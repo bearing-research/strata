@@ -892,6 +892,8 @@ class PromoteArtifactRequest(BaseModel):
     name: str = Field(..., min_length=1, max_length=512)
     alias: str | None = Field(default=None, max_length=128)
     tags: dict[str, str] = Field(default_factory=dict)
+    # Also write it into this Iceberg table, in the team store's catalog.
+    table: str | None = Field(default=None, max_length=1024)
 
 
 # ============================================================================
@@ -3241,6 +3243,7 @@ async def promote_notebook_artifact(
             name=request.name,
             alias=request.alias,
             tags=dict(request.tags),
+            table=request.table,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
@@ -3257,6 +3260,8 @@ async def promote_notebook_artifact(
         "copied": promotion.copied,
         "alias": promotion.alias,
         "alias_pending": promotion.alias_pending,
+        "table": promotion.table,
+        "table_snapshot": promotion.table_snapshot,
         "store": str(base_url),
     }
 

@@ -395,6 +395,15 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Tag to set on the promoted version, repeatable",
     )
     promote_parser.add_argument(
+        "--table",
+        default=None,
+        metavar="TABLE",
+        help=(
+            "Also have the team store write it into this Iceberg table "
+            "(<warehouse>#ns.table, or ns.table in the store's catalog)"
+        ),
+    )
+    promote_parser.add_argument(
         "--header",
         action="append",
         metavar="'Name: value'",
@@ -405,6 +414,33 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     _add_tenant_arg(promote_parser)
     promote_parser.set_defaults(func=_dispatch_artifact("cmd_promote"))
+
+    export_table_parser = artifact_sub.add_parser(
+        "export",
+        help="Write a tabular artifact into an Iceberg table",
+        description=(
+            "Write an artifact into an Iceberg table as its current snapshot. "
+            "The first write appends, a later one overwrites, and each "
+            "snapshot's summary names the artifact version it holds. A new "
+            "version may add columns; an incompatible schema is refused."
+        ),
+    )
+    export_table_parser.add_argument("ref", help="Name, id@v=N, or artifact id")
+    _add_store_args(export_table_parser)
+    export_table_parser.add_argument(
+        "--table",
+        required=True,
+        metavar="TABLE",
+        help="<warehouse>#ns.table, or ns.table in the configured catalog",
+    )
+    export_table_parser.add_argument(
+        "--alias", default=None, help="Tag the new snapshot with this name, e.g. champion"
+    )
+    export_table_parser.add_argument(
+        "--by", default=None, help="Recorded as strata.promoted_by in the snapshot summary"
+    )
+    _add_tenant_arg(export_table_parser)
+    export_table_parser.set_defaults(func=_dispatch_artifact("cmd_export_table"))
 
     unpublish_parser = artifact_sub.add_parser(
         "unpublish",
