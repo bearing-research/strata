@@ -1640,6 +1640,7 @@ class CellExecutor:
                         # someone else's hardware. Never computed here: this
                         # process may not be on that machine.
                         build_env=str(result.get("build_env") or ""),
+                        hardware=result.get("hardware") or {},
                         # What a teammate will be told they saved. Their own
                         # history has no comparable number — they never ran
                         # this cell — so it has to travel with the bytes.
@@ -3978,6 +3979,7 @@ class CellExecutor:
         variant: str | None = None,
         build_env: str = "",
         build_duration_ms: float = 0.0,
+        hardware: dict[str, Any] | None = None,
     ) -> bool:
         """Persist consumed output variables as artifacts.
 
@@ -4089,6 +4091,7 @@ class CellExecutor:
                     variant=variant,
                     build_env=build_env,
                     build_duration_ms=build_duration_ms,
+                    hardware=hardware,
                 )
                 uri = f"strata://artifact/{artifact_version.id}@v={artifact_version.version}"
                 cell.artifact_uris[var_name] = uri

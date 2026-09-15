@@ -641,6 +641,7 @@ async def test_cell_execute_uses_warm_pool_when_available(notebook_session, monk
         # assertion reads as — several layers away from the actual cause.
         build_env="",
         build_duration_ms=0.0,
+        hardware=None,
     ):
         return True
 
