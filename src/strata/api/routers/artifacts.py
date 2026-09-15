@@ -942,6 +942,52 @@ async def unpin_artifact(
     return {"unpinned": True, "artifact_id": artifact_id, "version": version, "reason": reason}
 
 
+class ExportTableRequest(BaseModel):
+    table: str
+    alias: str | None = None
+
+
+@router.post("/v1/artifacts/{artifact_id}/v/{version}/export")
+async def export_artifact_to_table(
+    artifact_id: str,
+    version: int,
+    request: ExportTableRequest,
+    tenant_filter: CurrentTenant,
+    principal: CurrentPrincipal,
+    store: ArtifactStore = store_for_scope("artifacts:write"),
+):
+    """Write a tabular artifact into an Iceberg table as its current snapshot.
+
+    For a platform that exports a dataset once it has been promoted. The
+    snapshot's summary names this version, and ``alias`` becomes a tag on it.
+    The catalog is this server's: ``table`` is a ``<warehouse>#ns.table`` URI or
+    a ``ns.table`` in the configured catalog, as ``@table`` reads it.
+    """
+    from strata.server import _ensure_artifact_access, get_state
+    from strata.table_export import export_artifact
+
+    artifact = _ensure_artifact_access(store.get_artifact(artifact_id, version), tenant_filter)
+    try:
+        written = await asyncio.to_thread(
+            export_artifact,
+            store,
+            artifact,
+            request.table,
+            config=get_state().config,
+            promoted_by=principal.id if principal is not None else None,
+            alias=request.alias,
+            tenant=tenant_filter,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {
+        "table": written.table,
+        "snapshot_id": written.snapshot_id,
+        "created": written.created,
+        "artifact_uri": f"strata://artifact/{artifact_id}@v={version}",
+    }
+
+
 @router.post("/v1/artifacts/gc")
 async def garbage_collect_artifacts(
     tenant_filter: CurrentTenant,

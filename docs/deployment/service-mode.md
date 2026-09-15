@@ -500,6 +500,41 @@ strata.promote("rows", name="taxi/rows", alias="champion")
 `STRATA_NOTEBOOK_REMOTE_STORE_URL`, which a cell's ambient `strata` client
 still needs.
 
+### Promoting into an Iceberg table
+
+A tabular result can also become a table in the team's warehouse, so tools
+outside Strata read it as a table and a notebook reads it with `@table`:
+
+```bash
+strata artifact promote nb_taxi_cell_c1_var_features \
+  --to https://store.example --name taxi/features --alias champion \
+  --table "s3://lake/warehouse#taxi.features"
+```
+
+The team store does the writing, with its own catalog settings, since that is
+where the bytes and the warehouse credentials are. `--table` takes the same
+forms `@table` reads: `<warehouse>#namespace.table`, or `namespace.table` in the
+store's configured catalog.
+
+- The first promotion creates the table and appends. Later promotions overwrite
+  it, so the current snapshot is always one version. A notebook's `@table` on
+  it goes stale when the next version is written, as for any other table.
+- Each snapshot's summary names what it holds: `strata.artifact_id`,
+  `strata.version`, `strata.provenance_hash`, and `strata.promoted_by` when the
+  store knows the caller. (An overwrite commits a delete and then an append; the
+  append is the snapshot that holds the version.)
+- A new version may add columns or widen a type. One whose schema the table
+  cannot evolve to is refused before anything is written.
+- The alias is an Iceberg tag on the snapshot. Moving the alias later, including
+  approving a protected one, moves the tag, as long as that version was written
+  to the table.
+
+The same write is `strata artifact export --table <table> <ref>` against a local
+store, and `POST /v1/artifacts/{id}/v/{version}/export` with
+`{"table": ..., "alias": ...}` for a platform that exports once a promotion
+lands. Only Arrow tables can be written; a JSON value, a pickle, an array or a
+scalar is refused.
+
 ## What a cell can read
 
 A cell is arbitrary Python, spawned by default with the server's whole
