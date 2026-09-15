@@ -209,6 +209,9 @@ async def test_an_r_cell_runs_on_a_signed_transport_worker(
     r_c2 = "coef <- model$coef * 2\n"
     _, session = r_notebook(cells=[("c1", None, r_c1, "r"), ("c2", "c1", r_c2, "r")])
     _on_worker(session, "c1", config)
+    # The build server runs in service mode, which refuses cells on its own
+    # host, so the downstream cell reads the RDS on the worker too.
+    session.notebook_state.get_cell("c2").worker = "r-worker"
     executor = CellExecutor(session)
 
     ran = await executor.execute_cell("c1", r_c1)
@@ -216,7 +219,8 @@ async def test_an_r_cell_runs_on_a_signed_transport_worker(
     assert ran.success is True, ran.error
     assert ran.remote_transport == "signed"
     assert ran.remote_build_state == "ready"
-    # An R-only value comes back as the RDS bytes it is locally.
+    # An R-only value comes back as the RDS bytes it is locally, and goes out
+    # to a worker again as an input.
     assert ran.outputs["model"]["content_type"] == "application/x-r-rds"
     downstream = await executor.execute_cell("c2", r_c2)
     assert downstream.success is True, downstream.error
