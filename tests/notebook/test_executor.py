@@ -1542,7 +1542,7 @@ class Person:
             build_id: str | None = None,
             log_url: str | None = None,
             env: dict[str, str] | None = None,
-            python: Path | None = None,
+            interpreter: Path | None = None,
         ) -> dict[str, object]:
             del (
                 harness_path,
@@ -1552,7 +1552,7 @@ class Person:
                 build_id,
                 log_url,
                 env,
-                python,
+                interpreter,
             )
             started.set()
             await asyncio.sleep(0.5)

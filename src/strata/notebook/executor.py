@@ -1943,14 +1943,14 @@ class CellExecutor:
         """R cell pipeline: provenance → upstream → cache check →
         Rscript harness → persist.
 
-        Phase 1 (#57) is local-only — there is no worker resolution, no
-        warm pool, and no HTTP-executor dispatch. R workers and pooled
-        execution are intentionally deferred to keep the initial slice
-        small. The cache / mount / storage layers are reused unchanged
-        because they are language-agnostic: they key off provenance
-        hashes and on-disk file extensions, both of which the R harness
-        produces in exactly the same shape as the Python one.
+        The harness runs here (warm pool first, then a cold ``Rscript``) or, for
+        a cell whose worker is an HTTP executor, on that worker, which runs
+        ``harness.R`` under its own ``Rscript``. The cache / mount / storage
+        layers are reused unchanged because they are language-agnostic: they
+        key off provenance hashes and on-disk file extensions, both of which
+        the R harness produces in exactly the same shape as the Python one.
         """
+        remote_metadata: dict[str, str] = {}
         try:
             cell = self.session.notebook_state.get_cell(cell_id)
 
@@ -1981,6 +1981,33 @@ class CellExecutor:
                     error=prov.fetch_error,
                     execution_method="error",
                 )
+            worker_spec = resolve_worker_spec(self.session.notebook_state, prov.effective_worker)
+            remote = (
+                worker_spec
+                if worker_spec is not None and is_http_executor_worker(worker_spec)
+                else None
+            )
+            if (
+                worker_spec is not None
+                and remote is None
+                and worker_spec.backend != WorkerBackendType.LOCAL
+            ):
+                return CellExecutionResult(
+                    cell_id=cell_id,
+                    success=False,
+                    error=f"R cells run locally or on an executor worker; worker "
+                    f"'{worker_spec.name}' is neither",
+                    execution_method="error",
+                )
+            if remote is not None and prov.fetched:
+                return CellExecutionResult(
+                    cell_id=cell_id,
+                    success=False,
+                    error="@fetch on an R cell is read on this machine; run the cell "
+                    "locally or fetch in a Python cell upstream",
+                    execution_method="error",
+                )
+            remote_metadata = self._remote_execution_metadata(worker_spec)
             mount_specs = [
                 *prov.mount_specs,
                 *(
@@ -2108,7 +2135,7 @@ class CellExecutor:
                     team_cache_saved_ms=team_pull.saved_ms if team_pull else 0,
                     team_cache_promotion=team_pull.promotion if team_pull else None,
                     from_team_cache=team_pull is not None,
-                )
+                ).apply_remote_metadata(**remote_metadata)
                 self.session.record_successful_execution_provenance(
                     cell_id,
                     provenance_hash,
@@ -2121,38 +2148,78 @@ class CellExecutor:
             with tempfile.TemporaryDirectory() as tmpdir:
                 output_dir = Path(tmpdir)
                 input_specs = self._load_input_blobs(cell_id, output_dir)
-                resolved_mounts = await self._prepare_mounts(mount_specs)
-                manifest_path = self._write_manifest(
-                    source,
-                    input_specs,
-                    output_dir,
-                    runtime_env,
-                    resolved_mounts,
-                )
-
-                # Warm R pool first (pre-paid Rscript startup + renv
-                # activation), cold harness as fallback — mirrors the
-                # Python pool dispatch in _dispatch_local.
-                result = None
-                execution_method = "cold"
-                r_pool = getattr(self.session, "r_warm_pool", None)
-                if r_pool is not None:
-                    from strata.notebook.pool import PooledCellExecutor
-
-                    pool_result = await PooledCellExecutor.execute_with_pool(
-                        r_pool,
-                        manifest_path,
-                        self.session.path,
-                        timeout_seconds,
+                result_output_dir = output_dir
+                if remote is not None:
+                    remote_build_id = (
+                        f"nbbuild-{uuid.uuid4().hex[:12]}"
+                        if worker_transport(remote) == "signed"
+                        else None
                     )
-                    if pool_result is not None:
-                        result = pool_result
-                        execution_method = "warm"
-                if result is None:
-                    result = await self._run_r_harness(manifest_path, timeout_seconds)
+                    remote_metadata = self._remote_execution_metadata(
+                        remote, remote_build_id=remote_build_id
+                    )
+                    with trace_span(
+                        "notebook.dispatch",
+                        worker=remote.name,
+                        build_id=remote_build_id,
+                        notebook_id=notebook_id,
+                        cell_id=cell_id,
+                    ):
+                        (
+                            result,
+                            result_output_dir,
+                            execution_method,
+                            resolved_mounts,
+                        ) = await self._dispatch_http_executor(
+                            remote,
+                            source,
+                            input_specs,
+                            mount_specs,
+                            output_dir,
+                            runtime_env,
+                            timeout_seconds,
+                            remote_build_id=remote_build_id,
+                            cell_id=cell_id,
+                            cell_provenance_hash=provenance_hash,
+                            language="r",
+                        )
+                    if remote_build_id and remote_metadata.get("remote_transport") == "signed":
+                        remote_metadata["remote_build_state"] = "ready"
+                else:
+                    resolved_mounts = await self._prepare_mounts(mount_specs)
+                    manifest_path = self._write_manifest(
+                        source,
+                        input_specs,
+                        output_dir,
+                        runtime_env,
+                        resolved_mounts,
+                    )
+
+                    # Warm R pool first (pre-paid Rscript startup + renv
+                    # activation), cold harness as fallback — mirrors the
+                    # Python pool dispatch in _dispatch_local.
+                    result = None
+                    execution_method = "cold"
+                    r_pool = getattr(self.session, "r_warm_pool", None)
+                    if r_pool is not None:
+                        from strata.notebook.pool import PooledCellExecutor
+
+                        pool_result = await PooledCellExecutor.execute_with_pool(
+                            r_pool,
+                            manifest_path,
+                            self.session.path,
+                            timeout_seconds,
+                        )
+                        if pool_result is not None:
+                            result = pool_result
+                            execution_method = "warm"
+                    if result is None:
+                        result = await self._run_r_harness(manifest_path, timeout_seconds)
 
                 duration_ms = (time.time() - start_time) * 1000
-                exec_result = self._parse_result(cell_id, result, duration_ms, execution_method)
+                exec_result = self._parse_result(
+                    cell_id, result, duration_ms, execution_method
+                ).apply_remote_metadata(**remote_metadata)
 
                 if exec_result.success:
                     self.session.record_successful_execution_provenance(
@@ -2163,12 +2230,16 @@ class CellExecutor:
                     )
                     stored_ok = self._store_outputs(
                         cell_id,
-                        output_dir,
+                        result_output_dir,
                         provenance_hash,
                         input_hashes,
                         source_hash=source_hash,
                         source=source,
                         env_hash=env_hash,
+                        # Reported by whatever ran the cell: a worker says
+                        # what it is; a local run leaves these empty, as before.
+                        build_env=str(result.get("build_env") or ""),
+                        hardware=result.get("hardware") or {},
                     )
                     if not stored_ok:
                         logger.error(
@@ -2195,7 +2266,7 @@ class CellExecutor:
                     if exec_result.success:
                         exec_result.display_outputs = self._store_display_outputs(
                             cell_id,
-                            output_dir,
+                            result_output_dir,
                             provenance_hash,
                             input_hashes,
                             exec_result.display_outputs,
@@ -2237,6 +2308,21 @@ class CellExecutor:
                 self.session.apply_execution_result_metadata(cell_id, exec_result)
                 return exec_result
 
+        except RemoteExecutionError as e:
+            duration_ms = (time.time() - start_time) * 1000
+            error_result = CellExecutionResult(
+                cell_id=cell_id,
+                success=False,
+                duration_ms=duration_ms,
+                error=str(e),
+            ).apply_remote_metadata(
+                **remote_metadata,
+                remote_build_state=e.remote_build_state,
+                remote_error_code=e.remote_error_code,
+            )
+            self.session.persist_display_output(cell_id, None)
+            self.session.apply_execution_result_metadata(cell_id, error_result)
+            return error_result
         except TimeoutError:
             duration_ms = (time.time() - start_time) * 1000
             timeout_result = CellExecutionResult(
@@ -2244,7 +2330,7 @@ class CellExecutor:
                 success=False,
                 duration_ms=duration_ms,
                 error=f"R cell execution timed out after {timeout_seconds}s",
-            )
+            ).apply_remote_metadata(**remote_metadata)
             self.session.persist_display_output(cell_id, None)
             self.session.apply_execution_result_metadata(cell_id, timeout_result)
             return timeout_result
@@ -2445,6 +2531,7 @@ class CellExecutor:
         remote_build_id: str | None = None,
         cell_id: str | None = None,
         cell_provenance_hash: str | None = None,
+        language: str = "python",
     ) -> tuple[dict[str, Any], Path, str, dict[str, ResolvedMount]]:
         """Run a cell through an external notebook executor over HTTP."""
         for mount in mount_specs:
@@ -2471,6 +2558,7 @@ class CellExecutor:
                 build_id=remote_build_id,
                 cell_id=cell_id,
                 cell_provenance_hash=cell_provenance_hash,
+                language=language,
             )
 
         metadata_inputs: list[dict[str, Any]] = []
@@ -2514,7 +2602,12 @@ class CellExecutor:
             },
             "inputs": metadata_inputs,
         }
-        environment = await self._locked_environment(worker_spec)
+        # Only a non-Python cell names its language, so what a Python cell sends
+        # (and every hash of it) is unchanged. The notebook's Python lock is for
+        # Python cells.
+        if language != "python":
+            metadata["transform"]["params"]["language"] = language
+        environment = await self._locked_environment(worker_spec) if language == "python" else None
         if environment is not None:
             metadata["transform"]["params"]["environment"] = environment
 
@@ -2637,6 +2730,7 @@ class CellExecutor:
         build_id: str | None = None,
         cell_id: str | None = None,
         cell_provenance_hash: str | None = None,
+        language: str = "python",
     ) -> tuple[dict[str, Any], Path, str, dict[str, ResolvedMount]]:
         """Run a cell through the core build + signed-URL transport path."""
         from strata.auth import get_principal
@@ -2729,7 +2823,9 @@ class CellExecutor:
             "output_format": "notebook-output-bundle@v1",
             "_dispatch_mode": "external",
         }
-        environment = await self._locked_environment(worker_spec)
+        if language != "python":
+            build_params["language"] = language
+        environment = await self._locked_environment(worker_spec) if language == "python" else None
         if environment is not None:
             build_params["environment"] = environment
         transport_provenance = hashlib.sha256(
