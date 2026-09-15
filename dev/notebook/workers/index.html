@@ -2469,7 +2469,7 @@
 <li>The worker runs the cell in a subprocess and returns outputs as a gzipped bundle.</li>
 <li>Strata stores the outputs as artifacts; cache hits work identically to local cells.</li>
 </ol>
-<p>Cells run in <strong>the worker's Python environment</strong>, so install your workload dependencies (torch, datafusion, sentence-transformers, etc.) into the worker image before launching it. Unlike Strata's own server, the worker process does <strong>not</strong> require a uv-managed env - it can be pip-installed into a plain Docker image.</p>
+<p>Cells run in <strong>the notebook's locked environment</strong> on a <code>strata-worker</code> of this version or later: Strata sends the notebook's <code>uv.lock</code> with the cell, and the worker builds that environment once per lock (with <code>uv</code>, which the image needs) and reuses it for every later cell with the same lock. A worker that does not advertise this in <code>/health</code> (an older <code>strata-worker</code>, or a custom worker) runs cells in its own Python environment, so install your workload dependencies (torch, datafusion, sentence-transformers, etc.) into that image before launching it. Either way the worker process does <strong>not</strong> require a uv-managed env - it can be pip-installed into a plain Docker image. See <a href="../../reference/executor-protocol/#the-environment-block">the <code>environment</code> block</a> for <code>STRATA_WORKER_ENV_ROOT</code> and a prebuilt-environment registry.</p>
 <p>For the wire-level contract - request envelopes, response bundle format, error codes, the pull-model with signed URLs - see the <a href="../../reference/executor-protocol/">Executor Protocol</a> reference. This page covers deployment and registration; that one covers the bytes on the wire and is what you'd implement against to write a custom worker that doesn't use <code>strata-worker</code>.</p>
 <h2 id="quick-start-run-a-worker-locally">Quick start: run a worker locally<a class="headerlink" href="#quick-start-run-a-worker-locally" title="Permanent link">&para;</a></h2>
 <p>Start by getting a worker running on your own machine. This verifies your install before you spend time on a cloud deploy, and the same <code># @worker name</code> annotation works against both local and cloud workers.</p>
@@ -2937,9 +2937,10 @@ the isolation boundary makes it a footgun worth designing around explicitly.</p>
 <li>Same code + same inputs + same <code>runtime_id</code> = cache hit, no remote call.</li>
 <li>Changing <code>runtime_id</code> (e.g., switching from <code>gpu-a10g</code> to <code>gpu-h100</code>) invalidates the cache for cells using that worker.</li>
 </ul>
+<p><code>runtime_id</code> names the hardware and drivers a worker runs on. The Python packages a cell imports come from the notebook's lock on a worker that runs locked environments, and the lock is already part of the provenance hash.</p>
 <p><strong>When to bump <code>runtime_id</code>:</strong></p>
 <ul>
-<li>You upgraded the worker's Python dependencies (new torch version, new model weights baked into the image) and want downstream cells to re-run.</li>
+<li>You upgraded what the image provides outside the lock (CUDA, drivers, model weights baked into the image), or, on a worker that runs cells in its own environment, its Python dependencies, and want downstream cells to re-run.</li>
 <li>You moved a worker to different hardware (CPU type, GPU SKU) and the numerical output may differ.</li>
 <li>You explicitly want to bust the cache for a debugging session.</li>
 </ul>
