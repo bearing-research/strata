@@ -1079,7 +1079,14 @@ class CellExecutor:
             runtime_identity=runtime_identity,
         )
         input_hashes = self._collect_input_hashes(cell_id)
-        table_fingerprints, table_snapshots = await self._fingerprint_tables(annotations.tables)
+        # A DuckDB cell's catalog tables are inputs the way its @table ones are.
+        # Imported only for a SQL cell: the SQL package needs the [sql] extra.
+        tables = list(annotations.tables)
+        if annotations.sql is not None:
+            from strata.notebook.sql.lake import lake_tables
+
+            tables += lake_tables(self.session.notebook_state, source)
+        table_fingerprints, table_snapshots = await self._fingerprint_tables(tables)
         fetch_fingerprints, fetched, fetch_refs, fetch_error = await self._resolve_fetches(
             annotations.fetches
         )

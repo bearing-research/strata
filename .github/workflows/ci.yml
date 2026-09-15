@@ -268,6 +268,7 @@ jobs:
             --ignore=tests/notebook/test_e2e_mounts_s3.py \
             --ignore=tests/notebook/test_e2e_mounts_azure.py \
             --ignore=tests/notebook/test_e2e_mounts_gcs.py \
+            --ignore=tests/notebook/test_e2e_duckdb_lake.py \
             -n auto --dist loadscope --tb=short
 
       # The one check that needs root and a second OS user, which the suite

@@ -181,6 +181,8 @@ SQL cells reference these by name via `# @sql connection=<name>`.
 | `credential` | string \| absent | Name of a server-defined credential ([Named credentials](#named-credentials)) whose fields become driver auth, underneath this block's own `auth`. |
 | `options` | table | Driver-specific runtime tunables that don't change which objects the connection sees (`application_name`, `connect_timeout`, etc.). |
 | (driver-specific top-level keys) | varies | `uri`, `host`, `account`, `database`, `role`, `path`, ... - interpreted by the driver adapter. |
+| `catalog` (DuckDB) | string \| absent | A server-configured REST catalog to attach under its name; the query reads each of its tables at the snapshot the cell's provenance folds. See [DuckDB over the lake](../notebook/cells.md#duckdb-over-the-lake). |
+| `mounts` (DuckDB) | list of strings \| absent | Mounts declared for the cell to expose as views by name over their Parquet, CSV or JSON files. |
 
 **Malformed connection preservation.** If a `[connections.<name>]` block fails validation (bad name, missing `driver`, etc.), its body is written back verbatim under the same `[connections.<name>]` table on save, so a typo doesn't get silently erased by an unrelated edit. The annotation-validation layer surfaces a user-visible diagnostic.
 
