@@ -25,7 +25,7 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
 from pathlib import Path
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 
 if TYPE_CHECKING:
     from strata.notebook.dependencies import _UvCommandResult
@@ -72,8 +72,9 @@ class EnvironmentBackend(Protocol):
         """
         ...
 
-    def add(self, package: str, *, timeout: int) -> _UvCommandResult:
-        """Add a package to the declared dependencies and sync."""
+    def add(self, package: str, *, timeout: int, dev: bool = False) -> _UvCommandResult:
+        """Add a package to the declared dependencies (the ``dev`` group when
+        *dev*) and sync."""
         ...
 
     def remove(self, package: str, *, timeout: int) -> _UvCommandResult:
@@ -158,11 +159,14 @@ class UvBackend:
             args += ["--python", python_version]
         return _run_uv_command(self.notebook_dir, args, timeout=timeout, display_name="uv sync")
 
-    def add(self, package: str, *, timeout: int) -> _UvCommandResult:
+    def add(self, package: str, *, timeout: int, dev: bool = False) -> _UvCommandResult:
         from strata.notebook.dependencies import _run_uv_command
 
         return _run_uv_command(
-            self.notebook_dir, ["add", package], timeout=timeout, display_name="uv add"
+            self.notebook_dir,
+            ["add", "--dev", package] if dev else ["add", package],
+            timeout=timeout,
+            display_name="uv add",
         )
 
     def remove(self, package: str, *, timeout: int) -> _UvCommandResult:
@@ -249,10 +253,36 @@ class UvBackend:
 def get_backend(notebook_dir: Path) -> EnvironmentBackend:
     """Resolve the env backend for *notebook_dir*.
 
-    Phase 1: always returns a ``UvBackend``. Phase 2 will branch on
-    detection (presence of ``uv.lock`` vs. attached venv) and on the
-    ``[environment] backend = "..."`` override in ``notebook.toml``.
-    Keeping the resolution behind one helper means callers don't
-    accumulate construction logic at every site that needs a backend.
+    A server-wide choice, ``notebook_env_backend``: ``uv`` gives each notebook
+    its own ``.venv``; ``shared`` links it into one environment per lockfile
+    (``strata.notebook.shared_env``). Keeping the resolution behind one helper
+    means callers don't accumulate construction logic at every site that
+    needs a backend.
     """
+    config = _config()
+    if getattr(config, "notebook_env_backend", "uv") == "shared":
+        from strata.notebook.shared_env import SharedEnvBackend
+
+        return SharedEnvBackend(notebook_dir, shared_env_root(config))
     return UvBackend(notebook_dir)
+
+
+def shared_env_root(config: Any) -> Path:
+    """Where shared environments live: ``notebook_shared_env_dir``, or ``envs``
+    beside the notebook storage directory."""
+    configured = getattr(config, "notebook_shared_env_dir", None)
+    if configured is not None:
+        return Path(configured)
+    return Path(config.notebook_storage_dir).parent / "envs"
+
+
+def _config() -> Any:
+    """Server config when running inside the server, else loaded fresh."""
+    try:
+        from strata.server import get_state
+
+        return get_state().config
+    except RuntimeError:
+        from strata.config import StrataConfig
+
+        return StrataConfig.load()

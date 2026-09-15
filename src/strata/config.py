@@ -411,6 +411,14 @@ class StrataConfig(BaseSettings):
         default_factory=lambda: Path.home() / ".strata" / "notebooks"
     )
     notebook_python_versions: list[str] = Field(default_factory=discover_installed_python_minors)
+    # How a notebook's Python environment is kept: "uv" gives each notebook its
+    # own .venv; "shared" links notebooks with the same lockfile and
+    # interpreter to one environment under notebook_shared_env_dir (default:
+    # "envs" beside notebook_storage_dir). Shared environments nothing links to
+    # are removed once unused for notebook_shared_env_ttl_days. POSIX only.
+    notebook_env_backend: Literal["uv", "shared"] = "uv"
+    notebook_shared_env_dir: Path | None = None
+    notebook_shared_env_ttl_days: Annotated[float, Field(ge=0)] = 7.0
 
     # Point the ambient `strata` client injected into notebook cells at a REMOTE
     # shared store instead of this local notebook server. Lets a team of

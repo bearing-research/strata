@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import re
 import shlex
 import shutil
@@ -234,8 +235,12 @@ def _run_uv_command(
     *,
     timeout: int,
     display_name: str,
+    env: dict[str, str] | None = None,
 ) -> _UvCommandResult:
-    """Run a uv command and capture bounded UI logs."""
+    """Run a uv command and capture bounded UI logs.
+
+    *env* adds to the inherited environment, e.g. ``UV_PROJECT_ENVIRONMENT``.
+    """
     started = time.perf_counter()
     uv = resolve_uv()
     if uv is None:
@@ -255,6 +260,7 @@ def _run_uv_command(
         completed = subprocess.run(
             command,
             cwd=str(notebook_dir),
+            env={**os.environ, **env} if env else None,
             timeout=timeout,
             capture_output=True,
             check=True,
@@ -323,6 +329,7 @@ async def run_uv_command_streaming(
     timeout: int,
     display_name: str,
     on_update: Callable[[str, str, bool], Awaitable[None] | None] | None = None,
+    env: dict[str, str] | None = None,
 ) -> _UvCommandResult:
     """Run a uv command asynchronously and surface bounded live stdout/stderr."""
     command = ["uv", *args]
@@ -342,6 +349,7 @@ async def run_uv_command_streaming(
         process = await asyncio.create_subprocess_exec(
             *command,
             cwd=str(notebook_dir),
+            env={**os.environ, **env} if env else None,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
@@ -1163,12 +1171,9 @@ def import_requirements_text(
                 error=f"Failed to write pyproject.toml: {exc}",
             )
 
-        command_result = _run_uv_command(
-            notebook_dir,
-            ["sync"],
-            timeout=timeout,
-            display_name="uv sync",
-        )
+        from strata.notebook.env_backend import get_backend
+
+        command_result = get_backend(notebook_dir).sync(python_version=None, timeout=timeout)
         if command_result.success:
             logger.info(
                 "Imported %s requirements into %s",
@@ -1244,12 +1249,10 @@ async def import_requirements_text_streaming(
                 error=f"Failed to write pyproject.toml: {exc}",
             )
 
-        command_result = await run_uv_command_streaming(
-            notebook_dir,
-            ["sync"],
-            timeout=timeout,
-            display_name="uv sync",
-            on_update=on_update,
+        from strata.notebook.env_backend import get_backend
+
+        command_result = await get_backend(notebook_dir).sync_streaming(
+            python_version=None, timeout=timeout, on_update=on_update
         )
         if command_result.success:
             logger.info(
@@ -1369,13 +1372,9 @@ def _add_dependency_locked(
 ) -> DependencyChangeResult:
     old_lockfile_hash = _lockfile_hash(notebook_dir)
 
-    args = ["add", "--dev", package] if dev else ["add", package]
-    command_result = _run_uv_command(
-        notebook_dir,
-        args,
-        timeout=timeout,
-        display_name="uv add",
-    )
+    from strata.notebook.env_backend import get_backend
+
+    command_result = get_backend(notebook_dir).add(package, timeout=timeout, dev=dev)
     if command_result.success:
         logger.info("uv add %s%s succeeded in %s", "--dev " if dev else "", package, notebook_dir)
     else:
@@ -1444,12 +1443,9 @@ def _remove_dependency_locked(
 ) -> DependencyChangeResult:
     old_lockfile_hash = _lockfile_hash(notebook_dir)
 
-    command_result = _run_uv_command(
-        notebook_dir,
-        ["remove", package],
-        timeout=timeout,
-        display_name="uv remove",
-    )
+    from strata.notebook.env_backend import get_backend
+
+    command_result = get_backend(notebook_dir).remove(package, timeout=timeout)
     if command_result.success:
         logger.info("uv remove %s succeeded in %s", package, notebook_dir)
     else:
