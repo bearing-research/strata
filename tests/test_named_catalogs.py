@@ -181,6 +181,10 @@ class TestFileRouting:
         assert opened[1][1] is default
 
     def test_gcs_and_azure_files_open_through_their_filesystems(self, monkeypatch, tmp_path):
+        try:
+            lake_files.pafs.AzureFileSystem  # noqa: B018
+        except ImportError:
+            pytest.skip("this pyarrow build has no AzureFileSystem")
         made = []
         monkeypatch.setattr(
             lake_files.pafs, "GcsFileSystem", lambda **kw: made.append(("gcs", kw)) or "gcs"

@@ -82,10 +82,6 @@ def test_a_rest_catalog_table_is_read_by_name(tmp_path):
 
     warehouse = tmp_path / "rest-warehouse"
     warehouse.mkdir()
-    # The catalog runs as its own user and writes metadata into directories
-    # this process creates, so they have to be writable by others. (Running the
-    # container as this uid instead fails: Hadoop cannot log in a user the
-    # image has no name for.)
     warehouse.chmod(0o777)
     port = _free_port()
     container = DockerContainer("apache/iceberg-rest-fixture:1.9.2")
@@ -93,6 +89,10 @@ def test_a_rest_catalog_table_is_read_by_name(tmp_path):
     # client, and then the scan, reads them.
     container.with_volume_mapping(str(warehouse), str(warehouse), "rw")
     container.with_env("CATALOG_WAREHOUSE", warehouse.as_uri())
+    # Both processes create directories the other writes into, as different
+    # users, so both run with an open umask. (Running the container as this
+    # uid instead fails: Hadoop cannot log in a user the image has no name for.)
+    container.with_command(["sh", "-c", "umask 0000 && exec java -jar iceberg-rest-adapter.jar"])
     container.with_bind_ports(8181, port)
     start_container_or_skip(
         container,
