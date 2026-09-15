@@ -2299,6 +2299,12 @@ families include:</p>
   breakdowns when multi-tenant is on</li>
 <li><strong>Rate limiter</strong>: request acceptance / rejection counts</li>
 <li><strong>Server</strong>: uptime, health-check status</li>
+<li><strong>AI</strong>: <code>strata_ai_calls_total</code>, <code>strata_ai_input_tokens_total</code> and
+  <code>strata_ai_output_tokens_total</code>, labelled by <code>tenant</code>, <code>principal</code> and
+  <code>model</code>. Counted from each provider response: the assistant's agent loop,
+  prompt cells, and the other AI routes. The labels are the caller the request
+  ran as, and are empty in personal mode. The series appear after the first
+  model call.</li>
 </ul>
 <p>For multi-tenant deployments the labels carry a <code>tenant</code> dimension
 so dashboards can split per-tenant usage.</p>

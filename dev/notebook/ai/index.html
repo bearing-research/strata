@@ -2427,6 +2427,7 @@
 </tbody>
 </table>
 <p>There is <strong>no aggregate token budget</strong> across iterations - a 10-iteration run can consume up to 10× the per-call limits. If you're using a metered provider, expect costs roughly proportional to (notebook context size + conversation history + tool-call traces) × iterations.</p>
+<p>What was used is reported, even though it isn't capped. Each run's <code>agent_done</code> frame carries <code>tokens: {input, output}</code> totalled across its iterations. The server also counts every model call on <a href="../../deployment/observability/#metrics-metricsprometheus"><code>/metrics/prometheus</code></a>, by tenant, principal and model.</p>
 <p><strong>What's NOT bounded.</strong></p>
 <ul>
 <li><strong>Package allowlist.</strong> <code>add_package</code> accepts any pip-compatible package spec. Approval-gated, so the user sees the spec before install, but there's no server-side allowlist or signature check. <code>pandas&gt;=2.0</code> and <code>evil-package@git+https://...</code> both pass the same gate.</li>
