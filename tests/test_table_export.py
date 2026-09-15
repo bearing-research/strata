@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import sys
 from types import SimpleNamespace
 
 import httpx
@@ -13,6 +14,13 @@ from pyiceberg.catalog.sql import SqlCatalog
 from strata.artifact_store import ArtifactStore
 from strata.notebook.artifact_integration import NotebookArtifactManager
 from strata.table_export import EXPORT_TAG, export_artifact
+
+# Same reason as the ``temp_warehouse`` fixture: pyiceberg's local FileIO cannot
+# resolve a Windows warehouse path, so Iceberg warehouses are not tested there.
+pytestmark = pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="pyiceberg + pyarrow LocalFileSystem path handling broken on Windows",
+)
 
 
 def _ipc(table: pa.Table) -> bytes:
