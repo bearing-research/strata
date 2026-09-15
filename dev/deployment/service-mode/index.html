@@ -1922,6 +1922,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#promoting-into-an-iceberg-table" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Promoting into an Iceberg table
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -2331,6 +2342,17 @@
     <span class="md-ellipsis">
       
         Sharing on purpose: promoted and strata artifact promote
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#promoting-into-an-iceberg-table" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Promoting into an Iceberg table
       
     </span>
   </a>
@@ -2924,6 +2946,36 @@ notebook, naming it the way the cell reads it:</p>
 <p><code>off</code> is the whole feature off without unsetting
 <code>STRATA_NOTEBOOK_REMOTE_STORE_URL</code>, which a cell's ambient <code>strata</code> client
 still needs.</p>
+<h3 id="promoting-into-an-iceberg-table">Promoting into an Iceberg table<a class="headerlink" href="#promoting-into-an-iceberg-table" title="Permanent link">&para;</a></h3>
+<p>A tabular result can also become a table in the team's warehouse, so tools
+outside Strata read it as a table and a notebook reads it with <code>@table</code>:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a>strata<span class="w"> </span>artifact<span class="w"> </span>promote<span class="w"> </span>nb_taxi_cell_c1_var_features<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a><span class="w">  </span>--to<span class="w"> </span>https://store.example<span class="w"> </span>--name<span class="w"> </span>taxi/features<span class="w"> </span>--alias<span class="w"> </span>champion<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a><span class="w">  </span>--table<span class="w"> </span><span class="s2">&quot;s3://lake/warehouse#taxi.features&quot;</span>
+</code></pre></div>
+<p>The team store does the writing, with its own catalog settings, since that is
+where the bytes and the warehouse credentials are. <code>--table</code> takes the same
+forms <code>@table</code> reads: <code>&lt;warehouse&gt;#namespace.table</code>, or <code>namespace.table</code> in the
+store's configured catalog.</p>
+<ul>
+<li>The first promotion creates the table and appends. Later promotions overwrite
+  it, so the current snapshot is always one version. A notebook's <code>@table</code> on
+  it goes stale when the next version is written, as for any other table.</li>
+<li>Each snapshot's summary names what it holds: <code>strata.artifact_id</code>,
+  <code>strata.version</code>, <code>strata.provenance_hash</code>, and <code>strata.promoted_by</code> when the
+  store knows the caller. (An overwrite commits a delete and then an append; the
+  append is the snapshot that holds the version.)</li>
+<li>A new version may add columns or widen a type. One whose schema the table
+  cannot evolve to is refused before anything is written.</li>
+<li>The alias is an Iceberg tag on the snapshot. Moving the alias later, including
+  approving a protected one, moves the tag, as long as that version was written
+  to the table.</li>
+</ul>
+<p>The same write is <code>strata artifact export --table &lt;table&gt; &lt;ref&gt;</code> against a local
+store, and <code>POST /v1/artifacts/{id}/v/{version}/export</code> with
+<code>{"table": ..., "alias": ...}</code> for a platform that exports once a promotion
+lands. Only Arrow tables can be written; a JSON value, a pickle, an array or a
+scalar is refused.</p>
 <h2 id="what-a-cell-can-read">What a cell can read<a class="headerlink" href="#what-a-cell-can-read" title="Permanent link">&para;</a></h2>
 <p>A cell is arbitrary Python, spawned by default with the server's whole
 environment. On a laptop that is right and there is nothing to protect. On a
@@ -2990,8 +3042,8 @@ can. A notebook that needs more isolation than that wants a worker on another
 machine.</p>
 <h3 id="what-a-cell-is-given-strata_notebook_harness_env_allowlist">What a cell is given: <code>STRATA_NOTEBOOK_HARNESS_ENV_ALLOWLIST</code><a class="headerlink" href="#what-a-cell-is-given-strata_notebook_harness_env_allowlist" title="Permanent link">&para;</a></h3>
 <p>The allowlist narrows the environment a cell receives:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="c1"># Only what cells actually need; everything else stays with the server.</span>
-<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a><span class="nv">STRATA_NOTEBOOK_HARNESS_ENV_ALLOWLIST</span><span class="o">=</span>AWS_*,HF_TOKEN
+<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="c1"># Only what cells actually need; everything else stays with the server.</span>
+<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a><span class="nv">STRATA_NOTEBOOK_HARNESS_ENV_ALLOWLIST</span><span class="o">=</span>AWS_*,HF_TOKEN
 </code></pre></div>
 <p>Entries are exact names or a prefix with a trailing <code>*</code>. The essentials a
 subprocess cannot start without are always included, and <code>STRATA_*</code> is dropped
@@ -3023,9 +3075,9 @@ harness user is what stops it taking the rest.</p>
 </li>
 <li>
 <p><strong>Flip the mode</strong> in env or <code>pyproject.toml</code>:
-   <div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="nv">STRATA_DEPLOYMENT_MODE</span><span class="o">=</span>service
-<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a><span class="nv">STRATA_AUTH_MODE</span><span class="o">=</span>trusted_proxy
-<a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a><span class="nv">STRATA_PROXY_TOKEN</span><span class="o">=</span>&lt;your-shared-secret&gt;
+   <div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="nv">STRATA_DEPLOYMENT_MODE</span><span class="o">=</span>service
+<a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a><span class="nv">STRATA_AUTH_MODE</span><span class="o">=</span>trusted_proxy
+<a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a><span class="nv">STRATA_PROXY_TOKEN</span><span class="o">=</span>&lt;your-shared-secret&gt;
 </code></pre></div>
    Boot will fail with a clear error if anything's missing, that's
    the fail-closed property at work.</p>
