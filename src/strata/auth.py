@@ -34,6 +34,8 @@ from __future__ import annotations
 
 import fnmatch
 import hmac
+from collections.abc import Iterator
+from contextlib import contextmanager
 from contextvars import ContextVar
 from typing import TYPE_CHECKING, Any
 
@@ -80,6 +82,18 @@ def remote_store_headers(config: Any) -> dict[str, str]:
     headers = {k: v for k, v in headers.items() if k.lower() != _FORWARDED_PRINCIPAL.lower()}
     headers[_FORWARDED_PRINCIPAL] = principal.id
     return headers
+
+
+@contextmanager
+def principal_context(principal: Principal | None) -> Iterator[None]:
+    """Make *principal* the current caller for a block, restoring the previous
+    one after. For work that runs outside the request task that authenticated
+    it, such as an MCP tool call served from its session's own task."""
+    token = _principal_ctx.set(principal)
+    try:
+        yield
+    finally:
+        _principal_ctx.reset(token)
 
 
 def set_principal(principal: Principal | None) -> None:

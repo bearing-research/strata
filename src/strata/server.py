@@ -1572,11 +1572,12 @@ app.include_router(materialize_router)
 
 
 def _mount_mcp_if_enabled() -> None:
-    """Mount the MCP endpoint at ``/mcp`` when configured (personal mode only).
+    """Mount the MCP endpoint at ``/mcp`` when configured.
 
     The decision is process-level (env / pyproject), read once at import — the
     endpoint is not toggled per request. Gated three ways: ``mcp_enabled`` set,
-    ``deployment_mode == 'personal'`` (service-mode is rejected earlier by
+    a deployment that is either personal or authenticates its callers (service
+    mode without principal auth is rejected earlier by
     ``validate_mode_coherence``; this is defense in depth), and the ``[mcp]``
     extra installed (``build_mcp_app`` returns ``None`` otherwise, so the server
     still boots without the dependency).
@@ -1584,7 +1585,9 @@ def _mount_mcp_if_enabled() -> None:
     global _mcp_app
 
     config = _state.config if _state is not None else StrataConfig.load()
-    if not config.mcp_enabled or config.deployment_mode != "personal":
+    if not config.mcp_enabled:
+        return
+    if config.deployment_mode != "personal" and not config.principal_auth_enabled:
         return
 
     from strata.notebook.mcp_server import build_mcp_app

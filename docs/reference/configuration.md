@@ -32,7 +32,7 @@ ai_model = "claude-sonnet-4-6"
 | `STRATA_ALLOW_REMOTE_CLIENTS_IN_PERSONAL` | `false`     | Allow non-localhost clients in personal mode |
 | `STRATA_CORS_ALLOW_ORIGINS`               | _(empty)_   | Origins allowed to call the API from a browser. Empty means no cross-origin access. Personal mode has no auth, so any page allowed here can author and run cells |
 | `STRATA_EMBED_FRAME_ANCESTORS`            | _(empty)_   | Origins allowed to embed a notebook's app view in an `<iframe>` (sets `Content-Security-Policy: frame-ancestors`). Empty means same-origin only. JSON array or comma-separated; `*` allows any host |
-| `STRATA_MCP_ENABLED`                      | `false`     | Mount the MCP server at `/mcp` so a coding agent can drive the live session. **Personal mode only** (rejected at startup in service mode) and requires the `[mcp]` extra. See [Notebook → MCP](../notebook/mcp.md) |
+| `STRATA_MCP_ENABLED`                      | `false`     | Mount the MCP server at `/mcp` so a coding agent can drive the live session. In service mode it requires principal auth (`trusted_proxy` or `api_key`); each tool call then runs as its caller and is checked against the notebook scopes. Requires the `[mcp]` extra. See [Notebook → MCP](../notebook/mcp.md) |
 | `STRATA_ARROW_MEMORY_POOL`                | `None`      | Arrow allocator: `default`, `system`, `jemalloc`, or `mimalloc`. Unset leaves the PyArrow default |
 
 ## Cache
