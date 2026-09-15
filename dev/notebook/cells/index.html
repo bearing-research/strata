@@ -4250,8 +4250,20 @@ never start one.</p>
 <td><code># @timeout 60</code></td>
 <td>Per-cell execution timeout in seconds.</td>
 </tr>
+<tr>
+<td><code># @worker gpu-box</code></td>
+<td>Runs the cell on an executor worker with R (see below).</td>
+</tr>
 </tbody>
 </table>
+<p>An R cell with a worker runs <code>harness.R</code> on that worker (a <code>strata-worker</code> of
+this version or later), under the worker's
+<code>Rscript</code> and its R library, which needs <code>jsonlite</code> and <code>arrow</code>
+(<code>docker build -f worker.Dockerfile --build-arg WITH_R=true</code>). Its outputs come
+back the way a local run's do, so it is a cache hit here afterwards, a
+downstream Python cell reads its data frame, and an R-only value returns as RDS.
+The worker does not restore the notebook's <code>renv.lock</code>; an <code>@fetch</code> on an R cell
+is read on this machine, so such a cell runs locally.</p>
 <p>Loop annotations (<code>@loop</code>, <code>@loop_until</code>) and prompt-cell annotations (<code>@output_schema</code> etc.) do not apply to R cells.</p>
 <h3 id="what-if-rscript-isnt-installed">What if Rscript isn't installed?<a class="headerlink" href="#what-if-rscript-isnt-installed" title="Permanent link">&para;</a></h3>
 <p>An R cell whose harness can't find <code>Rscript</code> on <code>PATH</code> returns a clean cell-level failure with the message <code>Rscript not found on PATH. Install R (https://cran.r-project.org/) and reopen the notebook.</code> No server crash, no other cells affected.</p>
