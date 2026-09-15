@@ -99,7 +99,7 @@ def _require_notebook_scope(request: Request) -> None:
         config = get_state().config
     except RuntimeError:
         return
-    if not config.principal_auth_enabled:
+    if not getattr(config, "principal_auth_enabled", False):
         return
     route = request.scope.get("route")
     path = getattr(route, "path", request.url.path)

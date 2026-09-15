@@ -227,7 +227,11 @@ def test_service_mode_needs_the_admin_scope(client, tmp_path, monkeypatch):
     )
     monkeypatch.setattr(
         "strata.auth.get_principal",
-        lambda: SimpleNamespace(has_scope=lambda scope: scope == "notebook:execute"),
+        # Past the notebook scope every mutation needs, so the refusal is the
+        # route's own admin check.
+        lambda: SimpleNamespace(
+            has_scope=lambda scope: scope in ("notebook:write", "notebook:execute")
+        ),
     )
 
     response = client.post(f"/v1/notebooks/{session_id}/quiesce", json={})
