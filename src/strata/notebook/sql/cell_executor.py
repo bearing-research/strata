@@ -38,6 +38,7 @@ from strata.notebook.provenance import derive_subkey
 from strata.notebook.sql.adapter import FreshnessToken
 from strata.notebook.sql.analyzer import analyze_sql_cell, rewrite_named_to_positional
 from strata.notebook.sql.bind import BindError, resolve_bind_params
+from strata.notebook.sql.lake import Lake, LakeError, lake_options, pin_snapshots, resolve_lake
 from strata.notebook.sql.provenance import (
     CachePolicyError,
     compute_sql_provenance_hash,
@@ -155,6 +156,15 @@ async def execute_sql_cell(
         adapter.canonicalize_connection_id(runtime_spec, read_only=True), spec
     )
 
+    # ---- the lake: catalog tables' snapshots, mounts ---------------
+    lake = None
+    if any(lake_options(spec)):
+        try:
+            lake = resolve_lake(session, cell_id, source, runtime_spec, analysis.tables)
+        except LakeError as exc:
+            return _error_result(f"connection {spec.name!r}: {exc}", start_time)
+        runtime_spec = lake.spec
+
     # ---- probes (optional) -----------------------------------------
     freshness = None
     schema_fp = None
@@ -210,6 +220,7 @@ async def execute_sql_cell(
         cache_salt=policy.salt,
         freshness_token=freshness,
         schema_fingerprint=schema_fp,
+        lake_fingerprints=lake.fingerprints if lake else (),
     )
     var_provenance = derive_subkey(provenance_hash, output_name)
 
@@ -233,7 +244,12 @@ async def execute_sql_cell(
     # ---- execute query ---------------------------------------------
     try:
         table = _execute_query(
-            adapter, runtime_spec, analysis, params, at=pin.at if pin is not None else None
+            adapter,
+            runtime_spec,
+            analysis,
+            params,
+            at=pin.at if pin is not None else None,
+            lake=lake,
         )
     except Exception as exc:  # noqa: BLE001
         return _error_result(
@@ -965,6 +981,7 @@ def _execute_query(
     params: tuple[Any, ...],
     *,
     at: str | None = None,
+    lake: Lake | None = None,
 ) -> Any:
     """Open a read-only connection, run the rewritten query, fetch Arrow.
 
@@ -973,6 +990,10 @@ def _execute_query(
     rewritten = rewrite_named_to_positional(analysis.sql_body, adapter.sqlglot_dialect)
     if at is not None:
         rewritten = cast("TimeTravelAdapter", adapter).pin_query(rewritten, at)
+    if lake is not None:
+        catalog, _ = lake_options(lake.spec)
+        if catalog:
+            rewritten = pin_snapshots(rewritten, catalog, lake.snapshots)
     conn = adapter.open(spec, read_only=True)
     try:
         cursor = conn.cursor()

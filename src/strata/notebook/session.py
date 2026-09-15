@@ -1839,11 +1839,17 @@ class NotebookSession:
         lake outage shows the cell stale rather than crashing the recompute.
         """
         annotations = parse_annotations(cell.source)
-        if not annotations.tables:
+        tables = list(annotations.tables)
+        if annotations.sql is not None:
+            # Only a SQL cell: the SQL package needs the [sql] extra.
+            from strata.notebook.sql.lake import lake_tables
+
+            tables += lake_tables(self.notebook_state, cell.source)
+        if not tables:
             return []
         from strata.notebook.tables import fingerprint_tables
 
-        fingerprints, _ = fingerprint_tables(annotations.tables, self._lake_config())
+        fingerprints, _ = fingerprint_tables(tables, self._lake_config())
         return fingerprints
 
     def _collect_fetch_fingerprints(self, cell: Any) -> list[str]:
