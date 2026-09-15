@@ -60,6 +60,42 @@ the outside.
 
 Still missing: any restriction on the container's own network access.
 
+## Several processes over one store
+
+`PoolStore` is a SQLite file, and one pool process on it is the simple
+deployment: a restart pauses dispatch for seconds and fails the jobs that were
+in flight. To keep dispatching through a restart, run more than one process
+over `PostgresPoolStore`, each with its own `instance_id`:
+
+```bash
+pip install "strata-pool[postgres]"
+```
+
+```python
+pool = Pool(
+    store=PostgresPoolStore("postgresql://pool@db/pool"),
+    backend=RunPodBackend(os.environ["RUNPOD_API_KEY"]),
+    machine_types=catalogue,
+    instance_id=os.environ["HOSTNAME"],   # required on a shared store
+)
+```
+
+The processes never run a job twice or start two machines for the same
+demand. Handing a job to a warm machine is a conditional update that only one
+of them wins, and deciding to start a machine counts the queue and inserts the
+new machine's row in one transaction, serialized across processes. Each
+process holds a **lease** on the jobs and machines it is acting on (a machine
+starting, running a job or stopping; a job dispatched or running) and renews it
+while it works. When a process dies, the scaler in another one fails its jobs
+and stops its machines once the lease runs out (`lease_seconds`, default 30),
+through that process's own backend. A process restarted under its old
+`instance_id` takes its own rows back at once, as a single process does today.
+
+Lease expiry is compared by wall clock across processes, so their clocks have
+to agree to well within a lease. Each process holds its catalogue in memory:
+`PUT /v1/machine-types` updates the process that served it and the stored
+catalogue, and the others pick it up when they restart.
+
 ## What it is not
 
 **It is not a cache.** The pool has no idea Strata deduplicates work.
@@ -99,7 +135,7 @@ with the code in the cell.
 | `types.py` | `Worker`, `Job`, `MachineType`, `UsageEvent` and their states |
 | `backend.py` | The `Backend` protocol — start / stop / health |
 | `backends/docker.py` | Containers on the local Docker daemon |
-| `store.py` | SQLite persistence; the pool process keeps no authoritative state |
+| `store.py` | SQLite and Postgres persistence, with the claims and leases that let several processes share it; the pool process keeps no authoritative state |
 | `pool.py` | Submission, dispatch, boot, execution, metering, restart recovery |
 
 ## Running it as a service
