@@ -6,8 +6,9 @@ from pathlib import Path
 import pyarrow as pa
 import pyarrow.parquet as pq
 
+from strata import lake_files
 from strata.config import StrataConfig
-from strata.iceberg import PyIcebergCatalog
+from strata.iceberg import CatalogProvider, PyIcebergCatalog, named_catalog
 from strata.metadata_cache import (
     ManifestCache,
     ManifestEntry,
@@ -303,9 +304,13 @@ class ReadPlanner:
         config: StrataConfig,
         parquet_cache: ParquetMetadataCache | None = None,
         manifest_cache: ManifestCache | None = None,
+        catalog: CatalogProvider | None = None,
     ) -> None:
         self.config = config
-        self.catalog = PyIcebergCatalog(config)
+        # Injectable: a deployment with its own catalog access (or a test)
+        # supplies the provider; the default reads Strata's catalog settings.
+        self.catalog = catalog if catalog is not None else PyIcebergCatalog(config)
+        lake_files.configure(config)
         # Enable persistence by passing cache_dir
         cache_dir = config.cache_dir
 
@@ -347,15 +352,24 @@ class ReadPlanner:
 
         # Parse table URI and build canonical TableIdentity
         # table_uri is treated as input only; table_identity is the canonical ID
-        warehouse_path, table_id = self.catalog.parse_table_uri(table_uri)
-        identity_catalog_name = self.config.catalog_name if warehouse_path is None else "strata"
-        manifest_catalog_name = (
-            self.config.catalog_name if warehouse_path is None else warehouse_path
-        )
+        named, named_table_id = named_catalog(table_uri, self.config)
+        if named is not None:
+            table_id = named_table_id
+            identity_catalog_name = manifest_catalog_name = named
+        else:
+            warehouse_path, table_id = PyIcebergCatalog.parse_table_uri(table_uri)
+            identity_catalog_name = self.config.catalog_name if warehouse_path is None else "strata"
+            manifest_catalog_name = (
+                self.config.catalog_name if warehouse_path is None else warehouse_path
+            )
         table_identity = TableIdentity.from_table_id(table_id, catalog=identity_catalog_name)
 
         # Load table and resolve snapshot
         table = self.catalog.load_table(table_uri)
+        if named is not None:
+            # A catalog that vends credentials hands them to the table's FileIO;
+            # the fetcher reads the data files, so it needs them too.
+            lake_files.register_vended_credentials(table.location(), dict(table.io.properties))
         resolved_snapshot_id = self.catalog.get_snapshot_id(table, snapshot_id)
 
         # Get the snapshot's manifest

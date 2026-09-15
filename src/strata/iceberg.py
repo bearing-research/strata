@@ -2,6 +2,7 @@
 
 import contextlib
 import logging
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from threading import Lock
@@ -30,6 +31,24 @@ class CatalogProvider(Protocol):
     def get_snapshot_id(self, table: Table, snapshot_id: int | None) -> int:
         """Resolve the snapshot id to read (the current snapshot if ``None``)."""
         ...
+
+
+_NAMED = re.compile(r"^([A-Za-z][A-Za-z0-9_-]*):(?!//)(.+)$")
+
+
+def named_catalog(table_uri: str, config: StrataConfig) -> tuple[str | None, str]:
+    """Split ``<name>:<namespace>.<table>`` into the catalog name and table id.
+
+    ``(None, table_uri)`` for anything else: a URI with a ``#`` names a
+    warehouse, and a name that is not a configured catalog is not one, so a
+    Windows path or a scheme is never taken for a catalog.
+    """
+    if "#" in table_uri:
+        return None, table_uri
+    match = _NAMED.match(table_uri)
+    if match is None or match.group(1) not in (getattr(config, "catalogs", None) or {}):
+        return None, table_uri
+    return match.group(1), match.group(2)
 
 
 def _is_connection_io_error(exc: BaseException) -> bool:
@@ -147,6 +166,19 @@ class PyIcebergCatalog:
             warehouse=str(self.config.cache_dir / "warehouse"),
         )
 
+    def _get_named_catalog(self, name: str) -> Catalog:
+        """The configured catalog *name*, built on first use and cached."""
+        key = f"catalog:{name}"
+        catalog = self._catalogs.get(key)
+        if catalog is not None:
+            return catalog
+        with self._lock:
+            catalog = self._catalogs.get(key)
+            if catalog is None:
+                catalog = load_catalog(name, **self.config.catalogs[name])
+                self._catalogs[key] = catalog
+        return catalog
+
     def _get_catalog(self, warehouse_path: str | None = None) -> Catalog:
         """Return the cached catalog for a warehouse, building it on first use.
 
@@ -197,6 +229,9 @@ class PyIcebergCatalog:
             - ``s3://bucket/path/to/warehouse#namespace.table``
             - ``namespace.table`` (default catalog)
 
+            ``<name>:namespace.table``, a configured named catalog, is
+            resolved by :func:`named_catalog` before this is consulted.
+
         Returns
         -------
         tuple of (str or None, str)
@@ -230,6 +265,9 @@ class PyIcebergCatalog:
         pyiceberg.table.Table
             The loaded table.
         """
+        name, named_table_id = named_catalog(table_uri, self.config)
+        if name is not None:
+            return self._get_named_catalog(name).load_table(named_table_id)
         warehouse_path, table_id = self.parse_table_uri(table_uri)
         catalog = self._get_catalog(warehouse_path)
         try:

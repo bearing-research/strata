@@ -116,6 +116,11 @@ def _reset_process_globals():
     # without lifespan inherits — surfacing as a spurious 429 once the bucket is
     # drained. Reset so every test starts with rate limiting disabled (None).
     reset_rate_limiter()
+    # Vended lake credentials are registered per table location by whichever
+    # test planned against a named catalog; a later test must not read with them.
+    from strata.lake_files import reset as reset_lake_files
+
+    reset_lake_files()
     # The build runner is a process global too, and the one whose leftovers are
     # not merely stale but *loop-bound*: its heartbeat task belongs to the loop
     # that started it. A test that leaves one registered hands the next

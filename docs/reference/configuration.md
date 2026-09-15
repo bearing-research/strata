@@ -125,6 +125,7 @@ Two constraints are enforced at startup rather than papered over at runtime:
 | ---------------------------- | --------- | ------------------------------------------------------------------------------------------------- |
 | `STRATA_CATALOG_NAME`        | `default` | Iceberg catalog name                                                                              |
 | `STRATA_CATALOG_PROPERTIES`  | `{}`      | PyIceberg catalog properties (JSON object via env; `[tool.strata.catalog_properties]` in pyproject) |
+| `STRATA_CATALOGS`            | `{}`      | Named catalogs: a JSON object of name to PyIceberg catalog properties (`[tool.strata.catalogs.<name>]` in pyproject), e.g. `{"lake": {"type": "rest", "uri": "https://catalog.example"}}`. A table in one is `<name>:<namespace>.<table>`, for `@table` and scans alike. Credentials a REST catalog vends for a table are used to read that table's files |
 | `STRATA_CATALOG_URI`         | `None`    | Catalog database URI. Merged into `catalog_properties.uri`, so it does not replace sibling keys set in pyproject |
 
 ## S3 Storage
