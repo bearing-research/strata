@@ -597,7 +597,7 @@ The worker image is missing the dependency the cell needs. Add it to the Dockerf
 Cold start. Modal scales the function to zero after `scaledown_window` seconds idle; the first request after a scale-down has to provision a fresh container. Either bump `scaledown_window`, set `min_containers=1` on the `@app.function`, or just expect the latency on the first cell after idle.
 
 **`413 Payload Too Large` from the worker.**
-A cell input is larger than the worker's max-input limit. Default is 256 MB; override with `STRATA_WORKER_MAX_INPUT_BYTES=<bytes>` on the worker. Better: shrink the input by selecting columns / filtering rows in an upstream cell.
+A cell input is larger than the worker's max-input limit. Default is 2 GiB; override with `STRATA_WORKER_MAX_INPUT_BYTES=<bytes>` on the worker. Inputs are written to disk as they arrive, so the limit to size against is the worker's disk, not its memory. Better: shrink the input by selecting columns / filtering rows in an upstream cell.
 
 **Fly build fails with `error: failed to fetch wheel` from a workload dep.**
 Some Python deps (torch, sentence-transformers) don't ship abi3 wheels and fall back to building from source. If your worker needs one, add `build-essential` (plus the dep-specific toolchain) to the Dockerfile via `RUN apt-get install -y --no-install-recommends build-essential && rm -rf /var/lib/apt/lists/*` before the `uv pip install` step.
