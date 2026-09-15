@@ -185,12 +185,13 @@ async def _run_harness(
     build_id: str | None = None,
     log_url: str | None = None,
     env: dict[str, str] | None = None,
-    python: Path | None = None,
+    interpreter: Path | None = None,
 ) -> dict[str, Any]:
     """Run the notebook harness with one manifest file.
 
-    With *python*, the harness runs under that interpreter: the notebook's
-    locked environment (``worker_env``) rather than the worker's own.
+    With *interpreter*, the harness runs under it rather than the worker's own
+    Python: the notebook's locked environment (``worker_env``), or ``Rscript``
+    for ``harness.R``.
 
     Registers the process in *in_flight* under *build_id* for the duration, so
     the cancel route can reach it. Both are optional: a caller with no build id
@@ -207,7 +208,7 @@ async def _run_harness(
     )
 
     proc = await asyncio.create_subprocess_exec(
-        str(python) if python is not None else sys.executable,
+        str(interpreter) if interpreter is not None else sys.executable,
         str(harness_path),
         str(manifest_path),
         stdout=asyncio.subprocess.PIPE,
@@ -393,6 +394,7 @@ def create_notebook_executor_app(
         notebook_id: str | None = None,
         cell_id: str | None = None,
         environment: Any = None,
+        language: str = "python",
     ) -> tuple[Path, Path] | JSONResponse:
         """Execute a cell and pack outputs into a bundle file.
 
@@ -439,6 +441,7 @@ def create_notebook_executor_app(
                     log_url=log_url,
                     gpu=gpu,
                     environment=environment,
+                    language=language,
                 )
         finally:
             _release(gpu)
@@ -455,6 +458,7 @@ def create_notebook_executor_app(
         log_url: str | None,
         gpu: int | None,
         environment: Any = None,
+        language: str = "python",
     ) -> tuple[Path, Path] | JSONResponse:
         if gpu is not None:
             # Both the cell's environment and the process's: the manifest env
@@ -533,8 +537,30 @@ def create_notebook_executor_app(
                 json.dump(manifest, f)
 
             harness_path = Path(__file__).parent / "harness.py"
+            interpreter: Path | None = None
             prepared = None
-            if environment is not None:
+            if language == "r":
+                # An R cell runs harness.R under the worker's Rscript and its
+                # library; a notebook's Python lock does not apply to it.
+                rscript = shutil.which("Rscript")
+                if rscript is None:
+                    shutil.rmtree(tmpdir, ignore_errors=True)
+                    return JSONResponse(
+                        status_code=500,
+                        content={
+                            "success": False,
+                            "error": "Rscript is not installed on this worker",
+                        },
+                    )
+                harness_path = Path(__file__).parent / "languages" / "r" / "harness.R"
+                interpreter = Path(rscript)
+            elif language != "python":
+                shutil.rmtree(tmpdir, ignore_errors=True)
+                return JSONResponse(
+                    status_code=400,
+                    content={"success": False, "error": f"unsupported cell language {language!r}"},
+                )
+            elif environment is not None:
                 from strata.notebook.worker_env import WorkerEnvironmentError, ensure_environment
 
                 try:
@@ -545,6 +571,7 @@ def create_notebook_executor_app(
                         status_code=500,
                         content={"success": False, "error": f"locked environment: {exc}"},
                     )
+                interpreter = prepared.python
             try:
                 result = await _run_harness(
                     harness_path,
@@ -558,7 +585,7 @@ def create_notebook_executor_app(
                         if gpu is not None
                         else None
                     ),
-                    python=prepared.python if prepared is not None else None,
+                    interpreter=interpreter,
                 )
                 if result.get("success", False):
                     await mount_resolver.sync_back(resolved_mounts)
@@ -606,6 +633,7 @@ def create_notebook_executor_app(
         log_url: str | None = None,
         trace_carrier: dict[str, Any] | None = None,
         environment: Any = None,
+        language: str = "python",
     ) -> Response:
         async def _write_uploaded_input(
             var_name: str,
@@ -636,6 +664,7 @@ def create_notebook_executor_app(
             log_url=log_url,
             trace_carrier=trace_carrier,
             environment=environment,
+            language=language,
         )
         if isinstance(result, JSONResponse):
             return result
@@ -674,6 +703,9 @@ def create_notebook_executor_app(
                     # Runs a cell in the notebook's locked environment when the
                     # request carries one (``worker_env``).
                     "locked_environments": True,
+                    # Cell languages this machine can run: R needs Rscript
+                    # with jsonlite and arrow in its library.
+                    "languages": ["python", "r"] if shutil.which("Rscript") else ["python"],
                 },
             },
             "version": "1.0.0",
@@ -753,6 +785,7 @@ def create_notebook_executor_app(
             build_id=str(metadata.get("build_id") or "") or None,
             trace_carrier=dict(http_request.headers),
             environment=metadata.get("environment"),
+            language=str(metadata.get("language") or "python"),
         )
 
     @app.post("/v1/execute", dependencies=[Depends(require_worker_token)])
@@ -829,6 +862,7 @@ def create_notebook_executor_app(
             build_id=str(metadata.get("build_id") or "") or None,
             trace_carrier=dict(http_request.headers),
             environment=params.get("environment"),
+            language=str(params.get("language") or "python"),
         )
 
     @app.post("/v1/execute-manifest", dependencies=[Depends(require_worker_token)])
@@ -983,6 +1017,7 @@ def create_notebook_executor_app(
             notebook_id=str(metadata.get("notebook_id") or "") or None,
             cell_id=str(metadata.get("cell_id") or "") or None,
             environment=params.get("environment"),
+            language=str(params.get("language") or "python"),
         )
         if isinstance(bundle_result, JSONResponse):
             return bundle_result

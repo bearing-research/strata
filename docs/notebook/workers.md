@@ -379,6 +379,12 @@ drives with:
 docker build -f worker.Dockerfile -t strata-worker:latest .
 ```
 
+For R cells, build it with R and the packages `harness.R` needs:
+
+```bash
+docker build -f worker.Dockerfile --build-arg WITH_R=true -t strata-worker:r .
+```
+
 That image needs `strata-notebook` **0.7.0 or newer** - `POST /execute` ships
 in that release - and it installs from PyPI, so building it inside a checkout
 does not pick up local worker changes.
