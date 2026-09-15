@@ -46,7 +46,9 @@ Liveness + capabilities probe. No auth.
     "features": {
       "notebook_protocol_version": "notebook-cell-v1",
       "output_format": "notebook-output-bundle@v1",
-      "pull_model": true
+      "pull_model": true,
+      "cancel": true,
+      "locked_environments": true
     }
   },
   "version": "1.0.0",
@@ -65,6 +67,29 @@ Liveness + capabilities probe. No auth.
 ```
 
 `active_executions` is the count of in-flight `/v1/*` calls - useful for autoscaler signals. `max_concurrent` and `gpu_slots` are the worker's limits (`null` when unset), and `free_gpu_slots` how many GPUs are unassigned, so a caller can plan rather than discover the limit by being refused. `hardware` is what the machine reports about itself: `cpus` (those this process may use) and `memory_mb` from the OS, and `accelerators` and `cuda` from `nvidia-smi` when it is on the worker's `PATH`. It lets a caller check a provider's machine against the class it was sold as without submitting a job. A field that could not be read is omitted, so a missing `accelerators` means unknown, not "no GPU". The notebook UI polls this and shows the worker badge red if `/health` fails or times out.
+
+`locked_environments: true` says the worker runs a cell in the notebook's own locked environment when the request carries one (below). Strata sends that block only to a worker that advertises it; any other gets requests exactly as before.
+
+### The `environment` block
+
+A request to a worker that advertises `locked_environments` carries the notebook's lock, in `transform.params.environment` on `POST /v1/execute`, `environment` in `POST /v1/notebook-execute` metadata, and `params.environment` in a manifest:
+
+```json
+{
+  "key": "<sha256 of uv.lock>",
+  "python": "3.13",
+  "lockfile": "<the notebook's uv.lock>",
+  "pyproject": "<the notebook's pyproject.toml>"
+}
+```
+
+The worker runs the cell's harness with the interpreter of that environment:
+
+- It keeps one environment per `key` and interpreter build under `STRATA_WORKER_ENV_ROOT` (default `~/.strata/worker-envs`). An environment already there is reused, so a second cell with the same lock installs nothing.
+- A missing one is fetched from `STRATA_WORKER_ENV_REGISTRY_URL/<key>` as a `.tar.gz` of the environment directory when that is set, and otherwise built with `uv sync --frozen` from the lock. The worker needs `uv` on its `PATH` for that.
+- A lock that does not hash to `key`, or that cannot be installed, fails the cell with the reason (`500`).
+
+The output bundle's result then carries `environment: {"key", "installed"}`, where `key` names the environment directory and `installed` whether this request built or fetched it.
 
 **`503 Service Unavailable`** from any execution route means the worker is full: `max_concurrent` executions are in flight, or every GPU slot is taken. It carries `Retry-After` in seconds and is refused before any input is downloaded, so retrying costs the worker nothing.
 

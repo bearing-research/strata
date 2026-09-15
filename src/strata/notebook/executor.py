@@ -2419,6 +2419,20 @@ class CellExecutor:
         unpacked_result = unpack_notebook_output_bundle(bundle_path, unpacked_dir)
         return unpacked_result, unpacked_dir, "executor", resolved_mounts
 
+    async def _locked_environment(self, worker_spec: Any) -> dict[str, str] | None:
+        """The notebook's lock, for a worker that runs cells in it.
+
+        Only a worker whose ``/health`` advertises ``locked_environments`` gets
+        one; any other runs the cell in its own environment, as before.
+        """
+        from strata.notebook.python_versions import read_requested_python_minor
+        from strata.notebook.worker_env import environment_spec
+        from strata.notebook.workers import worker_advertises
+
+        if not await worker_advertises(worker_spec, "locked_environments"):
+            return None
+        return environment_spec(self.session.path, read_requested_python_minor(self.session.path))
+
     async def _dispatch_http_executor(
         self,
         worker_spec: Any,
@@ -2500,6 +2514,9 @@ class CellExecutor:
             },
             "inputs": metadata_inputs,
         }
+        environment = await self._locked_environment(worker_spec)
+        if environment is not None:
+            metadata["transform"]["params"]["environment"] = environment
 
         files: list[tuple[str, tuple[str, Any, str]]] = [
             (
@@ -2712,6 +2729,9 @@ class CellExecutor:
             "output_format": "notebook-output-bundle@v1",
             "_dispatch_mode": "external",
         }
+        environment = await self._locked_environment(worker_spec)
+        if environment is not None:
+            build_params["environment"] = environment
         transport_provenance = hashlib.sha256(
             json.dumps(
                 {
