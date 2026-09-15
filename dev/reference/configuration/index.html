@@ -2957,6 +2957,11 @@ normal work as overload and walk the tier down to its floor.</p>
 <td>PyIceberg catalog properties (JSON object via env; <code>[tool.strata.catalog_properties]</code> in pyproject)</td>
 </tr>
 <tr>
+<td><code>STRATA_CATALOGS</code></td>
+<td><code>{}</code></td>
+<td>Named catalogs: a JSON object of name to PyIceberg catalog properties (<code>[tool.strata.catalogs.&lt;name&gt;]</code> in pyproject), e.g. <code>{"lake": {"type": "rest", "uri": "https://catalog.example"}}</code>. A table in one is <code>&lt;name&gt;:&lt;namespace&gt;.&lt;table&gt;</code>, for <code>@table</code> and scans alike. Credentials a REST catalog vends for a table are used to read that table's files</td>
+</tr>
+<tr>
 <td><code>STRATA_CATALOG_URI</code></td>
 <td><code>None</code></td>
 <td>Catalog database URI. Merged into <code>catalog_properties.uri</code>, so it does not replace sibling keys set in pyproject</td>
