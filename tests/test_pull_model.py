@@ -662,6 +662,30 @@ class TestFinalizeEndpoint:
         artifact = artifact_store.get_artifact("fin-output", version)
         assert artifact.state == "ready"
 
+    def test_finalize_refuses_an_output_over_the_limit(
+        self, client, config, build_store, artifact_store
+    ):
+        """A presigned upload never passes the upload route's byte count, so
+        finalize checks the size itself before publishing. Item 12."""
+        version = create_test_artifact(artifact_store, "big-output", finalize=False)
+        build_store.create_build(
+            build_id="big-build-001",
+            artifact_id="big-output",
+            version=version,
+            executor_ref="test@v1",
+        )
+        blob = create_test_arrow_blob()
+        artifact_store.write_blob("big-output", version, blob)
+        config.build_runner_default_max_output = len(blob) - 1
+
+        response = client.post("/v1/builds/big-build-001/finalize")
+
+        assert response.status_code == 413
+        build = build_store.get_build("big-build-001")
+        assert build.state == "failed"
+        assert build.error_code == "OUTPUT_TOO_LARGE"
+        assert artifact_store.get_artifact("big-output", version).state == "failed"
+
     def test_finalize_arrow_validation_runs_off_event_loop(
         self, client, build_store, artifact_store, monkeypatch
     ):

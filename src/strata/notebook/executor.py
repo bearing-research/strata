@@ -2738,6 +2738,9 @@ class CellExecutor:
                 },
                 input_artifacts=input_artifacts,
                 max_output_bytes=state.config.max_transform_output_bytes,
+                blob_store=(
+                    artifact_store.blob_store if state.config.artifact_presigned_urls else None
+                ),
                 url_expiry_seconds=state.config.signed_url_expiry_seconds,
             ).to_dict()
 

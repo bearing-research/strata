@@ -966,17 +966,29 @@ def create_notebook_executor_app(
                     while chunk := f.read(BLOB_STREAM_CHUNK_BYTES):
                         yield chunk
 
+            upload_fields = output.get("fields")
             try:
                 async with httpx.AsyncClient(timeout=max(timeout_seconds, 30.0)) as client:
-                    upload_response = await client.post(
-                        upload_url,
-                        content=_stream_bundle_body(),
-                        headers={
-                            "Content-Type": "application/x-tar",
-                            "Content-Length": str(byte_size),
-                        },
-                    )
-                    if upload_response.status_code != 200:
+                    if isinstance(upload_fields, dict):
+                        # A presigned object-store upload: the policy fields,
+                        # then the bundle as the file part, straight to the
+                        # object store rather than through the server.
+                        with open(bundle_path, "rb") as bundle_file:
+                            upload_response = await client.post(
+                                upload_url,
+                                data={str(k): str(v) for k, v in upload_fields.items()},
+                                files={"file": ("bundle.tar", bundle_file, "application/x-tar")},
+                            )
+                    else:
+                        upload_response = await client.post(
+                            upload_url,
+                            content=_stream_bundle_body(),
+                            headers={
+                                "Content-Type": "application/x-tar",
+                                "Content-Length": str(byte_size),
+                            },
+                        )
+                    if upload_response.status_code not in (200, 201, 204):
                         raise HTTPException(
                             status_code=502,
                             detail=(
