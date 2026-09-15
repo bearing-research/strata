@@ -3422,6 +3422,11 @@ deployment, not only in one that opted in to something.</p>
 <td>Put presigned object-store URLs in build manifests where the blob store can sign them (S3 with an access key pair in config or the environment), so a worker's inputs and output bypass the server. The output becomes a form upload (<code>output.fields</code>), which workers older than this release don't send, so enable it once the workers are upgraded.</td>
 </tr>
 <tr>
+<td><code>STRATA_WORKER_PROVISIONING_TIMEOUT_SECONDS</code></td>
+<td><code>600</code></td>
+<td>For a worker that answers a signed dispatch with 202: how long the job may take to start running. The cell's own timeout starts once it runs. See <a href="../executor-protocol/">Executor protocol</a>.</td>
+</tr>
+<tr>
 <td><code>STRATA_TRANSFORM_SIGNING_SECRET</code></td>
 <td><code>None</code></td>
 <td>HMAC secret signing pull-model build URLs. Unset → a random per-process secret (signed URLs break on restart and differ across replicas); set a stable value for multi-replica / restart-surviving deployments.</td>
