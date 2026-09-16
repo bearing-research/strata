@@ -54,7 +54,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
-from urllib.parse import urljoin, urlparse, urlunparse
+from urllib.parse import urljoin, urlparse, urlsplit, urlunparse
 
 import httpx
 
@@ -3165,12 +3165,23 @@ class CellExecutor:
             body = {}
         job_url = body.get("job_url") if isinstance(body, dict) else None
         if not isinstance(job_url, str) or not job_url:
+            await cancel()
             raise RemoteExecutionError(
                 f"Remote executor '{worker_spec.name}' accepted the job without a job_url",
                 remote_build_state="failed",
                 remote_error_code="PROTOCOL_ERROR",
             )
         job_url = urljoin(manifest_execute_url, job_url)
+        if urlsplit(job_url)[:2] != urlsplit(manifest_execute_url)[:2]:
+            # The job lives on the worker the manifest went to. An absolute URL
+            # somewhere else would have this server poll a host of the worker's
+            # choosing, carrying the worker's token.
+            raise RemoteExecutionError(
+                f"Remote executor '{worker_spec.name}' answered with a job_url on another "
+                f"host ({job_url})",
+                remote_build_state="failed",
+                remote_error_code="PROTOCOL_ERROR",
+            )
         provisioning_limit = float(
             getattr(self._lake_config(), "worker_provisioning_timeout_seconds", 600.0)
         )
@@ -3180,7 +3191,18 @@ class CellExecutor:
         running_since: float | None = None
         async with httpx.AsyncClient(timeout=30.0) as client:
             while True:
-                reply = await client.get(job_url, headers=headers)
+                try:
+                    reply = await client.get(job_url, headers=headers)
+                except httpx.HTTPError as exc:
+                    # The job outlives this request, so a status poll that fails
+                    # has to stop it; otherwise the machine runs on for a caller
+                    # whose build is already marked failed.
+                    await cancel()
+                    raise RemoteExecutionError(
+                        f"Remote executor '{worker_spec.name}' job status request failed: {exc}",
+                        remote_build_state="failed",
+                        remote_error_code="JOB_STATUS_FAILED",
+                    ) from exc
                 if reply.status_code != 200:
                     await cancel()
                     raise RemoteExecutionError(

@@ -3258,11 +3258,26 @@ async def _broadcast_execution_result(
     ts = datetime.now(tz=UTC).isoformat().replace("+00:00", "Z")
 
     # A remote cell whose console was streamed while it ran has already shown
-    # all of this. The frontend appends console text, so re-sending the
-    # complete stdout and stderr here would print the whole run a second time
-    # underneath itself.
-    if console_relay.streamed(notebook_id, cell_id):
+    # most of this, and the frontend appends, so send only what it has not
+    # seen. Forwarding a chunk is best effort — a dropped one would otherwise
+    # be missing from the notebook while the bundle holds it.
+    delivered = console_relay.streamed(notebook_id, cell_id)
+    if delivered is not None:
         console_relay.clear_streamed(notebook_id, cell_id)
+        for stream, text in (("stdout", result.stdout), ("stderr", result.stderr)):
+            tail = (text or "")[delivered.get(stream, 0) :]
+            if tail:
+                await _broadcast_message(
+                    notebook_id,
+                    _make_message(
+                        MessageType.CELL_CONSOLE,
+                        seq,
+                        CellConsolePayload(cell_id=cell_id, stream=stream, text=tail).model_dump(
+                            mode="json"
+                        ),
+                        ts=ts,
+                    ),
+                )
         await _broadcast_output_or_error(notebook_id, seq, cell_id, result, ts)
         return
 
