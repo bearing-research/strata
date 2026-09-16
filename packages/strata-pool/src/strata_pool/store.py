@@ -494,6 +494,10 @@ class _SqlStore:
         and two tenants cannot both spend the fleet's last slot.
         """
         live = [WorkerState.STARTING, WorkerState.WARM, WorkerState.BUSY]
+        # A machine whose stop is in flight is still allocated at the provider,
+        # and still billing, until the call comes back — so the fleet counts it
+        # even though the tenant's own cap does not (below).
+        allocated = [*live, WorkerState.STOPPING]
         with self._transaction():
             queued = self.count_queued(worker.machine_type, worker.tenant_id)
             # Stale machines (another image) are left out: they take no new
@@ -515,7 +519,10 @@ class _SqlStore:
                 >= max_workers
             ):
                 return "tenant_cap"
-            if max_workers_total is not None and self.count_all_workers(live) >= max_workers_total:
+            if (
+                max_workers_total is not None
+                and self.count_all_workers(allocated) >= max_workers_total
+            ):
                 return "fleet_cap"
             self.save_worker(worker)
         return "reserved"
