@@ -4052,6 +4052,9 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
+postgres = [
+    { name = "psycopg", extra = ["binary"] },
+]
 server = [
     { name = "fastapi" },
     { name = "uvicorn" },
@@ -4061,9 +4064,10 @@ server = [
 requires-dist = [
     { name = "fastapi", marker = "extra == 'server'", specifier = ">=0.115.0" },
     { name = "httpx", specifier = ">=0.28.0" },
+    { name = "psycopg", extras = ["binary"], marker = "extra == 'postgres'", specifier = ">=3.1" },
     { name = "uvicorn", marker = "extra == 'server'", specifier = ">=0.30.0" },
 ]
-provides-extras = ["server"]
+provides-extras = ["server", "postgres"]
 
 [[package]]
 name = "strictyaml"

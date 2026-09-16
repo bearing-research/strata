@@ -246,6 +246,11 @@ class StrataConfig(BaseSettings):
     # Catalog settings (for pyiceberg)
     catalog_name: str = "default"
     catalog_properties: dict[str, str] = Field(default_factory=dict)
+    # Named catalogs, each a set of pyiceberg catalog properties (``type`` =
+    # ``rest``, ``glue``, ``sql``, ... plus that type's settings). A table in
+    # one is addressed as ``<name>:<namespace>.<table>``, by ``@table`` and by
+    # scans alike.
+    catalogs: dict[str, dict[str, str]] = Field(default_factory=dict)
 
     # Resource limits (backpressure)
     max_concurrent_scans: Annotated[int, Field(ge=1)] = 100
@@ -396,6 +401,13 @@ class StrataConfig(BaseSettings):
     # startup (zombie sweep) — they can never serve data and would otherwise
     # linger in the store forever.
     artifact_zombie_build_timeout_seconds: Annotated[float, Field(gt=0)] = 3600.0
+    # Collect unreachable artifacts on a timer: unnamed, not the latest version
+    # of their id, not published or pinned, nothing published or pinned
+    # depending on them, and older than artifact_gc_max_age_days. Off (None)
+    # by default: a store that has never been collected should not start
+    # losing data because a server was upgraded.
+    artifact_gc_interval_seconds: Annotated[float, Field(gt=0)] | None = None
+    artifact_gc_max_age_days: Annotated[float, Field(ge=0)] = 7.0
     # Registry aliases that require approval: moves/deletes of these aliases
     # (e.g. "champion") land in a pending queue instead of applying, and an
     # explicit approve applies them. Empty (the default) = no gating.
@@ -404,6 +416,14 @@ class StrataConfig(BaseSettings):
         default_factory=lambda: Path.home() / ".strata" / "notebooks"
     )
     notebook_python_versions: list[str] = Field(default_factory=discover_installed_python_minors)
+    # How a notebook's Python environment is kept: "uv" gives each notebook its
+    # own .venv; "shared" links notebooks with the same lockfile and
+    # interpreter to one environment under notebook_shared_env_dir (default:
+    # "envs" beside notebook_storage_dir). Shared environments nothing links to
+    # are removed once unused for notebook_shared_env_ttl_days. POSIX only.
+    notebook_env_backend: Literal["uv", "shared"] = "uv"
+    notebook_shared_env_dir: Path | None = None
+    notebook_shared_env_ttl_days: Annotated[float, Field(ge=0)] = 7.0
 
     # Point the ambient `strata` client injected into notebook cells at a REMOTE
     # shared store instead of this local notebook server. Lets a team of
@@ -414,6 +434,11 @@ class StrataConfig(BaseSettings):
     # ambient client targets the local server as before.
     notebook_remote_store_url: str | None = None
     notebook_remote_store_headers: dict[str, str] = Field(default_factory=dict)
+    # Send the caller's principal to the remote store as X-Strata-Principal,
+    # replacing any the static headers name, so a shared server's results,
+    # promotions and approvals are attributed to the member and not the server.
+    # Off for a remote store that expects one fixed service identity.
+    notebook_remote_store_forward_principal: bool = True
     # Consult the remote store on a LOCAL cache miss, so a colleague's
     # expensive cell becomes your instant result. Distinct from the knob above,
     # which only redirects a cell's ambient client: that is explicit publish
@@ -467,6 +492,30 @@ class StrataConfig(BaseSettings):
     # another machine. Setting it needs the server to run as root, so it can
     # switch users. POSIX only.
     notebook_harness_user: str | None = None
+
+    # Named credentials, referenced from notebook.toml by name so no secret is
+    # committed: ``{name: {field: value}}``, where each value is usually a
+    # ``${VAR}`` resolved against the notebook's environment (which a secret
+    # manager fills) and then the server's. A mount's fields become fsspec
+    # storage options; a connection's become driver auth.
+    notebook_credentials: Annotated[dict[str, dict[str, str]], NoDecode] = Field(
+        default_factory=dict
+    )
+    # A default credential per mount URI scheme (``{"s3": "org-bucket"}``), for
+    # mounts that name none, so the organization's primary store works without
+    # any notebook change.
+    notebook_mount_credentials: Annotated[dict[str, str], NoDecode] = Field(default_factory=dict)
+
+    # Hosts ``@fetch`` may reach even on a private address, e.g. an internal
+    # data server. Public hosts need no entry; private, loopback and link-local
+    # addresses are refused unless named here. Exact names, or a leading dot
+    # for a suffix (``.internal``). Same rule as STRATA_WORKER_ALLOWED_HOSTS.
+    notebook_fetch_allowed_hosts: Annotated[list[str], NoDecode] = Field(default_factory=list)
+
+    # How long the last person to change a notebook cell holds it: an edit by
+    # someone else inside the window is refused with ``cell_locked`` unless it
+    # is forced. 0 turns the soft lock off.
+    notebook_cell_lock_seconds: Annotated[float, Field(ge=0)] = 5.0
 
     # AI/LLM assistant settings (OpenAI-compatible API)
     ai_base_url: str | None = None
@@ -560,6 +609,16 @@ class StrataConfig(BaseSettings):
 
     # Pull model configuration
     signed_url_expiry_seconds: Annotated[float, Field(gt=0)] = 600.0
+    # Put object-store URLs in build manifests where the blob store can sign
+    # them (S3 with keys it can read), so a worker's inputs and output bypass
+    # this server. Off by default: the output then arrives as a form upload
+    # (url + fields), which a worker older than this does not send.
+    artifact_presigned_urls: bool = False
+    # How long a signed dispatch may wait for its job to start running when the
+    # worker (or a pool in front of it) answers 202 with a job to poll. Separate
+    # from the cell's own timeout, which starts only once the job is running, so
+    # a cold machine does not spend the cell's budget booting.
+    worker_provisioning_timeout_seconds: Annotated[float, Field(gt=0)] = 600.0
     # HMAC secret for signing pull-model build URLs (env STRATA_TRANSFORM_SIGNING_SECRET).
     # If unset, a random per-process secret is used — fine for single-instance dev,
     # but signed URLs then become invalid on restart and differ across replicas.
@@ -679,6 +738,30 @@ class StrataConfig(BaseSettings):
                 f"known: {sorted(AGENT_TOOL_NAMES)}"
             )
         return names
+
+    @field_validator("notebook_credentials", "notebook_mount_credentials", mode="before")
+    @classmethod
+    def parse_credential_maps(cls, v: Any, info: Any) -> dict:
+        """Accept a dict or a JSON object string (the env-var form)."""
+        if v is None or v == "":
+            return {}
+        if isinstance(v, str):
+            import json
+
+            v = json.loads(v)
+        if not isinstance(v, dict):
+            raise ValueError(f"{info.field_name} must be a JSON object")
+        return v
+
+    @field_validator("notebook_fetch_allowed_hosts", mode="before")
+    @classmethod
+    def normalize_fetch_allowed_hosts(cls, v: Any) -> list[str]:
+        """Accept a list or comma-separated host names."""
+        if v is None:
+            return []
+        if isinstance(v, str):
+            v = [part.strip() for part in v.split(",") if part.strip()]
+        return [str(item).lower() for item in v]
 
     @field_validator("embed_frame_ancestors", mode="before")
     @classmethod
@@ -993,15 +1076,15 @@ class StrataConfig(BaseSettings):
                     "artifacts and require an artifact store; set artifact_dir)"
                 )
 
-            # The MCP endpoint exposes the warm-session read/run/author surface
-            # with no per-request auth — safe only behind a loopback personal
-            # deployment. In service mode it would hand every reachable client
-            # full notebook control, so refuse the combination outright.
-            if self.mcp_enabled:
+            # The MCP endpoint exposes the warm-session read/run/author surface.
+            # With principal auth each tool call runs as its caller and is
+            # checked against the notebook scopes; without it, it would hand
+            # every reachable client full notebook control.
+            if self.mcp_enabled and not self.principal_auth_enabled:
                 conflicts.append(
-                    "mcp_enabled=True with deployment_mode='service' (the MCP "
-                    "endpoint has no per-request auth and grants full session "
-                    "control; it is personal-mode only)"
+                    "mcp_enabled=True with deployment_mode='service' and no principal "
+                    "auth (the MCP endpoint grants session control and would have no "
+                    "caller to check; set auth_mode='trusted_proxy' or 'api_key')"
                 )
 
             if conflicts:

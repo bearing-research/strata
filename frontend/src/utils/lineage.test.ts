@@ -59,3 +59,20 @@ test('lineageToTree tolerates cycles without looping forever', () => {
   const rows = flattenLineage(lineageToTree(cyclic, MODEL))
   assert.equal(rows.length, 1)
 })
+
+test('a fetched URL is labelled by the URL, not as an artifact', () => {
+  const url = 'https://example.org/taxi_zones.csv'
+  const tree = lineageToTree(
+    {
+      artifact_uri: SCAN,
+      nodes: [
+        { uri: SCAN, type: 'artifact', version: 1, transform_ref: 'notebook/cell@v1' },
+        { uri: url, type: 'fetch' },
+      ],
+      edges: [{ from_uri: url, to_uri: SCAN }],
+    },
+    SCAN,
+  )
+  assert.equal(tree.children[0].type, 'fetch')
+  assert.equal(tree.children[0].label, url)
+})

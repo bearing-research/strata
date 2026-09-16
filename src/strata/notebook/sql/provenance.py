@@ -305,6 +305,7 @@ def compute_sql_provenance_hash(
     cache_salt: bytes,
     freshness_token: FreshnessToken | None,
     schema_fingerprint: SchemaFingerprint | None,
+    lake_fingerprints: Sequence[str] = (),
 ) -> str:
     """Compute the SHA-256 hash that identifies a SQL cell artifact.
 
@@ -323,7 +324,7 @@ def compute_sql_provenance_hash(
     module's docstring for the rationale. ``query_normalized`` is
     the SQL equivalent of an AST-normalized source.
     """
-    payload = {
+    payload: dict[str, Any] = {
         "query": query_normalized,
         "binds": serialize_bind_params(bind_params),
         "connection_id": connection_id,
@@ -346,5 +347,9 @@ def compute_sql_provenance_hash(
             else base64.b64encode(schema_fingerprint.value).decode("ascii")
         ),
     }
+    # A lake connection's catalog table snapshots and mount fingerprints. Only
+    # present when there are some, so every other cell keeps its hash.
+    if lake_fingerprints:
+        payload["lake"] = sorted(lake_fingerprints)
     encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()

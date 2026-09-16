@@ -14,6 +14,7 @@ import itertools
 
 from conftest import FakeBackend
 from strata_pool import JobState, MachineType, WorkerState
+from strata_pool.types import Worker, new_auth_token, new_id
 
 
 class Clock:
@@ -27,6 +28,25 @@ class Clock:
 
     def advance(self, seconds: float) -> None:
         self.now += seconds
+
+
+async def _start_idle_machine(pool, tenant_id: str = "acme") -> None:
+    """A machine nobody queued work for, as a job that failed leaves one."""
+    spec = pool.machine_types["cpu"]
+    worker = Worker(
+        id=new_id("worker"),
+        machine_type=spec.name,
+        tenant_id=tenant_id,
+        backend=pool.backend.name,
+        state=WorkerState.STARTING,
+        created_at=pool._wall(),
+        auth_token=new_auth_token(),
+        image=spec.image,
+        lease_owner=pool.instance_id,
+        lease_expires_at=pool._wall() + pool.lease_seconds,
+    )
+    pool.store.save_worker(worker)
+    await pool._start_worker(spec, worker)
 
 
 def _spec(**kwargs) -> MachineType:
@@ -97,7 +117,7 @@ async def test_a_machine_that_never_ran_anything_still_ages_out(make_pool):
     backend = FakeBackend()
     pool = make_pool(backend=backend, machine_types=[_spec()], wall=clock)
 
-    await pool._start_worker(pool.machine_types["cpu"], "acme")
+    await _start_idle_machine(pool)
     await asyncio.sleep(0)  # let it boot to warm
     assert [w.state for w in pool.store.list_workers()] == [WorkerState.WARM]
 
@@ -260,7 +280,7 @@ async def test_a_machine_that_takes_a_job_mid_pass_is_not_stopped_under_it(make_
     # Two idle machines for the same tenant, both past their cool-down.
     first = await pool.submit(tenant_id="acme", machine_type="cpu", payload=b"one")
     await pool.wait(first.id)
-    await pool._start_worker(pool.machine_types["cpu"], "acme")
+    await _start_idle_machine(pool)
     await asyncio.sleep(0)
     assert len(pool.store.list_workers()) == 2
     clock.advance(301)

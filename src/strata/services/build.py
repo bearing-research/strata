@@ -84,8 +84,11 @@ class BuildService:
         url_expiry_seconds: float,
         lease_owner: str | None = None,
         lease_expires_at: float | None = None,
+        presign: bool = False,
     ) -> dict:
         """Resolve a build's inputs and assemble its signed-URL manifest.
+
+        ``presign`` asks for object-store URLs where the store can sign them.
 
         Raises:
             ValueError: an input URI cannot be resolved to an artifact version.
@@ -115,6 +118,7 @@ class BuildService:
             url_expiry_seconds=url_expiry_seconds,
             lease_owner=lease_owner,
             lease_expires_at=lease_expires_at,
+            blob_store=store.blob_store if presign else None,
         )
         return manifest.to_dict()
 

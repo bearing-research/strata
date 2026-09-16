@@ -83,6 +83,22 @@ class LanguageExecutor(Protocol):
         """Return whether ``cell`` is eligible for run-all batching."""
         ...
 
+    def reopen_identity(self, cell: CellState, session: Any) -> str | None:
+        """What this cell's cache identity rests on beyond the generic triplet.
+
+        ``compute_staleness`` folds source, env, inputs, mounts and tables. A
+        language with its own cache scheme folds more -- the connection a SQL
+        cell reads and the policy it caches under, the model a prompt cell
+        asked -- and none of that is in the generic hash, so preserving READY
+        on that hash alone asserts a freshness nothing established.
+
+        ``None`` means the identity cannot be settled without going out to the
+        world: a ``@cache fingerprint`` cell has to probe its database, and an
+        open is not the place to do it. The gate treats ``None`` as "run it".
+        ``""`` means the generic triplet already covers this cell.
+        """
+        ...
+
 
 class UnknownLanguageError(LookupError):
     """Raised when a cell's language has no registered executor.
@@ -157,6 +173,10 @@ class _PythonExecutor:
             use_cache=use_cache,
         )
 
+    def reopen_identity(self, cell: CellState, session: Any) -> str | None:
+        del cell, session  # The generic triplet covers this language.
+        return ""
+
     def is_batchable(self, cell: CellState, executor: CellExecutor) -> bool:
         # The full PYTHON-only batching gate from executor.py:is_cell_batchable.
         # Per issue #26: PYTHON cell, resolved worker is "local", no
@@ -216,6 +236,16 @@ class _PromptExecutor:
             use_cache=use_cache,
         )
 
+    def reopen_identity(self, cell: CellState, session: Any) -> str | None:
+        """The model the answer came from, and the shape it was asked for.
+
+        All of it is settled by the cell's annotations and the notebook's
+        ``[ai]`` block, so reopening can check it without calling anybody.
+        """
+        from strata.notebook.prompt_executor import prompt_reopen_identity
+
+        return prompt_reopen_identity(cell, session)
+
     def is_batchable(self, cell: CellState, executor: CellExecutor) -> bool:
         return False
 
@@ -245,6 +275,17 @@ class _SqlExecutor:
             materialize_upstreams=materialize_upstreams,
             use_cache=use_cache,
         )
+
+    def reopen_identity(self, cell: CellState, session: Any) -> str | None:
+        """The connection read and the policy cached under, when they settle it.
+
+        ``None`` for a policy that wants a freshness probe: the cell's own
+        declaration is that its cache is only good if the source still says so,
+        and an open cannot ask.
+        """
+        from strata.notebook.sql.cell_executor import sql_reopen_identity
+
+        return sql_reopen_identity(cell, session)
 
     def is_batchable(self, cell: CellState, executor: CellExecutor) -> bool:
         return False
@@ -292,6 +333,10 @@ class _MarkdownExecutor:
             cache_hit=True,
         )
 
+    def reopen_identity(self, cell: CellState, session: Any) -> str | None:
+        del cell, session  # The generic triplet covers this language.
+        return ""
+
     def is_batchable(self, cell: CellState, executor: CellExecutor) -> bool:
         return False
 
@@ -321,6 +366,15 @@ class _WidgetExecutor:
             materialize_upstreams=materialize_upstreams,
             use_cache=use_cache,
         )
+
+    def reopen_identity(self, cell: CellState, session: Any) -> str | None:
+        """The control values the cell last rendered, which persist with it."""
+        import hashlib
+        import json
+
+        del session
+        values = json.dumps(cell.widget_values, sort_keys=True, default=str)
+        return hashlib.sha256(values.encode()).hexdigest()
 
     def is_batchable(self, cell: CellState, executor: CellExecutor) -> bool:
         return False

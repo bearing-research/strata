@@ -32,7 +32,7 @@ ai_model = "claude-sonnet-4-6"
 | `STRATA_ALLOW_REMOTE_CLIENTS_IN_PERSONAL` | `false`     | Allow non-localhost clients in personal mode |
 | `STRATA_CORS_ALLOW_ORIGINS`               | _(empty)_   | Origins allowed to call the API from a browser. Empty means no cross-origin access. Personal mode has no auth, so any page allowed here can author and run cells |
 | `STRATA_EMBED_FRAME_ANCESTORS`            | _(empty)_   | Origins allowed to embed a notebook's app view in an `<iframe>` (sets `Content-Security-Policy: frame-ancestors`). Empty means same-origin only. JSON array or comma-separated; `*` allows any host |
-| `STRATA_MCP_ENABLED`                      | `false`     | Mount the MCP server at `/mcp` so a coding agent can drive the live session. **Personal mode only** (rejected at startup in service mode) and requires the `[mcp]` extra. See [Notebook → MCP](../notebook/mcp.md) |
+| `STRATA_MCP_ENABLED`                      | `false`     | Mount the MCP server at `/mcp` so a coding agent can drive the live session. In service mode it requires principal auth (`trusted_proxy` or `api_key`); each tool call then runs as its caller and is checked against the notebook scopes. Requires the `[mcp]` extra. See [Notebook → MCP](../notebook/mcp.md) |
 | `STRATA_ARROW_MEMORY_POOL`                | `None`      | Arrow allocator: `default`, `system`, `jemalloc`, or `mimalloc`. Unset leaves the PyArrow default |
 
 ## Cache
@@ -125,6 +125,7 @@ Two constraints are enforced at startup rather than papered over at runtime:
 | ---------------------------- | --------- | ------------------------------------------------------------------------------------------------- |
 | `STRATA_CATALOG_NAME`        | `default` | Iceberg catalog name                                                                              |
 | `STRATA_CATALOG_PROPERTIES`  | `{}`      | PyIceberg catalog properties (JSON object via env; `[tool.strata.catalog_properties]` in pyproject) |
+| `STRATA_CATALOGS`            | `{}`      | Named catalogs: a JSON object of name to PyIceberg catalog properties (`[tool.strata.catalogs.<name>]` in pyproject), e.g. `{"lake": {"type": "rest", "uri": "https://catalog.example"}}`. A table in one is `<name>:<namespace>.<table>`, for `@table` and scans alike. Credentials a REST catalog vends for a table are used to read that table's files |
 | `STRATA_CATALOG_URI`         | `None`    | Catalog database URI. Merged into `catalog_properties.uri`, so it does not replace sibling keys set in pyproject |
 
 ## S3 Storage
@@ -170,6 +171,8 @@ credential.
 | --------------------------------- | ----------- | -------------------------------- |
 | `STRATA_ARTIFACT_DIR`             | `None`      | Artifact store directory         |
 | `STRATA_ARTIFACT_ZOMBIE_BUILD_TIMEOUT_SECONDS` | `3600.0` | Builds stuck in `building` longer than this are demoted to `failed` at startup |
+| `STRATA_ARTIFACT_GC_INTERVAL_SECONDS` | unset (off) | Run artifact garbage collection on this interval. Never collects anything named, latest, published or pinned, or anything those depend on. See [Lifecycle](../deployment/lifecycle.md#cleaning-up-the-core-artifact-store) |
+| `STRATA_ARTIFACT_GC_MAX_AGE_DAYS` | `7.0` | Minimum age of a version the scheduled sweep may collect |
 | `STRATA_REGISTRY_PROTECTED_ALIASES` | _(empty)_ | Comma-separated alias names (e.g. `champion,production`) whose moves/deletes queue for approval instead of applying |
 | `STRATA_ARTIFACT_BLOB_BACKEND`    | `local`     | `local`, `s3`, `gcs`, or `azure` |
 | `STRATA_ARTIFACT_S3_BUCKET`       | `None`      | S3 bucket for artifacts          |
@@ -289,6 +292,24 @@ The same shape as JSON in the env var:
 export STRATA_ACL_CONFIG='{"default":"deny","allow":[{"principal":"bi","tables":["file:analytics.*"]}]}'
 ```
 
+**A table pattern names the store or catalog the table is in.** The prefix is
+`file:` for a local warehouse, `s3:`, `gs:` or `az:` for one in object storage,
+and the catalog's own name for a table in a configured catalog
+(`STRATA_CATALOGS`), which is addressed as `<name>:<namespace>.<table>`:
+
+```toml
+deny = [
+  { principal = "*", tables = ["file:finance.*", "s3:finance.*", "lake:finance.*"] },
+]
+```
+
+A rule written for one prefix does not match another, so a table reachable
+both as `s3://bucket/wh#finance.ledger` and as `lake:finance.ledger` needs
+both patterns. **If you added a named catalog, or a GCS or Azure warehouse,
+check your deny rules**: before this release every warehouse table matched
+`file:` whatever store held it, so a rule written then covers less than it
+used to.
+
 `principal` and each `tables` entry are glob patterns; `tenant` is an exact
 match. Every rule must list at least one table pattern; a rule with none can
 never match, so it is rejected at startup rather than sitting inert. Unknown
@@ -393,6 +414,8 @@ deployment, not only in one that opted in to something.
 | `STRATA_TRANSFORM_MODE`                 | `embedded` | `embedded` (common transforms like `duckdb_sql@v1` run in-process) or `registry` (only transforms configured in `transforms_config`, via external executors). |
 | `STRATA_TRANSFORMS_CONFIG`              | `{}`    | The whole transforms block as a JSON object (`enabled`, `registry`, …). Normally written as `[tool.strata.transforms]` instead; `STRATA_TRANSFORMS_ENABLED` merges into it rather than replacing it. |
 | `STRATA_SIGNED_URL_EXPIRY_SECONDS`      | `600`   | Validity window for pull-model signed build URLs.                                               |
+| `STRATA_ARTIFACT_PRESIGNED_URLS` | `false` | Put presigned object-store URLs in build manifests where the blob store can sign them (S3 with an access key pair in config or the environment), so a worker's inputs and output bypass the server. The output becomes a form upload (`output.fields`), which workers older than this release don't send, so enable it once the workers are upgraded. |
+| `STRATA_WORKER_PROVISIONING_TIMEOUT_SECONDS` | `600` | For a worker that answers a signed dispatch with 202: how long the job may take to start running. The cell's own timeout starts once it runs. See [Executor protocol](executor-protocol.md). |
 | `STRATA_TRANSFORM_SIGNING_SECRET`       | `None`  | HMAC secret signing pull-model build URLs. Unset → a random per-process secret (signed URLs break on restart and differ across replicas); set a stable value for multi-replica / restart-surviving deployments. |
 | `STRATA_BUILD_RUNNER_POLL_INTERVAL_MS`  | `500`   | How often the embedded build runner polls for pending builds.                                   |
 | `STRATA_BUILD_RUNNER_MAX_CONCURRENT`    | `10`    | Max concurrent builds across the runner.                                                        |
@@ -416,11 +439,19 @@ deployment, not only in one that opted in to something.
 | ----------------------------------- | --------------------------- | -------------------------------------------------------------- |
 | `STRATA_NOTEBOOK_STORAGE_DIR`       | `~/.strata/notebooks`       | Default notebook storage directory. (Pre-2026-05 default was `/tmp/strata-notebooks`; see [Operations & Lifecycle](../deployment/lifecycle.md#notebook-storage-location) for the migration note.) |
 | `STRATA_NOTEBOOK_PYTHON_VERSIONS`   | current server Python minor | Available Python versions (JSON array or comma-separated list) |
+| `STRATA_NOTEBOOK_ENV_BACKEND`       | `uv`                        | How notebook Python environments are kept. `uv`: each notebook has its own `.venv`. `shared`: notebooks with the same `uv.lock` and interpreter build share one environment, and each notebook's `.venv` is a symlink to it, so a second notebook with that lock installs nothing. Adding or removing a package moves only that notebook to another environment. R libraries are shared the same way, one per `renv.lock` and R build, with `renv/library` a symlink. POSIX only. See [Shared environments](../notebook/environment.md#shared-environments). |
+| `STRATA_NOTEBOOK_SHARED_ENV_DIR`    | `envs` beside `STRATA_NOTEBOOK_STORAGE_DIR` | Where shared environments live, one directory per lockfile and interpreter. |
+| `STRATA_NOTEBOOK_SHARED_ENV_TTL_DAYS` | `7.0`                     | A shared environment no notebook links to is removed once unused this long, by an hourly sweep in the server or `strata env gc`. One a notebook links to is never removed. |
 | `STRATA_PERSONAL_MODE_USER_HEADER`  | `None`                      | Request header carrying caller identity. When set in personal mode, notebooks are stamped with the caller's identity on create and `discover`/`delete` scope to it. Intended for proxy-fronted personal deployments. |
 | `STRATA_NOTEBOOK_REMOTE_STORE_URL`  | `None`                      | Point the ambient `strata` client injected into cells at a remote shared store instead of this local notebook server, so a team publishes/consumes against one central deployment. Also what the Registry tab and the per-cell strip describe: with this set they forward there, so the dashboard shows the store the notebook actually names things in. Unset → both target the local server. Naming this server's own host and port is rejected at startup — the registry routes would forward to themselves. See [Service Mode → shared research store](../deployment/service-mode.md#authenticated-write-back-the-shared-research-store). |
 | `STRATA_NOTEBOOK_REMOTE_STORE_HEADERS` | `{}`                     | Auth headers the ambient client attaches when pointed at a remote store (e.g. the trusted-proxy identity/token). JSON object; set via env so secrets stay out of committed config. |
+| `STRATA_NOTEBOOK_REMOTE_STORE_FORWARD_PRINCIPAL` | `true` | With a caller's principal in context (service mode), send its id as `X-Strata-Principal` to the remote store in place of the one in the static headers, so team-cache attribution, promotions and registry approvals from a shared server name the member. `false` keeps the static identity for every request. |
 | `STRATA_NOTEBOOK_TEAM_CACHE_ENABLED` | `false`                    | Consult the remote store on a **local cache miss**, so a colleague's expensive cell becomes your instant result. Distinct from the URL above, which only redirects a cell's ambient client (explicit publish). Opt-in because it is a behaviour change, not only a performance one: it puts bytes another machine produced into your local store. Requires `STRATA_NOTEBOOK_REMOTE_STORE_URL`; enabling it without one is rejected at startup rather than left silently inert. |
 | `STRATA_NOTEBOOK_TEAM_CACHE_PUBLISH` | `all` | What the cache offers *outward*: `all` (every downstream-consumed variable of every successful cell), `promoted` (nothing automatically — `strata artifact promote` is how a result reaches the team; pulls are unchanged), or `off` (no offers and no pulls, without unsetting the URL a cell's ambient client still needs). Use `promoted` on a personal server, where offering everything means every intermediate a researcher computes lands in the team's store whether or not they meant to share it. |
+| `STRATA_NOTEBOOK_CREDENTIALS` | `{}` | Named credentials as a JSON object, `{name: {field: value}}`. A mount or connection in `notebook.toml` references one with `credential = "<name>"`, so no secret is committed. Values are usually `${VAR}`, resolved against the notebook's environment (where a secret manager puts fetched secrets) and then the server's. A mount's fields become fsspec storage options, a connection's become driver auth. The name is part of provenance; the values are not, so rotation invalidates nothing. See [Named credentials](notebook-toml.md#named-credentials). |
+| `STRATA_NOTEBOOK_MOUNT_CREDENTIALS` | `{}` | A default credential per mount URI scheme as JSON, e.g. `{"s3": "org-bucket"}`, applied to mounts that name none. |
+| `STRATA_NOTEBOOK_FETCH_ALLOWED_HOSTS` | `[]` | Hosts `@fetch` may reach even on a private address (an internal data server). Public hosts need no entry; private, loopback and link-local addresses are refused unless listed. Comma-separated exact names, or a leading dot for a suffix (`.internal`). Same rule as `STRATA_WORKER_ALLOWED_HOSTS`, and applied to every redirect hop. |
+| `STRATA_NOTEBOOK_CELL_LOCK_SECONDS` | `5.0` | How long the last person to change a notebook cell holds it. An edit by someone else inside the window is refused with `cell_locked` and the holder's name, over the WebSocket and over REST, unless it sends `force`. One identity never contends with itself, so a single user in several tabs is unaffected. `0` turns the soft lock off. See the [client protocol](notebook-protocol.md#presence-and-soft-locks). |
 | `STRATA_NOTEBOOK_HARNESS_ENV_ALLOWLIST` | `[]` (everything) | Which of the server's environment variables a cell subprocess is given. A cell is arbitrary Python, so unset — the default, and right on a laptop — every member who can run a cell can read `STRATA_NOTEBOOK_REMOTE_STORE_HEADERS`, `STRATA_PROXY_TOKEN`, worker tokens and every data-source credential the server holds. Entries are exact names or a prefix written with a trailing `*`; the essentials a subprocess cannot start without (`PATH`, `HOME`, `TMPDIR`, `UV_*`, …) are always included, and `STRATA_*` is dropped unless named exactly. A cell's own `[env]` and mount credentials travel in the manifest rather than the process environment, so the list stays short. Applies to every process that runs cell code: the cold, R and batch harnesses, the warm pool worker, the inspect REPL and cell tests. Not isolation on its own: a cell running as the server's user can read `/proc/<server pid>/environ`; see `STRATA_NOTEBOOK_HARNESS_USER`. |
 | `STRATA_NOTEBOOK_HARNESS_USER` | `None` | The OS user cell code runs as. In **service mode**, a cell that would run on the server's own host is refused unless this is set, or the cell is assigned a server-managed worker on another machine. Cache hits are still served. Setting it needs the server to run as root, so it can switch users, and the harness user must be able to read the notebook directories, their `.venv`s and the interpreter behind them (install uv-managed Pythons outside `/root`, e.g. `UV_PYTHON_INSTALL_DIR=/opt/uv-python`). POSIX only. In personal mode nothing is refused, and the user applies only when set. See [Service Mode → What a cell can read](../deployment/service-mode.md#what-a-cell-can-read). |
 | `STRATA_NOTEBOOK_MAX_BUNDLE_MEMBER_BYTES` | `2147483648` (2 GiB) | Per-file cap when packing a notebook bundle for a remote worker. Values that don't parse, or are `<= 0`, fall back to the default. |
@@ -443,7 +474,7 @@ These are read by `strata-worker`, not the main server. They have no effect on a
 | Variable                          | Default              | Description                                                                                  |
 | --------------------------------- | -------------------- | -------------------------------------------------------------------------------------------- |
 | `STRATA_WORKER_TOKEN`             | `None`               | Optional bearer token. When set, the worker's `/v1/*` execution endpoints require `Authorization: Bearer <token>`. `/health` stays open. See [Workers § Authentication](../notebook/workers.md#authentication). |
-| `STRATA_WORKER_MAX_INPUT_BYTES`   | `2147483648` (2 GiB) | Per-input download cap for the pull-model (`/v1/execute-manifest`). Reject inputs larger than this with 413. |
+| `STRATA_WORKER_MAX_INPUT_BYTES`   | `2147483648` (2 GiB) | Per-input download cap for the pull-model (`/v1/execute-manifest`). Reject inputs larger than this with 413, as soon as the count passes it. Inputs stream to disk, so this bounds disk use, not memory. |
 | `STRATA_WORKER_ALLOWED_HOSTS`     | _(empty)_            | Comma-separated hosts whose manifest URLs skip the private-address check, e.g. `build.internal,.svc.cluster.local`. A leading dot is a suffix (anchored on the dot, so `.example.com` does not match `evil-example.com`); anything else must match exactly. Matched on the name, so listing a host is trust in whoever controls its DNS. Prefer this over `STRATA_WORKER_ALLOW_LOCAL_HOSTS` in production. |
 | `STRATA_WORKER_ALLOW_LOCAL_HOSTS` | `false`              | Bypass the private-address check for **every** host. For tests and local dev with 127.0.0.1 build servers; in production name the hosts with `STRATA_WORKER_ALLOWED_HOSTS` instead. Setting both gives the wholesale bypass. |
 

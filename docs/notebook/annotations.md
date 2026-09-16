@@ -198,9 +198,98 @@ resolved local path (the cached mirror for remote URIs, the URI's local
 filesystem path for `file://` URIs). Use standard `Path` operations: `/` for
 joining, `.read_text()`, `.iterdir()`, etc.
 
-Format: `# @mount <name> <uri> [ro|rw]`. Defaults to `ro` (read-only) if the mode is omitted. The mount name must be a valid Python identifier (it's an injected variable).
+Format: `# @mount <name> <uri> [ro|rw] [credential=<name>]`. Defaults to `ro` (read-only) if the mode is omitted. `credential=` names a [server-defined credential](../reference/notebook-toml.md#named-credentials) instead of putting a secret in the cell. The mount name must be a valid Python identifier (it's an injected variable).
 
 ---
+
+## @fetch
+
+Declare a URL the cell reads. The bytes are downloaded into the notebook's
+cache and **their digest becomes part of the cell's provenance**, so the cell
+goes stale when the URL starts serving something else - instead of the URL
+string being in the source hash and the bytes being in nothing.
+
+```python
+# @fetch zones https://example.org/taxi_zones.csv
+import pandas as pd
+lookup = pd.read_csv(zones)
+```
+
+`<name>` is injected as a `pathlib.Path` to the downloaded file, which keeps the
+URL's file name, so code that looks at the extension still works. Like a mount
+variable it lives only in the declaring cell. In an R cell it is the path as a
+string. A `@loop` cell cannot declare a fetch, because each iteration is a
+separate run; fetch in an upstream cell instead.
+
+Format: `# @fetch <name> <url> [sha256=<digest>] [refetch=never|stale|always]`.
+
+- **`sha256=<digest>` pins the bytes.** The digest is the fingerprint, checked
+  without the network while the cached copy matches. If the URL serves anything
+  else, the cell fails with both digests.
+- **`refetch=stale`** (default) checks the URL with a conditional GET
+  (`ETag` / `Last-Modified`): at most once a minute while staleness is being
+  recomputed, and always right before the cell runs, so what a run records is
+  what the URL served then.
+- **`refetch=never`** uses the cached bytes once there are any.
+- **`refetch=always`** downloads again on every check, ignoring validators.
+
+Each artifact the cell stores records the URL and the digest of the bytes the
+run read as one of its inputs. That record is how a
+[publication](publishing.md) page and its RO-Crate list the URL under
+"External inputs". A snapshot export lists every fetch with whether it is
+pinned, so an unpinned one can be flagged before the snapshot is shared.
+
+Only `http` and `https` are fetched, and every redirect hop passes the same
+guard as a worker's URLs: no private, loopback or link-local address unless the
+host is listed in `STRATA_NOTEBOOK_FETCH_ALLOWED_HOSTS`. A URL that cannot be
+checked shows the cell as stale, and running it fails with the reason. A cell
+with `@fetch` runs on its own in Run All rather than in a batch.
+
+On a remote worker the server does the fetching: the bytes travel with the
+cell's other inputs, uploaded on the direct transport and staged behind a
+signed URL on the signed one, so the worker never contacts the URL and needs no
+route to it. The worker must be running this version of Strata or later. An
+older one does not recognise the input and the cell fails with a `NameError`
+on `<name>`.
+
+## @dataset
+
+Declare a registry name the cell reads. The name resolves to one artifact
+version, and **that version becomes part of the cell's provenance**, so a cell
+that reads the team's champion model goes stale when `champion` moves. Resolving
+the name with the `strata` client inside the cell records nothing: the name is
+in the source hash and the version is in nothing.
+
+```python
+# @dataset model taxi/model@champion
+predictions = model.predict(features)
+```
+
+Format: `# @dataset <name> <registry-name>[@<alias>|@v=<n>]`.
+
+- **`taxi/model@champion`** follows the alias. The cell goes stale when the
+  alias points somewhere else.
+- **`taxi/model`** follows the name pointer the same way.
+- **`taxi/model@v=3`** pins version 3 of the artifact the name points at. A
+  pinned dataset never makes the cell stale, as `snapshot=` does for `@table`.
+
+The name resolves in the registry the cell's `strata` client uses: the
+server's own store, or the team store when `STRATA_NOTEBOOK_REMOTE_STORE_URL`
+is set. The version is copied into the notebook's own store, keeping its id and
+version, and `<name>` is bound to its value like an upstream variable: a
+table as a DataFrame, a JSON value or a pickled object as itself. Artifacts
+written outside a notebook (a core transform, `strata.put`) are Arrow tables.
+Anything else, such as an image, arrives as a `pathlib.Path` to its bytes.
+
+Each artifact the cell stores records the name and the version it resolved to
+as an input, so lineage, in the dashboard and in `strata artifact lineage`,
+walks from a downstream result through the cell to the named version.
+
+The registry is asked at most once a minute while staleness is being
+recomputed, and always right before the cell runs. A name that does not
+resolve shows the cell as stale, and running it fails with the reason. A cell
+with `@dataset` runs on its own in Run All rather than in a batch. `@loop` and
+R cells cannot declare one; read the dataset in an upstream Python cell.
 
 ## @table
 
@@ -224,9 +313,23 @@ URI string - and `<name>_snapshot` - the snapshot id resolved when the cell's
 provenance was computed. Passing `<name>_snapshot` to the scan makes the cell
 fully deterministic: it reads exactly the snapshot its provenance recorded.
 
-Format: `# @table <name> <uri> [snapshot=<id>]`. The URI is
-`<warehouse>#<namespace>.<table>` - the same format `client.materialize`
-accepts. The name must be a valid Python identifier.
+Format: `# @table <name> <uri> [snapshot=<id>]`. The URI is one of the forms
+`client.materialize` accepts:
+
+- `<catalog>:<namespace>.<table>`, a table in a catalog the server names under
+  `STRATA_CATALOGS` (REST, Glue, SQL or any other PyIceberg catalog type), e.g.
+  `# @table orders lake:sales.orders`;
+- `<warehouse>#<namespace>.<table>`, a table in a SQL catalog kept in that
+  warehouse;
+- `<namespace>.<table>`, a table in the server's default catalog.
+
+The warehouse may be local or on S3, GCS (`gs://`) or Azure (`abfs://`,
+`abfss://`, `az://`); files on GCS and Azure are read with the same
+`STRATA_GCS_*` and `STRATA_AZURE_*` settings the artifact blob store uses. The
+name must be a valid Python identifier.
+
+Catalogs are named on the server, not in `notebook.toml`, because the scan the
+cell runs happens in the server and has to resolve the same name.
 
 `snapshot=<id>` pins the table: the cell reads that snapshot forever and never
 goes stale on new data (the lake-side analog of a mount `pin`). Without a pin,
@@ -443,7 +546,7 @@ Override the default `fingerprint` cache policy on a SQL cell.
 | `forever`         | Static salt; never invalidates from DB-side state.           |
 | `session`         | Session-unique salt; invalidates across sessions.            |
 | `ttl=<seconds>`   | `floor(now / ttl)` bucketed time-based salt.                 |
-| `snapshot`        | Probe MUST return a durable snapshot ID. Errors at execute time when the driver can't (SQLite/Postgres can't; Iceberg-via-engine can). |
+| `snapshot`        | The result is pinned to one queryable state of the warehouse. Snowflake and BigQuery only; refused on other drivers. |
 
 ```sql
 # @sql connection=warehouse
@@ -451,14 +554,37 @@ Override the default `fingerprint` cache policy on a SQL cell.
 SELECT * FROM dim_country
 ```
 
-`# @cache snapshot` requires `AdapterCapabilities.supports_snapshot = True`
-on the driver; otherwise the resolver fails fast before any connection is
-opened. **No shipped driver sets it today** -- DuckDB, SQLite, PostgreSQL,
-Snowflake and BigQuery all report `supports_snapshot = False` -- so
-`# @cache snapshot` is currently refused on every SQL cell. Snowflake and
-BigQuery both have time travel underneath and are where support would come
-from first. Per-driver freshness probe details are in
-[SQL Cells](cells.md#per-driver-freshness).
+`# @cache snapshot` needs a driver whose warehouse can query a table as it
+stood at a moment in time. **Snowflake** (`AT (TIMESTAMP => ...)`) and
+**BigQuery** (`FOR SYSTEM_TIME AS OF ...`) can. DuckDB, SQLite and PostgreSQL
+cannot, and the cell is refused before any connection is opened.
+
+```sql
+# @sql connection=warehouse
+# @cache snapshot
+SELECT region, SUM(amount) AS revenue FROM orders GROUP BY region
+```
+
+The first run reads the warehouse clock and runs the query with every table
+pinned to that moment. The timestamp is the cell's cache key and is recorded on
+its artifact. Running the cell again finds it there and hits the cache, even
+after new rows land, because the cell still names the same state. The
+timestamp moves only when the cell changes (its query, binds, connection or
+upstream inputs) or when you rerun it (`↻`), which pins to now.
+
+Time travel only reaches back so far, so each run reports how long its state
+stays queryable:
+
+```
+State as of 2026-09-15T10:05:00+00:00; queryable until 2026-09-16T10:05:00+00:00.
+```
+
+On Snowflake the horizon is the shortest `DATA_RETENTION_TIME_IN_DAYS` among
+the tables the query reads. On BigQuery it is 48 hours, the shortest time travel
+window a dataset can be configured with, since a dataset's own setting lives in
+a region-scoped view the connection does not name. After the horizon, a rerun
+works, but the recorded state can no longer be queried again. Per-driver
+freshness probe details are in [SQL Cells](cells.md#per-driver-freshness).
 
 ### `@name`
 

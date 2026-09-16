@@ -53,6 +53,12 @@ families include:
   breakdowns when multi-tenant is on
 - **Rate limiter**: request acceptance / rejection counts
 - **Server**: uptime, health-check status
+- **AI**: `strata_ai_calls_total`, `strata_ai_input_tokens_total` and
+  `strata_ai_output_tokens_total`, labelled by `tenant`, `principal` and
+  `model`. Counted from each provider response: the assistant's agent loop,
+  prompt cells, and the other AI routes. The labels are the caller the request
+  ran as, and are empty in personal mode. The series appear after the first
+  model call.
 
 For multi-tenant deployments the labels carry a `tenant` dimension
 so dashboards can split per-tenant usage.
@@ -65,6 +71,16 @@ over OTLP-gRPC to `OTEL_EXPORTER_OTLP_ENDPOINT` (default
 plus child spans for the planner, cache lookup, Parquet read,
 serialize-to-Arrow IPC, and stream write. The `service.name`
 attribute is set via `OTEL_SERVICE_NAME=strata`.
+
+A cell sent to a remote worker is one trace across processes. The
+server opens `notebook.dispatch` with `worker`, `build_id`,
+`notebook_id` and `cell_id`, and sends its W3C `traceparent` in
+the request headers and the build manifest. The worker's
+`worker.execute` span is its child. When the job goes through
+`strata-pool`, the pool's own span sits between the two if the pool
+has OpenTelemetry installed. Each process exports to its own
+`OTEL_EXPORTER_OTLP_ENDPOINT`, and the backend joins the spans by
+trace id.
 
 In Jaeger:
 

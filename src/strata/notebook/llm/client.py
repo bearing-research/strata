@@ -29,6 +29,7 @@ from strata.notebook.llm.structured import (
     parse_anthropic_tool_use_response,
     response_format_for,
 )
+from strata.notebook.llm.usage import record_llm_usage
 
 logger = logging.getLogger(__name__)
 
@@ -60,7 +61,9 @@ async def _chat_completion_anthropic_native(
         )
         raise_for_llm_status(resp, config.model)
         data = resp.json()
-    return parse_anthropic_tool_use_response(data, fallback_model=config.model)
+    result = parse_anthropic_tool_use_response(data, fallback_model=config.model)
+    record_llm_usage(result.model, result.input_tokens, result.output_tokens)
+    return result
 
 
 def _is_structured_output_rejection(status_code: int, body: str) -> bool:
@@ -142,12 +145,14 @@ async def _chat_completion_openai_compat(
     # OpenAI-compat providers). Coerce to "" so downstream JSON parsing
     # raises its handled JSONDecodeError instead of an unhandled
     # TypeError from json.loads(None).
-    return LlmCompletionResult(
+    result = LlmCompletionResult(
         content=choice["message"]["content"] or "",
         model=data.get("model", config.model),
         input_tokens=usage.get("prompt_tokens", 0),
         output_tokens=usage.get("completion_tokens", 0),
     )
+    record_llm_usage(result.model, result.input_tokens, result.output_tokens)
+    return result
 
 
 async def chat_completion(
@@ -350,6 +355,7 @@ async def _stream_openai_compat(
                 if text:
                     yield {"type": "delta", "text": text}
 
+    record_llm_usage(model, input_tokens, output_tokens)
     yield {
         "type": "done",
         "model": model,

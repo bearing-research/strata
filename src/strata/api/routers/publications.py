@@ -139,6 +139,13 @@ async def publish_artifact(
     token rather than minting a second. Two live URLs for one artifact would
     mean revoking one and believing the artifact had been withdrawn.
     """
+    from strata.server import _authorize_artifact_read, _ensure_artifact_access
+
+    # The strongest form of retrieval there is: what this hands out is readable
+    # by anyone with the link. A principal the ACL denies the artifact's inputs
+    # cannot read it here and must not be able to publish it either.
+    artifact = _ensure_artifact_access(store.get_artifact(artifact_id, version), tenant_filter)
+    _authorize_artifact_read(artifact)
     try:
         publication = store.publish_artifact(
             artifact_id,
@@ -220,6 +227,7 @@ async def revoke_publication(
     token: str,
     store: ReadStore,
     tenant_filter: CurrentTenant,
+    principal: CurrentPrincipal,
 ):
     """Withdraw a grant.
 
@@ -227,7 +235,9 @@ async def revoke_publication(
     already printed in a paper has to fail closed rather than start resolving
     to something else.
     """
-    if not store.revoke_publication(token, tenant=tenant_filter):
+    if not store.revoke_publication(
+        token, tenant=tenant_filter, actor=principal.id if principal is not None else None
+    ):
         raise HTTPException(status_code=404, detail="No active publication with that token")
     return {"revoked": True, "token": token}
 

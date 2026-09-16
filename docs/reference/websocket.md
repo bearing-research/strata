@@ -47,9 +47,10 @@ All messages are JSON with this shape:
 
 ### Cell Editing
 
-| Type                 | Payload                                 | Description    |
-| -------------------- | --------------------------------------- | -------------- |
-| `cell_source_update` | `{ "cell_id": "...", "source": "..." }` | Source changed |
+| Type                 | Payload                                                  | Description    |
+| -------------------- | -------------------------------------------------------- | -------------- |
+| `cell_source_update` | `{ "cell_id": "...", "source": "...", "force": false }` | Source changed. Refused with `cell_locked` when someone else changed the cell moments ago, unless `force` is true |
+| `cell_focus`         | `{ "cell_id": "..." }`                                  | The cell this client is on, or `null`. Updates `presence` for everyone |
 
 ### Cell Tests
 
@@ -155,6 +156,12 @@ All messages are JSON with this shape:
 | `agent_confirm_request` | `{ "job_id": "...", "tool": "...", "args": {...}, ... }`         | Agent is asking the client to approve a destructive tool use |
 | `agent_progress`        | `{ "job_id": "...", "event": "...", "detail": "...", ... }`      | Incremental agent-loop status (tool start/end, iteration)    |
 | `agent_done`            | `{ "job_id": "...", "content": "...", "model": "...", ... }`     | Agent finished, failed, or was cancelled                     |
+
+### Presence
+
+| Type       | Payload                                                                                          | Description |
+| ---------- | ------------------------------------------------------------------------------------------------ | ----------- |
+| `presence` | `{ "principals": [{ "principal": "alice", "focused_cell_id": "c1", "since": 1789455008.4 }], "you": "bob" }` | Who is on the session and which cell each is on. Sent on connect, disconnect and focus change, and after an edit over REST |
 
 ### Errors
 

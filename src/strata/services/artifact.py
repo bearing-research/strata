@@ -44,6 +44,19 @@ def _input_version_to_artifact_ref(
     return (f"strata://artifact/{artifact_id}@v={version}", artifact_id, version)
 
 
+def _leaf_node(input_uri: str, input_version: str) -> LineageNode:
+    """An input that is not an artifact in this store.
+
+    A notebook records a fetched URL against the digest of the bytes it read
+    (``sha256:<hex>``); anything else is a table, versioned by its snapshot.
+    """
+    if input_version.startswith("sha256:"):
+        return LineageNode(
+            uri=input_uri, type="fetch", content_sha256=input_version.removeprefix("sha256:")
+        )
+    return LineageNode(uri=input_uri, type="table")
+
+
 def _transform_ref(transform_spec: str | None) -> str | None:
     """Executor ref from a stored transform_spec, or ``None`` if absent/malformed.
 
@@ -166,9 +179,8 @@ class ArtifactService:
                 resolved_uri, inp_artifact_id, inp_version = resolved_input
                 queue.append((resolved_uri, inp_artifact_id, inp_version, 1))
             elif input_uri not in visited:
-                # It's a table input
                 visited.add(input_uri)
-                nodes[input_uri] = LineageNode(uri=input_uri, type="table")
+                nodes[input_uri] = _leaf_node(input_uri, input_version)
 
         # BFS to traverse transitive dependencies
         max_depth_reached = 0
@@ -236,9 +248,8 @@ class ArtifactService:
                     resolved_uri, nested_id, nested_ver = resolved_input
                     queue.append((resolved_uri, nested_id, nested_ver, depth + 1))
                 elif inp_uri not in visited:
-                    # Table input
                     visited.add(inp_uri)
-                    nodes[inp_uri] = LineageNode(uri=inp_uri, type="table")
+                    nodes[inp_uri] = _leaf_node(inp_uri, inp_version)
 
         return ArtifactLineageResponse(
             artifact_uri=artifact_uri,

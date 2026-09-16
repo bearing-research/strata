@@ -294,6 +294,7 @@ async def get_build_manifest(build_id: str, request: Request, build_store: Build
             url_expiry_seconds=state.config.signed_url_expiry_seconds,
             lease_owner=leased.lease_owner,
             lease_expires_at=leased.lease_expires_at,
+            presign=state.config.artifact_presigned_urls,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -623,6 +624,22 @@ async def finalize_build(
     byte_size = store.blob_size(build.artifact_id, build.version) or 0
     if byte_size == 0:
         raise HTTPException(status_code=500, detail="Failed to read uploaded blob")
+
+    # The Strata upload route enforces this as bytes arrive. A presigned upload
+    # never reaches it, and its policy is the object store's to enforce, so
+    # check here too rather than publish bytes on the policy's word alone.
+    max_output_bytes = get_state().config.max_transform_output_bytes
+    if byte_size > max_output_bytes:
+        build_store.fail_build(
+            build_id,
+            f"Output is {byte_size} bytes, over the {max_output_bytes}-byte limit",
+            "OUTPUT_TOO_LARGE",
+        )
+        store.fail_artifact(build.artifact_id, build.version)
+        raise HTTPException(
+            status_code=413,
+            detail=f"Output exceeds maximum size: {byte_size} > {max_output_bytes}",
+        )
 
     if output_format == "notebook-output-bundle@v1":
 

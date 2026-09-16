@@ -218,3 +218,55 @@ def instrument_fastapi(app: Any) -> None:
     except Exception:
         # Silently fail - tracing is optional
         pass
+
+
+# W3C trace context, carried across process boundaries -----------------------
+
+TRACE_CONTEXT_KEYS = ("traceparent", "tracestate")
+
+
+def current_trace_context() -> dict[str, str]:
+    """The active span's W3C ``traceparent`` / ``tracestate``, for a request or
+    manifest leaving this process. Empty when tracing is off or no span is
+    active, so callers can merge it unconditionally."""
+    if get_tracer() is None:
+        return {}
+    from opentelemetry.propagate import inject
+
+    carrier: dict[str, str] = {}
+    inject(carrier)
+    return {key: carrier[key] for key in TRACE_CONTEXT_KEYS if carrier.get(key)}
+
+
+@contextmanager
+def trace_span_from(
+    name: str,
+    carrier: dict[str, Any] | None,
+    **attributes: Any,
+) -> Iterator["Span | NoOpSpan"]:
+    """A span whose parent is the trace context another process sent.
+
+    ``carrier`` holds ``traceparent`` (and optionally ``tracestate``); without
+    one the span starts a trace of its own, as ``trace_span`` does.
+    """
+    tracer = get_tracer()
+    if tracer is None:
+        yield NoOpSpan()
+        return
+
+    from opentelemetry.propagate import extract
+    from opentelemetry.trace import Status, StatusCode
+
+    context = extract(
+        {key: str(carrier[key]) for key in TRACE_CONTEXT_KEYS if carrier and carrier.get(key)}
+    )
+    with tracer.start_as_current_span(name, context=context) as span:
+        for key, value in attributes.items():
+            if value is not None:
+                span.set_attribute(key, value)
+        try:
+            yield span
+        except Exception as e:
+            span.set_status(Status(StatusCode.ERROR, str(e)))
+            span.record_exception(e)
+            raise

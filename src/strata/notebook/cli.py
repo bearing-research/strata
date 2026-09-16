@@ -761,6 +761,11 @@ def add_export_arguments(parser: argparse.ArgumentParser) -> None:
         help="Output format (default: markdown)",
     )
     parser.add_argument(
+        "--force",
+        action="store_true",
+        help="snapshot only: overwrite --out when it already holds something",
+    )
+    parser.add_argument(
         "--include",
         choices=["all", "selected", "none"],
         default="selected",
@@ -857,9 +862,13 @@ def _import_snapshot_bundle(path: Path, args: argparse.Namespace) -> int:
     root = StrataConfig.load().notebook_storage_dir
     taken = {e["notebook_id"] for e in _discover_notebooks(Path(root)) if e.get("notebook_id")}
 
+    import zipfile
+
     try:
         result = import_snapshot(path, dest, taken_ids=taken)
-    except (NotASnapshotError, FileExistsError) as exc:
+    except (NotASnapshotError, FileExistsError, zipfile.BadZipFile) as exc:
+        # A file that is not a bundle at all is an input error like any other,
+        # not a traceback.
         print(f"error: {exc}", file=sys.stderr)
         return 2
 
@@ -967,6 +976,13 @@ def _write_snapshot_bundle(path: Path, args: argparse.Namespace) -> int:
     if unknown:
         print(f"error: no such cell(s) in this notebook: {', '.join(unknown)}", file=sys.stderr)
         return 1
+    existing = Path(out_path)
+    if existing.exists() and existing.stat().st_size and not getattr(args, "force", False):
+        # The peer, ``strata artifact archive``, refuses the same way: an
+        # export names a path, and a path that already holds something is more
+        # likely a mistake than an instruction.
+        print(f"error: {out_path} already exists; pass --force to overwrite", file=sys.stderr)
+        return 2
     with zipfile.ZipFile(out_path, "w", zipfile.ZIP_DEFLATED) as archive:
         write_committed_files(session, archive)
         manifest = write_snapshot(session, archive, include=args.include, selected_cells=selected)

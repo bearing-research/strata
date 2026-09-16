@@ -26,6 +26,7 @@ from __future__ import annotations
 import hashlib
 import re
 from collections.abc import Callable
+from datetime import timedelta
 from typing import Any
 from urllib.parse import parse_qs, quote, urlparse
 
@@ -39,13 +40,13 @@ from strata.notebook.sql.adapter import (
     hash_connection_identity,
 )
 from strata.notebook.sql.registry import register_adapter
+from strata.notebook.sql.time_travel import iso_utc, pin_tables, plus
 
 _CAPABILITIES = AdapterCapabilities(
     per_table_freshness=True,
-    # Time Travel exposes snapshot queries via SELECT … AT (TIMESTAMP),
-    # but the per-table snapshot ID is not exposed as a stable token
-    # the way Iceberg's snapshot_id is. Treat as equality-only.
-    supports_snapshot=False,
+    # No per-table snapshot id, but Time Travel queries a table as of a
+    # timestamp, so a snapshot is a timestamp (``time_travel.py``).
+    supports_snapshot=True,
     # Snowflake INFORMATION_SCHEMA isn't frozen inside a transaction
     # the way Postgres's pg_stat_* views are; the probe can share
     # the query connection.
@@ -489,6 +490,49 @@ class SnowflakeAdapter:
                     h.update(b"\x00")
 
         return FreshnessToken(value=h.digest())
+
+    def snapshot_timestamp(self, conn: Any) -> str:
+        with conn.cursor() as cursor:
+            cursor.execute("SELECT CURRENT_TIMESTAMP()")
+            row = cursor.fetchone()
+        return iso_utc(row[0])
+
+    def retention_until(self, conn: Any, tables: list[QualifiedTable], at: str) -> str | None:
+        """``at`` plus the shortest ``RETENTION_TIME`` (days) of the tables.
+
+        None when a table's retention cannot be read: a horizon that cannot be
+        stated is not guessed.
+        """
+        if not tables:
+            return None
+        days: list[int] = []
+        with conn.cursor() as cursor:
+            current_db, current_schema = _resolve_session_defaults(cursor)
+            for table in sorted(tables, key=lambda t: t.render()):
+                database = table.catalog or current_db
+                schema = table.schema or current_schema
+                if not database or not schema:
+                    return None
+                if not _IDENTIFIER_RE.match(database):
+                    raise RuntimeError(f"Snowflake database identifier {database!r} is not valid")
+                cursor.execute(
+                    f'SELECT RETENTION_TIME FROM "{database}".INFORMATION_SCHEMA.TABLES '
+                    "WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ?",
+                    (schema, table.name),
+                )
+                row = cursor.fetchone()
+                if row is None or row[0] is None:
+                    return None
+                days.append(int(row[0]))
+        return plus(at, timedelta(days=min(days)))
+
+    def pin_query(self, sql: str, at: str) -> str:
+        return pin_tables(
+            sql,
+            "snowflake",
+            f"SELECT * FROM t AT (TIMESTAMP => '{at}'::TIMESTAMP_TZ)",
+            "when",
+        )
 
     def probe_schema(
         self,

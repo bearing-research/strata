@@ -54,7 +54,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
-from urllib.parse import urlparse, urlunparse
+from urllib.parse import urljoin, urlparse, urlsplit, urlunparse
 
 import httpx
 
@@ -70,6 +70,7 @@ from strata.blob_store import BLOB_STREAM_CHUNK_BYTES
 from strata.notebook import console_relay
 from strata.notebook.analyzer import imported_names
 from strata.notebook.annotations import CellAnnotations, LoopAnnotation, parse_annotations
+from strata.notebook.credentials import CredentialResolver
 from strata.notebook.dag import SweepProducer
 from strata.notebook.dependencies import UV_NOT_FOUND_MESSAGE, resolve_uv
 from strata.notebook.env import compute_execution_env_hash, narrow_env_for_provenance
@@ -87,6 +88,9 @@ from strata.notebook.models import (
     CellOutput,
     CellTestCase,
     CellTestResult,
+    DatasetSpec,
+    FetchSpec,
+    MountMode,
     MountSpec,
     TableSpec,
     WorkerBackendType,
@@ -94,10 +98,9 @@ from strata.notebook.models import (
 from strata.notebook.module_export import build_module_export_plan, runtime_binding_names
 from strata.notebook.mounts import (
     MountCredentials,
-    MountFingerprinter,
     MountResolver,
     ResolvedMount,
-    parse_mount_uri,
+    mount_fingerprint,
     resolve_cell_mounts,
 )
 from strata.notebook.process_tree import (
@@ -120,6 +123,7 @@ from strata.notebook.remote_executor import (
     NOTEBOOK_EXECUTOR_PROTOCOL_VERSION,
     NOTEBOOK_EXECUTOR_TRANSFORM_REF,
 )
+from strata.notebook.serializer import ContentType
 from strata.notebook.team_store import (
     TeamPull,
     TeamStore,
@@ -135,10 +139,12 @@ from strata.notebook.workers import (
     worker_supports_notebook_execution,
     worker_transport,
 )
+from strata.tracing import current_trace_context, trace_span
 from strata.transforms.build_store import get_build_store
 from strata.types import EXECUTOR_PROTOCOL_HEADER, EXECUTOR_PROTOCOL_VERSION
 
 if TYPE_CHECKING:
+    from strata.notebook.datasets import DatasetInput
     from strata.notebook.pool import WarmProcessPool
     from strata.notebook.session import NotebookSession
 
@@ -287,6 +293,28 @@ def _artifact_content_type(artifact: Any) -> str:
     return str(ct) if isinstance(ct, str) and ct else "pickle/object"
 
 
+def _add_fetch_inputs(
+    input_specs: dict[str, dict[str, Any]], fetched: dict[str, Path], output_dir: Path
+) -> None:
+    """Put each ``@fetch``'s bytes in *output_dir* as an input a worker receives.
+
+    Every transport already ships ``{content_type, file}`` specs from this
+    directory, uploaded or staged for a signed URL, so a fetch rides along like
+    an upstream value; ``file/path`` tells the harness to inject the path
+    rather than load it. The name keeps the URL's file name for a cell that
+    looks at the extension, behind an index, since two fetch names can differ
+    only in case.
+    """
+    for index, (name, path) in enumerate(sorted(fetched.items())):
+        file_name = f"__fetch_{index}_{path.name}"
+        target = output_dir / file_name
+        try:
+            os.link(path, target)
+        except OSError:
+            shutil.copyfile(path, target)
+        input_specs[name] = {"content_type": ContentType.FILE_PATH.value, "file": file_name}
+
+
 @dataclass(kw_only=True, frozen=True)
 class _CellProvenance:
     """Inputs and outputs of the standard cell-provenance computation.
@@ -313,6 +341,15 @@ class _CellProvenance:
     table_fingerprints: list[str]
     table_snapshots: dict[str, int]
     provenance_hash: str
+    # ``@fetch`` inputs: what each name resolved to, and why any did not.
+    fetch_fingerprints: list[str] = field(default_factory=list)
+    fetched: dict[str, Path] = field(default_factory=dict)
+    fetch_error: str | None = None
+    # ``@dataset`` inputs: the version each name resolved to, already in the
+    # notebook's store, and why any did not resolve.
+    dataset_fingerprints: list[str] = field(default_factory=list)
+    datasets: dict[str, DatasetInput] = field(default_factory=dict)
+    dataset_error: str | None = None
 
 
 @dataclass(kw_only=True)
@@ -480,6 +517,14 @@ class BatchExecutionResult:
     end_reason: str = "complete"  # "complete" | "cell_error" | "persist_failed" | "subprocess_died"
 
 
+# How often an accepted job's status is read. Module-level so a test can make
+# polling immediate rather than wait on it.
+_JOB_POLL_SECONDS = 1.0
+
+# The clock deadlines are measured on, patchable for the same reason.
+_monotonic = time.monotonic
+
+
 class RemoteExecutionError(RuntimeError):
     """Execution failure with structured remote metadata for notebook UX."""
 
@@ -536,6 +581,15 @@ class CellExecutor:
         # execute_cell() recursive tree. Each top-level call creates a fresh
         # CellExecutor, so the guard resets between independent executions.
         self._materializing: set[str] = set()
+        # The digest each cell's fetches resolved to when its provenance was
+        # last computed, as lineage inputs (``{url: "sha256:<hex>"}``). Kept
+        # from that moment rather than read back from the fetch cache at store
+        # time: a staleness check in between can record newer bytes than the
+        # run used, and the artifact would name bytes it was not made from.
+        self._fetch_refs: dict[str, dict[str, str]] = {}
+        # The same for ``@dataset``: ``{strata://name/<reference>: <id>@v=<n>}``
+        # as resolved when provenance was computed.
+        self._dataset_refs: dict[str, dict[str, str]] = {}
         self._mount_resolver = MountResolver(
             cache_dir=session.path / ".strata" / "mount_cache",
             credentials=mount_credentials,
@@ -857,6 +911,7 @@ class CellExecutor:
                     timeout_seconds,
                     start_time,
                     materialize_upstreams=materialize_upstreams,
+                    use_cache=use_cache,
                 )
             finally:
                 self._materializing.discard(cell_id)
@@ -1025,9 +1080,30 @@ class CellExecutor:
             runtime_identity=runtime_identity,
         )
         input_hashes = self._collect_input_hashes(cell_id)
-        table_fingerprints, table_snapshots = await self._fingerprint_tables(annotations.tables)
+        # A DuckDB cell's catalog tables are inputs the way its @table ones are.
+        # Imported only for a SQL cell: the SQL package needs the [sql] extra.
+        tables = list(annotations.tables)
+        if annotations.sql is not None:
+            from strata.notebook.sql.lake import lake_tables
+
+            tables += lake_tables(self.session.notebook_state, source)
+        table_fingerprints, table_snapshots = await self._fingerprint_tables(tables)
+        fetch_fingerprints, fetched, fetch_refs, fetch_error = await self._resolve_fetches(
+            annotations.fetches
+        )
+        self._fetch_refs[cell_id] = fetch_refs
+        dataset_fingerprints, datasets, dataset_error = await self._resolve_datasets(
+            annotations.datasets
+        )
+        self._dataset_refs[cell_id] = {
+            dataset.resolved.lineage_uri: dataset.local_ref for dataset in datasets.values()
+        }
         provenance_hash = compute_provenance_hash(
-            input_hashes + mount_fingerprints + table_fingerprints,
+            input_hashes
+            + mount_fingerprints
+            + table_fingerprints
+            + fetch_fingerprints
+            + dataset_fingerprints,
             source_hash,
             env_hash,
         )
@@ -1046,6 +1122,12 @@ class CellExecutor:
             table_fingerprints=table_fingerprints,
             table_snapshots=table_snapshots,
             provenance_hash=provenance_hash,
+            fetch_fingerprints=fetch_fingerprints,
+            fetched=fetched,
+            fetch_error=fetch_error,
+            dataset_fingerprints=dataset_fingerprints,
+            datasets=datasets,
+            dataset_error=dataset_error,
         )
 
     # ------------------------------------------------------------------
@@ -1191,6 +1273,38 @@ class CellExecutor:
                 provenance_hash[:12],
             )
 
+            # A fetch that could not be checked, or served bytes that differ
+            # from its pin, fails the cell before anything runs: a cache hit
+            # would claim the bytes had not moved, which nobody verified.
+            if prov.fetch_error is not None:
+                return CellExecutionResult(
+                    cell_id=cell_id,
+                    success=False,
+                    error=prov.fetch_error,
+                    execution_method="error",
+                )
+            # Likewise a dataset the registry could not resolve or hand over.
+            if prov.dataset_error is not None:
+                return CellExecutionResult(
+                    cell_id=cell_id,
+                    success=False,
+                    error=prov.dataset_error,
+                    execution_method="error",
+                )
+            # Here each fetch reaches the cell as a read-only mount of its
+            # cached bytes. A remote worker cannot see this machine's paths, so
+            # there the bytes travel as inputs instead (``_add_fetch_inputs``)
+            # and the worker never touches the URL.
+            fetches_as_inputs = bool(prov.fetched) and is_http_executor_worker(worker_spec)
+            if not fetches_as_inputs:
+                mount_specs = [
+                    *mount_specs,
+                    *(
+                        MountSpec(name=name, uri=path.resolve().as_uri(), mode=MountMode.READ_ONLY)
+                        for name, path in prov.fetched.items()
+                    ),
+                ]
+
             # Declared lake tables must resolve to concrete snapshots before
             # the cell can run (the namespace injection needs them).
             try:
@@ -1259,7 +1373,7 @@ class CellExecutor:
                         source_hash=source_hash,
                         source=source,
                         env_hash=env_hash,
-                        input_versions=self.session._collect_input_refs(cell_id),
+                        input_versions=self._input_refs(cell_id),
                         variant=fanout_variant,
                     )
                     if team_pull is not None:
@@ -1495,6 +1609,9 @@ class CellExecutor:
                     fanout_group=fanout_group,
                     fanout_variant=fanout_variant,
                 )
+                if fetches_as_inputs:
+                    _add_fetch_inputs(input_specs, prov.fetched, output_dir)
+                self._add_dataset_inputs(input_specs, prov.datasets, output_dir)
 
                 venv_path = self.session.venv_python or Path("python")
 
@@ -1572,6 +1689,7 @@ class CellExecutor:
                         # someone else's hardware. Never computed here: this
                         # process may not be on that machine.
                         build_env=str(result.get("build_env") or ""),
+                        hardware=result.get("hardware") or {},
                         # What a teammate will be told they saved. Their own
                         # history has no comparable number — they never ran
                         # this cell — so it has to travel with the bytes.
@@ -1833,14 +1951,14 @@ class CellExecutor:
         """R cell pipeline: provenance → upstream → cache check →
         Rscript harness → persist.
 
-        Phase 1 (#57) is local-only — there is no worker resolution, no
-        warm pool, and no HTTP-executor dispatch. R workers and pooled
-        execution are intentionally deferred to keep the initial slice
-        small. The cache / mount / storage layers are reused unchanged
-        because they are language-agnostic: they key off provenance
-        hashes and on-disk file extensions, both of which the R harness
-        produces in exactly the same shape as the Python one.
+        The harness runs here (warm pool first, then a cold ``Rscript``) or, for
+        a cell whose worker is an HTTP executor, on that worker, which runs
+        ``harness.R`` under its own ``Rscript``. The cache / mount / storage
+        layers are reused unchanged because they are language-agnostic: they
+        key off provenance hashes and on-disk file extensions, both of which
+        the R harness produces in exactly the same shape as the Python one.
         """
+        remote_metadata: dict[str, str] = {}
         try:
             cell = self.session.notebook_state.get_cell(cell_id)
 
@@ -1852,8 +1970,59 @@ class CellExecutor:
             runtime_env = prov.runtime_env
             env_hash = prov.env_hash
             input_hashes = prov.input_hashes
-            mount_specs = prov.mount_specs
             provenance_hash = prov.provenance_hash
+            if prov.annotations.datasets:
+                return CellExecutionResult(
+                    cell_id=cell_id,
+                    success=False,
+                    error="@dataset is not supported on R cells; read the dataset in a "
+                    "Python cell upstream",
+                    execution_method="error",
+                )
+            # As in a Python cell: a fetch that could not be checked fails the
+            # run, and each fetched file arrives as a read-only mount, which
+            # harness.R binds to its name as a path string.
+            if prov.fetch_error is not None:
+                return CellExecutionResult(
+                    cell_id=cell_id,
+                    success=False,
+                    error=prov.fetch_error,
+                    execution_method="error",
+                )
+            worker_spec = resolve_worker_spec(self.session.notebook_state, prov.effective_worker)
+            remote = (
+                worker_spec
+                if worker_spec is not None and is_http_executor_worker(worker_spec)
+                else None
+            )
+            if (
+                worker_spec is not None
+                and remote is None
+                and worker_spec.backend != WorkerBackendType.LOCAL
+            ):
+                return CellExecutionResult(
+                    cell_id=cell_id,
+                    success=False,
+                    error=f"R cells run locally or on an executor worker; worker "
+                    f"'{worker_spec.name}' is neither",
+                    execution_method="error",
+                )
+            if remote is not None and prov.fetched:
+                return CellExecutionResult(
+                    cell_id=cell_id,
+                    success=False,
+                    error="@fetch on an R cell is read on this machine; run the cell "
+                    "locally or fetch in a Python cell upstream",
+                    execution_method="error",
+                )
+            remote_metadata = self._remote_execution_metadata(worker_spec)
+            mount_specs = [
+                *prov.mount_specs,
+                *(
+                    MountSpec(name=name, uri=path.resolve().as_uri(), mode=MountMode.READ_ONLY)
+                    for name, path in prov.fetched.items()
+                ),
+            ]
 
             if prov.has_rw_mount:
                 use_cache = False
@@ -1913,7 +2082,7 @@ class CellExecutor:
                         source_hash=source_hash,
                         source=source,
                         env_hash=env_hash,
-                        input_versions=self.session._collect_input_refs(cell_id),
+                        input_versions=self._input_refs(cell_id),
                     )
                     if team_pull is not None:
                         cached_artifact = artifact_mgr.find_cached(
@@ -1974,7 +2143,7 @@ class CellExecutor:
                     team_cache_saved_ms=team_pull.saved_ms if team_pull else 0,
                     team_cache_promotion=team_pull.promotion if team_pull else None,
                     from_team_cache=team_pull is not None,
-                )
+                ).apply_remote_metadata(**remote_metadata)
                 self.session.record_successful_execution_provenance(
                     cell_id,
                     provenance_hash,
@@ -1987,38 +2156,78 @@ class CellExecutor:
             with tempfile.TemporaryDirectory() as tmpdir:
                 output_dir = Path(tmpdir)
                 input_specs = self._load_input_blobs(cell_id, output_dir)
-                resolved_mounts = await self._prepare_mounts(mount_specs)
-                manifest_path = self._write_manifest(
-                    source,
-                    input_specs,
-                    output_dir,
-                    runtime_env,
-                    resolved_mounts,
-                )
-
-                # Warm R pool first (pre-paid Rscript startup + renv
-                # activation), cold harness as fallback — mirrors the
-                # Python pool dispatch in _dispatch_local.
-                result = None
-                execution_method = "cold"
-                r_pool = getattr(self.session, "r_warm_pool", None)
-                if r_pool is not None:
-                    from strata.notebook.pool import PooledCellExecutor
-
-                    pool_result = await PooledCellExecutor.execute_with_pool(
-                        r_pool,
-                        manifest_path,
-                        self.session.path,
-                        timeout_seconds,
+                result_output_dir = output_dir
+                if remote is not None:
+                    remote_build_id = (
+                        f"nbbuild-{uuid.uuid4().hex[:12]}"
+                        if worker_transport(remote) == "signed"
+                        else None
                     )
-                    if pool_result is not None:
-                        result = pool_result
-                        execution_method = "warm"
-                if result is None:
-                    result = await self._run_r_harness(manifest_path, timeout_seconds)
+                    remote_metadata = self._remote_execution_metadata(
+                        remote, remote_build_id=remote_build_id
+                    )
+                    with trace_span(
+                        "notebook.dispatch",
+                        worker=remote.name,
+                        build_id=remote_build_id,
+                        notebook_id=notebook_id,
+                        cell_id=cell_id,
+                    ):
+                        (
+                            result,
+                            result_output_dir,
+                            execution_method,
+                            resolved_mounts,
+                        ) = await self._dispatch_http_executor(
+                            remote,
+                            source,
+                            input_specs,
+                            mount_specs,
+                            output_dir,
+                            runtime_env,
+                            timeout_seconds,
+                            remote_build_id=remote_build_id,
+                            cell_id=cell_id,
+                            cell_provenance_hash=provenance_hash,
+                            language="r",
+                        )
+                    if remote_build_id and remote_metadata.get("remote_transport") == "signed":
+                        remote_metadata["remote_build_state"] = "ready"
+                else:
+                    resolved_mounts = await self._prepare_mounts(mount_specs)
+                    manifest_path = self._write_manifest(
+                        source,
+                        input_specs,
+                        output_dir,
+                        runtime_env,
+                        resolved_mounts,
+                    )
+
+                    # Warm R pool first (pre-paid Rscript startup + renv
+                    # activation), cold harness as fallback — mirrors the
+                    # Python pool dispatch in _dispatch_local.
+                    result = None
+                    execution_method = "cold"
+                    r_pool = getattr(self.session, "r_warm_pool", None)
+                    if r_pool is not None:
+                        from strata.notebook.pool import PooledCellExecutor
+
+                        pool_result = await PooledCellExecutor.execute_with_pool(
+                            r_pool,
+                            manifest_path,
+                            self.session.path,
+                            timeout_seconds,
+                        )
+                        if pool_result is not None:
+                            result = pool_result
+                            execution_method = "warm"
+                    if result is None:
+                        result = await self._run_r_harness(manifest_path, timeout_seconds)
 
                 duration_ms = (time.time() - start_time) * 1000
-                exec_result = self._parse_result(cell_id, result, duration_ms, execution_method)
+                exec_result = self._parse_result(
+                    cell_id, result, duration_ms, execution_method
+                ).apply_remote_metadata(**remote_metadata)
 
                 if exec_result.success:
                     self.session.record_successful_execution_provenance(
@@ -2029,12 +2238,16 @@ class CellExecutor:
                     )
                     stored_ok = self._store_outputs(
                         cell_id,
-                        output_dir,
+                        result_output_dir,
                         provenance_hash,
                         input_hashes,
                         source_hash=source_hash,
                         source=source,
                         env_hash=env_hash,
+                        # Reported by whatever ran the cell: a worker says
+                        # what it is; a local run leaves these empty, as before.
+                        build_env=str(result.get("build_env") or ""),
+                        hardware=result.get("hardware") or {},
                     )
                     if not stored_ok:
                         logger.error(
@@ -2061,7 +2274,7 @@ class CellExecutor:
                     if exec_result.success:
                         exec_result.display_outputs = self._store_display_outputs(
                             cell_id,
-                            output_dir,
+                            result_output_dir,
                             provenance_hash,
                             input_hashes,
                             exec_result.display_outputs,
@@ -2103,6 +2316,21 @@ class CellExecutor:
                 self.session.apply_execution_result_metadata(cell_id, exec_result)
                 return exec_result
 
+        except RemoteExecutionError as e:
+            duration_ms = (time.time() - start_time) * 1000
+            error_result = CellExecutionResult(
+                cell_id=cell_id,
+                success=False,
+                duration_ms=duration_ms,
+                error=str(e),
+            ).apply_remote_metadata(
+                **remote_metadata,
+                remote_build_state=e.remote_build_state,
+                remote_error_code=e.remote_error_code,
+            )
+            self.session.persist_display_output(cell_id, None)
+            self.session.apply_execution_result_metadata(cell_id, error_result)
+            return error_result
         except TimeoutError:
             duration_ms = (time.time() - start_time) * 1000
             timeout_result = CellExecutionResult(
@@ -2110,7 +2338,7 @@ class CellExecutor:
                 success=False,
                 duration_ms=duration_ms,
                 error=f"R cell execution timed out after {timeout_seconds}s",
-            )
+            ).apply_remote_metadata(**remote_metadata)
             self.session.persist_display_output(cell_id, None)
             self.session.apply_execution_result_metadata(cell_id, timeout_result)
             return timeout_result
@@ -2172,18 +2400,28 @@ class CellExecutor:
             )
 
         if is_http_executor_worker(worker_spec):
-            return await self._dispatch_http_executor(
-                worker_spec,
-                source,
-                input_specs,
-                mount_specs,
-                output_dir,
-                runtime_env,
-                timeout_seconds,
-                remote_build_id=remote_build_id,
+            # The parent of everything the remote side records: its context
+            # travels in the request headers and the manifest, so a worker's
+            # spans (and a pool's in between) join this trace.
+            with trace_span(
+                "notebook.dispatch",
+                worker=worker_spec.name,
+                build_id=remote_build_id,
+                notebook_id=self.session.notebook_state.id,
                 cell_id=cell_id,
-                cell_provenance_hash=cell_provenance_hash,
-            )
+            ):
+                return await self._dispatch_http_executor(
+                    worker_spec,
+                    source,
+                    input_specs,
+                    mount_specs,
+                    output_dir,
+                    runtime_env,
+                    timeout_seconds,
+                    remote_build_id=remote_build_id,
+                    cell_id=cell_id,
+                    cell_provenance_hash=cell_provenance_hash,
+                )
 
         raise RuntimeError(f"Unsupported worker backend: {worker_spec.backend.value}")
 
@@ -2275,6 +2513,37 @@ class CellExecutor:
         unpacked_result = unpack_notebook_output_bundle(bundle_path, unpacked_dir)
         return unpacked_result, unpacked_dir, "executor", resolved_mounts
 
+    async def _locked_environment(self, worker_spec: Any) -> dict[str, str] | None:
+        """The notebook's lock, for a worker that runs cells in it.
+
+        Only a worker whose ``/health`` advertises ``locked_environments`` gets
+        one; a worker that answers and does not have it runs the cell in its
+        own environment, as before.
+
+        A worker that could not be *asked* is a different thing, and for a
+        notebook that has a lock it is refused rather than guessed at. Guessing
+        meant the cell ran against whatever the worker's image happens to hold
+        while its provenance recorded the lock's hash -- a result stored under
+        a key describing an environment it never ran in, then served from the
+        cache and offered to the team as if it had.
+        """
+        from strata.notebook.python_versions import read_requested_python_minor
+        from strata.notebook.worker_env import environment_spec
+        from strata.notebook.workers import worker_advertises
+
+        spec = environment_spec(self.session.path, read_requested_python_minor(self.session.path))
+        if spec is None:
+            # No lock to run in, so what the worker advertises changes nothing.
+            return None
+        advertised = await worker_advertises(worker_spec, "locked_environments")
+        if advertised is None:
+            raise RuntimeError(
+                f"worker {worker_spec.name!r} could not be asked whether it runs cells in "
+                f"a locked environment, and this notebook has one. Running the cell anyway "
+                f"would record it as the lock's result without it having been used."
+            )
+        return spec if advertised else None
+
     async def _dispatch_http_executor(
         self,
         worker_spec: Any,
@@ -2287,6 +2556,7 @@ class CellExecutor:
         remote_build_id: str | None = None,
         cell_id: str | None = None,
         cell_provenance_hash: str | None = None,
+        language: str = "python",
     ) -> tuple[dict[str, Any], Path, str, dict[str, ResolvedMount]]:
         """Run a cell through an external notebook executor over HTTP."""
         for mount in mount_specs:
@@ -2313,6 +2583,7 @@ class CellExecutor:
                 build_id=remote_build_id,
                 cell_id=cell_id,
                 cell_provenance_hash=cell_provenance_hash,
+                language=language,
             )
 
         metadata_inputs: list[dict[str, Any]] = []
@@ -2356,6 +2627,14 @@ class CellExecutor:
             },
             "inputs": metadata_inputs,
         }
+        # Only a non-Python cell names its language, so what a Python cell sends
+        # (and every hash of it) is unchanged. The notebook's Python lock is for
+        # Python cells.
+        if language != "python":
+            metadata["transform"]["params"]["language"] = language
+        environment = await self._locked_environment(worker_spec) if language == "python" else None
+        if environment is not None:
+            metadata["transform"]["params"]["environment"] = environment
 
         files: list[tuple[str, tuple[str, Any, str]]] = [
             (
@@ -2383,6 +2662,7 @@ class CellExecutor:
         timeout = max(timeout_seconds + 5.0, 30.0)
         headers = {
             EXECUTOR_PROTOCOL_HEADER: EXECUTOR_PROTOCOL_VERSION,
+            **current_trace_context(),
         }
         if worker_token:
             headers["Authorization"] = f"Bearer {worker_token}"
@@ -2475,6 +2755,7 @@ class CellExecutor:
         build_id: str | None = None,
         cell_id: str | None = None,
         cell_provenance_hash: str | None = None,
+        language: str = "python",
     ) -> tuple[dict[str, Any], Path, str, dict[str, ResolvedMount]]:
         """Run a cell through the core build + signed-URL transport path."""
         from strata.auth import get_principal
@@ -2513,6 +2794,7 @@ class CellExecutor:
 
         build_id = build_id or f"nbbuild-{uuid.uuid4().hex[:12]}"
         artifact_id = f"nb_remote_{self.session.notebook_state.id}_{build_id}"
+        trace_context = current_trace_context()
         artifact_version: int | None = None
         failure_recorded = False
 
@@ -2566,6 +2848,11 @@ class CellExecutor:
             "output_format": "notebook-output-bundle@v1",
             "_dispatch_mode": "external",
         }
+        if language != "python":
+            build_params["language"] = language
+        environment = await self._locked_environment(worker_spec) if language == "python" else None
+        if environment is not None:
+            build_params["environment"] = environment
         transport_provenance = hashlib.sha256(
             json.dumps(
                 {
@@ -2633,15 +2920,24 @@ class CellExecutor:
                     "notebook_id": self.session.notebook_state.id,
                     "cell_id": cell_id,
                     "cell_provenance_hash": cell_provenance_hash,
+                    # W3C trace context of the dispatch, for a worker reached
+                    # without the headers (a dispatcher that queues the
+                    # manifest and forwards only the body).
+                    **trace_context,
                 },
                 input_artifacts=input_artifacts,
                 max_output_bytes=state.config.max_transform_output_bytes,
+                blob_store=(
+                    artifact_store.blob_store if state.config.artifact_presigned_urls else None
+                ),
                 url_expiry_seconds=state.config.signed_url_expiry_seconds,
             ).to_dict()
 
             manifest_execute_url = self._manifest_execute_url(executor_url)
             worker_token = _resolve_worker_token(worker_spec)
-            headers = {"Authorization": f"Bearer {worker_token}"} if worker_token else None
+            headers = {**trace_context}
+            if worker_token:
+                headers["Authorization"] = f"Bearer {worker_token}"
             # Say where this build's console chunks should be delivered before
             # the worker can send any. Registered around the request rather
             # than for the session, so a chunk arriving late for a finished
@@ -2653,8 +2949,23 @@ class CellExecutor:
                     response = await client.post(
                         manifest_execute_url, json=manifest, headers=headers
                     )
+                if response.status_code == 202:
+                    response = await self._await_accepted_job(
+                        response,
+                        manifest_execute_url=manifest_execute_url,
+                        headers=headers,
+                        timeout_seconds=timeout_seconds,
+                        cancel=lambda: self._cancel_remote_execution(
+                            executor_url, build_id, worker_token
+                        ),
+                        worker_spec=worker_spec,
+                        cell_id=cell_id,
+                    )
             finally:
                 console_relay.unregister(build_id)
+        except RemoteExecutionError as exc:
+            _mark_failed(str(exc), exc.remote_error_code or "EXECUTOR_ERROR")
+            raise
         except asyncio.CancelledError:
             _mark_failed("Notebook manifest execution cancelled", "CANCELLED")
             # Shielded: this runs inside a cancellation, so an unshielded await
@@ -2840,6 +3151,153 @@ class CellExecutor:
         except Exception as exc:
             logger.info("Could not cancel build %s on the worker: %s", build_id, exc)
 
+    async def _await_accepted_job(
+        self,
+        accepted: httpx.Response,
+        *,
+        manifest_execute_url: str,
+        headers: dict[str, str],
+        timeout_seconds: float,
+        cancel: Callable[[], Awaitable[None]],
+        worker_spec: Any,
+        cell_id: str | None,
+    ) -> httpx.Response:
+        """Follow a job a worker accepted with 202 until it finishes.
+
+        A synchronous answer spends the cell's timeout on queueing, booting and
+        pulling an environment as well as on the cell. Here those count against
+        ``worker_provisioning_timeout_seconds`` instead, and the cell's own
+        timeout starts when the job reports ``running``. Whichever deadline
+        passes first cancels the job, since otherwise the machine keeps
+        computing for a caller that has left.
+
+        The job URL answers ``{"state": ...}``: ``queued``, ``provisioning`` or
+        ``starting`` before the cell runs; ``running``; then ``finished`` or
+        ``failed``, with ``status_code`` and ``result`` (or ``error``) standing
+        for the response a synchronous worker would have given. That response
+        is returned, and handled exactly as a synchronous one.
+        """
+        try:
+            body = accepted.json()
+        except ValueError:
+            body = {}
+        job_url = body.get("job_url") if isinstance(body, dict) else None
+        if not isinstance(job_url, str) or not job_url:
+            await cancel()
+            raise RemoteExecutionError(
+                f"Remote executor '{worker_spec.name}' accepted the job without a job_url",
+                remote_build_state="failed",
+                remote_error_code="PROTOCOL_ERROR",
+            )
+        job_url = urljoin(manifest_execute_url, job_url)
+        if urlsplit(job_url)[:2] != urlsplit(manifest_execute_url)[:2]:
+            # The job lives on the worker the manifest went to. An absolute URL
+            # somewhere else would have this server poll a host of the worker's
+            # choosing, carrying the worker's token. The job itself is still
+            # running there, so stop it before giving up on it.
+            await cancel()
+            raise RemoteExecutionError(
+                f"Remote executor '{worker_spec.name}' answered with a job_url on another "
+                f"host ({job_url})",
+                remote_build_state="failed",
+                remote_error_code="PROTOCOL_ERROR",
+            )
+        provisioning_limit = float(
+            getattr(self._lake_config(), "worker_provisioning_timeout_seconds", 600.0)
+        )
+
+        await self._broadcast_remote_phase(cell_id, worker_spec, "starting")
+        started = _monotonic()
+        running_since: float | None = None
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            while True:
+                try:
+                    reply = await client.get(job_url, headers=headers)
+                except httpx.HTTPError as exc:
+                    # The job outlives this request, so a status poll that fails
+                    # has to stop it; otherwise the machine runs on for a caller
+                    # whose build is already marked failed.
+                    await cancel()
+                    raise RemoteExecutionError(
+                        f"Remote executor '{worker_spec.name}' job status request failed: {exc}",
+                        remote_build_state="failed",
+                        remote_error_code="JOB_STATUS_FAILED",
+                    ) from exc
+                if reply.status_code != 200:
+                    await cancel()
+                    raise RemoteExecutionError(
+                        f"Remote executor '{worker_spec.name}' job status returned "
+                        f"{reply.status_code}: {self._extract_remote_error(reply)}",
+                        remote_build_state="failed",
+                        remote_error_code="JOB_STATUS_FAILED",
+                    )
+                job = reply.json()
+                state = str(job.get("state", ""))
+                if state in ("finished", "failed"):
+                    status_code = int(
+                        job.get("status_code") or (200 if state == "finished" else 502)
+                    )
+                    content = job.get("result")
+                    if content is None:
+                        content = {"detail": job.get("error") or f"job {state}"}
+                    return httpx.Response(status_code, json=content)
+
+                now = _monotonic()
+                if state == "running":
+                    if running_since is None:
+                        running_since = now
+                        await self._broadcast_remote_phase(cell_id, worker_spec, "running")
+                    if now - running_since > timeout_seconds:
+                        await cancel()
+                        raise RemoteExecutionError(
+                            cell_timeout_message(timeout_seconds),
+                            remote_build_state="failed",
+                            remote_error_code="TIMEOUT",
+                        )
+                elif now - started > provisioning_limit:
+                    await cancel()
+                    raise RemoteExecutionError(
+                        f"Remote executor '{worker_spec.name}' did not start the job within "
+                        f"{provisioning_limit:g}s (last state: {state or 'unknown'}); set "
+                        "STRATA_WORKER_PROVISIONING_TIMEOUT_SECONDS, or keep a machine warm",
+                        remote_build_state="failed",
+                        remote_error_code="PROVISIONING_TIMEOUT",
+                    )
+                await asyncio.sleep(_JOB_POLL_SECONDS)
+
+    async def _broadcast_remote_phase(
+        self, cell_id: str | None, worker_spec: Any, phase: str
+    ) -> None:
+        """Move the cell's badge between ``starting`` (provisioning) and ``running``.
+
+        Best effort: a notebook with nobody watching, or a broadcast that fails,
+        must not fail the run.
+        """
+        if not cell_id:
+            return
+        try:
+            from strata.notebook.protocol import MessageType
+            from strata.notebook.ws import _broadcast_message, _make_message, next_notebook_sequence
+            from strata.notebook.ws_payloads import cell_status_payload
+
+            notebook_id = self.session.notebook_state.id
+            await _broadcast_message(
+                notebook_id,
+                _make_message(
+                    MessageType.CELL_STATUS,
+                    next_notebook_sequence(notebook_id),
+                    cell_status_payload(
+                        cell_id,
+                        "running",
+                        remote_worker=worker_spec.name,
+                        remote_transport=worker_transport(worker_spec),
+                        remote_build_state=phase,
+                    ),
+                ),
+            )
+        except Exception:
+            logger.debug("remote phase broadcast failed", exc_info=True)
+
     def _manifest_execute_url(self, executor_url: str) -> str:
         """Map an executor base URL to the notebook manifest execution endpoint."""
         parsed = urlparse(executor_url)
@@ -2935,6 +3393,10 @@ class CellExecutor:
             source_uri = str(spec.get("uri", "")).strip()
             staged_uri = _stage_blob(var_name, file_name, content_type, source_uri)
             staged_specs[var_name] = {"uri": staged_uri, "content_type": content_type}
+            if content_type == ContentType.FILE_PATH:
+                # The worker would otherwise name it ``<var>.bin``, and a cell
+                # reading a fetched file may go by its extension.
+                staged_specs[var_name]["file"] = file_name
 
             # A module/cell export ships injected values; stage each so the
             # worker can fetch them by signed URL and hydrate the module.
@@ -2999,20 +3461,27 @@ class CellExecutor:
         mount_specs: list[MountSpec],
     ) -> tuple[list[str], bool]:
         """Compute mount fingerprints without preparing local materializations."""
+        self._mount_resolver.credential_resolver = self._credential_resolver()
         mount_fingerprints: list[str] = []
         has_rw_mount = False
-        credentials = self._mount_resolver.credentials
         for mount in sorted(mount_specs, key=lambda item: item.name):
-            scheme, _ = parse_mount_uri(mount.uri)
-            storage_options = {**credentials.get(scheme, {}), **mount.options} or None
-            fingerprint = await MountFingerprinter.fingerprint_mount(
-                mount, storage_options=storage_options
-            )
+            fingerprint = await mount_fingerprint(self._mount_resolver, mount)
             if fingerprint is None:
                 has_rw_mount = True
             else:
-                mount_fingerprints.append(f"{mount.name}:{fingerprint}")
+                mount_fingerprints.append(fingerprint)
         return mount_fingerprints, has_rw_mount
+
+    def _credential_resolver(self) -> CredentialResolver:
+        """Named credentials as this notebook sees them right now.
+
+        Rebuilt per use rather than once: a secret manager fills the notebook's
+        environment after the session opens, and a rotated value has to be the
+        one the next run reads.
+        """
+        return CredentialResolver.from_config(
+            self._lake_config(), env=dict(self.session.notebook_state.env)
+        )
 
     async def _prepare_mounts(
         self,
@@ -3021,7 +3490,116 @@ class CellExecutor:
         """Prepare local mount materializations for local execution paths."""
         if not mount_specs:
             return {}
+        self._mount_resolver.credential_resolver = self._credential_resolver()
         return await self._mount_resolver.prepare_mounts(mount_specs)
+
+    async def _resolve_fetches(
+        self, fetch_specs: list[FetchSpec]
+    ) -> tuple[list[str], dict[str, Path], dict[str, str], str | None]:
+        """Check every ``@fetch`` right before a run and fingerprint its bytes.
+
+        Always checked here (``max_age=0``), whatever staleness last saw: what a
+        run records has to be what the URL served when it ran. Returns the
+        fingerprints, a path per name, the lineage input per URL, and the first
+        failure, if any.
+        """
+        if not fetch_specs:
+            return [], {}, {}, None
+        from strata.notebook.fetch import FetchCache, FetchError
+
+        cache = FetchCache(self.session.path, allowed_hosts=self._fetch_allowed_hosts())
+        fingerprints: list[str] = []
+        fetched: dict[str, Path] = {}
+        refs: dict[str, str] = {}
+        error: str | None = None
+        loop = asyncio.get_running_loop()
+        for spec in sorted(fetch_specs, key=lambda item: item.name):
+            try:
+                result = await loop.run_in_executor(
+                    None, lambda s=spec: cache.resolve(s, max_age=0)
+                )
+            except FetchError as exc:
+                error = error or str(exc)
+                fingerprints.append(cache.fingerprint(spec, max_age=float("inf")))
+                continue
+            fingerprints.append(result.fingerprint(spec))
+            fetched[spec.name] = result.path
+            refs[spec.url] = f"sha256:{result.sha256}"
+        return fingerprints, fetched, refs, error
+
+    async def _resolve_datasets(
+        self, dataset_specs: list[DatasetSpec]
+    ) -> tuple[list[str], dict[str, DatasetInput], str | None]:
+        """Resolve every ``@dataset`` right before a run and copy what it names
+        into the notebook's store.
+
+        Always resolved here, whatever staleness last saw, and the answer is
+        handed to the session so staleness agrees with what the run recorded.
+        Returns the fingerprints, the input per variable, and the first failure.
+        """
+        if not dataset_specs:
+            return [], {}, None
+        from strata.notebook.datasets import (
+            DatasetError,
+            copy_into,
+            registry_for,
+            unresolved_fingerprint,
+        )
+
+        store = self.session.get_artifact_manager().artifact_store
+        fingerprints: list[str] = []
+        datasets: dict[str, DatasetInput] = {}
+        error: str | None = None
+        for spec in sorted(dataset_specs, key=lambda item: item.name):
+            try:
+                registry = registry_for(self._lake_config())
+                resolved = await asyncio.to_thread(registry.resolve, spec)
+                dataset = await asyncio.to_thread(copy_into, registry, resolved, store)
+            except DatasetError as exc:
+                error = error or str(exc)
+                fingerprint = unresolved_fingerprint(spec)
+            else:
+                fingerprint = resolved.fingerprint
+                datasets[spec.name] = dataset
+            self.session.remember_dataset_fingerprint(spec, fingerprint)
+            fingerprints.append(fingerprint)
+        return fingerprints, datasets, error
+
+    def _add_dataset_inputs(
+        self,
+        input_specs: dict[str, Any],
+        datasets: dict[str, DatasetInput],
+        output_dir: Path,
+    ) -> None:
+        """Write each dataset's bytes into *output_dir* as an input the harness
+        binds, from the copy in the notebook's store."""
+        store = self.session.get_artifact_manager().artifact_store
+        for name, dataset in sorted(datasets.items()):
+            artifact_id, _, version = dataset.local_ref.partition("@v=")
+            blob = store.read_blob(artifact_id, int(version))
+            if blob is None:
+                continue
+            ext = _ARTIFACT_EXT_BY_CONTENT_TYPE.get(dataset.content_type, "")
+            file_name = f"__dataset_{name}{ext}"
+            (output_dir / file_name).write_bytes(blob)
+            input_specs[name] = {
+                "content_type": dataset.content_type,
+                "file": file_name,
+                "uri": f"strata://artifact/{dataset.local_ref}",
+            }
+
+    def _input_refs(self, cell_id: str) -> dict[str, str]:
+        """What an artifact of *cell_id* records as its inputs: upstream
+        artifacts, each fetched URL with the digest of the bytes read, and each
+        dataset with the version it resolved to."""
+        return {
+            **self.session._collect_input_refs(cell_id),
+            **self._fetch_refs.get(cell_id, {}),
+            **self._dataset_refs.get(cell_id, {}),
+        }
+
+    def _fetch_allowed_hosts(self) -> tuple[str, ...]:
+        return tuple(getattr(self._lake_config(), "notebook_fetch_allowed_hosts", None) or ())
 
     async def _fingerprint_tables(
         self,
@@ -3103,13 +3681,31 @@ class CellExecutor:
             return ""
         return f"{server_url}/v1/notebooks/{self.session.id}"
 
+    def _cell_strata_url(self) -> str:
+        """Where a *cell's* ambient client points -- this server, never the
+        team store.
+
+        Reaching the team store takes the operator's credential, and a
+        manifest is a file the cell can read: the run directory is handed to
+        the harness user precisely so the cell can write into it. A token in
+        the manifest is a token the cell has, and that token is what makes
+        ``X-Strata-Principal`` believable, so a cell holding it can act as
+        anyone. Promotion already goes through this server for the neighbouring
+        reason -- only this process can read the notebook's own artifacts -- and
+        the run-all path never sent a credential at all.
+        """
+        config = self._lake_config()
+        return str(getattr(config, "server_url", "") or "")
+
     def _ambient_strata_headers(self) -> dict[str, str]:
         """Auth headers the ambient client attaches when pointed at a remote
         store (e.g. trusted-proxy identity/token). Empty for the local server."""
         config = self._lake_config()
         if not getattr(config, "notebook_remote_store_url", None):
             return {}
-        return dict(getattr(config, "notebook_remote_store_headers", {}) or {})
+        from strata.auth import remote_store_headers
+
+        return remote_store_headers(config)
 
     async def _pull_from_team_store(
         self,
@@ -3298,8 +3894,7 @@ class CellExecutor:
             "tables": tables or {},
             "env": runtime_env,
             "mutation_defines": list(mutation_defines or []),
-            "strata_url": self._ambient_strata_url(),
-            "strata_headers": self._ambient_strata_headers(),
+            "strata_url": self._cell_strata_url(),
             "strata_cell_id": cell_id,
             "strata_promote_url": self._ambient_promote_url(),
         }
@@ -3383,9 +3978,15 @@ class CellExecutor:
         )
 
         if result_dict.get("success"):
-            cell = self.session.notebook_state.get_cell(cell_id)
-            if cell is not None:
-                cell.last_provenance_hash = standard_provenance
+            # Persisted, not just set in memory: every other cell kind with its
+            # own cache scheme records it here, and without the write a prompt
+            # cell is idle after a restart and re-issues a paid call.
+            self.session.record_successful_execution_provenance(
+                cell_id,
+                standard_provenance,
+                prov.source_hash,
+                prov.env_hash,
+            )
 
         return CellExecutionResult(
             cell_id=cell_id,
@@ -3838,6 +4439,7 @@ class CellExecutor:
         variant: str | None = None,
         build_env: str = "",
         build_duration_ms: float = 0.0,
+        hardware: dict[str, Any] | None = None,
     ) -> bool:
         """Persist consumed output variables as artifacts.
 
@@ -3850,7 +4452,7 @@ class CellExecutor:
             return True
 
         artifact_mgr = self.session.get_artifact_manager()
-        input_versions = self.session._collect_input_refs(cell_id)
+        input_versions = self._input_refs(cell_id)
         consumed_vars = self.session.dag.consumed_variables.get(cell_id, set())
 
         try:
@@ -3949,6 +4551,7 @@ class CellExecutor:
                     variant=variant,
                     build_env=build_env,
                     build_duration_ms=build_duration_ms,
+                    hardware=hardware,
                 )
                 uri = f"strata://artifact/{artifact_version.id}@v={artifact_version.version}"
                 cell.artifact_uris[var_name] = uri
@@ -3993,7 +4596,7 @@ class CellExecutor:
         if not stdout and not stderr:
             return
         artifact_mgr = self.session.get_artifact_manager()
-        input_versions = self.session._collect_input_refs(cell_id)
+        input_versions = self._input_refs(cell_id)
         blob = json.dumps({"stdout": stdout, "stderr": stderr}).encode("utf-8")
         artifact_mgr.store_cell_output(
             cell_id=cell_id,
@@ -4024,7 +4627,7 @@ class CellExecutor:
             return []
 
         artifact_mgr = self.session.get_artifact_manager()
-        input_versions = self.session._collect_input_refs(cell_id)
+        input_versions = self._input_refs(cell_id)
         stored_displays: list[dict[str, Any]] = []
 
         for index, display_output in enumerate(display_outputs):
@@ -4441,6 +5044,46 @@ class CellExecutor:
         "module/cell-instance": ".cell_instance.pickle",
     }
 
+    def _cached_loop_result(
+        self,
+        cell_id: str,
+        loop: LoopAnnotation,
+        carry_var_provenance: str,
+        start_time: float,
+    ) -> CellExecutionResult | None:
+        """The loop's own result from a previous identical run, or None.
+
+        The same two-part check the non-loop path makes: the store holds this
+        provenance, and the cell's canonical artifact is the row that has it —
+        so a hit is this cell's own result, not a duplicate of somebody else's
+        computation of the same thing.
+        """
+        artifact_mgr = self.session.get_artifact_manager()
+        if artifact_mgr.find_cached(carry_var_provenance) is None:
+            return None
+        notebook_id = self.session.notebook_state.id
+        canonical_id = f"nb_{notebook_id}_cell_{cell_id}_var_{loop.carry}"
+        canonical = artifact_mgr.artifact_store.get_latest_version(canonical_id)
+        if canonical is None or canonical.provenance_hash != carry_var_provenance:
+            return None
+        uri = f"strata://artifact/{canonical.id}@v={canonical.version}"
+        cell = self.session.notebook_state.get_cell(cell_id)
+        if cell is not None:
+            cell.cache_hit = True
+            cell.artifact_uris[loop.carry] = uri
+            cell.artifact_uri = uri
+        result = CellExecutionResult(
+            cell_id=cell_id,
+            success=True,
+            outputs={},
+            duration_ms=(time.time() - start_time) * 1000,
+            cache_hit=True,
+            artifact_uri=uri,
+            execution_method="cached",
+        )
+        self.session.apply_execution_result_metadata(cell_id, result)
+        return result
+
     async def _execute_loop_cell(
         self,
         cell_id: str,
@@ -4450,6 +5093,7 @@ class CellExecutor:
         start_time: float,
         *,
         materialize_upstreams: bool,
+        use_cache: bool = True,
     ) -> CellExecutionResult:
         """Execute a loop cell by running the body up to ``loop.max_iter`` times.
 
@@ -4477,6 +5121,32 @@ class CellExecutor:
         if materialize_upstreams:
             await self._materialize_upstreams(cell_id)
 
+        if annotations.datasets:
+            return CellExecutionResult(
+                cell_id=cell_id,
+                success=False,
+                error=(
+                    "@dataset is not supported on loop cells; read the dataset in an "
+                    "upstream cell and pass what the loop needs from it"
+                ),
+                execution_method="loop",
+            )
+
+        if annotations.fetches:
+            # An iteration is its own harness run with the mounts resolved
+            # here, and the fetch is checked only once the loop is over, so
+            # nothing would inject the name, and the digest recorded could
+            # differ from the bytes the iterations read.
+            return CellExecutionResult(
+                cell_id=cell_id,
+                success=False,
+                error=(
+                    "@fetch is not supported on loop cells; fetch in an upstream "
+                    "cell and pass what the loop needs from it"
+                ),
+                execution_method="loop",
+            )
+
         mount_specs = self._resolve_cell_mount_specs(cell_id, source)
         _, has_rw_mount = await self._fingerprint_mounts(mount_specs)
         if has_rw_mount:
@@ -4493,6 +5163,28 @@ class CellExecutor:
 
         runtime_env = self._resolve_effective_runtime_env(cell_id, annotations.env)
 
+        # What this run will be keyed under, computed before it starts so the
+        # loop can be skipped when the store already holds its result. Every
+        # other cell kind checks the cache in ``execute_cell``; the loop
+        # dispatch happens before that check, and ``_materialize_upstreams``
+        # calls ``execute_cell`` on every upstream on the documented assumption
+        # that it caches — so without this, running any downstream cell re-ran
+        # the whole loop.
+        prov = await self._compute_cell_provenance(
+            cell_id,
+            source,
+            annotations=annotations,
+            mount_specs=mount_specs,
+        )
+        cell_provenance = prov.provenance_hash
+        env_hash = prov.env_hash
+        source_hash = prov.source_hash
+        carry_var_provenance = derive_subkey(cell_provenance, loop.carry)
+        if use_cache:
+            cached = self._cached_loop_result(cell_id, loop, carry_var_provenance, start_time)
+            if cached is not None:
+                return cached
+
         try:
             carry_blob, carry_content_type = self._resolve_loop_seed(cell_id, loop)
         except ValueError as exc:
@@ -4503,7 +5195,6 @@ class CellExecutor:
                 execution_method="loop",
             )
 
-        source_hash = compute_source_hash(source)
         artifact_mgr = self.session.get_artifact_manager()
 
         # Downstream-consumed variables beyond the carry. The harness
@@ -4715,18 +5406,8 @@ class CellExecutor:
         # narrow env + input hashes + mount fingerprints + source. If
         # we stored a custom hash here the loop cell would always look
         # stale on subsequent staleness computations.
-        # Use the shared provenance helper — annotations and mount_specs
-        # are already resolved above, so pass them in to avoid redoing
-        # parse_annotations + mount discovery.
-        prov = await self._compute_cell_provenance(
-            cell_id,
-            source,
-            annotations=annotations,
-            mount_specs=mount_specs,
-        )
-        cell_provenance = prov.provenance_hash
-        env_hash = prov.env_hash
-        carry_var_provenance = derive_subkey(cell_provenance, loop.carry)
+        # ``cell_provenance``, ``env_hash`` and ``carry_var_provenance`` were
+        # computed before the loop ran, for the cache check.
 
         # A loop cell's artifacts were as environment-specific as any other's
         # and recorded none of it, so lineage and the team cache saw blanks
@@ -4739,7 +5420,7 @@ class CellExecutor:
         # no inputs at all — so the one artifact a research notebook most wants
         # to trace, the output of a training loop, had an empty lineage graph
         # rather than merely an opaque one.
-        loop_input_versions = self.session._collect_input_refs(cell_id)
+        loop_input_versions = self._input_refs(cell_id)
 
         canonical_artifact = artifact_mgr.store_cell_output(
             cell_id=cell_id,
@@ -5706,6 +6387,12 @@ def is_cell_batchable(executor: CellExecutor, cell: Any) -> bool:
     """
     from strata.notebook.dag import SweepProducer
     from strata.notebook.languages import get_language_executor
+
+    # A batch resolves inputs itself and never sees a fetch's bytes; a fetching
+    # cell runs single-cell, where the fetch is checked and injected.
+    annotations = parse_annotations(cell.source)
+    if annotations.fetches or annotations.datasets:
+        return False
 
     dag = executor.session.dag
     if dag is not None:
