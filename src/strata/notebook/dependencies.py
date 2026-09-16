@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import re
 import shlex
 import shutil
@@ -234,8 +235,12 @@ def _run_uv_command(
     *,
     timeout: int,
     display_name: str,
+    env: dict[str, str] | None = None,
 ) -> _UvCommandResult:
-    """Run a uv command and capture bounded UI logs."""
+    """Run a uv command and capture bounded UI logs.
+
+    *env* adds to the inherited environment, e.g. ``UV_PROJECT_ENVIRONMENT``.
+    """
     started = time.perf_counter()
     uv = resolve_uv()
     if uv is None:
@@ -255,6 +260,7 @@ def _run_uv_command(
         completed = subprocess.run(
             command,
             cwd=str(notebook_dir),
+            env={**os.environ, **env} if env else None,
             timeout=timeout,
             capture_output=True,
             check=True,
@@ -323,6 +329,7 @@ async def run_uv_command_streaming(
     timeout: int,
     display_name: str,
     on_update: Callable[[str, str, bool], Awaitable[None] | None] | None = None,
+    env: dict[str, str] | None = None,
 ) -> _UvCommandResult:
     """Run a uv command asynchronously and surface bounded live stdout/stderr."""
     command = ["uv", *args]
@@ -342,6 +349,7 @@ async def run_uv_command_streaming(
         process = await asyncio.create_subprocess_exec(
             *command,
             cwd=str(notebook_dir),
+            env={**os.environ, **env} if env else None,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
@@ -739,6 +747,7 @@ async def run_rscript_command_streaming(
     timeout: int,
     display_name: str,
     on_update: Callable[[str, str, bool], Awaitable[None] | None] | None = None,
+    env: dict[str, str] | None = None,
 ) -> _RscriptCommandResult:
     """Run an Rscript ``-e`` snippet asynchronously with streamed stdout/stderr.
 
@@ -780,6 +789,7 @@ async def run_rscript_command_streaming(
             cwd=str(notebook_dir),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            env={**os.environ, **env} if env else None,
         )
     except FileNotFoundError:
         return _RscriptCommandResult(
@@ -890,6 +900,59 @@ def _renv_lockfile_hash(notebook_dir: Path) -> str:
     return hasher.hexdigest()
 
 
+async def _run_renv_mutation(
+    notebook_dir: Path,
+    snippet: str,
+    *,
+    timeout: int,
+    display_name: str,
+    on_update: Callable[[str, str, bool], Awaitable[None] | None] | None,
+) -> _RscriptCommandResult:
+    """Run a snippet that installs into the notebook's R library.
+
+    With the shared backend the library is shared, so it is never installed
+    into: the notebook first moves onto a private library restored from the
+    package cache, and once the snippet has written ``renv.lock`` that library
+    is adopted under the new lock's key. A failed snippet links the notebook
+    back to the library for the lock it still has.
+    """
+    from strata.notebook.env_backend import shared_root
+
+    root = shared_root()
+    if root is None:
+        return await run_rscript_command_streaming(
+            notebook_dir, snippet, timeout=timeout, display_name=display_name, on_update=on_update
+        )
+    from strata.notebook.shared_env import (
+        adopt_r_library,
+        detach_r_library,
+        link_r_library_if_built,
+        r_env,
+    )
+
+    await asyncio.to_thread(detach_r_library, notebook_dir, root)
+    # Always restore first: the private library has to hold what the lock says
+    # before a package is added to it, or what is adopted afterwards is a
+    # library with one package in it that every notebook on the new lock links
+    # to and never restores.
+    snippet = "renv::restore(prompt = FALSE)\n" + snippet
+    result = await run_rscript_command_streaming(
+        notebook_dir,
+        snippet,
+        timeout=timeout,
+        display_name=display_name,
+        on_update=on_update,
+        env=r_env(root),
+    )
+    if result.success:
+        await asyncio.to_thread(adopt_r_library, notebook_dir, root)
+    else:
+        # Back to the library for the lock the notebook still has, when one is
+        # built; otherwise its own library stays as the failed run left it.
+        await asyncio.to_thread(link_r_library_if_built, notebook_dir, root)
+    return result
+
+
 async def renv_init(
     notebook_dir: Path,
     *,
@@ -968,7 +1031,7 @@ async def _renv_init_locked(
             'renv::snapshot(type = "all", prompt = FALSE)',
         ]
     )
-    result = await run_rscript_command_streaming(
+    result = await _run_renv_mutation(
         notebook_dir,
         snippet,
         timeout=timeout,
@@ -1061,7 +1124,7 @@ async def _renv_add_locked(
     # already rejected anything but [A-Za-z0-9.] so escape concerns are moot —
     # ``ggplot2`` becomes ``renv::install("ggplot2"); renv::snapshot(type = "all")``.
     snippet = f'renv::install("{package}"); renv::snapshot(type = "all", prompt = FALSE)'
-    result = await run_rscript_command_streaming(
+    result = await _run_renv_mutation(
         notebook_dir,
         snippet,
         timeout=timeout,
@@ -1163,12 +1226,9 @@ def import_requirements_text(
                 error=f"Failed to write pyproject.toml: {exc}",
             )
 
-        command_result = _run_uv_command(
-            notebook_dir,
-            ["sync"],
-            timeout=timeout,
-            display_name="uv sync",
-        )
+        from strata.notebook.env_backend import get_backend
+
+        command_result = get_backend(notebook_dir).sync(python_version=None, timeout=timeout)
         if command_result.success:
             logger.info(
                 "Imported %s requirements into %s",
@@ -1244,12 +1304,10 @@ async def import_requirements_text_streaming(
                 error=f"Failed to write pyproject.toml: {exc}",
             )
 
-        command_result = await run_uv_command_streaming(
-            notebook_dir,
-            ["sync"],
-            timeout=timeout,
-            display_name="uv sync",
-            on_update=on_update,
+        from strata.notebook.env_backend import get_backend
+
+        command_result = await get_backend(notebook_dir).sync_streaming(
+            python_version=None, timeout=timeout, on_update=on_update
         )
         if command_result.success:
             logger.info(
@@ -1369,13 +1427,9 @@ def _add_dependency_locked(
 ) -> DependencyChangeResult:
     old_lockfile_hash = _lockfile_hash(notebook_dir)
 
-    args = ["add", "--dev", package] if dev else ["add", package]
-    command_result = _run_uv_command(
-        notebook_dir,
-        args,
-        timeout=timeout,
-        display_name="uv add",
-    )
+    from strata.notebook.env_backend import get_backend
+
+    command_result = get_backend(notebook_dir).add(package, timeout=timeout, dev=dev)
     if command_result.success:
         logger.info("uv add %s%s succeeded in %s", "--dev " if dev else "", package, notebook_dir)
     else:
@@ -1444,12 +1498,9 @@ def _remove_dependency_locked(
 ) -> DependencyChangeResult:
     old_lockfile_hash = _lockfile_hash(notebook_dir)
 
-    command_result = _run_uv_command(
-        notebook_dir,
-        ["remove", package],
-        timeout=timeout,
-        display_name="uv remove",
-    )
+    from strata.notebook.env_backend import get_backend
+
+    command_result = get_backend(notebook_dir).remove(package, timeout=timeout)
     if command_result.success:
         logger.info("uv remove %s succeeded in %s", package, notebook_dir)
     else:

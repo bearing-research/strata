@@ -40,6 +40,11 @@ class CellRuntime:
     last_provenance_hash: str | None = None
     last_source_hash: str | None = None
     last_env_hash: str | None = None
+    # What the cell's own cache scheme rests on, for a language that has one
+    # (the connection a SQL cell read, the model a prompt cell asked). The
+    # generic triplet above does not cover it, so a reopen comparing only that
+    # would call a cell ready without having established anything of the sort.
+    last_reopen_identity: str | None = None
     display_outputs: list[dict[str, Any]] = field(default_factory=list)
     display: dict[str, Any] | None = None
     test_result: dict[str, Any] | None = None
@@ -61,6 +66,7 @@ class CellRuntime:
             self.last_provenance_hash
             or self.last_source_hash
             or self.last_env_hash
+            or self.last_reopen_identity
             or self.display_outputs
             or self.display
             or self.test_result
@@ -200,6 +206,7 @@ def persist_cell_provenance(
     last_provenance_hash: str | None,
     last_source_hash: str | None,
     last_env_hash: str | None,
+    last_reopen_identity: str | None = None,
 ) -> None:
     """Persist the last successful execution provenance for a cell.
 
@@ -214,6 +221,7 @@ def persist_cell_provenance(
     entry.last_provenance_hash = last_provenance_hash or None
     entry.last_source_hash = last_source_hash or None
     entry.last_env_hash = last_env_hash or None
+    entry.last_reopen_identity = last_reopen_identity
     save_runtime_state(notebook_dir, state)
 
 

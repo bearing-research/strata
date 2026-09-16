@@ -611,3 +611,71 @@ class TestNonAsciiTokensAreRejectedNotCrashed:
     def test_ascii_behaviour_is_unchanged(self):
         assert verify_proxy_token("secret", "secret") is True
         assert verify_proxy_token("secret", "other") is False
+
+
+class TestEveryStoreIsItsOwnAclSubject:
+    """A rule names a table in a store. Multi-cloud warehouses arrived in this
+    release, and collapsing them into one namespace would have a rule for a
+    local table grant the same-named table in somebody's bucket."""
+
+    def test_each_store_has_its_own_namespace(self):
+        identity = TableIdentity.from_table_id("secret.events")
+        refs = {
+            uri: str(TableRef.from_table_identity(identity, table_uri=uri))
+            for uri in (
+                "file:///wh#secret.events",
+                "s3://bucket/wh#secret.events",
+                "gs://bucket/wh#secret.events",
+                "abfss://c@a.dfs.core.windows.net/wh#secret.events",
+            )
+        }
+
+        assert refs == {
+            "file:///wh#secret.events": "file:secret.events",
+            "s3://bucket/wh#secret.events": "s3:secret.events",
+            "gs://bucket/wh#secret.events": "gs:secret.events",
+            "abfss://c@a.dfs.core.windows.net/wh#secret.events": "az:secret.events",
+        }
+
+
+class TestReadingACachedScanIsGatedWhereverTheTableLives:
+    """``_authorize_artifact_read`` re-checks the ACL of the table an artifact
+    was scanned from. It knew only file:// and s3://, so a cached scan of a
+    GCS, Azure or named-catalog table was readable by a denied principal."""
+
+    @staticmethod
+    def _identity(uri: str):
+        import strata.server as server_module
+        from strata.config import StrataConfig
+        from strata.server import ServerState
+
+        server_module._state = ServerState(
+            StrataConfig(catalogs={"prod": {"type": "rest", "uri": "http://catalog"}})
+        )
+        return server_module._table_identity_from_uri(uri)
+
+    def test_every_table_uri_resolves_to_an_identity_to_check(self):
+        for uri in (
+            "file:///wh#secret.events",
+            "s3://bucket/wh#secret.events",
+            "gs://bucket/wh#secret.events",
+            "abfss://c@a.dfs.core.windows.net/wh#secret.events",
+            "prod:secret.events",
+        ):
+            assert self._identity(uri) is not None, f"{uri} was not gated"
+
+    def test_what_is_not_a_table_is_left_alone(self):
+        assert self._identity("strata://artifact/rows@v=1") is None
+        assert self._identity("not-a-table") is None
+
+    def test_the_identity_is_the_one_the_planner_uses(self):
+        """The pre-plan gate and the post-plan gate have to name a table the
+        same way, or a rule matches one and not the other."""
+        from strata.config import StrataConfig
+        from strata.iceberg import table_identity_for
+
+        config = StrataConfig(catalogs={"prod": {"type": "rest", "uri": "http://catalog"}})
+
+        assert self._identity("prod:secret.events") == table_identity_for(
+            "prod:secret.events", config
+        )

@@ -23,6 +23,7 @@ import hashlib
 import os
 import re
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
 from strata.notebook.sql.adapter import (
@@ -159,6 +160,49 @@ def _force_mode_ro_in_uri(uri: str) -> str:
     other = [(k, v) for k, v in pairs if k != "mode"]
     other.append(("mode", "ro"))
     return f"{base}?{'&'.join(f'{k}={v}' if v else k for k, v in other)}"
+
+
+def _database_path(probe_conn) -> str | None:
+    """The file behind the connection's ``main`` database, or None in memory.
+
+    ``PRAGMA database_list`` answers for whatever connection it is given, so
+    the probe does not need the connection spec to find the file.
+    """
+    try:
+        with probe_conn.cursor() as cursor:
+            cursor.execute("PRAGMA database_list")
+            rows = cursor.fetchall() or []
+    except Exception:  # noqa: BLE001 — a broken handle is the caller's problem
+        return None
+    for row in rows:
+        if len(row) >= 3 and str(row[1]) == "main":
+            path = str(row[2] or "")
+            return path or None
+    return None
+
+
+def _file_signals(path: str | None) -> list[bytes]:
+    """What the database file says about how recently it changed."""
+    if not path:
+        return [b"memory"]
+    signals: list[bytes] = []
+    for candidate in (Path(path), Path(f"{path}-wal")):
+        try:
+            stat = candidate.stat()
+        except OSError:
+            signals.append(f"{candidate.name}:absent".encode())
+            continue
+        signals.append(f"{candidate.name}:{stat.st_size}:{stat.st_mtime_ns}".encode())
+    try:
+        with open(path, "rb") as database:
+            header = database.read(28)
+    except OSError:
+        return signals
+    if len(header) >= 28:
+        # The header's change counter, bumped on every commit that reaches the
+        # main file — the signal a rollback-journal database changes by.
+        signals.append(b"change-counter:" + header[24:28])
+    return signals
 
 
 class SqliteAdapter:
@@ -326,19 +370,24 @@ class SqliteAdapter:
         probe_conn: Any,
         tables: list[QualifiedTable],
     ) -> FreshnessToken:
-        """DB-wide freshness via ``PRAGMA data_version`` + ``schema_version``.
+        """DB-wide freshness: the database file's own state, plus the pragmas.
 
-        ``tables`` is intentionally ignored — SQLite doesn't expose
-        per-table change counters, so every cell against this
-        connection sees the same token. A write to any table (from
-        another connection or process) increments ``data_version``;
-        any DDL increments ``schema_version``.
+        ``tables`` is intentionally ignored — SQLite doesn't expose per-table
+        change counters, so every cell against this connection sees the same
+        token.
 
-        Caveat: ``data_version`` does NOT increment for writes on the
-        connection it's queried on. Phase 1 SQL cells are read-only
-        and the probe runs on its own usage path, so this gotcha
-        doesn't bite us in practice — but the limitation is real and
-        documented.
+        ``PRAGMA data_version`` alone is not enough, and the way it fails is
+        silent: it reports whether *this connection* has seen another
+        connection's writes, and the probe opens a new connection every run, so
+        its value is the same baseline every time. A cell would keep serving
+        its first answer however much the database changed underneath it.
+
+        So the file is asked directly: its size, its modification time, the
+        change counter in its header (bytes 24-28, bumped on every commit), and
+        the size and time of the write-ahead log beside it, which is where a
+        commit lands in WAL mode until a checkpoint. A database with no file —
+        ``:memory:`` — has only the pragmas, and each cell opens its own, so
+        there is nothing there to go stale.
         """
         h = hashlib.sha256()
         with probe_conn.cursor() as cursor:
@@ -357,6 +406,9 @@ class SqliteAdapter:
         h.update(str(data_row[0]).encode())
         h.update(b":schema_version:")
         h.update(str(schema_row[0]).encode())
+        for part in _file_signals(_database_path(probe_conn)):
+            h.update(b":")
+            h.update(part)
         return FreshnessToken(value=h.digest())
 
     def probe_schema(

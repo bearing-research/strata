@@ -49,6 +49,8 @@ class MessageType(StrEnum):
     WIDGET_UPDATE = "widget_update"
     AGENT_CANCEL = "agent_cancel"
     AGENT_CONFIRM_RESPONSE = "agent_confirm_response"
+    # The cell this client is on, or null. Payload: ``{cell_id, author?}``.
+    CELL_FOCUS = "cell_focus"
 
     # Server → Client
     ERROR = "error"
@@ -82,6 +84,10 @@ class MessageType(StrEnum):
     IMPACT_PREVIEW = "impact_preview"
     INSPECT_RESULT = "inspect_result"
     PROFILING_SUMMARY = "profiling_summary"
+    # Who is on the session and which cell each is on, sent on join, leave and
+    # focus change. Payload: ``{principals: [{principal, focused_cell_id,
+    # since}], you}``, ``you`` naming the receiving connection's own identity.
+    PRESENCE = "presence"
 
     # Server → Client (environment job lifecycle)
     ENVIRONMENT_JOB_STARTED = "environment_job_started"

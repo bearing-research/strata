@@ -161,6 +161,27 @@ class RemoteStore:
             method="put",
         )
 
+    def export_table(
+        self, artifact_id: str, version: int, table: str, alias: str | None = None
+    ) -> dict:
+        """Have the far side write a version it holds into an Iceberg table."""
+        from urllib.parse import quote
+
+        import httpx
+
+        response = httpx.post(
+            f"{self.base_url}/v1/artifacts/{quote(artifact_id, safe='')}/v/{version}/export",
+            json={"table": table, "alias": alias},
+            headers=self._headers,
+            timeout=REMOTE_TIMEOUT_SECONDS,
+        )
+        if response.status_code >= 400:
+            raise RuntimeError(
+                f"The store refused to write {artifact_id}@v={version} to {table}: "
+                f"HTTP {response.status_code}: {detail_of(response)}"
+            )
+        return response.json()
+
     def _post(self, path: str, payload: dict, *, what: str, method: str = "post"):
         import httpx
 
@@ -337,6 +358,9 @@ class Promotion:
     # the point of protecting it. The caller has to say so: a promotion that
     # reported plain success would leave someone believing the champion moved.
     alias_pending: bool = False
+    # The Iceberg table it was also written to, and the snapshot that holds it.
+    table: str | None = None
+    table_snapshot: int | None = None
 
 
 def promote_artifact(
@@ -348,6 +372,7 @@ def promote_artifact(
     alias: str | None = None,
     tags: dict[str, str] | None = None,
     max_depth: int = 10,
+    table: str | None = None,
 ) -> Promotion:
     """Copy an artifact and its chain to the team store, and name it there.
 
@@ -400,10 +425,22 @@ def promote_artifact(
             continue
         target.set_tag(landed_id, version, key, value)
 
+    table_snapshot = None
+    if table:
+        # The team store writes it, with its own catalog: the store is where
+        # the bytes and the warehouse credentials both are. A pending alias is
+        # not a tag yet; approving it moves the tag then.
+        exported = target.export_table(
+            landed_id, version, table, alias=alias if alias and not alias_pending else None
+        )
+        table_snapshot = exported.get("snapshot_id")
+
     return Promotion(
         name=name,
         ref=landed_ref,
         copied=len(written),
         alias=alias,
         alias_pending=alias_pending,
+        table=table,
+        table_snapshot=table_snapshot,
     )

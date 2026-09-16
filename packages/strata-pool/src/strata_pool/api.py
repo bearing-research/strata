@@ -23,7 +23,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, Res
 from fastapi.responses import JSONResponse
 
 from strata_pool.pool import Pool
-from strata_pool.types import Job, JobState, UsageEvent, Worker
+from strata_pool.types import Job, JobState, MachineType, UsageEvent, Worker
 
 logger = logging.getLogger(__name__)
 
@@ -86,6 +86,11 @@ def create_app(
         return value
 
     async def lifespan(app: FastAPI):
+        # The catalogue last set over the API outlives the process that set
+        # it; the one this process was constructed with is only the default.
+        saved = pool.store.load_machine_types()
+        if saved is not None:
+            await pool.replace_machine_types(saved)
         # Reconcile before serving: machines from a previous process are
         # either still reachable or still billing.
         await pool.recover()
@@ -123,6 +128,7 @@ def create_app(
             priority=priority,
             session_id=session_id,
             timeout_seconds=timeout_seconds,
+            trace_context=_trace_context(request),
         )
         return JSONResponse(_job_json(job), status_code=202)
 
@@ -151,6 +157,7 @@ def create_app(
             priority=priority,
             session_id=session_id,
             timeout_seconds=timeout_seconds,
+            trace_context=_trace_context(request),
         )
         try:
             done = await pool.wait(job.id, timeout=wait_seconds)
@@ -184,6 +191,31 @@ def create_app(
         """What a caller may ask for. The catalogue an annotation resolves against."""
         return [asdict(spec) for spec in pool.machine_types.values()]
 
+    @app.put("/v1/machine-types", dependencies=guard)
+    async def replace_machine_types(request: Request) -> list[dict]:
+        """Replace the whole catalogue, without a restart.
+
+        The body is the full list, in the shape `GET` returns. Types left out
+        are removed; see `Pool.replace_machine_types` for what happens to
+        their machines and queued jobs, and to machines on a changed image.
+        Persisted, so a restart serves this catalogue.
+        """
+        body = await request.json()
+        if not isinstance(body, list):
+            raise HTTPException(status_code=400, detail="expected a list of machine types")
+        try:
+            specs = [MachineType(**entry) for entry in body]
+        except TypeError as exc:
+            raise HTTPException(status_code=400, detail=f"invalid machine type: {exc}") from exc
+        names = [spec.name for spec in specs]
+        if len(set(names)) != len(names):
+            raise HTTPException(status_code=400, detail="machine type names must be unique")
+        # Stored first: a catalogue that applied but was not saved would
+        # silently revert at the next restart.
+        pool.store.save_machine_types(specs)
+        await pool.replace_machine_types(specs)
+        return [asdict(spec) for spec in pool.machine_types.values()]
+
     @app.get("/v1/workers", dependencies=guard)
     async def list_workers() -> list[dict]:
         return [_worker_json(worker) for worker in pool.store.list_workers()]
@@ -194,6 +226,13 @@ def create_app(
         return [_usage_json(event) for event in pool.store.list_usage(tenant_id)]
 
     return app
+
+
+def _trace_context(request: Request) -> dict[str, str]:
+    """The caller's W3C trace headers, carried with the job to the machine."""
+    return {
+        key: value for key in ("traceparent", "tracestate") if (value := request.headers.get(key))
+    }
 
 
 async def _submit(pool: Pool, **kwargs) -> Job:

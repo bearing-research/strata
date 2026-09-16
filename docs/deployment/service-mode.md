@@ -263,12 +263,21 @@ A few operations require a specific scope under trusted-proxy auth
 | `admin:cache` | `POST /v1/cache/clear` |
 | `admin:registry` | `POST /v1/registry/pending/approve` and `.../reject` - deciding protected-alias changes |
 | `artifacts:write` | Publishing in service mode (`put` / `set_name` / `set_alias` / tags) when `service_writes_enabled=true`. See [below](#authenticated-write-back-the-shared-research-store). |
+| `notebook:read` | Every notebook `GET` over REST, and observing a notebook over its WebSocket (sync, previews, profiling) |
+| `notebook:write` | Changing a notebook without running anything: creating, editing, reordering and deleting cells, and setting mounts, connections, workers, env, timeout, name and variants. REST and WebSocket alike. |
+| `notebook:execute` | Running code or changing its environment: executing a cell or its tests, run-all, dependency changes and environment sync, requirements imports, the Python version, SSH workers, the inspect REPL, widget updates and the assistant. REST and WebSocket alike. |
+
+The notebook scopes are checked against one table for both transports
+(`strata.notebook.scopes`), so a viewer holding only `notebook:read` can't run a
+cell over REST any more than over the socket. An operation the table doesn't
+classify requires `notebook:execute`.
 
 Registry **approval** additionally enforces separation of duty: the
 principal who requested a protected-alias move cannot approve it
 themselves unless they hold `admin:*`. The registry **audit** read
-(`GET /v1/registry/audit`) is tenant-scoped - a principal sees only its
-own tenant's history; `admin:*` sees the whole store.
+(`GET /v1/registry/audit`) and the events feed that follows it
+(`GET /v1/events`) are tenant-scoped - a principal sees only its own tenant's
+history; `admin:*` sees the whole store.
 
 ## Authenticated write-back: the shared research store
 
@@ -338,6 +347,17 @@ STRATA_NOTEBOOK_REMOTE_STORE_HEADERS='{"X-Strata-Proxy-Token":"…","X-Strata-Pr
 In a fully proxy-fronted setup the notebook's requests instead flow through the
 same auth proxy, which injects identity, and `notebook_remote_store_headers`
 can be omitted.
+
+On a **shared** notebook server several members run cells, and the static
+headers name one identity for all of them. When a request carries a principal,
+the server sends that caller's id as `X-Strata-Principal` to the remote store,
+replacing the one in the static headers. This covers results offered to the
+team cache, promotions, registry reads and approvals from the Registry tab, and
+a cell's own ambient client. The team cache's "computed by" and the registry
+audit then name the member. The remote store still has to accept that principal:
+the static headers are what authenticate the server to it. Set
+`STRATA_NOTEBOOK_REMOTE_STORE_FORWARD_PRINCIPAL=false` for a store that expects
+one fixed service identity. Personal mode has no principal and is unaffected.
 
 ### The team cache: sharing results nobody named
 
@@ -479,6 +499,41 @@ strata.promote("rows", name="taxi/rows", alias="champion")
 `off` is the whole feature off without unsetting
 `STRATA_NOTEBOOK_REMOTE_STORE_URL`, which a cell's ambient `strata` client
 still needs.
+
+### Promoting into an Iceberg table
+
+A tabular result can also become a table in the team's warehouse, so tools
+outside Strata read it as a table and a notebook reads it with `@table`:
+
+```bash
+strata artifact promote nb_taxi_cell_c1_var_features \
+  --to https://store.example --name taxi/features --alias champion \
+  --table "s3://lake/warehouse#taxi.features"
+```
+
+The team store does the writing, with its own catalog settings, since that is
+where the bytes and the warehouse credentials are. `--table` takes the same
+forms `@table` reads: `<warehouse>#namespace.table`, or `namespace.table` in the
+store's configured catalog.
+
+- The first promotion creates the table and appends. Later promotions overwrite
+  it, so the current snapshot is always one version. A notebook's `@table` on
+  it goes stale when the next version is written, as for any other table.
+- Each snapshot's summary names what it holds: `strata.artifact_id`,
+  `strata.version`, `strata.provenance_hash`, and `strata.promoted_by` when the
+  store knows the caller. (An overwrite commits a delete and then an append; the
+  append is the snapshot that holds the version.)
+- A new version may add columns or widen a type. One whose schema the table
+  cannot evolve to is refused before anything is written.
+- The alias is an Iceberg tag on the snapshot. Moving the alias later, including
+  approving a protected one, moves the tag, as long as that version was written
+  to the table.
+
+The same write is `strata artifact export --table <table> <ref>` against a local
+store, and `POST /v1/artifacts/{id}/v/{version}/export` with
+`{"table": ..., "alias": ...}` for a platform that exports once a promotion
+lands. Only Arrow tables can be written; a JSON value, a pickle, an array or a
+scalar is refused.
 
 ## What a cell can read
 

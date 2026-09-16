@@ -83,3 +83,22 @@ def test_every_payload_model_is_registered() -> None:
         f"payload models not in FRAME_PAYLOADS: {sorted(unregistered)} — "
         "register them so the frontend gets their types"
     )
+
+
+def test_a_field_too_long_for_one_line_is_broken_as_prettier_breaks_it() -> None:
+    """The frontend's prettier hook rewrites the committed file; a line the
+    emitter left too long would come back as drift on the next ``--check``."""
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("generate_ws_types", _SCRIPT)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    assert module._field_line("code", "?", "'a' | null") == "  code?: 'a' | null"
+    fits_below = " | ".join(f"'code_{i}'" for i in range(9))
+    assert module._field_line("code", "?", fits_below) == f"  code?:\n    {fits_below}"
+    too_long = " | ".join(f"'code_number_{i}'" for i in range(8))
+    assert module._field_line("code", "?", too_long) == "  code?:\n" + "\n".join(
+        f"    | 'code_number_{i}'" for i in range(8)
+    )

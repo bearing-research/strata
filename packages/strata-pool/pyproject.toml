@@ -15,7 +15,8 @@ classifiers = [
     "Programming Language :: Python :: 3.13",
     "Programming Language :: Python :: 3.14",
 ]
-# httpx forwards job payloads to workers; persistence is stdlib sqlite3.
+# httpx forwards job payloads to workers; persistence is stdlib sqlite3, or
+# Postgres through the optional extra below.
 # Cloud SDKs arrive with the backends that need them, as optional extras —
 # they must never become a base dependency.
 dependencies = [
@@ -29,6 +30,10 @@ dependencies = [
 server = [
     "fastapi>=0.115.0",
     "uvicorn>=0.30.0",
+]
+# A store several pool processes can share (PostgresPoolStore).
+postgres = [
+    "psycopg[binary]>=3.1",
 ]
 
 [project.urls]
@@ -54,4 +59,5 @@ testpaths = ["tests"]
 markers = [
     "docker: needs a reachable Docker daemon (skipped automatically without one)",
     "runpod: starts a billed RunPod pod; opt-in only, never in CI",
+    "fly: starts a billed Fly machine; opt-in only, never in CI",
 ]

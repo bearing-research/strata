@@ -46,7 +46,10 @@ Liveness + capabilities probe. No auth.
     "features": {
       "notebook_protocol_version": "notebook-cell-v1",
       "output_format": "notebook-output-bundle@v1",
-      "pull_model": true
+      "pull_model": true,
+      "cancel": true,
+      "locked_environments": true,
+      "languages": ["python", "r"]
     }
   },
   "version": "1.0.0",
@@ -54,11 +57,44 @@ Liveness + capabilities probe. No auth.
   "active_executions": 0,
   "max_concurrent": 2,
   "gpu_slots": 2,
-  "free_gpu_slots": 2
+  "free_gpu_slots": 2,
+  "hardware": {
+    "cpus": 32,
+    "memory_mb": 257000,
+    "accelerators": [{"name": "NVIDIA A100-SXM4-80GB", "memory_mb": 81920, "driver": "535.104.05"}],
+    "cuda": "12.2"
+  }
 }
 ```
 
-`active_executions` is the count of in-flight `/v1/*` calls - useful for autoscaler signals. `max_concurrent` and `gpu_slots` are the worker's limits (`null` when unset), and `free_gpu_slots` how many GPUs are unassigned, so a caller can plan rather than discover the limit by being refused. The notebook UI polls this and shows the worker badge red if `/health` fails or times out.
+`active_executions` is the count of in-flight `/v1/*` calls - useful for autoscaler signals. `max_concurrent` and `gpu_slots` are the worker's limits (`null` when unset), and `free_gpu_slots` how many GPUs are unassigned, so a caller can plan rather than discover the limit by being refused. `hardware` is what the machine reports about itself: `cpus` (those this process may use) and `memory_mb` from the OS, and `accelerators` and `cuda` from `nvidia-smi` when it is on the worker's `PATH`. It lets a caller check a provider's machine against the class it was sold as without submitting a job. A field that could not be read is omitted, so a missing `accelerators` means unknown, not "no GPU". The notebook UI polls this and shows the worker badge red if `/health` fails or times out.
+
+`locked_environments: true` says the worker runs a cell in the notebook's own locked environment when the request carries one (below). Strata sends that block only to a worker that advertises it; any other gets requests exactly as before.
+
+A cell runs with the worker's environment minus the worker's own secrets: `strata-worker` takes its token and credentials out of the process environment at startup and holds them in memory, so a cell cannot read them from its own environment or through `/proc`. `STRATA_NOTEBOOK_HARNESS_ENV_ALLOWLIST` narrows the rest, as [the server's allowlist](../notebook/workers.md) narrows a cell there. A cell gets what its manifest carries.
+
+`languages` lists the cell languages the worker can run: `r` when `Rscript` is on its `PATH`. An R cell's request says `"language": "r"`, in `transform.params.language` on `POST /v1/execute`, `language` in `POST /v1/notebook-execute` metadata, and `params.language` in a manifest; a Python cell's request carries no `language`. The worker runs `harness.R` under `Rscript` with the same manifest a Python cell's harness gets, and answers an R cell with `500` and `Rscript is not installed on this worker` when it has no R, or `400` for a language it does not know. An R cell carries no `environment` block.
+
+### The `environment` block
+
+A request to a worker that advertises `locked_environments` carries the notebook's lock, in `transform.params.environment` on `POST /v1/execute`, `environment` in `POST /v1/notebook-execute` metadata, and `params.environment` in a manifest:
+
+```json
+{
+  "key": "<sha256 of uv.lock>",
+  "python": "3.13",
+  "lockfile": "<the notebook's uv.lock>",
+  "pyproject": "<the notebook's pyproject.toml>"
+}
+```
+
+The worker runs the cell's harness with the interpreter of that environment:
+
+- It keeps one environment per `key` and interpreter build under `STRATA_WORKER_ENV_ROOT` (default `~/.strata/worker-envs`). An environment already there is reused, so a second cell with the same lock installs nothing.
+- A missing one is fetched from `STRATA_WORKER_ENV_REGISTRY_URL/<key>` as a `.tar.gz` of the environment directory when that is set, and otherwise built with `uv sync --frozen` from the lock. The worker needs `uv` on its `PATH` for that.
+- A lock that does not hash to `key`, or that cannot be installed, fails the cell with the reason (`500`).
+
+The output bundle's result then carries `environment: {"key", "installed"}`, where `key` names the environment directory and `installed` whether this request built or fetched it.
 
 **`503 Service Unavailable`** from any execution route means the worker is full: `max_concurrent` executions are in flight, or every GPU slot is taken. It carries `Retry-After` in seconds and is refused before any input is downloaded, so retrying costs the worker nothing.
 
@@ -113,7 +149,7 @@ The standard executor v1 envelope. Cells and inputs are pushed inline; the worke
 | `transform.params.timeout_seconds` | float | Execution timeout (default 30). |
 | `transform.params.mounts` | array of MountSpec | Filesystem mounts injected as `Path` variables (see [notebook.toml schema](notebook-toml.md#mounts-filesystem-mounts)). |
 | `transform.params.env` | object | Env vars set in the cell subprocess. |
-| `inputs` | array of `{name, format}` | Each entry references a multipart field with the same `name`. `format` is the content type - `arrow/ipc`, `pickle/object`, `json/object`, `module/import`, `module/cell`, `module/cell-instance`. |
+| `inputs` | array of `{name, format}` | Each entry references a multipart field with the same `name`. `format` is the content type - `arrow/ipc`, `pickle/object`, `json/object`, `module/import`, `module/cell`, `module/cell-instance`, or `file/path` for an `@fetch`'s bytes, which the harness injects as a `pathlib.Path` to the written file instead of loading. |
 
 **Response (200)**:
 
@@ -181,7 +217,8 @@ For workloads where streaming inputs through Strata is a bandwidth bottleneck (l
     "tenant": "team-a",
     "notebook_id": "9c7e22e3-8ed7-452c-885c-49574d7aa02f",
     "cell_id": "ba3b7451",
-    "cell_provenance_hash": "5f2c…"
+    "cell_provenance_hash": "5f2c…",
+    "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
   },
   "inputs": [
     {
@@ -197,6 +234,15 @@ For workloads where streaming inputs through Strata is a bandwidth bottleneck (l
 }
 ```
 
+With `STRATA_ARTIFACT_PRESIGNED_URLS` on and an S3 blob store the server can sign
+for, the input URLs and `output.url` point straight at the object store: SigV4
+query URLs for inputs, and for the output a POST policy URL with the form
+`fields` to send. The policy bounds the body with `content-length-range`, so S3
+refuses an oversized upload itself, and finalize checks the size again before
+publishing. `finalize_url` and `log_url` stay Strata routes. Without it, or when
+the store cannot sign (a local disk, or S3 credentials held only by an instance
+role inside PyArrow), every URL is a Strata route and `output` has no `fields`.
+
 `principal`, `tenant`, `notebook_id`, `cell_id` and `cell_provenance_hash` say
 who ran the cell and which cell of which notebook the build is for, so a
 dispatcher can attribute and match a job from the manifest alone rather than
@@ -207,11 +253,20 @@ computation share it. They sit outside `params` deliberately, since `params` is
 hashed into the build's transport provenance and who ran a cell must not change
 what is cached. A worker can ignore them.
 
+`traceparent` and `tracestate` are the W3C trace context of the server's
+`notebook.dispatch` span, present when the server has tracing on. The same
+values go in the request's headers. A worker opens its `worker.execute` span as
+a child of the header context if there is one, and otherwise of the manifest's.
+The header wins because a dispatcher in between, such as a pool, forwards its
+own span there. A dispatcher that queues the manifest and sends only the body
+still leaves the manifest's copy to link the trace. The direct transport
+carries the context in the request headers only.
+
 **Worker behavior:**
 
-1. For each entry in `metadata.params.input_specs`, look up its `uri` in `inputs[]` and stream-download from the signed URL. Inputs that exceed `STRATA_WORKER_MAX_INPUT_BYTES` (declared via `Content-Length` or measured during stream) are rejected with `413`.
+1. For each entry in `metadata.params.input_specs`, look up its `uri` in `inputs[]` and stream-download from the signed URL to the input file, so an input is bounded by the worker's disk rather than its memory. Inputs that exceed `STRATA_WORKER_MAX_INPUT_BYTES` (declared via `Content-Length` or measured during stream) are rejected with `413`.
 2. Run the cell in a subprocess (same as `/v1/execute`).
-3. Stream the resulting output bundle to `output.url` via `POST` with `Content-Type: application/x-tar`.
+3. Upload the resulting output bundle to `output.url`. Without `output.fields`, `POST` the bundle as the raw body with `Content-Type: application/x-tar` (a Strata route). With `output.fields`, it is a presigned object-store upload: `POST` a multipart form containing each field plus the bundle as the `file` part (S3 answers `204`).
 4. `POST {"output_format": "notebook-output-bundle@v1"}` to `finalize_url`.
 5. Return the `finalize` response body to the caller.
 
@@ -226,6 +281,35 @@ what is cached. A worker can ignore them.
   "finalize": { "...orchestrator's finalize response..." }
 }
 ```
+
+**Asynchronous execution (202).** A worker, or a pool or dispatcher in front of
+one, may instead answer `202 Accepted` right away:
+
+```json
+{"job_url": "/v1/jobs/01HZJV"}
+```
+
+`job_url` may be relative to the manifest URL, and must resolve to the same host and port the manifest went to — the server refuses one pointing anywhere else rather than poll a host of the worker's choosing with the worker's token. The server then polls
+`GET {job_url}`, with the same `Authorization` header, for:
+
+```json
+{"state": "provisioning"}
+{"state": "running"}
+{"state": "finished", "status_code": 200, "result": { "...the 200 body above..." }}
+{"state": "failed", "status_code": 502, "error": "..."}
+```
+
+Before the cell runs, the state is `queued`, `provisioning` or `starting`.
+That wait is bounded by `STRATA_WORKER_PROVISIONING_TIMEOUT_SECONDS` (default
+600). The cell's own timeout starts only when the job first reports `running`,
+so a machine that takes 45 s to boot doesn't spend a 60 s cell's budget. At
+`finished` or `failed`, `status_code` and `result` (or `error`) stand for the
+response a synchronous worker would have given, and are handled the same way.
+If either deadline passes, the server cancels the job through
+`/v1/executions/{build_id}/cancel` and fails the cell with
+`PROVISIONING_TIMEOUT` or `TIMEOUT`. While the job is being provisioned, the
+cell's badge reads "starting". A worker that answers synchronously needs no
+change.
 
 **SSRF defenses on signed URLs:** Before fetching/posting, the worker validates each URL:
 
@@ -265,9 +349,12 @@ error.json              - present only on failure
     {"file": "display/cell_default.png", "content_type": "image/png", "bytes": 18234}
   ],
   "console": "console.json",
+  "hardware": {"cpus": 32, "memory_mb": 257000, "accelerators": ["…"], "cuda": "12.2"},
   "error": null
 }
 ```
+
+`hardware` is the same object `/health` returns, echoed from the worker that ran the job. The notebook records it on each stored artifact's transform spec, beside `build_env`, and does not hash it: the machine type a cell asked for is part of its identity, while the exact accelerator and driver are kept for the record. That way identical machines of one class still share a cache.
 
 On cell errors, `error.json` is populated and `outputs` may be empty:
 

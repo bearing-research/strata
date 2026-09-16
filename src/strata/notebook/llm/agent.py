@@ -56,6 +56,7 @@ from strata.notebook.llm.config import (
     max_output_tokens_param,
 )
 from strata.notebook.llm.context import build_notebook_context
+from strata.notebook.llm.usage import record_llm_usage
 
 if TYPE_CHECKING:
     from strata.notebook.session import NotebookSession
@@ -448,6 +449,7 @@ async def _agent_chat_completion_stream(
     if assembled_tool_calls:
         message["tool_calls"] = assembled_tool_calls
 
+    record_llm_usage(model, input_tokens, output_tokens)
     yield {
         "type": "complete",
         "message": message,

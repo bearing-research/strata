@@ -74,6 +74,10 @@ def pack_notebook_output_bundle(
         # and recording where we happened to be standing.
         "build_env": result_manifest.get("build_env", ""),
     }
+    # Only a worker reports it (``strata.notebook.hardware``); a local run's
+    # bundle leaves it out rather than claiming an empty machine.
+    if result_manifest.get("hardware"):
+        bundle_manifest["hardware"] = result_manifest["hardware"]
 
     variables = result_manifest.get("variables", {})
     if not isinstance(variables, dict):
@@ -158,6 +162,7 @@ def unpack_notebook_output_bundle(
             "error": manifest_data.get("error"),
             "traceback": manifest_data.get("traceback"),
             "build_env": manifest_data.get("build_env", ""),
+            "hardware": manifest_data.get("hardware") or {},
         }
 
         variables = manifest_data.get("variables", {})

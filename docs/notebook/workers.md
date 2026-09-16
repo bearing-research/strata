@@ -20,7 +20,7 @@ Strata Notebook can dispatch individual cells to remote machines via the **execu
 4. The worker runs the cell in a subprocess and returns outputs as a gzipped bundle.
 5. Strata stores the outputs as artifacts; cache hits work identically to local cells.
 
-Cells run in **the worker's Python environment**, so install your workload dependencies (torch, datafusion, sentence-transformers, etc.) into the worker image before launching it. Unlike Strata's own server, the worker process does **not** require a uv-managed env - it can be pip-installed into a plain Docker image.
+Cells run in **the notebook's locked environment** on a `strata-worker` of this version or later: Strata sends the notebook's `uv.lock` with the cell, and the worker builds that environment once per lock (with `uv`, which the image needs) and reuses it for every later cell with the same lock. A worker that does not advertise this in `/health` (an older `strata-worker`, or a custom worker) runs cells in its own Python environment, so install your workload dependencies (torch, datafusion, sentence-transformers, etc.) into that image before launching it. Either way the worker process does **not** require a uv-managed env - it can be pip-installed into a plain Docker image. See [the `environment` block](../reference/executor-protocol.md#the-environment-block) for `STRATA_WORKER_ENV_ROOT` and a prebuilt-environment registry.
 
 For the wire-level contract - request envelopes, response bundle format, error codes, the pull-model with signed URLs - see the [Executor Protocol](../reference/executor-protocol.md) reference. This page covers deployment and registration; that one covers the bytes on the wire and is what you'd implement against to write a custom worker that doesn't use `strata-worker`.
 
@@ -379,6 +379,12 @@ drives with:
 docker build -f worker.Dockerfile -t strata-worker:latest .
 ```
 
+For R cells, build it with R and the packages `harness.R` needs:
+
+```bash
+docker build -f worker.Dockerfile --build-arg WITH_R=true -t strata-worker:r .
+```
+
 That image needs `strata-notebook` **0.7.0 or newer** - `POST /execute` ships
 in that release - and it installs from PyPI, so building it inside a checkout
 does not pick up local worker changes.
@@ -559,9 +565,11 @@ Remote execution results are cached identically to local cells. The provenance h
 - Same code + same inputs + same `runtime_id` = cache hit, no remote call.
 - Changing `runtime_id` (e.g., switching from `gpu-a10g` to `gpu-h100`) invalidates the cache for cells using that worker.
 
+`runtime_id` names the hardware and drivers a worker runs on. The Python packages a cell imports come from the notebook's lock on a worker that runs locked environments, and the lock is already part of the provenance hash.
+
 **When to bump `runtime_id`:**
 
-- You upgraded the worker's Python dependencies (new torch version, new model weights baked into the image) and want downstream cells to re-run.
+- You upgraded what the image provides outside the lock (CUDA, drivers, model weights baked into the image), or, on a worker that runs cells in its own environment, its Python dependencies, and want downstream cells to re-run.
 - You moved a worker to different hardware (CPU type, GPU SKU) and the numerical output may differ.
 - You explicitly want to bust the cache for a debugging session.
 
@@ -597,7 +605,7 @@ The worker image is missing the dependency the cell needs. Add it to the Dockerf
 Cold start. Modal scales the function to zero after `scaledown_window` seconds idle; the first request after a scale-down has to provision a fresh container. Either bump `scaledown_window`, set `min_containers=1` on the `@app.function`, or just expect the latency on the first cell after idle.
 
 **`413 Payload Too Large` from the worker.**
-A cell input is larger than the worker's max-input limit. Default is 256 MB; override with `STRATA_WORKER_MAX_INPUT_BYTES=<bytes>` on the worker. Better: shrink the input by selecting columns / filtering rows in an upstream cell.
+A cell input is larger than the worker's max-input limit. Default is 2 GiB; override with `STRATA_WORKER_MAX_INPUT_BYTES=<bytes>` on the worker. Inputs are written to disk as they arrive, so the limit to size against is the worker's disk, not its memory. Better: shrink the input by selecting columns / filtering rows in an upstream cell.
 
 **Fly build fails with `error: failed to fetch wheel` from a workload dep.**
 Some Python deps (torch, sentence-transformers) don't ship abi3 wheels and fall back to building from source. If your worker needs one, add `build-essential` (plus the dep-specific toolchain) to the Dockerfile via `RUN apt-get install -y --no-install-recommends build-essential && rm -rf /var/lib/apt/lists/*` before the `uv pip install` step.

@@ -44,6 +44,7 @@ from strata.notebook.python_versions import (
     read_requested_python_minor,
 )
 from strata.notebook.quiesce import NotebookQuiesced
+from strata.notebook.scopes import required_scope_for_route
 from strata.notebook.session import NotebookSession, SessionManager
 from strata.notebook.timing import NotebookTimingRecorder
 from strata.notebook.workers import (
@@ -79,7 +80,40 @@ _session_manager = SessionManager()
 # lives here for the server's lifetime and is torn down in the lifespan.
 _worker_supervisor: RemoteWorkerSupervisor | None = None
 
-router = APIRouter(prefix="/v1/notebooks", tags=["notebooks"])
+
+def _require_notebook_scope(request: Request) -> None:
+    """Router-level gate: the caller must hold the scope this route needs.
+
+    The same ``notebook:read`` / ``notebook:write`` / ``notebook:execute`` table
+    the WebSocket frames are checked against (``strata.notebook.scopes``), so a
+    principal that cannot run a cell over the socket cannot run it over REST
+    either. Keyed on the matched route's path template rather than a decorator
+    on each route, so a route added later is covered without anyone remembering
+    to gate it. No principal auth means no principal to check, as with
+    ``require_scope``.
+    """
+    from strata.auth import get_principal
+    from strata.server import get_state
+
+    try:
+        config = get_state().config
+    except RuntimeError:
+        return
+    if not getattr(config, "principal_auth_enabled", False):
+        return
+    route = request.scope.get("route")
+    path = getattr(route, "path", request.url.path)
+    required = required_scope_for_route(request.method, path)
+    principal = get_principal()
+    if principal is None or not principal.has_scope(required):
+        raise HTTPException(status_code=403, detail=f"This route requires the {required} scope")
+
+
+router = APIRouter(
+    prefix="/v1/notebooks",
+    tags=["notebooks"],
+    dependencies=[Depends(_require_notebook_scope)],
+)
 
 
 def get_session_manager() -> SessionManager:
@@ -641,6 +675,8 @@ class UpdateCellSourceRequest(BaseModel):
 
     source: str = Field(..., max_length=1_000_000)  # 1M characters (~1-4 MB UTF-8)
     author: str | None = Field(default=None, max_length=MAX_AUTHOR_LENGTH)
+    # Overwrite a cell someone else changed moments ago (see ``cell_locked``).
+    force: bool = False
 
 
 class UpdateCellTestsRequest(BaseModel):
@@ -856,6 +892,8 @@ class PromoteArtifactRequest(BaseModel):
     name: str = Field(..., min_length=1, max_length=512)
     alias: str | None = Field(default=None, max_length=128)
     tags: dict[str, str] = Field(default_factory=dict)
+    # Also write it into this Iceberg table, in the team store's catalog.
+    table: str | None = Field(default=None, max_length=1024)
 
 
 # ============================================================================
@@ -1460,7 +1498,11 @@ async def release_notebook(notebook_id: str, session: SessionDep) -> dict:
     return {"path": str(root), "released": quiesce.release(root)}
 
 
-projects_router = APIRouter(prefix="/v1/projects", tags=["notebooks"])
+projects_router = APIRouter(
+    prefix="/v1/projects",
+    tags=["notebooks"],
+    dependencies=[Depends(_require_notebook_scope)],
+)
 
 
 def _project_root(path: str, request: Request) -> tuple[Path, list[NotebookSession]]:
@@ -2222,10 +2264,28 @@ async def update_cell_source(
         Updated cell state and DAG
     """
 
+    from strata.notebook.presence import lock_window_seconds
+    from strata.notebook.ws import broadcast_presence
+
+    author = resolve_author(req.author)
+    held_by = session.presence.holder(cell_id, author, lock_window_seconds())
+    if held_by is not None and not req.force:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "cell_locked",
+                "cell_id": cell_id,
+                "held_by": held_by,
+                "message": f"{held_by} changed cell {cell_id} moments ago; retry in a "
+                "few seconds, or send force to take it over",
+            },
+        )
+
     try:
         # Write to disk
-        author = resolve_author(req.author)
         write_cell(session.path, cell_id, req.source, author=author)
+        session.presence.record_edit(cell_id, author)
+        session.presence.api_edit(author, cell_id)
 
         # Update source in session
         cell_in_session = session.notebook_state.get_cell(cell_id)
@@ -2242,7 +2302,7 @@ async def update_cell_source(
         # Without this, cells keep their old "ready" status and the
         # cascade planner won't trigger when the user runs a
         # downstream cell.
-        session.compute_staleness()
+        await session.compute_staleness_async()
 
         # Find and return the updated cell with DAG info
         cell = session.notebook_state.get_cell(cell_id)
@@ -2252,6 +2312,7 @@ async def update_cell_source(
         # Return cell and updated DAG — include all cells so the
         # frontend can sync staleness/status changes.
         await _broadcast_state(notebook_id, session)
+        await broadcast_presence(notebook_id, session)
         return {
             "cell": session.serialize_cell(cell),
             "dag": _format_dag(session),
@@ -3167,9 +3228,9 @@ async def promote_notebook_artifact(
             status_code=404, detail=f"{artifact_id}@v={version} is not in this notebook's store"
         )
 
-    target = RemoteStore(
-        str(base_url), dict(getattr(config, "notebook_remote_store_headers", {}) or {})
-    )
+    from strata.auth import remote_store_headers
+
+    target = RemoteStore(str(base_url), remote_store_headers(config))
     try:
         # The copy is a chain of blocking HTTP calls against another machine,
         # so it goes off the event loop: the notebook's WebSocket has to keep
@@ -3182,6 +3243,7 @@ async def promote_notebook_artifact(
             name=request.name,
             alias=request.alias,
             tags=dict(request.tags),
+            table=request.table,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
@@ -3198,6 +3260,8 @@ async def promote_notebook_artifact(
         "copied": promotion.copied,
         "alias": promotion.alias,
         "alias_pending": promotion.alias_pending,
+        "table": promotion.table,
+        "table_snapshot": promotion.table_snapshot,
         "store": str(base_url),
     }
 

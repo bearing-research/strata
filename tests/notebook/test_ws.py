@@ -641,6 +641,7 @@ async def test_cell_execute_uses_warm_pool_when_available(notebook_session, monk
         # assertion reads as — several layers away from the actual cause.
         build_env="",
         build_duration_ms=0.0,
+        hardware=None,
     ):
         return True
 
@@ -1130,8 +1131,18 @@ async def test_ws_cancelled_signed_http_executor_marks_build_failed(
         build_id: str | None = None,
         log_url: str | None = None,
         env: dict[str, str] | None = None,
+        interpreter: Path | None = None,
     ) -> dict[str, object]:
-        del harness_path, manifest_path, timeout_seconds, in_flight, build_id, log_url, env
+        del (
+            harness_path,
+            manifest_path,
+            timeout_seconds,
+            in_flight,
+            build_id,
+            log_url,
+            env,
+            interpreter,
+        )
         started.set()
         await asyncio.sleep(60)
         return {

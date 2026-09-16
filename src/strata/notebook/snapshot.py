@@ -127,6 +127,34 @@ def build_artifact_index(session: NotebookSession) -> dict[str, Any]:
     return cells
 
 
+def list_fetches(session: NotebookSession) -> list[dict[str, Any]]:
+    """Every ``@fetch`` in the notebook, so a preflight can flag the unpinned.
+
+    An unpinned fetch is the one input a snapshot cannot vouch for: its bytes
+    are whatever the URL serves when the cell next runs. ``sha256`` is the pin,
+    or else the digest last read, which is what an author would pin to.
+    """
+    from strata.notebook.annotations import parse_annotations
+    from strata.notebook.fetch import FetchCache
+
+    cache = FetchCache(session.path)
+    fetches = []
+    for cell in session.notebook_state.cells:
+        for spec in parse_annotations(cell.source).fetches:
+            recorded = cache.recorded(spec.url)
+            fetches.append(
+                {
+                    "cell_id": cell.id,
+                    "name": spec.name,
+                    "url": spec.url,
+                    "pinned": spec.sha256 is not None,
+                    "sha256": spec.sha256 or (recorded.sha256 if recorded else None),
+                    "refetch": spec.refetch,
+                }
+            )
+    return fetches
+
+
 def _artifacts_to_carry(
     index: dict[str, Any], include: IncludeMode, selected: list[str] | None
 ) -> set[tuple[str, int]]:
@@ -253,6 +281,7 @@ def write_snapshot(
         # it from what it failed to find.
         "carried": written,
         "records": records,
+        "fetches": list_fetches(session),
     }
     archive.writestr("artifacts.json", json.dumps(manifest, indent=2))
     return manifest

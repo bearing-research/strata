@@ -42,6 +42,22 @@ FROM python:3.14-slim
 ARG STRATA_VERSION=0.7.0
 RUN pip install --no-cache-dir "strata-notebook[notebook]==${STRATA_VERSION}"
 
+# R cells, with --build-arg WITH_R=true:
+#
+#   docker build -f worker.Dockerfile --build-arg WITH_R=true -t strata-worker:r .
+#
+# The worker runs an R cell's harness.R under Rscript, which needs jsonlite and
+# arrow in R's library. Debian does not package arrow, and compiling it takes
+# the better part of an hour, so both come as binaries from Posit's package
+# manager for this Debian release.
+ARG WITH_R=false
+RUN if [ "$WITH_R" = "true" ]; then \
+      apt-get update \
+      && apt-get install -y --no-install-recommends r-base-core \
+      && rm -rf /var/lib/apt/lists/* \
+      && Rscript -e 'options(repos = c(CRAN = "https://packagemanager.posit.co/cran/__linux__/trixie/latest"), HTTPUserAgent = sprintf("R/%s R (%s)", getRversion(), paste(getRversion(), R.version["platform"], R.version["arch"], R.version["os"]))); install.packages(c("jsonlite", "arrow")); for (p in c("jsonlite", "arrow")) if (!requireNamespace(p, quietly = TRUE)) stop(p, " did not install")'; \
+    fi
+
 # Cells execute arbitrary user code, so do not run them as root. The server
 # image does the same (see the root Dockerfile).
 RUN useradd --create-home --shell /bin/bash worker

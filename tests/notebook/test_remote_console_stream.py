@@ -176,6 +176,12 @@ class TestNoDoubleDelivery:
         assert [m["type"] for m in sent] == ["cell_console", "cell_console", "cell_output"]
 
 
+def remote_executor_module():
+    from strata.notebook import remote_executor
+
+    return remote_executor
+
+
 class TestWorkerTeeing:
     @pytest.mark.asyncio
     async def test_output_is_forwarded_as_it_is_produced(self, tmp_path, monkeypatch):
@@ -185,7 +191,7 @@ class TestWorkerTeeing:
         posted: list[tuple[str, str]] = []
         first_chunk_seen = asyncio.Event()
 
-        async def _fake_post(log_url, stream, text):
+        async def _fake_post(client, log_url, stream, text):
             posted.append((stream, text))
             first_chunk_seen.set()
 
@@ -215,6 +221,48 @@ class TestWorkerTeeing:
         await drain
 
     @pytest.mark.asyncio
+    async def test_a_real_cell_reaches_the_pipe_the_worker_reads(self, tmp_path):
+        """Driven through the harness, not a stand-in for it.
+
+        The harness replaces ``sys.stdout`` to capture the cell's output for
+        the result manifest. A capture nothing writes through leaves the pipe
+        this feature reads empty for the cell's whole life, so every test
+        above can pass while a worker streams nothing at all.
+        """
+        import json
+
+        output_dir = tmp_path / "run"
+        output_dir.mkdir()
+        manifest = output_dir / "manifest.json"
+        manifest.write_text(
+            json.dumps(
+                {
+                    "source": "print('from-the-cell')\nx = 1\n",
+                    "inputs": {},
+                    "output_dir": str(output_dir),
+                    "mounts": {},
+                    "tables": {},
+                    "env": {},
+                    "mutation_defines": [],
+                }
+            )
+        )
+
+        proc = await asyncio.create_subprocess_exec(
+            sys.executable,
+            "-m",
+            "strata.notebook.harness",
+            str(manifest),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, _ = await asyncio.wait_for(remote_executor_module()._drain(proc, None), timeout=60)
+
+        assert b"from-the-cell" in stdout, "a worker would have streamed nothing"
+        result = json.loads((output_dir / "harness-result.json").read_text())
+        assert result["stdout"] == "from-the-cell\n", "and the bundle still carries it whole"
+
+    @pytest.mark.asyncio
     async def test_without_a_log_url_the_output_is_still_collected(self, tmp_path):
         """A worker given no log URL behaves exactly as it did before."""
         from strata.notebook import remote_executor
@@ -232,3 +280,148 @@ class TestWorkerTeeing:
 
         assert stdout == b"out\n"
         assert stderr == b"err\n"
+
+
+class TestWhatStreamingDropped:
+    """Forwarding a chunk is best effort: the worker gives it five seconds and
+    swallows failures, a log URL expires, a replica may not hold the route. So
+    the report at the end sends what the notebook has not seen — not all of it
+    again, and not nothing."""
+
+    @pytest.mark.asyncio
+    async def test_the_part_that_never_arrived_is_sent_at_the_end(self, monkeypatch):
+        from strata.notebook.executor import CellExecutionResult
+        from strata.notebook.ws import _broadcast_execution_result
+
+        sent: list[dict] = []
+
+        async def _capture(notebook_id, message):
+            sent.append(message)
+
+        monkeypatch.setattr("strata.notebook.ws._broadcast_message", _capture)
+        console_relay.register("b1", "nb1", "cell9")
+        await console_relay.deliver("b1", "stdout", "epoch 1\n")
+        sent.clear()
+
+        # The worker's remaining chunks never made it; the bundle has them all.
+        result = CellExecutionResult(
+            cell_id="cell9", success=True, stdout="epoch 1\nepoch 2\nepoch 3\n", stderr=""
+        )
+        await _broadcast_execution_result("nb1", 5, "cell9", result)
+
+        console = [m for m in sent if m["type"] == "cell_console"]
+        assert [m["payload"]["text"] for m in console] == ["epoch 2\nepoch 3\n"]
+        assert [m["type"] for m in sent][-1] == "cell_output"
+
+    @pytest.mark.asyncio
+    async def test_a_stream_that_arrived_whole_is_not_repeated(self, monkeypatch):
+        from strata.notebook.executor import CellExecutionResult
+        from strata.notebook.ws import _broadcast_execution_result
+
+        sent: list[dict] = []
+
+        async def _capture(notebook_id, message):
+            sent.append(message)
+
+        monkeypatch.setattr("strata.notebook.ws._broadcast_message", _capture)
+        console_relay.register("b1", "nb1", "cell9")
+        await console_relay.deliver("b1", "stdout", "epoch 1\n")
+        await console_relay.deliver("b1", "stderr", "warn\n")
+        sent.clear()
+
+        result = CellExecutionResult(
+            cell_id="cell9", success=True, stdout="epoch 1\n", stderr="warn\n"
+        )
+        await _broadcast_execution_result("nb1", 5, "cell9", result)
+
+        assert [m["type"] for m in sent] == ["cell_output"]
+
+
+class TestForwardingDoesNotHoldTheCell:
+    """Console is advisory and the bundle is the record, so a server that never
+    answers must not cost the cell its own timeout."""
+
+    @pytest.mark.asyncio
+    async def test_a_log_server_that_never_answers_still_lets_the_cell_finish(self, tmp_path):
+        import asyncio as _asyncio
+
+        from strata.notebook.remote_executor import _drain
+
+        class _Hanging:
+            """A stand-in for the POST that never comes back."""
+
+            async def post(self, *args, **kwargs):
+                await _asyncio.sleep(3600)
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *exc):
+                return False
+
+        import strata.notebook.remote_executor as remote_executor
+
+        original = remote_executor.httpx.AsyncClient
+        remote_executor.httpx.AsyncClient = lambda *a, **k: _Hanging()
+        try:
+            proc = await _asyncio.create_subprocess_exec(
+                sys.executable,
+                "-c",
+                "import sys\nfor i in range(200): print('line', i)\nsys.stdout.flush()",
+                stdout=_asyncio.subprocess.PIPE,
+                stderr=_asyncio.subprocess.PIPE,
+            )
+            stdout, _ = await _asyncio.wait_for(
+                _drain(proc, "http://server/v1/builds/b1/log"), timeout=60
+            )
+        finally:
+            remote_executor.httpx.AsyncClient = original
+
+        assert stdout.decode().count("line ") == 200, "the bundle keeps the whole console"
+
+
+class TestWhatIsShownStaysAPrefix:
+    """The report at the end sends ``text[delivered:]``, so what was streamed
+    has to be a prefix of the whole console. Dropping the oldest queued chunk
+    under backpressure broke that: the start went missing and the end was shown
+    twice."""
+
+    @pytest.mark.asyncio
+    async def test_a_burst_the_link_cannot_keep_up_with_keeps_its_beginning(self, tmp_path):
+        import asyncio as _asyncio
+
+        import strata.notebook.remote_executor as remote_executor
+
+        posted: list[str] = []
+        release = _asyncio.Event()
+
+        async def _slow_post(client, log_url, stream, text):
+            await release.wait()
+            posted.append(text)
+
+        monkeypatch = pytest.MonkeyPatch()
+        monkeypatch.setattr(remote_executor, "_post_log_chunk", _slow_post)
+        try:
+            proc = await _asyncio.create_subprocess_exec(
+                sys.executable,
+                "-c",
+                # More chunks than the forwarding queue holds, so it fills.
+                "print('X' * 4_000_000)",
+                stdout=_asyncio.subprocess.PIPE,
+                stderr=_asyncio.subprocess.PIPE,
+            )
+            drain = _asyncio.create_task(_drain_via(remote_executor, proc))
+            await _asyncio.sleep(0.2)
+            release.set()
+            stdout, _ = await drain
+        finally:
+            monkeypatch.undo()
+
+        shown = "".join(posted)
+        assert stdout.decode().startswith(shown), (
+            "what the notebook was shown is no longer the beginning of the console"
+        )
+
+
+async def _drain_via(remote_executor, proc):
+    return await remote_executor._drain(proc, "http://server/v1/builds/b1/log")
