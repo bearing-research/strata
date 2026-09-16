@@ -14,6 +14,25 @@ from urllib.parse import urlparse
 ALLOWED_URL_SCHEMES = frozenset({"http", "https"})
 
 
+def web_url_or_none(value: str) -> str | None:
+    """*value* if it is an http(s) URL, else ``None``.
+
+    Scheme only, and no network: this answers "may I make this a link", which
+    a page render asks and which must not depend on DNS. ``url_safety_problem``
+    is the question a fetch asks and resolves the host.
+
+    A record holds whatever was written into it, so a value can be
+    ``javascript:...`` -- which survives HTML escaping and runs on the origin
+    of whoever clicks it. Testing for a leading "http" is not the same check:
+    ``httpfoo://x`` starts with it and is not a URL.
+    """
+    try:
+        scheme = urlparse(value).scheme.lower()
+    except ValueError:
+        return None
+    return value if scheme in ALLOWED_URL_SCHEMES else None
+
+
 def host_is_allowlisted(host: str, allowed_hosts: tuple[str, ...]) -> bool:
     """Whether *host* is named in the allowlist.
 

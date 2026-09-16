@@ -399,6 +399,21 @@ class TableWrite:
     created: bool
 
 
+def _strata_has_written(table: object) -> bool:
+    """Whether any snapshot of *table* was written by an export.
+
+    A first write appends and a later one replaces the contents, which is the
+    contract for a table Strata maintains. Aimed at a table somebody else
+    built -- a production table whose name a caller mistyped or reused -- the
+    same write throws their rows away, recoverable only by time travel until
+    the snapshot expires. The marker is the one ``tag`` already recognises.
+    """
+    return any(
+        snapshot.summary is not None and snapshot.summary.get(SUMMARY_ARTIFACT_ID)
+        for snapshot in table.snapshots()  # type: ignore[attr-defined]
+    )
+
+
 class IcebergWriter:
     """Writes artifacts into Iceberg tables as snapshots that name them.
 
@@ -467,6 +482,13 @@ class IcebergWriter:
         if table.current_snapshot() is None:
             table.append(data, snapshot_properties=properties)
         else:
+            if not created and not _strata_has_written(table):
+                raise ValueError(
+                    f"{table_uri} holds data Strata did not write, and a later "
+                    f"write replaces the table's contents -- refusing to "
+                    f"overwrite it with {artifact_id}@v={version}. Export to a "
+                    f"table of its own, or append to this one outside Strata."
+                )
             try:
                 with table.update_schema() as update:
                     update.union_by_name(data.schema)

@@ -145,7 +145,14 @@ class TestPublicationPage:
     """What the rendered page does and does not say."""
 
     @staticmethod
-    def _render(store, *, source: str, title: str | None = None, revoke: bool = False):
+    def _render(
+        store,
+        *,
+        source: str,
+        title: str | None = None,
+        revoke: bool = False,
+        external_ids: list[dict[str, str]] | None = None,
+    ):
         from strata.api.publication_page import render_publication
         from strata.notebook.artifact_integration import NotebookArtifactManager
         from strata.services.artifact import ArtifactService
@@ -173,6 +180,11 @@ class TestPublicationPage:
         publication = manager.artifact_store.publish_artifact(
             figure.id, figure.version, title=title
         )
+        if external_ids is not None:
+            manager.artifact_store.update_publication_credits(
+                publication.token, external_ids=external_ids
+            )
+            publication = manager.artifact_store.get_publication(publication.token)
         if revoke:
             manager.artifact_store.revoke_publication(publication.token)
             publication = manager.artifact_store.get_publication(publication.token)
@@ -200,6 +212,38 @@ class TestPublicationPage:
 
         assert "<script>alert(1)</script>" not in html
         assert "&lt;script&gt;" in html
+
+    def test_an_identifier_that_is_not_a_url_is_printed_not_linked(self, store):
+        """``url`` takes whatever it is handed, escaping leaves the scheme
+        alone, and this page is served unauthenticated to anyone with the
+        link -- on this server's own origin."""
+        html = self._render(
+            store,
+            source="rows = []",
+            external_ids=[{"scheme": "url", "value": "javascript:alert(1)"}],
+        )
+
+        assert "href='javascript:" not in html
+        assert 'href="javascript:' not in html
+        assert "javascript:alert(1)" in html, "the identifier is still shown"
+
+    def test_a_real_url_is_still_a_link(self, store):
+        html = self._render(
+            store,
+            source="rows = []",
+            external_ids=[{"scheme": "url", "value": "https://example.org/paper"}],
+        )
+
+        assert "href='https://example.org/paper'" in html
+
+    def test_a_doi_is_still_resolved_through_doi_org(self, store):
+        html = self._render(
+            store,
+            source="rows = []",
+            external_ids=[{"scheme": "doi", "value": "10.1000/xyz"}],
+        )
+
+        assert "href='https://doi.org/10.1000/xyz'" in html
 
     def test_the_title_is_escaped(self, store):
         html = self._render(store, source="rows = []", title="<img src=x onerror=1>")
