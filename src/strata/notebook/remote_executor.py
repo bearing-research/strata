@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import hmac
 import json
 import logging
@@ -126,7 +127,13 @@ def _assert_url_safe(url: str, field: str) -> None:
         raise HTTPException(status_code=400, detail=problem)
 
 
-async def _post_log_chunk(log_url: str, stream: str, text: str) -> None:
+# How many chunks may be waiting to be forwarded before the oldest are
+# dropped. Console is advisory, and a cell that outruns the link to the server
+# must keep running at its own speed rather than the link's.
+_LOG_QUEUE_CHUNKS = 64
+
+
+async def _post_log_chunk(client: httpx.AsyncClient, log_url: str, stream: str, text: str) -> None:
     """Forward one console chunk, and never let doing so affect the cell.
 
     Console is advisory: the bundle is the record. A server that is slow,
@@ -135,11 +142,10 @@ async def _post_log_chunk(log_url: str, stream: str, text: str) -> None:
     """
     separator = "&" if "?" in log_url else "?"
     try:
-        async with httpx.AsyncClient(timeout=5.0) as client:
-            await client.post(
-                f"{log_url}{separator}stream={stream}",
-                content=text.encode("utf-8"),
-            )
+        await client.post(
+            f"{log_url}{separator}stream={stream}",
+            content=text.encode("utf-8"),
+        )
     except Exception:
         logger.debug("Could not forward %s chunk for the running cell", stream, exc_info=True)
 
@@ -155,7 +161,26 @@ async def _drain(proc: Any, log_url: str | None) -> tuple[bytes, bytes]:
     is busy waiting on the other. Chunks for a single stream are posted in
     order, one at a time, because the notebook appends them in arrival order
     and has no way to reorder what it is shown.
+
+    Forwarding happens on its own task, over one connection, with a bounded
+    queue: a cell that prints faster than the link to the server carries used
+    to be charged the whole round trip per 8 KiB — the cell's own timeout paid
+    for the console — and now runs at its own speed while the oldest waiting
+    chunks are dropped.
     """
+    queue: asyncio.Queue[tuple[str, str]] | None = None
+    forwarder: asyncio.Task[None] | None = None
+
+    async def _forward() -> None:
+        assert queue is not None and log_url is not None
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            while True:
+                item = await queue.get()
+                try:
+                    stream, text = item
+                    await _post_log_chunk(client, log_url, stream, text)
+                finally:
+                    queue.task_done()
 
     async def _pump(reader: Any, stream: str) -> bytes:
         collected: list[bytes] = []
@@ -164,15 +189,34 @@ async def _drain(proc: Any, log_url: str | None) -> tuple[bytes, bytes]:
             if not chunk:
                 break
             collected.append(chunk)
-            if log_url:
-                await _post_log_chunk(log_url, stream, chunk.decode("utf-8", errors="replace"))
+            if queue is not None:
+                if queue.full():
+                    # Drop the oldest: what the cell is printing now is what
+                    # somebody watching wants to see.
+                    with contextlib.suppress(asyncio.QueueEmpty):
+                        queue.get_nowait()
+                        queue.task_done()
+                queue.put_nowait((stream, chunk.decode("utf-8", errors="replace")))
         return b"".join(collected)
 
-    stdout, stderr = await asyncio.gather(
-        _pump(proc.stdout, "stdout"),
-        _pump(proc.stderr, "stderr"),
-    )
-    await proc.wait()
+    if log_url:
+        queue = asyncio.Queue(maxsize=_LOG_QUEUE_CHUNKS)
+        forwarder = asyncio.create_task(_forward())
+    try:
+        stdout, stderr = await asyncio.gather(
+            _pump(proc.stdout, "stdout"),
+            _pump(proc.stderr, "stderr"),
+        )
+        await proc.wait()
+        if queue is not None:
+            # The cell is done; give what is still queued its moment to land.
+            with contextlib.suppress(TimeoutError):
+                await asyncio.wait_for(queue.join(), timeout=10.0)
+    finally:
+        if forwarder is not None:
+            forwarder.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await forwarder
     return stdout, stderr
 
 
@@ -251,6 +295,40 @@ def _positive_int_env(name: str) -> int | None:
     if value < 1:
         raise ValueError(f"{name} must be a positive integer, got {raw!r}")
     return value
+
+
+# A worker holds exactly the secrets a cell must not read: the bearer token
+# that authorizes running code on it, and the credentials it resolves mount and
+# connection names against. A cell is handed what its manifest carries, never
+# these — a cell that reads the token can dispatch to the machine as the server.
+_WORKER_SECRETS = (
+    "STRATA_WORKER_TOKEN",
+    "STRATA_NOTEBOOK_CREDENTIALS",
+    "STRATA_NOTEBOOK_MOUNT_CREDENTIALS",
+    "STRATA_PROXY_TOKEN",
+    "STRATA_NOTEBOOK_REMOTE_STORE_HEADERS",
+)
+
+
+def _cell_env(extra: dict[str, str] | None = None) -> dict[str, str]:
+    """The environment a cell's harness runs with on a worker.
+
+    ``STRATA_NOTEBOOK_HARNESS_ENV_ALLOWLIST`` narrows it the way it narrows a
+    cell on the server. Whatever it says, the worker's own secrets are dropped:
+    unset, an operator gets the server's environment on the server and the
+    worker's here, and neither should hand a cell its credentials.
+    """
+    from strata.notebook.harness_env import harness_env
+
+    allowlist: list[str] = [
+        entry.strip()
+        for entry in (os.environ.get("STRATA_NOTEBOOK_HARNESS_ENV_ALLOWLIST") or "").split(",")
+        if entry.strip()
+    ]
+    env = harness_env(allowlist, extra) if allowlist else {**os.environ, **(extra or {})}
+    for name in _WORKER_SECRETS:
+        env.pop(name, None)
+    return env
 
 
 def _worker_credentials() -> CredentialResolver:
@@ -580,11 +658,7 @@ def create_notebook_executor_app(
                     in_flight=in_flight,
                     build_id=build_id,
                     log_url=log_url,
-                    env=(
-                        {**os.environ, "CUDA_VISIBLE_DEVICES": str(gpu)}
-                        if gpu is not None
-                        else None
-                    ),
+                    env=_cell_env({"CUDA_VISIBLE_DEVICES": str(gpu)} if gpu is not None else None),
                     interpreter=interpreter,
                 )
                 if result.get("success", False):

@@ -30,7 +30,10 @@ _routes: dict[str, tuple[str, str]] = {}
 # The finished-execution broadcast sends the complete stdout and stderr, which
 # would show everything a second time under what was already streamed; it
 # consults this and skips what it has already shown.
-_streamed: set[tuple[str, str]] = set()
+# How much of each stream a cell has already shown while it ran, so the
+# report at the end can send what did not make it rather than all of it again
+# (the frontend appends) or nothing (a dropped chunk would be lost for good).
+_streamed: dict[tuple[str, str], dict[str, int]] = {}
 
 
 def register(build_id: str, notebook_id: str, cell_id: str) -> None:
@@ -43,14 +46,17 @@ def unregister(build_id: str) -> None:
     _routes.pop(build_id, None)
 
 
-def streamed(notebook_id: str, cell_id: str) -> bool:
-    """Whether this cell's console was already streamed while it ran."""
-    return (notebook_id, cell_id) in _streamed
+def streamed(notebook_id: str, cell_id: str) -> dict[str, int] | None:
+    """How much of each stream this cell showed while it ran, or None.
+
+    None means nothing was streamed and the whole console is still to be sent.
+    """
+    return _streamed.get((notebook_id, cell_id))
 
 
 def clear_streamed(notebook_id: str, cell_id: str) -> None:
     """Forget that a cell streamed, once its run is fully reported."""
-    _streamed.discard((notebook_id, cell_id))
+    _streamed.pop((notebook_id, cell_id), None)
 
 
 async def deliver(build_id: str, stream: str, text: str) -> bool:
@@ -72,7 +78,8 @@ async def deliver(build_id: str, stream: str, text: str) -> bool:
     )
     from strata.notebook.ws_payloads import CellConsolePayload
 
-    _streamed.add((notebook_id, cell_id))
+    delivered = _streamed.setdefault((notebook_id, cell_id), {})
+    delivered[stream] = delivered.get(stream, 0) + len(text)
     await _broadcast_message(
         notebook_id,
         _make_message(

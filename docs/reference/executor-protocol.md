@@ -71,6 +71,8 @@ Liveness + capabilities probe. No auth.
 
 `locked_environments: true` says the worker runs a cell in the notebook's own locked environment when the request carries one (below). Strata sends that block only to a worker that advertises it; any other gets requests exactly as before.
 
+A cell runs with the worker's environment minus the worker's own secrets — its token and the credentials it resolves names against — and `STRATA_NOTEBOOK_HARNESS_ENV_ALLOWLIST` narrows the rest, as [the server's allowlist](../notebook/workers.md) narrows a cell there. A cell gets what its manifest carries.
+
 `languages` lists the cell languages the worker can run: `r` when `Rscript` is on its `PATH`. An R cell's request says `"language": "r"`, in `transform.params.language` on `POST /v1/execute`, `language` in `POST /v1/notebook-execute` metadata, and `params.language` in a manifest; a Python cell's request carries no `language`. The worker runs `harness.R` under `Rscript` with the same manifest a Python cell's harness gets, and answers an R cell with `500` and `Rscript is not installed on this worker` when it has no R, or `400` for a language it does not know. An R cell carries no `environment` block.
 
 ### The `environment` block
@@ -287,7 +289,7 @@ one, may instead answer `202 Accepted` right away:
 {"job_url": "/v1/jobs/01HZJV"}
 ```
 
-`job_url` may be relative to the manifest URL. The server then polls
+`job_url` may be relative to the manifest URL, and must resolve to the same host and port the manifest went to — the server refuses one pointing anywhere else rather than poll a host of the worker's choosing with the worker's token. The server then polls
 `GET {job_url}`, with the same `Authorization` header, for:
 
 ```json
