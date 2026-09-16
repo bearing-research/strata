@@ -230,3 +230,40 @@ class TestFileRouting:
             "blob_storage_authority": "127.0.0.1:10000",
             "blob_storage_scheme": "http",
         }
+
+
+class TestAclNamesTheCatalog:
+    """A table in a configured catalog is authorized under that catalog's name,
+    so a rule for one catalog does not silently cover another's table."""
+
+    @staticmethod
+    def _ref(uri: str):
+        from strata.config import StrataConfig
+        from strata.iceberg import named_catalog, table_identity_for
+        from strata.types import TableRef
+
+        config = StrataConfig(catalogs={"lake": {"type": "rest", "uri": "http://catalog"}})
+        named, _ = named_catalog(uri, config)
+        return TableRef.from_table_identity(
+            table_identity_for(uri, config), table_uri=uri, named_catalog_name=named
+        )
+
+    def test_a_catalogs_table_carries_its_name(self):
+        assert str(self._ref("lake:taxi.trips")) == "lake:taxi.trips"
+
+    def test_a_warehouse_uri_keeps_the_scheme_rules_are_written_for(self):
+        assert str(self._ref("s3://bucket/wh#taxi.trips")) == "s3:taxi.trips"
+        assert str(self._ref("/data/wh#taxi.trips")) == "file:taxi.trips"
+
+    def test_a_rule_for_a_warehouse_does_not_reach_the_catalogs_table(self):
+        from strata.auth import AclEvaluator
+        from strata.config import _parse_acl_config
+        from strata.types import Principal
+
+        acl = _parse_acl_config(
+            {"default": "deny", "allow_rules": [{"principal": "*", "tables": ["file:taxi.*"]}]}
+        )
+        principal = Principal(id="scientist", scopes=frozenset({"artifacts:write"}))
+
+        assert AclEvaluator(acl).authorize(principal, self._ref("/data/wh#taxi.trips")) is True
+        assert AclEvaluator(acl).authorize(principal, self._ref("lake:taxi.trips")) is False

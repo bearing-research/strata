@@ -89,20 +89,28 @@ class TableRef:
 
     @classmethod
     def from_table_identity(
-        cls, identity: "TableIdentity", table_uri: str | None = None
+        cls,
+        identity: "TableIdentity",
+        table_uri: str | None = None,
+        named_catalog_name: str | None = None,
     ) -> "TableRef":
         """Convert TableIdentity to canonical TableRef.
 
         Args:
             identity: TableIdentity from the planner
             table_uri: Original table URI (used to determine catalog type)
+            named_catalog_name: The configured catalog holding the table, if any
 
         Returns:
             TableRef with normalized catalog, namespace, and table
         """
-        # Determine catalog type from URI prefix
+        # A configured catalog is named by the identity, and is what an ACL
+        # rule names too ("lake:taxi.*"); a warehouse URI keeps the scheme it
+        # has always had, so rules written for one go on matching.
         catalog = "file"
-        if table_uri and table_uri.startswith("s3://"):
+        if named_catalog_name:
+            catalog = named_catalog_name
+        elif table_uri and table_uri.startswith("s3://"):
             catalog = "s3"
 
         return cls(

@@ -311,3 +311,130 @@ def test_the_cli_writes_a_local_artifact_into_a_table(tmp_path, notebook_store, 
     assert status == 0, capsys.readouterr().out
     assert "Created" in capsys.readouterr().out
     assert _written_versions(tmp_path / "wh") == [(artifact.id, "1")]
+
+
+class TestWhoMayExport:
+    """The export route writes a table, so it is gated like every other write:
+    the service-mode write gate, and the table ACL a scan is held to."""
+
+    @staticmethod
+    def _service(monkeypatch, tmp_path, **overrides):
+        from fastapi.testclient import TestClient
+
+        import strata.server as server_module
+        from strata.artifact_store import get_artifact_store, reset_artifact_store
+        from strata.config import StrataConfig
+        from strata.server import ServerState, app
+
+        artifact_dir = tmp_path / "service-artifacts"
+        config = StrataConfig(
+            deployment_mode="service",
+            auth_mode="trusted_proxy",
+            proxy_token="sekrit",
+            artifact_dir=artifact_dir,
+            cache_dir=tmp_path / "cache",
+            **overrides,
+        )
+        reset_artifact_store()
+        monkeypatch.setattr(server_module, "_state", ServerState(config))
+        # Stamped with the caller's tenant, as a write-back from a notebook is.
+        store = get_artifact_store(artifact_dir)
+        from strata.artifact_store import TransformSpec
+
+        version = store.create_artifact(
+            "rows",
+            "a" * 64,
+            transform_spec=TransformSpec(
+                executor="notebook/cell@v1", params={"content_type": "arrow/ipc"}, inputs=[]
+            ),
+            tenant="acme",
+        )
+        blob = _ipc(pa.table({"x": [1]}))
+        with store.open_blob_writer("rows", version) as writer:
+            writer.write(blob)
+        store.finalize_artifact("rows", version, schema_json="", row_count=1, byte_size=len(blob))
+        return TestClient(app), SimpleNamespace(id="rows", version=version)
+
+    @staticmethod
+    def _headers() -> dict[str, str]:
+        return {
+            "X-Strata-Proxy-Token": "sekrit",
+            "X-Strata-Principal": "scientist",
+            "X-Strata-Tenant": "acme",
+            "X-Tenant-ID": "acme",
+            "X-Strata-Scopes": "artifacts:write",
+        }
+
+    def test_a_server_with_writes_disabled_refuses_it(self, tmp_path, monkeypatch):
+        client, rows = self._service(monkeypatch, tmp_path)
+
+        response = client.post(
+            f"/v1/artifacts/{rows.id}/v/{rows.version}/export",
+            json={"table": f"{tmp_path / 'wh'}#taxi.features"},
+            headers=self._headers(),
+        )
+
+        assert response.status_code == 403
+        assert response.json()["detail"]["error"] == "writes_disabled"
+        assert not (tmp_path / "wh").exists(), "the table was written anyway"
+
+    def test_a_table_the_caller_is_denied_is_refused(self, tmp_path, monkeypatch):
+        client, rows = self._service(
+            monkeypatch,
+            tmp_path,
+            service_writes_enabled=True,
+            acl_config={
+                "default": "allow",
+                "deny_rules": [{"principal": "*", "tables": ["file:denied.*"]}],
+            },
+        )
+
+        def _export(namespace: str):
+            return client.post(
+                f"/v1/artifacts/{rows.id}/v/{rows.version}/export",
+                json={"table": f"{tmp_path / 'wh'}#{namespace}.features"},
+                headers=self._headers(),
+            )
+
+        denied = _export("denied")
+        allowed = _export("taxi")
+
+        assert denied.status_code in (403, 404)
+        assert denied.json()["detail"] in ("Table not found", "Access denied to table")
+        # The same request against a table the rules allow goes through, so the
+        # refusal above is the ACL and not a missing artifact.
+        assert allowed.status_code == 200, allowed.text
+        assert _catalog(tmp_path / "wh").load_table("taxi.features") is not None
+
+
+def test_a_named_catalogs_table_is_written_in_that_catalog(tmp_path, notebook_store):
+    """``lake:taxi.features`` is the catalog's table, not a table called
+    ``lake:taxi.features`` in the default catalog."""
+    from strata.iceberg import PyIcebergCatalog
+    from strata.table_export import export_artifact
+
+    warehouse = tmp_path / "lake-wh"
+    warehouse.mkdir()
+    properties = {
+        "type": "sql",
+        "uri": f"sqlite:///{tmp_path / 'lake.db'}",
+        "warehouse": str(warehouse),
+    }
+    config = _config(tmp_path)
+    config.catalogs = {"lake": properties}
+    rows = _version(notebook_store, pa.table({"x": [1, 2]}))
+
+    written = export_artifact(
+        notebook_store.artifact_store,
+        notebook_store.artifact_store.get_artifact(rows.id, rows.version),
+        "lake:taxi.features",
+        config=config,
+        promoted_by="scientist",
+    )
+
+    named = PyIcebergCatalog(config)._get_named_catalog("lake")
+    table = named.load_table("taxi.features")
+    assert table.current_snapshot().snapshot_id == written.snapshot_id
+    assert table.scan().to_arrow().column("x").to_pylist() == [1, 2]
+    default = PyIcebergCatalog(config)._get_catalog(None)
+    assert not default.list_namespaces(), "the write leaked into the default catalog"
