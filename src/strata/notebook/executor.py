@@ -911,6 +911,7 @@ class CellExecutor:
                     timeout_seconds,
                     start_time,
                     materialize_upstreams=materialize_upstreams,
+                    use_cache=use_cache,
                 )
             finally:
                 self._materializing.discard(cell_id)
@@ -5009,6 +5010,46 @@ class CellExecutor:
         "module/cell-instance": ".cell_instance.pickle",
     }
 
+    def _cached_loop_result(
+        self,
+        cell_id: str,
+        loop: LoopAnnotation,
+        carry_var_provenance: str,
+        start_time: float,
+    ) -> CellExecutionResult | None:
+        """The loop's own result from a previous identical run, or None.
+
+        The same two-part check the non-loop path makes: the store holds this
+        provenance, and the cell's canonical artifact is the row that has it —
+        so a hit is this cell's own result, not a duplicate of somebody else's
+        computation of the same thing.
+        """
+        artifact_mgr = self.session.get_artifact_manager()
+        if artifact_mgr.find_cached(carry_var_provenance) is None:
+            return None
+        notebook_id = self.session.notebook_state.id
+        canonical_id = f"nb_{notebook_id}_cell_{cell_id}_var_{loop.carry}"
+        canonical = artifact_mgr.artifact_store.get_latest_version(canonical_id)
+        if canonical is None or canonical.provenance_hash != carry_var_provenance:
+            return None
+        uri = f"strata://artifact/{canonical.id}@v={canonical.version}"
+        cell = self.session.notebook_state.get_cell(cell_id)
+        if cell is not None:
+            cell.cache_hit = True
+            cell.artifact_uris[loop.carry] = uri
+            cell.artifact_uri = uri
+        result = CellExecutionResult(
+            cell_id=cell_id,
+            success=True,
+            outputs={},
+            duration_ms=(time.time() - start_time) * 1000,
+            cache_hit=True,
+            artifact_uri=uri,
+            execution_method="cached",
+        )
+        self.session.apply_execution_result_metadata(cell_id, result)
+        return result
+
     async def _execute_loop_cell(
         self,
         cell_id: str,
@@ -5018,6 +5059,7 @@ class CellExecutor:
         start_time: float,
         *,
         materialize_upstreams: bool,
+        use_cache: bool = True,
     ) -> CellExecutionResult:
         """Execute a loop cell by running the body up to ``loop.max_iter`` times.
 
@@ -5087,6 +5129,28 @@ class CellExecutor:
 
         runtime_env = self._resolve_effective_runtime_env(cell_id, annotations.env)
 
+        # What this run will be keyed under, computed before it starts so the
+        # loop can be skipped when the store already holds its result. Every
+        # other cell kind checks the cache in ``execute_cell``; the loop
+        # dispatch happens before that check, and ``_materialize_upstreams``
+        # calls ``execute_cell`` on every upstream on the documented assumption
+        # that it caches — so without this, running any downstream cell re-ran
+        # the whole loop.
+        prov = await self._compute_cell_provenance(
+            cell_id,
+            source,
+            annotations=annotations,
+            mount_specs=mount_specs,
+        )
+        cell_provenance = prov.provenance_hash
+        env_hash = prov.env_hash
+        source_hash = prov.source_hash
+        carry_var_provenance = derive_subkey(cell_provenance, loop.carry)
+        if use_cache:
+            cached = self._cached_loop_result(cell_id, loop, carry_var_provenance, start_time)
+            if cached is not None:
+                return cached
+
         try:
             carry_blob, carry_content_type = self._resolve_loop_seed(cell_id, loop)
         except ValueError as exc:
@@ -5097,7 +5161,6 @@ class CellExecutor:
                 execution_method="loop",
             )
 
-        source_hash = compute_source_hash(source)
         artifact_mgr = self.session.get_artifact_manager()
 
         # Downstream-consumed variables beyond the carry. The harness
@@ -5309,18 +5372,8 @@ class CellExecutor:
         # narrow env + input hashes + mount fingerprints + source. If
         # we stored a custom hash here the loop cell would always look
         # stale on subsequent staleness computations.
-        # Use the shared provenance helper — annotations and mount_specs
-        # are already resolved above, so pass them in to avoid redoing
-        # parse_annotations + mount discovery.
-        prov = await self._compute_cell_provenance(
-            cell_id,
-            source,
-            annotations=annotations,
-            mount_specs=mount_specs,
-        )
-        cell_provenance = prov.provenance_hash
-        env_hash = prov.env_hash
-        carry_var_provenance = derive_subkey(cell_provenance, loop.carry)
+        # ``cell_provenance``, ``env_hash`` and ``carry_var_provenance`` were
+        # computed before the loop ran, for the cache check.
 
         # A loop cell's artifacts were as environment-specific as any other's
         # and recorded none of it, so lineage and the team cache saw blanks

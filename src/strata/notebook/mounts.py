@@ -715,6 +715,10 @@ def mount_fingerprint_sync(resolver: MountResolver, mount: MountSpec) -> str | N
     part of it, since which credential a mount reads through can change what it
     sees; the values are not, so rotating a secret changes nothing here.
 
+    The uri is part of it too: a cell reads the mount's path as well as its
+    contents, and two directories that happen to hold the same files — two
+    empty ones, say — are not the same input.
+
     A credential that cannot be resolved gives a unique fingerprint, the same
     stance as an unreachable store: the cell shows stale and runs, and the run
     fails naming the credential.
@@ -730,7 +734,9 @@ def mount_fingerprint_sync(resolver: MountResolver, mount: MountSpec) -> str | N
     if fingerprint is None:
         return None
     identity = credential_identity(mount.credential)
-    return f"{mount.name}:{identity}:{fingerprint}" if identity else f"{mount.name}:{fingerprint}"
+    if identity:
+        return f"{mount.name}:{mount.uri}:{identity}:{fingerprint}"
+    return f"{mount.name}:{mount.uri}:{fingerprint}"
 
 
 async def mount_fingerprint(resolver: MountResolver, mount: MountSpec) -> str | None:
