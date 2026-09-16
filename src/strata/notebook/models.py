@@ -794,6 +794,14 @@ class CellState(BaseModel):
         exclude=True,
         description="Runtime-only provenance hash from the last successful execution",
     )
+    last_reopen_identity: str | None = Field(
+        default=None,
+        exclude=True,
+        description=(
+            "Runtime-only: what the cell's own cache scheme rested on at its "
+            "last successful run, for a language that has one"
+        ),
+    )
     last_source_hash: str | None = Field(
         default=None,
         exclude=True,

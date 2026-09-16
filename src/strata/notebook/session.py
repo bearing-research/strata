@@ -933,10 +933,32 @@ class NotebookSession:
                         if keyed_elsewhere
                         else (CellStatus.READY,)
                     )
+                    # The generic hash is not the whole of what these cells
+                    # cache on: a SQL cell's rows depend on the connection it
+                    # read and the policy it cached under, a prompt cell's
+                    # answer on the model it asked. Preserving READY on the
+                    # generic hash alone called a cell ready after its
+                    # connection was repointed at another database, and after
+                    # a ``@cache session`` cell's session had ended -- green,
+                    # showing the old answer, with nothing marked stale. So
+                    # the cell's own identity has to match what it recorded,
+                    # and a language that cannot settle it without a probe
+                    # says so by returning None.
+                    # Only for the status this branch resurrects. A cell that
+                    # is READY now ran in this session, and preserving that
+                    # across a reload is what it has always done; it is
+                    # bringing one back from IDLE -- a cold open, where the run
+                    # was some other session's -- that needs the identity.
+                    identity_required = keyed_elsewhere and cell.status == CellStatus.IDLE
+                    identity = self.reopen_identity(cell) if identity_required else None
+                    identity_holds = not identity_required or (
+                        identity is not None and identity == (cell.last_reopen_identity or "")
+                    )
                     can_preserve_uncached_ready = (
                         (cell.is_leaf or keyed_elsewhere)
                         and cell.status in allowed_status
                         and cell.last_provenance_hash == provenance_hash
+                        and identity_holds
                     )
                     if can_preserve_uncached_ready:
                         staleness_map[cell_id] = CellStaleness(status=CellStatus.READY, reasons=[])
@@ -1126,13 +1148,34 @@ class NotebookSession:
         cell.last_provenance_hash = provenance_hash
         cell.last_source_hash = source_hash
         cell.last_env_hash = env_hash
+        # What the cell's own cache scheme rested on for this run, so a reopen
+        # compares like with like rather than calling it ready on a hash that
+        # never covered the connection it read or the model it asked.
+        cell.last_reopen_identity = self.reopen_identity(cell)
         persist_cell_provenance(
             self.path,
             cell_id,
             last_provenance_hash=provenance_hash,
             last_source_hash=source_hash,
             last_env_hash=env_hash,
+            last_reopen_identity=cell.last_reopen_identity,
         )
+
+    def reopen_identity(self, cell: CellState) -> str | None:
+        """What this cell's cache scheme rests on beyond the generic triplet.
+
+        ``None`` when the language cannot settle it without going out to the
+        world, or when asking raised: an identity nobody can reproduce is one
+        a reopen must not act on.
+        """
+        from strata.notebook.languages import get_language_executor
+
+        try:
+            language_executor = get_language_executor(cell.language)
+            return language_executor.reopen_identity(cell, self)
+        except Exception:
+            logger.debug("reopen identity unavailable for cell %s", cell.id, exc_info=True)
+            return None
 
     def serialize_cell(self, cell: CellState) -> dict[str, Any]:
         """Serialize a cell with session-coupled overlays.
