@@ -3,20 +3,18 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import hmac
-import ipaddress
 import json
 import logging
 import os
 import shutil
-import socket
 import sys
 import tempfile
 import time
 from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
 
 import httpx
 from fastapi import Depends, FastAPI, HTTPException, Request
@@ -24,10 +22,14 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from starlette.background import BackgroundTask
 
 from strata.blob_store import BLOB_STREAM_CHUNK_BYTES
+from strata.notebook.credentials import CredentialResolver
+from strata.notebook.hardware import hardware_report
 from strata.notebook.models import MountSpec
 from strata.notebook.mounts import MountResolver, parse_mount_uri
 from strata.notebook.remote_bundle import pack_notebook_output_bundle
+from strata.tracing import trace_span_from
 from strata.types import EXECUTOR_PROTOCOL_HEADER, EXECUTOR_PROTOCOL_VERSION
+from strata.url_safety import host_is_allowlisted, url_safety_problem
 
 logger = logging.getLogger(__name__)
 
@@ -51,10 +53,27 @@ NOTEBOOK_EXECUTOR_MANIFEST_VERSION = "notebook-build-manifest@v1"
 # defenses below are cheap and don't depend on the orchestrator behaving
 # correctly.
 
-_ALLOWED_URL_SCHEMES = frozenset({"http", "https"})
-
 # Per-input download cap. Override via STRATA_WORKER_MAX_INPUT_BYTES.
 _DEFAULT_MAX_INPUT_BYTES = 2 * 1024 * 1024 * 1024  # 2 GiB
+# One MiB, matching the server's streamed reads and writes.
+_INPUT_CHUNK_BYTES = 1024 * 1024
+
+
+def _input_path(output_dir: Path, file_name: str) -> Path:
+    """Where an input named by the request is written, refused unless it is a
+    file directly in the run directory.
+
+    The name is already reduced to its last component, and ``..`` is one.
+    """
+    # normpath + startswith rather than Path.resolve: the same check, in the
+    # form static analysis recognises as containing a path.
+    root = os.path.realpath(output_dir)
+    target = os.path.normpath(os.path.join(root, file_name))
+    if not target.startswith(root + os.sep) or os.path.dirname(target) != root:
+        raise HTTPException(
+            status_code=400, detail=f"Input file name {file_name!r} is not a plain file name"
+        )
+    return Path(target)
 
 
 def _max_input_bytes() -> int:
@@ -95,147 +114,26 @@ def _allowed_hosts() -> tuple[str, ...]:
 
 
 def _host_is_allowlisted(host: str) -> bool:
-    """Whether *host* is named in the allowlist.
-
-    Matched on the name, never on the resolved address — that is the whole
-    point, since these hosts are trusted *because* an operator named them.
-
-    Suffixes are anchored on a dot, so ``.example.com`` matches
-    ``build.example.com`` and not ``evil-example.com``. Getting that wrong is
-    silent: the wrong host passes and nothing says so.
-    """
-    candidate = host.lower().rstrip(".")
-    for entry in _allowed_hosts():
-        if entry.startswith("."):
-            if candidate.endswith(entry) or candidate == entry[1:]:
-                return True
-        elif candidate == entry:
-            return True
-    return False
+    """Whether *host* is named in ``STRATA_WORKER_ALLOWED_HOSTS``."""
+    return host_is_allowlisted(host, _allowed_hosts())
 
 
 def _assert_url_safe(url: str, field: str) -> None:
-    """Reject manifest URLs that are scheme- or host-unsafe.
-
-    A compromised or buggy orchestrator could hand the worker URLs
-    that point at internal services. Two distinct defenses:
-
-    1. **Scheme allowlist** — only http and https. Blocks file://,
-       data:, javascript:, ftp:// and any other scheme httpx might
-       grow plugin support for.
-    2. **Host resolution + IP-range blocklist** — the resolved IP
-       must not be loopback, link-local (incl. cloud metadata
-       169.254.169.254 / fd00:ec2::254), private, multicast,
-       reserved, or unspecified. Hostnames are resolved via
-       getaddrinfo and every returned address is checked; a
-       hostname that resolves to multiple addresses must have all
-       of them in the public range to pass. This rules out both
-       direct internal-IP URLs and hostname-based variants
-       (e.g. metadata.google.internal). Set
-       ``STRATA_WORKER_ALLOW_LOCAL_HOSTS=1`` to bypass the IP check
-       (tests / local dev with 127.0.0.1 build servers); production
-       deployments leave it unset.
-
-    Allowlist-on-host instead of blocklist-on-host would be more
-    restrictive but breaks real signed-URL usage where S3/GCS
-    buckets resolve to public IPs across many regions. Blocklist
-    on internal ranges is the right tradeoff.
-
-    ``STRATA_WORKER_ALLOWED_HOSTS`` names specific hosts that pass
-    the address rule anyway -- for a server on a private address,
-    which is the ordinary shape of a managed worker talking to the
-    server that dispatched it. It supersedes
-    ``STRATA_WORKER_ALLOW_LOCAL_HOSTS``, which relaxes the same rule
-    for *every* host and remains for tests and local development
-    where 127.0.0.1 really is the target. A deployment that sets
-    both gets the wholesale bypass, because that is what it asked
-    for; prefer the allowlist in production.
-
-    Caveats:
-    * DNS rebinding race: the IP we resolved here may differ from
-      the IP httpx resolves at fetch time. Honest mitigation
-      requires resolving once and passing the IP to httpx; left as
-      a follow-up because the practical attacker who controls DNS
-      already has stronger primitives. An allowlisted host does not
-      resolve at all here, so the race does not apply to it -- but
-      that is not a stronger position: it means an allowlist entry
-      is trust in whoever controls that name's resolution, which is
-      what listing it says.
-    * IPv4-mapped IPv6 (``::ffff:127.0.0.1``) is caught — we
-      ``unmap()`` before checking.
-    """
-    parsed = urlparse(url)
-    scheme = parsed.scheme.lower()
-    if scheme not in _ALLOWED_URL_SCHEMES:
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                f"Manifest {field} URL uses disallowed scheme {scheme!r}; "
-                f"only {sorted(_ALLOWED_URL_SCHEMES)} are accepted."
-            ),
-        )
-
-    host = parsed.hostname
-    if not host:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Manifest {field} URL is missing a host: {url!r}",
-        )
-
-    # After the host check, not before it. The bypass used to return here and
-    # skipped both, so a URL with no host at all was accepted whenever it was
-    # set — which is on every managed worker, since that is the documented way
-    # to reach a server on a private address. Only the address rule is meant
-    # to be relaxed.
-    if _allow_local_hosts():
-        return
-
-    if _host_is_allowlisted(host):
-        # Named, therefore trusted. This is a statement about names the
-        # operator controls, not a general relaxation: the resolve-then-fetch
-        # race below stops mattering for these hosts, because whoever controls
-        # their resolution was already trusted by being listed.
-        return
-
-    try:
-        addrinfo = socket.getaddrinfo(host, None, type=socket.SOCK_STREAM)
-    except socket.gaierror as exc:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Manifest {field} URL host {host!r} did not resolve: {exc}",
-        ) from exc
-
-    for entry in addrinfo:
-        sockaddr = entry[4]
-        try:
-            ip = ipaddress.ip_address(sockaddr[0])
-        except ValueError:
-            raise HTTPException(
-                status_code=400,
-                detail=(
-                    f"Manifest {field} URL host {host!r} resolved to non-IP address {sockaddr[0]!r}"
-                ),
-            ) from None
-        if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped is not None:
-            ip = ip.ipv4_mapped
-        if (
-            ip.is_loopback
-            or ip.is_link_local
-            or ip.is_private
-            or ip.is_multicast
-            or ip.is_reserved
-            or ip.is_unspecified
-        ):
-            raise HTTPException(
-                status_code=400,
-                detail=(
-                    f"Manifest {field} URL host {host!r} resolves to "
-                    f"non-routable address {ip}; refusing to fetch"
-                ),
-            )
+    """Reject manifest URLs that are scheme- or host-unsafe (see ``url_safety``)."""
+    problem = url_safety_problem(
+        url, f"Manifest {field}", allowed_hosts=_allowed_hosts(), allow_local=_allow_local_hosts()
+    )
+    if problem is not None:
+        raise HTTPException(status_code=400, detail=problem)
 
 
-async def _post_log_chunk(log_url: str, stream: str, text: str) -> None:
+# How many chunks may be waiting to be forwarded before the oldest are
+# dropped. Console is advisory, and a cell that outruns the link to the server
+# must keep running at its own speed rather than the link's.
+_LOG_QUEUE_CHUNKS = 64
+
+
+async def _post_log_chunk(client: httpx.AsyncClient, log_url: str, stream: str, text: str) -> None:
     """Forward one console chunk, and never let doing so affect the cell.
 
     Console is advisory: the bundle is the record. A server that is slow,
@@ -244,11 +142,10 @@ async def _post_log_chunk(log_url: str, stream: str, text: str) -> None:
     """
     separator = "&" if "?" in log_url else "?"
     try:
-        async with httpx.AsyncClient(timeout=5.0) as client:
-            await client.post(
-                f"{log_url}{separator}stream={stream}",
-                content=text.encode("utf-8"),
-            )
+        await client.post(
+            f"{log_url}{separator}stream={stream}",
+            content=text.encode("utf-8"),
+        )
     except Exception:
         logger.debug("Could not forward %s chunk for the running cell", stream, exc_info=True)
 
@@ -264,7 +161,26 @@ async def _drain(proc: Any, log_url: str | None) -> tuple[bytes, bytes]:
     is busy waiting on the other. Chunks for a single stream are posted in
     order, one at a time, because the notebook appends them in arrival order
     and has no way to reorder what it is shown.
+
+    Forwarding happens on its own task, over one connection, with a bounded
+    queue: a cell that prints faster than the link to the server carries used
+    to be charged the whole round trip per 8 KiB — the cell's own timeout paid
+    for the console — and now runs at its own speed while the oldest waiting
+    chunks are dropped.
     """
+    queue: asyncio.Queue[tuple[str, str]] | None = None
+    forwarder: asyncio.Task[None] | None = None
+
+    async def _forward() -> None:
+        assert queue is not None and log_url is not None
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            while True:
+                item = await queue.get()
+                try:
+                    stream, text = item
+                    await _post_log_chunk(client, log_url, stream, text)
+                finally:
+                    queue.task_done()
 
     async def _pump(reader: Any, stream: str) -> bytes:
         collected: list[bytes] = []
@@ -273,15 +189,33 @@ async def _drain(proc: Any, log_url: str | None) -> tuple[bytes, bytes]:
             if not chunk:
                 break
             collected.append(chunk)
-            if log_url:
-                await _post_log_chunk(log_url, stream, chunk.decode("utf-8", errors="replace"))
+            if queue is not None:
+                if queue.full():
+                    # Drop this chunk rather than the oldest: what has been
+                    # shown stays a prefix of the whole console, so the report
+                    # at the end can send exactly the part that never arrived.
+                    continue
+                queue.put_nowait((stream, chunk.decode("utf-8", errors="replace")))
         return b"".join(collected)
 
-    stdout, stderr = await asyncio.gather(
-        _pump(proc.stdout, "stdout"),
-        _pump(proc.stderr, "stderr"),
-    )
-    await proc.wait()
+    if log_url:
+        queue = asyncio.Queue(maxsize=_LOG_QUEUE_CHUNKS)
+        forwarder = asyncio.create_task(_forward())
+    try:
+        stdout, stderr = await asyncio.gather(
+            _pump(proc.stdout, "stdout"),
+            _pump(proc.stderr, "stderr"),
+        )
+        await proc.wait()
+        if queue is not None:
+            # The cell is done; give what is still queued its moment to land.
+            with contextlib.suppress(TimeoutError):
+                await asyncio.wait_for(queue.join(), timeout=10.0)
+    finally:
+        if forwarder is not None:
+            forwarder.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await forwarder
     return stdout, stderr
 
 
@@ -294,8 +228,13 @@ async def _run_harness(
     build_id: str | None = None,
     log_url: str | None = None,
     env: dict[str, str] | None = None,
+    interpreter: Path | None = None,
 ) -> dict[str, Any]:
     """Run the notebook harness with one manifest file.
+
+    With *interpreter*, the harness runs under it rather than the worker's own
+    Python: the notebook's locked environment (``worker_env``), or ``Rscript``
+    for ``harness.R``.
 
     Registers the process in *in_flight* under *build_id* for the duration, so
     the cancel route can reach it. Both are optional: a caller with no build id
@@ -312,7 +251,7 @@ async def _run_harness(
     )
 
     proc = await asyncio.create_subprocess_exec(
-        sys.executable,
+        str(interpreter) if interpreter is not None else sys.executable,
         str(harness_path),
         str(manifest_path),
         stdout=asyncio.subprocess.PIPE,
@@ -355,6 +294,91 @@ def _positive_int_env(name: str) -> int | None:
     if value < 1:
         raise ValueError(f"{name} must be a positive integer, got {raw!r}")
     return value
+
+
+# A worker holds exactly the secrets a cell must not read: the bearer token
+# that authorizes running code on it, and the credentials it resolves mount and
+# connection names against. A cell is handed what its manifest carries, never
+# these — a cell that reads the token can dispatch to the machine as the server.
+_WORKER_SECRETS = (
+    "STRATA_WORKER_TOKEN",
+    "STRATA_NOTEBOOK_CREDENTIALS",
+    "STRATA_NOTEBOOK_MOUNT_CREDENTIALS",
+    "STRATA_PROXY_TOKEN",
+    "STRATA_NOTEBOOK_REMOTE_STORE_HEADERS",
+)
+
+
+_CAPTURED_SECRETS: dict[str, str] = {}
+
+
+def capture_worker_secrets() -> None:
+    """Take the worker's secrets out of the process environment, into memory.
+
+    Scrubbing the harness's own copy is not a boundary on its own: the harness
+    is a child of this process under the same uid, so a cell can read
+    ``/proc/<ppid>/environ`` and find the token there. Reading them once here
+    and deleting them means there is nothing left to read. Called by the worker
+    entry point, so an in-process app in a test keeps reading the environment.
+    """
+    for name in _WORKER_SECRETS:
+        value = os.environ.pop(name, None)
+        if value is not None:
+            _CAPTURED_SECRETS[name] = value
+
+
+def worker_secret(name: str) -> str:
+    """One of the worker's secrets, wherever it is now."""
+    return _CAPTURED_SECRETS.get(name) or os.environ.get(name, "") or ""
+
+
+def _cell_env(extra: dict[str, str] | None = None) -> dict[str, str]:
+    """The environment a cell's harness runs with on a worker.
+
+    ``STRATA_NOTEBOOK_HARNESS_ENV_ALLOWLIST`` narrows it the way it narrows a
+    cell on the server. Whatever it says, the worker's own secrets are dropped:
+    unset, an operator gets the server's environment on the server and the
+    worker's here, and neither should hand a cell its credentials.
+    """
+    from strata.notebook.harness_env import harness_env
+
+    allowlist = _configured_allowlist()
+    env = harness_env(allowlist, extra) if allowlist else {**os.environ, **(extra or {})}
+    for name in _WORKER_SECRETS:
+        env.pop(name, None)
+    return env
+
+
+def _configured_allowlist() -> list[str]:
+    """``STRATA_NOTEBOOK_HARNESS_ENV_ALLOWLIST``, in either form the server takes.
+
+    A comma-separated list or a JSON array — the setting's own validator accepts
+    both, and a worker that read only one of them would silently narrow a cell's
+    environment to nothing.
+    """
+    raw = (os.environ.get("STRATA_NOTEBOOK_HARNESS_ENV_ALLOWLIST") or "").strip()
+    if not raw:
+        return []
+    if raw.startswith("["):
+        try:
+            parsed = json.loads(raw)
+        except ValueError:
+            return []
+        return [str(entry).strip() for entry in parsed if str(entry).strip()]
+    return [entry.strip() for entry in raw.split(",") if entry.strip()]
+
+
+def _worker_credentials() -> CredentialResolver:
+    """Named credentials from the worker's environment.
+
+    Read from ``STRATA_NOTEBOOK_CREDENTIALS`` and
+    ``STRATA_NOTEBOOK_MOUNT_CREDENTIALS`` directly rather than a full server
+    config: a worker is not a Strata server and has none of its other settings.
+    """
+    return CredentialResolver(
+        json.loads(worker_secret("STRATA_NOTEBOOK_CREDENTIALS") or "{}"),
+        scheme_defaults=json.loads(worker_secret("STRATA_NOTEBOOK_MOUNT_CREDENTIALS") or "{}"),
+    )
 
 
 def create_notebook_executor_app(
@@ -428,7 +452,7 @@ def create_notebook_executor_app(
     in_flight: dict[str, Any] = {}
 
     # ---- Bearer-token gate ----
-    expected_token = os.environ.get("STRATA_WORKER_TOKEN", "").strip() or None
+    expected_token = worker_secret("STRATA_WORKER_TOKEN").strip() or None
 
     async def require_worker_token(http_request: Request) -> None:
         if expected_token is None:
@@ -478,9 +502,14 @@ def create_notebook_executor_app(
         raw_inputs: dict[str, dict[str, Any]],
         raw_mounts: list[dict[str, Any]],
         runtime_env: dict[str, str],
-        write_input_bytes: Any,
+        write_input: Any,
         build_id: str | None = None,
         log_url: str | None = None,
+        trace_carrier: dict[str, Any] | None = None,
+        notebook_id: str | None = None,
+        cell_id: str | None = None,
+        environment: Any = None,
+        language: str = "python",
     ) -> tuple[Path, Path] | JSONResponse:
         """Execute a cell and pack outputs into a bundle file.
 
@@ -507,17 +536,28 @@ def create_notebook_executor_app(
         # nothing; held until the harness exits.
         gpu = _admit()
         try:
-            return await _stage_and_run(
-                source=source,
-                timeout_seconds=timeout_seconds,
-                raw_inputs=raw_inputs,
-                mount_specs=mount_specs,
-                runtime_env=runtime_env,
-                write_input_bytes=write_input_bytes,
+            # A child of whatever dispatched this, when the dispatcher sent its
+            # trace context: the server's dispatch span, or a pool's in between.
+            with trace_span_from(
+                "worker.execute",
+                trace_carrier,
                 build_id=build_id,
-                log_url=log_url,
-                gpu=gpu,
-            )
+                notebook_id=notebook_id,
+                cell_id=cell_id,
+            ):
+                return await _stage_and_run(
+                    source=source,
+                    timeout_seconds=timeout_seconds,
+                    raw_inputs=raw_inputs,
+                    mount_specs=mount_specs,
+                    runtime_env=runtime_env,
+                    write_input=write_input,
+                    build_id=build_id,
+                    log_url=log_url,
+                    gpu=gpu,
+                    environment=environment,
+                    language=language,
+                )
         finally:
             _release(gpu)
 
@@ -528,10 +568,12 @@ def create_notebook_executor_app(
         raw_inputs: dict[str, dict[str, Any]],
         mount_specs: list[MountSpec],
         runtime_env: dict[str, str],
-        write_input_bytes: Any,
+        write_input: Any,
         build_id: str | None,
         log_url: str | None,
         gpu: int | None,
+        environment: Any = None,
+        language: str = "python",
     ) -> tuple[Path, Path] | JSONResponse:
         if gpu is not None:
             # Both the cell's environment and the process's: the manifest env
@@ -553,9 +595,7 @@ def create_notebook_executor_app(
                 content_type = str(spec.get("content_type", "pickle/object"))
                 requested_file_name = Path(str(spec.get("file", ""))).name
                 file_name = requested_file_name or f"{var_name}{_input_extension(content_type)}"
-                data = await write_input_bytes(var_name, file_name, spec)
-                with open(output_dir / file_name, "wb") as f:
-                    f.write(data)
+                await write_input(var_name, file_name, spec, _input_path(output_dir, file_name))
                 inputs[var_name] = {
                     "content_type": content_type,
                     "file": file_name,
@@ -577,16 +617,18 @@ def create_notebook_executor_app(
                         # (indices + a content-type-mapped extension) so no
                         # request-provided value ever reaches a filesystem path.
                         inj_lookup = Path(str(inj_spec.get("file", ""))).name
-                        inj_data = await write_input_bytes(inj_name, inj_lookup, inj_spec)
                         safe_file = f"__inj_{len(inputs)}_{inj_index}{_input_extension(inj_ct)}"
-                        with open(output_dir / safe_file, "wb") as f:
-                            f.write(inj_data)
+                        await write_input(inj_name, inj_lookup, inj_spec, output_dir / safe_file)
                         resolved_injected[inj_name] = {"content_type": inj_ct, "file": safe_file}
                     if resolved_injected:
                         inputs[var_name]["injected"] = resolved_injected
 
             mount_resolver = MountResolver(
                 cache_dir=output_dir / "mount_cache",
+                # A worker resolves a mount's credential name against its own
+                # configuration and environment; the name travels in the
+                # manifest and the secret never does.
+                credential_resolver=_worker_credentials(),
             )
             resolved_mounts = await mount_resolver.prepare_mounts(mount_specs)
             manifest_mounts = {
@@ -610,6 +652,41 @@ def create_notebook_executor_app(
                 json.dump(manifest, f)
 
             harness_path = Path(__file__).parent / "harness.py"
+            interpreter: Path | None = None
+            prepared = None
+            if language == "r":
+                # An R cell runs harness.R under the worker's Rscript and its
+                # library; a notebook's Python lock does not apply to it.
+                rscript = shutil.which("Rscript")
+                if rscript is None:
+                    shutil.rmtree(tmpdir, ignore_errors=True)
+                    return JSONResponse(
+                        status_code=500,
+                        content={
+                            "success": False,
+                            "error": "Rscript is not installed on this worker",
+                        },
+                    )
+                harness_path = Path(__file__).parent / "languages" / "r" / "harness.R"
+                interpreter = Path(rscript)
+            elif language != "python":
+                shutil.rmtree(tmpdir, ignore_errors=True)
+                return JSONResponse(
+                    status_code=400,
+                    content={"success": False, "error": f"unsupported cell language {language!r}"},
+                )
+            elif environment is not None:
+                from strata.notebook.worker_env import WorkerEnvironmentError, ensure_environment
+
+                try:
+                    prepared = await ensure_environment(environment)
+                except WorkerEnvironmentError as exc:
+                    shutil.rmtree(tmpdir, ignore_errors=True)
+                    return JSONResponse(
+                        status_code=500,
+                        content={"success": False, "error": f"locked environment: {exc}"},
+                    )
+                interpreter = prepared.python
             try:
                 result = await _run_harness(
                     harness_path,
@@ -618,11 +695,8 @@ def create_notebook_executor_app(
                     in_flight=in_flight,
                     build_id=build_id,
                     log_url=log_url,
-                    env=(
-                        {**os.environ, "CUDA_VISIBLE_DEVICES": str(gpu)}
-                        if gpu is not None
-                        else None
-                    ),
+                    env=_cell_env({"CUDA_VISIBLE_DEVICES": str(gpu)} if gpu is not None else None),
+                    interpreter=interpreter,
                 )
                 if result.get("success", False):
                     await mount_resolver.sync_back(resolved_mounts)
@@ -647,6 +721,11 @@ def create_notebook_executor_app(
                 )
 
             bundle_path = output_dir / "notebook-output-bundle.tar"
+            # The hardware beside the interpreter the harness reported, so the
+            # artifact records what computed it and not only what was asked for.
+            result = {**result, "hardware": await asyncio.to_thread(hardware_report)}
+            if prepared is not None:
+                result["environment"] = {"key": prepared.key, "installed": prepared.installed}
             pack_notebook_output_bundle(bundle_path, result, output_dir)
             return bundle_path, tmpdir
         except BaseException:
@@ -663,19 +742,27 @@ def create_notebook_executor_app(
         form: Any,
         build_id: str | None = None,
         log_url: str | None = None,
+        trace_carrier: dict[str, Any] | None = None,
+        environment: Any = None,
+        language: str = "python",
     ) -> Response:
         async def _write_uploaded_input(
             var_name: str,
             requested_file_name: str,
             _spec: dict[str, Any],
-        ) -> bytes:
+            target: Path,
+        ) -> None:
             upload = form.get(var_name) or form.get(requested_file_name)
             if upload is None or isinstance(upload, str):
                 raise HTTPException(
                     status_code=400,
                     detail=f"Missing uploaded input file: {var_name}",
                 )
-            return await upload.read()
+            # Copied in chunks: the form parser has already spooled the part to
+            # disk, and reading it whole would put it back in memory.
+            with open(target, "wb") as out:
+                while chunk := await upload.read(_INPUT_CHUNK_BYTES):
+                    out.write(chunk)
 
         result = await _execute_to_bundle(
             source=source,
@@ -683,9 +770,12 @@ def create_notebook_executor_app(
             raw_inputs=raw_inputs,
             raw_mounts=raw_mounts,
             runtime_env=runtime_env,
-            write_input_bytes=_write_uploaded_input,
+            write_input=_write_uploaded_input,
             build_id=build_id,
             log_url=log_url,
+            trace_carrier=trace_carrier,
+            environment=environment,
+            language=language,
         )
         if isinstance(result, JSONResponse):
             return result
@@ -721,6 +811,12 @@ def create_notebook_executor_app(
                     "output_format": "notebook-output-bundle@v1",
                     "pull_model": True,
                     "cancel": True,
+                    # Runs a cell in the notebook's locked environment when the
+                    # request carries one (``worker_env``).
+                    "locked_environments": True,
+                    # Cell languages this machine can run: R needs Rscript
+                    # with jsonlite and arrow in its library.
+                    "languages": ["python", "r"] if shutil.which("Rscript") else ["python"],
                 },
             },
             "version": "1.0.0",
@@ -731,6 +827,10 @@ def create_notebook_executor_app(
             "max_concurrent": max_concurrent,
             "gpu_slots": gpu_slots,
             "free_gpu_slots": len(free_gpus) if gpu_slots else None,
+            # What the machine is, from its driver and OS, so a caller can
+            # check a provider's machine against the class it was sold as
+            # without running a job. Missing fields mean unknown.
+            "hardware": await asyncio.to_thread(hardware_report),
         }
 
     @app.post("/v1/executions/{build_id}/cancel", dependencies=[Depends(require_worker_token)])
@@ -794,6 +894,9 @@ def create_notebook_executor_app(
             runtime_env=runtime_env,
             form=form,
             build_id=str(metadata.get("build_id") or "") or None,
+            trace_carrier=dict(http_request.headers),
+            environment=metadata.get("environment"),
+            language=str(metadata.get("language") or "python"),
         )
 
     @app.post("/v1/execute", dependencies=[Depends(require_worker_token)])
@@ -868,6 +971,9 @@ def create_notebook_executor_app(
             runtime_env=runtime_env,
             form=form,
             build_id=str(metadata.get("build_id") or "") or None,
+            trace_carrier=dict(http_request.headers),
+            environment=params.get("environment"),
+            language=str(params.get("language") or "python"),
         )
 
     @app.post("/v1/execute-manifest", dependencies=[Depends(require_worker_token)])
@@ -946,7 +1052,8 @@ def create_notebook_executor_app(
             var_name: str,
             _requested_file_name: str,
             spec: dict[str, Any],
-        ) -> bytes:
+            target: Path,
+        ) -> None:
             input_uri = str(spec.get("uri", "")).strip()
             if not input_uri:
                 raise HTTPException(
@@ -959,9 +1066,10 @@ def create_notebook_executor_app(
                     status_code=400,
                     detail=f"Manifest does not include a signed URL for {input_uri}",
                 )
-            # Stream + cap so a misconfigured-or-malicious download
-            # can't OOM the worker. Content-Length (when present) lets
-            # us reject up front before reading any bytes.
+            # Streamed to the input file with the cap checked as bytes land,
+            # so the largest input is bounded by the worker's disk rather than
+            # its memory. Content-Length (when present) lets us reject up
+            # front before reading any bytes.
             max_bytes = _max_input_bytes()
             async with httpx.AsyncClient(timeout=max(timeout_seconds, 30.0)) as client:
                 async with client.stream("GET", download_url) as response:
@@ -987,18 +1095,19 @@ def create_notebook_executor_app(
                                     f"{declared_bytes} bytes, exceeds {max_bytes}-byte cap"
                                 ),
                             )
-                    buf = bytearray()
-                    async for chunk in response.aiter_bytes():
-                        buf.extend(chunk)
-                        if len(buf) > max_bytes:
-                            raise HTTPException(
-                                status_code=413,
-                                detail=(
-                                    f"Notebook input {input_uri} exceeds "
-                                    f"{max_bytes}-byte cap during download"
-                                ),
-                            )
-            return bytes(buf)
+                    written = 0
+                    with open(target, "wb") as out:
+                        async for chunk in response.aiter_bytes(_INPUT_CHUNK_BYTES):
+                            written += len(chunk)
+                            if written > max_bytes:
+                                raise HTTPException(
+                                    status_code=413,
+                                    detail=(
+                                        f"Notebook input {input_uri} exceeds "
+                                        f"{max_bytes}-byte cap during download"
+                                    ),
+                                )
+                            out.write(chunk)
 
         bundle_result = await _execute_to_bundle(
             source=source,
@@ -1006,9 +1115,20 @@ def create_notebook_executor_app(
             raw_inputs=raw_inputs,
             raw_mounts=raw_mounts,
             runtime_env=runtime_env,
-            write_input_bytes=_download_input,
+            write_input=_download_input,
             build_id=str(metadata.get("build_id") or "") or None,
             log_url=log_url,
+            # The headers first: a pool between here and the server forwards
+            # its own span's context there, which is the nearer parent. The
+            # manifest's copy is the server's, for a dispatcher that sends
+            # only the body.
+            trace_carrier=(
+                dict(http_request.headers) if "traceparent" in http_request.headers else metadata
+            ),
+            notebook_id=str(metadata.get("notebook_id") or "") or None,
+            cell_id=str(metadata.get("cell_id") or "") or None,
+            environment=params.get("environment"),
+            language=str(params.get("language") or "python"),
         )
         if isinstance(bundle_result, JSONResponse):
             return bundle_result
@@ -1022,17 +1142,29 @@ def create_notebook_executor_app(
                     while chunk := f.read(BLOB_STREAM_CHUNK_BYTES):
                         yield chunk
 
+            upload_fields = output.get("fields")
             try:
                 async with httpx.AsyncClient(timeout=max(timeout_seconds, 30.0)) as client:
-                    upload_response = await client.post(
-                        upload_url,
-                        content=_stream_bundle_body(),
-                        headers={
-                            "Content-Type": "application/x-tar",
-                            "Content-Length": str(byte_size),
-                        },
-                    )
-                    if upload_response.status_code != 200:
+                    if isinstance(upload_fields, dict):
+                        # A presigned object-store upload: the policy fields,
+                        # then the bundle as the file part, straight to the
+                        # object store rather than through the server.
+                        with open(bundle_path, "rb") as bundle_file:
+                            upload_response = await client.post(
+                                upload_url,
+                                data={str(k): str(v) for k, v in upload_fields.items()},
+                                files={"file": ("bundle.tar", bundle_file, "application/x-tar")},
+                            )
+                    else:
+                        upload_response = await client.post(
+                            upload_url,
+                            content=_stream_bundle_body(),
+                            headers={
+                                "Content-Type": "application/x-tar",
+                                "Content-Length": str(byte_size),
+                            },
+                        )
+                    if upload_response.status_code not in (200, 201, 204):
                         raise HTTPException(
                             status_code=502,
                             detail=(
@@ -1151,13 +1283,18 @@ def main(argv: list[str] | None = None) -> int:
         if value is not None and value < 1:
             parser.error(f"{flag} must be a positive integer")
 
+    # Before anything can spawn a cell: a harness under this uid can read
+    # /proc/<ppid>/environ, so the worker's secrets are held in memory here
+    # rather than left in the environment a cell can reach.
+    capture_worker_secrets()
+
     # The worker executes arbitrary cell source by design. Binding a
     # non-loopback interface without a bearer token means anyone who can
     # reach the port can run code as this user — make that trade-off
     # loud rather than silent.
     if (
         args.host not in ("127.0.0.1", "localhost", "::1")
-        and not os.environ.get("STRATA_WORKER_TOKEN", "").strip()
+        and not worker_secret("STRATA_WORKER_TOKEN").strip()
     ):
         logger.warning(
             "strata-worker is binding %s WITHOUT authentication - anyone who can "

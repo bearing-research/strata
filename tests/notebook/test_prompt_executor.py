@@ -542,3 +542,51 @@ async def test_cache_hit_display_uses_scalar_key(tmp_path):
     assert first["display_output"].get("scalar") == "short answer"
     assert second["display_output"].get("scalar") == "short answer"
     assert "preview" not in second["display_output"]
+
+
+class TestWhatAReopenedPromptCellRestsOn:
+    """The generic staleness triplet sees a prompt cell's source, environment
+    and inputs -- not the model it asked, which comes from the notebook's
+    ``[ai]`` block. A reopen that compares only the triplet kept the previous
+    model's answer on screen, marked ready."""
+
+    @staticmethod
+    def _identity(tmp_path, source: str, ai_block: str = ""):
+        from strata.notebook.models import CellLanguage, CellState
+        from strata.notebook.prompt_executor import prompt_reopen_identity
+
+        (tmp_path / "notebook.toml").write_text(ai_block)
+
+        class _Session:
+            notebook_state = type("_N", (), {"env": {}})()
+            path = tmp_path
+
+        cell = CellState(id="p1", language=CellLanguage.PROMPT, source=source)
+        return prompt_reopen_identity(cell, _Session())
+
+    def test_the_same_cell_keeps_the_same_identity(self, tmp_path):
+        source = "# @model gpt-5.4\nSummarize {{ data }}"
+
+        assert self._identity(tmp_path, source) == self._identity(tmp_path, source)
+
+    @pytest.mark.parametrize(
+        ("first", "second"),
+        [
+            ("# @model gpt-5.4\nSummarize {{ d }}", "# @model claude-opus-5\nSummarize {{ d }}"),
+            ("# @temperature 0.0\nSummarize {{ d }}", "# @temperature 0.9\nSummarize {{ d }}"),
+            ("# @max_tokens 100\nSummarize {{ d }}", "# @max_tokens 4000\nSummarize {{ d }}"),
+            ("Summarize {{ d }}", "# @output json\nSummarize {{ d }}"),
+        ],
+    )
+    def test_asking_a_different_question_is_a_different_identity(self, tmp_path, first, second):
+        assert self._identity(tmp_path, first) != self._identity(tmp_path, second)
+
+    def test_the_notebook_model_counts_even_when_the_cell_names_none(self, tmp_path):
+        """The cell inherits ``[ai] model`` -- changing it there changes the
+        answer just as surely as an annotation would."""
+        source = "Summarize {{ data }}"
+
+        with_one = self._identity(tmp_path, source, '[ai]\nmodel = "gpt-5.4"\n')
+        with_other = self._identity(tmp_path, source, '[ai]\nmodel = "claude-opus-5"\n')
+
+        assert with_one != with_other

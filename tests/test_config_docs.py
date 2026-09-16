@@ -20,6 +20,7 @@ from pathlib import Path
 import pytest
 
 from strata.config import StrataConfig
+from strata.notebook.remote_executor import _WORKER_SECRETS
 
 _REPO = Path(__file__).resolve().parent.parent
 _DOC = _REPO / "docs" / "reference" / "configuration.md"
@@ -60,6 +61,10 @@ def _from_environ_lookups() -> set[str]:
     found: set[str] = set()
     for path in _SRC.rglob("*.py"):
         found |= set(_ENV_LOOKUP.findall(_read(path)))
+    # A worker takes its secrets out of the environment at startup and reads
+    # them from memory afterwards, so the only ``os.environ`` call naming them
+    # takes the name as a variable. They are set by an operator like any other.
+    found |= set(_WORKER_SECRETS)
     return found
 
 

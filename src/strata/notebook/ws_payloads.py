@@ -64,6 +64,9 @@ class CellStatusPayload(WsPayload):
     status: str
     remote_worker: str | None = None
     remote_transport: str | None = None
+    # ``starting`` while a remote job is being provisioned, ``running`` once
+    # it is, for a worker that runs cells asynchronously.
+    remote_build_state: str | None = None
     staleness_reasons: list[str] | None = None
     causality: dict[str, Any] | None = None
 
@@ -74,6 +77,7 @@ def cell_status_payload(
     *,
     remote_worker: str | None = None,
     remote_transport: str | None = None,
+    remote_build_state: str | None = None,
     staleness_reasons: list[str] | None = None,
     causality: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
@@ -89,6 +93,7 @@ def cell_status_payload(
         status=str(status),
         remote_worker=remote_worker,
         remote_transport=remote_transport,
+        remote_build_state=remote_build_state,
         staleness_reasons=staleness_reasons,
         causality=causality,
     ).model_dump(mode="json", exclude_none=True)
@@ -385,7 +390,30 @@ def dag_update_payload(raw: dict[str, Any]) -> dict[str, Any]:
 # The machine-readable classes an ``error`` frame can carry. Named so the
 # builder can be typed to it too: a mistyped code at an emit site should be a
 # type error, not a value the frontend silently fails to match.
-ErrorCode = Literal["ENVIRONMENT_BUSY", "cell_busy", "read_only", "insufficient_scope"]
+class PresenceEntryModel(WsPayload):
+    """One identity on a session and the cell it is on."""
+
+    principal: str
+    focused_cell_id: str | None = None
+    # Wall-clock seconds since the epoch when this entry last changed.
+    since: float
+
+
+class PresencePayload(WsPayload):
+    """``presence`` — who is on the session, sent on join, leave and focus change.
+
+    One entry per identity (a principal, or a declared author where nobody is
+    authenticated), not per socket. ``you`` is the receiving connection's own
+    identity, so a client can leave itself out of what it shows.
+    """
+
+    principals: list[PresenceEntryModel]
+    you: str
+
+
+ErrorCode = Literal[
+    "ENVIRONMENT_BUSY", "cell_busy", "cell_locked", "read_only", "insufficient_scope"
+]
 
 
 class ErrorPayload(WsPayload):
@@ -399,18 +427,24 @@ class ErrorPayload(WsPayload):
     the exact shape it sends today.
 
     Known codes: ``ENVIRONMENT_BUSY`` (an environment job holds the notebook),
-    ``cell_busy`` (edit refused while the cell runs), ``read_only`` (message
-    not allowed in app view), ``insufficient_scope`` (auth).
+    ``cell_busy`` (edit refused while the cell runs), ``cell_locked`` (edit
+    refused because someone else just changed the cell), ``read_only``
+    (message not allowed in app view), ``insufficient_scope`` (auth).
     """
 
     error: str
     code: ErrorCode | None = None
-    # Only on ``cell_busy``, which names the cell that refused the edit.
+    # On ``cell_busy`` and ``cell_locked``, the cell that refused the edit.
     cell_id: str | None = None
+    # Only on ``cell_locked``: who changed the cell.
+    held_by: str | None = None
 
 
 def error_payload(
-    error: str, code: ErrorCode | None = None, cell_id: str | None = None
+    error: str,
+    code: ErrorCode | None = None,
+    cell_id: str | None = None,
+    held_by: str | None = None,
 ) -> dict[str, Any]:
     """Build the wire dict for an ``error`` frame.
 
@@ -418,7 +452,7 @@ def error_payload(
     it has always been, rather than gaining null ``code`` / ``cell_id`` keys
     that clients would have to learn to ignore.
     """
-    return ErrorPayload(error=error, code=code, cell_id=cell_id).model_dump(
+    return ErrorPayload(error=error, code=code, cell_id=cell_id, held_by=held_by).model_dump(
         mode="json", exclude_none=True
     )
 
@@ -446,5 +480,6 @@ FRAME_PAYLOADS: dict[MessageType, type[WsPayload]] = {
     MessageType.ENVIRONMENT_JOB_STARTED: EnvironmentJobEventPayload,
     MessageType.ERROR: ErrorPayload,
     MessageType.IMPACT_PREVIEW: ImpactPreviewPayload,
+    MessageType.PRESENCE: PresencePayload,
     MessageType.PROFILING_SUMMARY: ProfilingSummaryPayload,
 }

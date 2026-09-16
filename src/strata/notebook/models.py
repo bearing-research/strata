@@ -52,6 +52,14 @@ class MountSpec(BaseModel):
             "endpoint_url, profile). Merged with executor-level credentials."
         ),
     )
+    credential: str | None = Field(
+        default=None,
+        description=(
+            "Name of a server-defined credential whose fields become fsspec "
+            "storage options, so no secret lives in notebook.toml. The name is "
+            "part of provenance; its values never are."
+        ),
+    )
 
 
 class TableSpec(BaseModel):
@@ -83,6 +91,60 @@ class TableSpec(BaseModel):
         default=None,
         description="Pinned snapshot id — the cell never goes stale on new data when set",
     )
+
+
+class FetchSpec(BaseModel):
+    """A URL a cell reads, declared with ``@fetch`` so its bytes are an input.
+
+    The bytes are downloaded into the notebook's fetch cache, ``name`` is
+    injected as a local ``Path`` to them, and their digest joins the cell's
+    provenance. See ``strata.notebook.fetch``.
+    """
+
+    name: str = Field(
+        ...,
+        description="Variable name, injected as a Path to the fetched bytes",
+        pattern=r"^[a-zA-Z_][a-zA-Z0-9_]*$",
+    )
+    url: str = Field(..., description="http(s) URL to fetch")
+    sha256: str | None = Field(
+        default=None,
+        description="Pinned digest; bytes that differ fail the cell with both digests",
+        pattern=r"^[0-9a-f]{64}$",
+    )
+    refetch: Literal["never", "stale", "always"] = Field(
+        default="stale",
+        description="When the URL is checked: never once cached, conditionally, or always",
+    )
+
+
+class DatasetSpec(BaseModel):
+    """A registry name a cell reads, declared with ``@dataset`` so it is an input.
+
+    The name resolves to one artifact version, which is copied into the
+    notebook's store, bound to ``name``, and folded into the cell's provenance.
+    See ``strata.notebook.datasets``.
+    """
+
+    name: str = Field(
+        ...,
+        description="Variable name, bound to the artifact's value",
+        pattern=r"^[a-zA-Z_][a-zA-Z0-9_]*$",
+    )
+    dataset: str = Field(..., description="Registry name, e.g. taxi/model", min_length=1)
+    alias: str | None = Field(default=None, description="Follow this alias, e.g. champion")
+    version: int | None = Field(
+        default=None, ge=1, description="Pin this version; the cell never goes stale when set"
+    )
+
+    @property
+    def reference(self) -> str:
+        """The declaration as written: ``name``, ``name@alias`` or ``name@v=N``."""
+        if self.alias is not None:
+            return f"{self.dataset}@{self.alias}"
+        if self.version is not None:
+            return f"{self.dataset}@v={self.version}"
+        return self.dataset
 
 
 class ConnectionSpec(BaseModel):
@@ -121,6 +183,14 @@ class ConnectionSpec(BaseModel):
         default_factory=dict,
         description=(
             "Driver-specific runtime options that don't change which objects the connection sees."
+        ),
+    )
+    credential: str | None = Field(
+        default=None,
+        description=(
+            "Name of a server-defined credential whose fields become driver auth, "
+            "underneath this block's own ``auth``. Part of the connection's "
+            "identity; its values never are."
         ),
     )
 
@@ -723,6 +793,14 @@ class CellState(BaseModel):
         default=None,
         exclude=True,
         description="Runtime-only provenance hash from the last successful execution",
+    )
+    last_reopen_identity: str | None = Field(
+        default=None,
+        exclude=True,
+        description=(
+            "Runtime-only: what the cell's own cache scheme rested on at its "
+            "last successful run, for a language that has one"
+        ),
     )
     last_source_hash: str | None = Field(
         default=None,

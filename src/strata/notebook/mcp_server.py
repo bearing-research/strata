@@ -23,12 +23,15 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+from strata.auth import get_principal, principal_context
 from strata.notebook.ops import LocalNotebookOps
+from strata.notebook.scopes import required_scope_for_tool
 
 if TYPE_CHECKING:
     from starlette.applications import Starlette
 
     from strata.notebook.session import SessionManager
+    from strata.types import Principal
 
 
 def _resolve_ops(session_manager: SessionManager, session_id: str) -> LocalNotebookOps:
@@ -529,9 +532,9 @@ def _promote(
         )
 
     store, artifact = _cell_output(session_manager, session_id, cell_id, variable)
-    target = RemoteStore(
-        str(base_url), dict(getattr(config, "notebook_remote_store_headers", {}) or {})
-    )
+    from strata.auth import remote_store_headers
+
+    target = RemoteStore(str(base_url), remote_store_headers(config))
     promotion = promote_artifact(
         store, target, artifact, name=name, alias=alias, tags=dict(tags or {})
     )
@@ -595,7 +598,17 @@ def _publish(
     else:
         served = store
 
-    publication = served.publish_artifact(published_id, published_version, title=title)
+    # Who published it: the REST route and the CLI both stamp the caller, and
+    # without it the audit row names nobody. The tenant is the artifact's own —
+    # what the copy landed as — since the store refuses a publication under a
+    # tenant the artifact does not carry.
+    caller = get_principal()
+    publication = served.publish_artifact(
+        published_id,
+        published_version,
+        title=title,
+        published_by=caller.id if caller is not None else None,
+    )
     return {
         "token": publication.token,
         "artifact_uri": f"strata://artifact/{published_id}@v={published_version}",
@@ -620,6 +633,37 @@ def _served_store():
     return ArtifactStore(artifact_dir) if artifact_dir else None
 
 
+def _caller(context: Any) -> Principal | None:
+    """The authenticated principal behind one MCP request, or ``None`` when the
+    server does not authenticate callers.
+
+    Parsed the same way the HTTP auth middleware parses it. The middleware has
+    already refused a request without valid credentials before it reached the
+    mount; this reads who it was for the call being served.
+    """
+    from strata.auth import AuthError, parse_api_key_principal, parse_principal, verify_proxy_token
+
+    config = _server_config()
+    if not getattr(config, "principal_auth_enabled", False):
+        return None
+    request = getattr(getattr(context, "request_context", None), "request", None)
+    if request is None:
+        return None
+    headers = dict(request.headers)
+    # The proxy token again, not only the middleware's check: a mount served
+    # some other way would otherwise take the identity headers on trust.
+    if config.auth_mode != "api_key" and not verify_proxy_token(
+        request.headers.get(config.proxy_token_header), config.proxy_token
+    ):
+        return None
+    try:
+        if config.auth_mode == "api_key":
+            return parse_api_key_principal(headers, config)
+        return parse_principal(headers, config)
+    except AuthError:
+        return None
+
+
 def build_mcp_app(session_manager: SessionManager) -> Starlette | None:
     """Build the streamable-HTTP MCP ASGI app, or ``None`` if ``[mcp]`` is absent.
 
@@ -637,9 +681,34 @@ def build_mcp_app(session_manager: SessionManager) -> Starlette | None:
     except ModuleNotFoundError:
         return None
 
+    from mcp.server.fastmcp.exceptions import ToolError
+
+    class AuthorizingFastMCP(FastMCP):
+        """Every tool call runs as the caller that made it, within its scopes.
+
+        On a server with principal auth the caller is read from the tool
+        call's own HTTP request, not from the task serving the MCP session:
+        one session's requests can arrive under different credentials, and
+        its server task was started by whichever request opened it. The
+        principal is then current for the call, so authorship, team-store
+        attribution and anything else that asks ``get_principal`` see the
+        caller. Scopes come from the table the REST routes and WebSocket
+        frames use.
+        """
+
+        async def call_tool(self, name: str, arguments: dict[str, Any]):
+            principal = _caller(self.get_context())
+            required = required_scope_for_tool(name)
+            if getattr(_server_config(), "principal_auth_enabled", False) and (
+                principal is None or not principal.has_scope(required)
+            ):
+                raise ToolError(f"'{name}' requires the {required} scope")
+            with principal_context(principal):
+                return await super().call_tool(name, arguments)
+
     # streamable_http_path="/" so mounting the app at "/mcp" yields the endpoint
     # at exactly "/mcp" (the default "/mcp" would nest it at "/mcp/mcp").
-    mcp = FastMCP("strata-notebook", streamable_http_path="/")
+    mcp = AuthorizingFastMCP("strata-notebook", streamable_http_path="/")
 
     @mcp.tool()
     def list_notebooks() -> list[dict[str, Any]]:
@@ -971,4 +1040,8 @@ def build_mcp_app(session_manager: SessionManager) -> Starlette | None:
         """
         return _publish(session_manager, session_id, cell_id, variable, title)
 
-    return mcp.streamable_http_app()
+    app = mcp.streamable_http_app()
+    # So the tool list can be read without an MCP client, e.g. to hold it to
+    # the scope table.
+    app.state.fastmcp = mcp
+    return app

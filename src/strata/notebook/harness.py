@@ -846,6 +846,36 @@ def batch_main() -> None:
     frame_out.close()
 
 
+class _Tee(io.StringIO):
+    """Captures the cell's output *and* lets it out of the process.
+
+    A cell's print goes to whatever ``sys.stdout`` is while it runs, and that
+    is this buffer: the result manifest needs the whole text, so capturing it
+    is not optional. But a worker streams a running cell's console by reading
+    this process's stdout pipe, and a buffer nothing writes through leaves
+    that pipe empty for the cell's whole life -- an hour of training with a
+    console that stays blank until the bundle lands, which is the opposite of
+    what streaming it is for.
+
+    Flushed per write because the point is to be seen now; a console that
+    arrives 8 KiB at a time is the buffering this exists to defeat.
+    """
+
+    def __init__(self, stream: Any) -> None:
+        super().__init__()
+        self._stream = stream
+
+    def write(self, text: str) -> int:
+        # The capture is what the result is built from, so it must not be lost
+        # to a closed or broken pipe on the way out.
+        try:
+            self._stream.write(text)
+            self._stream.flush()
+        except (ValueError, OSError):
+            pass
+        return super().write(text)
+
+
 def main():
     if len(sys.argv) > 1 and sys.argv[1] == "--batch":
         batch_main()
@@ -862,8 +892,8 @@ def main():
     # Owned here, not inside execute_cell: a cell that raises never returns its
     # captured streams, and the print trail is exactly what's wanted when the
     # cell failed. The batch and pool paths already keep theirs this way.
-    stdout_buffer = io.StringIO()
-    stderr_buffer = io.StringIO()
+    stdout_buffer = _Tee(sys.stdout)
+    stderr_buffer = _Tee(sys.stderr)
     ambient_client: Any = None
 
     try:

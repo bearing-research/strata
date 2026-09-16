@@ -26,12 +26,13 @@ a retry can finish rather than a notebook that looks complete and is not.
 from __future__ import annotations
 
 import json
+import re
 import shutil
 import tomllib
 import uuid
 import zipfile
 from dataclasses import dataclass, field, replace
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 from strata.artifact_store import ArtifactStore, ArtifactVersion
@@ -39,6 +40,28 @@ from strata.artifact_transfer import RECORD_FIELDS, remap_input_versions
 from strata.notebook.snapshot import SNAPSHOT_FORMAT_VERSION
 
 _ARTIFACT_URI_PREFIX = "strata://artifact/"
+
+
+_SAFE_SEGMENT = re.compile(r"^[A-Za-z0-9._-]+$")
+
+
+def _member_target(dest: Path, name: str) -> Path:
+    """Where a bundle member may be written under *dest*.
+
+    A bundle is a file somebody sends you, and its member names are its own.
+    ``dest / name`` for a member called ``cells/../../../.ssh/authorized_keys``
+    writes there, as the server's user: the route's careful notebook-name
+    handling is beside the point if the archive's interior names are trusted.
+    Each segment is checked rather than the joined path, so a name that only
+    resolves outside after symlinks still cannot be written.
+    """
+    parts = PurePosixPath(name).parts
+    if not parts or PurePosixPath(name).is_absolute():
+        raise NotASnapshotError(f"the bundle names a member it cannot write: {name!r}")
+    for part in parts:
+        if not _SAFE_SEGMENT.match(part) or part == "..":
+            raise NotASnapshotError(f"the bundle names a member it cannot write: {name!r}")
+    return dest.joinpath(*parts)
 
 
 class NotASnapshotError(ValueError):
@@ -260,8 +283,14 @@ def _record_from(data: dict[str, Any]) -> ArtifactVersion:
     missing = [key for key in RECORD_FIELDS if key not in data]
     if missing:
         raise NotASnapshotError(f"artifact record is missing {', '.join(missing)}")
+    artifact_id = str(data["id"])
+    # The id becomes a blob key, so it names a file. Checked here as well as in
+    # the store so a bundle carrying one says it is not a snapshot, the way its
+    # member names and cell ids do.
+    if "/" in artifact_id or "\\" in artifact_id or ".." in PurePosixPath(artifact_id).parts:
+        raise NotASnapshotError(f"the bundle names an artifact it cannot write: {artifact_id!r}")
     return ArtifactVersion(
-        id=str(data["id"]),
+        id=artifact_id,
         version=int(data["version"]),
         state=str(data["state"]),
         provenance_hash=str(data["provenance_hash"]),
@@ -322,7 +351,7 @@ def _write_committed_files(
 
     for name in archive.namelist():
         if name.startswith("cells/") and not name.endswith("/"):
-            target = dest / name
+            target = _member_target(dest, name)
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_bytes(archive.read(name))
         elif name in ("pyproject.toml", "uv.lock", "renv.lock"):
@@ -382,6 +411,10 @@ def _write_runtime_state(
             for output in cell.get("display_outputs") or []
         ]
 
+        if not _SAFE_SEGMENT.match(cell_id):
+            # The manifest names the cell, and the console is written to a path
+            # built from that name.
+            raise NotASnapshotError(f"the bundle names a cell it cannot write: {cell_id!r}")
         console_member = f"outputs/{cell_id}/console.json"
         if console_member in names:
             console = json.loads(archive.read(console_member))

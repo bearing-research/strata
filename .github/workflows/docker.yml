@@ -158,3 +158,23 @@ jobs:
         run: |
           docker stop strata-worker-test || true
           docker rm strata-worker-test || true
+
+      - name: Build the worker image with R
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a  # v7.3.0
+        with:
+          context: .
+          file: worker.Dockerfile
+          build-args: WITH_R=true
+          push: false
+          load: true
+          tags: strata-worker:r
+          cache-from: type=gha,scope=worker-r
+          cache-to: type=gha,mode=max,scope=worker-r
+
+      - name: Its R runs harness.R's packages, still not as root
+        run: |
+          # harness.R loads jsonlite unconditionally and arrow for any data
+          # frame; a worker without either accepts an R cell and fails it.
+          docker run --rm strata-worker:r Rscript -e 'library(jsonlite); library(arrow)'
+          uid=$(docker run --rm strata-worker:r id -u)
+          test "$uid" != "0" || { echo "FAIL: worker runs as root"; exit 1; }

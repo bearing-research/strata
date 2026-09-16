@@ -14,10 +14,27 @@ edits them.
 
 ## Enable it
 
-The endpoint is **off by default** and is **personal-mode only** - it has no
-per-request authentication, so it grants a caller full control of the session
-and is safe only behind a loopback, single-user deployment. (Starting the
-server in service mode with the flag set is rejected at startup.)
+The endpoint is **off by default**. On a personal server there is one user and
+nothing to check, so a caller has full control of the session. Keep it behind
+loopback.
+
+On a **service-mode** server it needs principal auth (`auth_mode` of
+`trusted_proxy` or `api_key`). Service mode without principal auth is rejected
+at startup when the flag is set. Each tool call then runs as the caller its HTTP
+request names. Authorship, team-store attribution and the registry audit record
+that caller, and the call is checked against the same notebook scopes as the
+REST routes and the WebSocket:
+
+| Scope | Tools |
+|---|---|
+| `notebook:read` | `list_notebooks`, `get_notebook`, `get_cell`, `get_variable`, `dag`, `status`, `list_workers`, `lineage`, `publish_preflight` |
+| `notebook:write` | `add_cell`, `edit_cell`, `remove_cell`, `move_cell`, `note`, `add_worker`, `set_default_worker`, `remove_worker`, `disconnect_ssh_worker`, `promote` |
+| `notebook:execute` | `run_cell`, `run_tests`, `run_snippet`, `add_dependency`, `remove_dependency`, `connect_ssh_worker`, and any tool not listed |
+| `artifacts:publish` | `publish` |
+
+Every open session on the server is visible to any caller holding
+`notebook:read`: a server serves one organization, and the check is scopes, not
+ownership.
 
 ```bash
 uv sync --extra mcp          # or: uv tool install "strata-notebook[mcp]"

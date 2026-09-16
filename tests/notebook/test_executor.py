@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import sys
 import threading
@@ -1542,8 +1543,18 @@ class Person:
             build_id: str | None = None,
             log_url: str | None = None,
             env: dict[str, str] | None = None,
+            interpreter: Path | None = None,
         ) -> dict[str, object]:
-            del harness_path, manifest_path, timeout_seconds, in_flight, build_id, log_url, env
+            del (
+                harness_path,
+                manifest_path,
+                timeout_seconds,
+                in_flight,
+                build_id,
+                log_url,
+                env,
+                interpreter,
+            )
             started.set()
             await asyncio.sleep(0.5)
             return {
@@ -2496,6 +2507,80 @@ class TestLoopCellExecution:
         )
         assert not result.success
         assert "seed" in (result.error or "").lower()
+
+    @pytest.mark.asyncio
+    async def test_running_the_loop_again_does_not_rerun_the_body(self, loop_notebook, tmp_path):
+        """An unchanged loop cell is served from the cache like any other.
+
+        The body appends a character per iteration to a file, so the count
+        says whether the loop actually ran rather than whether the executor
+        claimed it did.
+        """
+        from strata.notebook.writer import write_cell
+
+        notebook_dir, session = loop_notebook
+        trace = tmp_path / "trace.txt"
+        loop_source = (
+            "# @loop max_iter=3 carry=state\n"
+            f"open({str(trace)!r}, 'a').write('x')\n"
+            "state = {'n': state['n'] + 1, 'history': state['history'] + [state['n']]}\n"
+        )
+        write_cell(notebook_dir, "loop", loop_source)
+        session.reload()
+
+        executor = CellExecutor(session)
+        await executor.execute_cell("seed", "state = {'n': 0, 'history': []}")
+
+        first = await executor.execute_cell("loop", loop_source)
+        assert first.success, first.error
+        assert trace.read_text() == "xxx"
+
+        second = await executor.execute_cell("loop", loop_source)
+        assert second.success, second.error
+        assert second.cache_hit
+        assert second.execution_method == "cached"
+        assert second.artifact_uri == first.artifact_uri
+        assert trace.read_text() == "xxx"
+
+    @pytest.mark.asyncio
+    async def test_editing_the_loop_body_runs_it_again(self, loop_notebook, tmp_path):
+        """The cache is keyed on the cell's provenance, so an edited body
+        misses it — the loop must not serve the previous source's result."""
+        from strata.notebook.writer import write_cell
+
+        notebook_dir, session = loop_notebook
+        trace = tmp_path / "trace.txt"
+        body = f"open({str(trace)!r}, 'a').write('x')\n"
+        first_source = (
+            "# @loop max_iter=2 carry=state\n"
+            + body
+            + "state = {'n': state['n'] + 1, 'history': []}\n"
+        )
+        write_cell(notebook_dir, "loop", first_source)
+        session.reload()
+
+        executor = CellExecutor(session)
+        await executor.execute_cell("seed", "state = {'n': 0, 'history': []}")
+        first = await executor.execute_cell("loop", first_source)
+        assert first.success, first.error
+        assert trace.read_text() == "xx"
+
+        edited_source = (
+            "# @loop max_iter=2 carry=state\n"
+            + body
+            + "state = {'n': state['n'] + 100, 'history': []}\n"
+        )
+        write_cell(notebook_dir, "loop", edited_source)
+        session.reload()
+        second = await executor.execute_cell("loop", edited_source)
+
+        assert second.success, second.error
+        assert not second.cache_hit
+        assert trace.read_text() == "xxxx"
+
+        artifact_mgr = session.get_artifact_manager()
+        final = json.loads(artifact_mgr.load_iteration_blob("loop", "state", 1))
+        assert final == {"n": 200, "history": []}
 
 
 class TestSkipUpstreamMaterialization:

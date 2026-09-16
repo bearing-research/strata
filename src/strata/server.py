@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import math
 import os
 import re
@@ -763,6 +764,47 @@ def _should_warn_unset_signing_secret(config: StrataConfig) -> bool:
     return not config.transform_signing_secret and config.deployment_mode == "service"
 
 
+async def _artifact_gc_loop(store, interval_seconds: float, max_age_days: float) -> None:
+    """Run ``garbage_collect`` every ``interval_seconds`` until cancelled.
+
+    A pass that raises is logged and the loop carries on: one bad sweep must not
+    turn scheduled collection off for the life of the server.
+    """
+    while True:
+        await asyncio.sleep(interval_seconds)
+        try:
+            result = await asyncio.to_thread(store.garbage_collect, max_age_days=max_age_days)
+        except Exception:
+            logger.exception("artifact_gc_failed")
+            continue
+        if result.get("deleted_count"):
+            logger.info(
+                "artifact_gc_collected",
+                deleted_count=result["deleted_count"],
+                deleted_bytes=result["deleted_bytes"],
+            )
+
+
+# Shared notebook environments are gigabytes and are removed on a TTL of days,
+# so an hourly look is plenty.
+_SHARED_ENV_GC_INTERVAL_SECONDS = 3600.0
+
+
+async def _shared_env_gc_loop(root: Path, ttl_days: float) -> None:
+    """Remove unlinked shared notebook environments every hour until cancelled."""
+    from strata.notebook.shared_env import collect
+
+    while True:
+        await asyncio.sleep(_SHARED_ENV_GC_INTERVAL_SECONDS)
+        try:
+            result = await asyncio.to_thread(collect, root, ttl_days=ttl_days)
+        except Exception:
+            logger.exception("shared_env_gc_failed")
+            continue
+        if result.removed:
+            logger.info("shared_env_gc_collected", removed=", ".join(result.removed))
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Initialize server state on startup, graceful shutdown on exit."""
@@ -967,6 +1009,30 @@ async def lifespan(app: FastAPI):
         except Exception:
             pass  # Don't fail startup if sweep fails
 
+    # Scheduled garbage collection, when configured. The whole store in one
+    # pass: garbage_collect already treats every tenant's roots as roots.
+    gc_task: asyncio.Task | None = None
+    if config.artifact_gc_interval_seconds and config.artifact_dir is not None:
+        from strata.artifact_store import get_artifact_store as _get_store_for_gc
+
+        gc_store = _get_store_for_gc(config.artifact_dir)
+        if gc_store is not None:
+            gc_task = asyncio.create_task(
+                _artifact_gc_loop(
+                    gc_store,
+                    config.artifact_gc_interval_seconds,
+                    config.artifact_gc_max_age_days,
+                )
+            )
+
+    env_gc_task: asyncio.Task | None = None
+    if config.notebook_env_backend == "shared":
+        from strata.notebook.env_backend import shared_env_root
+
+        env_gc_task = asyncio.create_task(
+            _shared_env_gc_loop(shared_env_root(config), config.notebook_shared_env_ttl_days)
+        )
+
     # Initialize build QoS for server-mode transforms (quotas + backpressure)
     build_qos = None
     if config.server_transforms_enabled:
@@ -1060,6 +1126,12 @@ async def lifespan(app: FastAPI):
             yield
     else:
         yield
+
+    for task in (gc_task, env_gc_task):
+        if task is not None:
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
 
     # Reset build QoS
     from strata.transforms.build_qos import reset_build_qos
@@ -1529,11 +1601,12 @@ app.include_router(materialize_router)
 
 
 def _mount_mcp_if_enabled() -> None:
-    """Mount the MCP endpoint at ``/mcp`` when configured (personal mode only).
+    """Mount the MCP endpoint at ``/mcp`` when configured.
 
     The decision is process-level (env / pyproject), read once at import — the
     endpoint is not toggled per request. Gated three ways: ``mcp_enabled`` set,
-    ``deployment_mode == 'personal'`` (service-mode is rejected earlier by
+    a deployment that is either personal or authenticates its callers (service
+    mode without principal auth is rejected earlier by
     ``validate_mode_coherence``; this is defense in depth), and the ``[mcp]``
     extra installed (``build_mcp_app`` returns ``None`` otherwise, so the server
     still boots without the dependency).
@@ -1541,7 +1614,9 @@ def _mount_mcp_if_enabled() -> None:
     global _mcp_app
 
     config = _state.config if _state is not None else StrataConfig.load()
-    if not config.mcp_enabled or config.deployment_mode != "personal":
+    if not config.mcp_enabled:
+        return
+    if config.deployment_mode != "personal" and not config.principal_auth_enabled:
         return
 
     from strata.notebook.mcp_server import build_mcp_app
@@ -1814,8 +1889,6 @@ def _authorize_artifact_read(artifact) -> None:
         return
 
     from strata.artifact_store import TransformSpec
-    from strata.iceberg import PyIcebergCatalog
-    from strata.types import TableIdentity
 
     try:
         spec = TransformSpec.from_json(artifact.transform_spec)
@@ -1823,16 +1896,9 @@ def _authorize_artifact_read(artifact) -> None:
         return  # unparseable spec → no table inputs to gate
 
     for input_uri in spec.inputs:
-        if not (input_uri.startswith("file://") or input_uri.startswith("s3://")):
-            continue
-        if "#" not in input_uri:
-            continue  # not a `…#namespace.table` reference
-        _, table_id = PyIcebergCatalog.parse_table_uri(input_uri)
-        try:
-            identity = TableIdentity.from_table_id(table_id)
-        except ValueError:
-            continue
-        _authorize_table_access(input_uri, identity)
+        identity = _table_identity_from_uri(input_uri)
+        if identity is not None:
+            _authorize_table_access(input_uri, identity)
 
 
 def _table_identity_from_uri(table_uri: str):
@@ -1843,12 +1909,16 @@ def _table_identity_from_uri(table_uri: str):
     Iceberg reads). Returns ``None`` when the URI does not parse as a table
     id, in which case the caller falls through to the post-plan check.
     """
-    from strata.iceberg import PyIcebergCatalog
-    from strata.types import TableIdentity
+    from strata.iceberg import table_identity_for
 
-    _, table_id = PyIcebergCatalog.parse_table_uri(table_uri)
+    if "#" not in table_uri and ":" not in table_uri and "." not in table_uri:
+        return None
     try:
-        return TableIdentity.from_table_id(table_id)
+        # The planner's own helper, so the table is named the same before it
+        # plans and after — a gs:// or named-catalog table used to be named
+        # one way here and another there, and a rule written for it matched
+        # neither.
+        return table_identity_for(table_uri, get_state().config)
     except ValueError:
         return None
 

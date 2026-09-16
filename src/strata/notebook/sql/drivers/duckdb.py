@@ -40,7 +40,9 @@ import hashlib
 import os
 import re
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 from strata.notebook.sql.adapter import (
     AdapterCapabilities,
@@ -120,6 +122,14 @@ class DuckDBAdapter:
                 identity["path"] = ":memory:"
             else:
                 identity["path"] = os.path.abspath(path)
+        # What a lake connection sees beyond the file: the catalog by name and
+        # each mount by name. Their contents are in the freshness inputs.
+        catalog = getattr(spec, "catalog", None)
+        if catalog:
+            identity["catalog"] = catalog
+        mounts = getattr(spec, "mounts", None)
+        if mounts:
+            identity["mounts"] = sorted(mounts)
         return identity
 
     # --- connection lifecycle --------------------------------------------
@@ -149,6 +159,12 @@ class DuckDBAdapter:
         filtering.
         """
         path = self._build_path(spec)
+        catalog = getattr(spec, "catalog_properties", None)
+        mounts = getattr(spec, "mount_sources", None)
+        if catalog or mounts:
+            if not read_only:
+                raise RuntimeError("a connection's catalog and mounts are read-only")
+            return self._open_lake(path, getattr(spec, "catalog", None), catalog, mounts or [])
         is_memory = path == ":memory:"
         # ``duckdb.connect`` with ``read_only=True`` requires the
         # file to exist; a brand-new path can't be opened RO. For
@@ -168,6 +184,46 @@ class DuckDBAdapter:
         # blocking writes.
         conn.execute("BEGIN TRANSACTION READ ONLY")
         return _ReadOnlyDuckDB(conn)
+
+    def _open_lake(
+        self,
+        path: str,
+        catalog_name: str | None,
+        catalog: dict[str, str] | None,
+        mounts: list[dict[str, Any]],
+    ) -> Any:
+        """A read-only handle with the catalog attached and each mount a view.
+
+        The views have to be created before the read-only transaction starts,
+        and a read-only file cannot hold them, so the handle is an in-memory
+        database that the file is attached to and made the default of; the
+        views live in ``memory`` and resolve unqualified after the file's own
+        tables. The executor resolves ``catalog_properties`` and
+        ``mount_sources``; this method never looks a name up.
+        """
+        conn = self._invoke_connect(":memory:", read_only=False)
+        setup: list[str] = []
+        if path != ":memory:":
+            # The file's own name, as a plain connection calls it, unless
+            # DuckDB reserves it or the catalog has it.
+            stem = Path(path).stem
+            taken = {"memory", "main", "system", "temp", catalog_name}
+            alias = _ident(f"{stem}_file" if stem in taken else stem)
+            mode = " (READ_ONLY)" if os.path.exists(path) else ""
+            conn.execute(f"ATTACH {_literal(path)} AS {alias}{mode}")
+            setup.append(f"SET search_path = {_literal(f'{alias}.main,memory.main')}")
+        if any(_mount_scheme(m["uri"]) == "s3" for m in mounts) or catalog:
+            conn.execute("INSTALL httpfs; LOAD httpfs")
+        if catalog:
+            assert catalog_name is not None
+            conn.execute("INSTALL iceberg; LOAD iceberg")
+            _attach_catalog(conn, catalog_name, catalog)
+        for mount in mounts:
+            _create_mount_view(conn, mount)
+        for statement in setup:
+            conn.execute(statement)
+        conn.execute("BEGIN TRANSACTION READ ONLY")
+        return _ReadOnlyDuckDB(conn, setup)
 
     def _build_path(self, spec: Any) -> str:
         path = getattr(spec, "path", None)
@@ -409,11 +465,16 @@ class _ReadOnlyDuckDB:
     and integration callers don't need to know the proxy is here.
     """
 
-    def __init__(self, conn: Any) -> None:
+    def __init__(self, conn: Any, setup: list[str] | None = None) -> None:
         self._conn = conn
+        # Session settings (a lake handle's search path) do not carry to a
+        # cursor's child connection either.
+        self._setup = setup or []
 
     def cursor(self) -> Any:
         cur = self._conn.cursor()
+        for statement in self._setup:
+            cur.execute(statement)
         cur.execute("BEGIN TRANSACTION READ ONLY")
         return cur
 
@@ -433,6 +494,131 @@ class _ReadOnlyDuckDB:
         # AttributeError lookups, so the explicit overrides above
         # take precedence.
         return getattr(self._conn, name)
+
+
+_MOUNT_FORMATS = (("parquet", "read_parquet"), ("csv", "read_csv"), ("json", "read_json"))
+
+
+def _literal(value: str) -> str:
+    return "'" + value.replace("'", "''") + "'"
+
+
+def _ident(value: str) -> str:
+    return '"' + value.replace('"', '""') + '"'
+
+
+def _mount_scheme(uri: str) -> str:
+    from strata.notebook.mounts import parse_mount_uri
+
+    return parse_mount_uri(uri)[0]
+
+
+def _s3_secret(name: str, fields: dict[str, Any], scope: str | None = None) -> str | None:
+    """``CREATE SECRET`` for S3 from fsspec or pyiceberg names, or None without any.
+
+    A mount's storage options use s3fs's names (``key``, ``endpoint_url``) and a
+    catalog's properties pyiceberg's (``s3.access-key-id``, ``s3.endpoint``).
+    """
+    client_kwargs = fields.get("client_kwargs") or {}
+    values = {
+        "KEY_ID": fields.get("key") or fields.get("s3.access-key-id"),
+        "SECRET": fields.get("secret") or fields.get("s3.secret-access-key"),
+        "SESSION_TOKEN": fields.get("token") or fields.get("s3.session-token"),
+        "REGION": (
+            fields.get("region_name") or client_kwargs.get("region_name") or fields.get("s3.region")
+        ),
+    }
+    endpoint = fields.get("endpoint_url") or fields.get("s3.endpoint")
+    if not endpoint and not any(values.values()):
+        return None
+    options = [f"{key} {_literal(str(value))}" for key, value in values.items() if value]
+    if endpoint:
+        parsed = urlparse(str(endpoint))
+        options += [
+            f"ENDPOINT {_literal(parsed.netloc or parsed.path)}",
+            f"USE_SSL {'false' if parsed.scheme == 'http' else 'true'}",
+            "URL_STYLE 'path'",
+        ]
+    if scope:
+        options.append(f"SCOPE {_literal(scope)}")
+    return f"CREATE OR REPLACE SECRET {_ident(name)} (TYPE s3, {', '.join(options)})"
+
+
+def _attach_catalog(conn: Any, name: str, properties: dict[str, str]) -> None:
+    """Attach an Iceberg REST catalog, from its pyiceberg properties, as *name*."""
+    kind = properties.get("type", "rest")
+    if kind != "rest":
+        raise RuntimeError(f"DuckDB attaches REST catalogs; catalog {name!r} is {kind!r}")
+    uri = properties.get("uri")
+    if not uri:
+        raise RuntimeError(f"catalog {name!r} has no uri")
+    secret = f"strata_catalog_{name}"
+    if properties.get("token"):
+        conn.execute(
+            f"CREATE OR REPLACE SECRET {_ident(secret)} "
+            f"(TYPE iceberg, TOKEN {_literal(properties['token'])})"
+        )
+        auth = f"SECRET {_ident(secret)}"
+    elif properties.get("credential"):
+        client_id, _, client_secret = properties["credential"].rpartition(":")
+        server = properties.get("oauth2-server-uri") or f"{uri.rstrip('/')}/v1/oauth/tokens"
+        scope = f", OAUTH2_SCOPE {_literal(properties['scope'])}" if properties.get("scope") else ""
+        conn.execute(
+            f"CREATE OR REPLACE SECRET {_ident(secret)} (TYPE iceberg, "
+            f"CLIENT_ID {_literal(client_id)}, CLIENT_SECRET {_literal(client_secret)}, "
+            f"OAUTH2_SERVER_URI {_literal(server)}{scope})"
+        )
+        auth = f"SECRET {_ident(secret)}"
+    else:
+        auth = "AUTHORIZATION_TYPE 'none'"
+    # Scoped to the warehouse, so it neither reaches other buckets nor answers
+    # for a mount's; without an s3 warehouse to scope to, the catalog's vended
+    # credentials are all the tables get.
+    warehouse = properties.get("warehouse", "")
+    s3 = (
+        _s3_secret(f"strata_catalog_{name}_s3", properties, warehouse)
+        if warehouse.startswith("s3://")
+        else None
+    )
+    if s3:
+        conn.execute(s3)
+    conn.execute(
+        f"ATTACH {_literal(properties.get('warehouse', ''))} AS {_ident(name)} "
+        f"(TYPE iceberg, ENDPOINT {_literal(uri)}, {auth}, READ_ONLY)"
+    )
+
+
+def _create_mount_view(conn: Any, mount: dict[str, Any]) -> None:
+    """``memory.main.<name>``: a view over the mount's Parquet, CSV or JSON files."""
+    from strata.notebook.mounts import parse_mount_uri
+
+    name, uri = mount["name"], mount["uri"]
+    scheme, path = parse_mount_uri(uri)
+    if scheme == "file":
+        root = path
+    elif scheme == "s3":
+        root = f"s3://{path}"
+        secret = _s3_secret(f"strata_mount_{name}", mount.get("storage_options") or {}, root)
+        if secret:
+            conn.execute(secret)
+    else:
+        raise RuntimeError(f"DuckDB reads file and s3 mounts; mount {name!r} is {scheme}")
+    root = root.rstrip("/")
+    for extension, reader in _MOUNT_FORMATS:
+        if root.endswith(f".{extension}"):
+            files = root
+            break
+        pattern = f"{root}/**/*.{extension}"
+        (count,) = conn.execute(f"SELECT count(*) FROM glob({_literal(pattern)})").fetchone()
+        if count:
+            files = pattern
+            break
+    else:
+        raise RuntimeError(f"mount {name!r} has no Parquet, CSV or JSON files under {uri}")
+    conn.execute(
+        f"CREATE VIEW memory.main.{_ident(name)} AS "
+        f"SELECT * FROM {reader}({_literal(files)}, union_by_name = true)"
+    )
 
 
 _ADAPTER = DuckDBAdapter()

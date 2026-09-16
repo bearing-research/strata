@@ -44,13 +44,15 @@ from strata.notebook.models import (
     CellStaleness,
     CellState,
     CellStatus,
+    DatasetSpec,
     NotebookState,
     StalenessReason,
     VariantGroupState,
     VariantMember,
 )
-from strata.notebook.mounts import MountFingerprinter, resolve_cell_mounts
+from strata.notebook.mounts import resolve_cell_mounts
 from strata.notebook.parser import parse_notebook
+from strata.notebook.presence import SessionPresence
 from strata.notebook.protocol import MessageType
 from strata.notebook.provenance import (
     compute_provenance_hash,
@@ -243,6 +245,14 @@ class NotebookSession:
             artifact_dir=path / ".strata" / "artifacts",
         )
 
+        # One staleness computation at a time: it mutates the cells it walks,
+        # which on the event loop it had to itself. A threading lock rather
+        # than an asyncio one because a session outlives any single loop --
+        # one built for a test client's portal, say -- and an asyncio.Lock
+        # awaited from a loop other than the one it queued its waiter on never
+        # wakes. This one is only ever taken inside the worker thread.
+        self._staleness_lock = threading.Lock()
+
         # M6: Initialize warm process pool (optional)
         self.warm_pool: WarmProcessPool | None = None
         self.r_warm_pool: WarmProcessPool | None = None
@@ -261,6 +271,14 @@ class NotebookSession:
 
         # v1.1: Causality chains for stale cells
         self.causality_map: dict[str, CausalityChain] = {}
+
+        # Who is on the session and which cell each last changed.
+        self.presence = SessionPresence()
+
+        # What each ``@dataset`` last resolved to, keyed by (variable,
+        # reference), with when: staleness re-asks the registry at most every
+        # ``datasets.STALE_CHECK_SECONDS``, and a run's resolution lands here.
+        self._dataset_checks: dict[tuple[str, str], tuple[float, str]] = {}
 
         # Environment/runtime sync state for the current notebook venv.
         self.environment_sync_state: str = "unknown"
@@ -651,6 +669,23 @@ class NotebookSession:
             cell.last_env_hash = previous.last_env_hash
             cell.widget_values = dict(previous.widget_values)
 
+    def _restore_alternate_scheme_outputs(self, cell: Any) -> None:
+        """Point a cell at the artifacts its last successful run stored.
+
+        For a cell kind whose artifacts are keyed under its own scheme (SQL,
+        prompt, widget), nothing else repopulates ``artifact_uris`` on open,
+        and a downstream cell that finds none computes a provenance hash that
+        no longer matches what it recorded.
+        """
+        store = self.get_artifact_manager().artifact_store
+        notebook_id = self.notebook_state.id
+        for name in cell.defines:
+            artifact = store.get_latest_version(f"nb_{notebook_id}_cell_{cell.id}_var_{name}")
+            if artifact is not None:
+                uri = f"strata://artifact/{artifact.id}@v={artifact.version}"
+                cell.artifact_uris[name] = uri
+                cell.artifact_uri = uri
+
     def _restore_ready_runtime_state(
         self,
         previous_cells: dict[str, Any],
@@ -754,8 +789,33 @@ class NotebookSession:
         """
         return self.artifact_manager
 
+    async def compute_staleness_async(self) -> dict[str, CellStaleness]:
+        """``compute_staleness`` without holding up everything else.
+
+        Deciding whether a cell is stale reads the outside world: an ``@fetch``
+        URL, a ``@dataset`` registry, an ``@table`` catalog. Those are
+        synchronous calls -- ``httpx.Client`` with a sixty-second timeout for a
+        fetch -- and staleness runs on every debounced source flush, so one
+        unreachable host stalled the whole process: every notebook's socket,
+        every stream in flight, every route. The executor offloads its own
+        copies of exactly these calls; this is the same move for the mirror of
+        them, and it changes nothing about what is computed.
+
+        Serialized, because the work mutates the cells it walks. On the loop
+        that was free; two of these in threads at once would not be.
+        """
+        return await asyncio.to_thread(self._compute_staleness_serialized)
+
+    def _compute_staleness_serialized(self) -> dict[str, CellStaleness]:
+        """``compute_staleness`` with one caller at a time."""
+        with self._staleness_lock:
+            return self.compute_staleness()
+
     def compute_staleness(self) -> dict[str, CellStaleness]:
         """Compute staleness status for all cells.
+
+        Reads the outside world for ``@fetch``, ``@dataset`` and ``@table``
+        cells, so an async caller wants :meth:`compute_staleness_async`.
 
         Walk cells in topological order and check if cached artifacts
         match the current provenance hash. Updates cell.staleness.
@@ -848,9 +908,15 @@ class NotebookSession:
                 continue
 
             table_fingerprints = self._collect_table_fingerprints(cell)
+            fetch_fingerprints = self._collect_fetch_fingerprints(cell)
+            dataset_fingerprints = self._collect_dataset_fingerprints(cell)
 
             provenance_hash = compute_provenance_hash(
-                input_hashes + mount_fingerprints + table_fingerprints,
+                input_hashes
+                + mount_fingerprints
+                + table_fingerprints
+                + fetch_fingerprints
+                + dataset_fingerprints,
                 source_hash,
                 env_hash,
             )
@@ -885,13 +951,55 @@ class NotebookSession:
                     # artifact ids the generic lookup can't see, while
                     # the fan-out orchestrator records the base hash.
                     is_fanout = parse_annotations(cell.source).per_variant
+                    # A cell whose artifacts are keyed under its own scheme is
+                    # preserved from IDLE as well as READY: a cold open starts
+                    # every cell IDLE (status is not persisted), so requiring
+                    # READY made this branch dead on the path it was written
+                    # for — reopening sent prompt, SQL, widget and fan-out
+                    # cells back to idle, and everything downstream to stale,
+                    # with nothing changed. A leaf still needs READY: its
+                    # structural comparison on reload (mounts, worker, env)
+                    # catches changes its provenance hash does not.
+                    keyed_elsewhere = language_executor.has_alternate_cache_scheme or is_fanout
+                    allowed_status = (
+                        (CellStatus.READY, CellStatus.IDLE)
+                        if keyed_elsewhere
+                        else (CellStatus.READY,)
+                    )
+                    # The generic hash is not the whole of what these cells
+                    # cache on: a SQL cell's rows depend on the connection it
+                    # read and the policy it cached under, a prompt cell's
+                    # answer on the model it asked. Preserving READY on the
+                    # generic hash alone called a cell ready after its
+                    # connection was repointed at another database, and after
+                    # a ``@cache session`` cell's session had ended -- green,
+                    # showing the old answer, with nothing marked stale. So
+                    # the cell's own identity has to match what it recorded,
+                    # and a language that cannot settle it without a probe
+                    # says so by returning None.
+                    # Only for the status this branch resurrects. A cell that
+                    # is READY now ran in this session, and preserving that
+                    # across a reload is what it has always done; it is
+                    # bringing one back from IDLE -- a cold open, where the run
+                    # was some other session's -- that needs the identity.
+                    identity_required = keyed_elsewhere and cell.status == CellStatus.IDLE
+                    identity = self.reopen_identity(cell) if identity_required else None
+                    identity_holds = not identity_required or (
+                        identity is not None and identity == (cell.last_reopen_identity or "")
+                    )
                     can_preserve_uncached_ready = (
-                        (cell.is_leaf or language_executor.has_alternate_cache_scheme or is_fanout)
-                        and cell.status == CellStatus.READY
+                        (cell.is_leaf or keyed_elsewhere)
+                        and cell.status in allowed_status
                         and cell.last_provenance_hash == provenance_hash
+                        and identity_holds
                     )
                     if can_preserve_uncached_ready:
                         staleness_map[cell_id] = CellStaleness(status=CellStatus.READY, reasons=[])
+                        # The cell's outputs live under a per-language scheme
+                        # the generic lookup above cannot see, so its artifact
+                        # uris are still empty here — and a downstream cell
+                        # reads them to build its own provenance.
+                        self._restore_alternate_scheme_outputs(cell)
                     else:
                         # No cached artifact — cell is stale/idle unless we can
                         # prove it still matches the last successful uncached run.
@@ -1073,13 +1181,34 @@ class NotebookSession:
         cell.last_provenance_hash = provenance_hash
         cell.last_source_hash = source_hash
         cell.last_env_hash = env_hash
+        # What the cell's own cache scheme rested on for this run, so a reopen
+        # compares like with like rather than calling it ready on a hash that
+        # never covered the connection it read or the model it asked.
+        cell.last_reopen_identity = self.reopen_identity(cell)
         persist_cell_provenance(
             self.path,
             cell_id,
             last_provenance_hash=provenance_hash,
             last_source_hash=source_hash,
             last_env_hash=env_hash,
+            last_reopen_identity=cell.last_reopen_identity,
         )
+
+    def reopen_identity(self, cell: CellState) -> str | None:
+        """What this cell's cache scheme rests on beyond the generic triplet.
+
+        ``None`` when the language cannot settle it without going out to the
+        world, or when asking raised: an identity nobody can reproduce is one
+        a reopen must not act on.
+        """
+        from strata.notebook.languages import get_language_executor
+
+        try:
+            language_executor = get_language_executor(cell.language)
+            return language_executor.reopen_identity(cell, self)
+        except Exception:
+            logger.debug("reopen identity unavailable for cell %s", cell.id, exc_info=True)
+            return None
 
     def serialize_cell(self, cell: CellState) -> dict[str, Any]:
         """Serialize a cell with session-coupled overlays.
@@ -1788,14 +1917,26 @@ class NotebookSession:
         annotations = parse_annotations(cell.source)
         merged_mounts = resolve_cell_mounts([], cell.mounts, annotations.mounts)
 
+        # The same storage options the executor fingerprints with — scheme
+        # credentials and named ones — or a mount reached through a credential
+        # lists differently here and the cell never matches its own artifacts.
+        from strata.notebook.credentials import CredentialResolver
+        from strata.notebook.mounts import MountResolver, mount_fingerprint_sync
+
+        resolver = MountResolver(
+            cache_dir=self.path / ".strata" / "mount_cache",
+            credential_resolver=CredentialResolver.from_config(
+                self._lake_config(), env=dict(self.notebook_state.env)
+            ),
+        )
         mount_fingerprints: list[str] = []
         has_rw_mount = False
         for mount in sorted(merged_mounts, key=lambda m: m.name):
-            fingerprint = MountFingerprinter.fingerprint_mount_sync(mount)
+            fingerprint = mount_fingerprint_sync(resolver, mount)
             if fingerprint is None:
                 has_rw_mount = True
             else:
-                mount_fingerprints.append(f"{mount.name}:{fingerprint}")
+                mount_fingerprints.append(fingerprint)
 
         return mount_fingerprints, has_rw_mount
 
@@ -1811,12 +1952,75 @@ class NotebookSession:
         lake outage shows the cell stale rather than crashing the recompute.
         """
         annotations = parse_annotations(cell.source)
-        if not annotations.tables:
+        tables = list(annotations.tables)
+        if annotations.sql is not None:
+            # Only a SQL cell: the SQL package needs the [sql] extra.
+            from strata.notebook.sql.lake import lake_tables
+
+            tables += lake_tables(self.notebook_state, cell.source)
+        if not tables:
             return []
         from strata.notebook.tables import fingerprint_tables
 
-        fingerprints, _ = fingerprint_tables(annotations.tables, self._lake_config())
+        fingerprints, _ = fingerprint_tables(tables, self._lake_config())
         return fingerprints
+
+    def _collect_fetch_fingerprints(self, cell: Any) -> list[str]:
+        """``@fetch`` fingerprints for staleness, mirroring the executor's.
+
+        Checked at most every ``STALE_CHECK_SECONDS`` rather than on every
+        recompute: staleness runs on each source edit, and the executor checks
+        again before every run regardless. Never raises.
+        """
+        annotations = parse_annotations(cell.source)
+        if not annotations.fetches:
+            return []
+        from strata.notebook.fetch import FetchCache
+
+        cache = FetchCache(
+            self.path,
+            allowed_hosts=tuple(
+                getattr(self._lake_config(), "notebook_fetch_allowed_hosts", None) or ()
+            ),
+        )
+        return [
+            cache.fingerprint(spec) for spec in sorted(annotations.fetches, key=lambda s: s.name)
+        ]
+
+    def _collect_dataset_fingerprints(self, cell: Any) -> list[str]:
+        """``@dataset`` fingerprints for staleness, mirroring the executor's.
+
+        The registry is asked at most every ``STALE_CHECK_SECONDS`` per
+        declaration, since staleness runs on each source edit and the registry
+        may be across a network; the executor resolves again before every run
+        and records the answer here. Never raises: a name that cannot be
+        resolved fingerprints as stale.
+        """
+        annotations = parse_annotations(cell.source)
+        if not annotations.datasets:
+            return []
+        from strata.notebook import datasets
+
+        fingerprints: list[str] = []
+        for spec in sorted(annotations.datasets, key=lambda s: s.name):
+            checked = self._dataset_checks.get((spec.name, spec.reference))
+            if (
+                checked is not None
+                and _time.monotonic() - checked[0] < datasets.STALE_CHECK_SECONDS
+            ):
+                fingerprints.append(checked[1])
+                continue
+            try:
+                fingerprint = datasets.registry_for(self._lake_config()).resolve(spec).fingerprint
+            except datasets.DatasetError:
+                fingerprint = datasets.unresolved_fingerprint(spec)
+            self.remember_dataset_fingerprint(spec, fingerprint)
+            fingerprints.append(fingerprint)
+        return fingerprints
+
+    def remember_dataset_fingerprint(self, spec: DatasetSpec, fingerprint: str) -> None:
+        """Record what *spec* resolved to now, for staleness to reuse."""
+        self._dataset_checks[(spec.name, spec.reference)] = (_time.monotonic(), fingerprint)
 
     def _lake_config(self):
         """Server config when running inside the server, else loaded fresh."""
@@ -2044,11 +2248,18 @@ class NotebookSession:
         On failure the session still opens (venv_python falls back to
         ``python`` in PATH) so tests without ``uv`` keep working.
         """
+        from strata.notebook.env_backend import UvBackend
+
         started = _time.perf_counter()
-        ok = _uv_sync(
-            self.path,
-            python_version=read_requested_python_minor(self.path),
-        )
+        python_version = read_requested_python_minor(self.path)
+        if isinstance(self.backend, UvBackend):
+            ok = _uv_sync(self.path, python_version=python_version)
+        else:
+            # A shared environment is never synced through the notebook's link:
+            # ``uv sync`` there installs — and uninstalls — inside the
+            # environment every other notebook with that lock is using. The
+            # backend syncs into the key and moves this notebook's link.
+            ok = self.backend.sync(python_version=python_version, timeout=60).success
         self._apply_uv_sync_result(
             ok,
             duration_ms=int((_time.perf_counter() - started) * 1000),

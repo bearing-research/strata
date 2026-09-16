@@ -30,6 +30,7 @@ import pyarrow.ipc as ipc
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi import Path as FastPath
 from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
 
 from strata.api.dependencies import (
     CurrentPrincipal,
@@ -37,9 +38,10 @@ from strata.api.dependencies import (
     PersonalModeStore,
     ReadStore,
     WriteStore,
+    store_for_scope,
 )
 from strata.api.remote_registry import quoted, relay, remote_registry
-from strata.artifact_store import ArtifactStore
+from strata.artifact_store import ArtifactStore, reject_unsafe_artifact_id
 from strata.artifact_transfer import PROMOTION_TAG
 from strata.blob_store import BLOB_STREAM_CHUNK_BYTES
 from strata.logging import get_logger
@@ -334,6 +336,8 @@ async def get_artifact_info(
         byte_size=artifact.byte_size,
         created_at=artifact.created_at or 0,
         content_sha256=artifact.content_sha256,
+        provenance_hash=artifact.provenance_hash,
+        transform_spec=artifact.transform_spec,
     )
 
 
@@ -393,6 +397,11 @@ async def import_artifact_route(
     if not artifact_id:
         raise HTTPException(status_code=400, detail="Metadata is missing 'id'")
     try:
+        # The id is the caller's, and it becomes a blob key.
+        reject_unsafe_artifact_id(artifact_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    try:
         version = int(metadata.get("version"))
     except (TypeError, ValueError):
         raise HTTPException(status_code=400, detail="Metadata 'version' must be an integer")
@@ -438,12 +447,23 @@ async def import_artifact_route(
     )
 
     existing = store.get_artifact(artifact_id, version)
-    if existing is not None and (existing.tenant or "") != (tenant_id or ""):
+    # Two ways the id is already taken: by another tenant, and by another
+    # computation. Ids are not globally unique -- a notebook's are built from
+    # its own id and its cells' -- so two people working from one repository
+    # send the same id for cells they have each edited differently.
+    taken_by_another_tenant = existing is not None and (existing.tenant or "") != (tenant_id or "")
+    taken_by_another_computation = (
+        existing is not None
+        and not taken_by_another_tenant
+        and existing.provenance_hash != record.provenance_hash
+    )
+    if taken_by_another_tenant or taken_by_another_computation:
         if not remap:
+            held = "another tenant" if taken_by_another_tenant else "a different computation"
             raise HTTPException(
                 status_code=409,
                 detail=(
-                    f"{artifact_id}@v={version} already exists under another tenant. "
+                    f"{artifact_id}@v={version} already exists, holding {held}. "
                     f"Retry with remap=true to import it under a fresh id."
                 ),
             )
@@ -548,6 +568,15 @@ async def put_artifact_by_provenance(
         params["env_hash"] = str(env_hash)
 
     artifact_id = str(metadata.get("artifact_id") or uuid.uuid4())
+    # The caller names the id, so it can name somebody else's — and a version
+    # appended there becomes that artifact's latest, which is what a notebook
+    # reads and what GC protects. The import route refuses the same case.
+    existing = store.get_latest_version(artifact_id)
+    if existing is not None and (existing.tenant or "") != (tenant_id or ""):
+        raise HTTPException(
+            status_code=409,
+            detail=f"{artifact_id} already exists under another tenant",
+        )
     version = store.create_artifact(
         artifact_id=artifact_id,
         provenance_hash=provenance_hash,
@@ -883,27 +912,140 @@ async def delete_artifact(
         tenant_filter,
     )
 
-    deleted = store.delete_artifact(artifact_id, version, tenant=tenant_filter)
+    try:
+        deleted = store.delete_artifact(artifact_id, version, tenant=tenant_filter)
+    except ValueError as exc:
+        # Published: withdrawing the citation is a separate, deliberate act.
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     if not deleted:
         raise HTTPException(status_code=404, detail="Artifact not found")
 
     return {"deleted": True, "artifact_uri": f"strata://artifact/{artifact_id}@v={version}"}
 
 
+class PinRequest(BaseModel):
+    reason: str
+
+
+@router.post("/v1/artifacts/{artifact_id}/v/{version}/pin")
+async def pin_artifact(
+    artifact_id: str,
+    version: int,
+    request: PinRequest,
+    tenant_filter: CurrentTenant,
+    principal: CurrentPrincipal,
+    store: ArtifactStore = store_for_scope("artifacts:pin"),
+):
+    """Hold a version and every ancestor against garbage collection.
+
+    For a chain the store has no other reason to keep — a snapshot that must
+    stay restorable, a review still open. One pin per reason; pinning again
+    under the same reason refreshes it.
+    """
+    from strata.server import _ensure_artifact_access
+
+    _ensure_artifact_access(store.get_artifact(artifact_id, version), tenant_filter)
+    try:
+        return store.pin_artifact(
+            artifact_id,
+            version,
+            request.reason,
+            tenant=tenant_filter,
+            pinned_by=principal.id if principal is not None else None,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.delete("/v1/artifacts/{artifact_id}/v/{version}/pin")
+async def unpin_artifact(
+    artifact_id: str,
+    version: int,
+    reason: str,
+    tenant_filter: CurrentTenant,
+    store: ArtifactStore = store_for_scope("artifacts:pin"),
+):
+    """Release the pin placed under ``reason``."""
+    if not store.unpin_artifact(artifact_id, version, reason, tenant=tenant_filter):
+        raise HTTPException(status_code=404, detail="No pin with that reason on this version")
+    return {"unpinned": True, "artifact_id": artifact_id, "version": version, "reason": reason}
+
+
+class ExportTableRequest(BaseModel):
+    table: str
+    alias: str | None = None
+
+
+@router.post("/v1/artifacts/{artifact_id}/v/{version}/export")
+async def export_artifact_to_table(
+    artifact_id: str,
+    version: int,
+    request: ExportTableRequest,
+    tenant_filter: CurrentTenant,
+    principal: CurrentPrincipal,
+    store: WriteStore,
+):
+    """Write a tabular artifact into an Iceberg table as its current snapshot.
+
+    For a platform that exports a dataset once it has been promoted. The
+    snapshot's summary names this version, and ``alias`` becomes a tag on it.
+    The catalog is this server's: ``table`` is a ``<warehouse>#ns.table`` URI or
+    a ``ns.table`` in the configured catalog, as ``@table`` reads it.
+    """
+    from strata.api.dependencies import authorize_table_access
+    from strata.iceberg import table_identity_for
+    from strata.server import _ensure_artifact_access, get_state
+    from strata.table_export import export_artifact
+
+    config = get_state().config
+    # The table this writes is authorized like any table a scan reads, so a
+    # principal denied a table cannot write it either.
+    try:
+        identity = table_identity_for(request.table, config)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    authorize_table_access(request.table, identity)
+    artifact = _ensure_artifact_access(store.get_artifact(artifact_id, version), tenant_filter)
+    try:
+        written = await asyncio.to_thread(
+            export_artifact,
+            store,
+            artifact,
+            request.table,
+            config=config,
+            promoted_by=principal.id if principal is not None else None,
+            alias=request.alias,
+            tenant=tenant_filter,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {
+        "table": written.table,
+        "snapshot_id": written.snapshot_id,
+        "created": written.created,
+        "artifact_uri": f"strata://artifact/{artifact_id}@v={version}",
+    }
+
+
 @router.post("/v1/artifacts/gc")
 async def garbage_collect_artifacts(
-    store: PersonalModeStore,
     tenant_filter: CurrentTenant,
     max_age_days: float = 7.0,
     collect_latest: bool = False,
+    store: ArtifactStore = store_for_scope("admin:*"),
 ):
-    """Garbage collect unreachable artifacts (personal mode only).
+    """Garbage collect unreachable artifacts.
+
+    Personal mode, or service mode for a principal holding ``admin:*``, scoped
+    to the caller's tenant.
 
     Deletes artifact versions that:
     1. Have no name **or alias** pointing at them
     2. Are not the latest version of their id (unless ``collect_latest``)
     3. Are older than ``max_age_days``
     4. Are in "ready", "superseded" or "failed" state
+    5. Are not published or pinned, and nothing published or pinned depends
+       on them
 
     The latest version of an id is spared because that is the artifact's
     *current value*: ``get_latest_version(id)`` is how the store resolves it,

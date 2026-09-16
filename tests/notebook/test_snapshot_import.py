@@ -329,3 +329,90 @@ class TestTheCommandLine:
 
         assert import_main(self._args(bogus)) == 2
         assert "not a snapshot" in capsys.readouterr().err
+
+
+class TestABundleWritesOnlyIntoTheNotebook:
+    """A bundle is a file somebody sends you. Its member names are its own, and
+    ``dest / name`` for a member called ``cells/../../../x`` writes there, as
+    the server's user."""
+
+    @staticmethod
+    def _bundle_with(tmp_path, member: str, ran):
+        good = _export(ran, tmp_path / "snap.zip")
+        evil = tmp_path / "evil.zip"
+        with zipfile.ZipFile(good) as src, zipfile.ZipFile(evil, "w") as dst:
+            for name in src.namelist():
+                dst.writestr(name, src.read(name))
+            dst.writestr(member, b"pwned")
+        return evil
+
+    def test_a_member_that_climbs_out_is_refused(self, ran, tmp_path):
+        evil = self._bundle_with(tmp_path, "cells/../../../PWNED.txt", ran)
+        target = tmp_path / "dst"
+
+        with pytest.raises(NotASnapshotError, match="cannot write"):
+            import_snapshot(evil, target / "nb")
+
+        assert not (tmp_path / "PWNED.txt").exists()
+        assert not (target / "PWNED.txt").exists()
+
+    def test_a_member_outside_the_committed_set_is_not_written(self, ran, tmp_path):
+        """Only ``cells/`` and the three lock files are written, so a member
+        somewhere else is ignored rather than placed."""
+        evil = self._bundle_with(tmp_path, "sitecustomize.py", ran)
+        target = tmp_path / "dst" / "nb"
+
+        imported = import_snapshot(evil, target)
+
+        assert not (imported.notebook_dir / "sitecustomize.py").exists()
+        assert not (tmp_path / "sitecustomize.py").exists()
+
+    def test_a_cell_id_that_is_a_path_is_refused(self, ran, tmp_path):
+        good = _export(ran, tmp_path / "snap.zip")
+        evil = tmp_path / "evil-cell.zip"
+        with zipfile.ZipFile(good) as src, zipfile.ZipFile(evil, "w") as dst:
+            for name in src.namelist():
+                data = src.read(name)
+                if name == "artifacts.json":
+                    manifest = json.loads(data)
+                    manifest.setdefault("cells", {})["../../../escape"] = {
+                        "provenance_hash": "x",
+                        "source_hash": "y",
+                        "env_hash": "z",
+                    }
+                    data = json.dumps(manifest).encode()
+                dst.writestr(name, data)
+
+        with pytest.raises(NotASnapshotError, match="cannot write"):
+            import_snapshot(evil, tmp_path / "dst" / "nb")
+
+    def test_an_artifact_id_that_is_a_path_is_refused(self, ran, tmp_path):
+        """An id becomes a blob key -- ``{id}@v={n}.arrow`` under the blobs
+        directory -- so a record naming a path writes outside the notebook."""
+        good = _export(ran, tmp_path / "snap.zip")
+        evil = tmp_path / "evil-artifact.zip"
+        escaped = "../../../../victim/pwned"
+        with zipfile.ZipFile(good) as src, zipfile.ZipFile(evil, "w") as dst:
+            for name in src.namelist():
+                data = src.read(name)
+                if name == "artifacts.json":
+                    manifest = json.loads(data)
+                    records = manifest["records"]
+                    assert records, "the fixture exports at least one record"
+                    ref = next(iter(records))
+                    records[ref]["id"] = escaped
+                    data = json.dumps(manifest).encode()
+                dst.writestr(name, data)
+
+        with pytest.raises(NotASnapshotError, match="cannot write"):
+            import_snapshot(evil, tmp_path / "dst" / "nb")
+
+        assert not (tmp_path / "victim").exists()
+        assert not (tmp_path.parent / "victim").exists()
+
+    def test_an_ordinary_bundle_still_imports(self, ran, tmp_path):
+        bundle = _export(ran, tmp_path / "snap.zip")
+
+        imported = import_snapshot(bundle, tmp_path / "dst")
+
+        assert (imported.notebook_dir / "cells").is_dir()

@@ -88,6 +88,10 @@ class SignedUploadURL:
     build_id: str
     max_bytes: int
     expires_at: float
+    fields: dict[str, str] | None = None
+    """Form fields to POST with the body as the ``file`` part, when ``url`` is a
+    presigned object-store upload rather than a Strata route. ``None`` means
+    POST the raw body to ``url``."""
 
 
 @dataclass(frozen=True)
@@ -155,6 +159,8 @@ class BuildManifest:
         """
         output = asdict(self.output_url)
         del output["build_id"]
+        if output["fields"] is None:
+            del output["fields"]
         return {
             "build_id": self.build_id,
             "metadata": self.metadata,
@@ -527,6 +533,7 @@ class URLSigner:
         url_expiry_seconds: float = 600.0,
         lease_owner: str | None = None,
         lease_expires_at: float | None = None,
+        blob_store: Any = None,
     ) -> BuildManifest:
         """Assemble the full signed-URL manifest for a build.
 
@@ -547,27 +554,67 @@ class URLSigner:
             Maximum permitted output size, in bytes.
         url_expiry_seconds : float, optional
             Validity window applied to every URL in the manifest (default 600).
+        blob_store : BlobStore, optional
+            When given and able to presign, inputs are read and the output is
+            uploaded straight from the object store, and only finalize (and
+            the log) stay Strata routes. The output's key is the build's
+            artifact, named by ``metadata["artifact_id"]`` and ``["version"]``.
 
         Returns
         -------
         BuildManifest
             The assembled manifest.
         """
-        input_urls = [
-            self.generate_download_url(
-                base_url=base_url,
-                artifact_id=artifact_id,
-                version=version,
+        expires_at = time.time() + url_expiry_seconds
+        input_urls = []
+        for artifact_id, version in input_artifacts:
+            presigned = (
+                blob_store.presign_get(artifact_id, version, int(url_expiry_seconds))
+                if blob_store is not None
+                else None
+            )
+            input_urls.append(
+                SignedDownloadURL(
+                    url=presigned,
+                    artifact_id=artifact_id,
+                    version=version,
+                    expires_at=expires_at,
+                )
+                if presigned is not None
+                else self.generate_download_url(
+                    base_url=base_url,
+                    artifact_id=artifact_id,
+                    version=version,
+                    build_id=build_id,
+                    expiry_seconds=url_expiry_seconds,
+                )
+            )
+        output_artifact = metadata.get("artifact_id"), metadata.get("version")
+        presigned_upload = (
+            blob_store.presign_post(
+                str(output_artifact[0]),
+                int(output_artifact[1]),
+                max_output_bytes,
+                int(url_expiry_seconds),
+            )
+            if blob_store is not None and output_artifact[0] and output_artifact[1] is not None
+            else None
+        )
+        output_url = (
+            SignedUploadURL(
+                url=presigned_upload[0],
                 build_id=build_id,
+                max_bytes=max_output_bytes,
+                expires_at=expires_at,
+                fields=presigned_upload[1],
+            )
+            if presigned_upload is not None
+            else self.generate_upload_url(
+                base_url=base_url,
+                build_id=build_id,
+                max_bytes=max_output_bytes,
                 expiry_seconds=url_expiry_seconds,
             )
-            for artifact_id, version in input_artifacts
-        ]
-        output_url = self.generate_upload_url(
-            base_url=base_url,
-            build_id=build_id,
-            max_bytes=max_output_bytes,
-            expiry_seconds=url_expiry_seconds,
         )
         finalize_url = self.generate_finalize_url(
             base_url=base_url,

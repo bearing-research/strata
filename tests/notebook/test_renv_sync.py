@@ -115,7 +115,10 @@ class TestRenvSyncHappyPath:
         invocations: list[tuple] = []
 
         def fake_run(args, **kwargs):
-            invocations.append((args, kwargs.get("cwd")))
+            # Only Rscript: loading the server config outside a server (to
+            # see which environment backend is on) lists Pythons through uv.
+            if args[1:2] == ["-e"]:
+                invocations.append((args, kwargs.get("cwd")))
             return SimpleNamespace(returncode=0, stdout=b"", stderr=b"")
 
         monkeypatch.setattr(subprocess, "run", fake_run)

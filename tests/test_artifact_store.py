@@ -1691,3 +1691,49 @@ class TestTenantlessArtifactsAreVisibleToScopedQueries:
         assert store.get_artifact("legacy", 1) is None, (
             "tenant-scoped GC still cannot reach a tenantless artifact"
         )
+
+
+class TestAnIdTwoComputationsClaim:
+    """``import_artifact`` keeps the id it is given, and ids are not globally
+    unique: a notebook's are built from its own id and its cells', so two
+    people working from one repository produce the same one for cells they
+    have each edited differently."""
+
+    @staticmethod
+    def _record(provenance: str):
+        from strata.artifact_store import ArtifactVersion
+
+        return ArtifactVersion(
+            id="nb_shared_cell_c1_var_rows",
+            version=1,
+            state="ready",
+            provenance_hash=provenance,
+            schema_json="",
+            row_count=0,
+            byte_size=5,
+            created_at=1.0,
+            transform_spec=json.dumps({"executor": "notebook/cell@v1", "params": {}}),
+            input_versions="{}",
+            principal=None,
+            tenant=None,
+            content_sha256=None,
+        )
+
+    def test_a_repeated_import_of_the_same_computation_is_a_no_op(self, store):
+        store.import_artifact(self._record("a" * 64), b"ALICE")
+
+        again = store.import_artifact(self._record("a" * 64), b"ALICE")
+
+        assert again.written is False
+
+    def test_a_different_computation_under_that_id_is_refused(self, store):
+        """Keeping the row already here reported success and left the caller's
+        name, tags and descendants pointing at somebody else's bytes."""
+        from strata.artifact_store import ArtifactImportConflict
+
+        store.import_artifact(self._record("a" * 64), b"ALICE")
+
+        with pytest.raises(ArtifactImportConflict):
+            store.import_artifact(self._record("b" * 64), b"BOBBY")
+
+        assert store.read_blob("nb_shared_cell_c1_var_rows", 1) == b"ALICE"

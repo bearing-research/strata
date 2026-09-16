@@ -76,7 +76,8 @@ def test_capabilities_match_design():
     assert a.name == "bigquery"
     assert a.sqlglot_dialect == "bigquery"
     assert a.capabilities.per_table_freshness is True
-    assert a.capabilities.supports_snapshot is False
+    # Time travel: a snapshot is a timestamp (time_travel.py).
+    assert a.capabilities.supports_snapshot is True
     assert a.capabilities.needs_separate_probe_conn is False
 
 

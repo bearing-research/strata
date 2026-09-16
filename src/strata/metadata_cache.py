@@ -23,9 +23,10 @@ from threading import Lock
 from typing import TYPE_CHECKING, overload
 
 import pyarrow as pa
-import pyarrow.parquet as pq
 
 if TYPE_CHECKING:
+    import pyarrow.fs
+
     from strata.metadata_store import MetadataStore, PersistedParquetMeta
 
 
@@ -644,18 +645,9 @@ class ParquetMetadataCache:
 
     def _load_metadata(self, file_path: str) -> ParquetMetadata:
         """Load metadata from a Parquet file."""
-        # Handle S3 paths
-        if file_path.startswith("s3://"):
-            if self._s3_filesystem is None:
-                # Create default S3 filesystem on demand
-                import pyarrow.fs as pafs
+        from strata.lake_files import open_parquet
 
-                self._s3_filesystem = pafs.S3FileSystem()
-            # Strip s3:// prefix for PyArrow filesystem
-            s3_path = file_path[5:]
-            pq_file = pq.ParquetFile(s3_path, filesystem=self._s3_filesystem)
-        else:
-            pq_file = pq.ParquetFile(file_path)
+        pq_file = open_parquet(file_path, self._s3_filesystem)
 
         # Extract row group metadata (we store references, not copies)
         row_group_meta = []

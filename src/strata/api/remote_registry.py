@@ -11,11 +11,12 @@ do. ``notebook_remote_store_headers`` is the trusted-proxy identity the server
 holds; handing it to a page so the page could call the team store directly
 would put it in every user's devtools.
 
-That one identity is what the team store sees, not the browser's — which is
-the deployment this is for: a personal server is one person, and a shared one
-is one organization, so the registry a viewer sees is the organization's either
-way. It is not a per-user view of a shared registry, and pointing several
-organizations at one server would not make it one.
+The team store sees the server's identity, with the caller's principal
+forwarded when there is one (``notebook_remote_store_forward_principal``), so an
+approval from the Registry tab is the member's. The registry a viewer sees is
+still the organization's: a personal server is one person, and a shared one is
+one organization. It is not a per-user view of a shared registry, and pointing
+several organizations at one server would not make it one.
 """
 
 from __future__ import annotations
@@ -54,8 +55,9 @@ def remote_registry() -> tuple[str, dict[str, str]] | None:
     url = getattr(config, "notebook_remote_store_url", None)
     if not url:
         return None
-    headers = dict(getattr(config, "notebook_remote_store_headers", {}) or {})
-    return str(url).rstrip("/"), headers
+    from strata.auth import remote_store_headers
+
+    return str(url).rstrip("/"), remote_store_headers(config)
 
 
 async def _send(

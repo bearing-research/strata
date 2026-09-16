@@ -16,6 +16,14 @@ Supported annotations::
                                     new data makes the cell stale. <name> is
                                     injected as the URI string and
                                     <name>_snapshot as the resolved snapshot id.
+    # @fetch <name> <url> [sha256=<digest>] [refetch=never|stale|always]
+                                  — Declare a URL the cell reads; its bytes are
+                                    downloaded, injected as a Path, and their
+                                    digest joins the cell's provenance.
+    # @dataset <name> <registry-name>[@<alias>|@v=<n>]
+                                  — Declare a registry name the cell reads; it
+                                    resolves to one artifact version, bound to
+                                    <name>, which joins the cell's provenance.
     # @env <KEY>=<value>          — Set an environment variable for this cell
     # @variant <group> <name>     — Mark this cell as a variant in <group>; siblings
                                     in the same group share a defines contract and
@@ -36,7 +44,7 @@ from collections.abc import Iterator
 from dataclasses import dataclass, field
 from typing import Any, TypedDict
 
-from strata.notebook.models import MountMode, MountSpec, TableSpec
+from strata.notebook.models import DatasetSpec, FetchSpec, MountMode, MountSpec, TableSpec
 
 
 class LoopWirePayload(TypedDict):
@@ -223,7 +231,7 @@ def _line_sep(source: str) -> str:
 
 # Directives that may appear more than once in a cell; the single-line splice in
 # ``set_annotation_directive`` would silently collapse them, so it refuses them.
-_REPEATABLE_DIRECTIVES = frozenset({"env", "mount", "table"})
+_REPEATABLE_DIRECTIVES = frozenset({"env", "mount", "table", "fetch", "dataset"})
 
 
 def set_annotation_directive(source: str, key: str, value: str) -> str:
@@ -286,6 +294,8 @@ class CellAnnotations:
     timeout: float | None = None
     mounts: list[MountSpec] = field(default_factory=list)
     tables: list[TableSpec] = field(default_factory=list)
+    fetches: list[FetchSpec] = field(default_factory=list)
+    datasets: list[DatasetSpec] = field(default_factory=list)
     env: dict[str, str] = field(default_factory=dict)
 
     # Prompt cell annotations
@@ -400,6 +410,16 @@ def parse_annotations(source: str) -> CellAnnotations:
             table = _parse_table_annotation(value)
             if table is not None:
                 result.tables.append(table)
+
+        elif key == "fetch":
+            fetch = _parse_fetch_annotation(value)
+            if fetch is not None:
+                result.fetches.append(fetch)
+
+        elif key == "dataset":
+            dataset = _parse_dataset_annotation(value)
+            if dataset is not None:
+                result.datasets.append(dataset)
 
         elif key == "env":
             eq_idx = value.find("=")
@@ -598,6 +618,53 @@ def _parse_variant_annotation(value: str) -> VariantAnnotation | None:
     return VariantAnnotation(group=group, name=name)
 
 
+def _parse_fetch_annotation(value: str) -> FetchSpec | None:
+    """Parse ``<name> <url> [sha256=<digest>] [refetch=never|stale|always]``."""
+    parts = value.split()
+    if len(parts) < 2 or not parts[0].isidentifier():
+        return None
+    sha256: str | None = None
+    refetch = "stale"
+    for extra in parts[2:]:
+        key, sep, val = extra.partition("=")
+        if key == "sha256" and sep:
+            sha256 = val.lower()
+        elif key == "refetch" and val in ("never", "stale", "always"):
+            refetch = val
+        else:
+            return None
+    try:
+        return FetchSpec.model_validate(
+            {"name": parts[0], "url": parts[1], "sha256": sha256, "refetch": refetch}
+        )
+    except ValueError:
+        return None
+
+
+def _parse_dataset_annotation(value: str) -> DatasetSpec | None:
+    """Parse ``<var> <name>[@<alias>|@v=<n>]``."""
+    parts = value.split()
+    if len(parts) != 2 or not parts[0].isidentifier():
+        return None
+    dataset, sep, selector = parts[1].rpartition("@")
+    if not sep:
+        dataset, selector = parts[1], ""
+    alias: str | None = None
+    version: str | None = None
+    if selector.startswith("v="):
+        version = selector.removeprefix("v=")
+    elif selector:
+        alias = selector
+    elif sep:
+        return None
+    try:
+        return DatasetSpec.model_validate(
+            {"name": parts[0], "dataset": dataset, "alias": alias, "version": version}
+        )
+    except ValueError:
+        return None
+
+
 def _parse_table_annotation(value: str) -> TableSpec | None:
     """Parse a ``@table`` annotation value.
 
@@ -647,12 +714,16 @@ def _parse_mount_annotation(value: str) -> MountSpec | None:
     name = parts[0]
     uri = parts[1]
     mode = MountMode.READ_ONLY
+    credential: str | None = None
 
-    if len(parts) >= 3 and parts[2] in ("ro", "rw"):
-        mode = MountMode(parts[2])
+    for extra in parts[2:]:
+        if extra in ("ro", "rw"):
+            mode = MountMode(extra)
+        elif extra.startswith("credential="):
+            credential = extra[len("credential=") :] or None
 
     # Validate name is a valid Python identifier
     if not name.isidentifier():
         return None
 
-    return MountSpec(name=name, uri=uri, mode=mode)
+    return MountSpec(name=name, uri=uri, mode=mode, credential=credential)

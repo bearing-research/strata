@@ -89,21 +89,33 @@ class TableRef:
 
     @classmethod
     def from_table_identity(
-        cls, identity: "TableIdentity", table_uri: str | None = None
+        cls,
+        identity: "TableIdentity",
+        table_uri: str | None = None,
+        named_catalog_name: str | None = None,
     ) -> "TableRef":
         """Convert TableIdentity to canonical TableRef.
 
         Args:
             identity: TableIdentity from the planner
             table_uri: Original table URI (used to determine catalog type)
+            named_catalog_name: The configured catalog holding the table, if any
 
         Returns:
             TableRef with normalized catalog, namespace, and table
         """
-        # Determine catalog type from URI prefix
+        # A configured catalog is named by the identity, and is what an ACL
+        # rule names too ("lake:taxi.*"); a warehouse URI is named by its
+        # store, so a rule for a local table does not also grant the table of
+        # the same name in someone's bucket.
         catalog = "file"
-        if table_uri and table_uri.startswith("s3://"):
-            catalog = "s3"
+        if named_catalog_name:
+            catalog = named_catalog_name
+        elif table_uri:
+            for prefix, store in _ACL_STORES:
+                if table_uri.startswith(prefix):
+                    catalog = store
+                    break
 
         return cls(
             catalog=catalog,
@@ -114,6 +126,19 @@ class TableRef:
     def __str__(self) -> str:
         """Return canonical string for ACL pattern matching."""
         return f"{self.catalog}:{self.namespace}.{self.table}"
+
+
+# Which store an ACL rule names a warehouse table by. A URI with no scheme is
+# a local path, which is what "file" has always meant here.
+_ACL_STORES = (
+    ("s3://", "s3"),
+    ("gs://", "gs"),
+    ("gcs://", "gs"),
+    ("abfss://", "az"),
+    ("abfs://", "az"),
+    ("az://", "az"),
+    ("azure://", "az"),
+)
 
 
 @dataclass(frozen=True)
@@ -819,6 +844,10 @@ class ArtifactInfoResponse(BaseModel):
         content_sha256: SHA-256 of the stored bytes, so a caller can compare
             two machines' outputs without downloading either. ``None`` on rows
             written before the digest was recorded.
+        provenance_hash: What the artifact deduplicates by, which a store
+            copying it (a notebook's ``@dataset``) has to keep.
+        transform_spec: The stored transform specification, as JSON. Its
+            ``params.content_type`` says how a notebook reads the bytes.
     """
 
     artifact_id: str
@@ -829,6 +858,8 @@ class ArtifactInfoResponse(BaseModel):
     byte_size: int | None = None
     created_at: float
     content_sha256: str | None = None
+    provenance_hash: str | None = None
+    transform_spec: str | None = None
 
 
 #: Marks a by-provenance 404 as a genuine "nobody has computed this", as
@@ -1064,10 +1095,12 @@ class LineageNode(BaseModel):
     """A node in the artifact lineage graph.
 
     Attributes:
-        uri: Artifact URI (strata://artifact/{id}@v={version}) or table URI
+        uri: Artifact URI (strata://artifact/{id}@v={version}), table URI, or
+            the URL a notebook cell fetched
         artifact_id: Artifact ID (if this is an artifact, not a table)
         version: Artifact version (if this is an artifact)
-        type: "artifact" or "table"
+        type: "artifact", "table", or "fetch" (bytes read from a URL, with
+            ``content_sha256`` the digest of what was read)
         transform_ref: Transform executor reference (if artifact)
         created_at: When artifact was created (if artifact)
         principal: Who computed it, when the store recorded an author.
@@ -1105,7 +1138,7 @@ class LineageNode(BaseModel):
     uri: str
     artifact_id: str | None = None
     version: int | None = None
-    type: str  # "artifact" | "table"
+    type: str  # "artifact" | "table" | "fetch"
     transform_ref: str | None = None
     created_at: float | None = None
     principal: str | None = None

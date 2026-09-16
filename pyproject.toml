@@ -281,6 +281,7 @@ markers = [
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",
     "integration: marks tests as integration tests requiring external services",
     "warm_pool: marks tests that require live warm worker startup",
+    "locked_environments: lets remote workers build the notebook's locked environment",
 ]
 
 # Coverage is opt-in: pass ``--cov`` (or ``--cov=strata --cov-report=html``)

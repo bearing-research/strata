@@ -1,17 +1,23 @@
 """Iceberg snapshot resolution using pyiceberg."""
 
+import contextlib
 import logging
+import re
+from dataclasses import dataclass
 from pathlib import Path
 from threading import Lock
 from typing import Protocol
 
+import pyarrow as pa
 from pyiceberg.catalog import Catalog, load_catalog
 from pyiceberg.catalog.sql import SqlCatalog
-from pyiceberg.exceptions import NamespaceAlreadyExistsError, NoSuchTableError
+from pyiceberg.exceptions import NamespaceAlreadyExistsError, NoSuchTableError, ValidationError
 from pyiceberg.schema import Schema
 from pyiceberg.table import Table
+from pyiceberg.table.snapshots import Operation
 
 from strata.config import StrataConfig
+from strata.types import TableIdentity
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +32,39 @@ class CatalogProvider(Protocol):
     def get_snapshot_id(self, table: Table, snapshot_id: int | None) -> int:
         """Resolve the snapshot id to read (the current snapshot if ``None``)."""
         ...
+
+
+_NAMED = re.compile(r"^([A-Za-z][A-Za-z0-9_-]*):(?!//)(.+)$")
+
+
+def named_catalog(table_uri: str, config: StrataConfig) -> tuple[str | None, str]:
+    """Split ``<name>:<namespace>.<table>`` into the catalog name and table id.
+
+    ``(None, table_uri)`` for anything else: a URI with a ``#`` names a
+    warehouse, and a name that is not a configured catalog is not one, so a
+    Windows path or a scheme is never taken for a catalog.
+    """
+    if "#" in table_uri:
+        return None, table_uri
+    match = _NAMED.match(table_uri)
+    if match is None or match.group(1) not in (getattr(config, "catalogs", None) or {}):
+        return None, table_uri
+    return match.group(1), match.group(2)
+
+
+def table_identity_for(table_uri: str, config: StrataConfig) -> TableIdentity:
+    """The canonical identity of *table_uri*, a named catalog's table included.
+
+    The planner, and every gate that authorizes a table, name a table the same
+    way here: a table in a configured catalog is that catalog's, and one in a
+    warehouse the URI carries is ``strata``'s, as the cache keys have it.
+    """
+    named, table_id = named_catalog(table_uri, config)
+    if named is not None:
+        return TableIdentity.from_table_id(table_id, catalog=named)
+    warehouse_path, table_id = PyIcebergCatalog.parse_table_uri(table_uri)
+    catalog = config.catalog_name if warehouse_path is None else "strata"
+    return TableIdentity.from_table_id(table_id, catalog=catalog)
 
 
 def _is_connection_io_error(exc: BaseException) -> bool:
@@ -143,6 +182,19 @@ class PyIcebergCatalog:
             warehouse=str(self.config.cache_dir / "warehouse"),
         )
 
+    def _get_named_catalog(self, name: str) -> Catalog:
+        """The configured catalog *name*, built on first use and cached."""
+        key = f"catalog:{name}"
+        catalog = self._catalogs.get(key)
+        if catalog is not None:
+            return catalog
+        with self._lock:
+            catalog = self._catalogs.get(key)
+            if catalog is None:
+                catalog = load_catalog(name, **self.config.catalogs[name])
+                self._catalogs[key] = catalog
+        return catalog
+
     def _get_catalog(self, warehouse_path: str | None = None) -> Catalog:
         """Return the cached catalog for a warehouse, building it on first use.
 
@@ -193,6 +245,9 @@ class PyIcebergCatalog:
             - ``s3://bucket/path/to/warehouse#namespace.table``
             - ``namespace.table`` (default catalog)
 
+            ``<name>:namespace.table``, a configured named catalog, is
+            resolved by :func:`named_catalog` before this is consulted.
+
         Returns
         -------
         tuple of (str or None, str)
@@ -226,6 +281,9 @@ class PyIcebergCatalog:
         pyiceberg.table.Table
             The loaded table.
         """
+        name, named_table_id = named_catalog(table_uri, self.config)
+        if name is not None:
+            return self._get_named_catalog(name).load_table(named_table_id)
         warehouse_path, table_id = self.parse_table_uri(table_uri)
         catalog = self._get_catalog(warehouse_path)
         try:
@@ -323,3 +381,147 @@ class PyIcebergCatalog:
             return catalog.load_table(table_id)
         except NoSuchTableError:
             return catalog.create_table(table_id, schema)
+
+
+# Snapshot summary properties naming the artifact a snapshot was written from.
+SUMMARY_ARTIFACT_ID = "strata.artifact_id"
+SUMMARY_VERSION = "strata.version"
+SUMMARY_PROVENANCE = "strata.provenance_hash"
+SUMMARY_PROMOTED_BY = "strata.promoted_by"
+
+
+@dataclass(frozen=True)
+class TableWrite:
+    """What writing an artifact into a table produced."""
+
+    table: str
+    snapshot_id: int
+    created: bool
+
+
+def _strata_has_written(table: object) -> bool:
+    """Whether any snapshot of *table* was written by an export.
+
+    A first write appends and a later one replaces the contents, which is the
+    contract for a table Strata maintains. Aimed at a table somebody else
+    built -- a production table whose name a caller mistyped or reused -- the
+    same write throws their rows away, recoverable only by time travel until
+    the snapshot expires. The marker is the one ``tag`` already recognises.
+    """
+    return any(
+        snapshot.summary is not None and snapshot.summary.get(SUMMARY_ARTIFACT_ID)
+        for snapshot in table.snapshots()  # type: ignore[attr-defined]
+    )
+
+
+class IcebergWriter:
+    """Writes artifacts into Iceberg tables as snapshots that name them.
+
+    The first write to a table appends; a later one overwrites, so the table's
+    current snapshot is always one artifact version and its history is the
+    sequence of versions written. A new version may add columns or widen a
+    type; a change Iceberg cannot evolve to is refused before anything is
+    written. Each snapshot's summary carries the artifact id, version,
+    provenance hash and who wrote it, and an alias is an Iceberg tag on the
+    snapshot of the version it names.
+    """
+
+    def __init__(self, catalogs: PyIcebergCatalog) -> None:
+        self._catalogs = catalogs
+
+    def _table_id(self, table_uri: str) -> tuple[Catalog, str]:
+        named, named_table_id = named_catalog(table_uri, self._catalogs.config)
+        if named is not None:
+            # A configured catalog holds the table; without this the whole
+            # "<name>:<namespace>.<table>" string would be read as a table id
+            # in the default catalog, and the write would land elsewhere.
+            if "." not in named_table_id:
+                raise ValueError(f"{table_uri!r} names no namespace; expected <namespace>.<table>")
+            return self._catalogs._get_named_catalog(named), named_table_id
+        warehouse_path, table_id = self._catalogs.parse_table_uri(table_uri)
+        if "." not in table_id:
+            raise ValueError(f"{table_uri!r} names no namespace; expected <namespace>.<table>")
+        if warehouse_path and "://" not in warehouse_path:
+            # A local warehouse is where its SQLite catalog lives, so the first
+            # write to it has to be able to create it.
+            Path(warehouse_path).mkdir(parents=True, exist_ok=True)
+        return self._catalogs._get_catalog(warehouse_path), table_id
+
+    def write(
+        self,
+        table_uri: str,
+        data: pa.Table,
+        *,
+        artifact_id: str,
+        version: int,
+        provenance_hash: str,
+        promoted_by: str | None,
+        alias: str | None = None,
+    ) -> TableWrite:
+        catalog, table_id = self._table_id(table_uri)
+        properties = {
+            SUMMARY_ARTIFACT_ID: artifact_id,
+            SUMMARY_VERSION: str(version),
+            SUMMARY_PROVENANCE: provenance_hash,
+        }
+        if promoted_by:
+            properties[SUMMARY_PROMOTED_BY] = promoted_by
+        # Schema metadata is the writer's (pandas index layout, Strata's shape
+        # tags) and means nothing to a table.
+        data = data.replace_schema_metadata(None)
+
+        created = False
+        try:
+            table = catalog.load_table(table_id)
+        except NoSuchTableError:
+            with contextlib.suppress(NamespaceAlreadyExistsError):
+                catalog.create_namespace(table_id.rsplit(".", 1)[0])
+            table = catalog.create_table(table_id, schema=data.schema)
+            created = True
+
+        if table.current_snapshot() is None:
+            table.append(data, snapshot_properties=properties)
+        else:
+            if not created and not _strata_has_written(table):
+                raise ValueError(
+                    f"{table_uri} holds data Strata did not write, and a later "
+                    f"write replaces the table's contents -- refusing to "
+                    f"overwrite it with {artifact_id}@v={version}. Export to a "
+                    f"table of its own, or append to this one outside Strata."
+                )
+            try:
+                with table.update_schema() as update:
+                    update.union_by_name(data.schema)
+            except ValidationError as exc:
+                raise ValueError(
+                    f"{artifact_id}@v={version} cannot be written to {table_uri}: "
+                    f"its schema is not compatible with the table's ({exc})"
+                ) from exc
+            table.overwrite(data, snapshot_properties=properties)
+
+        snapshot = table.current_snapshot()
+        assert snapshot is not None
+        if alias:
+            table.manage_snapshots().create_tag(snapshot.snapshot_id, alias).commit()
+        return TableWrite(table=table_uri, snapshot_id=snapshot.snapshot_id, created=created)
+
+    def tag(self, table_uri: str, alias: str, *, artifact_id: str, version: int) -> int | None:
+        """Point tag *alias* at the latest snapshot written from
+        ``artifact_id@v=version``; its id, or None if the table has none."""
+        catalog, table_id = self._table_id(table_uri)
+        table = catalog.load_table(table_id)
+        # An overwrite commits a delete and then an append, both carrying the
+        # properties; the append is the snapshot that holds the data.
+        written = [
+            snapshot
+            for snapshot in table.snapshots()
+            if snapshot.summary is not None
+            and snapshot.summary.operation == Operation.APPEND
+            and snapshot.summary.get(SUMMARY_ARTIFACT_ID) == artifact_id
+            and snapshot.summary.get(SUMMARY_VERSION) == str(version)
+        ]
+        if not written:
+            return None
+        snapshot_id = max(written, key=lambda s: s.timestamp_ms).snapshot_id
+        table.manage_snapshots().create_tag(snapshot_id, alias).commit()
+        return snapshot_id

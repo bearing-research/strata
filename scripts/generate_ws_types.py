@@ -128,6 +128,25 @@ def _doc_comment(text: str) -> str:
     return f"  /** {' '.join(text.split()).replace('*/', '*\\/')} */"
 
 
+# The frontend's prettier ``printWidth``. The generated file is committed and
+# formatted by the same hook as the rest of the frontend, so a line the emitter
+# leaves too long is one prettier rewrites and ``--check`` then reports as drift.
+_PRINT_WIDTH = 100
+
+
+def _field_line(field: str, optional: str, ts: str) -> str:
+    """One interface member, broken the way prettier breaks it when too long:
+    the type on its own line, and one union member per line if even that is
+    too long."""
+    line = f"  {field}{optional}: {ts}"
+    if len(line) <= _PRINT_WIDTH:
+        return line
+    if len(f"    {ts}") <= _PRINT_WIDTH:
+        return f"  {field}{optional}:\n    {ts}"
+    members = "\n".join(f"    | {part}" for part in ts.split(" | "))
+    return f"  {field}{optional}:\n{members}"
+
+
 def _interface(name: str, schema: dict[str, Any]) -> str:
     if "enum" in schema:
         # A Python Enum reaches $defs as a bare enum node with no properties.
@@ -143,7 +162,7 @@ def _interface(name: str, schema: dict[str, Any]) -> str:
         doc = spec.get("description")
         if doc:
             lines.append(_doc_comment(doc))
-        lines.append(f"  {field}{optional}: {_ts_type(spec)}")
+        lines.append(_field_line(field, optional, _ts_type(spec)))
     lines.append("}")
     return "\n".join(lines)
 

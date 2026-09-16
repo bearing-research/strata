@@ -240,3 +240,18 @@ async def test_serving_the_pool_reconciles_what_the_last_process_left(tmp_path):
 
     assert recovered == [True]
     store.close()
+
+
+async def test_the_callers_trace_headers_travel_with_the_job(api):
+    """A dispatcher in front of the pool sends its W3C trace context; the job
+    keeps it, across the store, for the machine the job is sent to."""
+    traceparent = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
+    response = await api.post(
+        "/v1/jobs",
+        params={"machine_type": "cpu"},
+        content=b"x",
+        headers={**AUTH, "traceparent": traceparent, "tracestate": "k=v"},
+    )
+
+    job = api.pool.store.get_job(response.json()["id"])
+    assert job.trace_context == {"traceparent": traceparent, "tracestate": "k=v"}

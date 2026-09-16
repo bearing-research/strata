@@ -81,7 +81,8 @@ def test_capabilities_match_design():
     assert a.name == "snowflake"
     assert a.sqlglot_dialect == "snowflake"
     assert a.capabilities.per_table_freshness is True
-    assert a.capabilities.supports_snapshot is False
+    # Time travel: a snapshot is a timestamp (time_travel.py).
+    assert a.capabilities.supports_snapshot is True
     # INFORMATION_SCHEMA isn't frozen inside a transaction the
     # way Postgres's pg_stat_* views are.
     assert a.capabilities.needs_separate_probe_conn is False
