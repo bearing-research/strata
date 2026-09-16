@@ -2315,7 +2315,10 @@ through that process's own backend. A process restarted under its old
 <code>instance_id</code> takes its own rows back at once, as a single process does today.
 A pool given no <code>instance_id</code> generates one per process, so two processes over
 one SQLite file are never one name — under a shared name each would read the
-other's leases as its own and stop machines running the other's cells.</p>
+other's leases as its own and stop machines running the other's cells. The
+trade is that a generated name is new on every start, so a process restarted
+within <code>lease_seconds</code> waits its old leases out instead of reclaiming them at
+once; set <code>instance_id</code> explicitly to keep that.</p>
 <p>Lease expiry is compared by wall clock across processes, so their clocks have
 to agree to well within a lease. Each process holds its catalogue in memory:
 <code>PUT /v1/machine-types</code> updates the process that served it and the stored
