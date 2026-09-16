@@ -661,6 +661,23 @@ class NotebookSession:
             cell.last_env_hash = previous.last_env_hash
             cell.widget_values = dict(previous.widget_values)
 
+    def _restore_alternate_scheme_outputs(self, cell: Any) -> None:
+        """Point a cell at the artifacts its last successful run stored.
+
+        For a cell kind whose artifacts are keyed under its own scheme (SQL,
+        prompt, widget), nothing else repopulates ``artifact_uris`` on open,
+        and a downstream cell that finds none computes a provenance hash that
+        no longer matches what it recorded.
+        """
+        store = self.get_artifact_manager().artifact_store
+        notebook_id = self.notebook_state.id
+        for name in cell.defines:
+            artifact = store.get_latest_version(f"nb_{notebook_id}_cell_{cell.id}_var_{name}")
+            if artifact is not None:
+                uri = f"strata://artifact/{artifact.id}@v={artifact.version}"
+                cell.artifact_uris[name] = uri
+                cell.artifact_uri = uri
+
     def _restore_ready_runtime_state(
         self,
         previous_cells: dict[str, Any],
@@ -901,13 +918,33 @@ class NotebookSession:
                     # artifact ids the generic lookup can't see, while
                     # the fan-out orchestrator records the base hash.
                     is_fanout = parse_annotations(cell.source).per_variant
+                    # A cell whose artifacts are keyed under its own scheme is
+                    # preserved from IDLE as well as READY: a cold open starts
+                    # every cell IDLE (status is not persisted), so requiring
+                    # READY made this branch dead on the path it was written
+                    # for — reopening sent prompt, SQL, widget and fan-out
+                    # cells back to idle, and everything downstream to stale,
+                    # with nothing changed. A leaf still needs READY: its
+                    # structural comparison on reload (mounts, worker, env)
+                    # catches changes its provenance hash does not.
+                    keyed_elsewhere = language_executor.has_alternate_cache_scheme or is_fanout
+                    allowed_status = (
+                        (CellStatus.READY, CellStatus.IDLE)
+                        if keyed_elsewhere
+                        else (CellStatus.READY,)
+                    )
                     can_preserve_uncached_ready = (
-                        (cell.is_leaf or language_executor.has_alternate_cache_scheme or is_fanout)
-                        and cell.status == CellStatus.READY
+                        (cell.is_leaf or keyed_elsewhere)
+                        and cell.status in allowed_status
                         and cell.last_provenance_hash == provenance_hash
                     )
                     if can_preserve_uncached_ready:
                         staleness_map[cell_id] = CellStaleness(status=CellStatus.READY, reasons=[])
+                        # The cell's outputs live under a per-language scheme
+                        # the generic lookup above cannot see, so its artifact
+                        # uris are still empty here — and a downstream cell
+                        # reads them to build its own provenance.
+                        self._restore_alternate_scheme_outputs(cell)
                     else:
                         # No cached artifact — cell is stale/idle unless we can
                         # prove it still matches the last successful uncached run.

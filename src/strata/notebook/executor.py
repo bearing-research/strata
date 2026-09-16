@@ -3943,9 +3943,15 @@ class CellExecutor:
         )
 
         if result_dict.get("success"):
-            cell = self.session.notebook_state.get_cell(cell_id)
-            if cell is not None:
-                cell.last_provenance_hash = standard_provenance
+            # Persisted, not just set in memory: every other cell kind with its
+            # own cache scheme records it here, and without the write a prompt
+            # cell is idle after a restart and re-issues a paid call.
+            self.session.record_successful_execution_provenance(
+                cell_id,
+                standard_provenance,
+                prov.source_hash,
+                prov.env_hash,
+            )
 
         return CellExecutionResult(
             cell_id=cell_id,
