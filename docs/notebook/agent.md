@@ -140,8 +140,10 @@ agent is driving:
 One thing to know about the web UI row: an open tab follows the agent's source
 edits as well as its status and outputs, but a cell **you** are part-way through
 typing in is left alone until you stop. Your unflushed keystrokes are never
-overwritten, so the two of you editing the same cell at the same moment means
-the last one to flush wins, not a merge.
+overwritten. If the agent changed the cell in the last few seconds, your edit
+is held back and the cell shows who changed it, with a **Take over** button;
+the agent is told the same about yours. Neither is a merge. See
+[presence and soft locks](../reference/notebook-protocol.md#presence-and-soft-locks).
 
 The last row is worth knowing: a notebook is a directory of ordinary files, so
 `strata cell show`, `strata dag`, `git diff` and your editor all work on an

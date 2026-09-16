@@ -26,7 +26,13 @@ export type _PayloadNarrowsPerFrame = Expect<
 export type _CodeIsAUnion = Expect<
   Equal<
     ErrorPayload['code'],
-    'ENVIRONMENT_BUSY' | 'cell_busy' | 'read_only' | 'insufficient_scope' | null | undefined
+    | 'ENVIRONMENT_BUSY'
+    | 'cell_busy'
+    | 'cell_locked'
+    | 'read_only'
+    | 'insufficient_scope'
+    | null
+    | undefined
   >
 >
 

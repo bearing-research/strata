@@ -389,3 +389,88 @@ class TestASelectionThatNamesNothing:
         bundle = _bundle(session, include="selected", selected_cells=["total"])
 
         assert _manifest(bundle)["carried"] == []
+
+
+class TestFetches:
+    """Item 44: a preflight flags unpinned fetches from the snapshot alone."""
+
+    def test_every_fetch_is_listed_with_whether_it_is_pinned(self, tmp_path):
+        nb = create_notebook(tmp_path, "Fetches", initialize_environment=False)
+        pin = "b" * 64
+        read = "c" * 64
+        add_cell_to_notebook(nb, "loose", None)
+        write_cell(nb, "loose", "# @fetch zones https://example.org/zones.csv\nrows = 1")
+        add_cell_to_notebook(nb, "tight", "loose")
+        write_cell(
+            nb,
+            "tight",
+            f"# @fetch rates https://example.org/rates.csv sha256={pin} refetch=never\nr = 1",
+        )
+        # What the loose fetch last read, as the cache records it.
+        blob = nb / ".strata" / "fetch" / read / "zones.csv"
+        blob.parent.mkdir(parents=True)
+        blob.write_bytes(b"zone\n")
+        (nb / ".strata" / "fetch" / "index.json").write_text(
+            json.dumps({"https://example.org/zones.csv": {"sha256": read, "filename": "zones.csv"}})
+        )
+
+        manifest = _manifest(_bundle(NotebookSession(parse_notebook(nb), nb), include="none"))
+
+        assert manifest["fetches"] == [
+            {
+                "cell_id": "loose",
+                "name": "zones",
+                "url": "https://example.org/zones.csv",
+                "pinned": False,
+                "sha256": read,
+                "refetch": "stale",
+            },
+            {
+                "cell_id": "tight",
+                "name": "rates",
+                "url": "https://example.org/rates.csv",
+                "pinned": True,
+                "sha256": pin,
+                "refetch": "never",
+            },
+        ]
+
+
+class TestWritingTheBundleOut:
+    """``--out`` names a path, and a path that already holds something is more
+    likely a mistake than an instruction — the same stance
+    ``strata artifact archive`` takes."""
+
+    @staticmethod
+    def _export(notebook_dir, out, *extra):
+        from strata.cli import _build_parser
+        from strata.notebook.cli import export_main
+
+        args = _build_parser().parse_args(
+            ["export", str(notebook_dir), "--to", "snapshot", "--out", str(out), *extra]
+        )
+        return export_main(args)
+
+    def test_an_existing_file_is_not_overwritten(self, session, tmp_path):
+        out = tmp_path / "precious.csv"
+        out.write_text("measurements,1,2,3\n")
+
+        code = self._export(session.path, out)
+
+        assert code == 2
+        assert out.read_text() == "measurements,1,2,3\n"
+
+    def test_force_overwrites_it(self, session, tmp_path):
+        out = tmp_path / "precious.csv"
+        out.write_text("measurements,1,2,3\n")
+
+        code = self._export(session.path, out, "--force")
+
+        assert code == 0
+        assert zipfile.is_zipfile(out)
+
+    def test_a_fresh_path_needs_no_flag(self, session, tmp_path):
+        out = tmp_path / "snap.zip"
+
+        assert self._export(session.path, out) == 0
+        assert zipfile.is_zipfile(out)

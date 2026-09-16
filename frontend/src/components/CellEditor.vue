@@ -39,6 +39,10 @@ const {
   environmentOperation,
   updateSource,
   flushCellSource,
+  takeOverCell,
+  focusCellPresence,
+  othersOnCell,
+  cellLocks,
   openInspect,
   isInspecting: storeIsInspecting,
   closeInspect,
@@ -223,12 +227,16 @@ const statusClass = computed(() => `status-${props.cell.status}`)
 // Live dispatch badge: shows "dispatching → gpu-fly" when a remote cell
 // is in-flight. The backend includes remote_worker on the cell_status
 // running message precisely so this badge can appear without waiting for
-// the cell to finish.
+// the cell to finish. A worker that runs jobs asynchronously reports
+// "starting" while its machine is provisioned, before the cell's own
+// timeout begins.
 const dispatchLabel = computed(() => {
   if (props.cell.status !== 'running') return null
   const worker = props.cell.remoteWorkerName
   if (!worker) return null
-  return `dispatching → ${worker}`
+  return props.cell.remoteBuildState === 'starting'
+    ? `starting → ${worker}`
+    : `dispatching → ${worker}`
 })
 
 const statusLabel = computed(() => {
@@ -478,6 +486,10 @@ const effectiveWorkerLabel = computed(
 )
 
 const authorBadge = computed(() => authorBadgeLabel(props.cell.createdBy, props.cell.updatedBy))
+// Who else on the session is on this cell, and who holds it if this tab's last
+// edit was refused.
+const othersHere = computed(() => othersOnCell(props.cell.id))
+const lockedBy = computed(() => cellLocks.value[props.cell.id] ?? null)
 const authorTooltip = computed(() => authorTitle(props.cell.createdBy, props.cell.updatedBy))
 const effectiveWorkerEntry = computed(() =>
   resolveEffectiveWorkerEntry(availableWorkers.value, effectiveWorkerLabel.value),
@@ -912,6 +924,15 @@ function outputKey(output: CellOutput, index: number): string {
             {{ authorBadge }}
           </span>
           <span
+            v-for="who in othersHere"
+            :key="who"
+            class="presence-badge"
+            data-testid="presence-badge"
+            :title="`${who} is on this cell`"
+          >
+            {{ who }}
+          </span>
+          <span
             v-if="dispatchLabel"
             class="dispatch-badge"
             :title="'Cell is executing on a remote worker'"
@@ -1120,6 +1141,10 @@ function outputKey(output: CellOutput, index: number): string {
       </div>
       <WidgetCell v-if="!folded && cell.language === 'widget' && !widgetShowSource" :cell="cell" />
 
+      <div v-if="lockedBy" class="cell-lock-banner" data-testid="cell-lock-banner">
+        <span>{{ lockedBy }} changed this cell moments ago; your edit was not saved.</span>
+        <button type="button" @click="takeOverCell(cell.id)">Take over</button>
+      </div>
       <div
         v-show="
           !folded &&
@@ -1128,6 +1153,7 @@ function outputKey(output: CellOutput, index: number): string {
         "
         ref="editorEl"
         class="editor-container"
+        @focusin="focusCellPresence(cell.id)"
         @focusout="
           cell.language === 'markdown' ? exitMarkdownEditOnBlur() : flushCellSource(cell.id)
         "
@@ -1832,6 +1858,29 @@ function outputKey(output: CellOutput, index: number): string {
   border-radius: 3px;
   font-size: 10px;
 }
+.presence-badge {
+  background: var(--tint-mauve);
+  color: var(--accent-mauve);
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-size: 10px;
+  max-width: 24ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cell-lock-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 4px 8px;
+  font-size: 12px;
+  background: var(--tint-warning);
+  color: var(--accent-warning);
+}
+
 .author-badge {
   background: var(--tint-teal);
   color: var(--accent-teal);

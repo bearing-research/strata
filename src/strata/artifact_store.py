@@ -50,6 +50,53 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 
+class ArtifactImportConflict(ValueError):
+    """An artifact arriving from elsewhere claims an id another one holds.
+
+    Ids are not globally unique: a notebook's are built from its own id and
+    its cells', so two people working from one repository produce the same
+    ``nb_<notebook>_cell_<cell>_var_<name>`` for cells they have each edited
+    differently. Silently keeping the row already here reported success and
+    pointed the newcomer's name, tags and descendants at somebody else's
+    bytes.
+    """
+
+
+def reject_unsafe_artifact_id(artifact_id: str) -> None:
+    """Refuse an id from another store that would name a path.
+
+    An artifact id becomes a blob key -- ``{id}@v={n}.arrow`` under the blobs
+    directory, or a prefix in an object store -- so an id carrying a separator
+    or a ``..`` segment writes wherever it likes, as whoever runs the server. A
+    record arriving from elsewhere brings its id with it: a snapshot bundle is a
+    file somebody sends you, and ``POST /v1/artifacts/import`` takes the id from
+    the request. Ids this store generates never contain either.
+    """
+    if not artifact_id:
+        raise ValueError("an artifact id is required")
+    if "/" in artifact_id or "\\" in artifact_id or ".." in Path(artifact_id).parts:
+        raise ValueError(f"an artifact id cannot name a path: {artifact_id!r}")
+
+
+def _ancestor_of(input_uri: str, recorded: object) -> tuple[str, int] | None:
+    """The ``(id, version)`` an input edge names, or None if it is not one.
+
+    An edge is stored as ``{input_uri: recorded_version}``. The uri says what
+    was asked for — an artifact, or a name that pointed at one — and the value
+    says which version answered. ``services.artifact`` resolves the same pair
+    for the lineage walk; a reader following one and a sweep following the
+    other is how a published figure loses the inputs its page names.
+    """
+    if not isinstance(recorded, str):
+        return None
+    if not (input_uri.startswith("strata://artifact/") or input_uri.startswith("strata://name/")):
+        return None
+    artifact_id, separator, version = recorded.partition("@v=")
+    if not separator or not version.isdigit():
+        return None
+    return artifact_id, int(version)
+
+
 @dataclass(frozen=True)
 class ArtifactVersion:
     """Immutable artifact version metadata.
@@ -448,9 +495,32 @@ def _add_publication_credits(conn: StoreConnection, dialect: SqlDialect) -> None
             conn.execute(f"ALTER TABLE artifact_publications ADD COLUMN {column} TEXT")
 
 
+def _add_pins(conn: StoreConnection, dialect: SqlDialect) -> None:
+    """Give a platform a way to hold a chain the store has no other reason to keep."""
+    conn.execute(
+        dialect.adapt_ddl(
+            """
+            CREATE TABLE IF NOT EXISTS artifact_pins (
+                artifact_id TEXT NOT NULL,
+                version INTEGER NOT NULL,
+                reason TEXT NOT NULL,
+                tenant TEXT NOT NULL DEFAULT '',
+                pinned_by TEXT,
+                pinned_at REAL NOT NULL,
+                PRIMARY KEY (artifact_id, version, reason)
+            )
+            """
+        )
+    )
+    conn.execute(
+        dialect.adapt_ddl("CREATE INDEX IF NOT EXISTS idx_pins_tenant ON artifact_pins(tenant)")
+    )
+
+
 _MIGRATIONS: list[_Migration] = [
     _Migration(1, "artifact_versions.content_sha256", _add_content_sha256),
     _Migration(2, "artifact_publications.authors + external_ids", _add_publication_credits),
+    _Migration(3, "artifact_pins", _add_pins),
 ]
 
 _LATEST_SCHEMA_VERSION = max((m.version for m in _MIGRATIONS), default=_BASELINE_SCHEMA_VERSION)
@@ -599,6 +669,21 @@ CREATE TABLE IF NOT EXISTS artifact_publications (
 CREATE INDEX IF NOT EXISTS idx_publications_artifact
 ON artifact_publications(artifact_id, version);
 CREATE INDEX IF NOT EXISTS idx_publications_tenant ON artifact_publications(tenant);
+
+-- A hold on an artifact version and everything behind it, for a reason the
+-- store has no other way to know: a snapshot a platform must be able to
+-- restore, a review still open. A root for garbage collection, as a
+-- publication is. One row per reason, so two holders release independently.
+CREATE TABLE IF NOT EXISTS artifact_pins (
+    artifact_id TEXT NOT NULL,
+    version INTEGER NOT NULL,
+    reason TEXT NOT NULL,
+    tenant TEXT NOT NULL DEFAULT '',
+    pinned_by TEXT,
+    pinned_at REAL NOT NULL,
+    PRIMARY KEY (artifact_id, version, reason)
+);
+CREATE INDEX IF NOT EXISTS idx_pins_tenant ON artifact_pins(tenant);
 """
 
 # Migration SQL to add tenant columns to existing tables
@@ -1024,10 +1109,19 @@ class ArtifactStore:
         both have to name where the caller's descendants should point.
         """
         existing = conn.execute(
-            "SELECT 1 FROM artifact_versions WHERE id = ? AND version = ?",
+            "SELECT provenance_hash FROM artifact_versions WHERE id = ? AND version = ?",
             (record.id, record.version),
         ).fetchone()
         if existing is not None:
+            # Same id *and* same computation is the repeated import this is
+            # for. A different computation under that id is two artifacts
+            # claiming one name, and the caller has to be told: it is about to
+            # name, tag and build on what it believes it just sent.
+            if (existing["provenance_hash"] or "") != record.provenance_hash:
+                raise ArtifactImportConflict(
+                    f"{record.id}@v={record.version} is already here, holding a "
+                    f"different computation. Import it under a fresh id."
+                )
             return ImportedArtifact(record.id, record.version, written=False)
 
         duplicate = self._ready_with_provenance(conn, record)
@@ -1187,6 +1281,7 @@ class ArtifactStore:
         avoid rewriting bytes for an import that turns out to be a no-op; the
         check inside the transaction is the authoritative one.
         """
+        reject_unsafe_artifact_id(record.id)
         conn = self._get_connection()
         try:
             no_op = self._import_no_op(conn, record)
@@ -2571,6 +2666,19 @@ class ArtifactStore:
                     _json_or_none(publication.external_ids),
                 ),
             )
+            # In the registry audit rather than a table of its own, so one
+            # sequence orders publications and registry moves together and a
+            # follower needs one cursor (``read_events``).
+            self._audit_in_connection(
+                conn,
+                action="publish",
+                artifact_id=artifact_id,
+                to_version=version,
+                key="token",
+                value=publication.token,
+                actor=published_by,
+                tenant=effective_tenant,
+            )
             conn.commit()
             return publication
         finally:
@@ -2642,18 +2750,40 @@ class ArtifactStore:
         finally:
             conn.close()
 
-    def revoke_publication(self, token: str, tenant: str | None = None) -> bool:
-        """Withdraw a grant. Returns False if it was unknown or already gone."""
+    def revoke_publication(
+        self, token: str, tenant: str | None = None, actor: str | None = None
+    ) -> bool:
+        """Withdraw a grant (audited). Returns False if it was unknown or already gone."""
         effective_tenant = tenant if tenant is not None else ""
         conn = self._get_connection()
         try:
+            row = conn.execute(
+                "SELECT artifact_id, version FROM artifact_publications "
+                "WHERE token = ? AND tenant = ?",
+                (token, effective_tenant),
+            ).fetchone()
             cursor = conn.execute(
                 "UPDATE artifact_publications SET revoked_at = ? "
                 "WHERE token = ? AND tenant = ? AND revoked_at IS NULL",
                 (time.time(), token, effective_tenant),
             )
+            # Only the call that actually withdrew it records it: a second
+            # revoke of the same token changes nothing and is not an event.
+            if cursor.rowcount == 0 or row is None:
+                conn.commit()
+                return False
+            self._audit_in_connection(
+                conn,
+                action="withdraw",
+                artifact_id=row["artifact_id"],
+                to_version=row["version"],
+                key="token",
+                value=token,
+                actor=actor,
+                tenant=effective_tenant,
+            )
             conn.commit()
-            return cursor.rowcount > 0
+            return True
         finally:
             conn.close()
 
@@ -3069,6 +3199,36 @@ class ArtifactStore:
             params.append(limit)
             cursor = conn.execute(query, params)
             return [dict(row) for row in cursor.fetchall()]
+        finally:
+            conn.close()
+
+    def read_events(
+        self,
+        since: int = 0,
+        limit: int = 100,
+        tenant: object = _AUDIT_ALL_TENANTS,
+    ) -> list[dict]:
+        """Audit entries after ``since``, oldest first: what a follower reads.
+
+        The same rows as ``read_audit`` in the opposite order. A follower
+        pages by passing the last ``seq`` it saw; reading newest first and
+        stopping at a known entry would skip whatever landed in between
+        pages. ``tenant`` scopes as in ``read_audit``.
+        """
+        conn = self._get_connection()
+        try:
+            query = (
+                "SELECT seq, at, actor, action, name, alias, artifact_id, "
+                "from_artifact_id, from_version, to_version, key, value, tenant "
+                "FROM registry_audit WHERE seq > ?"
+            )
+            params: list = [since]
+            if tenant is not _AUDIT_ALL_TENANTS:
+                query += " AND tenant = ?"
+                params.append(tenant if tenant is not None else "")
+            query += " ORDER BY seq ASC LIMIT ?"
+            params.append(limit)
+            return [dict(row) for row in conn.execute(query, params).fetchall()]
         finally:
             conn.close()
 
@@ -3709,6 +3869,21 @@ class ArtifactStore:
                 artifact_tenant = row["tenant"] if row["tenant"] else None
                 if not self._can_assign_name_for_tenant(artifact_tenant, tenant):
                     return False
+            # A published version is cited by a link somebody else holds, and
+            # version numbers are reused (``MAX(version) + 1``), so deleting
+            # one and rebuilding the cell would leave that link serving
+            # different bytes under the same title and authors. Withdraw the
+            # publication first, deliberately, and then it can go.
+            published = conn.execute(
+                "SELECT token FROM artifact_publications "
+                "WHERE artifact_id = ? AND version = ? AND revoked_at IS NULL",
+                (artifact_id, version),
+            ).fetchone()
+            if published is not None:
+                raise ValueError(
+                    f"{artifact_id}@v={version} is published as {published['token']}; "
+                    "revoke the publication before deleting it"
+                )
             # Past this point the delete is committed to; the blob cleanup
             # below the finally runs only for rows that actually existed.
 
@@ -3783,8 +3958,11 @@ class ArtifactStore:
                 (artifact_id, version),
             )
 
-    def _publication_reachable(self, conn: StoreConnection) -> set[tuple[str, int]]:
-        """Every artifact version a publication depends on, roots included.
+    def _protected_reachable(self, conn: StoreConnection) -> set[tuple[str, int]]:
+        """Every artifact version a publication or a pin depends on, roots included.
+
+        A pin is a root for the same reason a publication is: whoever placed it
+        needs the chain, not only the version, to restore or explain it.
 
         A published page shows the code and environment of every step behind
         the result, so the chain is part of what was published: collecting an
@@ -3800,7 +3978,10 @@ class ArtifactStore:
         chain can cross tenants — is the kind of proof this store's pruning
         rules refuse to rely on elsewhere.
         """
-        roots = conn.execute("SELECT artifact_id, version FROM artifact_publications").fetchall()
+        roots = conn.execute(
+            "SELECT artifact_id, version FROM artifact_publications "
+            "UNION SELECT artifact_id, version FROM artifact_pins"
+        ).fetchall()
 
         reachable: set[tuple[str, int]] = set()
         pending = [(row["artifact_id"], row["version"]) for row in roots]
@@ -3815,17 +3996,116 @@ class ArtifactStore:
             ).fetchone()
             if row is None or not row["input_versions"]:
                 continue
-            for uri in json.loads(row["input_versions"]):
-                # Parsed exactly as ``_walk_lineage`` parses it, so that what
-                # GC protects and what the lineage walk will follow cannot
-                # drift apart. Anything else is a table or an external leaf.
-                if not uri.startswith("strata://artifact/"):
-                    continue
-                artifact_id, _, version = uri[len("strata://artifact/") :].partition("@v=")
-                if not version.isdigit():
-                    continue
-                pending.append((artifact_id, int(version)))
+            for uri, recorded in json.loads(row["input_versions"]).items():
+                # Parsed as the lineage walk parses it, so that what GC protects
+                # and what a publication's chain will follow cannot drift apart:
+                # a "strata://name/" edge records the concrete version it read
+                # in its value, and that ancestor is as reachable as any other.
+                # Anything else is a table or an external leaf.
+                ancestor = _ancestor_of(uri, recorded)
+                if ancestor is not None:
+                    pending.append(ancestor)
         return reachable
+
+    def pin_artifact(
+        self,
+        artifact_id: str,
+        version: int,
+        reason: str,
+        *,
+        tenant: str | None = None,
+        pinned_by: str | None = None,
+    ) -> dict:
+        """Hold a version and its chain against garbage collection.
+
+        Idempotent per reason: pinning again under the same reason refreshes
+        who and when rather than stacking a second hold that one release would
+        not lift.
+
+        Raises:
+            ValueError: If the version does not exist or belongs to another
+                tenant, or the reason is empty.
+        """
+        reason = reason.strip()
+        if not reason:
+            raise ValueError("a pin needs a reason")
+        effective_tenant = tenant if tenant is not None else ""
+        conn = self._get_connection()
+        try:
+            row = conn.execute(
+                "SELECT tenant FROM artifact_versions WHERE id = ? AND version = ?",
+                (artifact_id, version),
+            ).fetchone()
+            if row is None:
+                raise ValueError(f"Artifact {artifact_id}@v={version} not found")
+            if tenant is not None and (row["tenant"] or "") not in (effective_tenant, ""):
+                raise ValueError(f"Artifact {artifact_id}@v={version} not found")
+            pinned_at = time.time()
+            conn.execute(
+                "INSERT INTO artifact_pins "
+                "(artifact_id, version, reason, tenant, pinned_by, pinned_at) "
+                "VALUES (?, ?, ?, ?, ?, ?) "
+                "ON CONFLICT (artifact_id, version, reason) DO UPDATE SET "
+                "pinned_by = excluded.pinned_by, pinned_at = excluded.pinned_at",
+                (artifact_id, version, reason, effective_tenant, pinned_by, pinned_at),
+            )
+            conn.commit()
+            return {
+                "artifact_id": artifact_id,
+                "version": version,
+                "reason": reason,
+                "tenant": effective_tenant,
+                "pinned_by": pinned_by,
+                "pinned_at": pinned_at,
+            }
+        finally:
+            conn.close()
+
+    def unpin_artifact(
+        self, artifact_id: str, version: int, reason: str, *, tenant: str | None = None
+    ) -> bool:
+        """Release one hold. Returns False if there was no such pin."""
+        sql = "DELETE FROM artifact_pins WHERE artifact_id = ? AND version = ? AND reason = ?"
+        params: list[Any] = [artifact_id, version, reason]
+        if tenant is not None:
+            sql += " AND tenant = ?"
+            params.append(tenant)
+        conn = self._get_connection()
+        try:
+            cursor = conn.execute(sql, params)
+            conn.commit()
+            return cursor.rowcount > 0
+        finally:
+            conn.close()
+
+    def list_pins(
+        self,
+        artifact_id: str | None = None,
+        version: int | None = None,
+        *,
+        tenant: str | None = None,
+    ) -> list[dict]:
+        """Pins, oldest first, optionally for one version and one tenant."""
+        clauses: list[str] = []
+        params: list[Any] = []
+        if artifact_id is not None:
+            clauses.append("artifact_id = ?")
+            params.append(artifact_id)
+        if version is not None:
+            clauses.append("version = ?")
+            params.append(version)
+        if tenant is not None:
+            clauses.append("tenant = ?")
+            params.append(tenant)
+        sql = "SELECT artifact_id, version, reason, tenant, pinned_by, pinned_at FROM artifact_pins"
+        if clauses:
+            sql += " WHERE " + " AND ".join(clauses)
+        sql += " ORDER BY pinned_at ASC"
+        conn = self._get_connection()
+        try:
+            return [dict(row) for row in conn.execute(sql, params).fetchall()]
+        finally:
+            conn.close()
 
     def garbage_collect(
         self,
@@ -3876,7 +4156,7 @@ class ArtifactStore:
             #   upstream missing. Collecting superseded versions is still fine —
             #   that is what makes GC useful — but never the current one.
             #
-            # Publications and everything behind them are excluded below,
+            # Publications, pins and everything behind them are excluded below,
             # after the SELECT, by a lineage walk rather than by a clause here.
             # ``input_versions`` is JSON in a TEXT column, so expressing the
             # walk in SQL means ``json_each`` on one dialect and ``jsonb_each``
@@ -3916,7 +4196,7 @@ class ArtifactStore:
             cursor = conn.execute(query, params)
             rows = cursor.fetchall()
 
-            protected = self._publication_reachable(conn)
+            protected = self._protected_reachable(conn)
 
             deleted_count = 0
             deleted_bytes = 0

@@ -94,6 +94,21 @@ jobs:
   pool-only:
     name: strata-pool (no server deps)
     runs-on: ubuntu-latest
+    # The shared-store tests run against a real Postgres as well as SQLite.
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: pool
+          POSTGRES_PASSWORD: pool
+          POSTGRES_DB: pool
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U pool -d pool"
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
@@ -119,7 +134,7 @@ jobs:
 
       - name: Add the server extra and the test runner
         run: |
-          uv pip install --python .venv-pool './packages/strata-pool[server]' pytest pytest-asyncio
+          uv pip install --python .venv-pool './packages/strata-pool[server,postgres]' pytest pytest-asyncio
 
       - name: Assert the Strata server stack is still absent
         run: |
@@ -142,6 +157,8 @@ jobs:
         env:
           STRATA_POOL_REQUIRE_DOCKER: "1"
           STRATA_POOL_REQUIRE_SERVER: "1"
+          STRATA_POOL_REQUIRE_POSTGRES: "1"
+          STRATA_POOL_POSTGRES_DSN: postgresql://pool:pool@localhost:5432/pool
         run: ../../.venv-pool/bin/python -m pytest tests/ -v
 
   # Type-check the shipped code (src + strata-client) with ty. Enforces the
@@ -244,11 +261,14 @@ jobs:
             --ignore=tests/test_e2e_artifacts.py \
             --ignore=tests/test_lineage.py \
             --ignore=tests/test_s3_integration.py \
+            --ignore=tests/test_presigned_urls_minio.py \
+            --ignore=tests/test_lake_catalogs_integration.py \
             --ignore=tests/test_artifact_store_postgres.py \
             --ignore=tests/test_migrate_to_postgres.py \
             --ignore=tests/notebook/test_e2e_mounts_s3.py \
             --ignore=tests/notebook/test_e2e_mounts_azure.py \
             --ignore=tests/notebook/test_e2e_mounts_gcs.py \
+            --ignore=tests/notebook/test_e2e_duckdb_lake.py \
             -n auto --dist loadscope --tb=short
 
       # The one check that needs root and a second OS user, which the suite
@@ -281,6 +301,8 @@ jobs:
             --ignore=tests/test_e2e_artifacts.py \
             --ignore=tests/test_lineage.py \
             --ignore=tests/test_s3_integration.py \
+            --ignore=tests/test_presigned_urls_minio.py \
+            --ignore=tests/test_lake_catalogs_integration.py \
             --ignore=tests/test_artifact_store_postgres.py \
             --ignore=tests/test_migrate_to_postgres.py \
             --ignore=tests/notebook \
@@ -442,6 +464,8 @@ jobs:
             tests/notebook/test_r_cells.py \
             tests/notebook/test_language_r_executor.py \
             tests/notebook/test_language_r_analyzer.py \
+            tests/notebook/test_shared_renv.py \
+            tests/notebook/test_r_workers.py \
             -v --tb=short
 
   notebook-browser-smoke:

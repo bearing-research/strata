@@ -163,6 +163,12 @@ Upstream steps are `CreativeWork` entities, **not** files, and they are not
 listed under `hasPart`. Their bytes are deliberately not in the crate, and
 declaring files that are not there is a claim no validator would catch.
 
+A step that read a URL through [`@fetch`](annotations.md#fetch) names it as
+an input. On the page it appears under "External inputs" with the digest of the
+bytes read and when the reading step ran. In the crate it is a `File` whose
+`@id` is the URL, with that `sha256`. The digest describes what was read, and
+the URL may serve something else now.
+
 ## Embedding it elsewhere
 
 Paste the link into a wiki, CMS or note-taking tool that speaks oEmbed and it

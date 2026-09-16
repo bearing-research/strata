@@ -18,6 +18,7 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+from pathlib import Path
 
 from strata.notebook.agent_launch import add_agent_arguments, agent_main
 from strata.notebook.cli import (
@@ -146,6 +147,39 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
     )
     migrate_parser.set_defaults(func=_dispatch_migrate)
+
+    env_parser = subparsers.add_parser(
+        "env",
+        help="Manage shared notebook environments",
+        description=(
+            'Shared notebook environments (notebook_env_backend = "shared"): '
+            "one environment per lockfile and interpreter, linked from each "
+            "notebook's .venv."
+        ),
+    )
+    env_sub = env_parser.add_subparsers(dest="env_command", required=True)
+    env_gc = env_sub.add_parser(
+        "gc",
+        help="Remove shared environments no notebook links to",
+        description=(
+            "Remove shared environments that no notebook links to and that have "
+            "gone unused for the TTL. An environment a notebook links to is kept."
+        ),
+    )
+    env_gc.add_argument(
+        "--dir",
+        dest="env_dir",
+        default=None,
+        help="Shared environment directory (default: notebook_shared_env_dir)",
+    )
+    env_gc.add_argument(
+        "--ttl-days",
+        dest="ttl_days",
+        type=float,
+        default=None,
+        help="Unused this long before removal (default: notebook_shared_env_ttl_days)",
+    )
+    env_gc.set_defaults(func=_dispatch_env_gc)
 
     key_parser = subparsers.add_parser(
         "apikey",
@@ -395,6 +429,15 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Tag to set on the promoted version, repeatable",
     )
     promote_parser.add_argument(
+        "--table",
+        default=None,
+        metavar="TABLE",
+        help=(
+            "Also have the team store write it into this Iceberg table "
+            "(<warehouse>#ns.table, or ns.table in the store's catalog)"
+        ),
+    )
+    promote_parser.add_argument(
         "--header",
         action="append",
         metavar="'Name: value'",
@@ -405,6 +448,33 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     _add_tenant_arg(promote_parser)
     promote_parser.set_defaults(func=_dispatch_artifact("cmd_promote"))
+
+    export_table_parser = artifact_sub.add_parser(
+        "export",
+        help="Write a tabular artifact into an Iceberg table",
+        description=(
+            "Write an artifact into an Iceberg table as its current snapshot. "
+            "The first write appends, a later one overwrites, and each "
+            "snapshot's summary names the artifact version it holds. A new "
+            "version may add columns; an incompatible schema is refused."
+        ),
+    )
+    export_table_parser.add_argument("ref", help="Name, id@v=N, or artifact id")
+    _add_store_args(export_table_parser)
+    export_table_parser.add_argument(
+        "--table",
+        required=True,
+        metavar="TABLE",
+        help="<warehouse>#ns.table, or ns.table in the configured catalog",
+    )
+    export_table_parser.add_argument(
+        "--alias", default=None, help="Tag the new snapshot with this name, e.g. champion"
+    )
+    export_table_parser.add_argument(
+        "--by", default=None, help="Recorded as strata.promoted_by in the snapshot summary"
+    )
+    _add_tenant_arg(export_table_parser)
+    export_table_parser.set_defaults(func=_dispatch_artifact("cmd_export_table"))
 
     unpublish_parser = artifact_sub.add_parser(
         "unpublish",
@@ -616,6 +686,23 @@ def _dispatch_artifact(command: str):
         return getattr(artifact_cli, command)(args)
 
     return _dispatch
+
+
+def _dispatch_env_gc(args: argparse.Namespace) -> int:
+    from strata.config import StrataConfig
+    from strata.notebook.env_backend import shared_env_root
+    from strata.notebook.shared_env import collect
+
+    config = StrataConfig.load()
+    root = Path(args.env_dir) if args.env_dir else shared_env_root(config)
+    ttl_days = args.ttl_days if args.ttl_days is not None else config.notebook_shared_env_ttl_days
+    result = collect(root, ttl_days=ttl_days)
+    for key in result.removed:
+        print(f"removed {key}")
+    for key in result.referenced:
+        print(f"kept {key} (linked from a notebook)")
+    print(f"{len(result.removed)} removed, {len(result.referenced)} still linked")
+    return 0
 
 
 def _dispatch_migrate(args: argparse.Namespace) -> int:

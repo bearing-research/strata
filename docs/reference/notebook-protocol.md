@@ -36,8 +36,9 @@ The minimum sequence to render a notebook view:
    the same payload shape.
 2. **Connect the WebSocket.** `ws://.../v1/notebooks/ws/{session_id}`. The
    handler verifies the session exists and (if owned) that the caller is the
-   owner - refuses with close code `1008 Notebook not found` otherwise. No
-   initial frame is sent on accept.
+   owner - refuses with close code `1008 Notebook not found` otherwise. The
+   only frame sent on accept is `presence` (see
+   [Presence and soft locks](#presence-and-soft-locks)).
 3. **Send `notebook_sync`** as the first client → server message. The server
    answers with a `notebook_state` frame containing the same fields as the
    open response. This is your sole resync primitive on reconnects - there's
@@ -222,7 +223,8 @@ so a client has to handle it on every message it sends:
 | --------- | -------------- | --------------------------------------------------- |
 | `error`   | yes            | Human-readable message. Not a stable identifier      |
 | `code`    | no             | Machine-readable class, when the error has one       |
-| `cell_id` | no             | The cell concerned, on `cell_busy`                   |
+| `cell_id` | no             | The cell concerned, on `cell_busy` and `cell_locked` |
+| `held_by` | no             | Who changed the cell, on `cell_locked`               |
 
 Branch on `code`, never on the text of `error`. The codes:
 
@@ -230,6 +232,7 @@ Branch on `code`, never on the text of `error`. The codes:
 | -------------------- | ------------------------------------------------------------- |
 | `ENVIRONMENT_BUSY`   | An environment job holds the notebook; retry when it finishes  |
 | `cell_busy`          | The cell is executing and its source cannot be edited yet      |
+| `cell_locked`        | `held_by` changed the cell moments ago; resend with `force` to take it over |
 | `read_only`          | The message is not allowed in app view                         |
 | `insufficient_scope` | The connection's scopes do not cover the request               |
 
@@ -237,6 +240,39 @@ An error carrying no `code` is a plain failure with no machine-readable class;
 the key is absent rather than null, so test for presence. The shape is defined
 by `ErrorPayload` in `strata.notebook.ws_payloads`, which every emit site
 builds through - a field that is not on that model cannot reach a client.
+
+## Presence and soft locks
+
+Several clients can be on one session: people in browser tabs, a TUI, an agent.
+The server tells each of them who else is there.
+
+**Identity.** Under `trusted_proxy` and `api_key` it is the principal. With no
+authentication it is the `author` a client declares on its frames (`strata
+agent` and MCP clients name themselves), and `local` when it declares none.
+Several connections with one identity are one entry.
+
+**`presence`** lists `{principal, focused_cell_id, since}` per identity, plus
+`you`, the receiving connection's own identity, so a client can leave itself
+out. It arrives on connect, whenever a connection joins, leaves or focuses a
+cell, and after a cell edit over REST. An identity editing over REST has no
+connection, so it is shown on the cell it edited for a minute after its last
+edit.
+
+**`cell_focus`** `{cell_id}` (or `null`) tells the server which cell this
+connection is on. Editing a cell also focuses it.
+
+**Soft locks.** The identity that last changed a cell holds it for
+`STRATA_NOTEBOOK_CELL_LOCK_SECONDS` (default 5). An edit by a different
+identity inside that window is not applied:
+
+- over the WebSocket, `cell_source_update` is answered with an `error` frame,
+  `code: "cell_locked"`, `cell_id` and `held_by`;
+- over REST, `PUT .../cells/{cell_id}` returns `409` with the same `code`,
+  `cell_id` and `held_by` in `detail`.
+
+Resend with `force: true` to take the cell over. An identity never contends
+with itself, so one person in several tabs, or a single-user personal session,
+edits exactly as before. `0` turns the lock off.
 
 ## Where to go next
 

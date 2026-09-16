@@ -28,6 +28,8 @@ from __future__ import annotations
 
 import datetime
 
+from strata.url_safety import web_url_or_none
+
 # The crate context plus one local term. ``sha256`` is not defined in RO-Crate
 # 1.1, and an undefined term is *discarded* on JSON-LD expansion — so the
 # integrity digest this whole feature rests on would look present in the raw
@@ -176,7 +178,23 @@ def build_crate(
     # the invariant this module claims to hold. They are Datasets rather than
     # Files: a table lives in a lake, not in this crate.
     for node in lineage.nodes:
-        if node.type != "artifact":
+        if node.type == "fetch":
+            # Unlike an upstream step, these bytes can be had: a web-based data
+            # entity is a File whose @id is its URL, which RO-Crate 1.1 allows
+            # outside the crate. The digest is what was read, not a promise
+            # about what the URL serves now.
+            graph.append(
+                _prune(
+                    {
+                        "@id": node.uri,
+                        "@type": "File",
+                        "name": node.uri,
+                        "sha256": node.content_sha256,
+                        "description": "Bytes read from this URL when the step ran.",
+                    }
+                )
+            )
+        elif node.type != "artifact":
             graph.append(
                 _prune(
                     {
@@ -283,7 +301,12 @@ def _identifier_of(publication) -> str | None:
     ):
         value = by_scheme.get(scheme)
         if value:
-            return value if value.startswith("http") else template.format(value)
+            # An identifier a record holds is whatever was written into it, and
+            # ``url`` takes it verbatim. A crate's identifier is a URL or it is
+            # not this field's business.
+            url = web_url_or_none(value) or web_url_or_none(template.format(value))
+            if url:
+                return url
     return None
 
 

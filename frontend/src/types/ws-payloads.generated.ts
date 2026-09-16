@@ -81,6 +81,7 @@ export interface CellStatusPayload {
   status: string
   remote_worker?: string | null
   remote_transport?: string | null
+  remote_build_state?: string | null
   staleness_reasons?: string[] | null
   causality?: Record<string, unknown> | null
 }
@@ -172,8 +173,10 @@ export interface EnvironmentJobModel {
 
 export interface ErrorPayload {
   error: string
-  code?: 'ENVIRONMENT_BUSY' | 'cell_busy' | 'read_only' | 'insufficient_scope' | null
+  code?:
+    'ENVIRONMENT_BUSY' | 'cell_busy' | 'cell_locked' | 'read_only' | 'insufficient_scope' | null
   cell_id?: string | null
+  held_by?: string | null
 }
 
 export interface ImpactPreviewPayload {
@@ -186,6 +189,17 @@ export interface ImpactPreviewPayload {
 export interface ModuleExportModel {
   name: string
   kind: string
+}
+
+export interface PresenceEntryModel {
+  principal: string
+  focused_cell_id?: string | null
+  since: number
+}
+
+export interface PresencePayload {
+  principals: PresenceEntryModel[]
+  you: string
 }
 
 export interface ProfilingSummaryPayload {
@@ -217,6 +231,7 @@ export interface WsServerPayloadMap {
   environment_job_started: EnvironmentJobEventPayload
   error: ErrorPayload
   impact_preview: ImpactPreviewPayload
+  presence: PresencePayload
   profiling_summary: ProfilingSummaryPayload
 }
 

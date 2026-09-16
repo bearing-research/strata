@@ -659,3 +659,35 @@ class TestPublish:
         assert result["token"]
         assert result["copied"] == 1
         assert [p.token for p in served.list_publications()] == [result["token"]]
+
+
+@pytest.mark.asyncio
+async def test_publish_records_who_published_it_and_whose_it_is(
+    sm_with_a_stored_output, tmp_path, monkeypatch
+):
+    """The REST route and the CLI both stamp the caller; without it the audit
+    row names nobody."""
+    from types import SimpleNamespace
+
+    import strata.server as server_module
+    from strata.artifact_store import ArtifactStore
+    from strata.auth import principal_context
+    from strata.notebook.mcp_server import _publish
+    from strata.types import Principal
+
+    sm, session_id, _ = sm_with_a_stored_output
+    served_dir = tmp_path / "served"
+    monkeypatch.setattr(
+        server_module,
+        "_state",
+        SimpleNamespace(config=SimpleNamespace(artifact_dir=served_dir)),
+    )
+
+    caller = Principal(id="scientist", tenant="acme", scopes=frozenset({"artifacts:publish"}))
+    with principal_context(caller):
+        result = _publish(sm, session_id, "a", "x", title="Figure 1")
+
+    served = ArtifactStore(served_dir)
+    published = served.list_publications()
+    assert [p.token for p in published] == [result["token"]]
+    assert published[0].published_by == "scientist"

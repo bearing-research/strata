@@ -284,8 +284,15 @@ def _walk_lineage(
 
     input_versions = json.loads(artifact.input_versions) if artifact.input_versions else {}
     for uri, version in input_versions.items():
-        if uri.startswith("strata://artifact/") and _depth < max_depth:
+        # A name input (a notebook's ``@dataset``) records the version it
+        # resolved to, which is what the walk follows.
+        if uri.startswith("strata://artifact/"):
             ref = uri[len("strata://artifact/") :]
+        elif uri.startswith("strata://name/"):
+            ref = str(version)
+        else:
+            ref = ""
+        if "@v=" in ref and _depth < max_depth:
             artifact_id, _, version_str = ref.partition("@v=")
             try:
                 upstream = store.get_artifact(artifact_id, int(version_str))
@@ -447,6 +454,7 @@ def cmd_promote(args: argparse.Namespace) -> int:
             alias=getattr(args, "alias", None),
             tags=_parse_tags(getattr(args, "tag", None)),
             max_depth=getattr(args, "max_depth", 10),
+            table=getattr(args, "table", None),
         )
     except ValueError as exc:
         print(f"Cannot promote: {exc}")
@@ -466,6 +474,8 @@ def cmd_promote(args: argparse.Namespace) -> int:
                     "artifact_uri": f"strata://artifact/{promotion.ref}",
                     "copied": promotion.copied,
                     "alias_pending": promotion.alias_pending,
+                    "table": promotion.table,
+                    "table_snapshot": promotion.table_snapshot,
                 },
                 indent=2,
             )
@@ -484,6 +494,53 @@ def cmd_promote(args: argparse.Namespace) -> int:
             + (" (queued for approval)" if promotion.alias_pending else "")
         )
     print(f"  {promotion.copied} artifact(s) copied, including everything behind it")
+    if promotion.table:
+        print(f"  table: {promotion.table} (snapshot {promotion.table_snapshot})")
+    return 0
+
+
+def cmd_export_table(args: argparse.Namespace) -> int:
+    """``strata artifact export``: write a tabular artifact into an Iceberg table."""
+    from strata.config import StrataConfig
+    from strata.table_export import export_artifact
+
+    store = _open_store(args.artifact_dir)
+    if store is None:
+        return 2
+    artifact = _resolve_for_cmd(store, args)
+    if artifact is None:
+        return 1
+    try:
+        written = export_artifact(
+            store,
+            artifact,
+            args.table,
+            config=StrataConfig.load(),
+            promoted_by=args.by,
+            alias=args.alias,
+            tenant=getattr(args, "tenant", None),
+        )
+    except ValueError as exc:
+        print(f"Cannot export: {exc}")
+        return 1
+    if args.format == "json":
+        print(
+            json.dumps(
+                {
+                    "artifact_uri": f"strata://artifact/{artifact.id}@v={artifact.version}",
+                    "table": written.table,
+                    "snapshot_id": written.snapshot_id,
+                    "created": written.created,
+                },
+                indent=2,
+            )
+        )
+        return 0
+    verb = "Created" if written.created else "Wrote"
+    print(f"{verb} {written.table} from {artifact.id}@v={artifact.version}")
+    print(f"  snapshot: {written.snapshot_id}")
+    if args.alias:
+        print(f"  tag:      {args.alias}")
     return 0
 
 
