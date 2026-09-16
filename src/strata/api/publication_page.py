@@ -17,6 +17,8 @@ from __future__ import annotations
 import datetime
 from html import escape
 
+from strata.url_safety import web_url_or_none
+
 _STYLE = """
 :root { color-scheme: light dark; --fg:#12151a; --muted:#5b6472; --bg:#fbfbfd;
         --card:#fff; --line:#e3e6ec; --code:#f5f6f9; --accent:#2a5db0; }
@@ -106,9 +108,18 @@ def _citation_line(publication) -> str:
     for entry in publication.external_ids:
         value = entry["value"]
         template = _ID_LINKS.get(entry["scheme"], "{}")
-        url = value if value.startswith("http") else template.format(value)
+        url = web_url_or_none(value) or web_url_or_none(template.format(value))
         label = value if entry["scheme"] == "url" else f"{entry['scheme'].upper()} {value}"
-        links.append(f"<a href='{escape(url, quote=True)}' rel='noopener'>{escape(label)}</a>")
+        # Linked only when it is a link. The scheme of an identifier somebody
+        # typed is theirs, ``url`` takes whatever it is given, and escaping
+        # leaves ``javascript:`` intact -- on a page served to anyone holding
+        # the token, on this server's own origin. Printed either way, as the
+        # external inputs below are, so nothing is hidden by being unlinkable.
+        links.append(
+            f"<a href='{escape(url, quote=True)}' rel='noopener'>{escape(label)}</a>"
+            if url
+            else f"<span>{escape(label)}</span>"
+        )
     return f"<p class='cite'>Cite as {' · '.join(links)}</p>"
 
 

@@ -100,6 +100,27 @@ class TestTheWriter:
         assert first_snapshot.summary["strata.promoted_by"] == "ana"
         assert store.get_tags(second.id, second.version)[EXPORT_TAG] == uri
 
+    def test_a_table_strata_did_not_write_is_not_overwritten(self, tmp_path, notebook_store):
+        """A later write replaces the table's contents, which is the contract
+        for a table Strata maintains. Aimed at somebody else's production
+        table -- a mistyped or reused name -- the same write throws their rows
+        away, recoverable only by time travel until the snapshot expires."""
+        warehouse = tmp_path / "wh"
+        warehouse.mkdir()
+        catalog = _catalog(warehouse)
+        catalog.create_namespace("taxi")
+        theirs = pa.table({"trip": [7, 8, 9]})
+        catalog.create_table("taxi.features", schema=theirs.schema).append(theirs)
+
+        store = notebook_store.artifact_store
+        mine = _version(notebook_store, pa.table({"trip": [1]}), tag="1")
+
+        with pytest.raises(ValueError, match="Strata did not write"):
+            export_artifact(store, mine, f"{warehouse}#taxi.features", config=_config(tmp_path))
+
+        table = _catalog(warehouse).load_table("taxi.features")
+        assert table.scan().to_arrow().column("trip").to_pylist() == [7, 8, 9]
+
     def test_a_new_column_evolves_the_table_and_a_changed_type_is_refused(
         self, tmp_path, notebook_store
     ):
