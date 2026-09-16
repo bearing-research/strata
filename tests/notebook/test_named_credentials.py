@@ -126,19 +126,24 @@ class TestProvenance:
         return mount_fingerprint_sync(resolver, mount)
 
     def test_rotating_the_secret_invalidates_nothing(self, tmp_path):
-        before = self._fingerprint(tmp_path, "a", {"T": "old"})
-        after = self._fingerprint(tmp_path, "a", {"T": "rotated"})
+        # A value distinctive enough not to occur in a temp path by accident:
+        # the fingerprint carries the mount's uri, and "/var/folders/…" has an
+        # "old" in it.
+        before = self._fingerprint(tmp_path, "a", {"T": "secret-before-rotation"})
+        after = self._fingerprint(tmp_path, "a", {"T": "secret-after-rotation"})
 
         assert before == after
-        assert "old" not in before
+        assert "secret-before-rotation" not in before
 
     def test_reading_through_another_credential_is_another_identity(self, tmp_path):
         assert self._fingerprint(tmp_path, "a", {"T": "x"}) != self._fingerprint(
             tmp_path, "b", {"T": "x"}
         )
 
-    def test_a_mount_without_a_credential_keeps_its_existing_fingerprint(self, tmp_path):
-        """No notebook's cache moves because this feature exists."""
+    def test_a_mount_without_a_credential_names_no_credential(self, tmp_path):
+        """No notebook's cache moves because *this feature* exists: an
+        uncredentialed mount's fingerprint is its name, its uri and its
+        contents, with nothing about credentials in it."""
         from strata.notebook.mounts import MountFingerprinter
 
         data = tmp_path / "data"
@@ -147,8 +152,26 @@ class TestProvenance:
         mount = MountSpec(name="data", uri=f"file://{data}")
 
         assert mount_fingerprint_sync(MountResolver(cache_dir=tmp_path), mount) == (
-            f"data:{MountFingerprinter.fingerprint_mount_sync(mount)}"
+            f"data:{mount.uri}:{MountFingerprinter.fingerprint_mount_sync(mount)}"
         )
+
+    def test_two_empty_directories_are_not_one_input(self, tmp_path):
+        """A cell reads the mount's path as well as what is in it, so pointing
+        it somewhere else is a change.
+
+        The contents hash covers relative paths, sizes and mtimes, which tells
+        most directories apart on their own — but two empty ones hash alike,
+        and so does any pair of paths that do not exist yet.
+        """
+        first = tmp_path / "run-a"
+        second = tmp_path / "run-b"
+        for directory in (first, second):
+            directory.mkdir()
+        resolver = MountResolver(cache_dir=tmp_path)
+
+        assert mount_fingerprint_sync(
+            resolver, MountSpec(name="data", uri=f"file://{first}")
+        ) != mount_fingerprint_sync(resolver, MountSpec(name="data", uri=f"file://{second}"))
 
     def test_staleness_and_execution_agree_on_a_credentialed_mount(self, tmp_path, monkeypatch):
         """Or the cell never matches its own artifacts and sits stale forever."""
