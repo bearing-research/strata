@@ -245,6 +245,14 @@ class NotebookSession:
             artifact_dir=path / ".strata" / "artifacts",
         )
 
+        # One staleness computation at a time: it mutates the cells it walks,
+        # which on the event loop it had to itself. A threading lock rather
+        # than an asyncio one because a session outlives any single loop --
+        # one built for a test client's portal, say -- and an asyncio.Lock
+        # awaited from a loop other than the one it queued its waiter on never
+        # wakes. This one is only ever taken inside the worker thread.
+        self._staleness_lock = threading.Lock()
+
         # M6: Initialize warm process pool (optional)
         self.warm_pool: WarmProcessPool | None = None
         self.r_warm_pool: WarmProcessPool | None = None
@@ -781,8 +789,33 @@ class NotebookSession:
         """
         return self.artifact_manager
 
+    async def compute_staleness_async(self) -> dict[str, CellStaleness]:
+        """``compute_staleness`` without holding up everything else.
+
+        Deciding whether a cell is stale reads the outside world: an ``@fetch``
+        URL, a ``@dataset`` registry, an ``@table`` catalog. Those are
+        synchronous calls -- ``httpx.Client`` with a sixty-second timeout for a
+        fetch -- and staleness runs on every debounced source flush, so one
+        unreachable host stalled the whole process: every notebook's socket,
+        every stream in flight, every route. The executor offloads its own
+        copies of exactly these calls; this is the same move for the mirror of
+        them, and it changes nothing about what is computed.
+
+        Serialized, because the work mutates the cells it walks. On the loop
+        that was free; two of these in threads at once would not be.
+        """
+        return await asyncio.to_thread(self._compute_staleness_serialized)
+
+    def _compute_staleness_serialized(self) -> dict[str, CellStaleness]:
+        """``compute_staleness`` with one caller at a time."""
+        with self._staleness_lock:
+            return self.compute_staleness()
+
     def compute_staleness(self) -> dict[str, CellStaleness]:
         """Compute staleness status for all cells.
+
+        Reads the outside world for ``@fetch``, ``@dataset`` and ``@table``
+        cells, so an async caller wants :meth:`compute_staleness_async`.
 
         Walk cells in topological order and check if cached artifacts
         match the current provenance hash. Updates cell.staleness.

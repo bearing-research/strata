@@ -2517,15 +2517,32 @@ class CellExecutor:
         """The notebook's lock, for a worker that runs cells in it.
 
         Only a worker whose ``/health`` advertises ``locked_environments`` gets
-        one; any other runs the cell in its own environment, as before.
+        one; a worker that answers and does not have it runs the cell in its
+        own environment, as before.
+
+        A worker that could not be *asked* is a different thing, and for a
+        notebook that has a lock it is refused rather than guessed at. Guessing
+        meant the cell ran against whatever the worker's image happens to hold
+        while its provenance recorded the lock's hash -- a result stored under
+        a key describing an environment it never ran in, then served from the
+        cache and offered to the team as if it had.
         """
         from strata.notebook.python_versions import read_requested_python_minor
         from strata.notebook.worker_env import environment_spec
         from strata.notebook.workers import worker_advertises
 
-        if not await worker_advertises(worker_spec, "locked_environments"):
+        spec = environment_spec(self.session.path, read_requested_python_minor(self.session.path))
+        if spec is None:
+            # No lock to run in, so what the worker advertises changes nothing.
             return None
-        return environment_spec(self.session.path, read_requested_python_minor(self.session.path))
+        advertised = await worker_advertises(worker_spec, "locked_environments")
+        if advertised is None:
+            raise RuntimeError(
+                f"worker {worker_spec.name!r} could not be asked whether it runs cells in "
+                f"a locked environment, and this notebook has one. Running the cell anyway "
+                f"would record it as the lock's result without it having been used."
+            )
+        return spec if advertised else None
 
     async def _dispatch_http_executor(
         self,
@@ -3664,6 +3681,22 @@ class CellExecutor:
             return ""
         return f"{server_url}/v1/notebooks/{self.session.id}"
 
+    def _cell_strata_url(self) -> str:
+        """Where a *cell's* ambient client points -- this server, never the
+        team store.
+
+        Reaching the team store takes the operator's credential, and a
+        manifest is a file the cell can read: the run directory is handed to
+        the harness user precisely so the cell can write into it. A token in
+        the manifest is a token the cell has, and that token is what makes
+        ``X-Strata-Principal`` believable, so a cell holding it can act as
+        anyone. Promotion already goes through this server for the neighbouring
+        reason -- only this process can read the notebook's own artifacts -- and
+        the run-all path never sent a credential at all.
+        """
+        config = self._lake_config()
+        return str(getattr(config, "server_url", "") or "")
+
     def _ambient_strata_headers(self) -> dict[str, str]:
         """Auth headers the ambient client attaches when pointed at a remote
         store (e.g. trusted-proxy identity/token). Empty for the local server."""
@@ -3861,8 +3894,7 @@ class CellExecutor:
             "tables": tables or {},
             "env": runtime_env,
             "mutation_defines": list(mutation_defines or []),
-            "strata_url": self._ambient_strata_url(),
-            "strata_headers": self._ambient_strata_headers(),
+            "strata_url": self._cell_strata_url(),
             "strata_cell_id": cell_id,
             "strata_promote_url": self._ambient_promote_url(),
         }

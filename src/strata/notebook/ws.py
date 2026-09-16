@@ -334,6 +334,13 @@ async def _refresh_and_broadcast_changed_staleness(
     preserve_ready_cell_id: str | None = None,
 ) -> dict[str, CellStaleness]:
     """Recompute notebook staleness and broadcast only changed cells."""
+    # Deliberately not the off-loop form. This one runs between a cell's
+    # result and the frames that describe it, and an await here lets other
+    # frames land in the middle: the end-to-end suite waits forever for a
+    # sequence that no longer arrives in the order it was sent. The handlers
+    # that call this already yielded before reaching it; the flush that reads
+    # the network on every keystroke pause is the one that had to stop
+    # blocking, and it does.
     staleness_map = session.compute_staleness()
     if preserve_ready_cell_id is not None:
         session.mark_executed_ready(preserve_ready_cell_id)
@@ -1710,7 +1717,7 @@ async def _handle_cell_source_update(
         session._run_annotation_validation()
 
         # Recompute staleness
-        staleness_map = session.compute_staleness()
+        staleness_map = await session.compute_staleness_async()
 
         # Build DAG update message
         dag_edges = session.dag.serialize_edges() if session.dag else []
@@ -1816,7 +1823,7 @@ async def _handle_variant_set_active(
 
     try:
         session.set_variant_active(group, variant_name)
-        staleness_map = session.compute_staleness()
+        staleness_map = await session.compute_staleness_async()
 
         dag_edges = session.dag.serialize_edges() if session.dag else []
         from strata.notebook.module_export import build_module_export_plan
@@ -1907,7 +1914,7 @@ async def _handle_variant_add(
 
     try:
         session.add_variant(group, author=resolve_author(payload.get("author")))
-        staleness_map = session.compute_staleness()
+        staleness_map = await session.compute_staleness_async()
 
         # variant_add creates a new cell, so the frontend store needs
         # the full cell payload (source, language, order, ...). The
