@@ -1360,3 +1360,129 @@ class TestExternalInputs:
         assert entity["sha256"] == self.DIGEST
         action = next(e for e in crate["@graph"] if e.get("@type") == "CreateAction")
         assert {"@id": url} in action["object"]
+
+
+class TestWhatPublishingRequires:
+    """A publication is the strongest read there is: anyone with the link gets
+    the bytes, with no credentials at all."""
+
+    @staticmethod
+    def _service(monkeypatch, tmp_path, acl):
+        from fastapi.testclient import TestClient
+
+        import strata.server as server_module
+        from strata.artifact_store import get_artifact_store, reset_artifact_store
+        from strata.config import StrataConfig
+        from strata.server import ServerState, app
+
+        artifact_dir = tmp_path / "service-artifacts"
+        config = StrataConfig(
+            deployment_mode="service",
+            auth_mode="trusted_proxy",
+            proxy_token="sekrit",
+            artifact_dir=artifact_dir,
+            cache_dir=tmp_path / "cache",
+            acl_config=acl,
+        )
+        reset_artifact_store()
+        monkeypatch.setattr(server_module, "_state", ServerState(config))
+        store = get_artifact_store(artifact_dir)
+        payload = b"rows"
+        version = store.create_artifact(
+            "secret",
+            hashlib.sha256(payload).hexdigest(),
+            transform_spec=_scan_of("file:///wh#test_db.events"),
+            tenant="acme",
+        )
+        with store.open_blob_writer("secret", version) as writer:
+            writer.write(payload)
+        store.finalize_artifact("secret", version, schema_json="", row_count=1, byte_size=4)
+        return TestClient(app), version
+
+    def test_a_denied_artifact_cannot_be_published(self, tmp_path, monkeypatch):
+        client, version = self._service(
+            monkeypatch,
+            tmp_path,
+            {"default": "allow", "deny_rules": [{"principal": "*", "tables": ["file:test_db.*"]}]},
+        )
+        headers = {
+            "X-Strata-Proxy-Token": "sekrit",
+            "X-Strata-Principal": "intruder",
+            "X-Strata-Tenant": "acme",
+            "X-Tenant-ID": "acme",
+            "X-Strata-Scopes": "artifacts:publish artifacts:read",
+        }
+
+        read = client.get(f"/v1/artifacts/secret/v/{version}/data", headers=headers)
+        published = client.post(f"/v1/artifacts/secret/v/{version}/publish", headers=headers)
+
+        assert read.status_code in (403, 404)
+        assert published.status_code in (403, 404), (
+            "a table the caller cannot read was published to anyone with the link"
+        )
+
+    def test_an_allowed_artifact_is_still_published(self, tmp_path, monkeypatch):
+        client, version = self._service(monkeypatch, tmp_path, {"default": "allow"})
+        headers = {
+            "X-Strata-Proxy-Token": "sekrit",
+            "X-Strata-Principal": "analyst",
+            "X-Strata-Tenant": "acme",
+            "X-Tenant-ID": "acme",
+            "X-Strata-Scopes": "artifacts:publish artifacts:read",
+        }
+
+        published = client.post(f"/v1/artifacts/secret/v/{version}/publish", headers=headers)
+
+        assert published.status_code == 200, published.text
+        token = published.json()["token"]
+        assert client.get(f"/p/{token}/data").status_code == 200
+
+
+def _scan_of(table_uri: str):
+    from strata.artifact_store import TransformSpec
+
+    return TransformSpec(executor="scan@v1", params={"table": table_uri}, inputs=[table_uri])
+
+
+class TestACitationCannotBeRepointed:
+    def test_a_published_version_is_not_deleted_out_from_under_its_link(self, store):
+        version = _ready_artifact(store, "nb_abc_cell_c1_var_figure", b"ORIGINAL")
+        store.publish_artifact("nb_abc_cell_c1_var_figure", version)
+
+        with pytest.raises(ValueError, match="published"):
+            store.delete_artifact("nb_abc_cell_c1_var_figure", version)
+
+        assert store.get_artifact("nb_abc_cell_c1_var_figure", version) is not None
+
+    def test_withdrawing_it_first_allows_the_delete(self, store):
+        version = _ready_artifact(store, "fig", b"ORIGINAL")
+        publication = store.publish_artifact("fig", version)
+
+        store.revoke_publication(publication.token)
+
+        assert store.delete_artifact("fig", version) is True
+
+
+class TestWhatTheSweepProtects:
+    def test_a_published_figures_inputs_survive_when_the_edge_is_a_name(self, store):
+        """A ``@dataset`` cell, and any input given as ``strata://name/…``,
+        records the name it asked for against the version that answered. The
+        sweep has to follow that edge, or the page's chain loses its inputs."""
+        rows = _ready_artifact(store, "rows", b"[1]")
+        store.set_name("team/rows", "rows", rows)
+        figure = store.create_artifact(
+            "figure",
+            "f" * 64,
+            input_versions={"strata://name/team/rows": f"rows@v={rows}"},
+        )
+        with store.open_blob_writer("figure", figure) as writer:
+            writer.write(b"png")
+        store.finalize_artifact("figure", figure, schema_json="", row_count=0, byte_size=3)
+        store.publish_artifact("figure", figure)
+        store.set_name("team/rows", "rows", _ready_artifact(store, "rows", b"[2]"))
+
+        store.garbage_collect(max_age_days=0)
+
+        assert store.get_artifact("rows", rows) is not None, (
+            "the published figure's input was collected"
+        )

@@ -292,6 +292,24 @@ The same shape as JSON in the env var:
 export STRATA_ACL_CONFIG='{"default":"deny","allow":[{"principal":"bi","tables":["file:analytics.*"]}]}'
 ```
 
+**A table pattern names the store or catalog the table is in.** The prefix is
+`file:` for a local warehouse, `s3:`, `gs:` or `az:` for one in object storage,
+and the catalog's own name for a table in a configured catalog
+(`STRATA_CATALOGS`), which is addressed as `<name>:<namespace>.<table>`:
+
+```toml
+deny = [
+  { principal = "*", tables = ["file:finance.*", "s3:finance.*", "lake:finance.*"] },
+]
+```
+
+A rule written for one prefix does not match another, so a table reachable
+both as `s3://bucket/wh#finance.ledger` and as `lake:finance.ledger` needs
+both patterns. **If you added a named catalog, or a GCS or Azure warehouse,
+check your deny rules**: before this release every warehouse table matched
+`file:` whatever store held it, so a rule written then covers less than it
+used to.
+
 `principal` and each `tables` entry are glob patterns; `tenant` is an exact
 match. Every rule must list at least one table pattern; a rule with none can
 never match, so it is rejected at startup rather than sitting inert. Unknown

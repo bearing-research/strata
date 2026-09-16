@@ -50,6 +50,25 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 
+def _ancestor_of(input_uri: str, recorded: object) -> tuple[str, int] | None:
+    """The ``(id, version)`` an input edge names, or None if it is not one.
+
+    An edge is stored as ``{input_uri: recorded_version}``. The uri says what
+    was asked for — an artifact, or a name that pointed at one — and the value
+    says which version answered. ``services.artifact`` resolves the same pair
+    for the lineage walk; a reader following one and a sweep following the
+    other is how a published figure loses the inputs its page names.
+    """
+    if not isinstance(recorded, str):
+        return None
+    if not (input_uri.startswith("strata://artifact/") or input_uri.startswith("strata://name/")):
+        return None
+    artifact_id, separator, version = recorded.partition("@v=")
+    if not separator or not version.isdigit():
+        return None
+    return artifact_id, int(version)
+
+
 @dataclass(frozen=True)
 class ArtifactVersion:
     """Immutable artifact version metadata.
@@ -3812,6 +3831,21 @@ class ArtifactStore:
                 artifact_tenant = row["tenant"] if row["tenant"] else None
                 if not self._can_assign_name_for_tenant(artifact_tenant, tenant):
                     return False
+            # A published version is cited by a link somebody else holds, and
+            # version numbers are reused (``MAX(version) + 1``), so deleting
+            # one and rebuilding the cell would leave that link serving
+            # different bytes under the same title and authors. Withdraw the
+            # publication first, deliberately, and then it can go.
+            published = conn.execute(
+                "SELECT token FROM artifact_publications "
+                "WHERE artifact_id = ? AND version = ? AND revoked_at IS NULL",
+                (artifact_id, version),
+            ).fetchone()
+            if published is not None:
+                raise ValueError(
+                    f"{artifact_id}@v={version} is published as {published['token']}; "
+                    "revoke the publication before deleting it"
+                )
             # Past this point the delete is committed to; the blob cleanup
             # below the finally runs only for rows that actually existed.
 
@@ -3924,16 +3958,15 @@ class ArtifactStore:
             ).fetchone()
             if row is None or not row["input_versions"]:
                 continue
-            for uri in json.loads(row["input_versions"]):
-                # Parsed exactly as ``_walk_lineage`` parses it, so that what
-                # GC protects and what the lineage walk will follow cannot
-                # drift apart. Anything else is a table or an external leaf.
-                if not uri.startswith("strata://artifact/"):
-                    continue
-                artifact_id, _, version = uri[len("strata://artifact/") :].partition("@v=")
-                if not version.isdigit():
-                    continue
-                pending.append((artifact_id, int(version)))
+            for uri, recorded in json.loads(row["input_versions"]).items():
+                # Parsed as the lineage walk parses it, so that what GC protects
+                # and what a publication's chain will follow cannot drift apart:
+                # a "strata://name/" edge records the concrete version it read
+                # in its value, and that ancestor is as reachable as any other.
+                # Anything else is a table or an external leaf.
+                ancestor = _ancestor_of(uri, recorded)
+                if ancestor is not None:
+                    pending.append(ancestor)
         return reachable
 
     def pin_artifact(

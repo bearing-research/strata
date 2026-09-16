@@ -1889,8 +1889,6 @@ def _authorize_artifact_read(artifact) -> None:
         return
 
     from strata.artifact_store import TransformSpec
-    from strata.iceberg import PyIcebergCatalog
-    from strata.types import TableIdentity
 
     try:
         spec = TransformSpec.from_json(artifact.transform_spec)
@@ -1898,16 +1896,9 @@ def _authorize_artifact_read(artifact) -> None:
         return  # unparseable spec → no table inputs to gate
 
     for input_uri in spec.inputs:
-        if not (input_uri.startswith("file://") or input_uri.startswith("s3://")):
-            continue
-        if "#" not in input_uri:
-            continue  # not a `…#namespace.table` reference
-        _, table_id = PyIcebergCatalog.parse_table_uri(input_uri)
-        try:
-            identity = TableIdentity.from_table_id(table_id)
-        except ValueError:
-            continue
-        _authorize_table_access(input_uri, identity)
+        identity = _table_identity_from_uri(input_uri)
+        if identity is not None:
+            _authorize_table_access(input_uri, identity)
 
 
 def _table_identity_from_uri(table_uri: str):
@@ -1918,12 +1909,16 @@ def _table_identity_from_uri(table_uri: str):
     Iceberg reads). Returns ``None`` when the URI does not parse as a table
     id, in which case the caller falls through to the post-plan check.
     """
-    from strata.iceberg import PyIcebergCatalog
-    from strata.types import TableIdentity
+    from strata.iceberg import table_identity_for
 
-    _, table_id = PyIcebergCatalog.parse_table_uri(table_uri)
+    if "#" not in table_uri and ":" not in table_uri and "." not in table_uri:
+        return None
     try:
-        return TableIdentity.from_table_id(table_id)
+        # The planner's own helper, so the table is named the same before it
+        # plans and after — a gs:// or named-catalog table used to be named
+        # one way here and another there, and a rule written for it matched
+        # neither.
+        return table_identity_for(table_uri, get_state().config)
     except ValueError:
         return None
 
