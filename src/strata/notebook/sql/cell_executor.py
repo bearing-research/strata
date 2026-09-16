@@ -749,6 +749,55 @@ def _credentials(session: NotebookSession) -> CredentialResolver:
     )
 
 
+def sql_reopen_identity(cell: Any, session: Any) -> str | None:
+    """What a reopened SQL cell's cached rows depend on, beyond its query.
+
+    The connection is the answer's other half: the same ``SELECT`` against a
+    different database is a different result, and the generic provenance
+    triplet sees neither the connection nor the policy the cell caches under.
+
+    ``None`` whenever the policy wants a probe. ``fingerprint`` and
+    ``snapshot`` say, in the cell's own annotation, that the cached rows are
+    good only while the source agrees -- and asking the source is a query, not
+    something to do while opening a notebook. A cell that declares
+    ``forever``, ``session`` or ``ttl`` has already said what it depends on,
+    and each of those is settled here: the session salt is this session's, and
+    the ttl bucket is this moment's, so a cell whose window has passed no
+    longer matches what it recorded.
+    """
+    annotations = parse_annotations(cell.source)
+    if annotations.sql is None or not annotations.sql.connection:
+        return None
+    spec = _find_connection(session, annotations.sql.connection)
+    if spec is None:
+        return None
+    try:
+        adapter = get_adapter(spec.driver)
+    except KeyError:
+        return None
+    analysis = analyze_sql_cell(cell.source, dialect=adapter.sqlglot_dialect)
+    try:
+        policy = resolve_cache_policy(
+            analysis.cache_policy,
+            capabilities=adapter.capabilities,
+            session_id=session.id,
+        )
+    except CachePolicyError:
+        return None
+    if policy.freshness_required:
+        return None
+    try:
+        # Without credentials: resolving one can go out to a secret manager,
+        # and the identity only ever carries the credential's name anyway.
+        runtime_spec = _resolve_runtime_spec(spec, session.path)
+        connection_id = _with_credential(
+            adapter.canonicalize_connection_id(runtime_spec, read_only=True), spec
+        )
+    except (CredentialError, ValueError, OSError):
+        return None
+    return hashlib.sha256(connection_id.encode() + b"|" + policy.salt).hexdigest()
+
+
 def _with_credential(connection_id: str, spec: ConnectionSpec) -> str:
     """Fold the credential's name into the connection's identity.
 
