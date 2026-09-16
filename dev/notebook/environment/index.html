@@ -2402,7 +2402,9 @@ lockfile instead:</p>
 <li><strong>Clean-up.</strong> An environment no notebook links to is removed once it has
   gone unused for <code>STRATA_NOTEBOOK_SHARED_ENV_TTL_DAYS</code> (default 7), by an
   hourly sweep in the server or by <code>strata env gc</code>. An environment a notebook
-  links to is never removed.</li>
+  links to is never removed, opening a notebook counts as using it, and the
+  sweep removes only environments it built — a directory of your own under the
+  store, or one whose build never finished, is left alone.</li>
 </ul>
 <p>R libraries are shared the same way. A notebook with an <code>renv.lock</code> restores
 it once per server into <code>r/</code> in the same store, keyed by the raw <code>renv.lock</code>
