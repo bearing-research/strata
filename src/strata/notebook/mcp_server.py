@@ -23,7 +23,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from strata.auth import principal_context
+from strata.auth import get_principal, principal_context
 from strata.notebook.ops import LocalNotebookOps
 from strata.notebook.scopes import required_scope_for_tool
 
@@ -598,7 +598,17 @@ def _publish(
     else:
         served = store
 
-    publication = served.publish_artifact(published_id, published_version, title=title)
+    # Who published it: the REST route and the CLI both stamp the caller, and
+    # without it the audit row names nobody. The tenant is the artifact's own —
+    # what the copy landed as — since the store refuses a publication under a
+    # tenant the artifact does not carry.
+    caller = get_principal()
+    publication = served.publish_artifact(
+        published_id,
+        published_version,
+        title=title,
+        published_by=caller.id if caller is not None else None,
+    )
     return {
         "token": publication.token,
         "artifact_uri": f"strata://artifact/{published_id}@v={published_version}",
