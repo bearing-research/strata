@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
+from typing import Any
 
 from sqlglot.errors import SqlglotError as _SqlglotError
 
@@ -119,6 +120,60 @@ def analyze_sql_cell(source: str, *, dialect: str | None = None) -> SqlAnalysis:
         tables=tables,
         parse_error=parse_error,
     )
+
+
+# Named lazily inside the check: importing sqlglot's expression module at
+# module scope would pull it in for every cell, and only SQL cells need it.
+#
+# What a read cell may run. Everything else — DDL, DML, COPY, ATTACH, USE,
+# CALL, INSTALL, and the transaction statements that end the read-only one the
+# driver opened — belongs to a ``# @sql ... write`` cell.
+_READ_STATEMENT_NAMES = (
+    "Select",
+    "SetOperation",
+    "Union",
+    "Except",
+    "Intersect",
+    "Subquery",
+    "Describe",
+    "Show",
+)
+# sqlglot parses what it has no grammar for as ``Command``, which is where
+# EXPLAIN lands. Naming the few read-only ones keeps the rest — ATTACH, CALL,
+# INSTALL — refused with everything else.
+_READ_COMMANDS = ("EXPLAIN",)
+
+
+def read_only_violation(sql: str, dialect: str | None) -> str | None:
+    """The first statement in *sql* a read cell may not run, or None.
+
+    A read cell's connection is opened read-only, but that is a transaction the
+    body can end: ``COMMIT; ATTACH '/db' AS w (READ_WRITE); CREATE TABLE ...``
+    runs as three statements, and the second and third are no longer inside it.
+    What a read cell reads is the boundary, so it is checked before anything is
+    sent to the driver.
+    """
+    if dialect is None or not sql.strip():
+        return None
+    import sqlglot
+
+    try:
+        statements = [statement for statement in sqlglot.parse(sql, dialect=dialect) if statement]
+    except _SqlglotError:
+        # The caller already surfaces the parse error, and nothing runs.
+        return None
+    for statement in statements:
+        name = type(statement).__name__
+        if name in _READ_STATEMENT_NAMES:
+            continue
+        if name == "Command" and str(statement.this or "").upper() in _READ_COMMANDS:
+            continue
+        kind = str(statement.this or "").upper() if name == "Command" else name.upper()
+        return (
+            f"a SQL cell reads, and {kind} is not a read. Use "
+            "`# @sql connection=<name> write` for a cell that changes a database."
+        )
+    return None
 
 
 def _extract_placeholder_positions(sql: str) -> list[str]:
@@ -330,6 +385,25 @@ def _scan_dollar_quote_open(sql: str, start: int) -> int | None:
         if j < n and sql[j] == "$":
             return j
     return None
+
+
+def base_table_nodes(tree: Any, dialect: str) -> list[Any]:
+    """The ``exp.Table`` nodes in *tree* that are base tables, scope by scope.
+
+    The same rule ``_extract_tables`` reports a cell's inputs by, returning the
+    nodes so a caller can rewrite them.
+    """
+    from sqlglot import exp
+    from sqlglot.optimizer.scope import Scope, traverse_scope
+
+    nodes: list[Any] = []
+    for scope in traverse_scope(tree):
+        for node in scope.find_all(exp.Table):
+            source = scope.sources.get(node.alias_or_name)
+            if isinstance(source, Scope):
+                continue
+            nodes.append(node)
+    return nodes
 
 
 def _extract_tables(sql: str, dialect: str) -> list[QualifiedTable]:

@@ -36,7 +36,11 @@ from strata.notebook.annotations import parse_annotations
 from strata.notebook.credentials import CredentialError, CredentialResolver, credential_identity
 from strata.notebook.provenance import derive_subkey
 from strata.notebook.sql.adapter import FreshnessToken
-from strata.notebook.sql.analyzer import analyze_sql_cell, rewrite_named_to_positional
+from strata.notebook.sql.analyzer import (
+    analyze_sql_cell,
+    read_only_violation,
+    rewrite_named_to_positional,
+)
 from strata.notebook.sql.bind import BindError, resolve_bind_params
 from strata.notebook.sql.lake import Lake, LakeError, lake_options, pin_snapshots, resolve_lake
 from strata.notebook.sql.provenance import (
@@ -122,6 +126,11 @@ async def execute_sql_cell(
         return _error_result(f"SQL parse error: {analysis.parse_error}", start_time)
     if not analysis.sql_body:
         return _error_result("SQL cell body is empty.", start_time)
+    # The driver opens read-only, but a body can leave that transaction and go
+    # on: what a read cell may run is decided here, before anything is sent.
+    violation = read_only_violation(analysis.sql_body, adapter.sqlglot_dialect)
+    if violation is not None:
+        return _error_result(violation, start_time)
 
     # ---- bind params -----------------------------------------------
     namespace, upstream_input_hashes = _load_upstream_variables(

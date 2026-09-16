@@ -243,3 +243,43 @@ class TestTheAdapters:
         assert adapter.retention_until(None, [], "2026-09-15T10:00:00+00:00") == (
             "2026-09-17T10:00:00+00:00"
         )
+
+
+class TestWhichTablesAPinCovers:
+    """A cell's provenance says it read one moment, so every table it reads
+    must carry that moment — and no table the author pinned themselves may be
+    moved to another one."""
+
+    _AT = "SELECT * FROM t AT (TIMESTAMP => CAST('2020-01-01T00:00:00+00:00' AS TIMESTAMPTZ))"
+
+    def test_a_base_table_sharing_a_name_with_an_inner_cte_is_pinned(self):
+        from strata.notebook.sql.time_travel import pin_tables
+
+        pinned = pin_tables(
+            "SELECT * FROM orders WHERE x IN (WITH orders AS (SELECT 1 AS x) SELECT x FROM orders)",
+            "snowflake",
+            self._AT,
+            "when",
+        )
+
+        assert pinned.startswith("SELECT * FROM orders AT (TIMESTAMP =>"), pinned
+
+    def test_a_cte_is_not_pinned_but_the_table_it_reads_is(self):
+        from strata.notebook.sql.time_travel import pin_tables
+
+        pinned = pin_tables(
+            "WITH recent AS (SELECT * FROM base) SELECT * FROM recent",
+            "snowflake",
+            self._AT,
+            "when",
+        )
+
+        assert "base AT (TIMESTAMP =>" in pinned
+        assert "recent AT" not in pinned
+
+    def test_the_moment_the_author_asked_for_is_kept(self):
+        from strata.notebook.sql.time_travel import pin_tables
+
+        pinned = pin_tables("SELECT * FROM a AT (OFFSET => -300)", "snowflake", self._AT, "when")
+
+        assert pinned == "SELECT * FROM a AT (OFFSET => -300)"

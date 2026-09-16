@@ -27,10 +27,10 @@ from sqlglot import exp
 
 from strata.notebook.annotations import parse_annotations
 from strata.notebook.models import TableSpec
+from strata.notebook.sql.adapter import QualifiedTable
 
 if TYPE_CHECKING:
     from strata.notebook.models import ConnectionSpec, NotebookState
-    from strata.notebook.sql.adapter import QualifiedTable
 
 
 class LakeError(ValueError):
@@ -61,12 +61,35 @@ def _table_spec(catalog: str, table: QualifiedTable) -> TableSpec:
     return TableSpec(name="lake_" + hashlib.sha256(uri.encode()).hexdigest()[:16], uri=uri)
 
 
+def catalog_table(catalog: str, table: QualifiedTable) -> tuple[str, str] | None:
+    """The ``(namespace, table)`` *table* names in *catalog*, or None.
+
+    A database and a schema are case-insensitive in DuckDB and may be written
+    either way round: ``lake.taxi.trips``, ``LAKE.taxi.trips``, and — with the
+    catalog's default schema — ``lake.trips``. Each is the same table, and one
+    this misses is read live and never goes stale.
+    """
+    name = catalog.lower()
+    if (table.catalog or "").lower() == name:
+        return (table.schema, table.name) if table.schema else None
+    if not table.catalog and (table.schema or "").lower() == name:
+        # ``<catalog>.<table>``: DuckDB fills in the default schema.
+        return ("main", table.name)
+    return None
+
+
 def _catalog_tables(catalog: str, tables: list[QualifiedTable]) -> list[TableSpec]:
-    specs = {
-        spec.uri: spec
-        for spec in (_table_spec(catalog, t) for t in tables if t.catalog == catalog and t.schema)
-    }
+    named = [_namespaced(catalog, t) for t in tables]
+    specs = {spec.uri: spec for spec in named if spec is not None}
     return [specs[uri] for uri in sorted(specs)]
+
+
+def _namespaced(catalog: str, table: QualifiedTable) -> TableSpec | None:
+    found = catalog_table(catalog, table)
+    if found is None:
+        return None
+    namespace, name = found
+    return _table_spec(catalog, QualifiedTable(catalog=catalog, schema=namespace, name=name))
 
 
 def lake_tables(notebook_state: NotebookState, source: str) -> list[TableSpec]:
@@ -116,8 +139,7 @@ def resolve_lake(
         from strata.notebook.tables import fingerprint_tables, resolve_table_snapshot
 
         specs = _catalog_tables(catalog, tables)
-        fingerprints, snapshots = fingerprint_tables(specs, config)
-        lake.fingerprints += fingerprints
+        _, snapshots = fingerprint_tables(specs, config)
         for table_spec in specs:
             snapshot = snapshots.get(table_spec.name)
             if snapshot is None:
@@ -129,6 +151,11 @@ def resolve_lake(
                     raise LakeError(f"table {table_spec.uri}: {exc}") from exc
             namespace, _, name = table_spec.uri.partition(":")[2].rpartition(".")
             lake.snapshots[(namespace, name)] = snapshot
+            # From the snapshot the query will read, so a catalog that answered
+            # only on the retry still gives the cell a hash it can reproduce —
+            # fingerprint_tables invents a random one for what it could not
+            # resolve, which no later run would ever match.
+            lake.fingerprints.append(f"{table_spec.name}:table:{table_spec.uri}:{snapshot}")
     if mount_names:
         update["mount_sources"] = _mount_sources(session, cell_id, source, mount_names, lake)
     if update:
@@ -178,8 +205,14 @@ def pin_snapshots(sql: str, catalog: str, snapshots: dict[tuple[str, str], int])
         return sql
     tree = sqlglot.parse_one(sql, read="duckdb")
     for reference in tree.find_all(exp.Table):
-        snapshot = snapshots.get((reference.db, reference.name))
-        if reference.catalog != catalog or snapshot is None or reference.args.get("when"):
+        found = catalog_table(
+            catalog,
+            QualifiedTable(
+                catalog=reference.catalog or None, schema=reference.db or None, name=reference.name
+            ),
+        )
+        snapshot = snapshots.get(found) if found is not None else None
+        if snapshot is None or reference.args.get("when"):
             continue
         template = sqlglot.parse_one(f"SELECT * FROM t AT (VERSION => {int(snapshot)})", "duckdb")
         clause = template.find(exp.Table)

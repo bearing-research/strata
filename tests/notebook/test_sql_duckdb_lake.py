@@ -48,6 +48,12 @@ def _write_parquet(path: Path, values: list[int]) -> None:
     pq.write_table(pa.table({"k": values}), path)
 
 
+def _lake_name(uri: str) -> str:
+    import hashlib
+
+    return "lake_" + hashlib.sha256(uri.encode()).hexdigest()[:16]
+
+
 def _rows(session: NotebookSession, uri: str) -> list[dict[str, Any]]:
     art_id, version = uri.removeprefix("strata://artifact/").rsplit("@v=", 1)
     blob = session.get_artifact_manager().load_artifact_data(art_id, int(version))
@@ -232,6 +238,10 @@ def test_a_table_the_first_resolution_missed_reads_what_the_retry_found(tmp_path
     )
 
     assert lake.snapshots == {("taxi", "trips"): 7}
+    # And the cell's key names that snapshot, not the random stand-in
+    # fingerprint_tables invents for what it could not resolve — which no
+    # later run would ever reproduce.
+    assert lake.fingerprints == [f"{_lake_name('lake:taxi.trips')}:table:lake:taxi.trips:7"]
 
 
 def test_the_catalogs_s3_secret_reaches_only_its_warehouse():
@@ -290,3 +300,95 @@ def test_a_python_notebook_needs_no_sql_extra(tmp_path):
     done = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True)
 
     assert done.stdout.strip().endswith("ok"), done.stderr
+
+
+class TestAReadCellReads:
+    """The connection opens read-only, but a body can end that transaction and
+    keep going, so what a read cell may run is decided before anything is sent
+    to the driver."""
+
+    @staticmethod
+    async def _run(tmp_path, body: str):
+        nb_dir = _notebook(
+            tmp_path,
+            {"c1": f"# @sql connection=lake\n{body}\n"},
+            'driver = "duckdb"\npath = ":memory:"',
+        )
+        session = NotebookSession(parse_notebook(nb_dir), nb_dir)
+        return await _run(nb_dir, session, "c1")
+
+    @pytest.mark.asyncio
+    async def test_a_committed_attach_cannot_write_another_database(self, tmp_path):
+        import duckdb
+
+        victim = tmp_path / "victim.duckdb"
+        with duckdb.connect(str(victim)) as conn:
+            conn.execute("CREATE TABLE t AS SELECT 1 AS x")
+        _write_parquet(tmp_path / "raw" / "a.parquet", [1])
+
+        result = await self._run(
+            tmp_path,
+            f"COMMIT; ATTACH '{victim}' AS w (READ_WRITE); "
+            "CREATE TABLE w.main.pwn AS SELECT 42 AS x; SELECT 1 AS ok",
+        )
+
+        assert result.success is False
+        assert "is not a read" in result.error
+        with duckdb.connect(str(victim), read_only=True) as conn:
+            tables = [row[0] for row in conn.execute("SHOW TABLES").fetchall()]
+        assert tables == ["t"], "a read cell wrote into another database"
+
+    @pytest.mark.asyncio
+    async def test_copying_out_of_the_database_is_not_a_read(self, tmp_path):
+        target = tmp_path / "leak.csv"
+        _write_parquet(tmp_path / "raw" / "a.parquet", [1])
+
+        result = await self._run(tmp_path, f"COPY (SELECT 1 AS x) TO '{target}'")
+
+        assert result.success is False
+        assert "COPY is not a read" in result.error
+        assert not target.exists()
+
+    @pytest.mark.asyncio
+    async def test_reads_still_run(self, tmp_path):
+        _write_parquet(tmp_path / "raw" / "a.parquet", [1])
+
+        result = await self._run(
+            tmp_path, "WITH a AS (SELECT 1 AS x) SELECT sum(x) AS total FROM a"
+        )
+
+        assert result.success, result.error
+
+
+class TestHowACatalogTableIsWritten:
+    """DuckDB resolves a database and a schema case-insensitively, and a
+    two-part name takes the catalog's default schema. Every spelling is the
+    same table, and one that is missed is read live under a provenance that
+    never goes stale."""
+
+    @staticmethod
+    def _tables(state, body: str):
+        from strata.notebook.sql.lake import lake_tables
+
+        return sorted(t.uri for t in lake_tables(state, f"# @sql connection=lake\n{body}\n"))
+
+    def test_the_spellings_of_one_table_are_that_table(self, tmp_path):
+        nb_dir = _notebook(tmp_path, {}, 'driver = "duckdb"\npath = ":memory:"\ncatalog = "lake"')
+        state = parse_notebook(nb_dir)
+
+        assert self._tables(state, "SELECT * FROM LAKE.taxi.trips") == ["lake:taxi.trips"]
+        assert self._tables(state, 'SELECT * FROM "LAKE".taxi.trips') == ["lake:taxi.trips"]
+        assert self._tables(state, "SELECT * FROM lake.trips") == ["lake:main.trips"]
+        assert self._tables(state, "SELECT * FROM other.taxi.trips") == []
+
+    def test_every_spelling_is_pinned(self):
+        from strata.notebook.sql.lake import pin_snapshots
+
+        snapshots = {("taxi", "trips"): 11, ("main", "zones"): 22}
+
+        pinned = pin_snapshots(
+            "SELECT * FROM LAKE.taxi.trips JOIN lake.zones USING (id)", "lake", snapshots
+        )
+
+        assert "AT (VERSION => 11)" in pinned
+        assert "AT (VERSION => 22)" in pinned
