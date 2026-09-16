@@ -38,6 +38,8 @@ scaler).
 import asyncio
 import contextlib
 import logging
+import os
+import socket
 import time
 from collections.abc import AsyncIterator, Callable, Coroutine, Iterable, Iterator
 from typing import Any
@@ -124,7 +126,12 @@ class Pool:
         self._health_poll_seconds = health_poll_seconds
         self.max_workers_total = max_workers_total
         self._tracer = tracer
-        self.instance_id = instance_id or "pool"
+        # Not a constant: a SQLite file may be shared by two processes on one
+        # host, and under one name each would take the other's machines and
+        # jobs for its own — every lease predicate would match. A process
+        # restarted under a generated name waits out the old leases instead of
+        # taking its rows straight back, which is the safe direction.
+        self.instance_id = instance_id or f"{socket.gethostname()}:{os.getpid()}:{new_id('p')}"
         self.lease_seconds = lease_seconds
         self._tasks: set[asyncio.Task] = set()
         # worker id -> consecutive failed probes. In memory rather than in the
@@ -476,6 +483,17 @@ class Pool:
             job.timeout_seconds if job.timeout_seconds is not None else spec.job_timeout_seconds
         )
 
+        # Someone else may have taken this job over while the task waited to
+        # run — a reclaim after this process stalled past its lease. Writing
+        # ``running`` over their terminal row would leave it running forever:
+        # nothing reclaims a row with no lease owner.
+        current = self.store.get_job(job.id)
+        if current is None or current.state not in (JobState.DISPATCHED, JobState.RUNNING):
+            logger.info(
+                "job is no longer ours to run",
+                extra={"job_id": job.id, "state": None if current is None else current.state.value},
+            )
+            return
         job.state = JobState.RUNNING
         job.started_at = self._wall()
         self.store.save_job(job)
@@ -647,17 +665,24 @@ class Pool:
         worker.lease_owner = self.instance_id
 
         if worker.backend_id is not None:
-            # No lease renewal around the stop: it is one provider call, well
-            # inside the lease just claimed, and a renewal task would put an
-            # extra suspension between the machine stopping and its row going,
-            # where a caller could see a stopped machine still listed.
+            # No lease renewal around the stop: it is one provider call, and a
+            # renewal task would put an extra suspension between the machine
+            # stopping and its row going, where a caller could see a stopped
+            # machine still listed. It is bounded by the lease instead, so a
+            # provider that hangs cannot have another process take the row
+            # while this one is still waiting on it.
             try:
-                await self.backend.stop(worker.backend_id)
+                async with asyncio.timeout(self.lease_seconds / 2):
+                    await self.backend.stop(worker.backend_id)
             except Exception:
                 logger.exception(
-                    "backend failed to stop a worker; it may still be billing",
+                    "backend failed to stop a worker; its row is kept so the stop is tried again",
                     extra={"worker_id": worker.id, "backend_id": worker.backend_id},
                 )
+                # The row stays, in ``stopping``, holding the machine's place
+                # against the fleet cap: deleting it would leave a machine
+                # running and billing with nothing naming it.
+                return False
         self.store.delete_worker(worker.id)
         return True
 

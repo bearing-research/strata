@@ -90,6 +90,9 @@ while it works. When a process dies, the scaler in another one fails its jobs
 and stops its machines once the lease runs out (`lease_seconds`, default 30),
 through that process's own backend. A process restarted under its old
 `instance_id` takes its own rows back at once, as a single process does today.
+A pool given no `instance_id` generates one per process, so two processes over
+one SQLite file are never one name — under a shared name each would read the
+other's leases as its own and stop machines running the other's cells.
 
 Lease expiry is compared by wall clock across processes, so their clocks have
 to agree to well within a lease. Each process holds its catalogue in memory:

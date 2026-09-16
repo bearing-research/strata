@@ -392,3 +392,173 @@ class TestTheStore:
             pytest.skip("a SQLite store is not shared across hosts")
         with pytest.raises(ValueError, match="instance_id"):
             Pool(store, FakeBackend(), [MachineType(name="cpu", image="w")])
+
+
+class TestTwoProcessesAreTwoNames:
+    """Every lease predicate matches the holder's name, so two processes under
+    one name each take the other's machines and jobs for their own."""
+
+    def test_a_pool_without_a_name_does_not_share_one(self, tmp_path):
+        types = [MachineType(name="cpu", image="w")]
+        first = Pool(PoolStore(tmp_path / "a.sqlite"), FakeBackend(), types)
+        second = Pool(PoolStore(tmp_path / "a.sqlite"), FakeBackend(), types)
+
+        assert first.instance_id != second.instance_id
+        assert "pool" != first.instance_id, "a constant name is every other process's name too"
+
+    @pytest.mark.asyncio
+    async def test_a_second_pool_does_not_stop_the_first_ones_busy_machine(
+        self, open_store, make_pool
+    ):
+        """What the shared-store docstring promises: a machine another live
+        process holds is left alone."""
+        workers = FakeWorkers()
+        clock = Clock()
+        first = make_pool("a", workers=workers, wall=clock)
+        store = first.store
+        worker = Worker(
+            id=new_id("w"),
+            machine_type="cpu",
+            tenant_id="t",
+            backend="fake",
+            state=WorkerState.BUSY,
+            backend_id="a-1",
+            endpoint="http://a-1",
+            auth_token=new_auth_token(),
+            created_at=clock(),
+            lease_owner=first.instance_id,
+            lease_expires_at=clock() + first.lease_seconds,
+        )
+        store.save_worker(worker)
+
+        second = make_pool("b", workers=workers, wall=clock)
+        stopped = await second._stop_worker(store.get_worker(worker.id))
+
+        assert stopped is False
+        assert store.get_worker(worker.id).state is WorkerState.BUSY
+
+
+class TestAJobTakenOverStaysTakenOver:
+    @pytest.mark.asyncio
+    async def test_a_stalled_process_does_not_resurrect_a_failed_job(self, open_store, make_pool):
+        """The task dispatched the job, then this process stalled past its
+        lease and another failed the job and stopped the machine. When the task
+        finally runs it must not write ``running`` back over that."""
+        workers = FakeWorkers()
+        clock = Clock()
+        pool = make_pool("a", workers=workers, wall=clock)
+        store = pool.store
+        worker = Worker(
+            id=new_id("w"),
+            machine_type="cpu",
+            tenant_id="t",
+            backend="fake",
+            state=WorkerState.BUSY,
+            backend_id="a-1",
+            endpoint="http://a-1",
+            auth_token=new_auth_token(),
+            created_at=clock(),
+        )
+        store.save_worker(worker)
+        job = Job(
+            id=new_id("j"),
+            machine_type="cpu",
+            tenant_id="t",
+            payload=b"{}",
+            state=JobState.FAILED,
+            error="reclaimed: the pool process holding it stopped answering",
+            submitted_at=clock(),
+            completed_at=clock(),
+        )
+        store.save_job(job)
+
+        dispatched = Job(**{**job.__dict__, "state": JobState.DISPATCHED})
+        await pool._execute(worker, dispatched)
+
+        after = store.get_job(job.id)
+        assert after.state is JobState.FAILED
+        assert after.error.startswith("reclaimed:")
+
+
+class TestAMachineBeingStoppedStillCounts:
+    @pytest.mark.asyncio
+    async def test_the_fleet_cap_holds_while_a_stop_is_in_flight(self, open_store, make_pool):
+        """A machine whose provider stop is in flight is still allocated and
+        still billing, so it holds its place against the cap."""
+        workers = FakeWorkers()
+        clock = Clock()
+        pool = make_pool("a", workers=workers, wall=clock, max_workers_total=1)
+        store = pool.store
+        stopping = Worker(
+            id=new_id("w"),
+            machine_type="cpu",
+            tenant_id="t",
+            backend="fake",
+            state=WorkerState.STOPPING,
+            backend_id="a-1",
+            endpoint="http://a-1",
+            auth_token=new_auth_token(),
+            created_at=clock(),
+        )
+        store.save_worker(stopping)
+        # Demand from another tenant, so the only thing that can refuse the
+        # reservation is the fleet cap.
+        store.save_job(
+            Job(
+                id=new_id("j"),
+                machine_type="cpu",
+                tenant_id="t2",
+                payload=b"{}",
+                state=JobState.QUEUED,
+                submitted_at=clock(),
+            )
+        )
+
+        reserved = store.reserve_worker(
+            Worker(
+                id=new_id("w"),
+                machine_type="cpu",
+                tenant_id="t2",
+                backend="fake",
+                state=WorkerState.STARTING,
+                created_at=clock(),
+            ),
+            max_workers=2,
+            max_workers_total=1,
+        )
+
+        assert reserved == "fleet_cap", "the cap was exceeded while a machine was still stopping"
+
+
+class TestAStopThatFailsKeepsTheRow:
+    @pytest.mark.asyncio
+    async def test_a_provider_error_does_not_orphan_the_machine(self, open_store, make_pool):
+        """Deleting the row would leave a machine running, billing, with
+        nothing naming it. It stays, in ``stopping``, to be stopped again."""
+
+        class _Failing(FakeBackend):
+            async def stop(self, backend_id: str) -> None:
+                raise RuntimeError("provider 503")
+
+        workers = FakeWorkers()
+        clock = Clock()
+        pool = make_pool("a", workers=workers, wall=clock, backend=_Failing())
+        store = pool.store
+        worker = Worker(
+            id=new_id("w"),
+            machine_type="cpu",
+            tenant_id="t",
+            backend="fake",
+            state=WorkerState.WARM,
+            backend_id="a-1",
+            endpoint="http://a-1",
+            auth_token=new_auth_token(),
+            created_at=clock(),
+        )
+        store.save_worker(worker)
+
+        stopped = await pool._stop_worker(worker)
+
+        assert stopped is False
+        kept = store.get_worker(worker.id)
+        assert kept is not None and kept.state is WorkerState.STOPPING
