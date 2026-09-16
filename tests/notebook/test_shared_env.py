@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+import time
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -188,3 +189,78 @@ def test_the_key_names_the_interpreter_build(tmp_path):
     assert backend.key("cpython 3.13.1  macosx-14-arm64") != backend.key(
         "cpython 3.13.2  macosx-14-arm64"
     )
+
+
+class TestTheSweepOnlyTakesWhatItBuilt:
+    """A removed environment is a notebook that cannot run, so the sweep is
+    conservative about what it is looking at and what it counts as unused."""
+
+    def test_a_directory_it_did_not_build_is_left_alone(self, tmp_path, shared):
+        theirs = shared / "not-an-environment"
+        (theirs / "nested").mkdir(parents=True)
+        (theirs / "nested" / "thesis.csv").write_text("data")
+        old = time.time() - 30 * 86400
+        os.utime(theirs, (old, old))
+
+        result = collect(shared, ttl_days=1)
+
+        assert result.removed == []
+        assert (theirs / "nested" / "thesis.csv").read_text() == "data"
+
+    def test_a_half_built_environment_is_left_to_be_built_again(self, tmp_path, shared):
+        half = shared / ("0" * 32)
+        half.mkdir(parents=True)
+        old = time.time() - 30 * 86400
+        os.utime(half, (old, old))
+
+        assert collect(shared, ttl_days=1).removed == []
+        assert half.exists()
+
+    def test_a_notebook_whose_volume_is_away_keeps_its_environment(self, tmp_path, shared):
+        env = shared / ("a" * 32)
+        env.mkdir(parents=True)
+        (env / COMPLETE_MARKER).touch()
+        refs = shared / "refs" / ("a" * 32)
+        refs.mkdir(parents=True)
+        # A reference this process cannot read says nothing about whether the
+        # notebook still links here.
+        unreadable = refs / "ref1"
+        unreadable.write_text(str(tmp_path / "gone"))
+        unreadable.chmod(0o000)
+        old = time.time() - 30 * 86400
+        os.utime(env / COMPLETE_MARKER, (old, old))
+
+        try:
+            result = collect(shared, ttl_days=1)
+        finally:
+            unreadable.chmod(0o600)
+
+        assert result.removed == []
+        assert env.exists()
+
+
+def test_opening_a_notebook_keeps_its_environment_in_use(tmp_path, shared, monkeypatch):
+    """The sweep ages an environment out from when it was last linked, so a
+    notebook that is opened but not re-synced must count as using it."""
+    from strata.notebook.parser import parse_notebook
+    from strata.notebook.session import NotebookSession
+    from strata.notebook.writer import create_notebook
+
+    notebook = create_notebook(tmp_path / "nb", "nb", initialize_environment=False)
+    (notebook / "uv.lock").write_text("version = 1\n")
+    session = NotebookSession(parse_notebook(notebook), notebook)
+    synced: list[str] = []
+
+    def _sync(self, *, python_version, timeout):
+        synced.append("backend")
+        from strata.notebook.dependencies import EnvironmentOperationLog, _UvCommandResult
+
+        return _UvCommandResult(
+            success=True, error=None, operation_log=EnvironmentOperationLog(command="uv sync")
+        )
+
+    monkeypatch.setattr(SharedEnvBackend, "sync", _sync)
+
+    session.ensure_venv_synced()
+
+    assert synced == ["backend"], "the shared backend must do the sync, not a bare uv sync"

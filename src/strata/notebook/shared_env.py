@@ -444,16 +444,50 @@ def restore_r_library(
         return False
     key = r_key(notebook_dir, build)
     r_root.mkdir(parents=True, exist_ok=True)
+    library = _r_library(notebook_dir)
     with _key_lock(r_root, key):
         target = r_root / key
         if not (target / COMPLETE_MARKER).exists():
             target.mkdir(exist_ok=True)
+            # The restore writes through the link, so the library the notebook
+            # has is moved aside rather than removed: a restore that fails
+            # (CRAN unreachable, a package that will not build) leaves the
+            # notebook with the packages it had this morning.
+            previous = None
+            if library.exists() and not library.is_symlink():
+                previous = library.with_name(f"library.previous-{uuid.uuid4().hex[:8]}")
+                os.replace(library, previous)
             _link_r_library(notebook_dir, r_root, key)
             if not restore(r_env(root)):
+                if previous is not None:
+                    library.unlink(missing_ok=True)
+                    os.replace(previous, library)
                 return False
+            if previous is not None:
+                shutil.rmtree(previous, ignore_errors=True)
             (target / COMPLETE_MARKER).touch()
         _link_r_library(notebook_dir, r_root, key)
         os.utime(target / COMPLETE_MARKER)
+    return True
+
+
+def link_r_library_if_built(notebook_dir: Path, root: Path) -> bool:
+    """Link the notebook to the built library for its lock, if there is one.
+
+    For a mutation that failed: the notebook goes back to the shared library it
+    was using, and when there is none its private one is left alone rather than
+    removed — it holds whatever the restore before the failure had installed.
+    """
+    notebook_dir = Path(notebook_dir)
+    build = r_build()
+    if build is None or not (notebook_dir / "renv.lock").exists():
+        return False
+    r_root = Path(root).resolve() / R_DIR
+    key = r_key(notebook_dir, build)
+    if not (r_root / key / COMPLETE_MARKER).exists():
+        return False
+    with _key_lock(r_root, key):
+        _link_r_library(notebook_dir, r_root, key)
     return True
 
 
@@ -532,19 +566,31 @@ def _collect(
             continue
         key = env_dir.name
         with _key_lock(root, key):
+            marker = env_dir / COMPLETE_MARKER
+            if not marker.exists():
+                # Not an environment this ever finished building. A half-built
+                # one is rebuilt in place, and anything else under the root is
+                # somebody's directory, not a key.
+                continue
             refs = root / _REFS / key
             live = False
             for ref in list(refs.iterdir()) if refs.is_dir() else []:
-                venv = Path(ref.read_text()) / link
-                if venv.is_symlink() and Path(os.readlink(venv)) == env_dir:
+                try:
+                    venv = Path(ref.read_text()) / link
+                    points_here = venv.is_symlink() and Path(os.readlink(venv)) == env_dir
+                except OSError:
+                    # A notebook on a volume that is not mounted right now says
+                    # nothing about whether it still links here.
+                    live = True
+                    continue
+                if points_here:
                     live = True
                 else:
                     ref.unlink()
             if live:
                 result.referenced.append(prefix + key)
                 continue
-            marker = env_dir / COMPLETE_MARKER
-            last_used = marker.stat().st_mtime if marker.exists() else env_dir.stat().st_mtime
+            last_used = marker.stat().st_mtime
             if now - last_used < ttl_days * 86400:
                 continue
             shutil.rmtree(env_dir)
