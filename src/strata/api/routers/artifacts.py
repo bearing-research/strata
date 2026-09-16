@@ -447,12 +447,23 @@ async def import_artifact_route(
     )
 
     existing = store.get_artifact(artifact_id, version)
-    if existing is not None and (existing.tenant or "") != (tenant_id or ""):
+    # Two ways the id is already taken: by another tenant, and by another
+    # computation. Ids are not globally unique -- a notebook's are built from
+    # its own id and its cells' -- so two people working from one repository
+    # send the same id for cells they have each edited differently.
+    taken_by_another_tenant = existing is not None and (existing.tenant or "") != (tenant_id or "")
+    taken_by_another_computation = (
+        existing is not None
+        and not taken_by_another_tenant
+        and existing.provenance_hash != record.provenance_hash
+    )
+    if taken_by_another_tenant or taken_by_another_computation:
         if not remap:
+            held = "another tenant" if taken_by_another_tenant else "a different computation"
             raise HTTPException(
                 status_code=409,
                 detail=(
-                    f"{artifact_id}@v={version} already exists under another tenant. "
+                    f"{artifact_id}@v={version} already exists, holding {held}. "
                     f"Retry with remap=true to import it under a fresh id."
                 ),
             )

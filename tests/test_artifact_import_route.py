@@ -135,6 +135,47 @@ class TestIdempotencyByCompleteness:
         assert store.get_artifact("rows", 1).input_versions == original
 
 
+class TestAnIdTwoComputationsClaim:
+    """Ids are not globally unique. A notebook's are built from its own id and
+    its cells', so two people working from one repository send the same
+    ``nb_<notebook>_cell_<cell>_var_<name>`` for cells they have each edited
+    differently."""
+
+    def test_a_different_computation_under_a_held_id_is_refused(self, client, served_dir):
+        from strata.artifact_store import ArtifactStore
+
+        assert _post(client, _metadata("shared", 1, "a" * 64), blob=b"ALICE").status_code == 200
+
+        response = _post(client, _metadata("shared", 1, "b" * 64), blob=b"BOBBY")
+
+        assert response.status_code == 409
+        assert "different computation" in response.json()["detail"]
+        store = ArtifactStore(served_dir)
+        assert store.read_blob("shared", 1) == b"ALICE", "and nobody's bytes were replaced"
+
+    def test_remap_lands_it_under_a_fresh_id(self, client, served_dir):
+        """The escape the tenant clash already had: keep both."""
+        from strata.artifact_store import ArtifactStore
+
+        _post(client, _metadata("shared", 1, "a" * 64), blob=b"ALICE")
+
+        body = _post(client, _metadata("shared", 1, "b" * 64), blob=b"BOBBY", remap="true").json()
+
+        assert body["written"] is True
+        assert body["id"] != "shared"
+        store = ArtifactStore(served_dir)
+        assert store.read_blob("shared", 1) == b"ALICE"
+        assert store.read_blob(body["id"], body["version"]) == b"BOBBY"
+
+    def test_the_same_computation_is_still_a_no_op(self, client):
+        """A repeated import is what the id check is for."""
+        _post(client, _metadata("shared", 1, "a" * 64), blob=b"ALICE")
+
+        body = _post(client, _metadata("shared", 1, "a" * 64), blob=b"ALICE").json()
+
+        assert body["written"] is False
+
+
 class TestIntegrity:
     def test_bytes_contradicting_the_declared_digest_are_refused(self, client):
         """Storing them would publish a page whose verify step fails."""
