@@ -151,7 +151,17 @@ _READ_COMMANDS = ("EXPLAIN", "SHOW", "DESC", "DESCRIBE")
 # whatever it says: sqlglot parses the reporting form (``PRAGMA table_info(t)``)
 # and the setting form (``PRAGMA journal_mode = WAL``) into the same shape, and
 # the schema panel is how a notebook introspects a connection.
-_ANALYZE = re.compile(r"^\s*\(?\s*ANALYZE\b", re.IGNORECASE)
+# Comments are part of the text sqlglot hands back, and a classifier that reads
+# it raw is one ``EXPLAIN /*x*/ ANALYZE`` away from waving a write through.
+_COMMENTS = re.compile(r"/\*.*?\*/|--[^\n]*", re.DOTALL)
+# ``ANALYZE`` leading the argument, bare or parenthesized, and anywhere inside a
+# leading option list -- ``EXPLAIN (FORMAT JSON, ANALYZE)`` runs the statement
+# exactly as ``EXPLAIN ANALYZE`` does. Confined to the option list so that a
+# query merely *mentioning* the word still describes its plan.
+_ANALYZE = re.compile(
+    r"^\s*(?:\(\s*[^)]*\banaly[sz]e\b|\(?\s*analy[sz]e\b)",
+    re.IGNORECASE,
+)
 
 
 def read_only_violation(sql: str, dialect: str | None) -> str | None:
@@ -182,7 +192,7 @@ def read_only_violation(sql: str, dialect: str | None) -> str | None:
         if name == "Command":
             head = str(statement.this or "").upper()
             argument = statement.args.get("expression")
-            argument_text = str(getattr(argument, "this", argument) or "")
+            argument_text = _COMMENTS.sub(" ", str(getattr(argument, "this", argument) or ""))
             if head in _READ_COMMANDS and not (head == "EXPLAIN" and _ANALYZE.match(argument_text)):
                 continue
             if head == "EXPLAIN":

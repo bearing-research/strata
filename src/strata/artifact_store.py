@@ -50,6 +50,22 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 
+def reject_unsafe_artifact_id(artifact_id: str) -> None:
+    """Refuse an id from another store that would name a path.
+
+    An artifact id becomes a blob key -- ``{id}@v={n}.arrow`` under the blobs
+    directory, or a prefix in an object store -- so an id carrying a separator
+    or a ``..`` segment writes wherever it likes, as whoever runs the server. A
+    record arriving from elsewhere brings its id with it: a snapshot bundle is a
+    file somebody sends you, and ``POST /v1/artifacts/import`` takes the id from
+    the request. Ids this store generates never contain either.
+    """
+    if not artifact_id:
+        raise ValueError("an artifact id is required")
+    if "/" in artifact_id or "\\" in artifact_id or ".." in Path(artifact_id).parts:
+        raise ValueError(f"an artifact id cannot name a path: {artifact_id!r}")
+
+
 def _ancestor_of(input_uri: str, recorded: object) -> tuple[str, int] | None:
     """The ``(id, version)`` an input edge names, or None if it is not one.
 
@@ -1244,6 +1260,7 @@ class ArtifactStore:
         avoid rewriting bytes for an import that turns out to be a no-op; the
         check inside the transaction is the authoritative one.
         """
+        reject_unsafe_artifact_id(record.id)
         conn = self._get_connection()
         try:
             no_op = self._import_no_op(conn, record)
