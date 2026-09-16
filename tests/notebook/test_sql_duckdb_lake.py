@@ -392,3 +392,54 @@ class TestHowACatalogTableIsWritten:
 
         assert "AT (VERSION => 11)" in pinned
         assert "AT (VERSION => 22)" in pinned
+
+
+class TestWhatCountsAsAReadStatement:
+    """The classifier decides what a read cell may send to the driver. Two
+    ways to be wrong: a write it lets through, and a read it refuses."""
+
+    @staticmethod
+    def _violation(sql: str, dialect: str = "duckdb"):
+        from strata.notebook.sql.analyzer import read_only_violation
+
+        return read_only_violation(sql, dialect)
+
+    @pytest.mark.asyncio
+    async def test_explain_analyze_runs_what_it_wraps_so_it_is_not_a_read(self, tmp_path):
+        """DuckDB's EXPLAIN ANALYZE executes the statement it describes, which
+        made it a way around every refusal below it."""
+        target = tmp_path / "leak.csv"
+        nb_dir = _notebook(
+            tmp_path,
+            {"c1": f"# @sql connection=lake\nEXPLAIN ANALYZE COPY (SELECT 1 AS x) TO '{target}'\n"},
+            'driver = "duckdb"\npath = ":memory:"',
+        )
+        session = NotebookSession(parse_notebook(nb_dir), nb_dir)
+
+        result = await _run(nb_dir, session, "c1")
+
+        assert result.success is False
+        assert "EXPLAIN ANALYZE" in result.error
+        assert not target.exists(), "a read cell wrote a file through EXPLAIN ANALYZE"
+
+    def test_a_plain_explain_is_still_a_read(self):
+        assert self._violation("EXPLAIN SELECT 1") is None
+
+    def test_the_parenthesised_form_is_caught_too(self):
+        assert "EXPLAIN ANALYZE" in (self._violation("EXPLAIN (ANALYZE) DELETE FROM t") or "")
+
+    def test_reads_that_are_not_selects_are_allowed(self):
+        for sql in ("VALUES (1), (2)", "SUMMARIZE t", "TABLE t", "DESCRIBE t", "SHOW TABLES"):
+            assert self._violation(sql) is None, sql
+        assert self._violation("SHOW search_path", "postgres") is None
+
+    def test_the_message_names_the_annotation_that_works(self):
+        """`write` alone is ignored by the parser; the flag is `write=true`."""
+        from strata.notebook.annotations import parse_annotations
+
+        message = self._violation("INSERT INTO t VALUES (1)") or ""
+        assert "write=true" in message
+        annotation = parse_annotations(
+            "# @sql connection=db write=true\nINSERT INTO t VALUES (1)\n"
+        )
+        assert annotation.sql is not None and annotation.sql.write is True

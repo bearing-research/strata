@@ -952,6 +952,18 @@ class Pool:
         """
         now = self._wall()
         stopped = 0
+        # A machine whose stop failed keeps its row, in ``stopping``, holding
+        # its place against the fleet cap. Retry it here: nothing else revisits
+        # it, and a row nobody retries is a slot the fleet never gets back.
+        for stopping in self.store.list_workers(states=[WorkerState.STOPPING]):
+            held_elsewhere = (
+                stopping.lease_owner not in (None, self.instance_id)
+                and (stopping.lease_expires_at or 0) > now
+            )
+            if held_elsewhere:
+                continue
+            if await self._stop_worker(stopping):
+                stopped += 1
         # Every warm machine, not only those of types still in the catalogue:
         # a removed type's machines retire here too.
         for candidate in self.store.list_workers(states=[WorkerState.WARM]):

@@ -3175,7 +3175,9 @@ class CellExecutor:
         if urlsplit(job_url)[:2] != urlsplit(manifest_execute_url)[:2]:
             # The job lives on the worker the manifest went to. An absolute URL
             # somewhere else would have this server poll a host of the worker's
-            # choosing, carrying the worker's token.
+            # choosing, carrying the worker's token. The job itself is still
+            # running there, so stop it before giving up on it.
+            await cancel()
             raise RemoteExecutionError(
                 f"Remote executor '{worker_spec.name}' answered with a job_url on another "
                 f"host ({job_url})",
