@@ -1,6 +1,6 @@
 [project]
 name = "strata-notebook"
-version = "0.7.0"
+version = "0.8.0"
 description = "A notebook built for coding agents: every result cached, versioned, and visible to the human watching"
 readme = "README.md"
 authors = [

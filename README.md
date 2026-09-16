@@ -93,10 +93,23 @@ whether an un-primed session uses the notebook at all. See
 **Compute and data**
 
 - **distributed:** `# @worker gpu-fly` dispatches a cell to a remote box; bring your own compute
+- **worker pool** (separate package, `pip install strata-pool`)**:** machines start on demand — Fly, Docker or RunPod — are held for a tenant, hand out GPUs per cell, and stop when the work does
+- **the same environment, elsewhere:** a remote cell runs in the notebook's own locked environment rather than whatever the worker image holds
 - **remote cells over SSH:** hand an agent an SSH target and it provisions a worker there, tunnels to it, and routes heavy cells over, cached like everything else
+- **lake-aware SQL:** read a named catalog and the notebook's mounts in one query, pinned to the snapshot the cell's provenance records
+- **every input recorded:** `# @fetch` makes bytes from a URL an input, `# @dataset` makes a registry name one, both content-addressed
 - **mounts:** `# @mount data s3://bucket/prefix ro` makes any S3, GCS or Azure prefix a local `pathlib.Path`
 - **isolated envs:** every notebook gets its own uv-managed `.venv/`, locked and reproducible
 - **headless:** `strata run ./my-notebook` for CI and scheduled execution, same DAG and same cache
+
+**Teams**
+
+- **promote to the team:** `strata artifact promote` copies a result and the chain behind it into the team's store, from the notebook, the CLI or inside a cell
+- **a colleague's run counts:** a cell can be served from a teammate's earlier result — the expensive middle of a pipeline, not just what someone chose to name
+- **a figure gets a URL:** publish an artifact and anyone with the link sees the plot, the code, and the environment of every step behind it — no account, no install
+- **a notebook travels:** export the whole state as one bundle and import it back, artifacts included
+- **share a session:** presence, cell focus and soft locks, with every cell recording who wrote it
+- **safe to share** (in service mode)**:** cells run as their own OS user once you name one, notebook scopes are enforced on every route under principal auth, and an MCP tool call runs as its caller
 
 **Surfaces**
 

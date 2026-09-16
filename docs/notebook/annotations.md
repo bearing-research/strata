@@ -516,12 +516,17 @@ Key/value parameters:
   `[connections.<name>]` in `notebook.toml`. Manage these via the
   **Connections panel** in the sidebar; you don't need to edit the file
   directly.
-- `write=true`, opt the cell into writable execution. Without this flag,
-  the connection is opened in enforced read-only mode (SQLite `mode=ro` +
-  `PRAGMA query_only=ON`; PostgreSQL `SET default_transaction_read_only =
-  on`) and any DDL/DML errors before mutating the database. With it, the
-  cell can run setup scripts (`CREATE TABLE`, `INSERT`, `DROP`). The flag
-  is per-cell, read cells using the same connection stay read-only.
+- `write=true`, opt the cell into writable execution. Without this flag the
+  cell may only read: `SELECT`, set operations, `VALUES`, `TABLE`,
+  `SUMMARIZE`, `DESCRIBE`, `SHOW` and plain `EXPLAIN`. Anything else — DDL,
+  DML, `COPY`, `ATTACH`, `USE`, `CALL`, `SET`, `PRAGMA`, and `EXPLAIN
+  ANALYZE`, which runs the statement it describes — is refused before the
+  statement reaches the driver, naming it. The connection is still opened
+  read-only, but that is a second line rather than the boundary: the
+  read-only transaction a driver opens is one a `COMMIT` in the cell body
+  can end. With the flag the cell can run setup scripts (`CREATE TABLE`,
+  `INSERT`, `DROP`). It is per-cell; read cells on the same connection stay
+  read-only.
 
 ```sql
 # @sql connection=warehouse write=true

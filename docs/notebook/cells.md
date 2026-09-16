@@ -494,6 +494,19 @@ A SQL cell's **provenance hash** folds together:
 | `ttl=<seconds>` | `floor(now / ttl)` in the salt; bucketed time-based invalidation.                                                         | Stale-tolerant aggregations.       |
 | `snapshot`      | Probe MUST return a durable snapshot ID. Errors at execute time if the driver can't (SQLite/Postgres can't; Iceberg can). | Reproducibility-critical reads.    |
 
+**On reopen.** `fingerprint` and `snapshot` open idle. Both say, in the cell's
+own annotation, that the cached rows are good only while the source still
+agrees — and asking the source is a query, not something to do while opening a
+notebook. `forever`, `session` and `ttl` can come back ready, because each has
+already said what it depends on and that is settled locally: a `session` cell
+matches only within the session that ran it, and a `ttl` cell only inside the
+same time bucket, so one whose window has passed comes back idle anyway.
+
+The connection counts too. Repointing `[connections.<name>]` at another
+database, or at a different credential, means the cell is no longer ready about
+what it was ready about, so it opens idle rather than green with the previous
+database's rows.
+
 ```sql
 # @sql connection=warehouse
 # @cache forever
