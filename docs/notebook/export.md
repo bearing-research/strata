@@ -30,7 +30,10 @@ strata export <notebook_dir> [options]
 
 | Flag                            | Description                                                                                          |
 | ------------------------------- | ---------------------------------------------------------------------------------------------------- |
-| `--to {markdown,html}`          | Output format. Default `markdown`.                                                                   |
+| `--to {markdown,html,snapshot}` | Output format. Default `markdown`. `snapshot` writes a portable zip — see [Snapshots](#snapshots).   |
+| `--force`                       | Snapshot only. Overwrite `--out` when it already holds something.                                    |
+| `--include {all,selected,none}` | Snapshot only. Whose artifact bytes travel. Default `selected`.                                      |
+| `--cells <ids>`                 | Snapshot only. Comma-separated cell ids whose artifacts to carry, with `--include selected`.         |
 | `--out <path>`                  | Write to a file instead of stdout.                                                                   |
 | `--include-inactive-variants`   | Stack all variants of every group; otherwise only the active variant is rendered.                    |
 | `--no-console`                  | Omit the per-cell stdout/stderr snapshots.                                                           |
@@ -141,6 +144,33 @@ format.
 | ---------- | ----------------------------------------------------------------- |
 | `markdown` | Drops into GitHub PRs, mkdocs sites, Confluence pages, Notion.    |
 | `html`     | Standalone shareable file. Server-side Pygments syntax highlights. Images inline. No external network requests. |
+| `snapshot` | Moving a notebook to another machine, or handing someone a reviewable copy with its results. |
+
+## Snapshots
+
+`--to snapshot` writes a zip rather than a rendering: the committed files, the
+per-cell runtime state, and as many artifact bytes as you ask for. `strata
+import <file>.zip` unpacks one back into a notebook directory — see
+[Importing a snapshot](import.md#importing-a-snapshot).
+
+What travels is `--include`:
+
+| Value      | Carries                                                                    |
+| ---------- | -------------------------------------------------------------------------- |
+| `all`      | Every artifact. Use it to move a project between machines.                  |
+| `selected` | Only the cells named by `--cells`; the rest are described by reference. The default. |
+| `none`     | No artifact bytes — the notebook and its provenance, nothing to replay from. |
+
+```bash
+# The whole thing, to carry to another machine
+strata export ./my_analysis --to snapshot --include all --out my_analysis.zip
+
+# A review copy: one cell's results, the rest by reference
+strata export ./my_analysis --to snapshot --cells a1b2c3d4 --out review.zip
+```
+
+`--out` is required for a snapshot — it is a zip, not text — and it refuses to
+overwrite a path that already holds something unless you pass `--force`.
 
 ## Integration: mkdocs hook
 

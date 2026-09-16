@@ -40,6 +40,12 @@ FROM python:3.14-slim
 # the published version. To test unreleased worker code, build a wheel
 # (``uv build``) and install that instead of this line.
 #
+# This pin therefore moves *after* a release, never with it: CI builds this
+# file as written, so pointing it at a version PyPI does not have yet fails
+# the build. Bumping it is the first post-release task, and until it happens
+# a freshly built image runs a worker one version behind the server that
+# dispatches to it.
+#
 # ``uv`` comes with it, and is not optional either. A cell whose notebook has a
 # uv.lock -- which is every notebook ``strata new`` creates -- is dispatched
 # with a locked environment, and building one is a ``uv sync --frozen``

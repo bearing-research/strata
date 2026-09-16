@@ -5,6 +5,274 @@ All notable changes to Strata will be documented in this file.
 Entries focus on user-visible changes and release framing rather than
 exhaustive commit history.
 
+## 0.8.0 - 2026-09-16
+
+A notebook stops being one person's machine. This release is about the three
+things that were in the way: the work runs somewhere else, it reads the
+organization's data, and several people share the server it runs on.
+
+**Work runs somewhere else.** The worker pool that arrived in 0.7.0 stops being
+a single process to lose: several pool processes share one fleet through a
+store protocol, a Postgres store and per-worker leases. It boots Fly Machines
+on the private network alongside the existing Docker and RunPod backends, hands
+out GPUs per cell under a concurrency cap, and a cancelled cell now stops the
+machine it was running on. And a remote cell runs in *the notebook's* locked
+environment rather than whatever the worker image happens to hold, which is
+what makes a result computed there the same result.
+
+**Work reads the organization's data.** A catalog gets a name and credentials
+are vended rather than copied, on S3, GCS and Azure alike. A DuckDB cell reads
+that catalog and the notebook's mounts together, pinned to the snapshot its
+provenance names. Snowflake and BigQuery cells can pin a durable snapshot
+through time travel. What a cell reads from outside a store is recorded as an
+input too: bytes from a URL with `@fetch`, a registry name with `@dataset`.
+
+**Several people share the server.** Cells run as a separate OS user, so a cell
+cannot read the server's secrets out of its own parent process. Presence, cell
+focus and soft locks make two people in one notebook visible to each other, and
+every cell records who wrote it. Notebook scopes are checked on the REST routes
+from the same table the WebSocket uses, and an MCP tool call runs as its caller
+within those scopes.
+
+Around the edges: a result travels to the team by promotion rather than by
+copying a directory, a notebook's whole state exports as one bundle and imports
+back, and an artifact store can be swept, pinned, and reported on per tenant.
+
+### Added
+
+- **The server image can use a Postgres artifact store.** Setting
+  `STRATA_ARTIFACT_METADATA_DSN` on the published image previously refused to
+  start, because the `postgres` extra was not in it and installing one means
+  building your own image. Several servers over one artifact store is the
+  deployment the image is for.
+- **The worker pool runs as more than one process.** A store protocol, a
+  Postgres store and per-worker leases let several pool processes share one
+  fleet, so the pool is no longer a single point of loss. **Fly Machines** join
+  the Docker and RunPod backends that shipped in 0.7.0, booting on the private
+  network. Concurrent executions are capped and GPUs handed out per cell; the
+  machine-type catalogue can be replaced without a restart; a dead warm machine
+  is found before a job is sent to it; a cancelled cell stops the machine it was
+  running on instead of leaving it billing; and a personal server offers the
+  machine types it manages, with the server-managed registry surviving a
+  restart.
+- **Remote cells run in the notebook's locked environment.** A worker that
+  advertises it installs the notebook's `uv.lock` and runs the cell there, so
+  the result matches what the same cell computes locally. R cells run on remote
+  workers too, against the worker's `renv` library.
+- **A remote cell's console arrives while it runs.** Output is streamed from the
+  worker as it is produced rather than at the end, so a long cell is no longer
+  silent for its whole life. The worker also streams manifest inputs to disk as
+  they download, reports the machine's hardware in `/health` and in each job's
+  bundle, names the hosts a manifest may point at, and accepts an asynchronous
+  execute with a provisioning deadline kept apart from the cell's own timeout.
+- **Named catalogs, vended credentials, and GCS and Azure on the scan path.** A
+  catalog is configured once and referred to by name; a query gets credentials
+  vended for the table it reads rather than the warehouse holding them.
+- **DuckDB cells over the organization's catalog and mounts.** A SQL cell reads
+  catalog tables and the notebook's mounts in one query, with catalog tables
+  pinned to the snapshot the cell's provenance records.
+- **Durable snapshots for Snowflake and BigQuery.** `# @cache snapshot` pins a
+  query to a point in time through the warehouse's own time travel, so a cell
+  that reruns reads what it read before.
+- **Named credentials for mounts and connections.** A credential is named once
+  and referred to by name; the name is part of what a cell's provenance folds,
+  the value never is, so rotating a secret does not invalidate a cache.
+- **`@fetch`: bytes from a URL are a recorded input.** A cell declares a URL, the
+  bytes are content-addressed and checked according to its policy, and the
+  digest is part of the cell's provenance. Fetched URLs appear in lineage and
+  are listed where the result is read; the bytes are delivered to remote workers
+  as inputs like any other.
+- **`@dataset`: a registry name is a recorded input.** A cell names a dataset in
+  the registry and gets the version it resolved to, recorded as an input.
+- **Promote a result to the team, with the work behind it.** `strata artifact promote`
+  copies an artifact and the chain that produced it into the team's store, from
+  the notebook, from the CLI, or from inside a cell. Any cell output can be
+  promoted, and a team cache hit says which promotion it came from.
+- **A notebook's state exports as one bundle, and imports back.** Cells, config,
+  runtime state and the artifacts behind them travel as a single file.
+- **Publications record who wrote them and what cites them**, land in the audit
+  trail, and are served as an events feed. An archive bundle is served over
+  HTTP, and a tabular bundle carries Parquet beside the archived bytes.
+- **Tabular artifacts can be written into Iceberg tables**, with aliases kept as
+  tags on the snapshot that version wrote.
+- **Cells run as a separate OS user.** The harness runs as its own user and the
+  run directory is handed to it, so a cell cannot read the server's environment
+  through its parent process. A service host without such a user refuses to run
+  cells rather than running them as the server.
+- **Presence, cell focus and soft locks.** Two people in one notebook can see
+  where each other is working, and every cell records who wrote it — in the
+  notebook, and on every surface that writes one.
+- **Notebook scopes on the REST routes**, read from the same table the WebSocket
+  uses, and MCP tool calls that run as their caller within those scopes. An
+  agent can read lineage, promote and publish through MCP.
+- **Artifact pins, service-mode GC for admins, and a scheduled sweep**, plus a
+  tenant's usage reported in service mode and model tokens counted by tenant,
+  principal and model.
+- **Quiesce a notebook or project** so it can be copied consistently while the
+  server is running.
+- **A shared environment backend, one environment per lockfile** — and one
+  `renv` library per `renv.lock` — so notebooks that declare the same
+  dependencies stop each building their own.
+- **Trace context is carried** from the server through the pool to the worker,
+  and a signed build manifest says who and what it is for. Build manifests can
+  carry presigned object-store URLs.
+- **A new notebook directory is ready for git**, and a store's schema can be
+  evolved after it already holds data.
+
+### Changed
+
+Upgrading changes some behaviour that was previously silent. Each of these was
+a case of the server reporting more confidence than it had:
+
+- **A read SQL cell may only read.** `SET`, `PRAGMA`, `ATTACH`, `CALL`,
+  `COPY … TO` and `EXPLAIN ANALYZE` are refused, naming the statement, because
+  a read cell's connection is a transaction its body could end. Use
+  `# @sql connection=<name> write=true` for a cell that changes a database.
+- **A SQL cell on the default `fingerprint` policy opens idle**, not ready. That
+  policy is a promise to ask the source before trusting the cache, and opening a
+  notebook does not ask. `# @cache forever`, `session` and `ttl` say what they
+  depend on and are restored when it still holds.
+- **A cell no longer receives the team store's credentials.** Its ambient client
+  points at its own server, and so does the same cell inside Run All, which
+  used to reach the team store instead with no credential for it.
+  `strata.put(name=...)` inside a cell lands in the notebook's own store and
+  reaches the team through promotion, which is the path that can copy a chain.
+- **`strata artifact export --table` refuses a table Strata did not write**,
+  rather than replacing its contents. Export to a table of its own, or append
+  outside Strata.
+- **Importing a different computation under an id another one holds is
+  refused** with a 409 instead of silently keeping the row already there. Retry
+  with `remap=true` to land it under a fresh id.
+- **A worker that cannot be asked whether it runs locked environments is
+  refused** for a notebook that has a lock, instead of running the cell in the
+  worker's own environment under provenance that claims the lock. A worker that
+  answers and does not have the feature is unaffected.
+- **Deny rules match named catalogs and GCS and Azure warehouses** now that a
+  table is authorized the same way wherever it lives. Check any deny rules you
+  wrote against `file:` URIs.
+- **A service host runs no cells of its own until you name a user for them.**
+  Set `STRATA_NOTEBOOK_HARNESS_USER` to a second OS account (the server must be
+  able to become it) or send the work to remote workers. A service deployment
+  upgrading from 0.7.0 that ran cells on the server host runs none until one of
+  those is true — the alternative was continuing to run notebook code as the
+  server user, which is what the rest of this release is about not doing.
+- **Every notebook REST route is scope gated under principal auth.** A
+  principal that holds only `notebook:read` can no longer reach the routes that
+  write or execute, the same way it already could not over the WebSocket. Issue
+  `notebook:write` and `notebook:execute` where a client needs them; a route
+  nobody has classified requires `notebook:execute`.
+- **A mount's fingerprint covers its uri**, so every `@mount` cell is stale once
+  after upgrade and re-runs. Nothing cached is wrong — the key changed, not the
+  data. One consequence to know: a mounted cell's provenance now carries an
+  absolute path, so the same notebook on two machines no longer shares those
+  cache entries.
+
+### Security
+
+- **A cell cannot read the server's secrets.** The worker takes its token and
+  credential map out of the process environment at startup and keeps them in
+  memory, so a cell cannot recover them from `/proc/<ppid>/environ`; the
+  harness runs as its own OS user; and the cell's manifest no longer carries the
+  team store's proxy token, which would have let a cell assert any principal.
+- **A read SQL cell cannot write files.** `COPY … TO` inside a read cell — and
+  the `EXPLAIN ANALYZE` and `EXPLAIN /*comment*/ ANALYZE` forms that run the
+  statement they describe — are refused before anything reaches the driver.
+- **A bundle writes only inside the notebook it imports.** Member names, cell
+  ids and artifact ids from an uploaded snapshot are all checked before
+  anything is written; an artifact id becomes a blob key, so one naming a path
+  wrote outside the notebook as the server's user.
+- **A citation is linked only if it is a link.** An identifier recorded as a
+  `url` is rendered as text unless it is really `http(s)`, so `javascript:`
+  cannot become a clickable link on a publication page served to anyone holding
+  the token.
+- **A table export is authorized and a publication is tenant-scoped.** The
+  export route gates on the table ACL wherever the table lives, a published
+  artifact cannot be deleted out from under its page, and the chain behind a
+  publication is kept out of the garbage collector's sweep.
+- **A manifest may only point at named hosts**, and a worker's job URL is
+  checked against the manifest's own origin.
+
+### Fixed
+
+- **A worker that answers has answered.** A worker predating the health
+  document replies 404, which says it is older than every feature it would
+  list — so the cell runs in the worker's own environment, as documented,
+  instead of being refused. Only a transport failure or a 5xx leaves the
+  question open. The probe also waits longer than the `/health` it asks:
+  reporting a machine's hardware shells out to `nvidia-smi`, so the first cell
+  on a freshly started GPU worker used to time out and be refused.
+- **Run All takes part in the team cache.** It neither offered what it computed
+  nor looked before computing, so a team running notebooks the ordinary way —
+  top to bottom — shared nothing and reused nothing, while the same notebook
+  run cell by cell did both.
+- **`strata status`, `strata cell ls` and `strata cell show` report what they
+  found.** Offline they answered `idle`, with no staleness reasons and no
+  outputs, for every cell of every notebook — the state a session starts in,
+  not one about the notebook. This is the surface agents read.
+- **`@fetch` may reach your own machine.** `http://localhost:8000/data.csv` was
+  refused in personal mode by a guard meant for a shared server. Service mode
+  is unchanged.
+- **A `@fetch` or `@dataset` that cannot be read says so.** Both were dropped
+  silently when malformed, so a typo became a `NameError` about a variable
+  nothing explained the absence of.
+- **A cell's console is copied for a reader, or not at all.** Every locally run
+  cell's output was also accumulating in the server process for the length of
+  the run, for a reader that discards it.
+- **Reconstructing a 64-bit jax array says that it changed the process.**
+  Enabling `jax_enable_x64` is process-wide and jax has no per-array form, so
+  later cells in a reused worker get 64-bit defaults with nothing in their
+  provenance recording it. Set `JAX_ENABLE_X64` in the notebook's env to make
+  the choice explicit and hashed.
+- **Run All sends a cell to the same place a single run does**, and gives it
+  somewhere to promote to and the inputs to name. With a team store configured,
+  identical cell source used to reach a different store depending on how it was
+  run, with no credential for the place it was sent; `strata.promote(...)` in a
+  batch reported there was no team store; `# @nocache` was ignored, so a cell
+  marked as having an effect the artifact does not capture was served from
+  cache; and a mount naming a credential failed to resolve.
+- **Deciding whether a cell is stale cannot stall the server.** The check reads
+  an `@fetch` URL, an `@table` catalog and a `@dataset` registry, and it now
+  does that before taking the lock that serializes it — held across those, one
+  slow host blocked every socket in the process.
+- **A cell's in-place mutations and its `@table` inputs reach a worker.** Both
+  were dropped on the way to an HTTP worker while the provenance hash claimed
+  otherwise, so a cell that changed a value without rebinding it stored nothing
+  and downstream cells read the value from before, from cache, indefinitely.
+- **The reference worker image can do what it says.** `/health` answered that
+  it builds locked environments whether or not `uv` was installed — and the
+  image shipped without it, so every Python cell failed. It probes now, and the
+  image ships `uv`.
+- **An edit made while Run All is working is not mistaken for what ran.** The
+  batch executes the source it was given; persisting it read whatever the cell
+  held by then, so editing a cell whose turn had not come filed its output
+  under a hash of source that never ran.
+- **A loop cell checks the cache.** Every other cell kind checked it before
+  running; the loop dispatch happened before that check, so running any cell
+  downstream of a loop re-ran the whole loop.
+- **A reopened cell says ready only about what it checked.** A SQL, prompt or
+  widget cell was restored on a hash that never covered its connection, its
+  cache policy or its model — so a notebook repointed at another database
+  reopened green, showing the first database's rows.
+- **A cell's console leaves the process while the cell runs.** The harness
+  captured the cell's output for the result manifest and nothing wrote it
+  through, so the pipe a worker streams from stayed empty for the cell's whole
+  life.
+- **A mount's fingerprint covers where it points**, not only what is in it: two
+  empty directories, or two paths that do not exist yet, hashed alike.
+- **A SQLite cell sees writes** made outside it, through the file's size, mtime,
+  header change counter and `-wal` sidecar.
+- **A catalog table is pinned however it is written** — qualified, unqualified,
+  quoted or in a different case.
+- **Two pool processes over one store are two processes**, each with its own
+  instance id, so a restart waits out the old leases rather than adopting them.
+  A failed stop keeps the row, and a machine is not reaped while it is running a
+  cell.
+- **Shared environments are not changed, or swept, under a running notebook**,
+  and a failed `renv::restore()` no longer destroys the library it was
+  replacing.
+- **A cell's dtype survives the cell boundary**, and a fetch annotation is
+  honoured on R cells and refused on loop cells rather than ignored.
+
 ## 0.7.0 - 2026-09-06
 
 A result can now leave the notebook without leaving its history behind. **A
