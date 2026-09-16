@@ -2312,7 +2312,10 @@ starting, running a job or stopping; a job dispatched or running) and renews it
 while it works. When a process dies, the scaler in another one fails its jobs
 and stops its machines once the lease runs out (<code>lease_seconds</code>, default 30),
 through that process's own backend. A process restarted under its old
-<code>instance_id</code> takes its own rows back at once, as a single process does today.</p>
+<code>instance_id</code> takes its own rows back at once, as a single process does today.
+A pool given no <code>instance_id</code> generates one per process, so two processes over
+one SQLite file are never one name — under a shared name each would read the
+other's leases as its own and stop machines running the other's cells.</p>
 <p>Lease expiry is compared by wall clock across processes, so their clocks have
 to agree to well within a lease. Each process holds its catalogue in memory:
 <code>PUT /v1/machine-types</code> updates the process that served it and the stored
