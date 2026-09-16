@@ -2302,7 +2302,7 @@ async def update_cell_source(
         # Without this, cells keep their old "ready" status and the
         # cascade planner won't trigger when the user runs a
         # downstream cell.
-        session.compute_staleness()
+        await session.compute_staleness_async()
 
         # Find and return the updated cell with DAG info
         cell = session.notebook_state.get_cell(cell_id)

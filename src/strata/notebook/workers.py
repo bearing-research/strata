@@ -655,25 +655,34 @@ _FEATURES_TTL_SECONDS = 60.0
 _advertised_features: dict[str, tuple[float, dict[str, Any]]] = {}
 
 
-async def worker_advertises(worker: WorkerSpec, feature: str) -> bool:
+async def worker_advertises(worker: WorkerSpec, feature: str) -> bool | None:
     """Whether *worker*'s ``/health`` lists *feature* as true.
 
-    A worker that cannot be asked is taken not to: it gets what every worker
-    got before the feature existed.
+    ``None`` means the worker could not be asked -- unreachable, timed out, or
+    answering something that is not a health document. That is not the same as
+    a worker that answered and does not have the feature, which is an older
+    worker and gets what every worker got before the feature existed. The
+    caller decides what an unanswered question is worth; for a feature that
+    changes *what the cell computes*, it is not worth a guess.
+
+    Only an answer is cached. Caching a failure gave one timed-out probe a
+    minute of authority over every cell dispatched in it.
     """
     health_url = _health_url_for_worker(worker)
     if health_url is None:
         return False
     cached = _advertised_features.get(health_url)
     if cached is None or time.monotonic() - cached[0] >= _FEATURES_TTL_SECONDS:
-        features: dict[str, Any] = {}
         try:
             async with httpx.AsyncClient(timeout=5.0) as client:
                 response = await client.get(health_url)
-            if response.status_code == 200:
-                features = response.json().get("capabilities", {}).get("features", {}) or {}
+            if response.status_code != 200:
+                return None
+            features: dict[str, Any] = (
+                response.json().get("capabilities", {}).get("features", {}) or {}
+            )
         except (httpx.HTTPError, ValueError, AttributeError):
-            features = {}
+            return None
         cached = (time.monotonic(), features)
         _advertised_features[health_url] = cached
     return cached[1].get(feature) is True

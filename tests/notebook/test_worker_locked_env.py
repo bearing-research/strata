@@ -142,6 +142,72 @@ async def test_only_a_worker_that_advertises_it_is_sent_the_lock(tmp_path):
         server.shutdown()
 
 
+@pytest.mark.locked_environments
+class TestAWorkerThatCannotBeAsked:
+    """A probe that fails is not an answer. Treating it as "no" ran the cell
+    against whatever the worker's image holds while its provenance recorded
+    the lock's hash."""
+
+    @staticmethod
+    def _worker(url: str):
+        from strata.notebook.models import WorkerBackendType, WorkerSpec
+
+        return WorkerSpec(
+            name="unreachable",
+            backend=WorkerBackendType.EXECUTOR,
+            runtime_id="r",
+            config={"url": url},
+        )
+
+    @pytest.mark.asyncio
+    async def test_an_unreachable_worker_answers_nothing(self, tmp_path):
+        from strata.notebook import workers
+
+        # Nothing is listening on this port.
+        worker = self._worker("http://127.0.0.1:1/v1/execute")
+
+        assert await workers.worker_advertises(worker, "locked_environments") is None
+
+    @pytest.mark.asyncio
+    async def test_a_failed_probe_is_not_cached_as_an_answer(self, tmp_path):
+        """One timed-out probe used to hold authority over every cell
+        dispatched in the next minute."""
+        from strata.notebook import workers
+
+        worker = self._worker("http://127.0.0.1:1/v1/execute")
+        await workers.worker_advertises(worker, "locked_environments")
+
+        health = workers._health_url_for_worker(worker)
+        assert health not in workers._advertised_features
+
+    @pytest.mark.asyncio
+    async def test_a_locked_notebook_refuses_rather_than_guess(self, tmp_path):
+        from strata.notebook.executor import CellExecutor
+
+        nb = _notebook(tmp_path)
+        (nb / "uv.lock").write_text("version = 1\n")
+        worker = self._worker("http://127.0.0.1:1/v1/execute")
+        executor = CellExecutor(_session(nb, worker.config.url))
+
+        with pytest.raises(RuntimeError, match="could not be asked"):
+            await executor._locked_environment(worker)
+
+    @pytest.mark.asyncio
+    async def test_a_notebook_without_a_lock_does_not_care(self, tmp_path):
+        """There is nothing to be locked into, so an unanswered probe costs
+        nothing and must not fail the cell."""
+        from strata.notebook.executor import CellExecutor
+        from strata.notebook.writer import add_cell_to_notebook, create_notebook
+
+        nb = create_notebook(tmp_path / "plain", "unlocked", initialize_environment=False)
+        add_cell_to_notebook(nb, "c1", None)
+        (nb / "uv.lock").unlink(missing_ok=True)
+        worker = self._worker("http://127.0.0.1:1/v1/execute")
+        executor = CellExecutor(_session(nb, worker.config.url))
+
+        assert await executor._locked_environment(worker) is None
+
+
 class TestTheWorkerSide:
     def _spec(self, lock: str = "version = 1\n") -> dict[str, str]:
         return {
