@@ -954,7 +954,7 @@ async def export_artifact_to_table(
     request: ExportTableRequest,
     tenant_filter: CurrentTenant,
     principal: CurrentPrincipal,
-    store: ArtifactStore = store_for_scope("artifacts:write"),
+    store: WriteStore,
 ):
     """Write a tabular artifact into an Iceberg table as its current snapshot.
 
@@ -963,9 +963,19 @@ async def export_artifact_to_table(
     The catalog is this server's: ``table`` is a ``<warehouse>#ns.table`` URI or
     a ``ns.table`` in the configured catalog, as ``@table`` reads it.
     """
+    from strata.api.dependencies import authorize_table_access
+    from strata.iceberg import table_identity_for
     from strata.server import _ensure_artifact_access, get_state
     from strata.table_export import export_artifact
 
+    config = get_state().config
+    # The table this writes is authorized like any table a scan reads, so a
+    # principal denied a table cannot write it either.
+    try:
+        identity = table_identity_for(request.table, config)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    authorize_table_access(request.table, identity)
     artifact = _ensure_artifact_access(store.get_artifact(artifact_id, version), tenant_filter)
     try:
         written = await asyncio.to_thread(
@@ -973,7 +983,7 @@ async def export_artifact_to_table(
             store,
             artifact,
             request.table,
-            config=get_state().config,
+            config=config,
             promoted_by=principal.id if principal is not None else None,
             alias=request.alias,
             tenant=tenant_filter,

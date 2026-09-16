@@ -8,7 +8,12 @@ import pyarrow.parquet as pq
 
 from strata import lake_files
 from strata.config import StrataConfig
-from strata.iceberg import CatalogProvider, PyIcebergCatalog, named_catalog
+from strata.iceberg import (
+    CatalogProvider,
+    PyIcebergCatalog,
+    named_catalog,
+    table_identity_for,
+)
 from strata.metadata_cache import (
     ManifestCache,
     ManifestEntry,
@@ -25,7 +30,6 @@ from strata.types import (
     CacheKey,
     Filter,
     ReadPlan,
-    TableIdentity,
     Task,
     compute_filter_fingerprint,
     filters_to_iceberg_expression,
@@ -355,14 +359,13 @@ class ReadPlanner:
         named, named_table_id = named_catalog(table_uri, self.config)
         if named is not None:
             table_id = named_table_id
-            identity_catalog_name = manifest_catalog_name = named
+            manifest_catalog_name = named
         else:
             warehouse_path, table_id = PyIcebergCatalog.parse_table_uri(table_uri)
-            identity_catalog_name = self.config.catalog_name if warehouse_path is None else "strata"
             manifest_catalog_name = (
                 self.config.catalog_name if warehouse_path is None else warehouse_path
             )
-        table_identity = TableIdentity.from_table_id(table_id, catalog=identity_catalog_name)
+        table_identity = table_identity_for(table_uri, self.config)
 
         # Load table and resolve snapshot
         table = self.catalog.load_table(table_uri)

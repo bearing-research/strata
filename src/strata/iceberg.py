@@ -17,6 +17,7 @@ from pyiceberg.table import Table
 from pyiceberg.table.snapshots import Operation
 
 from strata.config import StrataConfig
+from strata.types import TableIdentity
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +50,21 @@ def named_catalog(table_uri: str, config: StrataConfig) -> tuple[str | None, str
     if match is None or match.group(1) not in (getattr(config, "catalogs", None) or {}):
         return None, table_uri
     return match.group(1), match.group(2)
+
+
+def table_identity_for(table_uri: str, config: StrataConfig) -> TableIdentity:
+    """The canonical identity of *table_uri*, a named catalog's table included.
+
+    The planner, and every gate that authorizes a table, name a table the same
+    way here: a table in a configured catalog is that catalog's, and one in a
+    warehouse the URI carries is ``strata``'s, as the cache keys have it.
+    """
+    named, table_id = named_catalog(table_uri, config)
+    if named is not None:
+        return TableIdentity.from_table_id(table_id, catalog=named)
+    warehouse_path, table_id = PyIcebergCatalog.parse_table_uri(table_uri)
+    catalog = config.catalog_name if warehouse_path is None else "strata"
+    return TableIdentity.from_table_id(table_id, catalog=catalog)
 
 
 def _is_connection_io_error(exc: BaseException) -> bool:
@@ -399,6 +415,14 @@ class IcebergWriter:
         self._catalogs = catalogs
 
     def _table_id(self, table_uri: str) -> tuple[Catalog, str]:
+        named, named_table_id = named_catalog(table_uri, self._catalogs.config)
+        if named is not None:
+            # A configured catalog holds the table; without this the whole
+            # "<name>:<namespace>.<table>" string would be read as a table id
+            # in the default catalog, and the write would land elsewhere.
+            if "." not in named_table_id:
+                raise ValueError(f"{table_uri!r} names no namespace; expected <namespace>.<table>")
+            return self._catalogs._get_named_catalog(named), named_table_id
         warehouse_path, table_id = self._catalogs.parse_table_uri(table_uri)
         if "." not in table_id:
             raise ValueError(f"{table_uri!r} names no namespace; expected <namespace>.<table>")
