@@ -50,6 +50,18 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 
+class ArtifactImportConflict(ValueError):
+    """An artifact arriving from elsewhere claims an id another one holds.
+
+    Ids are not globally unique: a notebook's are built from its own id and
+    its cells', so two people working from one repository produce the same
+    ``nb_<notebook>_cell_<cell>_var_<name>`` for cells they have each edited
+    differently. Silently keeping the row already here reported success and
+    pointed the newcomer's name, tags and descendants at somebody else's
+    bytes.
+    """
+
+
 def reject_unsafe_artifact_id(artifact_id: str) -> None:
     """Refuse an id from another store that would name a path.
 
@@ -1097,10 +1109,19 @@ class ArtifactStore:
         both have to name where the caller's descendants should point.
         """
         existing = conn.execute(
-            "SELECT 1 FROM artifact_versions WHERE id = ? AND version = ?",
+            "SELECT provenance_hash FROM artifact_versions WHERE id = ? AND version = ?",
             (record.id, record.version),
         ).fetchone()
         if existing is not None:
+            # Same id *and* same computation is the repeated import this is
+            # for. A different computation under that id is two artifacts
+            # claiming one name, and the caller has to be told: it is about to
+            # name, tag and build on what it believes it just sent.
+            if (existing["provenance_hash"] or "") != record.provenance_hash:
+                raise ArtifactImportConflict(
+                    f"{record.id}@v={record.version} is already here, holding a "
+                    f"different computation. Import it under a fresh id."
+                )
             return ImportedArtifact(record.id, record.version, written=False)
 
         duplicate = self._ready_with_provenance(conn, record)
