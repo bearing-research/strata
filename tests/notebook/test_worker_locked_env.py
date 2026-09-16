@@ -200,3 +200,66 @@ class TestTheWorkerSide:
         assert prepared.installed is True
         assert again.installed is False
         assert prepared.python.exists()
+
+
+class TestAnEnvironmentIsCompleteWhenItRuns:
+    """The marker says a worker may reuse a directory without installing. An
+    archive with no interpreter where the worker looks for one must not be
+    marked complete, or every cell with that lock fails there for good."""
+
+    @pytest.mark.asyncio
+    async def test_an_archive_without_an_interpreter_is_not_kept(self, tmp_path, monkeypatch):
+        import tarfile
+
+        from strata.notebook.worker_env import (
+            COMPLETE_MARKER,
+            WorkerEnvironmentError,
+            ensure_environment,
+            env_root,
+        )
+
+        empty = tmp_path / "env"
+        (empty / "lib").mkdir(parents=True)
+        archive = tmp_path / "env.tar.gz"
+        with tarfile.open(archive, "w:gz") as tar:
+            tar.add(empty, arcname=".")
+        served = tmp_path / "served"
+        served.mkdir()
+        monkeypatch.setenv("STRATA_WORKER_ENV_ROOT", str(tmp_path / "worker-envs"))
+
+        def _fetch(registry, key, env_dir):
+            with tarfile.open(archive) as tar:
+                tar.extractall(env_dir, filter="data")
+
+        monkeypatch.setattr("strata.notebook.worker_env._fetch", _fetch)
+        monkeypatch.setenv("STRATA_WORKER_ENV_REGISTRY_URL", "http://registry")
+        lock = "version = 1\n"
+        spec = {
+            "key": hashlib.sha256(lock.encode()).hexdigest(),
+            "python": "",
+            "lockfile": lock,
+            "pyproject": "[project]\nname = 'nb'\nversion = '0'\n",
+        }
+
+        with pytest.raises(WorkerEnvironmentError, match="no interpreter"):
+            await ensure_environment(spec)
+
+        built = [p for p in env_root().iterdir() if p.is_dir()]
+        assert built, "the directory it unpacked into is still there to be replaced"
+        assert not any((p / COMPLETE_MARKER).exists() for p in built), (
+            "an environment with no interpreter was marked complete"
+        )
+
+        # A registry that has been fixed is fetched again rather than skipped.
+        fetched: list[str] = []
+
+        def _good_fetch(registry, key, env_dir):
+            fetched.append(key)
+            (env_dir / "bin").mkdir(parents=True, exist_ok=True)
+            (env_dir / "bin" / "python").write_text("#!/bin/sh\n")
+
+        monkeypatch.setattr("strata.notebook.worker_env._fetch", _good_fetch)
+        prepared = await ensure_environment(spec)
+
+        assert fetched == [spec["key"]]
+        assert prepared.installed is True

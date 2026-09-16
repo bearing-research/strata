@@ -2135,11 +2135,18 @@ class NotebookSession:
         On failure the session still opens (venv_python falls back to
         ``python`` in PATH) so tests without ``uv`` keep working.
         """
+        from strata.notebook.env_backend import UvBackend
+
         started = _time.perf_counter()
-        ok = _uv_sync(
-            self.path,
-            python_version=read_requested_python_minor(self.path),
-        )
+        python_version = read_requested_python_minor(self.path)
+        if isinstance(self.backend, UvBackend):
+            ok = _uv_sync(self.path, python_version=python_version)
+        else:
+            # A shared environment is never synced through the notebook's link:
+            # ``uv sync`` there installs — and uninstalls — inside the
+            # environment every other notebook with that lock is using. The
+            # backend syncs into the key and moves this notebook's link.
+            ok = self.backend.sync(python_version=python_version, timeout=60).success
         self._apply_uv_sync_result(
             ok,
             duration_ms=int((_time.perf_counter() - started) * 1000),

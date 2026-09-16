@@ -926,12 +926,16 @@ async def _run_renv_mutation(
     from strata.notebook.shared_env import (
         adopt_r_library,
         detach_r_library,
+        link_r_library_if_built,
         r_env,
-        restore_r_library,
     )
 
-    if await asyncio.to_thread(detach_r_library, notebook_dir, root):
-        snippet = "renv::restore(prompt = FALSE)\n" + snippet
+    await asyncio.to_thread(detach_r_library, notebook_dir, root)
+    # Always restore first: the private library has to hold what the lock says
+    # before a package is added to it, or what is adopted afterwards is a
+    # library with one package in it that every notebook on the new lock links
+    # to and never restores.
+    snippet = "renv::restore(prompt = FALSE)\n" + snippet
     result = await run_rscript_command_streaming(
         notebook_dir,
         snippet,
@@ -942,8 +946,10 @@ async def _run_renv_mutation(
     )
     if result.success:
         await asyncio.to_thread(adopt_r_library, notebook_dir, root)
-    elif (notebook_dir / "renv.lock").exists():
-        await asyncio.to_thread(restore_r_library, notebook_dir, root, lambda env: False)
+    else:
+        # Back to the library for the lock the notebook still has, when one is
+        # built; otherwise its own library stays as the failed run left it.
+        await asyncio.to_thread(link_r_library_if_built, notebook_dir, root)
     return result
 
 

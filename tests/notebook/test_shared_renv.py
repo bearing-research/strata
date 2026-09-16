@@ -228,3 +228,51 @@ async def test_a_real_lock_restores_once_and_an_r_cell_runs_on_the_link(
     result = await CellExecutor(session).execute_cell("c1", source)
     assert result.success is True, result.error
     assert result.outputs["out"]["preview"] == '{"ok":true}'
+
+
+def test_a_failed_restore_leaves_the_library_the_notebook_had(tmp_path, shared, monkeypatch):
+    """CRAN unreachable, or a package that will not build, must not cost a
+    notebook the packages it already had installed."""
+    monkeypatch.setattr(shared_env, "r_build", lambda: "R version 4.4.0 aarch64")
+    notebook = _notebook(tmp_path, "nb")
+    for package in ("ggplot2", "dplyr"):
+        (notebook / "renv" / "library" / "R-4.4" / package).mkdir(parents=True)
+    monkeypatch.setattr(
+        writer, "_renv_restore_locked", lambda notebook_dir, *, timeout, env=None: False
+    )
+
+    assert writer._renv_sync(notebook) is False
+
+    library = notebook / "renv" / "library"
+    assert not library.is_symlink(), "a failed restore must not leave a link to nothing"
+    assert sorted(p.name for p in (library / "R-4.4").iterdir()) == ["dplyr", "ggplot2"]
+
+
+@pytest.mark.asyncio
+async def test_a_failed_install_keeps_what_the_restore_had_put_back(
+    tmp_path, shared, fake_r, monkeypatch
+):
+    """The notebook detaches onto a private library and restores into it; if
+    the install then fails there is no built library for the new lock, so the
+    private one stays rather than being replaced by an empty link."""
+    notebook = _notebook(tmp_path, "nb")
+    assert writer._renv_sync(notebook)
+
+    async def _install(notebook_dir, snippet, *, timeout, display_name, on_update=None, env=None):
+        library = notebook_dir / "renv" / "library"
+        assert not library.is_symlink()
+        (library / "R-4.4" / "jsonlite").mkdir(parents=True)  # what the restore put back
+        (notebook_dir / "renv.lock").write_text(_LOCK.replace("}}}", '}, "ggplot2": {}}}'))
+        return dependencies._RscriptCommandResult(
+            success=False,
+            error="renv::install failed (exit 1)",
+            operation_log=dependencies.EnvironmentOperationLog(command="Rscript"),
+        )
+
+    monkeypatch.setattr(dependencies, "run_rscript_command_streaming", _install)
+
+    result = await dependencies.renv_add(notebook, "ggplot2")
+
+    assert result.success is False
+    library = notebook / "renv" / "library"
+    assert (library / "R-4.4" / "jsonlite").is_dir(), "the restored packages were thrown away"
