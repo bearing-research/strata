@@ -428,6 +428,41 @@ class TestWhatCountsAsAReadStatement:
     def test_the_parenthesised_form_is_caught_too(self):
         assert "EXPLAIN ANALYZE" in (self._violation("EXPLAIN (ANALYZE) DELETE FROM t") or "")
 
+    @pytest.mark.asyncio
+    async def test_a_comment_does_not_hide_the_analyze(self, tmp_path):
+        """The parser hands the argument back with its comments, so a
+        classifier reading it raw is one ``/*x*/`` away from the write it
+        refuses without one."""
+        target = tmp_path / "leak.csv"
+        nb_dir = _notebook(
+            tmp_path,
+            {
+                "c1": "# @sql connection=lake\n"
+                f"EXPLAIN /*x*/ ANALYZE COPY (SELECT 1 AS x) TO '{target}'\n"
+            },
+            'driver = "duckdb"\npath = ":memory:"',
+        )
+        session = NotebookSession(parse_notebook(nb_dir), nb_dir)
+
+        result = await _run(nb_dir, session, "c1")
+
+        assert result.success is False
+        assert not target.exists(), "a comment carried a write past the classifier"
+
+    def test_analyze_anywhere_in_the_option_list_is_caught(self):
+        """The options are a set, not a sequence: ANALYZE runs the statement
+        wherever in the brackets it is written."""
+        for sql in (
+            "EXPLAIN (FORMAT JSON, ANALYZE) DELETE FROM t",
+            "EXPLAIN --c\nANALYZE DELETE FROM t",
+            "EXPLAIN ANALYSE DELETE FROM t",
+        ):
+            assert "EXPLAIN ANALYZE" in (self._violation(sql) or ""), sql
+
+    def test_a_query_that_merely_mentions_the_word_still_describes_its_plan(self):
+        assert self._violation("EXPLAIN SELECT 'ANALYZE' AS w") is None
+        assert self._violation("EXPLAIN (FORMAT JSON) SELECT 1") is None
+
     def test_reads_that_are_not_selects_are_allowed(self):
         for sql in ("VALUES (1), (2)", "SUMMARIZE t", "TABLE t", "DESCRIBE t", "SHOW TABLES"):
             assert self._violation(sql) is None, sql

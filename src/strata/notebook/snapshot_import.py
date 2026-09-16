@@ -283,8 +283,14 @@ def _record_from(data: dict[str, Any]) -> ArtifactVersion:
     missing = [key for key in RECORD_FIELDS if key not in data]
     if missing:
         raise NotASnapshotError(f"artifact record is missing {', '.join(missing)}")
+    artifact_id = str(data["id"])
+    # The id becomes a blob key, so it names a file. Checked here as well as in
+    # the store so a bundle carrying one says it is not a snapshot, the way its
+    # member names and cell ids do.
+    if "/" in artifact_id or "\\" in artifact_id or ".." in PurePosixPath(artifact_id).parts:
+        raise NotASnapshotError(f"the bundle names an artifact it cannot write: {artifact_id!r}")
     return ArtifactVersion(
-        id=str(data["id"]),
+        id=artifact_id,
         version=int(data["version"]),
         state=str(data["state"]),
         provenance_hash=str(data["provenance_hash"]),

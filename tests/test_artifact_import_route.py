@@ -158,6 +158,15 @@ class TestIntegrity:
 
         assert _post(client, metadata).status_code == 400
 
+    @pytest.mark.parametrize("artifact_id", ["../../../../victim/pwned", "/etc/pwned", "a/b", ".."])
+    def test_an_id_that_names_a_path_is_refused(self, client, served_dir, artifact_id):
+        """The id becomes a blob key, so a record naming a path writes wherever
+        it likes as whoever runs the server. The id arrives in the request."""
+        response = _post(client, _metadata(artifact_id, 1, "j" * 64), blob=b"pwned")
+
+        assert response.status_code == 400
+        assert not list(served_dir.parent.rglob("*pwned*@v=1.arrow"))
+
 
 class TestPublishTo:
     """``strata artifact publish --to`` end to end.

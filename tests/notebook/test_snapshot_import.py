@@ -386,6 +386,30 @@ class TestABundleWritesOnlyIntoTheNotebook:
         with pytest.raises(NotASnapshotError, match="cannot write"):
             import_snapshot(evil, tmp_path / "dst" / "nb")
 
+    def test_an_artifact_id_that_is_a_path_is_refused(self, ran, tmp_path):
+        """An id becomes a blob key -- ``{id}@v={n}.arrow`` under the blobs
+        directory -- so a record naming a path writes outside the notebook."""
+        good = _export(ran, tmp_path / "snap.zip")
+        evil = tmp_path / "evil-artifact.zip"
+        escaped = "../../../../victim/pwned"
+        with zipfile.ZipFile(good) as src, zipfile.ZipFile(evil, "w") as dst:
+            for name in src.namelist():
+                data = src.read(name)
+                if name == "artifacts.json":
+                    manifest = json.loads(data)
+                    records = manifest["records"]
+                    assert records, "the fixture exports at least one record"
+                    ref = next(iter(records))
+                    records[ref]["id"] = escaped
+                    data = json.dumps(manifest).encode()
+                dst.writestr(name, data)
+
+        with pytest.raises(NotASnapshotError, match="cannot write"):
+            import_snapshot(evil, tmp_path / "dst" / "nb")
+
+        assert not (tmp_path / "victim").exists()
+        assert not (tmp_path.parent / "victim").exists()
+
     def test_an_ordinary_bundle_still_imports(self, ran, tmp_path):
         bundle = _export(ran, tmp_path / "snap.zip")
 

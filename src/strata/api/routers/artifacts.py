@@ -41,7 +41,7 @@ from strata.api.dependencies import (
     store_for_scope,
 )
 from strata.api.remote_registry import quoted, relay, remote_registry
-from strata.artifact_store import ArtifactStore
+from strata.artifact_store import ArtifactStore, reject_unsafe_artifact_id
 from strata.artifact_transfer import PROMOTION_TAG
 from strata.blob_store import BLOB_STREAM_CHUNK_BYTES
 from strata.logging import get_logger
@@ -396,6 +396,11 @@ async def import_artifact_route(
     artifact_id = str(metadata.get("id") or "").strip()
     if not artifact_id:
         raise HTTPException(status_code=400, detail="Metadata is missing 'id'")
+    try:
+        # The id is the caller's, and it becomes a blob key.
+        reject_unsafe_artifact_id(artifact_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     try:
         version = int(metadata.get("version"))
     except (TypeError, ValueError):
