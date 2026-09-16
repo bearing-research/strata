@@ -79,16 +79,22 @@ def pin_tables(sql: str, dialect: str, template: str, clause_key: str) -> str:
 
     *template* is a one-table query in *dialect* carrying the clause, and
     *clause_key* is where sqlglot keeps it on a ``Table`` (``when`` for
-    Snowflake's ``AT``, ``version`` for BigQuery's ``FOR SYSTEM_TIME``). A
-    reference to a CTE is not a table and is left alone.
+    Snowflake's ``AT``, ``version`` for BigQuery's ``FOR SYSTEM_TIME``).
+
+    The tables pinned are the ones the analyzer counts as the cell's inputs,
+    scope by scope, so a base table that shares a name with a CTE in another
+    scope is pinned rather than read live under a provenance that claims a
+    snapshot. A table the author already pinned keeps the moment they asked
+    for.
     """
+    from strata.notebook.sql.analyzer import base_table_nodes
+
     table = sqlglot.parse_one(template, read=dialect).find(exp.Table)
     assert table is not None
     clause = table.args[clause_key]
     tree = sqlglot.parse_one(sql, read=dialect)
-    ctes = {cte.alias_or_name for cte in tree.find_all(exp.CTE)}
-    for reference in tree.find_all(exp.Table):
-        if not reference.db and reference.name in ctes:
+    for reference in base_table_nodes(tree, dialect):
+        if reference.args.get(clause_key):
             continue
         reference.set(clause_key, clause.copy())
     return tree.sql(dialect=dialect)
