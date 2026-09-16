@@ -552,6 +552,15 @@ async def put_artifact_by_provenance(
         params["env_hash"] = str(env_hash)
 
     artifact_id = str(metadata.get("artifact_id") or uuid.uuid4())
+    # The caller names the id, so it can name somebody else's — and a version
+    # appended there becomes that artifact's latest, which is what a notebook
+    # reads and what GC protects. The import route refuses the same case.
+    existing = store.get_latest_version(artifact_id)
+    if existing is not None and (existing.tenant or "") != (tenant_id or ""):
+        raise HTTPException(
+            status_code=409,
+            detail=f"{artifact_id} already exists under another tenant",
+        )
     version = store.create_artifact(
         artifact_id=artifact_id,
         provenance_hash=provenance_hash,
@@ -887,7 +896,11 @@ async def delete_artifact(
         tenant_filter,
     )
 
-    deleted = store.delete_artifact(artifact_id, version, tenant=tenant_filter)
+    try:
+        deleted = store.delete_artifact(artifact_id, version, tenant=tenant_filter)
+    except ValueError as exc:
+        # Published: withdrawing the citation is a separate, deliberate act.
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     if not deleted:
         raise HTTPException(status_code=404, detail="Artifact not found")
 

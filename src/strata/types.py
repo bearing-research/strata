@@ -105,13 +105,17 @@ class TableRef:
             TableRef with normalized catalog, namespace, and table
         """
         # A configured catalog is named by the identity, and is what an ACL
-        # rule names too ("lake:taxi.*"); a warehouse URI keeps the scheme it
-        # has always had, so rules written for one go on matching.
+        # rule names too ("lake:taxi.*"); a warehouse URI is named by its
+        # store, so a rule for a local table does not also grant the table of
+        # the same name in someone's bucket.
         catalog = "file"
         if named_catalog_name:
             catalog = named_catalog_name
-        elif table_uri and table_uri.startswith("s3://"):
-            catalog = "s3"
+        elif table_uri:
+            for prefix, store in _ACL_STORES:
+                if table_uri.startswith(prefix):
+                    catalog = store
+                    break
 
         return cls(
             catalog=catalog,
@@ -122,6 +126,19 @@ class TableRef:
     def __str__(self) -> str:
         """Return canonical string for ACL pattern matching."""
         return f"{self.catalog}:{self.namespace}.{self.table}"
+
+
+# Which store an ACL rule names a warehouse table by. A URI with no scheme is
+# a local path, which is what "file" has always meant here.
+_ACL_STORES = (
+    ("s3://", "s3"),
+    ("gs://", "gs"),
+    ("gcs://", "gs"),
+    ("abfss://", "az"),
+    ("abfs://", "az"),
+    ("az://", "az"),
+    ("azure://", "az"),
+)
 
 
 @dataclass(frozen=True)

@@ -139,6 +139,13 @@ async def publish_artifact(
     token rather than minting a second. Two live URLs for one artifact would
     mean revoking one and believing the artifact had been withdrawn.
     """
+    from strata.server import _authorize_artifact_read, _ensure_artifact_access
+
+    # The strongest form of retrieval there is: what this hands out is readable
+    # by anyone with the link. A principal the ACL denies the artifact's inputs
+    # cannot read it here and must not be able to publish it either.
+    artifact = _ensure_artifact_access(store.get_artifact(artifact_id, version), tenant_filter)
+    _authorize_artifact_read(artifact)
     try:
         publication = store.publish_artifact(
             artifact_id,
