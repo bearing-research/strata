@@ -443,6 +443,8 @@ GROUP BY t.zone
 
 Each mount is a view by its name over its Parquet, CSV or JSON files (`file` and `s3` mounts, read with the mount's storage options). Every catalog table the query reads is an input the way an `@table` declaration is: the cell's provenance folds its current snapshot, the query reads that snapshot, and a new snapshot makes the cell stale. Each mount's fingerprint is folded too, so a new file does the same. The catalog is attached read-only and the mounts are views; a `write` cell on the connection writes only its `path` database. The catalog's `s3.*` keys apply only under an `s3://` warehouse; otherwise its tables are read with the credentials the catalog vends.
 
+A read cell runs reads: `SELECT`, set operations, `DESCRIBE`, `SHOW` and `EXPLAIN`. Anything else — DDL, DML, `COPY`, `ATTACH`, `USE`, `CALL` — is refused before the cell reaches the driver, naming the statement, because the read-only transaction the driver opens is one a `COMMIT` in the body can end. Use `# @sql connection=<name> write` for a cell that changes a database.
+
 ### Schema discovery
 
 The **Schema panel** in the sidebar shows the tables and columns visible through each declared connection. Click a connection to lazy-load its schema; click a table to expand its columns. The `↻` button re-fetches when the underlying database has changed externally. No SQL cell needs to run for this, the panel talks directly to each driver's catalog query surface (`sqlite_master` for SQLite, `information_schema.tables JOIN columns` for PostgreSQL, and the driver-specific catalog queries for Snowflake and BigQuery).
