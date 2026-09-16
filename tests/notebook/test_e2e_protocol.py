@@ -123,7 +123,7 @@ class TestProtocolErrors:
         with open_notebook_session(client, nb.path) as (sid, session):
             with ws_connect(client, sid) as ws:
                 ws.send("cell_execute", {})  # No cell_id
-                msg = ws.receive()
+                msg = ws.receive_until("error")
                 assert msg["type"] == "error"
                 assert (
                     "cell_id" in msg["payload"]["error"].lower()
@@ -138,7 +138,7 @@ class TestProtocolErrors:
         with open_notebook_session(client, nb.path) as (sid, session):
             with ws_connect(client, sid) as ws:
                 ws.send("totally_made_up", {"foo": "bar"})
-                msg = ws.receive()
+                msg = ws.receive_until("error")
                 assert msg["type"] == "error"
 
     def test_nonexistent_cell(self, setup):
@@ -149,7 +149,7 @@ class TestProtocolErrors:
         with open_notebook_session(client, nb.path) as (sid, session):
             with ws_connect(client, sid) as ws:
                 ws.execute_cell("nonexistent_cell_id")
-                msg = ws.receive()
+                msg = ws.receive_until("error")
                 assert msg["type"] == "error"
                 assert "not found" in msg["payload"]["error"].lower()
 
@@ -189,7 +189,7 @@ class TestSourceUpdate:
         with open_notebook_session(client, nb.path) as (sid, session):
             with ws_connect(client, sid) as ws:
                 ws.send("cell_source_update", {"cell_id": "c1"})
-                msg = ws.receive()
+                msg = ws.receive_until("error")
                 assert msg["type"] == "error"
 
 

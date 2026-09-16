@@ -19,6 +19,7 @@ Implementations:
 from __future__ import annotations
 
 import hashlib
+import hmac
 import logging
 import os
 import tempfile
@@ -44,6 +45,18 @@ Matches httpx's multipart ``FileField.CHUNK_SIZE`` and FastAPI's
 ``FileResponse`` default, so the HTTP-boundary streams line up with
 the blob-store streams without extra copying.
 """
+
+
+def _sigv4_context(secret_key: str, region: str) -> tuple[str, str, bytes]:
+    """``(amz_date, credential scope, signing key)`` for an S3 SigV4 signature now."""
+    from datetime import UTC, datetime
+
+    now = datetime.now(UTC)
+    datestamp = now.strftime("%Y%m%d")
+    key = f"AWS4{secret_key}".encode()
+    for part in (datestamp, region, "s3", "aws4_request"):
+        key = hmac.new(key, part.encode(), hashlib.sha256).digest()
+    return now.strftime("%Y%m%dT%H%M%SZ"), f"{datestamp}/{region}/s3/aws4_request", key
 
 
 class BlobStore(ABC):
@@ -174,6 +187,27 @@ class BlobStore(ABC):
             True if blob was deleted, False if it didn't exist
         """
         ...
+
+    def presign_get(self, artifact_id: str, version: int, ttl_seconds: int) -> str | None:
+        """A URL that reads this blob straight from the object store, or ``None``.
+
+        ``None`` means the backend cannot sign one (a local disk, or an object
+        store whose credentials this process cannot sign with), and the caller
+        keeps serving the bytes through Strata.
+        """
+        return None
+
+    def presign_post(
+        self, artifact_id: str, version: int, max_bytes: int, ttl_seconds: int
+    ) -> tuple[str, dict[str, str]] | None:
+        """A form upload of at most ``max_bytes`` into this blob's key, or ``None``.
+
+        Returns ``(url, fields)``: POST the fields plus the body as the ``file``
+        part. A POST policy rather than a presigned PUT because a policy can
+        bound the size, so an oversized upload is refused by the object store
+        rather than stored and then rejected.
+        """
+        return None
 
     def _blob_key(self, artifact_id: str, version: int) -> str:
         """Generate storage key for a blob.
@@ -356,6 +390,12 @@ class S3BlobStore(BlobStore):
 
         self.bucket = bucket
         self.prefix = prefix.strip("/")
+        # Kept for presigning, which PyArrow's filesystem does not expose.
+        self._region = region
+        self._endpoint_url = endpoint_url
+        self._access_key = access_key
+        self._secret_key = secret_key
+        self._anonymous = anonymous
 
         # Build S3FileSystem
         kwargs = {}
@@ -370,6 +410,119 @@ class S3BlobStore(BlobStore):
             kwargs["anonymous"] = True
 
         self._fs = pafs.S3FileSystem(**kwargs)
+
+    def _object_key(self, artifact_id: str, version: int) -> str:
+        blob_key = self._blob_key(artifact_id, version)
+        return f"{self.prefix}/{blob_key}" if self.prefix else blob_key
+
+    def _signing_credentials(self) -> tuple[str, str, str | None] | None:
+        """Keys to sign with: the configured pair, else the standard environment.
+
+        An instance role's credentials are fetched inside PyArrow's AWS SDK and
+        never reach Python, so a store running on one cannot presign and the
+        manifest keeps its Strata URLs.
+        """
+        if self._anonymous:
+            return None
+        if self._access_key and self._secret_key:
+            return self._access_key, self._secret_key, None
+        access = os.environ.get("AWS_ACCESS_KEY_ID")
+        secret = os.environ.get("AWS_SECRET_ACCESS_KEY")
+        if access and secret:
+            return access, secret, os.environ.get("AWS_SESSION_TOKEN")
+        return None
+
+    def _signing_region(self) -> str:
+        return (
+            self._region
+            or os.environ.get("AWS_REGION")
+            or os.environ.get("AWS_DEFAULT_REGION")
+            or "us-east-1"
+        )
+
+    def _object_location(self, key: str) -> tuple[str, str, str]:
+        """``(scheme, host, path)`` for an object: path-style on a custom
+        endpoint (MinIO, LocalStack), virtual-hosted on AWS."""
+        from urllib.parse import quote, urlsplit
+
+        quoted = quote(key, safe="/-_.~")
+        if self._endpoint_url:
+            endpoint = (
+                self._endpoint_url
+                if "://" in self._endpoint_url
+                else f"https://{self._endpoint_url}"
+            )
+            parts = urlsplit(endpoint)
+            return parts.scheme, parts.netloc, f"/{self.bucket}/{quoted}"
+        return "https", f"{self.bucket}.s3.{self._signing_region()}.amazonaws.com", f"/{quoted}"
+
+    def presign_get(self, artifact_id: str, version: int, ttl_seconds: int) -> str | None:
+        from urllib.parse import quote
+
+        credentials = self._signing_credentials()
+        if credentials is None:
+            return None
+        access_key, secret_key, token = credentials
+        scheme, host, path = self._object_location(self._object_key(artifact_id, version))
+        amz_date, scope, signing_key = _sigv4_context(secret_key, self._signing_region())
+        params = {
+            "X-Amz-Algorithm": "AWS4-HMAC-SHA256",
+            "X-Amz-Credential": f"{access_key}/{scope}",
+            "X-Amz-Date": amz_date,
+            "X-Amz-Expires": str(int(ttl_seconds)),
+            "X-Amz-SignedHeaders": "host",
+        }
+        if token:
+            params["X-Amz-Security-Token"] = token
+        query = "&".join(
+            f"{quote(k, safe='-_.~')}={quote(v, safe='-_.~')}" for k, v in sorted(params.items())
+        )
+        canonical_request = f"GET\n{path}\n{query}\nhost:{host}\n\nhost\nUNSIGNED-PAYLOAD"
+        string_to_sign = (
+            f"AWS4-HMAC-SHA256\n{amz_date}\n{scope}\n"
+            f"{hashlib.sha256(canonical_request.encode()).hexdigest()}"
+        )
+        signature = hmac.new(signing_key, string_to_sign.encode(), hashlib.sha256).hexdigest()
+        return f"{scheme}://{host}{path}?{query}&X-Amz-Signature={signature}"
+
+    def presign_post(
+        self, artifact_id: str, version: int, max_bytes: int, ttl_seconds: int
+    ) -> tuple[str, dict[str, str]] | None:
+        import base64
+        import json
+        from datetime import UTC, datetime, timedelta
+
+        credentials = self._signing_credentials()
+        if credentials is None:
+            return None
+        access_key, secret_key, token = credentials
+        key = self._object_key(artifact_id, version)
+        scheme, host, _ = self._object_location(key)
+        url = f"{scheme}://{host}/{self.bucket}" if self._endpoint_url else f"{scheme}://{host}"
+        amz_date, scope, signing_key = _sigv4_context(secret_key, self._signing_region())
+        fields = {
+            "key": key,
+            "x-amz-algorithm": "AWS4-HMAC-SHA256",
+            "x-amz-credential": f"{access_key}/{scope}",
+            "x-amz-date": amz_date,
+        }
+        if token:
+            fields["x-amz-security-token"] = token
+        expiration = datetime.now(UTC) + timedelta(seconds=int(ttl_seconds))
+        policy = {
+            "expiration": expiration.strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "conditions": [
+                {"bucket": self.bucket},
+                *({name: value} for name, value in fields.items()),
+                ["content-length-range", 1, int(max_bytes)],
+            ],
+        }
+        encoded_policy = base64.b64encode(json.dumps(policy).encode()).decode()
+        fields["policy"] = encoded_policy
+        fields["x-amz-signature"] = hmac.new(
+            signing_key, encoded_policy.encode(), hashlib.sha256
+        ).hexdigest()
+        return url, fields
 
     def _s3_key(self, artifact_id: str, version: int) -> str:
         """Get full S3 key for a blob."""

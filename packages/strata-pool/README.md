@@ -15,7 +15,7 @@ Jobs arrive with a machine type. The pool hands each one to a warm worker of
 that type, starts a machine when there is none, forwards the payload over
 HTTP, records the result, and meters the execution. A backend provides start /
 stop / health and nothing else, so the pool does not know which it is talking
-to. Two ship: local Docker and RunPod. Anything satisfying the `Backend`
+to. Three ship: local Docker, RunPod, and Fly Machines. Anything satisfying the `Backend`
 protocol works.
 
 ```python
@@ -60,6 +60,48 @@ the outside.
 
 Still missing: any restriction on the container's own network access.
 
+## Several processes over one store
+
+`PoolStore` is a SQLite file, and one pool process on it is the simple
+deployment: a restart pauses dispatch for seconds and fails the jobs that were
+in flight. To keep dispatching through a restart, run more than one process
+over `PostgresPoolStore`, each with its own `instance_id`:
+
+```bash
+pip install "strata-pool[postgres]"
+```
+
+```python
+pool = Pool(
+    store=PostgresPoolStore("postgresql://pool@db/pool"),
+    backend=RunPodBackend(os.environ["RUNPOD_API_KEY"]),
+    machine_types=catalogue,
+    instance_id=os.environ["HOSTNAME"],   # required on a shared store
+)
+```
+
+The processes never run a job twice or start two machines for the same
+demand. Handing a job to a warm machine is a conditional update that only one
+of them wins, and deciding to start a machine counts the queue and inserts the
+new machine's row in one transaction, serialized across processes. Each
+process holds a **lease** on the jobs and machines it is acting on (a machine
+starting, running a job or stopping; a job dispatched or running) and renews it
+while it works. When a process dies, the scaler in another one fails its jobs
+and stops its machines once the lease runs out (`lease_seconds`, default 30),
+through that process's own backend. A process restarted under its old
+`instance_id` takes its own rows back at once, as a single process does today.
+A pool given no `instance_id` generates one per process, so two processes over
+one SQLite file are never one name — under a shared name each would read the
+other's leases as its own and stop machines running the other's cells. The
+trade is that a generated name is new on every start, so a process restarted
+within `lease_seconds` waits its old leases out instead of reclaiming them at
+once; set `instance_id` explicitly to keep that.
+
+Lease expiry is compared by wall clock across processes, so their clocks have
+to agree to well within a lease. Each process holds its catalogue in memory:
+`PUT /v1/machine-types` updates the process that served it and the stored
+catalogue, and the others pick it up when they restart.
+
 ## What it is not
 
 **It is not a cache.** The pool has no idea Strata deduplicates work.
@@ -99,7 +141,7 @@ with the code in the cell.
 | `types.py` | `Worker`, `Job`, `MachineType`, `UsageEvent` and their states |
 | `backend.py` | The `Backend` protocol — start / stop / health |
 | `backends/docker.py` | Containers on the local Docker daemon |
-| `store.py` | SQLite persistence; the pool process keeps no authoritative state |
+| `store.py` | SQLite and Postgres persistence, with the claims and leases that let several processes share it; the pool process keeps no authoritative state |
 | `pool.py` | Submission, dispatch, boot, execution, metering, restart recovery |
 
 ## Running it as a service
@@ -125,9 +167,24 @@ deployment cannot forget the call that stops it paying for idle machines.
 | `GET /v1/jobs/{id}` | Status, without the payload or result |
 | `GET /v1/jobs/{id}/result` | The raw result bytes; 409 while the job is not finished |
 | `GET /v1/machine-types` | What a caller may ask for — the catalogue an annotation resolves against |
+| `PUT /v1/machine-types` | Replace the catalogue without a restart; persisted, so a restart serves it |
 | `GET /v1/workers` | The fleet, without machine credentials |
 | `GET /v1/usage` | The billing feed, filterable by tenant |
 | `GET /health` | Outside the token check, for load balancers |
+
+Replacing the catalogue takes effect at once. A new type accepts jobs straight
+away. A removed type accepts none: its queued jobs fail with the reason, and
+its machines finish what they are running, then retire once idle past the
+type's cool-down. A type whose `image` changed starts new machines on the new
+image. Machines already running the old image get no new jobs and retire the
+same way. The catalogue is stored with the pool's state, and on start it
+replaces the one the process was constructed with.
+
+A job submitted with W3C `traceparent` / `tracestate` headers keeps them, and
+the pool forwards them to the machine it runs on. With OpenTelemetry installed
+(it is not a dependency) the pool also opens a `pool.execute` span for the job's
+time on the machine. The machine's work then sits under that span, which sits
+under the caller's.
 
 A job that fails **on the worker** comes back as 502, and one that times out
 as 504 — the caller has to be able to tell "your code raised" from "we could
@@ -187,6 +244,50 @@ orphan is findable.
 A pod's port is published on the public internet through RunPod's proxy. The
 per-machine credential is what stands between that URL and anyone who finds
 it.
+
+## The Fly Machines backend
+
+Boots workers as machines in one Fly app and region. A machine is reachable
+only on the organization's private network, at
+`http://{machine_id}.vm.{app}.internal:{port}`, so a pool running beside its
+notebook servers on Fly hands them workers that never face the internet.
+
+```python
+FlyBackend(os.environ["FLY_API_TOKEN"], app="strata-workers", region="sjc")
+MachineType(
+    name="a100",
+    image="registry.fly.io/strata-worker:latest",
+    cpus=8,
+    memory_mb=65536,
+    gpu_type="a100-80gb",       # Fly's own gpu_kind string
+    cool_down_seconds=120,
+)
+```
+
+`start` creates the machine with the worker token and the machine type's
+`STRATA_WORKER_*` settings in its environment, with `restart: no` and
+`auto_destroy: false` so its lifetime stays the pool's. `stop` destroys it by
+force (a second destroy is a no-op). `health` needs Fly to report the machine
+`started` before it probes the worker's `/health`, because a stopped machine's
+private address can be reused.
+
+**Not yet verified against a live account.** The request shapes follow the
+Machines API documentation; every field lives in `_create_body` and is asserted
+by a test, `provider_options` overrides anything in the machine `config`, and
+`base_url` can be repointed. To verify:
+
+```bash
+export FLY_API_TOKEN=... STRATA_POOL_FLY_APP=... STRATA_POOL_FLY_REGION=sjc
+STRATA_POOL_FLY_LIVE=1 pytest packages/strata-pool/tests/test_fly_live.py -v -s
+```
+
+That **starts a billed machine**. Off the private network it proves create,
+start and destroy; add `STRATA_POOL_FLY_ON_NETWORK=1` where the `.internal`
+names resolve (a Fly machine, or a `fly wireguard` peer) to probe the worker
+too.
+
+The worker credential still matters here: every machine in the organization
+can reach every other.
 
 ## The worker contract
 

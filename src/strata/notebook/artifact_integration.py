@@ -195,6 +195,8 @@ class NotebookArtifactManager:
         build_env: str = "",
         build_duration_ms: float = 0.0,
         principal: str | None = None,
+        hardware: dict[str, Any] | None = None,
+        extra_params: dict[str, str] | None = None,
     ) -> ArtifactVersion:
         """Store a cell output as an artifact.
 
@@ -241,6 +243,12 @@ class NotebookArtifactManager:
                 so their own history holds no comparable duration and the
                 savings estimate would credit zero for exactly the case worth
                 counting. Zero when unrecorded.
+            hardware: The machine a worker reported running the cell on
+                (``strata.notebook.hardware``). Recorded, never hashed, for
+                the same reason as ``build_env``: identical machines of a
+                class should share a cache, and the record should still say
+                which accelerator and driver computed the bytes. Absent for a
+                local run.
             principal: Who computed these bytes, when that is known. A locally
                 run cell has no authenticated identity to record, so this is
                 normally ``None``; a result *pulled* from a shared store does,
@@ -277,6 +285,10 @@ class NotebookArtifactManager:
             params["build_env"] = build_env
         if build_duration_ms > 0:
             params["build_duration_ms"] = str(int(build_duration_ms))
+        if hardware:
+            params["hardware"] = json.dumps(hardware, sort_keys=True)
+        if extra_params:
+            params.update(extra_params)
 
         transform_spec = TransformSpec(
             executor="notebook/cell@v1",

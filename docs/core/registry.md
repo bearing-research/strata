@@ -74,6 +74,25 @@ Entries carry the actor (principal id when authenticated), the action, and
 the from → to versions. `GET /v1/registry/audit` serves the same data; the
 SDK exposes `get_registry_audit(name=..., artifact_id=...)`.
 
+Publishing an artifact and withdrawing a publication are recorded in the same
+log, as `publish` and `withdraw` with the token in `value`.
+
+### Following the store
+
+Something that reacts to changes, such as a platform mirroring a registry or a
+feed of promotions, reads `GET /v1/events?since=<seq>&limit=<n>`. It returns
+the same entries **oldest first** after `since`, with `next` set to the last
+`seq` returned, so passing `next` back pages through every event exactly once,
+including those that land between two reads. `limit` is at most 1000. Scoping
+matches the audit: a principal sees its tenant, `admin:*` and personal mode see
+the whole store.
+
+```json
+{"events": [{"seq": 41, "action": "publish", "artifact_id": "fig", "to_version": 1,
+             "key": "token", "value": "…", "actor": "ana", "tenant": "", "at": 1757900000.0}],
+ "next": 41}
+```
+
 ## Approval gates
 
 Protect aliases whose moves should require a human:

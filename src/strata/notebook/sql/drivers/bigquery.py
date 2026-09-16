@@ -37,6 +37,7 @@ import hashlib
 import json
 import re
 from collections.abc import Callable
+from datetime import timedelta
 from pathlib import Path
 from typing import Any
 
@@ -50,13 +51,16 @@ from strata.notebook.sql.adapter import (
     hash_connection_identity,
 )
 from strata.notebook.sql.registry import register_adapter
+from strata.notebook.sql.time_travel import iso_utc, pin_tables, plus
+
+# The shortest window a dataset can be configured with.
+_GUARANTEED_TIME_TRAVEL = timedelta(hours=48)
 
 _CAPABILITIES = AdapterCapabilities(
     per_table_freshness=True,
-    # BigQuery time-travel exposes snapshot reads via ``FOR SYSTEM_TIME
-    # AS OF``, but no per-table snapshot ID is exposed as a stable
-    # equality token. Treat as equality-only.
-    supports_snapshot=False,
+    # No per-table snapshot id, but ``FOR SYSTEM_TIME AS OF`` reads a table
+    # as of a timestamp, so a snapshot is a timestamp (``time_travel.py``).
+    supports_snapshot=True,
     # ``__TABLES__`` and ``INFORMATION_SCHEMA`` aren't frozen inside
     # a transaction — the probe shares the query connection.
     needs_separate_probe_conn=False,
@@ -292,6 +296,30 @@ class BigQueryAdapter:
             return None, None
 
     # --- probes ----------------------------------------------------------
+
+    def snapshot_timestamp(self, conn: Any) -> str:
+        with conn.cursor() as cursor:
+            cursor.execute("SELECT CURRENT_TIMESTAMP()")
+            row = cursor.fetchone()
+        return iso_utc(row[0])
+
+    def retention_until(self, conn: Any, tables: list[QualifiedTable], at: str) -> str | None:
+        """``at`` plus BigQuery's guaranteed time-travel window.
+
+        A dataset's window (``max_time_travel_hours``) is configurable from
+        two to seven days and lives in a region-scoped view this adapter has
+        no region for, so the horizon stated is the minimum every dataset
+        guarantees rather than a guess at this one's setting.
+        """
+        return plus(at, _GUARANTEED_TIME_TRAVEL)
+
+    def pin_query(self, sql: str, at: str) -> str:
+        return pin_tables(
+            sql,
+            "bigquery",
+            f"SELECT * FROM t FOR SYSTEM_TIME AS OF TIMESTAMP '{at}'",
+            "version",
+        )
 
     def probe_freshness(
         self,

@@ -636,8 +636,7 @@ class TestAmbientPromoteWiring:
         from strata.notebook.executor import CellExecutor
 
         executor = self._executor(remote_store="http://store.example")
-        executor._ambient_strata_url = lambda: "http://store.example"
-        executor._ambient_strata_headers = lambda: {}
+        executor._cell_strata_url = lambda: CellExecutor._cell_strata_url(executor)
         executor._ambient_promote_url = lambda: CellExecutor._ambient_promote_url(executor)
 
         manifest_path = CellExecutor._write_manifest(
@@ -652,6 +651,39 @@ class TestAmbientPromoteWiring:
         manifest = json.loads(manifest_path.read_text())
 
         assert manifest["strata_promote_url"] == "http://nb.local/v1/notebooks/sess-1"
+
+    def test_the_manifest_carries_no_credential_and_points_at_this_server(self, tmp_path):
+        """The run directory is handed to the harness user so the cell can
+        write into it, so anything in the manifest is the cell's to read. The
+        team store's token is what makes X-Strata-Principal believable: a cell
+        holding it can act as anybody."""
+        from types import SimpleNamespace
+
+        from strata.notebook.executor import CellExecutor
+
+        executor = self._executor(remote_store="http://store.example")
+        executor._lake_config = lambda: SimpleNamespace(
+            notebook_remote_store_url="http://store.example",
+            notebook_remote_store_headers={"X-Strata-Proxy-Token": "s3cret"},
+            server_url="http://nb.local",
+        )
+        executor._cell_strata_url = lambda: CellExecutor._cell_strata_url(executor)
+        executor._ambient_promote_url = lambda: CellExecutor._ambient_promote_url(executor)
+
+        manifest_path = CellExecutor._write_manifest(
+            executor,
+            "x = 1",
+            {},
+            tmp_path,
+            {},
+            {},
+            cell_id="c2",
+        )
+        manifest = json.loads(manifest_path.read_text())
+
+        assert "strata_headers" not in manifest
+        assert "s3cret" not in manifest_path.read_text()
+        assert manifest["strata_url"] == "http://nb.local", "a cell asks this server"
 
     @pytest.mark.parametrize("path", ["harness", "pool_worker"])
     def test_both_execution_paths_hand_it_to_the_client(self, path, monkeypatch):

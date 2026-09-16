@@ -1133,3 +1133,149 @@ class TestSafelyClose:
         from strata.notebook.sql.cell_executor import _safely_close
 
         _safely_close(None)
+
+
+class TestWhatASqlCellRemembersAcrossAReopen:
+    """A SQL cell's artifacts are keyed under the SQL hash, which the generic
+    staleness lookup cannot see; the generic triplet it records is what keeps
+    it ready. Status is not persisted, so a cold open starts it idle — and the
+    branch that preserves ready used to require ready."""
+
+    @pytest.mark.asyncio
+    async def test_reopening_keeps_it_ready_and_its_output_reachable(self, tmp_path):
+        db_path = tmp_path / "events.duckdb"
+        _seed_duckdb(db_path)
+        nb_dir = _build_notebook_with_duckdb_cell(
+            tmp_path,
+            db_path=db_path,
+            cell_source="# @sql connection=db\n# @cache forever\nSELECT id FROM events\n",
+        )
+        session = _make_session(nb_dir)
+        from strata.notebook.executor import CellExecutor
+
+        result = await CellExecutor(session).execute_cell("c1", _read_cell(nb_dir, "c1"))
+        assert result.success, result.error
+        session.compute_staleness()
+        session.mark_executed_ready("c1")
+
+        reopened = _make_session(nb_dir)
+        staleness = reopened.compute_staleness()
+
+        from strata.notebook.models import CellStatus
+
+        assert staleness["c1"].status == CellStatus.READY, (
+            "a reopened SQL cell went idle with nothing changed"
+        )
+        cell = reopened.notebook_state.get_cell("c1")
+        assert cell.artifact_uris, "a downstream cell reads these to build its own provenance"
+
+    @staticmethod
+    def _repoint(nb_dir: Path, db_path: Path) -> None:
+        toml_path = nb_dir / "notebook.toml"
+        head, _, _ = toml_path.read_text().partition("[connections.db]")
+        toml_path.write_text(head + f'[connections.db]\ndriver = "duckdb"\npath = "{db_path}"\n')
+
+    async def _run_then_reopen(self, tmp_path, cell_source: str, repoint_to: Path | None = None):
+        from strata.notebook.executor import CellExecutor
+
+        db_path = tmp_path / "events.duckdb"
+        _seed_duckdb(db_path)
+        nb_dir = _build_notebook_with_duckdb_cell(
+            tmp_path, db_path=db_path, cell_source=cell_source
+        )
+        session = _make_session(nb_dir)
+        result = await CellExecutor(session).execute_cell("c1", _read_cell(nb_dir, "c1"))
+        assert result.success, result.error
+        session.compute_staleness()
+        session.mark_executed_ready("c1")
+        if repoint_to is not None:
+            _seed_duckdb(repoint_to)
+            self._repoint(nb_dir, repoint_to)
+        return _make_session(nb_dir).compute_staleness()["c1"].status
+
+    @pytest.mark.asyncio
+    async def test_pointing_the_connection_at_another_database_is_not_ready(self, tmp_path):
+        """The same SELECT against a different database is a different answer,
+        and the generic triplet the cell records sees no connection at all."""
+        from strata.notebook.models import CellStatus
+
+        status = await self._run_then_reopen(
+            tmp_path,
+            "# @sql connection=db\n# @cache forever\nSELECT id FROM events\n",
+            repoint_to=tmp_path / "other.duckdb",
+        )
+
+        assert status != CellStatus.READY, "a reopen served another database's rows as ready"
+
+    @pytest.mark.asyncio
+    async def test_a_session_policy_does_not_survive_the_session(self, tmp_path):
+        """``# @cache session`` says the rows are good for this session. A
+        reopen is a new one, so the cell is invalid by its own declaration."""
+        from strata.notebook.models import CellStatus
+
+        status = await self._run_then_reopen(
+            tmp_path, "# @sql connection=db\n# @cache session\nSELECT id FROM events\n"
+        )
+
+        assert status != CellStatus.READY
+
+    @pytest.mark.asyncio
+    async def test_the_default_policy_waits_to_be_asked(self, tmp_path):
+        """``fingerprint`` -- the default -- is a promise to check the source
+        before trusting the cache, and opening a notebook does not check."""
+        from strata.notebook.models import CellStatus
+
+        status = await self._run_then_reopen(
+            tmp_path, "# @sql connection=db\nSELECT id FROM events\n"
+        )
+
+        assert status != CellStatus.READY
+
+    @pytest.mark.asyncio
+    async def test_the_run_that_just_happened_stays_ready(self, tmp_path):
+        """The default policy cannot be re-established on a cold open, but a
+        cell that ran in *this* session has already established it -- asking
+        again would send a cell idle the moment after it succeeded."""
+        from strata.notebook.executor import CellExecutor
+        from strata.notebook.models import CellStatus
+
+        db_path = tmp_path / "events.duckdb"
+        _seed_duckdb(db_path)
+        nb_dir = _build_notebook_with_duckdb_cell(
+            tmp_path,
+            db_path=db_path,
+            cell_source="# @sql connection=db\nSELECT id FROM events\n",
+        )
+        session = _make_session(nb_dir)
+
+        result = await CellExecutor(session).execute_cell("c1", _read_cell(nb_dir, "c1"))
+        assert result.success, result.error
+        session.compute_staleness()
+        session.mark_executed_ready("c1")
+
+        assert session.compute_staleness()["c1"].status == CellStatus.READY
+
+    @pytest.mark.asyncio
+    async def test_an_edit_still_makes_it_stale(self, tmp_path):
+        db_path = tmp_path / "events.duckdb"
+        _seed_duckdb(db_path)
+        nb_dir = _build_notebook_with_duckdb_cell(
+            tmp_path,
+            db_path=db_path,
+            cell_source="# @sql connection=db\n# @cache forever\nSELECT id FROM events\n",
+        )
+        session = _make_session(nb_dir)
+        from strata.notebook.executor import CellExecutor
+
+        await CellExecutor(session).execute_cell("c1", _read_cell(nb_dir, "c1"))
+        session.compute_staleness()
+        session.mark_executed_ready("c1")
+
+        (nb_dir / "cells" / "c1.py").write_text(
+            "# @sql connection=db\n# @cache forever\nSELECT id, name FROM events\n"
+        )
+        reopened = _make_session(nb_dir)
+
+        from strata.notebook.models import CellStatus
+
+        assert reopened.compute_staleness()["c1"].status != CellStatus.READY

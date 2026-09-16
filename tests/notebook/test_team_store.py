@@ -1108,3 +1108,90 @@ async def test_under_the_promoted_policy_a_cell_run_offers_nothing(
     assert bob_result.success, bob_result.error
     assert bob_result.cache_hit is False
     assert bob_result.team_cache_principal is None
+
+
+async def test_each_callers_offered_results_carry_that_callers_principal(tmp_path, monkeypatch):
+    """A shared server offers results for several members. Each has to arrive
+    as the member who ran the cell, or the team cache's "computed by" names
+    the server for all of them. Item 2."""
+    import asyncio
+    import http.server
+    import threading
+
+    from strata.auth import set_principal
+    from strata.config import StrataConfig
+    from strata.notebook.executor import CellExecutor
+    from strata.notebook.parser import parse_notebook
+    from strata.notebook.session import NotebookSession
+    from strata.notebook.writer import add_cell_to_notebook, create_notebook, write_cell
+    from strata.types import PROVENANCE_MISS_HEADER, Principal
+
+    offered: list[dict[str, str]] = []
+
+    class Store(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):  # noqa: N802
+            self.send_response(404)
+            self.send_header(PROVENANCE_MISS_HEADER, "1")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+
+        def do_PUT(self):  # noqa: N802
+            self.rfile.read(int(self.headers.get("Content-Length") or 0))
+            offered.append(dict(self.headers))
+            self.send_response(200)
+            self.send_header("Content-Length", "2")
+            self.end_headers()
+            self.wfile.write(b"{}")
+
+        def log_message(self, *args):
+            return None
+
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Store)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+
+    def build(name: str, source: str):
+        notebook_dir = create_notebook(tmp_path / name, name)
+        add_cell_to_notebook(notebook_dir, "up", None)
+        write_cell(notebook_dir, "up", source)
+        add_cell_to_notebook(notebook_dir, "down", "up")
+        write_cell(notebook_dir, "down", "doubled = value * 2")
+        session = NotebookSession(parse_notebook(notebook_dir), notebook_dir)
+        session.ensure_venv_synced()
+        return session
+
+    def configure(forward: bool):
+        config = StrataConfig(
+            cache_dir=tmp_path / "cache",
+            notebook_remote_store_url=f"http://127.0.0.1:{server.server_address[1]}",
+            notebook_remote_store_headers={"X-Strata-Principal": "server:7"},
+            notebook_team_cache_enabled=True,
+            notebook_remote_store_forward_principal=forward,
+        )
+        monkeypatch.setattr(CellExecutor, "_lake_config", lambda self: config)
+
+    async def run_as(principal_id: str, session, source: str):
+        # A task of its own, as each WebSocket's execution is: the principal is
+        # the context the auth layer set for that caller.
+        async def body():
+            set_principal(Principal(id=principal_id, tenant="acme"))
+            return await CellExecutor(session).execute_cell("up", source)
+
+        return await asyncio.create_task(body())
+
+    try:
+        configure(forward=True)
+        ana = await run_as("ana", build("ana", "value = 11"), "value = 11")
+        ben = await run_as("ben", build("ben", "value = 22"), "value = 22")
+        assert ana.success and ben.success, (ana.error, ben.error)
+        forwarded = [h["X-Strata-Principal"] for h in offered]
+
+        offered.clear()
+        configure(forward=False)
+        cam = await run_as("cam", build("cam", "value = 33"), "value = 33")
+        assert cam.success, cam.error
+        fixed = [h["X-Strata-Principal"] for h in offered]
+    finally:
+        server.shutdown()
+
+    assert forwarded == ["ana", "ben"]
+    assert fixed == ["server:7"]

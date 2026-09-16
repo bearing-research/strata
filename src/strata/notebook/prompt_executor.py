@@ -127,6 +127,39 @@ def _format_retry_prompt(errors: list[str]) -> str:
     )
 
 
+def prompt_reopen_identity(cell: Any, session: Any) -> str | None:
+    """What a reopened prompt cell's cached answer depends on, beyond its text.
+
+    The model, the sampling, the length and the shape asked for: change any of
+    them and the previous answer is the answer to a different question. None of
+    it is in the generic provenance triplet, which sees only the source, the
+    environment and the inputs, so without this a notebook reopened after its
+    ``[ai]`` model changed showed the old model's answer as ready.
+
+    Never ``None``: everything here is settled by the cell and the notebook.
+    """
+    from strata.notebook.routes import _read_notebook_ai_config
+
+    analysis = analyze_prompt_cell(cell.source)
+    # The notebook's own [ai] block rather than the fully resolved config: a
+    # resolved one needs an API key to exist at all, so whether it resolves
+    # depends on the caller's context, and an identity that changes with the
+    # context it is computed in never matches the one it was compared to.
+    notebook_ai = _read_notebook_ai_config(session) or {}
+    payload = {
+        "model": analysis.model or notebook_ai.get("model"),
+        "temperature": analysis.temperature if analysis.temperature is not None else 0.0,
+        "max_tokens": analysis.max_tokens or notebook_ai.get("max_output_tokens"),
+        "system_prompt": analysis.system_prompt,
+        "output_type": analysis.output_type
+        or ("json" if analysis.output_schema is not None else "text"),
+        "output_schema": analysis.output_schema,
+    }
+    return hashlib.sha256(
+        json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str).encode()
+    ).hexdigest()
+
+
 def compute_prompt_provenance_hash(
     *,
     rendered: str,

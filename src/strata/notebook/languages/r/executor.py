@@ -59,6 +59,10 @@ class _RExecutor:
             use_cache=use_cache,
         )
 
+    def reopen_identity(self, cell: CellState, session: object) -> str | None:
+        del cell, session  # The generic triplet covers this language.
+        return ""
+
     def is_batchable(self, cell: CellState, executor: CellExecutor) -> bool:
         return False
 

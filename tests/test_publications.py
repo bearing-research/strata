@@ -145,7 +145,14 @@ class TestPublicationPage:
     """What the rendered page does and does not say."""
 
     @staticmethod
-    def _render(store, *, source: str, title: str | None = None, revoke: bool = False):
+    def _render(
+        store,
+        *,
+        source: str,
+        title: str | None = None,
+        revoke: bool = False,
+        external_ids: list[dict[str, str]] | None = None,
+    ):
         from strata.api.publication_page import render_publication
         from strata.notebook.artifact_integration import NotebookArtifactManager
         from strata.services.artifact import ArtifactService
@@ -173,6 +180,11 @@ class TestPublicationPage:
         publication = manager.artifact_store.publish_artifact(
             figure.id, figure.version, title=title
         )
+        if external_ids is not None:
+            manager.artifact_store.update_publication_credits(
+                publication.token, external_ids=external_ids
+            )
+            publication = manager.artifact_store.get_publication(publication.token)
         if revoke:
             manager.artifact_store.revoke_publication(publication.token)
             publication = manager.artifact_store.get_publication(publication.token)
@@ -200,6 +212,38 @@ class TestPublicationPage:
 
         assert "<script>alert(1)</script>" not in html
         assert "&lt;script&gt;" in html
+
+    def test_an_identifier_that_is_not_a_url_is_printed_not_linked(self, store):
+        """``url`` takes whatever it is handed, escaping leaves the scheme
+        alone, and this page is served unauthenticated to anyone with the
+        link -- on this server's own origin."""
+        html = self._render(
+            store,
+            source="rows = []",
+            external_ids=[{"scheme": "url", "value": "javascript:alert(1)"}],
+        )
+
+        assert "href='javascript:" not in html
+        assert 'href="javascript:' not in html
+        assert "javascript:alert(1)" in html, "the identifier is still shown"
+
+    def test_a_real_url_is_still_a_link(self, store):
+        html = self._render(
+            store,
+            source="rows = []",
+            external_ids=[{"scheme": "url", "value": "https://example.org/paper"}],
+        )
+
+        assert "href='https://example.org/paper'" in html
+
+    def test_a_doi_is_still_resolved_through_doi_org(self, store):
+        html = self._render(
+            store,
+            source="rows = []",
+            external_ids=[{"scheme": "doi", "value": "10.1000/xyz"}],
+        )
+
+        assert "href='https://doi.org/10.1000/xyz'" in html
 
     def test_the_title_is_escaped(self, store):
         html = self._render(store, source="rows = []", title="<img src=x onerror=1>")
@@ -1275,3 +1319,214 @@ class TestBadge:
 
         assert f"/p/{token}/badge.svg" in page
         assert "Putting it somewhere" in page
+
+
+class TestExternalInputs:
+    """Bytes a cell fetched from a URL, listed by URL, digest and time. Item 44."""
+
+    DIGEST = "d" * 64
+
+    def _published(self, tmp_path, url: str):
+        from strata.notebook.artifact_integration import NotebookArtifactManager
+        from strata.services.artifact import ArtifactService
+
+        manager = NotebookArtifactManager("nb", artifact_dir=tmp_path / "fetched")
+        figure = manager.store_cell_output(
+            cell_id="c1",
+            variable_name="__display__0",
+            blob_data=b"PNG",
+            content_type="image/png",
+            provenance_hash="a" * 64,
+            input_versions={url: f"sha256:{self.DIGEST}"},
+            source="plt.plot(pd.read_csv(zones))",
+        )
+        publication = manager.artifact_store.publish_artifact(figure.id, figure.version)
+        lineage = ArtifactService().build_lineage(
+            manager.artifact_store,
+            artifact=figure,
+            artifact_id=figure.id,
+            version=figure.version,
+            tenant_filter=None,
+            max_depth=10,
+        )
+        return publication, figure, lineage
+
+    @staticmethod
+    def _page(publication, figure, lineage) -> str:
+        from strata.api.publication_page import render_publication
+
+        return render_publication(
+            publication=publication,
+            artifact=figure,
+            lineage=lineage,
+            content_type="image/png",
+            image_src=None,
+        )
+
+    def test_the_page_lists_the_url_the_digest_and_the_step_that_read_it(self, tmp_path):
+        url = "https://example.org/taxi_zones.csv"
+        publication, figure, lineage = self._published(tmp_path, url)
+
+        html = self._page(publication, figure, lineage)
+        external = html.split("<h2>External inputs</h2>", 1)[1].split("<h2>", 1)[0]
+
+        assert url in external
+        assert self.DIGEST in external
+        assert f"{figure.id}@v={figure.version}" in external
+        # Named once, as an external input, not again as an upstream step.
+        assert html.count(url) == 1
+
+    def test_a_hostile_url_is_printed_not_linked(self, tmp_path):
+        """The record is the page's only source, and a record is not trusted to
+        hold only https."""
+        html = self._page(*self._published(tmp_path, "javascript:alert(1)//<script>x</script>"))
+
+        assert "<script>x</script>" not in html
+        assert "href='javascript:" not in html
+
+    def test_the_crate_declares_the_url_as_a_file_with_its_digest(self, tmp_path):
+        from strata.api.provenance_ld import build_crate
+
+        url = "https://example.org/taxi_zones.csv"
+        publication, figure, lineage = self._published(tmp_path, url)
+
+        crate = build_crate(
+            publication=publication,
+            artifact=figure,
+            lineage=lineage,
+            content_type="image/png",
+            payload_id="artifact.png",
+            include_descriptor=True,
+        )
+
+        entity = next(e for e in crate["@graph"] if e["@id"] == url)
+        assert entity["@type"] == "File"
+        assert entity["sha256"] == self.DIGEST
+        action = next(e for e in crate["@graph"] if e.get("@type") == "CreateAction")
+        assert {"@id": url} in action["object"]
+
+
+class TestWhatPublishingRequires:
+    """A publication is the strongest read there is: anyone with the link gets
+    the bytes, with no credentials at all."""
+
+    @staticmethod
+    def _service(monkeypatch, tmp_path, acl):
+        from fastapi.testclient import TestClient
+
+        import strata.server as server_module
+        from strata.artifact_store import get_artifact_store, reset_artifact_store
+        from strata.config import StrataConfig
+        from strata.server import ServerState, app
+
+        artifact_dir = tmp_path / "service-artifacts"
+        config = StrataConfig(
+            deployment_mode="service",
+            auth_mode="trusted_proxy",
+            proxy_token="sekrit",
+            artifact_dir=artifact_dir,
+            cache_dir=tmp_path / "cache",
+            acl_config=acl,
+        )
+        reset_artifact_store()
+        monkeypatch.setattr(server_module, "_state", ServerState(config))
+        store = get_artifact_store(artifact_dir)
+        payload = b"rows"
+        version = store.create_artifact(
+            "secret",
+            hashlib.sha256(payload).hexdigest(),
+            transform_spec=_scan_of("file:///wh#test_db.events"),
+            tenant="acme",
+        )
+        with store.open_blob_writer("secret", version) as writer:
+            writer.write(payload)
+        store.finalize_artifact("secret", version, schema_json="", row_count=1, byte_size=4)
+        return TestClient(app), version
+
+    def test_a_denied_artifact_cannot_be_published(self, tmp_path, monkeypatch):
+        client, version = self._service(
+            monkeypatch,
+            tmp_path,
+            {"default": "allow", "deny_rules": [{"principal": "*", "tables": ["file:test_db.*"]}]},
+        )
+        headers = {
+            "X-Strata-Proxy-Token": "sekrit",
+            "X-Strata-Principal": "intruder",
+            "X-Strata-Tenant": "acme",
+            "X-Tenant-ID": "acme",
+            "X-Strata-Scopes": "artifacts:publish artifacts:read",
+        }
+
+        read = client.get(f"/v1/artifacts/secret/v/{version}/data", headers=headers)
+        published = client.post(f"/v1/artifacts/secret/v/{version}/publish", headers=headers)
+
+        assert read.status_code in (403, 404)
+        assert published.status_code in (403, 404), (
+            "a table the caller cannot read was published to anyone with the link"
+        )
+
+    def test_an_allowed_artifact_is_still_published(self, tmp_path, monkeypatch):
+        client, version = self._service(monkeypatch, tmp_path, {"default": "allow"})
+        headers = {
+            "X-Strata-Proxy-Token": "sekrit",
+            "X-Strata-Principal": "analyst",
+            "X-Strata-Tenant": "acme",
+            "X-Tenant-ID": "acme",
+            "X-Strata-Scopes": "artifacts:publish artifacts:read",
+        }
+
+        published = client.post(f"/v1/artifacts/secret/v/{version}/publish", headers=headers)
+
+        assert published.status_code == 200, published.text
+        token = published.json()["token"]
+        assert client.get(f"/p/{token}/data").status_code == 200
+
+
+def _scan_of(table_uri: str):
+    from strata.artifact_store import TransformSpec
+
+    return TransformSpec(executor="scan@v1", params={"table": table_uri}, inputs=[table_uri])
+
+
+class TestACitationCannotBeRepointed:
+    def test_a_published_version_is_not_deleted_out_from_under_its_link(self, store):
+        version = _ready_artifact(store, "nb_abc_cell_c1_var_figure", b"ORIGINAL")
+        store.publish_artifact("nb_abc_cell_c1_var_figure", version)
+
+        with pytest.raises(ValueError, match="published"):
+            store.delete_artifact("nb_abc_cell_c1_var_figure", version)
+
+        assert store.get_artifact("nb_abc_cell_c1_var_figure", version) is not None
+
+    def test_withdrawing_it_first_allows_the_delete(self, store):
+        version = _ready_artifact(store, "fig", b"ORIGINAL")
+        publication = store.publish_artifact("fig", version)
+
+        store.revoke_publication(publication.token)
+
+        assert store.delete_artifact("fig", version) is True
+
+
+class TestWhatTheSweepProtects:
+    def test_a_published_figures_inputs_survive_when_the_edge_is_a_name(self, store):
+        """A ``@dataset`` cell, and any input given as ``strata://name/…``,
+        records the name it asked for against the version that answered. The
+        sweep has to follow that edge, or the page's chain loses its inputs."""
+        rows = _ready_artifact(store, "rows", b"[1]")
+        store.set_name("team/rows", "rows", rows)
+        figure = store.create_artifact(
+            "figure",
+            "f" * 64,
+            input_versions={"strata://name/team/rows": f"rows@v={rows}"},
+        )
+        with store.open_blob_writer("figure", figure) as writer:
+            writer.write(b"png")
+        store.finalize_artifact("figure", figure, schema_json="", row_count=0, byte_size=3)
+        store.publish_artifact("figure", figure)
+        store.set_name("team/rows", "rows", _ready_artifact(store, "rows", b"[2]"))
+
+        store.garbage_collect(max_age_days=0)
+
+        assert store.get_artifact("rows", rows) is not None, (
+            "the published figure's input was collected"
+        )

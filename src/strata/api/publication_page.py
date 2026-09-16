@@ -17,6 +17,8 @@ from __future__ import annotations
 import datetime
 from html import escape
 
+from strata.url_safety import web_url_or_none
+
 _STYLE = """
 :root { color-scheme: light dark; --fg:#12151a; --muted:#5b6472; --bg:#fbfbfd;
         --card:#fff; --line:#e3e6ec; --code:#f5f6f9; --accent:#2a5db0; }
@@ -106,9 +108,18 @@ def _citation_line(publication) -> str:
     for entry in publication.external_ids:
         value = entry["value"]
         template = _ID_LINKS.get(entry["scheme"], "{}")
-        url = value if value.startswith("http") else template.format(value)
+        url = web_url_or_none(value) or web_url_or_none(template.format(value))
         label = value if entry["scheme"] == "url" else f"{entry['scheme'].upper()} {value}"
-        links.append(f"<a href='{escape(url, quote=True)}' rel='noopener'>{escape(label)}</a>")
+        # Linked only when it is a link. The scheme of an identifier somebody
+        # typed is theirs, ``url`` takes whatever it is given, and escaping
+        # leaves ``javascript:`` intact -- on a page served to anyone holding
+        # the token, on this server's own origin. Printed either way, as the
+        # external inputs below are, so nothing is hidden by being unlinkable.
+        links.append(
+            f"<a href='{escape(url, quote=True)}' rel='noopener'>{escape(label)}</a>"
+            if url
+            else f"<span>{escape(label)}</span>"
+        )
     return f"<p class='cite'>Cite as {' · '.join(links)}</p>"
 
 
@@ -140,6 +151,47 @@ def _artifact_label(node) -> str:
     if node.type != "artifact":
         return escape(node.uri)
     return escape(f"{node.artifact_id}@v={node.version}")
+
+
+def _external_inputs(fetches, lineage) -> str:
+    """Bytes a step read from a URL, by URL, digest and when the step ran.
+
+    The URL is printed, never linked: it comes from the stored record, and a
+    record is not trusted to hold only ``https``. The time is the reading
+    step's, because the check before a run is what ties these bytes to that
+    URL at that moment.
+    """
+    by_uri = {node.uri: node for node in lineage.nodes}
+    parts = [
+        "<h2>External inputs</h2><div class='card'>",
+        "<p class='note'>Read from outside any store. The digest is of the bytes "
+        "the step read; the URL may serve something else now, which "
+        "<code>sha256sum</code> on a fresh download will show.</p>",
+    ]
+    for node in fetches:
+        readers = [
+            by_uri[edge.to_uri]
+            for edge in lineage.edges
+            if edge.from_uri == node.uri and edge.to_uri in by_uri
+        ]
+        parts.append(
+            _rows(
+                [
+                    ("URL", _code(node.uri)),
+                    ("Content digest (SHA-256)", _code(node.content_sha256 or "")),
+                    *(
+                        (
+                            "Read by",
+                            f"{_code(f'{reader.artifact_id}@v={reader.version}')} "
+                            f"at {escape(_when(reader.created_at))}",
+                        )
+                        for reader in readers
+                    ),
+                ]
+            )
+        )
+    parts.append("</div>")
+    return "".join(parts)
 
 
 def render_publication(
@@ -179,7 +231,8 @@ def render_publication(
         )
 
     root = next((n for n in lineage.nodes if n.artifact_id == artifact.id), None)
-    ancestors = [n for n in lineage.nodes if n is not root]
+    ancestors = [n for n in lineage.nodes if n is not root and n.type != "fetch"]
+    fetches = [n for n in lineage.nodes if n.type == "fetch"]
 
     parts: list[str] = [
         f"<h1>{escape(title)}</h1>",
@@ -284,6 +337,9 @@ def render_publication(
                     shown_sources[node.source] = f"{node.artifact_id}@v={node.version}"
                 parts.append(_source_block(node.source))
         parts.append("</div>")
+
+    if fetches:
+        parts.append(_external_inputs(fetches, lineage))
 
     if share is not None:
         parts.append("<h2>Putting it somewhere</h2><div class='card'>")

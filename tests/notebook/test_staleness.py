@@ -108,3 +108,64 @@ def test_staleness_updates_cells_when_dag_is_invalid(tmp_path):
         assert cell.cache_hit is False
         assert cell.staleness is not None
         assert cell.staleness.status == "idle"
+
+
+class TestStalenessOffTheEventLoop:
+    """Deciding whether a cell is stale reads the outside world -- an @fetch
+    URL, a @dataset registry, an @table catalog -- through synchronous calls
+    with timeouts measured in tens of seconds. On the event loop one
+    unreachable host stalled every notebook's socket and every stream in
+    flight, so the async callers hand the work to a thread."""
+
+    @pytest.mark.asyncio
+    async def test_the_work_does_not_run_on_the_loop_thread(self, three_cell_notebook, monkeypatch):
+        import threading
+
+        notebook_dir, notebook_state = three_cell_notebook
+        session = NotebookSession(notebook_state, notebook_dir)
+        ran_on: list[int] = []
+        original = session.compute_staleness
+
+        def _record():
+            ran_on.append(threading.get_ident())
+            return original()
+
+        monkeypatch.setattr(session, "compute_staleness", _record)
+
+        await session.compute_staleness_async()
+
+        assert ran_on, "the sync computation never ran"
+        assert ran_on[0] != threading.get_ident(), (
+            "staleness ran on the event loop thread, so its network calls block everything else"
+        )
+
+    @pytest.mark.asyncio
+    async def test_two_at_once_do_not_overlap(self, three_cell_notebook, monkeypatch):
+        """It mutates the cells it walks. On the loop that was free."""
+        import asyncio
+        import threading
+
+        notebook_dir, notebook_state = three_cell_notebook
+        session = NotebookSession(notebook_state, notebook_dir)
+        inside = 0
+        overlapped = False
+        guard = threading.Lock()
+        original = session.compute_staleness
+
+        def _watch():
+            nonlocal inside, overlapped
+            with guard:
+                inside += 1
+                if inside > 1:
+                    overlapped = True
+            try:
+                return original()
+            finally:
+                with guard:
+                    inside -= 1
+
+        monkeypatch.setattr(session, "compute_staleness", _watch)
+
+        await asyncio.gather(*(session.compute_staleness_async() for _ in range(4)))
+
+        assert not overlapped

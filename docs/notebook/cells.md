@@ -422,6 +422,29 @@ Notes:
 - **Relative `path` values are notebook-local.** `path = "analytics.db"` resolves against the notebook directory at execution time. The on-disk value stays relative so a notebook moves cleanly between machines.
 - **Currently shipped drivers**: DuckDB, SQLite, PostgreSQL, Snowflake, and BigQuery. DuckDB uses the native DuckDB DBAPI; the other four are ADBC-backed (`adbc-driver-sqlite`, `adbc-driver-postgresql`, `adbc-driver-snowflake`, `adbc-driver-bigquery`). For Snowflake, read cells use `role`; `write=true` cells switch to `write_role` when configured, otherwise they reuse `role`. For BigQuery, read cells use `credentials_path`; `write=true` cells switch to `write_credentials_path` when configured, otherwise they reuse `credentials_path`. Snowflake and BigQuery do not have a session-level read-only flag like PostgreSQL's `SET default_transaction_read_only = on`, so the safety boundary is the grants on the configured role or service account.
 
+### DuckDB over the lake
+
+A DuckDB connection can read the organization's Iceberg catalog and the notebook's mounts. `catalog` names a catalog the server configures (`[tool.strata.catalogs.<name>]`, a REST catalog), and `mounts` names mounts declared for the cell, in `[[mounts]]` or with `# @mount`:
+
+```toml
+[connections.lake]
+driver = "duckdb"
+path = ":memory:"
+catalog = "lake"
+mounts = ["raw"]
+```
+
+```sql
+# @sql connection=lake
+SELECT t.zone, count(*) AS trips
+FROM lake.taxi.trips t JOIN raw USING (zone)
+GROUP BY t.zone
+```
+
+Each mount is a view by its name over its Parquet, CSV or JSON files (`file` and `s3` mounts, read with the mount's storage options). Every catalog table the query reads is an input the way an `@table` declaration is: the cell's provenance folds its current snapshot, the query reads that snapshot, and a new snapshot makes the cell stale. Each mount's fingerprint is folded too, so a new file does the same. The catalog is attached read-only and the mounts are views; a `write` cell on the connection writes only its `path` database. The catalog's `s3.*` keys apply only under an `s3://` warehouse; otherwise its tables are read with the credentials the catalog vends.
+
+A read cell runs reads: `SELECT`, set operations, `VALUES`, `TABLE`, `SUMMARIZE`, `DESCRIBE`, `SHOW` and `EXPLAIN`. Anything else — DDL, DML, `COPY`, `ATTACH`, `USE`, `CALL`, `PRAGMA`, and `EXPLAIN ANALYZE`, which runs the statement it describes — is refused before the cell reaches the driver, naming the statement, because the read-only transaction the driver opens is one a `COMMIT` in the body can end. Use `# @sql connection=<name> write=true` for a cell that changes a database.
+
 ### Schema discovery
 
 The **Schema panel** in the sidebar shows the tables and columns visible through each declared connection. Click a connection to lazy-load its schema; click a table to expand its columns. The `↻` button re-fetches when the underlying database has changed externally. No SQL cell needs to run for this, the panel talks directly to each driver's catalog query surface (`sqlite_master` for SQLite, `information_schema.tables JOIN columns` for PostgreSQL, and the driver-specific catalog queries for Snowflake and BigQuery).
@@ -880,6 +903,16 @@ The same annotation parser handles both Python and R cells (`#`-prefixed comment
 | `# @env KEY=value`         | Sets `Sys.getenv("KEY")` for the cell's process.                        |
 | `# @mount data file:///x`  | Binds `data` inside the R cell to the mount's local path (a character string - R has no `pathlib.Path`).  |
 | `# @timeout 60`            | Per-cell execution timeout in seconds.                                  |
+| `# @worker gpu-box`        | Runs the cell on an executor worker with R (see below).                 |
+
+An R cell with a worker runs `harness.R` on that worker (a `strata-worker` of
+this version or later), under the worker's
+`Rscript` and its R library, which needs `jsonlite` and `arrow`
+(`docker build -f worker.Dockerfile --build-arg WITH_R=true`). Its outputs come
+back the way a local run's do, so it is a cache hit here afterwards, a
+downstream Python cell reads its data frame, and an R-only value returns as RDS.
+The worker does not restore the notebook's `renv.lock`; an `@fetch` on an R cell
+is read on this machine, so such a cell runs locally.
 
 Loop annotations (`@loop`, `@loop_until`) and prompt-cell annotations (`@output_schema` etc.) do not apply to R cells.
 

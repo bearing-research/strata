@@ -419,3 +419,82 @@ async def test_sql_empty_result_set_produces_valid_artifact(tmp_path):
     # Schema preserved even with no rows — downstream cells can
     # still inspect column names / types.
     assert set(table.schema.names) == {"id", "name"}
+
+
+class TestAnOutsideWriteIsSeen:
+    """The default cache policy folds a freshness token, and for SQLite that
+    token used to be the same value every run: the probe opens a new connection
+    each time, and ``PRAGMA data_version`` reports only what *that* connection
+    has seen since it opened. A cell kept serving its first answer however much
+    the database changed underneath it."""
+
+    @pytest.mark.asyncio
+    async def test_a_write_from_another_connection_makes_the_cell_recompute(self, tmp_path):
+        from strata.notebook.executor import CellExecutor
+
+        db_path = tmp_path / "events.db"
+        _seed_sqlite(db_path)
+        source = "# @sql connection=db\nSELECT sum(value) AS total FROM events\n"
+        nb_dir = _build_notebook(tmp_path, db_path=db_path, cells=[("sql", "sql", source)])
+        session = _session(nb_dir)
+        executor = CellExecutor(session)
+
+        first = await executor.execute_cell("sql", source)
+        assert first.success, first.error
+        assert _load_arrow(session, first.artifact_uri).column("total").to_pylist() == [60]
+
+        with sqlite3.connect(db_path) as conn:
+            conn.execute("INSERT INTO events (id, name, value) VALUES (4, 'delta', 40)")
+            conn.commit()
+
+        second = await executor.execute_cell("sql", source)
+
+        assert second.success, second.error
+        assert second.cache_hit is False, "the cell served a stale answer as a cache hit"
+        assert _load_arrow(session, second.artifact_uri).column("total").to_pylist() == [100]
+
+    @pytest.mark.asyncio
+    async def test_an_unchanged_database_still_hits_the_cache(self, tmp_path):
+        from strata.notebook.executor import CellExecutor
+
+        db_path = tmp_path / "events.db"
+        _seed_sqlite(db_path)
+        source = "# @sql connection=db\nSELECT sum(value) AS total FROM events\n"
+        nb_dir = _build_notebook(tmp_path, db_path=db_path, cells=[("sql", "sql", source)])
+        executor = CellExecutor(_session(nb_dir))
+
+        await executor.execute_cell("sql", source)
+        again = await executor.execute_cell("sql", source)
+
+        assert again.cache_hit is True
+
+    @pytest.mark.asyncio
+    async def test_a_write_in_wal_mode_is_seen_before_any_checkpoint(self, tmp_path):
+        """In WAL mode a commit lands beside the database, and the main file's
+        header does not move until a checkpoint."""
+        from strata.notebook.executor import CellExecutor
+
+        db_path = tmp_path / "events.db"
+        _seed_sqlite(db_path)
+        with sqlite3.connect(db_path) as conn:
+            conn.execute("PRAGMA journal_mode=WAL")
+        source = "# @sql connection=db\nSELECT sum(value) AS total FROM events\n"
+        nb_dir = _build_notebook(tmp_path, db_path=db_path, cells=[("sql", "sql", source)])
+        session = _session(nb_dir)
+        executor = CellExecutor(session)
+
+        first = await executor.execute_cell("sql", source)
+        assert first.success, first.error
+
+        writer = sqlite3.connect(db_path)
+        try:
+            writer.execute("PRAGMA journal_mode=WAL")
+            writer.execute("INSERT INTO events (id, name, value) VALUES (5, 'epsilon', 50)")
+            writer.commit()
+            assert (tmp_path / "events.db-wal").exists(), "the commit should still be in the log"
+            second = await executor.execute_cell("sql", source)
+        finally:
+            writer.close()
+
+        assert second.cache_hit is False
+        assert _load_arrow(session, second.artifact_uri).column("total").to_pylist() == [110]

@@ -165,6 +165,24 @@ def fast_notebook_env(monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRe
     if not request.node.get_closest_marker("warm_pool"):
         monkeypatch.setattr("strata.notebook.pool.WarmProcessPool.start", _noop_start)
 
+    # What each worker's /health advertised is cached by URL, and ports repeat.
+    from strata.notebook import workers as _workers_cache
+
+    _workers_cache._advertised_features.clear()
+
+    # The notebooks here carry a stub uv.lock (``_fake_uv_sync``) that no worker
+    # could install, so remote cells run in the worker's own environment unless
+    # a test is about locked environments.
+    if not request.node.get_closest_marker("locked_environments"):
+
+        async def _no_locked_environments(worker, feature):
+            return False if feature == "locked_environments" else await _advertises(worker, feature)
+
+        from strata.notebook import workers as _workers
+
+        _advertises = _workers.worker_advertises
+        monkeypatch.setattr(_workers, "worker_advertises", _no_locked_environments)
+
     # The production WS handler holds onto execution + inspect state for
     # 60s after the last disconnect so a reconnecting client doesn't lose
     # a running cell. In tests we want the teardown to fire immediately

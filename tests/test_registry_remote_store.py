@@ -274,6 +274,40 @@ class TestTargetResolution:
             {"X-Strata-Principal": "alice"},
         )
 
+    @pytest.mark.parametrize("forward", [True, False])
+    def test_a_caller_is_forwarded_in_place_of_the_servers_identity(self, monkeypatch, forward):
+        """On a shared server an approval from the Registry tab is the member's,
+        not the server's. The flag keeps a store that expects one fixed service
+        identity working. Item 2."""
+        import strata.server as server_module
+        from strata.api.remote_registry import remote_registry
+        from strata.auth import set_principal
+        from strata.types import Principal
+
+        monkeypatch.setattr(
+            server_module,
+            "_state",
+            self._config(
+                notebook_remote_store_url="http://store.example",
+                # Lowercase, as an operator might write it: still the same header.
+                notebook_remote_store_headers={
+                    "x-strata-principal": "server:7",
+                    "X-Strata-Proxy-Token": "t",
+                },
+                notebook_remote_store_forward_principal=forward,
+            ),
+        )
+        set_principal(Principal(id="ana", tenant="acme"))
+        try:
+            _, headers = remote_registry()
+        finally:
+            set_principal(None)
+
+        if forward:
+            assert headers == {"X-Strata-Principal": "ana", "X-Strata-Proxy-Token": "t"}
+        else:
+            assert headers == {"x-strata-principal": "server:7", "X-Strata-Proxy-Token": "t"}
+
 
 def test_a_remote_store_url_naming_this_server_is_refused():
     """It would make every registry read forward to itself and recurse.
