@@ -330,3 +330,50 @@ class TestForwardingDoesNotHoldTheCell:
             remote_executor.httpx.AsyncClient = original
 
         assert stdout.decode().count("line ") == 200, "the bundle keeps the whole console"
+
+
+class TestWhatIsShownStaysAPrefix:
+    """The report at the end sends ``text[delivered:]``, so what was streamed
+    has to be a prefix of the whole console. Dropping the oldest queued chunk
+    under backpressure broke that: the start went missing and the end was shown
+    twice."""
+
+    @pytest.mark.asyncio
+    async def test_a_burst_the_link_cannot_keep_up_with_keeps_its_beginning(self, tmp_path):
+        import asyncio as _asyncio
+
+        import strata.notebook.remote_executor as remote_executor
+
+        posted: list[str] = []
+        release = _asyncio.Event()
+
+        async def _slow_post(client, log_url, stream, text):
+            await release.wait()
+            posted.append(text)
+
+        monkeypatch = pytest.MonkeyPatch()
+        monkeypatch.setattr(remote_executor, "_post_log_chunk", _slow_post)
+        try:
+            proc = await _asyncio.create_subprocess_exec(
+                sys.executable,
+                "-c",
+                # More chunks than the forwarding queue holds, so it fills.
+                "print('X' * 4_000_000)",
+                stdout=_asyncio.subprocess.PIPE,
+                stderr=_asyncio.subprocess.PIPE,
+            )
+            drain = _asyncio.create_task(_drain_via(remote_executor, proc))
+            await _asyncio.sleep(0.2)
+            release.set()
+            stdout, _ = await drain
+        finally:
+            monkeypatch.undo()
+
+        shown = "".join(posted)
+        assert stdout.decode().startswith(shown), (
+            "what the notebook was shown is no longer the beginning of the console"
+        )
+
+
+async def _drain_via(remote_executor, proc):
+    return await remote_executor._drain(proc, "http://server/v1/builds/b1/log")

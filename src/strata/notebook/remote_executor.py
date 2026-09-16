@@ -191,11 +191,10 @@ async def _drain(proc: Any, log_url: str | None) -> tuple[bytes, bytes]:
             collected.append(chunk)
             if queue is not None:
                 if queue.full():
-                    # Drop the oldest: what the cell is printing now is what
-                    # somebody watching wants to see.
-                    with contextlib.suppress(asyncio.QueueEmpty):
-                        queue.get_nowait()
-                        queue.task_done()
+                    # Drop this chunk rather than the oldest: what has been
+                    # shown stays a prefix of the whole console, so the report
+                    # at the end can send exactly the part that never arrived.
+                    continue
                 queue.put_nowait((stream, chunk.decode("utf-8", errors="replace")))
         return b"".join(collected)
 
@@ -310,6 +309,29 @@ _WORKER_SECRETS = (
 )
 
 
+_CAPTURED_SECRETS: dict[str, str] = {}
+
+
+def capture_worker_secrets() -> None:
+    """Take the worker's secrets out of the process environment, into memory.
+
+    Scrubbing the harness's own copy is not a boundary on its own: the harness
+    is a child of this process under the same uid, so a cell can read
+    ``/proc/<ppid>/environ`` and find the token there. Reading them once here
+    and deleting them means there is nothing left to read. Called by the worker
+    entry point, so an in-process app in a test keeps reading the environment.
+    """
+    for name in _WORKER_SECRETS:
+        value = os.environ.pop(name, None)
+        if value is not None:
+            _CAPTURED_SECRETS[name] = value
+
+
+def worker_secret(name: str) -> str:
+    """One of the worker's secrets, wherever it is now."""
+    return _CAPTURED_SECRETS.get(name) or os.environ.get(name, "") or ""
+
+
 def _cell_env(extra: dict[str, str] | None = None) -> dict[str, str]:
     """The environment a cell's harness runs with on a worker.
 
@@ -320,15 +342,30 @@ def _cell_env(extra: dict[str, str] | None = None) -> dict[str, str]:
     """
     from strata.notebook.harness_env import harness_env
 
-    allowlist: list[str] = [
-        entry.strip()
-        for entry in (os.environ.get("STRATA_NOTEBOOK_HARNESS_ENV_ALLOWLIST") or "").split(",")
-        if entry.strip()
-    ]
+    allowlist = _configured_allowlist()
     env = harness_env(allowlist, extra) if allowlist else {**os.environ, **(extra or {})}
     for name in _WORKER_SECRETS:
         env.pop(name, None)
     return env
+
+
+def _configured_allowlist() -> list[str]:
+    """``STRATA_NOTEBOOK_HARNESS_ENV_ALLOWLIST``, in either form the server takes.
+
+    A comma-separated list or a JSON array — the setting's own validator accepts
+    both, and a worker that read only one of them would silently narrow a cell's
+    environment to nothing.
+    """
+    raw = (os.environ.get("STRATA_NOTEBOOK_HARNESS_ENV_ALLOWLIST") or "").strip()
+    if not raw:
+        return []
+    if raw.startswith("["):
+        try:
+            parsed = json.loads(raw)
+        except ValueError:
+            return []
+        return [str(entry).strip() for entry in parsed if str(entry).strip()]
+    return [entry.strip() for entry in raw.split(",") if entry.strip()]
 
 
 def _worker_credentials() -> CredentialResolver:
@@ -339,8 +376,8 @@ def _worker_credentials() -> CredentialResolver:
     config: a worker is not a Strata server and has none of its other settings.
     """
     return CredentialResolver(
-        json.loads(os.environ.get("STRATA_NOTEBOOK_CREDENTIALS") or "{}"),
-        scheme_defaults=json.loads(os.environ.get("STRATA_NOTEBOOK_MOUNT_CREDENTIALS") or "{}"),
+        json.loads(worker_secret("STRATA_NOTEBOOK_CREDENTIALS") or "{}"),
+        scheme_defaults=json.loads(worker_secret("STRATA_NOTEBOOK_MOUNT_CREDENTIALS") or "{}"),
     )
 
 
@@ -415,7 +452,7 @@ def create_notebook_executor_app(
     in_flight: dict[str, Any] = {}
 
     # ---- Bearer-token gate ----
-    expected_token = os.environ.get("STRATA_WORKER_TOKEN", "").strip() or None
+    expected_token = worker_secret("STRATA_WORKER_TOKEN").strip() or None
 
     async def require_worker_token(http_request: Request) -> None:
         if expected_token is None:
@@ -1246,13 +1283,18 @@ def main(argv: list[str] | None = None) -> int:
         if value is not None and value < 1:
             parser.error(f"{flag} must be a positive integer")
 
+    # Before anything can spawn a cell: a harness under this uid can read
+    # /proc/<ppid>/environ, so the worker's secrets are held in memory here
+    # rather than left in the environment a cell can reach.
+    capture_worker_secrets()
+
     # The worker executes arbitrary cell source by design. Binding a
     # non-loopback interface without a bearer token means anyone who can
     # reach the port can run code as this user — make that trade-off
     # loud rather than silent.
     if (
         args.host not in ("127.0.0.1", "localhost", "::1")
-        and not os.environ.get("STRATA_WORKER_TOKEN", "").strip()
+        and not worker_secret("STRATA_WORKER_TOKEN").strip()
     ):
         logger.warning(
             "strata-worker is binding %s WITHOUT authentication - anyone who can "

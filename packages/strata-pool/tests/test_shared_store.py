@@ -562,3 +562,49 @@ class TestAStopThatFailsKeepsTheRow:
         assert stopped is False
         kept = store.get_worker(worker.id)
         assert kept is not None and kept.state is WorkerState.STOPPING
+
+
+class TestAStopThatFailedIsTriedAgain:
+    @pytest.mark.asyncio
+    async def test_the_fleet_slot_comes_back_once_the_provider_answers(self, open_store, make_pool):
+        """Keeping the row holds the machine's place against the fleet cap, so
+        something has to revisit it — otherwise a provider blip costs a slot for
+        the life of the process."""
+
+        class _FlakyBackend(FakeBackend):
+            def __init__(self):
+                super().__init__()
+                self.failures = 1
+
+            async def stop(self, backend_id: str) -> None:
+                if self.failures:
+                    self.failures -= 1
+                    raise RuntimeError("provider 503")
+                await super().stop(backend_id)
+
+        workers = FakeWorkers()
+        clock = Clock()
+        backend = _FlakyBackend()
+        pool = make_pool("a", workers=workers, wall=clock, backend=backend)
+        store = pool.store
+        worker = Worker(
+            id=new_id("w"),
+            machine_type="cpu",
+            tenant_id="t",
+            backend="fake",
+            state=WorkerState.WARM,
+            backend_id="a-1",
+            endpoint="http://a-1",
+            auth_token=new_auth_token(),
+            created_at=clock(),
+        )
+        store.save_worker(worker)
+
+        assert await pool._stop_worker(worker) is False
+        assert store.get_worker(worker.id).state is WorkerState.STOPPING
+
+        clock.now += 1000  # the claim it holds has long expired
+        stopped = await pool.reap_idle_workers()
+
+        assert stopped == 1
+        assert store.get_worker(worker.id) is None, "the fleet slot never came back"

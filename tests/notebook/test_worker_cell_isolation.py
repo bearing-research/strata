@@ -171,3 +171,47 @@ def _recording(calls: list[bool]):
         calls.append(True)
 
     return _cancel
+
+
+def test_the_workers_secrets_leave_the_environment_a_cell_can_reach(monkeypatch):
+    """Scrubbing the harness's own copy is not a boundary: the harness runs
+    under the worker's uid, so /proc/<ppid>/environ has whatever the worker
+    still holds. The entry point takes them out of the environment entirely."""
+    import os
+
+    from strata.notebook.remote_executor import (
+        _CAPTURED_SECRETS,
+        capture_worker_secrets,
+        worker_secret,
+    )
+
+    monkeypatch.setenv("STRATA_WORKER_TOKEN", "worker-bearer-token")
+    monkeypatch.setenv("STRATA_NOTEBOOK_CREDENTIALS", '{"lab": {"key": "AKIA"}}')
+    _CAPTURED_SECRETS.clear()
+    try:
+        capture_worker_secrets()
+
+        assert "STRATA_WORKER_TOKEN" not in os.environ
+        assert "STRATA_NOTEBOOK_CREDENTIALS" not in os.environ
+        # The worker still needs them: it authenticates requests and resolves
+        # the credential names a manifest carries.
+        assert worker_secret("STRATA_WORKER_TOKEN") == "worker-bearer-token"
+        assert "AKIA" in worker_secret("STRATA_NOTEBOOK_CREDENTIALS")
+    finally:
+        _CAPTURED_SECRETS.clear()
+
+
+def test_an_allowlist_written_as_json_is_read_the_way_the_server_reads_it(monkeypatch):
+    """The setting's validator accepts a JSON array; a worker that read only
+    the comma form would narrow a cell's environment to nothing."""
+    from strata.config import StrataConfig
+    from strata.notebook.remote_executor import _cell_env
+
+    monkeypatch.setenv("MY_TOOL_HOME", "/opt/tool")
+    monkeypatch.setenv("SOMEONE_ELSES", "private")
+    monkeypatch.setenv("STRATA_NOTEBOOK_HARNESS_ENV_ALLOWLIST", '["MY_TOOL_HOME"]')
+
+    assert StrataConfig.load().notebook_harness_env_allowlist == ["MY_TOOL_HOME"]
+    env = _cell_env()
+    assert env.get("MY_TOOL_HOME") == "/opt/tool"
+    assert "SOMEONE_ELSES" not in env

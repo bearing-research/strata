@@ -137,11 +137,21 @@ _READ_STATEMENT_NAMES = (
     "Subquery",
     "Describe",
     "Show",
+    "Values",
+    "Summarize",
+    "Pivot",
+    "Unpivot",
 )
 # sqlglot parses what it has no grammar for as ``Command``, which is where
-# EXPLAIN lands. Naming the few read-only ones keeps the rest — ATTACH, CALL,
-# INSTALL — refused with everything else.
-_READ_COMMANDS = ("EXPLAIN",)
+# EXPLAIN and (on some dialects) SHOW land. Naming the read-only ones keeps the
+# rest — ATTACH, CALL, INSTALL — refused with everything else.
+_READ_COMMANDS = ("EXPLAIN", "SHOW", "DESC", "DESCRIBE")
+# EXPLAIN describes a plan; EXPLAIN ANALYZE *runs* the statement it wraps, so
+# it is the wrapped statement's privilege, not EXPLAIN's. PRAGMA is refused
+# whatever it says: sqlglot parses the reporting form (``PRAGMA table_info(t)``)
+# and the setting form (``PRAGMA journal_mode = WAL``) into the same shape, and
+# the schema panel is how a notebook introspects a connection.
+_ANALYZE = re.compile(r"^\s*\(?\s*ANALYZE\b", re.IGNORECASE)
 
 
 def read_only_violation(sql: str, dialect: str | None) -> str | None:
@@ -166,12 +176,25 @@ def read_only_violation(sql: str, dialect: str | None) -> str | None:
         name = type(statement).__name__
         if name in _READ_STATEMENT_NAMES:
             continue
-        if name == "Command" and str(statement.this or "").upper() in _READ_COMMANDS:
+        if name == "Alias" and type(statement.this).__name__ in ("Select", "Table", "Column"):
+            # ``TABLE t``.
             continue
+        if name == "Command":
+            head = str(statement.this or "").upper()
+            argument = statement.args.get("expression")
+            argument_text = str(getattr(argument, "this", argument) or "")
+            if head in _READ_COMMANDS and not (head == "EXPLAIN" and _ANALYZE.match(argument_text)):
+                continue
+            if head == "EXPLAIN":
+                return (
+                    "a SQL cell reads, and EXPLAIN ANALYZE runs the statement it describes. "
+                    "Use `# @sql connection=<name> write=true` for a cell that changes a "
+                    "database, or EXPLAIN without ANALYZE."
+                )
         kind = str(statement.this or "").upper() if name == "Command" else name.upper()
         return (
             f"a SQL cell reads, and {kind} is not a read. Use "
-            "`# @sql connection=<name> write` for a cell that changes a database."
+            "`# @sql connection=<name> write=true` for a cell that changes a database."
         )
     return None
 
