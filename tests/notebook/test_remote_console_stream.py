@@ -176,6 +176,12 @@ class TestNoDoubleDelivery:
         assert [m["type"] for m in sent] == ["cell_console", "cell_console", "cell_output"]
 
 
+def remote_executor_module():
+    from strata.notebook import remote_executor
+
+    return remote_executor
+
+
 class TestWorkerTeeing:
     @pytest.mark.asyncio
     async def test_output_is_forwarded_as_it_is_produced(self, tmp_path, monkeypatch):
@@ -213,6 +219,48 @@ class TestWorkerTeeing:
 
         proc.kill()
         await drain
+
+    @pytest.mark.asyncio
+    async def test_a_real_cell_reaches_the_pipe_the_worker_reads(self, tmp_path):
+        """Driven through the harness, not a stand-in for it.
+
+        The harness replaces ``sys.stdout`` to capture the cell's output for
+        the result manifest. A capture nothing writes through leaves the pipe
+        this feature reads empty for the cell's whole life, so every test
+        above can pass while a worker streams nothing at all.
+        """
+        import json
+
+        output_dir = tmp_path / "run"
+        output_dir.mkdir()
+        manifest = output_dir / "manifest.json"
+        manifest.write_text(
+            json.dumps(
+                {
+                    "source": "print('from-the-cell')\nx = 1\n",
+                    "inputs": {},
+                    "output_dir": str(output_dir),
+                    "mounts": {},
+                    "tables": {},
+                    "env": {},
+                    "mutation_defines": [],
+                }
+            )
+        )
+
+        proc = await asyncio.create_subprocess_exec(
+            sys.executable,
+            "-m",
+            "strata.notebook.harness",
+            str(manifest),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, _ = await asyncio.wait_for(remote_executor_module()._drain(proc, None), timeout=60)
+
+        assert b"from-the-cell" in stdout, "a worker would have streamed nothing"
+        result = json.loads((output_dir / "harness-result.json").read_text())
+        assert result["stdout"] == "from-the-cell\n", "and the bundle still carries it whole"
 
     @pytest.mark.asyncio
     async def test_without_a_log_url_the_output_is_still_collected(self, tmp_path):
