@@ -445,6 +445,7 @@ class LocalNotebookOps:
         state = parse_notebook(notebook_dir)
         self._session = NotebookSession(state, notebook_dir)
         self._executor: object | None = None
+        self._staleness_computed = False
 
     @classmethod
     def from_session(cls, session: NotebookSession, author: str | None = None) -> LocalNotebookOps:
@@ -470,14 +471,40 @@ class LocalNotebookOps:
         ops.author = resolve_author(author)
         ops._session = session
         ops._executor = None
+        # The server computed it when it opened this session and keeps it
+        # current on every edit; this handle is a view onto that, not a
+        # second opinion.
+        ops._staleness_computed = True
         return ops
+
+    def _ensure_staleness(self) -> None:
+        """Work out what each cell's status is, before reporting it.
+
+        A session starts every cell IDLE -- status is not persisted -- and the
+        server's ``SessionManager`` settles that by computing staleness when it
+        opens the notebook. An offline handle builds its session directly and
+        so skipped it, and every cell read back ``idle``, no staleness reasons
+        and no outputs: the answer a cold session begins with rather than one
+        about this notebook. Anything reading a cell's status has to do the
+        work the server does.
+
+        Once per handle. One handle is one command, the computation reaches an
+        ``@fetch`` URL and an ``@table`` catalog, and nothing here mutates a
+        cell between two reads of it.
+        """
+        if self._staleness_computed:
+            return
+        self._staleness_computed = True
+        self._session.compute_staleness()
 
     def list_cells(self) -> list[CellView]:
         """List every cell in order (see :meth:`NotebookOps.list_cells`)."""
+        self._ensure_staleness()
         return [_cell_view(cell) for cell in self._session.notebook_state.cells]
 
     def get_cell(self, cell_id: str) -> CellView:
         """Project one cell (see :meth:`NotebookOps.get_cell`)."""
+        self._ensure_staleness()
         cell = self._session.notebook_state.get_cell(cell_id)
         if cell is None:
             raise NotebookOpsError(f"no cell with id {cell_id!r}")
@@ -489,6 +516,7 @@ class LocalNotebookOps:
 
     def status(self) -> NotebookStatus:
         """Summarize per-cell status (see :meth:`NotebookOps.status`)."""
+        self._ensure_staleness()
         state = self._session.notebook_state
         return NotebookStatus(
             notebook_id=state.id,

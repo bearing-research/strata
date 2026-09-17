@@ -3547,9 +3547,10 @@ class CellExecutor:
         """
         if not fetch_specs:
             return [], {}, {}, None
-        from strata.notebook.fetch import FetchCache, FetchError
+        from strata.notebook.fetch import FetchCache, FetchError, guard_settings
 
-        cache = FetchCache(self.session.path, allowed_hosts=self._fetch_allowed_hosts())
+        allowed_hosts, allow_local = guard_settings(self._lake_config())
+        cache = FetchCache(self.session.path, allowed_hosts=allowed_hosts, allow_local=allow_local)
         fingerprints: list[str] = []
         fetched: dict[str, Path] = {}
         refs: dict[str, str] = {}
@@ -3639,9 +3640,6 @@ class CellExecutor:
             **self._fetch_refs.get(cell_id, {}),
             **self._dataset_refs.get(cell_id, {}),
         }
-
-    def _fetch_allowed_hosts(self) -> tuple[str, ...]:
-        return tuple(getattr(self._lake_config(), "notebook_fetch_allowed_hosts", None) or ())
 
     async def _fingerprint_tables(
         self,

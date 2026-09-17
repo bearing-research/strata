@@ -223,6 +223,38 @@ class TestTheGuard:
 
         assert origin.requests == []
 
+    def test_personal_mode_may_fetch_from_its_own_machine(self, tmp_path, origin):
+        """The guard asks whether a URL crosses a trust boundary. On one
+        person's laptop ``http://localhost:8000/data.csv`` is their own dev
+        server, and refusing it protected nobody from anything -- it only meant
+        the feature could not be used on the machine most people try it on.
+        """
+        allowed, allow_local = fetch_module.guard_settings(
+            SimpleNamespace(deployment_mode="personal", notebook_fetch_allowed_hosts=[])
+        )
+        assert allow_local is True
+
+        fetched = FetchCache(tmp_path, allowed_hosts=allowed, allow_local=allow_local).resolve(
+            FetchSpec(name="zones", url=origin.url())
+        )
+
+        assert fetched.path.read_bytes() == origin.body
+
+    def test_a_service_deployment_keeps_the_guard(self, tmp_path, origin):
+        """Where more than one person can reach the server, the address a URL
+        resolves to is exactly the question."""
+        allowed, allow_local = fetch_module.guard_settings(
+            SimpleNamespace(deployment_mode="service", notebook_fetch_allowed_hosts=[])
+        )
+        assert allow_local is False
+
+        with pytest.raises(FetchError, match="non-routable"):
+            FetchCache(tmp_path, allowed_hosts=allowed, allow_local=allow_local).resolve(
+                FetchSpec(name="zones", url=origin.url())
+            )
+
+        assert origin.requests == []
+
     def test_a_redirect_is_checked_hop_by_hop(self, tmp_path, origin):
         """A permitted host that redirects to the metadata service is the
         request the guard exists to refuse."""
@@ -398,7 +430,12 @@ class TestOnARemoteWorker:
         from strata.notebook.session import NotebookSession
         from strata.notebook.writer import add_cell_to_notebook, create_notebook, write_cell
 
-        monkeypatch.setattr(CellExecutor, "_fetch_allowed_hosts", lambda self: ("127.0.0.1",))
+        # The seam the guard reads now: allow this origin by name, and keep
+        # the loopback rule on, so what is exercised here is the allowlist
+        # rather than the personal-mode exemption.
+        monkeypatch.setattr(
+            "strata.notebook.fetch.guard_settings", lambda config: (("127.0.0.1",), False)
+        )
         source = (
             f"# @fetch zones {origin.url()}\n"
             "text = zones.read_text()\n"
@@ -444,7 +481,12 @@ class TestOtherCellKinds:
         from strata.notebook.session import NotebookSession
         from strata.notebook.writer import add_cell_to_notebook, create_notebook, write_cell
 
-        monkeypatch.setattr(CellExecutor, "_fetch_allowed_hosts", lambda self: ("127.0.0.1",))
+        # The seam the guard reads now: allow this origin by name, and keep
+        # the loopback rule on, so what is exercised here is the allowlist
+        # rather than the personal-mode exemption.
+        monkeypatch.setattr(
+            "strata.notebook.fetch.guard_settings", lambda config: (("127.0.0.1",), False)
+        )
         source = f"# @fetch zones {origin.url()}\nrows <- length(readLines(zones))"
         nb = create_notebook(tmp_path, "R fetch", initialize_environment=False)
         add_cell_to_notebook(nb, "c1", None, language="r")
@@ -476,7 +518,12 @@ class TestOtherCellKinds:
         from strata.notebook.session import NotebookSession
         from strata.notebook.writer import add_cell_to_notebook, create_notebook, write_cell
 
-        monkeypatch.setattr(CellExecutor, "_fetch_allowed_hosts", lambda self: ("127.0.0.1",))
+        # The seam the guard reads now: allow this origin by name, and keep
+        # the loopback rule on, so what is exercised here is the allowlist
+        # rather than the personal-mode exemption.
+        monkeypatch.setattr(
+            "strata.notebook.fetch.guard_settings", lambda config: (("127.0.0.1",), False)
+        )
         pin = "1" * 64
         source = f"# @fetch zones {origin.url()} sha256={pin}\nrows <- 1"
         nb = create_notebook(tmp_path, "R pin", initialize_environment=False)
