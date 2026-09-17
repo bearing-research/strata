@@ -126,7 +126,8 @@ strata validate <notebook_dir> [--format human|json]
 - the DAG builds without cycles
 - per-cell annotation diagnostics - the **same validation the server runs
   on open / reload** (`worker_unknown`, `loop_missing_carry`,
-  `sql_missing_connection`, malformed `@output_schema`, …)
+  `sql_missing_connection`, `fetch_unreadable`, `dataset_unreadable`,
+  malformed `@output_schema`, …)
 
 Exit codes mirror `strata run`: `0` valid (warnings allowed), `1` invalid
 (parse failure, DAG cycle, or any error-severity diagnostic), `2`
