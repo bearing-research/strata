@@ -13,6 +13,7 @@ from strata.notebook.annotations import (
     iter_annotation_block,
     parse_annotation_directive,
     parse_annotations,
+    unreadable_input_directives,
 )
 from strata.notebook.models import (
     AnnotationDiagnostic,
@@ -39,16 +40,19 @@ def validate_cell_annotations(
     variant_diagnostics = variant_diagnostics + _validate_per_variant_annotation(
         cell, _cell_annotations, notebook_state
     )
+    if cell.language == CellLanguage.MARKDOWN:
+        # Markdown cells are pure prose; ``# @worker`` etc. would be a
+        # markdown heading, not an annotation. No validation applies.
+        return variant_diagnostics
+    # Every language that runs: a dropped ``@fetch`` or ``@dataset`` is a
+    # variable the cell is going to reach for and not find.
+    variant_diagnostics = variant_diagnostics + _validate_recorded_inputs(cell)
     if cell.language == CellLanguage.PROMPT:
         return variant_diagnostics + _validate_prompt_cell_annotations(cell)
     if cell.language == CellLanguage.SQL:
         return variant_diagnostics + _validate_sql_cell_annotations(cell, notebook_state)
     if cell.language == CellLanguage.WIDGET:
         return variant_diagnostics + _validate_widget_cell_annotations(cell)
-    if cell.language == CellLanguage.MARKDOWN:
-        # Markdown cells are pure prose; ``# @worker`` etc. would be a
-        # markdown heading, not an annotation. No validation applies.
-        return variant_diagnostics
     diagnostics: list[AnnotationDiagnostic] = list(variant_diagnostics)
     diagnostics.extend(_validate_module_export(cell, notebook_state))
     annotations = parse_annotations(cell.source)
@@ -213,6 +217,34 @@ def validate_cell_annotations(
     diagnostics.extend(_validate_loop_annotation(cell, annotations, notebook_state))
 
     return diagnostics
+
+
+def _validate_recorded_inputs(cell: CellState) -> list[AnnotationDiagnostic]:
+    """Say so when a ``@fetch`` or ``@dataset`` could not be read.
+
+    Both are dropped when they do not parse, so the cell runs without the
+    variable they promised and dies on a ``NameError`` naming it -- with
+    nothing anywhere pointing at the line that was ignored. Every other
+    directive with a shape to get wrong already reports one; these two shipped
+    without.
+    """
+    hints = {
+        "fetch": "expected `@fetch <name> <url> [sha256=<hex>] [refetch=never|stale|always]`",
+        "dataset": "expected `@dataset <var> <name>[@<alias>|@v=<n>]`",
+    }
+    return [
+        AnnotationDiagnostic(
+            severity=DiagnosticSeverity.WARN,
+            code=f"{directive}_unreadable",
+            message=(
+                f"`@{directive} {value}` could not be read and was ignored, so the "
+                f"variable it declares will not exist when the cell runs. "
+                f"{hints[directive]}."
+            ),
+            line=lineno,
+        )
+        for lineno, directive, value in unreadable_input_directives(cell.source)
+    ]
 
 
 def _validate_module_export(

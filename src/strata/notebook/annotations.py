@@ -375,6 +375,30 @@ class CellAnnotations:
         }
 
 
+def unreadable_input_directives(source: str) -> list[tuple[int, str, str]]:
+    """``@fetch`` and ``@dataset`` lines the parser could not read.
+
+    Returns ``(line number, directive, value)`` for each. Both directives are
+    dropped when malformed rather than guessed at, which is right -- half a URL
+    or half a dataset reference is not something to resolve on the author's
+    behalf -- but each one names a variable the cell expects to exist, so
+    dropping it silently means the cell fails on a ``NameError`` that says
+    nothing about the annotation that caused it. The validator turns these into
+    diagnostics; deciding what parses stays here, next to the parsing.
+    """
+    unreadable: list[tuple[int, str, str]] = []
+    for lineno, line in iter_annotation_block(source):
+        parsed = parse_annotation_directive(line)
+        if parsed is None:
+            continue
+        key, value = parsed
+        if key == "fetch" and _parse_fetch_annotation(value) is None:
+            unreadable.append((lineno, key, value))
+        elif key == "dataset" and _parse_dataset_annotation(value) is None:
+            unreadable.append((lineno, key, value))
+    return unreadable
+
+
 def parse_annotations(source: str) -> CellAnnotations:
     """Extract annotations from the leading comment block of a cell.
 

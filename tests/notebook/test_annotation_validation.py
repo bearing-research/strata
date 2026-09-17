@@ -31,8 +31,8 @@ def _nb(*, workers: list[WorkerSpec] | None = None, mounts: list[MountSpec] | No
     )
 
 
-def _cell(source: str, cell_id: str = "c1") -> CellState:
-    return CellState(id=cell_id, source=source)
+def _cell(source: str, cell_id: str = "c1", language: str = "python") -> CellState:
+    return CellState(id=cell_id, source=source, language=language)
 
 
 def _codes(cell: CellState, nb: NotebookState) -> list[str]:
@@ -190,6 +190,64 @@ class TestEnvMalformed:
     def test_value_with_equals_signs(self):
         # Values may contain `=` (e.g. base64, signed URLs).
         cell = _cell("# @env KEY=part1=part2=part3\nx = 1")
+        assert _codes(cell, _nb()) == []
+
+
+class TestRecordedInputsUnreadable:
+    """`@fetch` and `@dataset` are dropped when they do not parse. Every other
+    directive with a shape to get wrong reports a diagnostic; these two shipped
+    without one, so a typo vanished and the cell died on a NameError naming a
+    variable nothing explained the absence of."""
+
+    @pytest.mark.parametrize(
+        "source",
+        [
+            "# @fetch zones\nx = zones",
+            "# @fetch zones http://x.org/a.csv refresh=always\nx = zones",
+            "# @fetch zones http://x.org/a.csv sha256=nothex\nx = zones",
+            "# @fetch 1bad http://x.org/a.csv\nx = 1",
+        ],
+    )
+    def test_an_unreadable_fetch_is_reported(self, source):
+        assert _codes(_cell(source), _nb()) == ["fetch_unreadable"]
+
+    @pytest.mark.parametrize(
+        "source",
+        [
+            "# @dataset trips\nx = trips",
+            "# @dataset 1bad rides\nx = rides",
+            "# @dataset trips rides extra\nx = trips",
+        ],
+    )
+    def test_an_unreadable_dataset_is_reported(self, source):
+        assert _codes(_cell(source), _nb()) == ["dataset_unreadable"]
+
+    @pytest.mark.parametrize(
+        "source",
+        [
+            "# @fetch zones http://x.org/a.csv\nx = zones",
+            "# @fetch zones http://x.org/a.csv refetch=never\nx = zones",
+            "# @dataset trips rides@v=2\nx = trips",
+            "# @dataset trips rides@latest\nx = trips",
+        ],
+    )
+    def test_a_readable_one_is_not(self, source):
+        assert _codes(_cell(source), _nb()) == []
+
+    def test_the_diagnostic_points_at_the_line(self):
+        cell = _cell("# @worker local\n# @fetch zones\nx = zones")
+
+        (diagnostic,) = [
+            d for d in validate_cell_annotations(cell, _nb()) if d.code == "fetch_unreadable"
+        ]
+
+        assert diagnostic.line == 2
+        assert "will not exist when the cell runs" in diagnostic.message
+
+    def test_markdown_is_prose_not_annotations(self):
+        """`# @fetch ...` in a markdown cell is a heading."""
+        cell = _cell("# @fetch zones\nsome prose", language="markdown")
+
         assert _codes(cell, _nb()) == []
 
 
