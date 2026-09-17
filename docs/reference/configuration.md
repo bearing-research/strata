@@ -4,21 +4,37 @@ Strata is configured via environment variables (prefixed with `STRATA_`) or a `[
 
 **Precedence**: defaults < pyproject.toml < environment variables < programmatic overrides
 
-The `[tool.strata]` block accepts every env var listed below with the
+The `[tool.strata]` block accepts most of the env vars listed below with the
 `STRATA_` prefix dropped and the name lowercased (e.g. `STRATA_HOST` →
 `host`, `STRATA_CACHE_DIR` → `cache_dir`, `STRATA_S3_REGION` →
 `s3_region`). Values are typed by `StrataConfig` in `src/strata/config.py`;
 strings, numbers, booleans, and TOML arrays all work as expected.
+
+Some settings are environment-only and have no `[tool.strata]` equivalent,
+because they are read directly by the process that uses them rather than being
+fields of `StrataConfig`: everything in the **Worker** section (the
+`strata-worker` process), the TUI variables, logging, tracing and metrics, and
+the fast-IO tuning. Those rows say so.
 
 ```toml
 # pyproject.toml
 [tool.strata]
 host = "0.0.0.0"
 port = 8765
-deployment_mode = "service"
 cache_dir = "/var/cache/strata"
-multi_tenant_enabled = true
 ai_model = "claude-sonnet-4-6"
+```
+
+Multi-tenancy is an access-control boundary, so it is refused without
+authentication — this is a startup error, not a warning:
+
+```toml
+[tool.strata]
+deployment_mode = "service"
+artifact_dir = "/var/lib/strata/artifacts"
+multi_tenant_enabled = true
+auth_mode = "trusted_proxy"
+proxy_token = "…"           # or STRATA_PROXY_TOKEN
 ```
 
 ## Server
@@ -312,9 +328,15 @@ used to.
 
 `principal` and each `tables` entry are glob patterns; `tenant` is an exact
 match. Every rule must list at least one table pattern; a rule with none can
-never match, so it is rejected at startup rather than sitting inert. Unknown
-keys are rejected for the same reason: a mistyped `deny` would otherwise leave
-an ACL that boots clean and enforces nothing.
+never match, so it is rejected at startup rather than sitting inert. An unknown
+key at the top of the block is rejected for the same reason: a mistyped `deny`
+would otherwise leave an ACL that boots clean and enforces nothing.
+
+That check does not reach inside a rule. An unrecognised key *within* a rule is
+currently ignored, so `tenants = "acme"` — the plural — is dropped and the rule
+applies to every tenant instead of one. Check the spelling of `principal`,
+`tenant` and `tables` against this page; a rule is only as narrow as the keys
+that were understood.
 
 Rules are enforced only when the caller is authenticated. Service mode rejects
 configured rules under any other auth mode, so they cannot sit inert. **Personal
@@ -411,7 +433,7 @@ deployment, not only in one that opted in to something.
 
 | Variable                                | Default | Description                                                                                     |
 | --------------------------------------- | ------- | ----------------------------------------------------------------------------------------------- |
-| `STRATA_TRANSFORM_MODE`                 | `embedded` | `embedded` (common transforms like `duckdb_sql@v1` run in-process) or `registry` (only transforms configured in `transforms_config`, via external executors). |
+| `STRATA_TRANSFORM_MODE`                 | `embedded` | Accepted but **not currently wired up**: the registry is always built in embedded mode, so setting `registry` has no effect. Configure transforms through `transforms_config` instead. |
 | `STRATA_TRANSFORMS_CONFIG`              | `{}`    | The whole transforms block as a JSON object (`enabled`, `registry`, …). Normally written as `[tool.strata.transforms]` instead; `STRATA_TRANSFORMS_ENABLED` merges into it rather than replacing it. |
 | `STRATA_SIGNED_URL_EXPIRY_SECONDS`      | `600`   | Validity window for pull-model signed build URLs.                                               |
 | `STRATA_ARTIFACT_PRESIGNED_URLS` | `false` | Put presigned object-store URLs in build manifests where the blob store can sign them (S3 with an access key pair in config or the environment), so a worker's inputs and output bypass the server. The output becomes a form upload (`output.fields`), which workers older than this release don't send, so enable it once the workers are upgraded. |
@@ -438,7 +460,7 @@ deployment, not only in one that opted in to something.
 | Variable                            | Default                     | Description                                                    |
 | ----------------------------------- | --------------------------- | -------------------------------------------------------------- |
 | `STRATA_NOTEBOOK_STORAGE_DIR`       | `~/.strata/notebooks`       | Default notebook storage directory. (Pre-2026-05 default was `/tmp/strata-notebooks`; see [Operations & Lifecycle](../deployment/lifecycle.md#notebook-storage-location) for the migration note.) |
-| `STRATA_NOTEBOOK_PYTHON_VERSIONS`   | current server Python minor | Available Python versions (JSON array or comma-separated list) |
+| `STRATA_NOTEBOOK_PYTHON_VERSIONS`   | every uv-installed minor matching Strata's `requires-python` | Available Python versions for new notebooks (JSON array or comma-separated list). Falls back to the server's own minor when uv is unavailable. |
 | `STRATA_NOTEBOOK_ENV_BACKEND`       | `uv`                        | How notebook Python environments are kept. `uv`: each notebook has its own `.venv`. `shared`: notebooks with the same `uv.lock` and interpreter build share one environment, and each notebook's `.venv` is a symlink to it, so a second notebook with that lock installs nothing. Adding or removing a package moves only that notebook to another environment. R libraries are shared the same way, one per `renv.lock` and R build, with `renv/library` a symlink. POSIX only. See [Shared environments](../notebook/environment.md#shared-environments). |
 | `STRATA_NOTEBOOK_SHARED_ENV_DIR`    | `envs` beside `STRATA_NOTEBOOK_STORAGE_DIR` | Where shared environments live, one directory per lockfile and interpreter. |
 | `STRATA_NOTEBOOK_SHARED_ENV_TTL_DAYS` | `7.0`                     | A shared environment no notebook links to is removed once unused this long, by an hourly sweep in the server or `strata env gc`. One a notebook links to is never removed. |
@@ -496,7 +518,7 @@ These are read by `strata-worker`, not the main server. They have no effect on a
 | ----------------------------- | -------- | ----------------------- |
 | `STRATA_LOG_LEVEL`            | `INFO`   | Log level               |
 | `STRATA_LOG_FORMAT`           | `json`   | `json` or `text`        |
-| `STRATA_TRACING_ENABLED`      | `false`  | Enable OpenTelemetry    |
+| `STRATA_TRACING_ENABLED`      | `true`   | A kill switch, not an opt-in: set `false` to disable tracing. No effect unless the `[otel]` extra is installed, which is what keeps it off by default. Environment only. |
 | `STRATA_METRICS_ENABLED`      | `true`   | Set `false` to stop collecting request/cache metrics |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | `None`   | OTLP collector endpoint |
 | `OTEL_SERVICE_NAME`           | `strata` | Service name for traces |

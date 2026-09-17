@@ -41,6 +41,14 @@ producing artifacts that flow through an auto-built DAG.
 - **isolated envs:** every notebook gets its own uv-managed `.venv/`, locked and reproducible
 - **auto-install:** missing import in a cell? one click adds the package via uv and re-runs
 - **headless:** `strata run ./my-notebook` for CI and scheduled execution - same DAG, same cache
+- **every input recorded:** `# @fetch` makes bytes from a URL an input and `# @dataset` makes a registry name one, both content-addressed like everything else
+- **lake-aware SQL:** read a named catalog and the notebook's mounts in one query, pinned to the snapshot the cell's provenance records
+- **the same environment, elsewhere:** a remote cell runs in the notebook's own locked environment rather than whatever the worker image happens to hold
+- **a figure gets a URL:** publish an artifact and anyone with the link sees the plot, the code behind it, and the environment of every step - no account, no install
+- **promote to the team:** copy a result and its whole chain into a shared store, from the notebook, the CLI or inside a cell - and a teammate's earlier run can serve your cell
+- **a notebook travels:** export the whole state as one bundle, artifacts included, and import it back elsewhere
+- **share a session:** presence, cell focus and soft locks, with every cell recording who wrote it
+- **worker pool** (a separate package, `pip install strata-pool`)**:** machines start on demand - Fly, Docker or RunPod - are held for a tenant, hand out GPUs per cell, and stop when the work does
 
 ### Three ways to drive it
 
