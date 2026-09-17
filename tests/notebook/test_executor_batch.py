@@ -410,3 +410,53 @@ async def test_batch_warns_on_inplace_input_mutation_end_to_end(tmp_path: Path):
     warnings = by_id["mutate"].mutation_warnings
     assert len(warnings) == 1
     assert warnings[0]["var_name"] == "df"
+
+
+@pytest.mark.asyncio
+async def test_an_edit_during_a_batch_does_not_rename_what_ran(tmp_path: Path):
+    """A batch is handed every cell's source when the partition is built, and
+    the subprocess runs from that. Nothing refuses an edit to a cell whose
+    turn has not come -- the busy guard covers only the running cell, and in a
+    batch that is the one that just finished -- so the outputs used to be
+    filed under the hash of source that never ran.
+    """
+    session = _make_session_with_cells(
+        tmp_path,
+        [("c1", "x = 41\n"), ("c2", "y = x + 1\n"), ("c3", "z = y + 1\n")],
+    )
+    specs = _populate_consumed_vars(
+        [
+            _cell_spec("c1", "x = 41\n"),
+            _cell_spec("c2", "y = x + 1\n"),
+            _cell_spec("c3", "z = y + 1\n"),
+        ],
+        session,
+    )
+    executor = CellExecutor(session)
+    edited = "y = x + 1000\n"
+
+    async def _edit_the_cell_whose_turn_has_not_come(result) -> None:
+        if result.cell_id == "c1":
+            session.notebook_state.get_cell("c2").source = edited
+
+    outcome = await executor.execute_batch(
+        specs, on_cell_event=_edit_the_cell_whose_turn_has_not_come
+    )
+
+    assert outcome.completed, f"batch failed: {outcome.end_reason}"
+    assert session.notebook_state.get_cell("c2").source == edited, "the edit never landed"
+    ran = await executor._compute_cell_provenance("c2", "y = x + 1\n")
+    as_edited = await executor._compute_cell_provenance("c2", edited)
+    assert ran.provenance_hash != as_edited.provenance_hash, "the two sources must differ"
+    # Each consumed variable is keyed off the cell's hash, so that is where
+    # "which source does this output claim to be" actually shows up.
+    from strata.notebook.provenance import derive_subkey
+
+    store = session.artifact_manager.artifact_store
+    assert store.find_by_provenance(derive_subkey(as_edited.provenance_hash, "y")) is None, (
+        "the batch stored its result under the hash of the edited source, so "
+        "reopening shows the edit as ready while holding output it never produced"
+    )
+    assert store.find_by_provenance(derive_subkey(ran.provenance_hash, "y")) is not None, (
+        "the result was not stored under the source that actually ran"
+    )

@@ -127,6 +127,22 @@ def _rewrite_variant_annotation(source: str, group: str, new_name: str) -> str:
     return new_source
 
 
+@dataclass(frozen=True)
+class _OutsideWorld:
+    """What one cell's staleness depends on beyond this process.
+
+    Gathered before the staleness lock is taken, because gathering it reaches
+    a catalog, a registry and an ``@fetch`` URL, and the lock is taken on the
+    event loop by the broadcast path.
+    """
+
+    mount_fingerprints: list[str]
+    has_rw_mount: bool
+    table_fingerprints: list[str]
+    fetch_fingerprints: list[str]
+    dataset_fingerprints: list[str]
+
+
 @dataclass
 class ExecutionSample:
     """One execution timing sample for profiling and estimates."""
@@ -826,10 +842,54 @@ class NotebookSession:
         Returns:
             Dict mapping cell_id -> CellStaleness
         """
+        # Everything outside this process is read first, before the lock. The
+        # lock serializes the walk because the walk mutates the cells it
+        # visits; the reads mutate nothing, and they are the slow part -- an
+        # ``@fetch`` gets sixty seconds to answer. Held across those, the lock
+        # stopped being a guard on a short mutation and became one thread's
+        # network call blocking every caller of the other kind: the broadcast
+        # path takes it on the event loop, where waiting freezes every socket
+        # the process has.
+        prefetched = self._outside_world_fingerprints()
         with self._staleness_lock:
-            return self._compute_staleness_locked()
+            return self._compute_staleness_locked(prefetched)
 
-    def _compute_staleness_locked(self) -> dict[str, CellStaleness]:
+    def _outside_world_fingerprints(self) -> dict[str, _OutsideWorld]:
+        """Fingerprint what each cell reads from outside, before the lock.
+
+        A cell with no mounts, ``@table``, ``@fetch`` or ``@dataset`` costs
+        nothing here -- every collector returns on the empty list. A cell that
+        has them is fingerprinted even when the walk would go on to skip it
+        for a stale upstream; both the fetch cache and the dataset memo
+        throttle their own checks, so that costs a first call the cell's own
+        run would have made anyway.
+        """
+        gathered: dict[str, _OutsideWorld] = {}
+        if self.dag is None:
+            return gathered
+        from strata.notebook.languages import get_language_executor
+
+        for cell_id in self.dag.topological_order:
+            cell = self.notebook_state.get_cell(cell_id)
+            if cell is None or get_language_executor(cell.language).skips_execution_provenance:
+                continue
+            gathered[cell_id] = self._outside_world_for(cell)
+        return gathered
+
+    def _outside_world_for(self, cell: Any) -> _OutsideWorld:
+        """One cell's outside-world fingerprints."""
+        mount_fingerprints, has_rw_mount = self._collect_mount_fingerprints(cell)
+        return _OutsideWorld(
+            mount_fingerprints=mount_fingerprints,
+            has_rw_mount=has_rw_mount,
+            table_fingerprints=self._collect_table_fingerprints(cell),
+            fetch_fingerprints=self._collect_fetch_fingerprints(cell),
+            dataset_fingerprints=self._collect_dataset_fingerprints(cell),
+        )
+
+    def _compute_staleness_locked(
+        self, prefetched: dict[str, _OutsideWorld]
+    ) -> dict[str, CellStaleness]:
         staleness_map: dict[str, CellStaleness] = {}
         stale_cells: set[str] = set()  # Track stale cells for propagation
         if self.dag is None:
@@ -906,23 +966,25 @@ class NotebookSession:
             # per-variable artifact selection as execution, not the legacy
             # single artifact_uri field.
             input_hashes = self._collect_input_hashes(cell_id)
-            mount_fingerprints, has_rw_mount = self._collect_mount_fingerprints(cell)
+            # Read before the lock. Missing only when the DAG moved between
+            # the two, which is a race this walk loses anyway -- the next
+            # flush recomputes -- so it reads its own rather than skipping a
+            # cell's mounts.
+            outside = prefetched.get(cell_id)
+            if outside is None:
+                outside = self._outside_world_for(cell)
 
-            if has_rw_mount:
+            if outside.has_rw_mount:
                 staleness_map[cell_id] = CellStaleness(status=CellStatus.IDLE, reasons=[])
                 stale_cells.add(cell_id)
                 continue
 
-            table_fingerprints = self._collect_table_fingerprints(cell)
-            fetch_fingerprints = self._collect_fetch_fingerprints(cell)
-            dataset_fingerprints = self._collect_dataset_fingerprints(cell)
-
             provenance_hash = compute_provenance_hash(
                 input_hashes
-                + mount_fingerprints
-                + table_fingerprints
-                + fetch_fingerprints
-                + dataset_fingerprints,
+                + outside.mount_fingerprints
+                + outside.table_fingerprints
+                + outside.fetch_fingerprints
+                + outside.dataset_fingerprints,
                 source_hash,
                 env_hash,
             )

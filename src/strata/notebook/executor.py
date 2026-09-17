@@ -293,6 +293,29 @@ def _artifact_content_type(artifact: Any) -> str:
     return str(ct) if isinstance(ct, str) and ct else "pickle/object"
 
 
+def _add_harness_params(
+    params: dict[str, Any],
+    mutation_defines: list[str] | None,
+    tables: dict[str, dict[str, Any]] | None,
+) -> None:
+    """Carry to a worker the two harness inputs only a local run used to get.
+
+    ``mutation_defines`` names the variables a cell changes in place without
+    rebinding -- the harness re-serializes exactly those, and without the list
+    it sees an unchanged ``id()`` and stores nothing. ``tables`` carries each
+    ``@table``'s uri and the snapshot the executor resolved, which the harness
+    injects as ``<name>`` and ``<name>_snapshot``; no catalog is needed at the
+    far end to read them.
+
+    Added only when the cell has them, so a cell with neither sends the bytes
+    it always sent.
+    """
+    if mutation_defines:
+        params["mutation_defines"] = list(mutation_defines)
+    if tables:
+        params["tables"] = tables
+
+
 def _add_fetch_inputs(
     input_specs: dict[str, dict[str, Any]], fetched: dict[str, Path], output_dir: Path
 ) -> None:
@@ -2419,6 +2442,8 @@ class CellExecutor:
                     runtime_env,
                     timeout_seconds,
                     remote_build_id=remote_build_id,
+                    mutation_defines=mutation_defines,
+                    tables=tables,
                     cell_id=cell_id,
                     cell_provenance_hash=cell_provenance_hash,
                 )
@@ -2554,6 +2579,8 @@ class CellExecutor:
         runtime_env: dict[str, str],
         timeout_seconds: float,
         remote_build_id: str | None = None,
+        mutation_defines: list[str] | None = None,
+        tables: dict[str, dict[str, Any]] | None = None,
         cell_id: str | None = None,
         cell_provenance_hash: str | None = None,
         language: str = "python",
@@ -2581,6 +2608,8 @@ class CellExecutor:
                 runtime_env,
                 timeout_seconds,
                 build_id=remote_build_id,
+                mutation_defines=mutation_defines,
+                tables=tables,
                 cell_id=cell_id,
                 cell_provenance_hash=cell_provenance_hash,
                 language=language,
@@ -2632,6 +2661,13 @@ class CellExecutor:
         # Python cells.
         if language != "python":
             metadata["transform"]["params"]["language"] = language
+        # Sent only when the cell has them, so a cell with neither puts the
+        # same bytes on the wire as before. A cell with either used to put
+        # them nowhere: the local dispatch passed both to the harness and this
+        # one silently dropped them, so the same source rebound its inputs and
+        # recaptured its mutations locally, and did neither on a worker --
+        # under the same provenance hash.
+        _add_harness_params(metadata["transform"]["params"], mutation_defines, tables)
         environment = await self._locked_environment(worker_spec) if language == "python" else None
         if environment is not None:
             metadata["transform"]["params"]["environment"] = environment
@@ -2753,6 +2789,8 @@ class CellExecutor:
         runtime_env: dict[str, str],
         timeout_seconds: float,
         build_id: str | None = None,
+        mutation_defines: list[str] | None = None,
+        tables: dict[str, dict[str, Any]] | None = None,
         cell_id: str | None = None,
         cell_provenance_hash: str | None = None,
         language: str = "python",
@@ -2850,6 +2888,10 @@ class CellExecutor:
         }
         if language != "python":
             build_params["language"] = language
+        # Same reason as the v1 path above. These belong in ``params``, not
+        # beside them: they change what the cell computes, so two dispatches
+        # that differ in them are not the same build.
+        _add_harness_params(build_params, mutation_defines, tables)
         environment = await self._locked_environment(worker_spec) if language == "python" else None
         if environment is not None:
             build_params["environment"] = environment
@@ -5787,6 +5829,15 @@ class CellExecutor:
                         send_response,
                         cell_results,
                         batch_tmpdir,
+                        # What the subprocess was given, frozen when the
+                        # partition was built. ``cell.source`` moves under a
+                        # running batch -- nothing refuses an edit to a cell
+                        # whose turn has not come -- and hashing that would
+                        # file this run's outputs under the edit's key.
+                        executed_sources={
+                            str(spec.get("cell_id", "")): str(spec.get("source", ""))
+                            for spec in cell_specs
+                        },
                         use_cache=use_cache,
                         on_cell_event=on_cell_event,
                         watchdog_state=watchdog_state,
@@ -5854,6 +5905,7 @@ class CellExecutor:
         cell_results: dict[str, BatchCellResult],
         batch_tmpdir: Path,
         *,
+        executed_sources: dict[str, str],
         use_cache: bool,
         on_cell_event: Callable[[BatchCellResult], Awaitable[None]] | None = None,
         watchdog_state: dict[str, Any] | None = None,
@@ -5949,11 +6001,14 @@ class CellExecutor:
                 response = await self._batch_service_cache_check(
                     payload.get("cell_id", ""),
                     batch_tmpdir,
+                    executed_sources=executed_sources,
                     use_cache=use_cache,
                 )
                 send_response(response)
             elif ftype == "persist":
-                response = await self._batch_service_persist(payload, batch_tmpdir)
+                response = await self._batch_service_persist(
+                    payload, batch_tmpdir, executed_sources=executed_sources
+                )
                 cell_id_pl = payload["cell_id"]
                 if response.get("ok"):
                     # Prefer post-persist display metadata (carries
@@ -6110,6 +6165,7 @@ class CellExecutor:
         cell_id: str,
         batch_tmpdir: Path,
         *,
+        executed_sources: dict[str, str],
         use_cache: bool,
     ) -> dict[str, Any]:
         """Service a ``cache_check`` request from the batch harness.
@@ -6123,7 +6179,9 @@ class CellExecutor:
         if cell is None:
             return {"cache_hit": False, "provenance_hash": ""}
 
-        source = cell.source
+        # The source in the partition, not the one in the session: an edit
+        # that lands mid-batch must not decide whether this run is a hit.
+        source = executed_sources.get(cell_id, cell.source)
         try:
             prov = await self._compute_cell_provenance(cell_id, source)
         except Exception as exc:
@@ -6220,6 +6278,8 @@ class CellExecutor:
         self,
         payload: dict[str, Any],
         batch_tmpdir: Path,
+        *,
+        executed_sources: dict[str, str],
     ) -> dict[str, Any]:
         """Service a ``persist`` request from the batch harness.
 
@@ -6237,10 +6297,14 @@ class CellExecutor:
         if not cell_output_dir.exists():
             return {"ok": False, "error": f"output dir missing for {cell_id}"}
 
-        # Recompute provenance (same as cache_check). Deterministic given
-        # the cell's current source + upstream artifact_uris.
+        # Everything recorded here describes the run, so everything here
+        # reads the source that ran rather than the one the session holds
+        # now. Reading ``cell.source`` filed a cell's outputs under the hash
+        # of an edit made while the batch was still working through the cells
+        # before it -- green on reopen, and the wrong bytes.
+        executed_source = executed_sources.get(cell_id, cell.source)
         try:
-            prov = await self._compute_cell_provenance(cell_id, cell.source)
+            prov = await self._compute_cell_provenance(cell_id, executed_source)
         except Exception as exc:
             return {"ok": False, "error": f"provenance compute failed: {exc}"}
 
@@ -6260,7 +6324,7 @@ class CellExecutor:
         try:
             module_export_error = self._write_module_export_outputs(
                 cell_id,
-                cell.source,
+                executed_source,
                 cell_output_dir,
                 provenance_hash,
                 {},  # outputs dict; module export reads from AST, not this
@@ -6277,7 +6341,7 @@ class CellExecutor:
             provenance_hash,
             input_hashes,
             source_hash=source_hash,
-            source=cell.source,
+            source=executed_source,
             env_hash=env_hash,
         )
 

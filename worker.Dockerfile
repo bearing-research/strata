@@ -39,8 +39,16 @@ FROM python:3.14-slim
 # it inside a checkout does NOT pick up local changes to the worker -- you get
 # the published version. To test unreleased worker code, build a wheel
 # (``uv build``) and install that instead of this line.
+#
+# ``uv`` comes with it, and is not optional either. A cell whose notebook has a
+# uv.lock -- which is every notebook ``strata new`` creates -- is dispatched
+# with a locked environment, and building one is a ``uv sync --frozen``
+# (worker_env.py). Without uv on PATH the worker now answers
+# ``locked_environments: false`` and the server runs the cell in this image
+# instead, which works but ignores the notebook's own pins; with it, the
+# notebook's environment is what the cell gets.
 ARG STRATA_VERSION=0.7.0
-RUN pip install --no-cache-dir "strata-notebook[notebook]==${STRATA_VERSION}"
+RUN pip install --no-cache-dir "strata-notebook[notebook]==${STRATA_VERSION}" uv
 
 # R cells, with --build-arg WITH_R=true:
 #
