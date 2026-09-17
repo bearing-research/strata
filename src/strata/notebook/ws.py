@@ -2522,7 +2522,11 @@ async def _run_partition_batch(
         mount_manifest: dict[str, dict[str, str]] = {}
         if mount_specs:
             try:
-                resolved_mounts = await executor._mount_resolver.prepare_mounts(mount_specs)
+                # ``_prepare_mounts``, not the resolver directly: it is what
+                # populates the credential resolver first. Reaching past it
+                # meant a mount naming a credential resolved on its own and
+                # failed inside Run All only.
+                resolved_mounts = await executor._prepare_mounts(mount_specs)
             except Exception as exc:
                 mount_failed_cells.append((cell.id, exc))
                 continue
@@ -2568,6 +2572,12 @@ async def _run_partition_batch(
                 # on its own or in Run All, and the batch had no credential for
                 # the place it was sent.
                 "strata_url": executor._cell_strata_url(),
+                # Without it the cell's ambient client is built with no
+                # promote url, and ``strata.promote(...)`` inside Run All
+                # answered "No team store is configured" -- to a user who
+                # had configured one, and whose identical cell promotes
+                # fine when run on its own.
+                "strata_promote_url": executor._ambient_promote_url(),
                 "source_hash": "",
                 "env_hash": "",
             }

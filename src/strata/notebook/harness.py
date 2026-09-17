@@ -474,13 +474,23 @@ def _run_one_batched_cell(
     }
     inject_mounts({"mounts": mount_manifest}, namespace)
     inject_tables({"tables": table_manifest}, namespace)
-    ambient_client = inject_client(cell, namespace)
+    ambient_client = None
 
     try:
         with apply_env_overrides({"env": cell_env}):
             # Cache check — parent decides hit/miss.
             _send_frame(frame_out, "cache_check", {"cell_id": cell_id})
             response = _recv_response(resp_in)
+
+            # After the response, because the parent answers it with the
+            # artifact uri of every input this cell reads -- a single-cell
+            # run reads the same map out of its manifest, and without it
+            # ``strata.promote("rows")`` cannot say which input it means.
+            # Still before the namespace is snapshotted below, so ``strata``
+            # is an injected input rather than something the cell produced.
+            ambient_client = inject_client(
+                {**cell, "inputs": response.get("input_uris") or {}}, namespace
+            )
 
             if response.get("cache_hit"):
                 # Load cached outputs into namespace. Parent has already

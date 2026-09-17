@@ -460,3 +460,101 @@ async def test_an_edit_during_a_batch_does_not_rename_what_ran(tmp_path: Path):
     assert store.find_by_provenance(derive_subkey(ran.provenance_hash, "y")) is not None, (
         "the result was not stored under the source that actually ran"
     )
+
+
+@pytest.mark.asyncio
+async def test_a_cell_in_a_batch_can_promote_what_it_reads(tmp_path: Path):
+    """``strata.promote("x")`` names an input the way the cell names it, which
+    takes two things a batch did not give it: a promote url, and the map from
+    variable to artifact uri. Without the map the client cannot turn ``x`` into
+    an id; without the url it reports there is no team store at all -- to a
+    user who has one, about a cell that promotes fine when run on its own.
+    """
+    import http.server
+    import threading
+
+    promoted: list[str] = []
+
+    class _Store(http.server.BaseHTTPRequestHandler):
+        def do_POST(self) -> None:  # noqa: N802 - http.server's spelling
+            promoted.append(self.path)
+            body = b'{"ok": true}'
+            self.send_response(200)
+            self.send_header("content-type", "application/json")
+            self.send_header("content-length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *args) -> None:
+            return
+
+    server = http.server.HTTPServer(("127.0.0.1", 0), _Store)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    port = server.server_address[1]
+    try:
+        session = _make_session_with_cells(
+            tmp_path,
+            [
+                ("c1", "x = 41\n"),
+                ("c2", 'strata.promote("x", name="shared/x")\ny = x + 1\n'),
+            ],
+        )
+        specs = _populate_consumed_vars(
+            [
+                _cell_spec("c1", "x = 41\n"),
+                _cell_spec("c2", 'strata.promote("x", name="shared/x")\ny = x + 1\n'),
+            ],
+            session,
+        )
+        for spec in specs:
+            spec["strata_url"] = f"http://127.0.0.1:{port}"
+            spec["strata_promote_url"] = f"http://127.0.0.1:{port}"
+
+        outcome = await CellExecutor(session).execute_batch(specs)
+
+        assert outcome.completed, f"batch failed: {outcome.end_reason}"
+        statuses = {r.cell_id: r.status for r in outcome.cell_results}
+        assert statuses["c2"] == "ok", (
+            f"the promoting cell failed: "
+            f"{[r.error for r in outcome.cell_results if r.cell_id == 'c2']}"
+        )
+        assert promoted, "the cell never reached the team store"
+        assert "/promote" in promoted[0] and "@v=" not in promoted[0], promoted[0]
+        assert "_cell_c1_var_x" in promoted[0], (
+            f"promoted something other than c1's x: {promoted[0]}"
+        )
+    finally:
+        server.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_nocache_runs_every_time_in_a_batch_too(tmp_path: Path):
+    """``# @nocache`` marks a cell whose effect the artifact does not capture.
+    Run All served it from cache, so the effect did not happen -- and the agent
+    guide tells agents to mark exactly these cells with it.
+    """
+    source = "# @nocache\nimport pathlib\nx = 1\n"
+    # c3 exists so c2 has a consumer: a cell nothing reads has no consumed
+    # vars, which the batch treats as a miss every time, and would make the
+    # control below prove nothing.
+    session = _make_session_with_cells(
+        tmp_path,
+        [("c1", source), ("c2", "y = x + 1\n"), ("c3", "z = y + 1\n")],
+    )
+    specs = _populate_consumed_vars(
+        [
+            _cell_spec("c1", source),
+            _cell_spec("c2", "y = x + 1\n"),
+            _cell_spec("c3", "z = y + 1\n"),
+        ],
+        session,
+    )
+    executor = CellExecutor(session)
+
+    first = await executor.execute_batch(specs)
+    second = await executor.execute_batch(specs)
+
+    assert first.completed and second.completed
+    hits = {r.cell_id: r.cache_hit for r in second.cell_results}
+    assert hits["c1"] is False, "a @nocache cell was served from cache inside Run All"
+    assert hits["c2"] is True, "the ordinary cell should still cache, or this proves nothing"

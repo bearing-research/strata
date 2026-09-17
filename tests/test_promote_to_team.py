@@ -705,6 +705,45 @@ class TestAmbientPromoteWiring:
             "run-all would point cells somewhere a single run does not"
         )
 
+    def test_run_all_gives_cells_somewhere_to_promote_to(self):
+        """Structural, for the same reason as the url above it.
+
+        The spec carried the url a cell reads from and not the one it
+        promotes to, so ``strata.promote(...)`` inside Run All told a user
+        who had configured a team store that there was no team store.
+        """
+        import inspect
+
+        from strata.notebook import ws
+
+        source = inspect.getsource(ws._run_partition_batch)
+
+        assignments = [
+            line.strip() for line in source.splitlines() if '"strata_promote_url":' in line
+        ]
+
+        assert assignments == ['"strata_promote_url": executor._ambient_promote_url(),'], (
+            "a cell in Run All has no promote url, so promoting from one raises"
+        )
+
+    def test_run_all_resolves_mount_credentials_the_way_a_single_run_does(self):
+        """``_prepare_mounts`` is not a thin alias for the resolver: it fills in
+        the credential resolver first. Reaching past it to
+        ``_mount_resolver.prepare_mounts`` left a mount naming a credential
+        unresolvable, so ``# mount data s3://... credential=lab`` worked alone
+        and failed in Run All.
+        """
+        import inspect
+
+        from strata.notebook import ws
+
+        source = inspect.getsource(ws._run_partition_batch)
+
+        assert "_mount_resolver.prepare_mounts(" not in source, (
+            "run-all resolves mounts without a credential resolver"
+        )
+        assert "executor._prepare_mounts(" in source
+
     @pytest.mark.parametrize("path", ["harness", "pool_worker"])
     def test_both_execution_paths_hand_it_to_the_client(self, path, monkeypatch):
         import importlib
