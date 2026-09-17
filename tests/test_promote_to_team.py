@@ -685,6 +685,26 @@ class TestAmbientPromoteWiring:
         assert "s3cret" not in manifest_path.read_text()
         assert manifest["strata_url"] == "http://nb.local", "a cell asks this server"
 
+    def test_run_all_points_cells_at_the_same_place_a_single_run_does(self):
+        """Structural, because the batch spec is built inline in a handler that
+        needs seven executor internals to fake -- and fakes of those drift.
+
+        With a team store configured the two urls differ, so a batch that asked
+        for the ambient one sent identical cell source somewhere else than a
+        single-cell run did, with no credential for the place it was sent.
+        """
+        import inspect
+
+        from strata.notebook import ws
+
+        source = inspect.getsource(ws._run_partition_batch)
+
+        assignments = [line.strip() for line in source.splitlines() if '"strata_url":' in line]
+
+        assert assignments == ['"strata_url": executor._cell_strata_url(),'], (
+            "run-all would point cells somewhere a single run does not"
+        )
+
     @pytest.mark.parametrize("path", ["harness", "pool_worker"])
     def test_both_execution_paths_hand_it_to_the_client(self, path, monkeypatch):
         import importlib

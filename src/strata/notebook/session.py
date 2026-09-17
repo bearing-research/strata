@@ -245,13 +245,20 @@ class NotebookSession:
             artifact_dir=path / ".strata" / "artifacts",
         )
 
-        # One staleness computation at a time: it mutates the cells it walks,
-        # which on the event loop it had to itself. A threading lock rather
-        # than an asyncio one because a session outlives any single loop --
-        # one built for a test client's portal, say -- and an asyncio.Lock
-        # awaited from a loop other than the one it queued its waiter on never
-        # wakes. This one is only ever taken inside the worker thread.
-        self._staleness_lock = threading.Lock()
+        # One staleness computation at a time: it mutates the cells it walks
+        # -- status, staleness, artifact uris -- which on the event loop it had
+        # to itself. Taken by ``compute_staleness`` itself rather than only by
+        # the off-loop wrapper, because the callers that stayed on the loop
+        # walk the same cells: a thread part-way through a slow fetch and an
+        # on-loop recompute would otherwise write a cell's status over each
+        # other, and the cascade planner reads exactly that.
+        #
+        # Reentrant so the off-loop wrapper can hold it across the call it
+        # makes. A threading lock rather than an asyncio one because a session
+        # outlives any single loop -- one built for a test client's portal,
+        # say -- and an asyncio.Lock awaited from a loop other than the one it
+        # queued its waiter on never wakes.
+        self._staleness_lock = threading.RLock()
 
         # M6: Initialize warm process pool (optional)
         self.warm_pool: WarmProcessPool | None = None
@@ -804,12 +811,7 @@ class NotebookSession:
         Serialized, because the work mutates the cells it walks. On the loop
         that was free; two of these in threads at once would not be.
         """
-        return await asyncio.to_thread(self._compute_staleness_serialized)
-
-    def _compute_staleness_serialized(self) -> dict[str, CellStaleness]:
-        """``compute_staleness`` with one caller at a time."""
-        with self._staleness_lock:
-            return self.compute_staleness()
+        return await asyncio.to_thread(self.compute_staleness)
 
     def compute_staleness(self) -> dict[str, CellStaleness]:
         """Compute staleness status for all cells.
@@ -824,6 +826,10 @@ class NotebookSession:
         Returns:
             Dict mapping cell_id -> CellStaleness
         """
+        with self._staleness_lock:
+            return self._compute_staleness_locked()
+
+    def _compute_staleness_locked(self) -> dict[str, CellStaleness]:
         staleness_map: dict[str, CellStaleness] = {}
         stale_cells: set[str] = set()  # Track stale cells for propagation
         if self.dag is None:
