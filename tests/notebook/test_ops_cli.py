@@ -60,6 +60,48 @@ def test_local_ops_status_summary(chain_nb):
     assert all(isinstance(c.staleness_reasons, list) for c in status.cells)
 
 
+def test_an_offline_handle_reports_the_staleness_it_computed(chain_nb):
+    """Only the server's session manager computed staleness on open, so an
+    offline handle reported the answer a cold session starts with -- every cell
+    idle, no reasons -- whatever the notebook actually looked like. It is the
+    surface agents and the CLI read.
+
+    The scenario has to be one where idle is the *wrong* answer, or it passes
+    on a notebook where everything is idle anyway.
+    """
+    import json
+
+    from strata.notebook.parser import parse_notebook
+    from strata.notebook.session import NotebookSession
+    from strata.notebook.writer import write_cell
+
+    # Give b a recorded run to go stale *from*: with none it is idle, which is
+    # also not ready, and the assertion would hold for the wrong reason.
+    runtime = chain_nb / ".strata" / "runtime.json"
+    runtime.parent.mkdir(parents=True, exist_ok=True)
+    state = json.loads(runtime.read_text()) if runtime.exists() else {"cells": {}}
+    state.setdefault("cells", {})["b"] = {"last_provenance_hash": "deadbeef"}
+    runtime.write_text(json.dumps(state))
+    write_cell(chain_nb, "a", "x = 2")
+
+    rows = {row.id: row for row in LocalNotebookOps(chain_nb).status().cells}
+
+    assert rows["b"].status == "stale", f"b should be stale after a changed, got {rows['b'].status}"
+    assert "upstream" in rows["b"].staleness_reasons
+    # And it is the same answer something that does the work arrives at.
+    truth = NotebookSession(parse_notebook(chain_nb), chain_nb).compute_staleness()
+    assert {cid: st.status for cid, st in truth.items()} == {
+        cid: row.status for cid, row in rows.items()
+    }
+
+    # Every read that reports a status, not just the summary: `cell ls` and
+    # `cell show` print the same field from the same handle.
+    listed = {cell.id: cell for cell in LocalNotebookOps(chain_nb).list_cells()}
+    assert listed["b"].status == "stale", "cell ls reports a status of its own"
+    shown = LocalNotebookOps(chain_nb).get_cell("b")
+    assert shown.status == "stale", "cell show reports a status of its own"
+
+
 def test_cli_cell_list_json(chain_nb, capsys):
     rc = main(["cell", "list", str(chain_nb), "--format", "json"])
     assert rc == 0

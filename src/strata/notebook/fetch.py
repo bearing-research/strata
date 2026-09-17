@@ -42,7 +42,7 @@ import re
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 from urllib.parse import urlparse
 
 import httpx
@@ -59,6 +59,26 @@ RefetchPolicy = Literal["never", "stale", "always"]
 
 _SHA256 = re.compile(r"[0-9a-f]{64}")
 _UNSAFE_NAME = re.compile(r"[^A-Za-z0-9._-]")
+
+
+def guard_settings(config: Any) -> tuple[tuple[str, ...], bool]:
+    """How strictly to check an ``@fetch`` URL, from the server's configuration.
+
+    Returns the host allowlist and whether a loopback or private address is
+    allowed. Personal mode allows them: that deployment is one person's own
+    machine, where ``http://localhost:8000/data.csv`` is their own dev server
+    and not a trust boundary being crossed, and refusing it does not protect
+    them from anything -- it only means the feature cannot be used on the
+    machine most people try it on first. A service deployment keeps the guard,
+    where the address a URL resolves to is exactly the question.
+
+    One helper because the executor and the staleness walk both build a
+    ``FetchCache`` and have to agree: a fetch the run accepts and the staleness
+    check refuses is a cell that never settles.
+    """
+    allowed = tuple(getattr(config, "notebook_fetch_allowed_hosts", None) or ())
+    personal = getattr(config, "deployment_mode", "service") == "personal"
+    return allowed, personal
 
 
 def _safe_filename(name: str) -> str:
@@ -104,11 +124,13 @@ class FetchCache:
         notebook_dir: Path,
         *,
         allowed_hosts: tuple[str, ...] = (),
+        allow_local: bool = False,
         client: httpx.Client | None = None,
         clock=time.time,
     ):
         self.root = Path(notebook_dir) / ".strata" / "fetch"
         self._allowed_hosts = allowed_hosts
+        self._allow_local = allow_local
         self._client = client
         self._clock = clock
 
@@ -183,7 +205,10 @@ class FetchCache:
                 # itself would check only the first URL, and a public host that
                 # redirects to 169.254.169.254 is the request the guard exists for.
                 problem = url_safety_problem(
-                    url, f"@fetch {spec.name}", allowed_hosts=self._allowed_hosts
+                    url,
+                    f"@fetch {spec.name}",
+                    allowed_hosts=self._allowed_hosts,
+                    allow_local=self._allow_local,
                 )
                 if problem is not None:
                     raise FetchError(problem)

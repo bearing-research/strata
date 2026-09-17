@@ -2043,14 +2043,10 @@ class NotebookSession:
         annotations = parse_annotations(cell.source)
         if not annotations.fetches:
             return []
-        from strata.notebook.fetch import FetchCache
+        from strata.notebook.fetch import FetchCache, guard_settings
 
-        cache = FetchCache(
-            self.path,
-            allowed_hosts=tuple(
-                getattr(self._lake_config(), "notebook_fetch_allowed_hosts", None) or ()
-            ),
-        )
+        allowed_hosts, allow_local = guard_settings(self._lake_config())
+        cache = FetchCache(self.path, allowed_hosts=allowed_hosts, allow_local=allow_local)
         return [
             cache.fingerprint(spec) for spec in sorted(annotations.fetches, key=lambda s: s.name)
         ]
