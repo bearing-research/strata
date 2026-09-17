@@ -140,8 +140,14 @@ class TestStalenessOffTheEventLoop:
         )
 
     @pytest.mark.asyncio
-    async def test_two_at_once_do_not_overlap(self, three_cell_notebook, monkeypatch):
-        """It mutates the cells it walks. On the loop that was free."""
+    async def test_a_caller_that_stayed_on_the_loop_does_not_interleave(
+        self, three_cell_notebook, monkeypatch
+    ):
+        """Not every caller was moved off the loop -- the broadcast path runs
+        between a cell's result and the frames describing it, where an await
+        reorders them. So the one in the thread and the one on the loop walk
+        the same cells, writing each cell's status, and the cascade planner
+        reads exactly that."""
         import asyncio
         import threading
 
@@ -150,7 +156,7 @@ class TestStalenessOffTheEventLoop:
         inside = 0
         overlapped = False
         guard = threading.Lock()
-        original = session.compute_staleness
+        original = session._compute_staleness_locked
 
         def _watch():
             nonlocal inside, overlapped
@@ -164,7 +170,44 @@ class TestStalenessOffTheEventLoop:
                 with guard:
                     inside -= 1
 
-        monkeypatch.setattr(session, "compute_staleness", _watch)
+        monkeypatch.setattr(session, "_compute_staleness_locked", _watch)
+
+        offloaded = asyncio.create_task(session.compute_staleness_async())
+        await asyncio.sleep(0)
+        session.compute_staleness()  # the on-loop caller, as ws.py still makes
+        await offloaded
+
+        assert not overlapped
+
+    @pytest.mark.asyncio
+    async def test_two_at_once_do_not_overlap(self, three_cell_notebook, monkeypatch):
+        """It mutates the cells it walks. On the loop that was free."""
+        import asyncio
+        import threading
+
+        notebook_dir, notebook_state = three_cell_notebook
+        session = NotebookSession(notebook_state, notebook_dir)
+        inside = 0
+        overlapped = False
+        guard = threading.Lock()
+        # The body inside the lock, not the entry point: threads queue at the
+        # lock, so a wrapper around the entry point sees them arrive together
+        # whether or not the serialization works.
+        original = session._compute_staleness_locked
+
+        def _watch():
+            nonlocal inside, overlapped
+            with guard:
+                inside += 1
+                if inside > 1:
+                    overlapped = True
+            try:
+                return original()
+            finally:
+                with guard:
+                    inside -= 1
+
+        monkeypatch.setattr(session, "_compute_staleness_locked", _watch)
 
         await asyncio.gather(*(session.compute_staleness_async() for _ in range(4)))
 

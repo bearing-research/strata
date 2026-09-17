@@ -180,6 +180,60 @@ class TestAWorkerThatCannotBeAsked:
         health = workers._health_url_for_worker(worker)
         assert health not in workers._advertised_features
 
+    @staticmethod
+    def _serving(status: int, body: bytes = b"{}"):
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):  # noqa: N802
+                self.send_response(status)
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            def log_message(self, *args):
+                return None
+
+        server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        return server
+
+    @pytest.mark.asyncio
+    async def test_a_worker_with_no_health_route_has_answered(self, tmp_path):
+        """A 404 is a live worker saying the route is not there -- older than
+        the health document, and older than every feature it would list. It
+        keeps what every worker got before the feature existed."""
+        from strata.notebook import workers
+
+        server = self._serving(404)
+        try:
+            worker = self._worker(f"http://127.0.0.1:{server.server_address[1]}/v1/execute")
+
+            assert await workers.worker_advertises(worker, "locked_environments") is False
+        finally:
+            server.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_a_worker_that_is_up_and_unwell_has_not(self, tmp_path):
+        """A 503 while it starts is not an answer about its features."""
+        from strata.notebook import workers
+
+        server = self._serving(503)
+        try:
+            worker = self._worker(f"http://127.0.0.1:{server.server_address[1]}/v1/execute")
+
+            assert await workers.worker_advertises(worker, "locked_environments") is None
+        finally:
+            server.shutdown()
+
+    def test_the_probe_outlasts_the_worker_it_asks(self):
+        """``/health`` reports the machine's hardware, and on a GPU box the
+        first call shells out to nvidia-smi with a timeout of its own. A probe
+        that gave up first refused the opening cell on exactly the machine a
+        pool had just started."""
+        from strata.notebook.hardware import _NVIDIA_SMI_TIMEOUT_SECONDS
+        from strata.notebook.workers import _PROBE_TIMEOUT_SECONDS
+
+        assert _PROBE_TIMEOUT_SECONDS > _NVIDIA_SMI_TIMEOUT_SECONDS
+
     @pytest.mark.asyncio
     async def test_a_locked_notebook_refuses_rather_than_guess(self, tmp_path):
         from strata.notebook.executor import CellExecutor

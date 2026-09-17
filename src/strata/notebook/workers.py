@@ -652,6 +652,12 @@ def build_worker_catalog(notebook_state: NotebookState) -> list[dict[str, Any]]:
 # Features a worker's /health advertises, by health URL, with when they were
 # read. Dispatch asks on every cell, so the answer is kept for a minute.
 _FEATURES_TTL_SECONDS = 60.0
+# Longer than the worker's own ``/health`` takes to answer the first time. It
+# reports the machine's hardware, and on a GPU box that shells out to
+# ``nvidia-smi`` with a ten-second timeout of its own -- so a five-second probe
+# timed out on exactly the machine a pool had just started, and a notebook with
+# a lock had its first cell there refused.
+_PROBE_TIMEOUT_SECONDS = 20.0
 _advertised_features: dict[str, tuple[float, dict[str, Any]]] = {}
 
 
@@ -670,18 +676,29 @@ async def worker_advertises(worker: WorkerSpec, feature: str) -> bool | None:
     """
     health_url = _health_url_for_worker(worker)
     if health_url is None:
-        return False
+        # Nowhere to ask, which is not the same as having asked.
+        return None
     cached = _advertised_features.get(health_url)
     if cached is None or time.monotonic() - cached[0] >= _FEATURES_TTL_SECONDS:
         try:
-            async with httpx.AsyncClient(timeout=5.0) as client:
+            async with httpx.AsyncClient(timeout=_PROBE_TIMEOUT_SECONDS) as client:
                 response = await client.get(health_url)
-            if response.status_code != 200:
-                return None
+        except (httpx.HTTPError, AttributeError):
+            # Nothing came back. Ask again next time rather than deciding.
+            return None
+        if response.status_code in (404, 405, 501):
+            # A worker that answers, and has no such route: older than the
+            # health document, and older than every feature it would list.
+            return False
+        if response.status_code != 200:
+            # It is up and unwell -- a gateway error, a 503 while starting.
+            # That is not an answer about its features either.
+            return None
+        try:
             features: dict[str, Any] = (
                 response.json().get("capabilities", {}).get("features", {}) or {}
             )
-        except (httpx.HTTPError, ValueError, AttributeError):
+        except (ValueError, AttributeError):
             return None
         cached = (time.monotonic(), features)
         _advertised_features[health_url] = cached

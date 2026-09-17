@@ -2561,7 +2561,13 @@ async def _run_partition_batch(
                 "env": effective_env,
                 "mount_manifest": mount_manifest,
                 "table_manifest": table_manifest,
-                "strata_url": executor._ambient_strata_url(),
+                # The same url a single-cell run gets. This said
+                # ``_ambient_strata_url()``, which is the team store when one
+                # is configured -- so with a team store the identical cell
+                # source reached a different place depending on whether it ran
+                # on its own or in Run All, and the batch had no credential for
+                # the place it was sent.
+                "strata_url": executor._cell_strata_url(),
                 "source_hash": "",
                 "env_hash": "",
             }
