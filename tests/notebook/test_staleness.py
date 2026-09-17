@@ -117,6 +117,47 @@ class TestStalenessOffTheEventLoop:
     unreachable host stalled every notebook's socket and every stream in
     flight, so the async callers hand the work to a thread."""
 
+    def test_the_lock_is_free_while_the_outside_world_is_read(
+        self, three_cell_notebook, monkeypatch
+    ):
+        """Serializing the walk is not licence to hold the lock across a
+        sixty-second fetch. The broadcast path takes this lock on the event
+        loop, so a thread holding it out there is every socket in the process
+        waiting on someone else's network."""
+        import threading
+
+        notebook_dir, notebook_state = three_cell_notebook
+        session = NotebookSession(notebook_state, notebook_dir)
+        free_while_reading: list[bool] = []
+        original = session._collect_fetch_fingerprints
+
+        def _probe(cell):
+            # From another thread: the lock is reentrant, so the thread doing
+            # the reading can always take it and would learn nothing.
+            answer: list[bool] = []
+
+            def _try() -> None:
+                got = session._staleness_lock.acquire(timeout=0.5)
+                if got:
+                    session._staleness_lock.release()
+                answer.append(got)
+
+            probe = threading.Thread(target=_try)
+            probe.start()
+            probe.join()
+            free_while_reading.append(answer[0])
+            return original(cell)
+
+        monkeypatch.setattr(session, "_collect_fetch_fingerprints", _probe)
+
+        session.compute_staleness()
+
+        assert free_while_reading, "the outside world was never read"
+        assert all(free_while_reading), (
+            "the staleness lock was held while reading the outside world, so a "
+            "slow fetch blocks every caller -- including the event loop"
+        )
+
     @pytest.mark.asyncio
     async def test_the_work_does_not_run_on_the_loop_thread(self, three_cell_notebook, monkeypatch):
         import threading
@@ -158,14 +199,14 @@ class TestStalenessOffTheEventLoop:
         guard = threading.Lock()
         original = session._compute_staleness_locked
 
-        def _watch():
+        def _watch(prefetched):
             nonlocal inside, overlapped
             with guard:
                 inside += 1
                 if inside > 1:
                     overlapped = True
             try:
-                return original()
+                return original(prefetched)
             finally:
                 with guard:
                     inside -= 1
@@ -195,14 +236,14 @@ class TestStalenessOffTheEventLoop:
         # whether or not the serialization works.
         original = session._compute_staleness_locked
 
-        def _watch():
+        def _watch(prefetched):
             nonlocal inside, overlapped
             with guard:
                 inside += 1
                 if inside > 1:
                     overlapped = True
             try:
-                return original()
+                return original(prefetched)
             finally:
                 with guard:
                     inside -= 1

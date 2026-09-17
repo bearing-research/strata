@@ -510,6 +510,8 @@ def create_notebook_executor_app(
         cell_id: str | None = None,
         environment: Any = None,
         language: str = "python",
+        mutation_defines: list[str] | None = None,
+        tables: dict[str, dict[str, Any]] | None = None,
     ) -> tuple[Path, Path] | JSONResponse:
         """Execute a cell and pack outputs into a bundle file.
 
@@ -557,6 +559,8 @@ def create_notebook_executor_app(
                     gpu=gpu,
                     environment=environment,
                     language=language,
+                    mutation_defines=mutation_defines,
+                    tables=tables,
                 )
         finally:
             _release(gpu)
@@ -574,6 +578,8 @@ def create_notebook_executor_app(
         gpu: int | None,
         environment: Any = None,
         language: str = "python",
+        mutation_defines: list[str] | None = None,
+        tables: dict[str, dict[str, Any]] | None = None,
     ) -> tuple[Path, Path] | JSONResponse:
         if gpu is not None:
             # Both the cell's environment and the process's: the manifest env
@@ -646,6 +652,13 @@ def create_notebook_executor_app(
                 "output_dir": str(output_dir),
                 "mounts": manifest_mounts,
                 "env": runtime_env,
+                # What the server says this cell mutates in place and reads
+                # from the lake. Both reach a local harness through its
+                # manifest; a worker got neither, so the same cell recaptured
+                # its mutations in one place and not the other, and an @table
+                # name was simply undefined here.
+                "mutation_defines": list(mutation_defines or []),
+                "tables": tables or {},
             }
             manifest_path = output_dir / "manifest.json"
             with open(manifest_path, "w", encoding="utf-8") as f:
@@ -745,6 +758,8 @@ def create_notebook_executor_app(
         trace_carrier: dict[str, Any] | None = None,
         environment: Any = None,
         language: str = "python",
+        mutation_defines: list[str] | None = None,
+        tables: dict[str, dict[str, Any]] | None = None,
     ) -> Response:
         async def _write_uploaded_input(
             var_name: str,
@@ -776,6 +791,8 @@ def create_notebook_executor_app(
             trace_carrier=trace_carrier,
             environment=environment,
             language=language,
+            mutation_defines=mutation_defines,
+            tables=tables,
         )
         if isinstance(result, JSONResponse):
             return result
@@ -812,8 +829,15 @@ def create_notebook_executor_app(
                     "pull_model": True,
                     "cancel": True,
                     # Runs a cell in the notebook's locked environment when the
-                    # request carries one (``worker_env``).
-                    "locked_environments": True,
+                    # request carries one (``worker_env``) -- which it can only
+                    # do with uv, since building that environment is a
+                    # ``uv sync --frozen``. Claimed unconditionally, this was a
+                    # worker telling the server to send work it would refuse:
+                    # every notebook has a uv.lock, so a pip-installed image
+                    # (the one worker.Dockerfile builds) failed every Python
+                    # cell with a 500. Probed, exactly as ``languages`` below
+                    # probes for Rscript.
+                    "locked_environments": shutil.which("uv") is not None,
                     # Cell languages this machine can run: R needs Rscript
                     # with jsonlite and arrow in its library.
                     "languages": ["python", "r"] if shutil.which("Rscript") else ["python"],
@@ -895,6 +919,8 @@ def create_notebook_executor_app(
             form=form,
             build_id=str(metadata.get("build_id") or "") or None,
             trace_carrier=dict(http_request.headers),
+            mutation_defines=metadata.get("mutation_defines"),
+            tables=metadata.get("tables"),
             environment=metadata.get("environment"),
             language=str(metadata.get("language") or "python"),
         )
@@ -974,6 +1000,8 @@ def create_notebook_executor_app(
             trace_carrier=dict(http_request.headers),
             environment=params.get("environment"),
             language=str(params.get("language") or "python"),
+            mutation_defines=params.get("mutation_defines"),
+            tables=params.get("tables"),
         )
 
     @app.post("/v1/execute-manifest", dependencies=[Depends(require_worker_token)])
@@ -1129,6 +1157,8 @@ def create_notebook_executor_app(
             cell_id=str(metadata.get("cell_id") or "") or None,
             environment=params.get("environment"),
             language=str(params.get("language") or "python"),
+            mutation_defines=params.get("mutation_defines"),
+            tables=params.get("tables"),
         )
         if isinstance(bundle_result, JSONResponse):
             return bundle_result

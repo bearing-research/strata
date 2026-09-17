@@ -96,6 +96,7 @@ async def test_batch_service_loop_survives_oversized_frame(tmp_path):
         lambda payload: None,
         {},
         tmp_path,
+        executed_sources={},
         use_cache=True,
     )
     assert end_reason == "subprocess_died"

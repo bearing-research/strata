@@ -6,6 +6,7 @@ import hashlib
 import http.server
 import io
 import json
+import shutil
 import subprocess
 import sys
 import tarfile
@@ -383,3 +384,38 @@ class TestAnEnvironmentIsCompleteWhenItRuns:
 
         assert fetched == [spec["key"]]
         assert prepared.installed is True
+
+
+class TestAWorkerAnswersForTheMachineItIsOn:
+    """The server does not guess whether a worker can build a locked
+    environment -- it asks, and believes the answer. Answered as a constant,
+    that made the question pointless: the image the repo ships installs with
+    pip and has no uv, so it claimed the feature, was sent every notebook's
+    lockfile (they all have one), and failed each cell with a 500."""
+
+    def _features(self, monkeypatch, uv_path):
+        from fastapi.testclient import TestClient
+
+        from strata.notebook.remote_executor import create_notebook_executor_app
+
+        monkeypatch.delenv("STRATA_WORKER_TOKEN", raising=False)
+        real_which = shutil.which
+        monkeypatch.setattr(
+            "strata.notebook.remote_executor.shutil.which",
+            lambda name, *a, **kw: uv_path if name == "uv" else real_which(name, *a, **kw),
+        )
+        client = TestClient(create_notebook_executor_app())
+        return client.get("/health").json()["capabilities"]["features"]
+
+    def test_without_uv_it_says_so(self, monkeypatch):
+        features = self._features(monkeypatch, None)
+
+        assert features["locked_environments"] is False, (
+            "a worker with no uv claimed it could build a locked environment; "
+            "the server would send one and every python cell would fail"
+        )
+
+    def test_with_uv_it_offers_the_feature(self, monkeypatch):
+        features = self._features(monkeypatch, "/usr/local/bin/uv")
+
+        assert features["locked_environments"] is True
