@@ -395,6 +395,83 @@ async def test_a_result_alice_never_published_by_hand_reaches_bob(
     ) == alice_store.load_artifact_data(alice_artifact_id, alice_artifact.version)
 
 
+async def test_run_all_both_contributes_to_the_team_and_is_served_by_it(
+    tmp_path, team_store_server, monkeypatch
+):
+    """The same loop as above, driven through Run All instead of one cell.
+
+    The batch path had neither half: it never offered what it computed and
+    never looked before computing, so a team that used Run All -- the ordinary
+    way to run a notebook -- shared nothing and reused nothing, while the
+    identical notebook run cell by cell did both.
+    """
+    from strata.config import StrataConfig
+    from strata.notebook.executor import CellExecutor
+    from strata.notebook.parser import parse_notebook
+    from strata.notebook.session import NotebookSession
+    from strata.notebook.writer import add_cell_to_notebook, create_notebook, write_cell
+
+    upstream_source = "value = sum(range(5000))"
+    downstream_source = "doubled = value * 2"
+
+    def build(name: str):
+        notebook_dir = create_notebook(tmp_path / name, name)
+        add_cell_to_notebook(notebook_dir, "up", None)
+        write_cell(notebook_dir, "up", upstream_source)
+        add_cell_to_notebook(notebook_dir, "down", "up")
+        write_cell(notebook_dir, "down", downstream_source)
+        session = NotebookSession(parse_notebook(notebook_dir), notebook_dir)
+        session.ensure_venv_synced()
+        return session
+
+    def specs(session):
+        dag = session.dag
+        return [
+            {
+                "cell_id": cell_id,
+                "source": source,
+                "consumed_vars": sorted(dag.consumed_variables.get(cell_id, set()) if dag else ()),
+                "references": [],
+                "env": {},
+                "mount_manifest": {},
+                "table_manifest": {},
+                "source_hash": "",
+                "env_hash": "",
+            }
+            for cell_id, source in (("up", upstream_source), ("down", downstream_source))
+        ]
+
+    team_config = StrataConfig(
+        cache_dir=tmp_path / "shared-config-cache",
+        notebook_remote_store_url=team_store_server["base_url"],
+        notebook_team_cache_enabled=True,
+    )
+    monkeypatch.setattr(CellExecutor, "_lake_config", lambda self: team_config)
+
+    alice = build("alice")
+    alice_run = await CellExecutor(alice).execute_batch(specs(alice))
+    assert alice_run.completed, alice_run.end_reason
+    assert {r.cell_id: r.cache_hit for r in alice_run.cell_results}["up"] is False
+
+    bob = build("bob")
+    bob_run = await CellExecutor(bob).execute_batch(specs(bob))
+
+    assert bob_run.completed, bob_run.end_reason
+    assert {r.cell_id: r.cache_hit for r in bob_run.cell_results}["up"] is True, (
+        "Run All recomputed a cell Alice's Run All had already published"
+    )
+
+    bob_store = bob.get_artifact_manager()
+    bob_artifact_id = bob_store.cell_artifact_id("up", "value")
+    bob_artifact = bob_store.artifact_store.get_latest_version(bob_artifact_id)
+    assert bob_artifact is not None
+    alice_store = alice.get_artifact_manager()
+    alice_artifact_id = alice_store.cell_artifact_id("up", "value")
+    alice_artifact = alice_store.artifact_store.get_latest_version(alice_artifact_id)
+    assert alice_artifact is not None
+    assert bob_artifact.provenance_hash == alice_artifact.provenance_hash
+
+
 async def test_a_store_that_refuses_a_publish_does_not_fail_the_cell(tmp_path, monkeypatch):
     """The cell already succeeded. A read-only member, an expired token, or a
     store that is simply down must cost the *next* person a recomputation and
