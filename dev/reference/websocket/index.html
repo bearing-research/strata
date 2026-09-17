@@ -3022,6 +3022,11 @@
 <td><code>{ "job_id": "...", "content": "...", "model": "...", ... }</code></td>
 <td>Agent finished, failed, or was cancelled</td>
 </tr>
+<tr>
+<td><code>agent_note</code></td>
+<td><code>{ "source": "mcp" \| "agent", "text": "..." }</code></td>
+<td>An outside agent driving this notebook over MCP narrating what it did (<code>mcp</code>) or a note it pushed itself (<code>agent</code>). No <code>job_id</code>: the agent is not the built-in one, and nothing here is part of an agent job</td>
+</tr>
 </tbody>
 </table>
 <h3 id="presence">Presence<a class="headerlink" href="#presence" title="Permanent link">&para;</a></h3>

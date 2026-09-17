@@ -2445,11 +2445,15 @@ enforcement is symmetric across REST and WS, with no opt-outs.</p>
 <li>Every <code>/v1/*</code> request needs <code>X-Strata-Principal</code>, <code>X-Strata-Proxy-Token</code>,
   and <code>X-Tenant-ID</code> (if multi-tenant). The WS upgrade carries the same
   headers; missing or invalid token closes with <code>1008</code>.</li>
-<li>Notebook-session lifecycle endpoints (<code>/open</code>, <code>/create</code>, session
-  reconnect, <code>/discover</code>, path-keyed deletes) are personal-mode-only and
-  return <code>400 Bad Request</code> in service mode - write surface in service mode
-  routes through the artifact build pipeline instead. See the
-  <a href="../rest-api/#authentication">REST API page</a> for the full list.</li>
+<li><code>/open</code>, <code>/create</code> and <code>/discover</code> work in service mode. What is
+  personal-mode-only is narrower: the two path-keyed deletes and the two
+  <code>/sessions</code> routes, which return <code>403 Forbidden</code> elsewhere.</li>
+<li>Every route on the <code>/v1/notebooks</code> and <code>/v1/projects</code> routers is scope
+  gated under principal auth, by the same <code>notebook:read</code> /
+  <code>notebook:write</code> / <code>notebook:execute</code> table that checks the frames below</li>
+<li>so a principal that cannot run a cell over this socket cannot run it
+  over REST either. A route nobody classified requires <code>notebook:execute</code>.
+  See the <a href="../rest-api/#authentication">REST API page</a> for the full list.</li>
 </ul>
 <h2 id="cold-start-payload">Cold-start payload<a class="headerlink" href="#cold-start-payload" title="Permanent link">&para;</a></h2>
 <p><code>POST /v1/notebooks/open</code> and <code>GET /v1/notebooks/sessions/{session_id}</code>

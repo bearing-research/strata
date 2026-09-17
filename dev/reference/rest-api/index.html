@@ -3982,7 +3982,7 @@
 </tbody>
 </table>
 <p>In service mode, <strong>every</strong> <code>/v1/*</code> endpoint requires <code>X-Strata-Principal</code> (the proxy-asserted user identity) and the <code>X-Strata-Proxy-Token</code> shared secret. Two further restrictions narrow what each endpoint accepts:</p>
-<p><strong>Personal-mode-only endpoints.</strong> These notebook-session-lifecycle operations return <code>400 Bad Request</code> outside personal mode (long-lived sessions and filesystem notebook management don't fit a multi-tenant service deployment). Artifact and registry <em>writes</em>, by contrast, are available in service mode when <code>service_writes_enabled</code> is on, with the <code>artifacts:write</code> scope - see <a href="../../deployment/service-mode/#authenticated-write-back-the-shared-research-store">Service Mode</a>.</p>
+<p><strong>Personal-mode-only endpoints.</strong> These four return <code>403 Forbidden</code> outside personal mode. They expose either a filesystem delete or the in-memory session table, neither of which fits a multi-tenant service deployment. Artifact and registry <em>writes</em>, by contrast, are available in service mode when <code>service_writes_enabled</code> is on, with the <code>artifacts:write</code> scope - see <a href="../../deployment/service-mode/#authenticated-write-back-the-shared-research-store">Service Mode</a>.</p>
 <table>
 <thead>
 <tr>
@@ -4000,16 +4000,17 @@
 <td>Same, addressed by path</td>
 </tr>
 <tr>
-<td><code>GET /v1/notebooks/discover</code></td>
-<td>Walks the storage root for any notebook</td>
+<td><code>GET /v1/notebooks/sessions</code></td>
+<td>Lists in-memory session ids and notebook filesystem paths</td>
 </tr>
 <tr>
-<td>Notebook session lifecycle (<code>/open</code>, <code>/create</code>, session reconnect)</td>
-<td>Long-lived sessions land on one server process; service-mode multi-tenant deploys use the artifact API instead</td>
+<td><code>GET /v1/notebooks/sessions/{session_id}</code></td>
+<td>Same, for one session</td>
 </tr>
 </tbody>
 </table>
-<p><strong>Scope-gated endpoints.</strong> These require a scope token in <code>X-Strata-Scopes</code> beyond authenticated principal:</p>
+<p><code>POST /open</code>, <code>POST /create</code> and <code>GET /discover</code> are <strong>not</strong> restricted - they work in service mode, and <code>/discover</code> is filtered by owner when <code>STRATA_PERSONAL_MODE_USER_HEADER</code> is set.</p>
+<p><strong>Scope-gated endpoints.</strong> Under principal auth, <strong>every</strong> route on the <code>/v1/notebooks</code> and <code>/v1/projects</code> routers requires a notebook scope in <code>X-Strata-Scopes</code>. The gate is a router-level dependency keyed on the matched path template, so a route added later is covered without anyone remembering to gate it, and it returns <code>403 Forbidden</code> naming the scope it wanted.</p>
 <table>
 <thead>
 <tr>
@@ -4019,12 +4020,29 @@
 </thead>
 <tbody>
 <tr>
+<td>Every <code>GET</code> and <code>HEAD</code>, plus the two <code>environment/*/preview</code> posts</td>
+<td><code>notebook:read</code></td>
+</tr>
+<tr>
+<td>Content and configuration changes that run nothing: <code>/open</code>, <code>/create</code>, <code>/import</code>, cell add/edit/reorder/delete, mounts, connections, workers, env, name, timeout, variants, quiesce/release, promote</td>
+<td><code>notebook:write</code></td>
+</tr>
+<tr>
+<td>Anything that runs code - execute, run-all, cancel, tests, the inspect REPL, widget updates, dependency changes (uv runs build scripts), the assistant - <strong>and any route nobody has classified</strong></td>
+<td><code>notebook:execute</code></td>
+</tr>
+<tr>
 <td><code>POST /v1/cache/clear</code></td>
 <td><code>admin:cache</code></td>
 </tr>
+<tr>
+<td>Artifact and registry writes</td>
+<td><code>artifacts:write</code></td>
+</tr>
 </tbody>
 </table>
-<p>All other endpoints documented below need only <code>X-Strata-Principal</code> + <code>X-Strata-Proxy-Token</code> in service mode, and no auth in personal mode. Endpoints below carry a <code>Personal mode only</code> callout where applicable; otherwise treat them as available in both modes.</p>
+<p><code>notebook:execute</code> is the default on purpose: an operation nobody classified is treated as the most dangerous kind. The per-route table is <code>src/strata/notebook/scopes.py</code>, and the same table checks WebSocket frames - a principal that cannot run a cell over the socket cannot run it over REST either.</p>
+<p>Without principal auth (personal mode, or <code>auth_mode="none"</code>), the scope gate returns immediately and none of this applies.</p>
 <p>Personal mode with no header configured is effectively trust-on-first-call - anyone reaching the server can use it. Deploying personal mode to a public URL without an auth proxy is a <a href="../../deployment/modes/">trust-model decision</a>; see <a href="../../deployment/fly/#trust-model">Fly.io deployment</a> for the load-bearing details.</p>
 <h3 id="error-shape">Error shape<a class="headerlink" href="#error-shape" title="Permanent link">&para;</a></h3>
 <p>All <code>4xx</code> and <code>5xx</code> responses use FastAPI's standard JSON shape:</p>
@@ -4221,7 +4239,10 @@ process and do not survive a restart.</p>
 <p>Lists notebook directories under the configured storage root. Returns
 <code>{ "root", "notebooks": [{ "path", "name", "notebook_id", "updated_at" }] }</code>
 sorted newest-first. Used by the "Open existing" UI so users pick from a list
-instead of typing a filesystem path. <strong>Personal mode only.</strong></p>
+instead of typing a filesystem path. Available in both modes; requires
+<code>notebook:read</code> under principal auth. With <code>STRATA_PERSONAL_MODE_USER_HEADER</code>
+set, the list is filtered to the caller's own notebooks - unowned ones stay
+visible to everyone.</p>
 <h3 id="delete-notebook-by-path">Delete Notebook By Path<a class="headerlink" href="#delete-notebook-by-path" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a>POST /v1/notebooks/delete-by-path
 </code></pre></div>
