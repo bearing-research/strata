@@ -950,6 +950,11 @@ def main():
                 stdout_capture=stdout_buffer,
                 stderr_capture=stderr_buffer,
             )
+            # Said here rather than where it happens: inputs are deserialized
+            # before the cell's console is being captured, so a message written
+            # there goes to a pipe the local caller discards.
+            if _ser.x64_was_enabled_here():
+                stderr_text += _ser.X64_NOTE
 
         serialized: dict[str, Any] = {}
         for var_name, value in outputs.items():

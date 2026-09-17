@@ -381,7 +381,12 @@ def execute_harness(manifest: dict) -> dict:
             },
             "displays": serialized_displays,
             "stdout": stdout_buf.getvalue(),
-            "stderr": stderr_buf.getvalue(),
+            # Inputs are deserialized before this buffer is installed, so the
+            # note about x64 is appended here rather than written where it
+            # happens. This worker is the reused one, which is where a
+            # process-wide switch matters most.
+            "stderr": stderr_buf.getvalue()
+            + (_ser.X64_NOTE if _ser.x64_was_enabled_here() else ""),
             "error": None,
             "mutation_warnings": mutation_warnings,
             "build_env": build_env_identity(),

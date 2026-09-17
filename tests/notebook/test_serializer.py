@@ -1293,6 +1293,47 @@ class TestJaxPrecisionGuard:
         assert excinfo.value.stored_dtype == "float64"
         assert excinfo.value.reconstructed_dtype == "float32"
 
+    def test_throwing_the_switch_is_reported(self, fake_jax_x64, tmp_path, monkeypatch):
+        """``jax_enable_x64`` has no per-array form, so repairing one value
+        changes the process. In the warm pool and the batch that process runs
+        the cells after it too, and their provenance does not record which
+        width they got -- so the author has to be told, and told what to do
+        instead: name it in the notebook's env, where it is hashed.
+        """
+        import numpy as np
+
+        from strata.notebook import serializer
+
+        monkeypatch.setattr(serializer, "_x64_enabled_here", False)
+        assert serializer.x64_was_enabled_here() is False
+
+        original = fake_jax_x64.Array(np.arange(4, dtype=np.float64))
+        payload = serializer.serialize_value(original, tmp_path, "arr")
+        fake_jax_x64.x64 = False
+        serializer.deserialize_value(payload["content_type"], tmp_path / payload["file"])
+
+        assert serializer.x64_was_enabled_here() is True
+        assert "JAX_ENABLE_X64" in serializer.X64_NOTE, (
+            "the note has to name the setting that makes this deliberate"
+        )
+
+    def test_a_reader_that_never_needed_it_reports_nothing(
+        self, fake_jax_x64, tmp_path, monkeypatch
+    ):
+        """Or the note appears for notebooks the switch was never thrown for."""
+        import numpy as np
+
+        from strata.notebook import serializer
+
+        monkeypatch.setattr(serializer, "_x64_enabled_here", False)
+
+        original = fake_jax_x64.Array(np.arange(4, dtype=np.float32))
+        payload = serializer.serialize_value(original, tmp_path, "arr")
+        fake_jax_x64.x64 = False
+        serializer.deserialize_value(payload["content_type"], tmp_path / payload["file"])
+
+        assert serializer.x64_was_enabled_here() is False
+
     def test_a_dtype_that_survives_is_returned_unchanged(self, fake_jax_x64, tmp_path):
         """The guard is about narrowing, not about jax reconstruction."""
         import numpy as np

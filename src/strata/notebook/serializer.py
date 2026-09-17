@@ -128,6 +128,44 @@ class StrataRArtifactError(RuntimeError):
         super().__init__(message)
 
 
+_x64_enabled_here = False
+
+# What a caller tells the author when the switch had to be thrown. Here, next
+# to the flag, because the harness and the pooled worker both report it and a
+# second copy of the wording is a second thing to keep true.
+X64_NOTE = (
+    "strata: turned on jax_enable_x64 to hand back a stored 64-bit array at its own "
+    "width. That switch is process-wide, so in a reused worker every later cell gets "
+    "64-bit defaults too, and no cell's provenance records which it got. Put "
+    "`# @env JAX_ENABLE_X64=1` on the cells that want it: jax reads it at import, and "
+    "it becomes part of their env hash.\n"
+)
+
+
+def _record_x64_enabled() -> None:
+    """Remember that this process turned ``jax_enable_x64`` on, once."""
+    global _x64_enabled_here
+    _x64_enabled_here = True
+
+
+def x64_was_enabled_here() -> bool:
+    """Whether reconstructing an input turned ``jax_enable_x64`` on.
+
+    The switch is process-wide and there is no per-array alternative in jax, so
+    a worker that is reused across cells -- the warm pool, and the batch behind
+    Run All -- keeps it on for every cell after the one that needed it. Those
+    cells then get float64 where they would otherwise get float32, and their
+    provenance hash does not record which it was, so what a cached result holds
+    depends on what ran before it in that process.
+
+    Setting ``JAX_ENABLE_X64`` in the notebook's env is the way to say this
+    deliberately: jax reads it at import, every execution path applies the env
+    before deserializing anything, and it is part of the cell's env hash. The
+    caller reports this so the author can move to that.
+    """
+    return _x64_enabled_here
+
+
 class StrataPrecisionError(RuntimeError):
     """Raised when a stored array cannot be reconstructed at its own dtype.
 
@@ -1930,6 +1968,7 @@ def _tensor_from_table(table: Any) -> Any:
 
             jax.config.update("jax_enable_x64", True)
             converted = jnp.asarray(arr)
+            _record_x64_enabled()
         if converted.dtype != arr.dtype:
             # Enabling x64 did not repair it, so the dtype is one this JAX
             # cannot represent at all. Narrowing silently is the one thing not

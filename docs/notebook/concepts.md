@@ -267,6 +267,34 @@ Cell outputs are serialized based on their Python type:
 
 The content type is stored in the artifact metadata so the read side knows how to deserialize.
 
+### JAX and 64-bit values
+
+JAX defaults to 32 bits: it turns a `float64` into a `float32` when it builds
+an array, unless `jax_enable_x64` is on. Every other library here keeps the
+dtype it was given, so this is the one case where a value can come back
+narrower than it was stored.
+
+Strata will not hand you the narrowed value. Reading a stored 64-bit array
+turns the setting on and converts again, and if that still does not reproduce
+the dtype it raises rather than returning something plausible and wrong.
+
+That switch is process-wide, and jax offers no per-array alternative. The warm
+pool and Run All reuse one process across cells, so once it is on, later cells
+in that worker get 64-bit defaults too — and no cell's provenance records which
+width it got, so a cached result can depend on what ran before it. When this
+happens the cell's console says so.
+
+If a notebook works in 64-bit, say so explicitly:
+
+```python
+# @env JAX_ENABLE_X64=1
+import jax.numpy as jnp
+```
+
+jax reads that at import, every execution path applies the environment before
+deserializing anything, and it becomes part of the cell's env hash — so the
+width is the same on every path and is recorded in what the result is keyed on.
+
 The second row is what keeps a library Strata has never heard of out of the
 pickle path. DuckDB relations, cuDF frames, Ibis tables and anything else
 implementing the [Arrow PyCapsule
