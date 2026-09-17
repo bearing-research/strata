@@ -244,6 +244,8 @@ class TestWorkerTeeing:
                     "tables": {},
                     "env": {},
                     "mutation_defines": [],
+                    # What the worker sets when it has somewhere to forward to.
+                    "stream_console": True,
                 }
             )
         )
@@ -261,6 +263,46 @@ class TestWorkerTeeing:
         assert b"from-the-cell" in stdout, "a worker would have streamed nothing"
         result = json.loads((output_dir / "harness-result.json").read_text())
         assert result["stdout"] == "from-the-cell\n", "and the bundle still carries it whole"
+
+    @pytest.mark.asyncio
+    async def test_a_run_nobody_is_watching_does_not_pay_for_it(self, tmp_path):
+        """The write-through is for a reader forwarding chunks as they arrive.
+        A local run's reader takes the pipe and discards it -- its console comes
+        from the result -- so teeing there just holds a second copy of
+        everything the cell printed in the parent's memory for the whole run.
+        """
+        import json
+
+        output_dir = tmp_path / "quiet-run"
+        output_dir.mkdir()
+        manifest = output_dir / "manifest.json"
+        manifest.write_text(
+            json.dumps(
+                {
+                    "source": "print('from-the-cell')\nx = 1\n",
+                    "inputs": {},
+                    "output_dir": str(output_dir),
+                    "mounts": {},
+                    "tables": {},
+                    "env": {},
+                    "mutation_defines": [],
+                }
+            )
+        )
+
+        proc = await asyncio.create_subprocess_exec(
+            sys.executable,
+            "-m",
+            "strata.notebook.harness",
+            str(manifest),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, _ = await asyncio.wait_for(remote_executor_module()._drain(proc, None), timeout=60)
+
+        assert b"from-the-cell" not in stdout, "the cell's output was copied for nobody"
+        result = json.loads((output_dir / "harness-result.json").read_text())
+        assert result["stdout"] == "from-the-cell\n", "and the result still carries it whole"
 
     @pytest.mark.asyncio
     async def test_without_a_log_url_the_output_is_still_collected(self, tmp_path):

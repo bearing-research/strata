@@ -902,12 +902,21 @@ def main():
     # Owned here, not inside execute_cell: a cell that raises never returns its
     # captured streams, and the print trail is exactly what's wanted when the
     # cell failed. The batch and pool paths already keep theirs this way.
-    stdout_buffer = _Tee(sys.stdout)
-    stderr_buffer = _Tee(sys.stderr)
+    # Plain until the manifest asks for more. The capture is what the result
+    # is built from either way; writing through to this process's stdout costs
+    # a second copy of everything the cell prints, held in the reader's memory
+    # for the length of the run, and only buys something when a reader is
+    # forwarding it somewhere. A local run's reader takes the pipe and throws
+    # it away -- the console it shows comes from the result.
+    stdout_buffer: io.StringIO = io.StringIO()
+    stderr_buffer: io.StringIO = io.StringIO()
     ambient_client: Any = None
 
     try:
         manifest = load_manifest(manifest_path)
+        if manifest.get("stream_console"):
+            stdout_buffer = _Tee(sys.stdout)
+            stderr_buffer = _Tee(sys.stderr)
         source = manifest.get("source", "")
         output_dir = Path(manifest.get("output_dir", "/tmp/strata_output"))
 
