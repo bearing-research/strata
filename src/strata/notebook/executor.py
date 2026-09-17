@@ -6187,6 +6187,49 @@ class CellExecutor:
                     inputs.setdefault(var_name, {"uri": uri})
         return inputs
 
+    def _materialize_batch_cache_hit(
+        self,
+        cell: Any,
+        cell_id: str,
+        provenance_hash: str,
+        consumed_vars: set[str] | list[str],
+        cell_output_dir: Path,
+    ) -> dict[str, dict[str, str]] | None:
+        """Write every consumed variable's cached bytes where the harness reads.
+
+        ``None`` the moment one is missing or does not match this cell's hash:
+        a partial hit is a miss, since the cell would come back with some of
+        its values and not others. Separate from its caller so it can be asked
+        twice -- once against what is here, and again after a team pull has
+        written a colleague's results under the same canonical ids.
+        """
+        artifact_mgr = self.session.get_artifact_manager()
+        notebook_id = self.session.notebook_state.id
+        cached_outputs: dict[str, dict[str, str]] = {}
+        for var_name in consumed_vars:
+            canonical_id = f"nb_{notebook_id}_cell_{cell_id}_var_{var_name}"
+            var_prov = derive_subkey(provenance_hash, var_name)
+            canonical_art = artifact_mgr.artifact_store.get_latest_version(canonical_id)
+            if canonical_art is None or canonical_art.provenance_hash != var_prov:
+                return None
+            blob = artifact_mgr.artifact_store.read_blob(canonical_art.id, canonical_art.version)
+            if blob is None:
+                return None
+            content_type = _artifact_content_type(canonical_art)
+            ext = _ARTIFACT_EXT_BY_CONTENT_TYPE.get(content_type, ".bin")
+            file_name = f"{safe_filename_stem(var_name)}{ext}"
+            (cell_output_dir / file_name).write_bytes(blob)
+            cached_outputs[var_name] = {
+                "content_type": content_type,
+                "file": file_name,
+            }
+            # Mirror single-cell L823-844 — populate artifact_uris so
+            # downstream cells in the batch resolve via _collect_input_hashes.
+            uri = f"strata://artifact/{canonical_art.id}@v={canonical_art.version}"
+            cell.artifact_uris[var_name] = uri
+            cell.artifact_uri = uri
+        return cached_outputs
+
     async def _batch_service_cache_check(
         self,
         cell_id: str,
@@ -6270,29 +6313,31 @@ class CellExecutor:
         if not consumed_vars and not cached_displays:
             return {"cache_hit": False, "provenance_hash": provenance_hash}
 
-        cached_outputs: dict[str, dict[str, str]] = {}
-        for var_name in consumed_vars:
-            canonical_id = f"nb_{notebook_id}_cell_{cell_id}_var_{var_name}"
-            var_prov = derive_subkey(provenance_hash, var_name)
-            canonical_art = artifact_mgr.artifact_store.get_latest_version(canonical_id)
-            if canonical_art is None or canonical_art.provenance_hash != var_prov:
-                return {"cache_hit": False, "provenance_hash": provenance_hash}
-            blob = artifact_mgr.artifact_store.read_blob(canonical_art.id, canonical_art.version)
-            if blob is None:
-                return {"cache_hit": False, "provenance_hash": provenance_hash}
-            content_type = _artifact_content_type(canonical_art)
-            ext = _ARTIFACT_EXT_BY_CONTENT_TYPE.get(content_type, ".bin")
-            file_name = f"{safe_filename_stem(var_name)}{ext}"
-            (cell_output_dir / file_name).write_bytes(blob)
-            cached_outputs[var_name] = {
-                "content_type": content_type,
-                "file": file_name,
-            }
-            # Mirror single-cell L823-844 — populate artifact_uris so
-            # downstream cells in the batch resolve via _collect_input_hashes.
-            uri = f"strata://artifact/{canonical_art.id}@v={canonical_art.version}"
-            cell.artifact_uris[var_name] = uri
-            cell.artifact_uri = uri
+        cached_outputs = self._materialize_batch_cache_hit(
+            cell, cell_id, provenance_hash, consumed_vars, cell_output_dir
+        )
+        if cached_outputs is None and consumed_vars:
+            # The team cache tier, in the same order a single run uses it: only
+            # after the local store has missed, so an ordinary hit pays nothing
+            # for it. A successful pull writes each consumed variable under its
+            # canonical local id, so the same probe is what decides afterwards.
+            # Run All skipped this entirely and re-ran what a colleague had
+            # already computed.
+            team_pull = await self._pull_from_team_store(
+                cell_id=cell_id,
+                provenance_hash=provenance_hash,
+                consumed_vars=set(consumed_vars),
+                source_hash=prov.source_hash,
+                source=source,
+                env_hash=prov.env_hash,
+                input_versions=self._input_refs(cell_id),
+            )
+            if team_pull is not None:
+                cached_outputs = self._materialize_batch_cache_hit(
+                    cell, cell_id, provenance_hash, consumed_vars, cell_output_dir
+                )
+        if cached_outputs is None:
+            return {"cache_hit": False, "provenance_hash": provenance_hash}
 
         # Update session-side display state from the hydrated models.
         cell.cache_hit = True
@@ -6402,6 +6447,13 @@ class CellExecutor:
 
         if not stored_ok:
             return {"ok": False, "error": "store_outputs returned False"}
+
+        # Offer it to the team, as a single run does after its own store
+        # succeeds. Inert unless the team cache is configured, and it swallows
+        # its own failures: the cell is done, and a shared-cache problem must
+        # not retroactively fail it. Without this, Run All consumed a
+        # colleague's results and contributed none of its own.
+        await self._push_to_team_store(cell_id=cell_id)
 
         # Record provenance + execution as single-cell does.
         try:
