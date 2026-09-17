@@ -73,6 +73,13 @@ COPY packages ./packages
 #   --extra otel: OpenTelemetry SDK + OTLP exporter. The fly.toml sets
 #     OTEL_* env vars to wire spans to a collector; without the otel
 #     extra installed, those env vars would be silently ignored.
+#   --extra postgres: psycopg 3 + its pool, for STRATA_ARTIFACT_METADATA_DSN.
+#     Same reason: a deployment that points the artifact store at Postgres
+#     sets one env var, and config validation then refuses to start with
+#     "the postgres extra is not installed" -- which the operator of a
+#     published image cannot act on without building their own. More than
+#     one server sharing one artifact store is the shape this image exists
+#     for; SQLite stays the default and costs nothing here.
 RUN mkdir -p dist && \
     uv export \
       --frozen \
@@ -82,6 +89,7 @@ RUN mkdir -p dist && \
       --no-header \
       --no-annotate \
       --extra otel \
+      --extra postgres \
       --format requirements.txt \
       --output-file dist/runtime-requirements.txt
 
