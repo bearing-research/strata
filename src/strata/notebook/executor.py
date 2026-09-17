@@ -6004,6 +6004,11 @@ class CellExecutor:
                     executed_sources=executed_sources,
                     use_cache=use_cache,
                 )
+                # Answered here rather than at each of the cache check's
+                # several returns: it is the same map either way, and the
+                # cell is about to be given an ambient client that needs it
+                # to name what it promotes.
+                response["input_uris"] = self._upstream_artifact_uris(payload.get("cell_id", ""))
                 send_response(response)
             elif ftype == "persist":
                 response = await self._batch_service_persist(
@@ -6160,6 +6165,30 @@ class CellExecutor:
         (target_dir / file_name).write_bytes(blob)
         return {"content_type": content_type, "file": file_name}
 
+    def _upstream_artifact_uris(self, cell_id: str) -> dict[str, dict[str, str]]:
+        """The inputs this cell reads, in the shape the manifest uses.
+
+        ``{variable: {"uri": ...}}`` -- what ``strata.promote("rows")`` needs
+        to name an input the way the cell names it rather than by an id the
+        cell never sees. A single-cell run reads this out of its manifest's
+        ``inputs``; a batch has no per-cell manifest, but by the time a cell
+        asks about its cache its in-batch upstreams have already persisted,
+        so the same map can be built here.
+        """
+        cell = self.session.notebook_state.get_cell(cell_id)
+        if cell is None:
+            return {}
+        references = set(cell.references or [])
+        inputs: dict[str, dict[str, str]] = {}
+        for upstream_id in cell.upstream_ids:
+            upstream = self.session.notebook_state.get_cell(upstream_id)
+            if upstream is None:
+                continue
+            for var_name, uri in upstream.artifact_uris.items():
+                if var_name in references:
+                    inputs.setdefault(var_name, {"uri": uri})
+        return inputs
+
     async def _batch_service_cache_check(
         self,
         cell_id: str,
@@ -6189,7 +6218,13 @@ class CellExecutor:
             return {"cache_hit": False, "provenance_hash": ""}
 
         provenance_hash = prov.provenance_hash
-        if not use_cache:
+        # ``# @nocache`` is the author saying this cell has an effect the
+        # artifact does not capture -- a write, a POST, a clock read. A
+        # single run honors it; Run All served the cell from cache and the
+        # effect never happened, which is the one thing the annotation
+        # exists to prevent. The agent guide tells agents to mark exactly
+        # these cells with it.
+        if not use_cache or prov.annotations.nocache:
             return {"cache_hit": False, "provenance_hash": provenance_hash}
 
         cell_output_dir = batch_tmpdir / cell_id
