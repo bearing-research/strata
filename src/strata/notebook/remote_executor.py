@@ -659,6 +659,12 @@ def create_notebook_executor_app(
                 # name was simply undefined here.
                 "mutation_defines": list(mutation_defines or []),
                 "tables": tables or {},
+                # Only when a reader is forwarding it: ``_drain`` posts each
+                # chunk to the server's log url as the cell prints, and that
+                # is the whole reason to pay for a second copy of the output.
+                # Without one the bundle carries the console at the end, the
+                # same as a local run.
+                "stream_console": log_url is not None,
             }
             manifest_path = output_dir / "manifest.json"
             with open(manifest_path, "w", encoding="utf-8") as f:
