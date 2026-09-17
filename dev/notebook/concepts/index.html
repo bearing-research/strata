@@ -868,6 +868,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Serialization">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#jax-and-64-bit-values" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        JAX and 64-bit values
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -2250,6 +2267,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Serialization">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#jax-and-64-bit-values" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        JAX and 64-bit values
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -2596,6 +2630,26 @@ usable scratchpad. A cell that must always run, because it has a side effect
 </tbody>
 </table>
 <p>The content type is stored in the artifact metadata so the read side knows how to deserialize.</p>
+<h3 id="jax-and-64-bit-values">JAX and 64-bit values<a class="headerlink" href="#jax-and-64-bit-values" title="Permanent link">&para;</a></h3>
+<p>JAX defaults to 32 bits: it turns a <code>float64</code> into a <code>float32</code> when it builds
+an array, unless <code>jax_enable_x64</code> is on. Every other library here keeps the
+dtype it was given, so this is the one case where a value can come back
+narrower than it was stored.</p>
+<p>Strata will not hand you the narrowed value. Reading a stored 64-bit array
+turns the setting on and converts again, and if that still does not reproduce
+the dtype it raises rather than returning something plausible and wrong.</p>
+<p>That switch is process-wide, and jax offers no per-array alternative. The warm
+pool and Run All reuse one process across cells, so once it is on, later cells
+in that worker get 64-bit defaults too — and no cell's provenance records which
+width it got, so a cached result can depend on what ran before it. When this
+happens the cell's console says so.</p>
+<p>If a notebook works in 64-bit, say so explicitly:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="c1"># @env JAX_ENABLE_X64=1</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="kn">import</span><span class="w"> </span><span class="nn">jax.numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">jnp</span>
+</code></pre></div>
+<p>jax reads that at import, every execution path applies the environment before
+deserializing anything, and it becomes part of the cell's env hash — so the
+width is the same on every path and is recorded in what the result is keyed on.</p>
 <p>The second row is what keeps a library Strata has never heard of out of the
 pickle path. DuckDB relations, cuDF frames, Ibis tables and anything else
 implementing the <a href="https://arrow.apache.org/docs/format/CDataInterface/PyCapsuleInterface.html">Arrow PyCapsule
@@ -2638,9 +2692,9 @@ per artifact.</p>
 </ul>
 <p>The <strong>causality chain</strong> explains why a cell is stale, tracing the change back to its root cause (e.g., "upstream cell X changed its source").</p>
 <h2 id="cell-status-lifecycle">Cell Status Lifecycle<a class="headerlink" href="#cell-status-lifecycle" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>idle → running → ready
-<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>                ↗
-<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>idle → running → error
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>idle → running → ready
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>                ↗
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>idle → running → error
 </code></pre></div>
 <ul>
 <li><strong>idle</strong>: never executed, or stale (needs re-execution)</li>
