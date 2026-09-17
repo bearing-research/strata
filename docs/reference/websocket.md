@@ -156,6 +156,7 @@ All messages are JSON with this shape:
 | `agent_confirm_request` | `{ "job_id": "...", "tool": "...", "args": {...}, ... }`         | Agent is asking the client to approve a destructive tool use |
 | `agent_progress`        | `{ "job_id": "...", "event": "...", "detail": "...", ... }`      | Incremental agent-loop status (tool start/end, iteration)    |
 | `agent_done`            | `{ "job_id": "...", "content": "...", "model": "...", ... }`     | Agent finished, failed, or was cancelled                     |
+| `agent_note`            | `{ "source": "mcp" \| "agent", "text": "..." }`                  | An outside agent driving this notebook over MCP narrating what it did (`mcp`) or a note it pushed itself (`agent`). No `job_id`: the agent is not the built-in one, and nothing here is part of an agent job |
 
 ### Presence
 

@@ -33,22 +33,30 @@ Authentication depends on `deployment_mode`:
 
 In service mode, **every** `/v1/*` endpoint requires `X-Strata-Principal` (the proxy-asserted user identity) and the `X-Strata-Proxy-Token` shared secret. Two further restrictions narrow what each endpoint accepts:
 
-**Personal-mode-only endpoints.** These notebook-session-lifecycle operations return `400 Bad Request` outside personal mode (long-lived sessions and filesystem notebook management don't fit a multi-tenant service deployment). Artifact and registry *writes*, by contrast, are available in service mode when `service_writes_enabled` is on, with the `artifacts:write` scope - see [Service Mode](../deployment/service-mode.md#authenticated-write-back-the-shared-research-store).
+**Personal-mode-only endpoints.** These four return `403 Forbidden` outside personal mode. They expose either a filesystem delete or the in-memory session table, neither of which fits a multi-tenant service deployment. Artifact and registry *writes*, by contrast, are available in service mode when `service_writes_enabled` is on, with the `artifacts:write` scope - see [Service Mode](../deployment/service-mode.md#authenticated-write-back-the-shared-research-store).
 
 | Endpoint | Why personal-mode-only |
 | --- | --- |
 | `DELETE /v1/notebooks/{session_id}` | Filesystem delete of a notebook directory |
 | `POST /v1/notebooks/delete-by-path` | Same, addressed by path |
-| `GET /v1/notebooks/discover` | Walks the storage root for any notebook |
-| Notebook session lifecycle (`/open`, `/create`, session reconnect) | Long-lived sessions land on one server process; service-mode multi-tenant deploys use the artifact API instead |
+| `GET /v1/notebooks/sessions` | Lists in-memory session ids and notebook filesystem paths |
+| `GET /v1/notebooks/sessions/{session_id}` | Same, for one session |
 
-**Scope-gated endpoints.** These require a scope token in `X-Strata-Scopes` beyond authenticated principal:
+`POST /open`, `POST /create` and `GET /discover` are **not** restricted - they work in service mode, and `/discover` is filtered by owner when `STRATA_PERSONAL_MODE_USER_HEADER` is set.
+
+**Scope-gated endpoints.** Under principal auth, **every** route on the `/v1/notebooks` and `/v1/projects` routers requires a notebook scope in `X-Strata-Scopes`. The gate is a router-level dependency keyed on the matched path template, so a route added later is covered without anyone remembering to gate it, and it returns `403 Forbidden` naming the scope it wanted.
 
 | Endpoint | Required scope |
 | --- | --- |
+| Every `GET` and `HEAD`, plus the two `environment/*/preview` posts | `notebook:read` |
+| Content and configuration changes that run nothing: `/open`, `/create`, `/import`, cell add/edit/reorder/delete, mounts, connections, workers, env, name, timeout, variants, quiesce/release, promote | `notebook:write` |
+| Anything that runs code - execute, run-all, cancel, tests, the inspect REPL, widget updates, dependency changes (uv runs build scripts), the assistant - **and any route nobody has classified** | `notebook:execute` |
 | `POST /v1/cache/clear` | `admin:cache` |
+| Artifact and registry writes | `artifacts:write` |
 
-All other endpoints documented below need only `X-Strata-Principal` + `X-Strata-Proxy-Token` in service mode, and no auth in personal mode. Endpoints below carry a `Personal mode only` callout where applicable; otherwise treat them as available in both modes.
+`notebook:execute` is the default on purpose: an operation nobody classified is treated as the most dangerous kind. The per-route table is `src/strata/notebook/scopes.py`, and the same table checks WebSocket frames - a principal that cannot run a cell over the socket cannot run it over REST either.
+
+Without principal auth (personal mode, or `auth_mode="none"`), the scope gate returns immediately and none of this applies.
 
 Personal mode with no header configured is effectively trust-on-first-call - anyone reaching the server can use it. Deploying personal mode to a public URL without an auth proxy is a [trust-model decision](../deployment/modes.md); see [Fly.io deployment](../deployment/fly.md#trust-model) for the load-bearing details.
 
@@ -241,7 +249,10 @@ GET /v1/notebooks/discover
 Lists notebook directories under the configured storage root. Returns
 `{ "root", "notebooks": [{ "path", "name", "notebook_id", "updated_at" }] }`
 sorted newest-first. Used by the "Open existing" UI so users pick from a list
-instead of typing a filesystem path. **Personal mode only.**
+instead of typing a filesystem path. Available in both modes; requires
+`notebook:read` under principal auth. With `STRATA_PERSONAL_MODE_USER_HEADER`
+set, the list is filtered to the caller's own notebooks - unowned ones stay
+visible to everyone.
 
 ### Delete Notebook By Path
 

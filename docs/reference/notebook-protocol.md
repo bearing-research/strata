@@ -98,11 +98,15 @@ enforcement is symmetric across REST and WS, with no opt-outs.
 - Every `/v1/*` request needs `X-Strata-Principal`, `X-Strata-Proxy-Token`,
   and `X-Tenant-ID` (if multi-tenant). The WS upgrade carries the same
   headers; missing or invalid token closes with `1008`.
-- Notebook-session lifecycle endpoints (`/open`, `/create`, session
-  reconnect, `/discover`, path-keyed deletes) are personal-mode-only and
-  return `400 Bad Request` in service mode - write surface in service mode
-  routes through the artifact build pipeline instead. See the
-  [REST API page](rest-api.md#authentication) for the full list.
+- `/open`, `/create` and `/discover` work in service mode. What is
+  personal-mode-only is narrower: the two path-keyed deletes and the two
+  `/sessions` routes, which return `403 Forbidden` elsewhere.
+- Every route on the `/v1/notebooks` and `/v1/projects` routers is scope
+  gated under principal auth, by the same `notebook:read` /
+  `notebook:write` / `notebook:execute` table that checks the frames below
+  - so a principal that cannot run a cell over this socket cannot run it
+  over REST either. A route nobody classified requires `notebook:execute`.
+  See the [REST API page](rest-api.md#authentication) for the full list.
 
 ## Cold-start payload
 
