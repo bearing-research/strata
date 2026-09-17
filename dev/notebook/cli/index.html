@@ -2458,7 +2458,8 @@ subprocesses, no LLM calls:</p>
 <li>the DAG builds without cycles</li>
 <li>per-cell annotation diagnostics - the <strong>same validation the server runs
   on open / reload</strong> (<code>worker_unknown</code>, <code>loop_missing_carry</code>,
-  <code>sql_missing_connection</code>, malformed <code>@output_schema</code>, …)</li>
+  <code>sql_missing_connection</code>, <code>fetch_unreadable</code>, <code>dataset_unreadable</code>,
+  malformed <code>@output_schema</code>, …)</li>
 </ul>
 <p>Exit codes mirror <code>strata run</code>: <code>0</code> valid (warnings allowed), <code>1</code> invalid
 (parse failure, DAG cycle, or any error-severity diagnostic), <code>2</code>
