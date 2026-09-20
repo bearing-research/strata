@@ -1,7 +1,7 @@
 [project]
 name = "strata-notebook"
 version = "0.7.0"
-description = "A content-addressed computation graph with an interactive notebook UI"
+description = "A notebook built for coding agents: every result cached, versioned, and visible to the human watching"
 readme = "README.md"
 authors = [
     { name = "Fangchen Li", email = "fangchen.li@outlook.com" }
