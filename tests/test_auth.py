@@ -679,3 +679,23 @@ class TestReadingACachedScanIsGatedWhereverTheTableLives:
         assert self._identity("prod:secret.events") == table_identity_for(
             "prod:secret.events", config
         )
+
+
+class TestARuleIsAsNarrowAsItReads:
+    """A key pydantic does not recognise used to be dropped, and a dropped key
+    in an access rule is a rule wider than the file says it is."""
+
+    def test_a_misspelled_key_is_refused(self):
+        import pytest
+
+        from strata.config import AclRule
+
+        # The plural. It left ``tenant`` None, which matches every tenant
+        # rather than the one named, while the rule still read correctly.
+        with pytest.raises(ValueError, match="tenants"):
+            AclRule(principal="bob", tables=["*"], tenants="acme")
+
+    def test_the_spelling_it_meant_still_works(self):
+        from strata.config import AclRule
+
+        assert AclRule(principal="bob", tables=["*"], tenant="acme").tenant == "acme"

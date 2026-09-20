@@ -47,7 +47,12 @@ class AclRule(BaseModel):
         tables: Tuple of table patterns (glob-style, e.g., "file:db.*")
     """
 
-    model_config = ConfigDict(frozen=True)
+    # ``extra="forbid"`` for the same reason the block around it forbids them:
+    # a key pydantic does not recognise is dropped, and a dropped key in an
+    # access rule is a rule that is wider than it reads. ``tenants = "acme"``
+    # -- the plural -- left ``tenant`` None, which matches every tenant rather
+    # than the one named. The rule still looked right in the file.
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
     principal: str = "*"
     tenant: str | None = None
