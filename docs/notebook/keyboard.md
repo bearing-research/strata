@@ -42,7 +42,7 @@ dedicated keyboard shortcuts yet - use the buttons or menu:
 
 - **Run all cells** (WebSocket `notebook_run_all`)
 - **Add cell below / above** (use `+` in the cell gutter)
-- **Delete cell** (use `×` in the cell gutter, confirms via modal)
+- **Delete cell** (use `×` in the cell gutter; it deletes immediately, with no confirmation, and does nothing when only one cell is left)
 - **Reorder cells** (use `▲` / `▼` in the gutter, or drag the cell handle)
 - **Navigate cells** (no arrow-key navigation between cells; click to
   focus, or use the editor `↑` / `↓` to move the cursor within a cell)

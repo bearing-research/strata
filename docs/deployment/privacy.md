@@ -38,24 +38,40 @@ does **not** mean your cell outputs cross-pollinate.
 Notebook IDs are full UUIDs (8-char prefix for display, full UUID
 for the actual ID). They're not in any global enumeration and
 they're not in `discover`'s output unless the caller owns them.
-But: **once a UUID is known, anyone can open the notebook**.
+What happens next depends on whether `STRATA_PERSONAL_MODE_USER_HEADER`
+is configured.
 
-| Endpoint | Owner check? | Why |
+**With per-user scoping on**, knowing the id is not enough. Every route
+that takes a session id resolves it through one dependency,
+`get_notebook_session`, which checks the notebook's recorded owner against
+the caller's identity and answers `404` on a mismatch. The WebSocket upgrade
+does the same and closes with `1008`. A missing header is denied too, so a
+caller who sends nothing is not treated as everyone.
+
+| Endpoint | Owner check? | How |
 |---|---|---|
-| `POST /v1/notebooks/open` | No | Direct URL collaboration ("send Alice the link") |
-| `GET /v1/notebooks/{id}/cells` | No | Same, read-after-open |
-| `POST /v1/notebooks/{id}/cells/{cell_id}/execute` | No | Collaboration shape |
-| `GET /v1/notebooks/{id}/dag` | No | Same |
-| `WS /v1/notebooks/ws/{id}` | No | Live editing |
-| `GET /v1/notebooks/discover` | **Yes**: filters by owner | Prevents accidental discovery |
-| `DELETE /v1/notebooks/{id}` | **Yes**: 404 to non-owners | Destructive |
-| `POST /v1/notebooks/delete-by-path` | **Yes**: 404 to non-owners | Destructive |
-| `PUT /v1/notebooks/{id}/name` | **Yes**: 404 to non-owners | Rename is destructive to URL-based sharing |
+| `GET /v1/notebooks/{id}/cells` | **Yes** | `get_notebook_session`, 404 to non-owners |
+| `POST /v1/notebooks/{id}/cells/{cell_id}/execute` | **Yes** | Same dependency |
+| `GET /v1/notebooks/{id}/dag` | **Yes** | Same dependency |
+| `WS /v1/notebooks/ws/{id}` | **Yes** | Upgrade closes with 1008 |
+| `GET /v1/notebooks/discover` | **Yes** | Filters by owner, and scans only the caller's own storage root |
+| `POST /v1/notebooks/open` | **Yes** | The path must lie inside the caller's own storage root |
+| `DELETE /v1/notebooks/{id}` | **Yes** | 404 to non-owners |
+| `POST /v1/notebooks/delete-by-path` | **Yes** | 404 to non-owners |
+| `PUT /v1/notebooks/{id}/name` | **Yes** | 404 to non-owners |
 
-The pattern: **collaboration is open via URL, destructive operations
-are owner-only**. Suits "I want to share an analysis with my
-teammate" but doesn't suit "I have a private notebook with secrets
-that no one else should ever read".
+The generic `404` is deliberate: a `403` would confirm that a notebook with
+that id exists.
+
+**With the header unset** there is no identity to check against, every
+notebook is unowned, and anyone who can reach the port can open anything.
+That is the single-user shape, and it is why personal mode binds to loopback
+by default.
+
+Sharing a link with a teammate therefore does not work under per-user
+scoping, because their path resolution is confined to their own root. Use
+[publishing](../notebook/publishing.md) to hand someone a result, or service
+mode for a genuinely shared deployment.
 
 ## How notebook ownership gets stamped
 
@@ -104,8 +120,9 @@ don't put it in a shared Strata notebook.
 ### Multi-tenant or hard-isolation requirements
 
 `STRATA_DEPLOYMENT_MODE=service` + multi-tenancy. Each tenant gets
-its own QoS pools, cache namespacing, and metric labels. Discover
-is disabled (the proxy / app routes users to specific notebooks).
+its own QoS pools, cache namespacing, and metric labels. Notebook routes
+are scope gated, so what a principal can reach depends on the scopes the
+proxy asserts for it.
 
 Notes:
 

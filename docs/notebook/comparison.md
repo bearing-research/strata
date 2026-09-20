@@ -72,17 +72,21 @@ cell 3 from rebasing on top of changes to cell 7.
 
 ## Where other notebooks are stronger
 
-- **Interactive UI widgets.** Marimo has `mo.ui.slider`, `mo.ui.dropdown`,
-  etc., reactive widgets the user can drag/click to update a parameter,
-  which then propagates through the DAG. Strata doesn't have a widget
-  layer; you change a value by editing source.
+- **Interactive UI widgets.** Marimo's `mo.ui.*` widgets are composed in
+  Python and can be built up programmatically. Strata's `widget` cells are
+  declarative rather than composable: slider, number, dropdown, text and
+  checkbox, declared in the cell and consumed by downstream cells as inputs.
+  With Live on, moving a control re-runs what depends on it.
 - **Ecosystem maturity.** Jupyter's ecosystem of extensions, kernels (R,
-  Julia, Scala, Bash, etc.), and integrations is unmatched. Strata is
-  Python-only with an AI provider abstraction.
+  Julia, Scala, Bash, etc.), and integrations is unmatched. Strata runs
+  Python, R, SQL, prompt, markdown and widget cells in one DAG, which covers
+  a narrower range than Jupyter's kernels.
 - **Reactive evaluation at the keystroke level.** Pluto and Marimo
   immediately re-run dependent cells on edit. Strata is reactive about
   *staleness* (the DAG updates, downstream cells flip to stale on every
-  source change) but execution is explicit, you press Run.
+  source change) and execution is explicit, you press Run. The exception is
+  a widget cell with Live on, where moving a control re-runs its dependents
+  immediately.
 - **Hosted offerings.** Google Colab, Deepnote, Hex, and Databricks
   Notebooks all bundle a hosted runtime; Strata is self-hosted (see
   the section below on where these fit).

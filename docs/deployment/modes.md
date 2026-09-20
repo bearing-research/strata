@@ -118,9 +118,10 @@ See [Service Mode](service-mode.md) for the full story:
 
 A common deployment shape is "personal mode behind an authenticating proxy", for example, Cloudflare Access in front of a Fly.io app, sharing the
 notebook UI with a handful of trusted users. This isn't full multi-tenancy
-(no per-user storage, no per-user QoS, no artifact isolation), but Strata
-provides a thin per-user filter so each invitee sees their own work in the
-"Open existing" list.
+(no per-user QoS, one shared cache), but each user does get their own
+storage root, `<notebook_storage_dir>/<identity>/`, and every path-taking
+route is confined to it. A notebook's artifacts live under its own
+directory, so they land inside that root too.
 
 Set:
 
@@ -142,15 +143,19 @@ What changes when the header is set:
   `owner == caller` or `owner is None`.
 - `DELETE /v1/notebooks/{id}` and `POST /v1/notebooks/delete-by-path`
   return 404 if a non-owner tries to delete an owned notebook.
-- Direct-URL access stays open: anyone with a notebook ID can `POST /open`
-  and view it. This is intentional, it preserves "share a link with a
-  collaborator" while preventing accidents in the discovery list.
+- Sharing a link does not work. `POST /open` resolves the path inside the
+  caller's own storage root, and every session-targeted route checks the
+  notebook's owner and answers 404 otherwise. To hand someone a result, use
+  [publishing](../notebook/publishing.md).
 
 What does *not* change:
 - Concurrent edits to the same notebook still race (no per-user sessions).
 - The artifact store is shared; provenance hashes don't include the caller.
 - The AI API key pool (`STRATA_AI_*`) is shared across all users.
-- Unowned (legacy) notebooks remain visible and deletable by everyone.
+- Unowned (legacy) notebooks bypass the owner check, but not the storage
+  boundary: one sitting in the base directory rather than a user's own root
+  is invisible to `discover` and unopenable by every scoped caller. Move it
+  into a user's root to make it reachable again.
 
 This shape is the right answer for a 5–20 person trusted group. For untrusted
 or paid users, migrate to service mode for proper tenant isolation.

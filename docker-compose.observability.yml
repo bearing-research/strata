@@ -14,7 +14,7 @@
 #   curl http://localhost:8765/health
 #
 # Run load test to generate traces:
-#   uv run python benchmarks/capacity_sweep.py --quick --no-server --base-url http://localhost:8765
+#   uv run python benchmarks/capacity_sweep.py --dry-run --no-server --base-url http://localhost:8765
 
 services:
   # Strata server with tracing enabled

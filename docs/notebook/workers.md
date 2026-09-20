@@ -69,7 +69,7 @@ Expected response:
 
 ```toml
 [[workers]]
-name = "local"
+name = "local-dev"
 backend = "executor"
 runtime_id = "local-dev"
 
@@ -78,15 +78,20 @@ url = "http://127.0.0.1:9000/v1/execute"
 transport = "direct"
 ```
 
+Any name except `local`. That one is reserved for the built-in in-process
+worker: `resolve_worker_spec` returns it before it ever looks at the
+notebook's own definitions, so a worker you name `local` is never dispatched
+to, and the cell runs in-process while appearing to be configured.
+
 **4. Use it in a cell:**
 
 ```python
-# @worker local
+# @worker local-dev
 import platform
 hostname = platform.node()
 ```
 
-When the cell runs, the UI shows a pulsing **"dispatching → local"** badge during execution. The `hostname` artifact is what the worker process saw, not your laptop - confirming the cell really ran remotely.
+When the cell runs, the UI shows a pulsing **"dispatching → local-dev"** badge during execution. The `hostname` artifact is what the worker process saw. On one machine that is the same name your laptop reports, so it confirms the round trip rather than the location; point the worker at another host and the name changes.
 
 ### Sharing one machine: concurrency and GPUs
 
@@ -152,7 +157,7 @@ Two other routes are documented elsewhere on this page and are often the
 shorter path:
 
 - **A machine you can SSH to** - [one command](#run-cells-on-a-machine-you-can-ssh-to), no deploy, no account. Usually the fastest way to reach a GPU you already have.
-- **Machines started per job** - [worker pools](#worker-pools-a-different-layer), whose Docker and RunPod backends boot hardware on demand. A different layer, dispatched by a proxy rather than by the notebook.
+- **Machines started per job** - [worker pools](#worker-pools-a-different-layer), whose Docker, Fly and RunPod backends boot hardware on demand. A different layer, dispatched by a proxy rather than by the notebook.
 
 You can register many workers per notebook; each cell picks its target independently. Mixing Fly (cheap CPU) and Modal (on-demand GPU) is a common setup.
 
@@ -370,7 +375,7 @@ pip install strata-pool            # library
 pip install "strata-pool[server]"  # plus the HTTP service
 ```
 
-It ships Docker and RunPod backends, per-worker credentials, tenant-scoped
+It ships Docker, Fly and RunPod backends, per-worker credentials, tenant-scoped
 machines, a fleet cap, and usage metering. Cloud SDKs live in the backend
 extras, so the base install pulls only `httpx`. Build the image the pool
 drives with:
@@ -441,7 +446,7 @@ restart. Before, they lived only in memory and the next restart reverted them.
 **The file wins over `[tool.strata.transforms] notebook_workers`.** The
 configured table is the bootstrap; once anything has been changed through the
 admin routes, that file is the registry and editing the config table has no
-effect. Delete the file to go back to the configured table — an *empty*
+effect. Delete the file to go back to the configured table. An *empty*
 registry is a decision, not an absence, so removing every worker through the
 API does not fall back.
 
@@ -451,7 +456,7 @@ it interrupts every cell currently executing.
 
 **Personal-mode servers get the registry too.** A personal server started with
 a registry offers those machine types to every notebook it opens, with no
-`[[workers]]` block in `notebook.toml` — which is the point, since writing one
+`[[workers]]` block in `notebook.toml`, which is the point, since writing one
 into every notebook puts the catalogue in git diffs and drifts as soon as it
 changes. They appear in the Workers panel with `source: server`.
 
@@ -578,11 +583,11 @@ Remote execution results are cached identically to local cells. The provenance h
 - Redeploying the same image (no dep changes). The cache is correct by construction; re-running is wasted compute.
 - Scaling the number of worker instances. Output is deterministic given the same inputs.
 
-If you don't set `runtime_id`, Strata uses the worker `name` as a fallback. That's fine for solo notebooks but risks cache surprises if two notebooks both have a worker named `gpu` pointing at different deployments - set `runtime_id` explicitly in shared notebooks.
+If you don't set `runtime_id`, the identity is the backend, the name and a hash of the worker's config, so two notebooks with a worker named `gpu` pointing at different URLs already get different identities. Set `runtime_id` when you want the opposite: two differently configured workers treated as one runtime, so a result computed on either is a cache hit for the other.
 
 ## Health checks
 
-Every worker exposes `GET /health`. The notebook UI polls this and shows a green/red badge next to cells that use the worker; cells refuse to dispatch to an unhealthy worker.
+Every worker exposes `GET /health`. The notebook UI polls this and shows a green/red badge next to cells that use the worker. The badge is advisory: execution does not consult it, so a cell dispatched to a worker that has gone down fails when the connection does, not before.
 
 ```bash
 curl https://my-worker.example.com/health
