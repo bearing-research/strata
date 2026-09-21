@@ -97,7 +97,7 @@ cannot be proved, read more data rather than risk dropping rows.
 
 ### Deployment modes
 
-`deployment_mode` (env `STRATA_DEPLOYMENT_MODE`, default `service`). Coherence
+`deployment_mode` (env `STRATA_DEPLOYMENT_MODE`, default `personal`). Coherence
 enforced at startup by `validate_mode_coherence` in `config.py`.
 
 | Flag                    | personal              | service                        |

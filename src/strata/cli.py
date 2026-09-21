@@ -456,7 +456,8 @@ def _build_parser() -> argparse.ArgumentParser:
             "Write an artifact into an Iceberg table as its current snapshot. "
             "The first write appends, a later one overwrites, and each "
             "snapshot's summary names the artifact version it holds. A new "
-            "version may add columns; an incompatible schema is refused."
+            "version may add columns; an incompatible schema is refused. A "
+            "table Strata did not write is refused rather than replaced."
         ),
     )
     export_table_parser.add_argument("ref", help="Name, id@v=N, or artifact id")

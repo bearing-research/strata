@@ -69,7 +69,7 @@ Liveness + capabilities probe. No auth.
 
 `active_executions` is the count of in-flight `/v1/*` calls - useful for autoscaler signals. `max_concurrent` and `gpu_slots` are the worker's limits (`null` when unset), and `free_gpu_slots` how many GPUs are unassigned, so a caller can plan rather than discover the limit by being refused. `hardware` is what the machine reports about itself: `cpus` (those this process may use) and `memory_mb` from the OS, and `accelerators` and `cuda` from `nvidia-smi` when it is on the worker's `PATH`. It lets a caller check a provider's machine against the class it was sold as without submitting a job. A field that could not be read is omitted, so a missing `accelerators` means unknown, not "no GPU". The notebook UI polls this and shows the worker badge red if `/health` fails or times out.
 
-`locked_environments: true` says the worker runs a cell in the notebook's own locked environment when the request carries one (below). Strata sends that block only to a worker that advertises it; any other gets requests exactly as before.
+`locked_environments: true` says the worker runs a cell in the notebook's own locked environment when the request carries one (below). Strata sends that block only to a worker that advertises it; any other gets requests exactly as before. Answer it honestly: building that environment is a `uv sync --frozen`, so the reference worker reports it by probing for `uv` on its own `PATH` rather than claiming it unconditionally. A worker that claims it without `uv` is sent work it will refuse, and every notebook has a lockfile.
 
 A cell runs with the worker's environment minus the worker's own secrets: `strata-worker` takes its token and credentials out of the process environment at startup and holds them in memory, so a cell cannot read them from its own environment or through `/proc`. `STRATA_NOTEBOOK_HARNESS_ENV_ALLOWLIST` narrows the rest, as [the server's allowlist](../notebook/workers.md) narrows a cell there. A cell gets what its manifest carries.
 
@@ -149,6 +149,8 @@ The standard executor v1 envelope. Cells and inputs are pushed inline; the worke
 | `transform.params.timeout_seconds` | float | Execution timeout (default 30). |
 | `transform.params.mounts` | array of MountSpec | Filesystem mounts injected as `Path` variables (see [notebook.toml schema](notebook-toml.md#mounts-filesystem-mounts)). |
 | `transform.params.env` | object | Env vars set in the cell subprocess. |
+| `transform.params.mutation_defines` | array of string | Present only when non-empty. Variables the cell changes in place without rebinding. The harness re-serializes exactly these: without the list it sees an unchanged `id()` and stores nothing, and the downstream cell reads the value from before — under a provenance hash that says otherwise. |
+| `transform.params.tables` | object | Present only when non-empty. `{name: {uri, snapshot_id}}` for each `@table` the cell declares. Injected as `<name>` and `<name>_snapshot`; no catalog access is needed at the worker to read them. |
 | `inputs` | array of `{name, format}` | Each entry references a multipart field with the same `name`. `format` is the content type - `arrow/ipc`, `pickle/object`, `json/object`, `module/import`, `module/cell`, `module/cell-instance`, or `file/path` for an `@fetch`'s bytes, which the harness injects as a `pathlib.Path` to the written file instead of loading. |
 
 **Response (200)**:
