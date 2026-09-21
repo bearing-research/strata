@@ -41,6 +41,16 @@ parent. (Plain `strata watch ./scratch` usually cannot open it: a server only
 opens notebooks under its own storage root, and a scratchpad lives in the
 project.)
 
+**Once someone is watching, switch to the session they are watching.** A
+path-based `strata … ./scratch` opens its own offline session, so its runs
+never reach the viewer and two sessions write the same files. Use the MCP
+tools, or add the live selectors to the same commands:
+
+```bash
+SID=$(curl -s http://127.0.0.1:8765/v1/notebooks/sessions | jq -r '.sessions[0].session_id')
+strata cell add --server http://127.0.0.1:8765 --session "$SID" -c 'print(1 + 1)' --run
+```
+
 ## Run a snippet (one call)
 
 CLI (works anywhere, no server needed):

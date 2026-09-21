@@ -75,6 +75,43 @@ cd ./my-notebook && claude
 Claude Code finds the `.mcp.json` that step 1 wrote, connects to the
 `strata-notebook` MCP server, and reads the working agreement from `CLAUDE.md`.
 
+??? info "Any other agent: finding the session and driving it"
+
+    `.mcp.json` and `CLAUDE.md` are a Claude Code convenience, not the
+    interface. Everything below them is an ordinary HTTP server and a session
+    id, so any agent can drive the same session two ways.
+
+    `strata agent` prints the session id when it starts. To find it again, or
+    to attach to a server someone else started, ask the server:
+
+    ```bash
+    curl -s http://127.0.0.1:8765/v1/notebooks/sessions | jq -r '.sessions[] | "\(.session_id)  \(.path)"'
+    ```
+
+    If the notebook is not open yet, open it. This is the one step an agent
+    cannot do through the MCP tools, which only see sessions that already
+    exist:
+
+    ```bash
+    SID=$(curl -s -X POST http://127.0.0.1:8765/v1/notebooks/open \
+      -H 'content-type: application/json' \
+      -d '{"path": "./my-notebook"}' | jq -r .session_id)
+    ```
+
+    Then either point the agent's MCP client at `http://127.0.0.1:8765/mcp`
+    (streamable HTTP, the same endpoint `.mcp.json` names), or drive the
+    session from the CLI with the selectors the
+    [CLI guide](cli.md#working-against-a-live-session-server-session) covers:
+
+    ```bash
+    strata status    --server http://127.0.0.1:8765 --session "$SID"
+    strata cell add  --server http://127.0.0.1:8765 --session "$SID" -c 'print(1 + 1)' --run
+    ```
+
+    Both routes reach the session the human is watching. A path-based
+    `strata … ./my-notebook` does not: it opens its own offline session on the
+    directory, so nothing it runs appears in the viewer.
+
 ### 3. Ask for something
 
 ```text
@@ -155,11 +192,12 @@ The last row is worth knowing: a notebook is a directory of ordinary files, so
 `strata cell show`, `strata dag`, `git diff` and your editor all work on an
 agent's output with no live connection at all.
 
-One caveat on that row. Live *cell status* (running, ready, errored) belongs to
-the session rather than to disk, so `strata status` run against the directory
-reports `idle` for cells the agent has already executed. What it does tell you
-offline is separately useful: each cell's **staleness** and why. For "what is
-it doing right now", attach one of the live views above.
+One caveat on that row. `running` belongs to the session rather than to disk,
+so you never see it offline. What you do see is recomputed from the artifact
+store: a cell whose output another cell consumes reports `ready` or `stale`
+with the reasons why, and a **leaf** cell reports `idle` however many times it
+has run, because a leaf stores no artifact to recognise it by. For "what is it
+doing right now", attach one of the live views above.
 
 If you would rather keep a browser tab than a terminal viewer, start with
 `strata agent --no-tui` and open the notebook in the web UI instead.
