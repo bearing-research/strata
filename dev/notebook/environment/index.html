@@ -2288,7 +2288,7 @@
 <h2 id="how-it-works">How It Works<a class="headerlink" href="#how-it-works" title="Permanent link">&para;</a></h2>
 <p>When you create a notebook, Strata:</p>
 <ol>
-<li>Generates a <code>pyproject.toml</code> with <code>pyarrow</code> as the default dependency</li>
+<li>Generates a <code>pyproject.toml</code> seeded with the packages a cell needs to hand values to the next one: <code>pyarrow</code>, <code>orjson</code> and <code>cloudpickle</code></li>
 <li>Runs <code>uv sync</code> to create a <code>.venv/</code> and <code>uv.lock</code></li>
 <li>All cell execution uses this notebook-local venv</li>
 </ol>
@@ -2403,7 +2403,7 @@ lockfile instead:</p>
   gone unused for <code>STRATA_NOTEBOOK_SHARED_ENV_TTL_DAYS</code> (default 7), by an
   hourly sweep in the server or by <code>strata env gc</code>. An environment a notebook
   links to is never removed, opening a notebook counts as using it, and the
-  sweep removes only environments it built — a directory of your own under the
+  sweep removes only environments it built. A directory of your own under the
   store, or one whose build never finished, is left alone.</li>
 </ul>
 <p>R libraries are shared the same way. A notebook with an <code>renv.lock</code> restores

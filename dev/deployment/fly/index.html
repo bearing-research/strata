@@ -2182,8 +2182,10 @@ comparison.</p>
 <li><a href="https://fly.io/docs/flyctl/install/">Fly CLI</a> installed (<code>brew install flyctl</code> on macOS).</li>
 <li><code>fly auth login</code> completed (opens a browser; one-time).</li>
 <li>A Fly.io account with a payment method on file. The default
-  <code>shared-cpu-4x</code> VM costs ~$5/mo if always-on, less if you let it
-  scale to zero.</li>
+  <code>shared-cpu-4x</code> VM costs roughly $5/mo always-on, which is what the
+  shipped <code>fly.toml</code> configures: it suspends idle machines but keeps one
+  running, so it does not scale to zero unless you change
+  <code>min_machines_running</code>.</li>
 </ul>
 <h2 id="deploy">Deploy<a class="headerlink" href="#deploy" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="c1"># First time</span>
@@ -2200,7 +2202,7 @@ comparison.</p>
 <p>After <code>fly deploy</code> reports success:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>curl<span class="w"> </span>https://&lt;your-app-name&gt;.fly.dev/health
 </code></pre></div>
-<p>Expected response: <code>{"status":"ok"}</code> (plus details). If you get a
+<p>Expected response: exactly <code>{"status":"ok"}</code>. The detailed views are <code>/health/dependencies</code> and <code>/health/ready</code>. If you get a
 504 or connection error, run <code>fly logs</code> to inspect the startup -
 the most common cause is a cold-start delay on the first request.</p>
 <h2 id="configuration">Configuration<a class="headerlink" href="#configuration" title="Permanent link">&para;</a></h2>

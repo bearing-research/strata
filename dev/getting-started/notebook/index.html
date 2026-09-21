@@ -2670,15 +2670,15 @@ cell, or call from <code>display()</code>:</p>
 </tr>
 <tr>
 <td>numpy ndarray</td>
-<td>Preview header (<code>shape</code>, <code>dtype</code>) + first few rows.</td>
+<td>A one-line summary of its shape and dtype.</td>
 </tr>
 <tr>
 <td><code>Markdown("**hi**")</code></td>
 <td>The <code>Markdown</code> helper renders inline HTML.</td>
 </tr>
 <tr>
-<td><code>Image.open(...)</code>, video, audio</td>
-<td>Inline rendering of the appropriate type.</td>
+<td><code>Image.open(...)</code></td>
+<td>Rendered inline as PNG. Video and audio are not display types; store them as artifacts and open them outside the notebook.</td>
 </tr>
 </tbody>
 </table>

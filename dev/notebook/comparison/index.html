@@ -2258,17 +2258,21 @@ share the same file. Strata's per-cell layout keeps a diff that touches
 cell 3 from rebasing on top of changes to cell 7.</p>
 <h2 id="where-other-notebooks-are-stronger">Where other notebooks are stronger<a class="headerlink" href="#where-other-notebooks-are-stronger" title="Permanent link">&para;</a></h2>
 <ul>
-<li><strong>Interactive UI widgets.</strong> Marimo has <code>mo.ui.slider</code>, <code>mo.ui.dropdown</code>,
-  etc., reactive widgets the user can drag/click to update a parameter,
-  which then propagates through the DAG. Strata doesn't have a widget
-  layer; you change a value by editing source.</li>
+<li><strong>Interactive UI widgets.</strong> Marimo's <code>mo.ui.*</code> widgets are composed in
+  Python and can be built up programmatically. Strata's <code>widget</code> cells are
+  declarative rather than composable: slider, number, dropdown, text and
+  checkbox, declared in the cell and consumed by downstream cells as inputs.
+  With Live on, moving a control re-runs what depends on it.</li>
 <li><strong>Ecosystem maturity.</strong> Jupyter's ecosystem of extensions, kernels (R,
-  Julia, Scala, Bash, etc.), and integrations is unmatched. Strata is
-  Python-only with an AI provider abstraction.</li>
+  Julia, Scala, Bash, etc.), and integrations is unmatched. Strata runs
+  Python, R, SQL, prompt, markdown and widget cells in one DAG, which covers
+  a narrower range than Jupyter's kernels.</li>
 <li><strong>Reactive evaluation at the keystroke level.</strong> Pluto and Marimo
   immediately re-run dependent cells on edit. Strata is reactive about
   <em>staleness</em> (the DAG updates, downstream cells flip to stale on every
-  source change) but execution is explicit, you press Run.</li>
+  source change) and execution is explicit, you press Run. The exception is
+  a widget cell with Live on, where moving a control re-runs its dependents
+  immediately.</li>
 <li><strong>Hosted offerings.</strong> Google Colab, Deepnote, Hex, and Databricks
   Notebooks all bundle a hosted runtime; Strata is self-hosted (see
   the section below on where these fit).</li>

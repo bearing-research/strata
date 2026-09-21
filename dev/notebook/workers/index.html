@@ -2500,7 +2500,7 @@
 </code></pre></div>
 <p><strong>3. Register it in your notebook.</strong> Either through the <strong>Workers panel</strong> in the sidebar, or by editing <code>notebook.toml</code>:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="k">[[workers]]</span>
-<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="n">name</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;local&quot;</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="n">name</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;local-dev&quot;</span>
 <a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="n">backend</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;executor&quot;</span>
 <a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="n">runtime_id</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;local-dev&quot;</span>
 <a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a>
@@ -2508,12 +2508,16 @@
 <a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a><span class="n">url</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;http://127.0.0.1:9000/v1/execute&quot;</span>
 <a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a><span class="n">transport</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;direct&quot;</span>
 </code></pre></div>
+<p>Any name except <code>local</code>. That one is reserved for the built-in in-process
+worker: <code>resolve_worker_spec</code> returns it before it ever looks at the
+notebook's own definitions, so a worker you name <code>local</code> is never dispatched
+to, and the cell runs in-process while appearing to be configured.</p>
 <p><strong>4. Use it in a cell:</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="c1"># @worker local</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="c1"># @worker local-dev</span>
 <a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="kn">import</span><span class="w"> </span><span class="nn">platform</span>
 <a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="n">hostname</span> <span class="o">=</span> <span class="n">platform</span><span class="o">.</span><span class="n">node</span><span class="p">()</span>
 </code></pre></div>
-<p>When the cell runs, the UI shows a pulsing <strong>"dispatching → local"</strong> badge during execution. The <code>hostname</code> artifact is what the worker process saw, not your laptop - confirming the cell really ran remotely.</p>
+<p>When the cell runs, the UI shows a pulsing <strong>"dispatching → local-dev"</strong> badge during execution. The <code>hostname</code> artifact is what the worker process saw. On one machine that is the same name your laptop reports, so it confirms the round trip rather than the location; point the worker at another host and the name changes.</p>
 <h3 id="sharing-one-machine-concurrency-and-gpus">Sharing one machine: concurrency and GPUs<a class="headerlink" href="#sharing-one-machine-concurrency-and-gpus" title="Permanent link">&para;</a></h3>
 <p>A worker runs as many cells at once as it is sent. On a machine several people's cells reach, cap it, and let the worker hand out GPUs itself:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>uv<span class="w"> </span>run<span class="w"> </span>strata-worker<span class="w"> </span>--port<span class="w"> </span><span class="m">9000</span><span class="w"> </span>--max-concurrent<span class="w"> </span><span class="m">2</span><span class="w"> </span>--gpu-slots<span class="w"> </span><span class="m">2</span>
@@ -2574,7 +2578,7 @@
 shorter path:</p>
 <ul>
 <li><strong>A machine you can SSH to</strong> - <a href="#run-cells-on-a-machine-you-can-ssh-to">one command</a>, no deploy, no account. Usually the fastest way to reach a GPU you already have.</li>
-<li><strong>Machines started per job</strong> - <a href="#worker-pools-a-different-layer">worker pools</a>, whose Docker and RunPod backends boot hardware on demand. A different layer, dispatched by a proxy rather than by the notebook.</li>
+<li><strong>Machines started per job</strong> - <a href="#worker-pools-a-different-layer">worker pools</a>, whose Docker, Fly and RunPod backends boot hardware on demand. A different layer, dispatched by a proxy rather than by the notebook.</li>
 </ul>
 <p>You can register many workers per notebook; each cell picks its target independently. Mixing Fly (cheap CPU) and Modal (on-demand GPU) is a common setup.</p>
 <h3 id="flyio-cpu-worker">Fly.io (CPU worker)<a class="headerlink" href="#flyio-cpu-worker" title="Permanent link">&para;</a></h3>
@@ -2767,7 +2771,7 @@ wrong boots machines to recompute results that already exist.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-24-1" name="__codelineno-24-1" href="#__codelineno-24-1"></a>pip<span class="w"> </span>install<span class="w"> </span>strata-pool<span class="w">            </span><span class="c1"># library</span>
 <a id="__codelineno-24-2" name="__codelineno-24-2" href="#__codelineno-24-2"></a>pip<span class="w"> </span>install<span class="w"> </span><span class="s2">&quot;strata-pool[server]&quot;</span><span class="w">  </span><span class="c1"># plus the HTTP service</span>
 </code></pre></div>
-<p>It ships Docker and RunPod backends, per-worker credentials, tenant-scoped
+<p>It ships Docker, Fly and RunPod backends, per-worker credentials, tenant-scoped
 machines, a fleet cap, and usage metering. Cloud SDKs live in the backend
 extras, so the base install pulls only <code>httpx</code>. Build the image the pool
 drives with:</p>
@@ -2850,7 +2854,7 @@ restart. Before, they lived only in memory and the next restart reverted them.</
 <p><strong>The file wins over <code>[tool.strata.transforms] notebook_workers</code>.</strong> The
 configured table is the bootstrap; once anything has been changed through the
 admin routes, that file is the registry and editing the config table has no
-effect. Delete the file to go back to the configured table — an <em>empty</em>
+effect. Delete the file to go back to the configured table. An <em>empty</em>
 registry is a decision, not an absence, so removing every worker through the
 API does not fall back.</p>
 <p><code>POST /v1/admin/notebook-workers/reload</code> re-reads the file, for a fleet
@@ -2858,7 +2862,7 @@ manager writing it underneath a running server. A restart would work too, but
 it interrupts every cell currently executing.</p>
 <p><strong>Personal-mode servers get the registry too.</strong> A personal server started with
 a registry offers those machine types to every notebook it opens, with no
-<code>[[workers]]</code> block in <code>notebook.toml</code> — which is the point, since writing one
+<code>[[workers]]</code> block in <code>notebook.toml</code>, which is the point, since writing one
 into every notebook puts the catalogue in git diffs and drifts as soon as it
 changes. They appear in the Workers panel with <code>source: server</code>.</p>
 <p>A notebook's own <code>[[workers]]</code> still win: define <code>gpu-a100</code> in your
@@ -2952,9 +2956,9 @@ the isolation boundary makes it a footgun worth designing around explicitly.</p>
 <li>Redeploying the same image (no dep changes). The cache is correct by construction; re-running is wasted compute.</li>
 <li>Scaling the number of worker instances. Output is deterministic given the same inputs.</li>
 </ul>
-<p>If you don't set <code>runtime_id</code>, Strata uses the worker <code>name</code> as a fallback. That's fine for solo notebooks but risks cache surprises if two notebooks both have a worker named <code>gpu</code> pointing at different deployments - set <code>runtime_id</code> explicitly in shared notebooks.</p>
+<p>If you don't set <code>runtime_id</code>, the identity is the backend, the name and a hash of the worker's config, so two notebooks with a worker named <code>gpu</code> pointing at different URLs already get different identities. Set <code>runtime_id</code> when you want the opposite: two differently configured workers treated as one runtime, so a result computed on either is a cache hit for the other.</p>
 <h2 id="health-checks">Health checks<a class="headerlink" href="#health-checks" title="Permanent link">&para;</a></h2>
-<p>Every worker exposes <code>GET /health</code>. The notebook UI polls this and shows a green/red badge next to cells that use the worker; cells refuse to dispatch to an unhealthy worker.</p>
+<p>Every worker exposes <code>GET /health</code>. The notebook UI polls this and shows a green/red badge next to cells that use the worker. The badge is advisory: execution does not consult it, so a cell dispatched to a worker that has gone down fails when the connection does, not before.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-34-1" name="__codelineno-34-1" href="#__codelineno-34-1"></a>curl<span class="w"> </span>https://my-worker.example.com/health
 </code></pre></div>
 <p>The <code>/health</code> endpoint is <strong>not</strong> gated by <code>STRATA_WORKER_TOKEN</code> - platform health probes (Fly, k8s liveness, Cloudflare) don't need the secret.</p>

@@ -2210,7 +2210,7 @@
 <li><code>&lt;warehouse-path&gt;</code> is the path to the warehouse root (the directory containing Iceberg metadata).</li>
 <li>The fragment after <code>#</code> names the Iceberg table inside the warehouse, as <code>&lt;namespace&gt;.&lt;table&gt;</code>.</li>
 </ul>
-<p>For the demo above, the warehouse lives at <code>/warehouse</code> and contains the <code>events</code> table in the <code>db</code> namespace, so the URI is <code>file:///warehouse#db.events</code>.</p>
+<p>A table URI is <code>&lt;warehouse&gt;#&lt;namespace&gt;.&lt;table&gt;</code>. The demo prints the exact one it created when it runs, because it builds its warehouse in a temporary directory rather than at a fixed path; copy that line rather than the shape below.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">strata_client</span><span class="w"> </span><span class="kn">import</span> <span class="n">StrataClient</span>
 <a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>
 <a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="n">client</span> <span class="o">=</span> <span class="n">StrataClient</span><span class="p">()</span>

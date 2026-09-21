@@ -2297,67 +2297,80 @@ does <strong>not</strong> mean your cell outputs cross-pollinate.</p>
 <p>Notebook IDs are full UUIDs (8-char prefix for display, full UUID
 for the actual ID). They're not in any global enumeration and
 they're not in <code>discover</code>'s output unless the caller owns them.
-But: <strong>once a UUID is known, anyone can open the notebook</strong>.</p>
+What happens next depends on whether <code>STRATA_PERSONAL_MODE_USER_HEADER</code>
+is configured.</p>
+<p><strong>With per-user scoping on</strong>, knowing the id is not enough. Every route
+that takes a session id resolves it through one dependency,
+<code>get_notebook_session</code>, which checks the notebook's recorded owner against
+the caller's identity and answers <code>404</code> on a mismatch. The WebSocket upgrade
+does the same and closes with <code>1008</code>. A missing header is denied too, so a
+caller who sends nothing is not treated as everyone.</p>
 <table>
 <thead>
 <tr>
 <th>Endpoint</th>
 <th>Owner check?</th>
-<th>Why</th>
+<th>How</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td><code>POST /v1/notebooks/open</code></td>
-<td>No</td>
-<td>Direct URL collaboration ("send Alice the link")</td>
-</tr>
-<tr>
 <td><code>GET /v1/notebooks/{id}/cells</code></td>
-<td>No</td>
-<td>Same, read-after-open</td>
+<td><strong>Yes</strong></td>
+<td><code>get_notebook_session</code>, 404 to non-owners</td>
 </tr>
 <tr>
 <td><code>POST /v1/notebooks/{id}/cells/{cell_id}/execute</code></td>
-<td>No</td>
-<td>Collaboration shape</td>
+<td><strong>Yes</strong></td>
+<td>Same dependency</td>
 </tr>
 <tr>
 <td><code>GET /v1/notebooks/{id}/dag</code></td>
-<td>No</td>
-<td>Same</td>
+<td><strong>Yes</strong></td>
+<td>Same dependency</td>
 </tr>
 <tr>
 <td><code>WS /v1/notebooks/ws/{id}</code></td>
-<td>No</td>
-<td>Live editing</td>
+<td><strong>Yes</strong></td>
+<td>Upgrade closes with 1008</td>
 </tr>
 <tr>
 <td><code>GET /v1/notebooks/discover</code></td>
-<td><strong>Yes</strong>: filters by owner</td>
-<td>Prevents accidental discovery</td>
+<td><strong>Yes</strong></td>
+<td>Filters by owner, and scans only the caller's own storage root</td>
+</tr>
+<tr>
+<td><code>POST /v1/notebooks/open</code></td>
+<td><strong>Yes</strong></td>
+<td>The path must lie inside the caller's own storage root</td>
 </tr>
 <tr>
 <td><code>DELETE /v1/notebooks/{id}</code></td>
-<td><strong>Yes</strong>: 404 to non-owners</td>
-<td>Destructive</td>
+<td><strong>Yes</strong></td>
+<td>404 to non-owners</td>
 </tr>
 <tr>
 <td><code>POST /v1/notebooks/delete-by-path</code></td>
-<td><strong>Yes</strong>: 404 to non-owners</td>
-<td>Destructive</td>
+<td><strong>Yes</strong></td>
+<td>404 to non-owners</td>
 </tr>
 <tr>
 <td><code>PUT /v1/notebooks/{id}/name</code></td>
-<td><strong>Yes</strong>: 404 to non-owners</td>
-<td>Rename is destructive to URL-based sharing</td>
+<td><strong>Yes</strong></td>
+<td>404 to non-owners</td>
 </tr>
 </tbody>
 </table>
-<p>The pattern: <strong>collaboration is open via URL, destructive operations
-are owner-only</strong>. Suits "I want to share an analysis with my
-teammate" but doesn't suit "I have a private notebook with secrets
-that no one else should ever read".</p>
+<p>The generic <code>404</code> is deliberate: a <code>403</code> would confirm that a notebook with
+that id exists.</p>
+<p><strong>With the header unset</strong> there is no identity to check against, every
+notebook is unowned, and anyone who can reach the port can open anything.
+That is the single-user shape, and it is why personal mode binds to loopback
+by default.</p>
+<p>Sharing a link with a teammate therefore does not work under per-user
+scoping, because their path resolution is confined to their own root. Use
+<a href="../../notebook/publishing/">publishing</a> to hand someone a result, or service
+mode for a genuinely shared deployment.</p>
 <h2 id="how-notebook-ownership-gets-stamped">How notebook ownership gets stamped<a class="headerlink" href="#how-notebook-ownership-gets-stamped" title="Permanent link">&para;</a></h2>
 <p>The <code>owner</code> field on <code>notebook.toml</code> is set when:</p>
 <ul>
@@ -2394,8 +2407,9 @@ look at the notebook. If you wouldn't put it in a shared Google Doc,
 don't put it in a shared Strata notebook.</p>
 <h3 id="multi-tenant-or-hard-isolation-requirements">Multi-tenant or hard-isolation requirements<a class="headerlink" href="#multi-tenant-or-hard-isolation-requirements" title="Permanent link">&para;</a></h3>
 <p><code>STRATA_DEPLOYMENT_MODE=service</code> + multi-tenancy. Each tenant gets
-its own QoS pools, cache namespacing, and metric labels. Discover
-is disabled (the proxy / app routes users to specific notebooks).</p>
+its own QoS pools, cache namespacing, and metric labels. Notebook routes
+are scope gated, so what a principal can reach depends on the scopes the
+proxy asserts for it.</p>
 <p>Notes:</p>
 <ul>
 <li><strong>The URL-access property still holds within a tenant.</strong> Multi-

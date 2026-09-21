@@ -2332,9 +2332,10 @@ path. Strata trusts the proxy and refuses to do its own auth.</p>
 <h2 id="sharing-personal-mode-with-a-small-group">Sharing personal mode with a small group<a class="headerlink" href="#sharing-personal-mode-with-a-small-group" title="Permanent link">&para;</a></h2>
 <p>A common deployment shape is "personal mode behind an authenticating proxy", for example, Cloudflare Access in front of a Fly.io app, sharing the
 notebook UI with a handful of trusted users. This isn't full multi-tenancy
-(no per-user storage, no per-user QoS, no artifact isolation), but Strata
-provides a thin per-user filter so each invitee sees their own work in the
-"Open existing" list.</p>
+(no per-user QoS, one shared cache), but each user does get their own
+storage root, <code>&lt;notebook_storage_dir&gt;/&lt;identity&gt;/</code>, and every path-taking
+route is confined to it. A notebook's artifacts live under its own
+directory, so they land inside that root too.</p>
 <p>Set:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="nv">STRATA_DEPLOYMENT_MODE</span><span class="o">=</span>personal
 <a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="nv">STRATA_ALLOW_REMOTE_CLIENTS_IN_PERSONAL</span><span class="o">=</span><span class="nb">true</span>
@@ -2351,15 +2352,19 @@ ID, anything stable.</p>
   <code>owner == caller</code> or <code>owner is None</code>.</li>
 <li><code>DELETE /v1/notebooks/{id}</code> and <code>POST /v1/notebooks/delete-by-path</code>
   return 404 if a non-owner tries to delete an owned notebook.</li>
-<li>Direct-URL access stays open: anyone with a notebook ID can <code>POST /open</code>
-  and view it. This is intentional, it preserves "share a link with a
-  collaborator" while preventing accidents in the discovery list.</li>
+<li>Sharing a link does not work. <code>POST /open</code> resolves the path inside the
+  caller's own storage root, and every session-targeted route checks the
+  notebook's owner and answers 404 otherwise. To hand someone a result, use
+  <a href="../../notebook/publishing/">publishing</a>.</li>
 </ul>
 <p>What does <em>not</em> change:
 - Concurrent edits to the same notebook still race (no per-user sessions).
 - The artifact store is shared; provenance hashes don't include the caller.
 - The AI API key pool (<code>STRATA_AI_*</code>) is shared across all users.
-- Unowned (legacy) notebooks remain visible and deletable by everyone.</p>
+- Unowned (legacy) notebooks bypass the owner check, but not the storage
+  boundary: one sitting in the base directory rather than a user's own root
+  is invisible to <code>discover</code> and unopenable by every scoped caller. Move it
+  into a user's root to make it reachable again.</p>
 <p>This shape is the right answer for a 5–20 person trusted group. For untrusted
 or paid users, migrate to service mode for proper tenant isolation.</p>
 <h2 id="coherence-enforcement">Coherence enforcement<a class="headerlink" href="#coherence-enforcement" title="Permanent link">&para;</a></h2>
