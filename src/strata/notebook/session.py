@@ -1113,9 +1113,7 @@ class NotebookSession:
     @staticmethod
     def _failure_still_stands(cell: CellState) -> bool:
         """Whether ``cell``'s recorded error is still about the source it has."""
-        if cell.error is None or cell.error_source_hash is None:
-            return False
-        return cell.error_source_hash == compute_source_hash(cell.source)
+        return cell.current_error() is not None
 
     def mark_executed_ready(self, cell_id: str) -> None:
         """Preserve a just-executed cell as ready in backend state.
