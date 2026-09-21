@@ -2319,6 +2319,11 @@ terminal viewer; skip it if you plan to watch in a browser and pass <code>--no-t
 <div class="tabbed-block">
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>uv<span class="w"> </span>sync<span class="w"> </span>--extra<span class="w"> </span>mcp<span class="w"> </span>--extra<span class="w"> </span>tui<span class="w">     </span><span class="c1"># or: uv sync --all-extras</span>
 </code></pre></div>
+<p><code>uv sync</code> installs into the checkout's <code>.venv</code>, it does not put <code>strata</code> on
+your <code>PATH</code>. Run every <code>strata …</code> command below as <code>uv run strata …</code> from
+the checkout. A bare <code>strata</code> there is whatever else you have installed,
+which on a machine that also has the released package is a different and
+usually older build.</p>
 </div>
 </div>
 </div>
