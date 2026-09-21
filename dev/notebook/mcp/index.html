@@ -2148,7 +2148,7 @@ REST routes and the WebSocket:</p>
 <tbody>
 <tr>
 <td><code>notebook:read</code></td>
-<td><code>list_notebooks</code>, <code>get_notebook</code>, <code>get_cell</code>, <code>get_variable</code>, <code>dag</code>, <code>status</code>, <code>list_workers</code>, <code>lineage</code>, <code>publish_preflight</code></td>
+<td><code>list_notebooks</code>, <code>get_notebook</code>, <code>get_cell</code>, <code>save_cell_output</code>, <code>get_variable</code>, <code>dag</code>, <code>status</code>, <code>list_workers</code>, <code>lineage</code>, <code>publish_preflight</code></td>
 </tr>
 <tr>
 <td><code>notebook:write</code></td>
@@ -2214,6 +2214,10 @@ The typical loop:</p>
 <tr>
 <td><code>get_cell(session_id, cell_id)</code></td>
 <td>One cell: source, status, outputs.</td>
+</tr>
+<tr>
+<td><code>save_cell_output(session_id, cell_id, index=-1)</code></td>
+<td>Write a display output (a plot, an image) to the notebook's <code>.strata/outputs/</code> and return the path, so the agent can open it.</td>
 </tr>
 <tr>
 <td><code>get_variable(session_id, name)</code></td>
