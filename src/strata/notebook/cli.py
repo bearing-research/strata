@@ -278,139 +278,142 @@ async def _run_async(args: argparse.Namespace) -> int:
     failed_cells: set[str] = set()
     start = time.monotonic()
 
-    for cell_id in session.dag.topological_order:
-        cell = cell_by_id.get(cell_id)
-        if cell is None:
-            # Cell in the DAG but not in notebook_state — shouldn't happen,
-            # but don't crash.
-            continue
+    # One run: each cell executes at most once, so a @nocache producer
+    # with several consumers is not re-executed as each one materialises it.
+    with executor.one_run():
+        for cell_id in session.dag.topological_order:
+            cell = cell_by_id.get(cell_id)
+            if cell is None:
+                # Cell in the DAG but not in notebook_state — shouldn't happen,
+                # but don't crash.
+                continue
 
-        # Markdown cells are non-executable prose; surface them as
-        # success-with-no-op so ``strata run`` doesn't print a misleading
-        # "skipped: unsupported language" line for documentation cells.
-        if cell.language == CellLanguage.MARKDOWN:
-            entry = {
-                "id": cell_id,
-                "label": f"[markdown] {_cell_label(cell.source)}",
-                "status": "ok",
-                "reason": None,
-                "duration_ms": 0,
-                "cache_hit": True,
-            }
-            results.append(entry)
-            if args.format == "human" and not args.quiet:
-                _print_cell_line(entry)
-            continue
+            # Markdown cells are non-executable prose; surface them as
+            # success-with-no-op so ``strata run`` doesn't print a misleading
+            # "skipped: unsupported language" line for documentation cells.
+            if cell.language == CellLanguage.MARKDOWN:
+                entry = {
+                    "id": cell_id,
+                    "label": f"[markdown] {_cell_label(cell.source)}",
+                    "status": "ok",
+                    "reason": None,
+                    "duration_ms": 0,
+                    "cache_hit": True,
+                }
+                results.append(entry)
+                if args.format == "human" and not args.quiet:
+                    _print_cell_line(entry)
+                continue
 
-        # Skip languages we can't execute headlessly. R cells run through
-        # the same language-executor dispatch the session uses (Rscript +
-        # harness.R); a missing `Rscript` surfaces as a clean cell error,
-        # not a crash, so R belongs in the executable set rather than the
-        # skip list.
-        if cell.language not in {
-            CellLanguage.PYTHON,
-            CellLanguage.PROMPT,
-            CellLanguage.SQL,
-            CellLanguage.R,
-        }:
-            entry = {
-                "id": cell_id,
-                "label": f"[{cell.language}] {_cell_label(cell.source)}",
-                "status": "skipped",
-                "reason": f"unsupported language: {cell.language}",
-                "duration_ms": 0,
-                "cache_hit": False,
-            }
-            results.append(entry)
-            if args.format == "human" and not args.quiet:
-                _print_cell_line(entry)
-            continue
+            # Skip languages we can't execute headlessly. R cells run through
+            # the same language-executor dispatch the session uses (Rscript +
+            # harness.R); a missing `Rscript` surfaces as a clean cell error,
+            # not a crash, so R belongs in the executable set rather than the
+            # skip list.
+            if cell.language not in {
+                CellLanguage.PYTHON,
+                CellLanguage.PROMPT,
+                CellLanguage.SQL,
+                CellLanguage.R,
+            }:
+                entry = {
+                    "id": cell_id,
+                    "label": f"[{cell.language}] {_cell_label(cell.source)}",
+                    "status": "skipped",
+                    "reason": f"unsupported language: {cell.language}",
+                    "duration_ms": 0,
+                    "cache_hit": False,
+                }
+                results.append(entry)
+                if args.format == "human" and not args.quiet:
+                    _print_cell_line(entry)
+                continue
 
-        # Skip if any upstream failed.
-        upstream = session.dag.cell_upstream.get(cell_id, [])
-        if any(u in failed_cells for u in upstream):
-            entry = {
+            # Skip if any upstream failed.
+            upstream = session.dag.cell_upstream.get(cell_id, [])
+            if any(u in failed_cells for u in upstream):
+                entry = {
+                    "id": cell_id,
+                    "label": _cell_label(cell.source),
+                    "status": "skipped",
+                    "reason": "upstream failed",
+                    "duration_ms": 0,
+                    "cache_hit": False,
+                }
+                results.append(entry)
+                failed_cells.add(cell_id)
+                if args.format == "human" and not args.quiet:
+                    _print_cell_line(entry)
+                continue
+
+            try:
+                # --timeout raises the fallback per-cell limit for this run; a
+                # per-cell `# @timeout` / notebook.toml `timeout` still takes
+                # precedence (see CellExecutor._resolve_effective_timeout).
+                cell_timeout = (
+                    args.timeout if args.timeout is not None else DEFAULT_CELL_TIMEOUT_SECONDS
+                )
+                if args.force:
+                    result = await executor.execute_cell_force(
+                        cell_id, cell.source, timeout_seconds=cell_timeout
+                    )
+                else:
+                    result = await executor.execute_cell(
+                        cell_id, cell.source, timeout_seconds=cell_timeout
+                    )
+            except Exception as exc:
+                entry = {
+                    "id": cell_id,
+                    "label": _cell_label(cell.source),
+                    "status": "error",
+                    "error": f"{type(exc).__name__}: {exc}",
+                    "duration_ms": 0,
+                    "cache_hit": False,
+                }
+                results.append(entry)
+                failed_cells.add(cell_id)
+                if args.format == "human" and not args.quiet:
+                    _print_cell_line(entry)
+                continue
+
+            entry: dict[str, Any] = {
                 "id": cell_id,
                 "label": _cell_label(cell.source),
-                "status": "skipped",
-                "reason": "upstream failed",
-                "duration_ms": 0,
-                "cache_hit": False,
+                "status": "ok" if result.success else "error",
+                "duration_ms": int(result.duration_ms or 0),
+                "cache_hit": bool(result.cache_hit),
             }
-            results.append(entry)
-            failed_cells.add(cell_id)
-            if args.format == "human" and not args.quiet:
-                _print_cell_line(entry)
-            continue
-
-        try:
-            # --timeout raises the fallback per-cell limit for this run; a
-            # per-cell `# @timeout` / notebook.toml `timeout` still takes
-            # precedence (see CellExecutor._resolve_effective_timeout).
-            cell_timeout = (
-                args.timeout if args.timeout is not None else DEFAULT_CELL_TIMEOUT_SECONDS
-            )
-            if args.force:
-                result = await executor.execute_cell_force(
-                    cell_id, cell.source, timeout_seconds=cell_timeout
-                )
+            # Carry console output so external authors (scripts, coding
+            # agents) can verify computed values from the JSON payload
+            # instead of reaching into .strata/ — which is documented as
+            # hands-off (issue #114 litmus finding). Cache hits replay the
+            # stored result without re-emitting console output, so these
+            # keys can be absent on warm runs.
+            if result.stdout:
+                entry["stdout"] = _truncate_console(result.stdout)
+            if result.stderr:
+                entry["stderr"] = _truncate_console(result.stderr)
+            # In-place mutation of an input is otherwise silent in headless runs (the
+            # warning only reached the WS/UI path). Surface it: a cell that mutates an
+            # input without exporting it means downstream cells see the stale value.
+            if result.mutation_warnings:
+                entry["mutation_warnings"] = [dict(w) for w in result.mutation_warnings]
+            if not result.success:
+                entry["error"] = result.error or "cell failed"
+                failed_cells.add(cell_id)
             else:
-                result = await executor.execute_cell(
-                    cell_id, cell.source, timeout_seconds=cell_timeout
-                )
-        except Exception as exc:
-            entry = {
-                "id": cell_id,
-                "label": _cell_label(cell.source),
-                "status": "error",
-                "error": f"{type(exc).__name__}: {exc}",
-                "duration_ms": 0,
-                "cache_hit": False,
-            }
+                # What makes two run reports comparable. Without these a report
+                # says "both green" and stops: two machines that computed
+                # different numbers produce identical JSON. Read back from the
+                # store rather than from the result, because a cache hit carries
+                # no outputs and is exactly the run worth comparing.
+                entry.update(_cell_identity(session, cell, cell_id))
             results.append(entry)
-            failed_cells.add(cell_id)
             if args.format == "human" and not args.quiet:
                 _print_cell_line(entry)
-            continue
-
-        entry: dict[str, Any] = {
-            "id": cell_id,
-            "label": _cell_label(cell.source),
-            "status": "ok" if result.success else "error",
-            "duration_ms": int(result.duration_ms or 0),
-            "cache_hit": bool(result.cache_hit),
-        }
-        # Carry console output so external authors (scripts, coding
-        # agents) can verify computed values from the JSON payload
-        # instead of reaching into .strata/ — which is documented as
-        # hands-off (issue #114 litmus finding). Cache hits replay the
-        # stored result without re-emitting console output, so these
-        # keys can be absent on warm runs.
-        if result.stdout:
-            entry["stdout"] = _truncate_console(result.stdout)
-        if result.stderr:
-            entry["stderr"] = _truncate_console(result.stderr)
-        # In-place mutation of an input is otherwise silent in headless runs (the
-        # warning only reached the WS/UI path). Surface it: a cell that mutates an
-        # input without exporting it means downstream cells see the stale value.
-        if result.mutation_warnings:
-            entry["mutation_warnings"] = [dict(w) for w in result.mutation_warnings]
-        if not result.success:
-            entry["error"] = result.error or "cell failed"
-            failed_cells.add(cell_id)
-        else:
-            # What makes two run reports comparable. Without these a report
-            # says "both green" and stops: two machines that computed
-            # different numbers produce identical JSON. Read back from the
-            # store rather than from the result, because a cache hit carries
-            # no outputs and is exactly the run worth comparing.
-            entry.update(_cell_identity(session, cell, cell_id))
-        results.append(entry)
-        if args.format == "human" and not args.quiet:
-            _print_cell_line(entry)
-            for w in result.mutation_warnings:
-                tail = f" {w['suggestion']}" if w.get("suggestion") else ""
-                print(f"      {_yellow('⚠')} {w['message']}{tail}")
+                for w in result.mutation_warnings:
+                    tail = f" {w['suggestion']}" if w.get("suggestion") else ""
+                    print(f"      {_yellow('⚠')} {w['message']}{tail}")
 
     total_ms = int((time.monotonic() - start) * 1000)
     any_failed = any(r["status"] == "error" for r in results)

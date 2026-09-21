@@ -2222,147 +2222,154 @@ async def _execute_cascade(
 
     cascade_failed = False
 
-    try:
-        for i, step in enumerate(plan.steps):
-            # Under target_force the cached-ready target must still rerun.
-            if step.skip and not (target_force and step.cell_id == plan.target_cell_id):
-                continue
+    # One run: a @nocache step is not re-executed as each later step
+    # materialises its upstreams.
+    with executor.one_run():
+        try:
+            for i, step in enumerate(plan.steps):
+                # Under target_force the cached-ready target must still rerun.
+                if step.skip and not (target_force and step.cell_id == plan.target_cell_id):
+                    continue
 
-            cell_id = step.cell_id
-            cell = session.notebook_state.get_cell(cell_id)
-            if not cell:
-                continue
+                cell_id = step.cell_id
+                cell = session.notebook_state.get_cell(cell_id)
+                if not cell:
+                    continue
 
-            # If an earlier cascade step failed, abort remaining steps
-            if cascade_failed:
-                logger.warning(
-                    "Cascade %s: skipping cell %s (earlier step failed)",
-                    plan.plan_id,
-                    cell_id,
-                )
-                # Use "stale" (not "idle") so the client can distinguish a
-                # cascade-abort from a normal staleness notification.
-                cell_to_skip = session.notebook_state.get_cell(cell_id)
-                if cell_to_skip:
-                    cell_to_skip.status = CellStatus.STALE
+                # If an earlier cascade step failed, abort remaining steps
+                if cascade_failed:
+                    logger.warning(
+                        "Cascade %s: skipping cell %s (earlier step failed)",
+                        plan.plan_id,
+                        cell_id,
+                    )
+                    # Use "stale" (not "idle") so the client can distinguish a
+                    # cascade-abort from a normal staleness notification.
+                    cell_to_skip = session.notebook_state.get_cell(cell_id)
+                    if cell_to_skip:
+                        cell_to_skip.status = CellStatus.STALE
+                    await _broadcast_message(
+                        notebook_id,
+                        _make_message(
+                            MessageType.CELL_STATUS, seq, cell_status_payload(cell_id, "stale")
+                        ),
+                    )
+                    continue
+
+                execution_state.running_cell = cell_id
+
+                # Send cascade progress
                 await _broadcast_message(
                     notebook_id,
                     _make_message(
-                        MessageType.CELL_STATUS, seq, cell_status_payload(cell_id, "stale")
+                        MessageType.CASCADE_PROGRESS,
+                        seq,
+                        CascadeProgressPayload(
+                            plan_id=plan.plan_id,
+                            current_cell_id=cell_id,
+                            completed=i,
+                            total=len([s for s in plan.steps if not s.skip]),
+                        ).model_dump(mode="json"),
                     ),
                 )
-                continue
 
-            execution_state.running_cell = cell_id
-
-            # Send cascade progress
-            await _broadcast_message(
-                notebook_id,
-                _make_message(
-                    MessageType.CASCADE_PROGRESS,
-                    seq,
-                    CascadeProgressPayload(
-                        plan_id=plan.plan_id,
-                        current_cell_id=cell_id,
-                        completed=i,
-                        total=len([s for s in plan.steps if not s.skip]),
-                    ).model_dump(mode="json"),
-                ),
-            )
-
-            # Execute cell — update backend state AND broadcast
-            session.mark_cell_running(cell_id)
-            await _broadcast_message(
-                notebook_id,
-                _make_message(
-                    MessageType.CELL_STATUS, seq, _running_payload(session, cell_id, cell.source)
-                ),
-            )
-
-            try:
-                if target_force and cell_id == plan.target_cell_id:
-                    result = await executor.execute_cell_rerun(cell_id, cell.source)
-                else:
-                    result = await executor.execute_cell(cell_id, cell.source)
-
-                # Fresh seq after execution — streaming frames drew from
-                # the same counter; the result must not look older.
-                seq = execution_state.next_sequence()
-
-                # v1.1: Record execution for profiling
-                session.record_execution(
-                    cell_id,
-                    result.duration_ms,
-                    result.cache_hit,
-                    from_team=result.from_team_cache,
-                    team_principal=result.team_cache_principal,
-                    team_promotion=result.team_cache_promotion,
-                    team_saved_ms=result.team_cache_saved_ms,
-                )
-                session.apply_execution_result_metadata(cell_id, result)
-
-                # Broadcast stdout/stderr console + output/error in the
-                # same shape as the direct-execute path. Note: cascade
-                # previously skipped the stderr console broadcast — that
-                # drift is fixed by going through the shared helper.
-                await _broadcast_execution_result(notebook_id, seq, cell_id, result)
-
-                # Mark as ready — update backend state AND broadcast
-                status = CellStatus.READY if result.success else CellStatus.ERROR
-                cascade_cell = session.notebook_state.get_cell(cell_id)
-                if cascade_cell:
-                    cascade_cell.status = status
+                # Execute cell — update backend state AND broadcast
+                session.mark_cell_running(cell_id)
                 await _broadcast_message(
                     notebook_id,
                     _make_message(
-                        MessageType.CELL_STATUS, seq, cell_status_payload(cell_id, status)
+                        MessageType.CELL_STATUS,
+                        seq,
+                        _running_payload(session, cell_id, cell.source),
                     ),
                 )
 
-                logger.info(
-                    "Cascade %s: cell %s finished status=%s artifact_uri=%s cache_hit=%s",
-                    plan.plan_id,
-                    cell_id,
-                    status,
-                    getattr(cascade_cell, "artifact_uri", None) if cascade_cell else None,
-                    result.cache_hit,
-                )
+                try:
+                    if target_force and cell_id == plan.target_cell_id:
+                        result = await executor.execute_cell_rerun(cell_id, cell.source)
+                    else:
+                        result = await executor.execute_cell(cell_id, cell.source)
 
-                # If a step fails, abort the rest of the cascade
-                if not result.success:
+                    # Fresh seq after execution — streaming frames drew from
+                    # the same counter; the result must not look older.
+                    seq = execution_state.next_sequence()
+
+                    # v1.1: Record execution for profiling
+                    session.record_execution(
+                        cell_id,
+                        result.duration_ms,
+                        result.cache_hit,
+                        from_team=result.from_team_cache,
+                        team_principal=result.team_cache_principal,
+                        team_promotion=result.team_cache_promotion,
+                        team_saved_ms=result.team_cache_saved_ms,
+                    )
+                    session.apply_execution_result_metadata(cell_id, result)
+
+                    # Broadcast stdout/stderr console + output/error in the
+                    # same shape as the direct-execute path. Note: cascade
+                    # previously skipped the stderr console broadcast — that
+                    # drift is fixed by going through the shared helper.
+                    await _broadcast_execution_result(notebook_id, seq, cell_id, result)
+
+                    # Mark as ready — update backend state AND broadcast
+                    status = CellStatus.READY if result.success else CellStatus.ERROR
+                    cascade_cell = session.notebook_state.get_cell(cell_id)
+                    if cascade_cell:
+                        cascade_cell.status = status
+                    await _broadcast_message(
+                        notebook_id,
+                        _make_message(
+                            MessageType.CELL_STATUS, seq, cell_status_payload(cell_id, status)
+                        ),
+                    )
+
+                    logger.info(
+                        "Cascade %s: cell %s finished status=%s artifact_uri=%s cache_hit=%s",
+                        plan.plan_id,
+                        cell_id,
+                        status,
+                        getattr(cascade_cell, "artifact_uri", None) if cascade_cell else None,
+                        result.cache_hit,
+                    )
+
+                    # If a step fails, abort the rest of the cascade
+                    if not result.success:
+                        cascade_failed = True
+
+                except asyncio.CancelledError:
+                    await _set_cell_idle(
+                        session, notebook_id, execution_state.next_sequence(), cell_id
+                    )
+                    raise
+                except Exception as e:
+                    seq = execution_state.next_sequence()
+                    downstream_stale = session.mark_cell_error(cell_id)
+                    await _broadcast_message(
+                        notebook_id,
+                        _make_message(
+                            MessageType.CELL_ERROR, seq, {"cell_id": cell_id, "error": str(e)}
+                        ),
+                    )
+                    await _broadcast_message(
+                        notebook_id,
+                        _make_message(
+                            MessageType.CELL_STATUS, seq, cell_status_payload(cell_id, "error")
+                        ),
+                    )
+                    await _broadcast_downstream_stale(notebook_id, seq, downstream_stale)
                     cascade_failed = True
-
-            except asyncio.CancelledError:
-                await _set_cell_idle(session, notebook_id, execution_state.next_sequence(), cell_id)
-                raise
-            except Exception as e:
-                seq = execution_state.next_sequence()
-                downstream_stale = session.mark_cell_error(cell_id)
-                await _broadcast_message(
+            if not cascade_failed:
+                previous_snapshot = session.capture_cell_state_snapshot()
+                await _refresh_and_broadcast_changed_staleness(
+                    session,
                     notebook_id,
-                    _make_message(
-                        MessageType.CELL_ERROR, seq, {"cell_id": cell_id, "error": str(e)}
-                    ),
+                    seq,
+                    previous_snapshot,
+                    preserve_ready_cell_id=plan.target_cell_id,
                 )
-                await _broadcast_message(
-                    notebook_id,
-                    _make_message(
-                        MessageType.CELL_STATUS, seq, cell_status_payload(cell_id, "error")
-                    ),
-                )
-                await _broadcast_downstream_stale(notebook_id, seq, downstream_stale)
-                cascade_failed = True
-        if not cascade_failed:
-            previous_snapshot = session.capture_cell_state_snapshot()
-            await _refresh_and_broadcast_changed_staleness(
-                session,
-                notebook_id,
-                seq,
-                previous_snapshot,
-                preserve_ready_cell_id=plan.target_cell_id,
-            )
-    finally:
-        execution_state.running_cell = None
+        finally:
+            execution_state.running_cell = None
 
 
 async def _execute_run_all(
@@ -2415,70 +2422,74 @@ async def _execute_run_all(
     )
 
     had_failure = False
-    try:
-        for kind, cells_in_run in partition:
-            if had_failure and not continue_on_error:
-                break
-
-            # Size-1 batches gain nothing from subprocess amortization;
-            # route them through single-cell. So does a host that will not
-            # start cell code: single-cell serves each cache hit and shows the
-            # refusal on each cell that would run, where a refused batch would
-            # leave the rest of the notebook idle with nothing said.
-            if kind == "batch" and len(cells_in_run) >= 2 and batching_allowed:
-                batch_result = await _run_partition_batch(
-                    session=session,
-                    executor=executor,
-                    cells_in_run=cells_in_run,
-                    seq=seq,
-                    notebook_id=notebook_id,
-                    force=force,
-                    execution_state=execution_state,
-                )
-                if not batch_result.completed:
-                    had_failure = True
-                    # Batch ended early — any cells after the failed one
-                    # are status=not_run. Per issue #26 round-5 design,
-                    # they continue via single-cell with
-                    # skip_upstream_materialization=True so the failed
-                    # upstream isn't recursively re-executed.
-                    not_run_ids = {
-                        r.cell_id for r in batch_result.cell_results if r.status == "not_run"
-                    }
-                    for cell in cells_in_run:
-                        if cell.id not in not_run_ids:
-                            continue
-                        if not continue_on_error:
-                            break
-                        await _run_partition_single_cell(
-                            session=session,
-                            executor=executor,
-                            cell=cell,
-                            seq=seq,
-                            notebook_id=notebook_id,
-                            force=force,
-                            skip_upstream=True,
-                            execution_state=execution_state,
-                        )
-                continue
-
-            for cell in cells_in_run:
+    # One run: each cell executes at most once. Run All walks display order,
+    # so without this a consumer above its producer materialises it and the
+    # producer's own row then executes it again.
+    with executor.one_run():
+        try:
+            for kind, cells_in_run in partition:
                 if had_failure and not continue_on_error:
                     break
-                ok = await _run_partition_single_cell(
-                    session=session,
-                    executor=executor,
-                    cell=cell,
-                    seq=seq,
-                    notebook_id=notebook_id,
-                    force=force,
-                    skip_upstream=had_failure,
-                    execution_state=execution_state,
-                )
-                if not ok:
-                    had_failure = True
-    finally:
-        execution_state.running_cell = None
+
+                # Size-1 batches gain nothing from subprocess amortization;
+                # route them through single-cell. So does a host that will not
+                # start cell code: single-cell serves each cache hit and shows the
+                # refusal on each cell that would run, where a refused batch would
+                # leave the rest of the notebook idle with nothing said.
+                if kind == "batch" and len(cells_in_run) >= 2 and batching_allowed:
+                    batch_result = await _run_partition_batch(
+                        session=session,
+                        executor=executor,
+                        cells_in_run=cells_in_run,
+                        seq=seq,
+                        notebook_id=notebook_id,
+                        force=force,
+                        execution_state=execution_state,
+                    )
+                    if not batch_result.completed:
+                        had_failure = True
+                        # Batch ended early — any cells after the failed one
+                        # are status=not_run. Per issue #26 round-5 design,
+                        # they continue via single-cell with
+                        # skip_upstream_materialization=True so the failed
+                        # upstream isn't recursively re-executed.
+                        not_run_ids = {
+                            r.cell_id for r in batch_result.cell_results if r.status == "not_run"
+                        }
+                        for cell in cells_in_run:
+                            if cell.id not in not_run_ids:
+                                continue
+                            if not continue_on_error:
+                                break
+                            await _run_partition_single_cell(
+                                session=session,
+                                executor=executor,
+                                cell=cell,
+                                seq=seq,
+                                notebook_id=notebook_id,
+                                force=force,
+                                skip_upstream=True,
+                                execution_state=execution_state,
+                            )
+                    continue
+
+                for cell in cells_in_run:
+                    if had_failure and not continue_on_error:
+                        break
+                    ok = await _run_partition_single_cell(
+                        session=session,
+                        executor=executor,
+                        cell=cell,
+                        seq=seq,
+                        notebook_id=notebook_id,
+                        force=force,
+                        skip_upstream=had_failure,
+                        execution_state=execution_state,
+                    )
+                    if not ok:
+                        had_failure = True
+        finally:
+            execution_state.running_cell = None
 
 
 async def _run_partition_batch(
