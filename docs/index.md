@@ -1,6 +1,6 @@
 # Strata
 
-**Strata is a content-addressed computation graph with an interactive notebook UI.**
+**Strata is a notebook your coding agent can drive, and everything it computes stays.**
 
 ![The Strata notebook UI: a Python cell with its source and an interactive table
 of results, the sidebar panels for mounts, workers and environment, and a bottom
@@ -9,14 +9,20 @@ drawer showing the cell DAG and per-cell timings.](assets/notebook-anatomy-light
 of results, the sidebar panels for mounts, workers and environment, and a bottom
 drawer showing the cell DAG and per-cell timings.](assets/notebook-anatomy-dark.png#only-dark)
 
-Every cell output is a versioned artifact keyed by its provenance: source,
-inputs, and environment. Strata reads each cell's AST to build the
-dependency graph automatically, so re-running a notebook is mostly a series
-of cache hits. Prompt cells make AI calls first-class DAG nodes, cached by
-template, inputs, and model config. The `# @worker gpu-fly` annotation
-dispatches a cell to a remote GPU. The whole notebook is plain `.py` files
-plus a manifest, so commits are git-diffable and there are no JSON blobs
-or execution metadata bleeding into the history.
+Coding agents explore by writing throwaway scripts that nobody sees and
+nothing remembers. Point one at Strata and the work lands in a notebook
+instead: every result cached by what produced it, every cell recording who
+wrote it, and the whole thing open in your browser while the agent works.
+
+That holds because of what a cell is. Each one is keyed by its source, its
+inputs and its environment, so the expensive step an agent ran ten turns ago
+is a cache hit now, and the same inputs give the same result a year later on
+another machine. Change one cell and only the cells below it run again.
+
+It is a good notebook for a person, too. Ask a model a question in a prompt
+cell and the answer is cached like any other result. Send the slow cell to a
+GPU with one line. The notebook itself is plain `.py` files plus a manifest,
+so a commit is a readable diff rather than a wall of JSON.
 
 ---
 

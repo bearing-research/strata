@@ -1,6 +1,6 @@
 site_name: Strata
 site_url: https://bearing-research.github.io/strata/
-site_description: A content-addressed computation graph with an interactive notebook UI
+site_description: "A notebook built for coding agents: every result cached, versioned, and visible to the human watching"
 repo_url: https://github.com/bearing-research/strata
 repo_name: bearing-research/strata
 

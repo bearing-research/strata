@@ -10,22 +10,26 @@
 [![codecov](https://codecov.io/gh/bearing-research/strata/branch/main/graph/badge.svg?token=GBAX34U2PO)](https://codecov.io/gh/bearing-research/strata)
 [![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/bearing-research/strata/badge)](https://securityscorecards.dev/viewer/?uri=github.com/bearing-research/strata)
 
-**Strata is a content-addressed computation graph with an interactive notebook UI.**
+**Strata is a notebook your coding agent can drive, and everything it computes stays.**
 
-Every cell output is a versioned artifact keyed by its provenance: source,
-inputs, and environment. Strata reads each cell's AST to build the
-dependency graph automatically, so re-running a notebook is mostly a series
-of cache hits. Touch one cell and the cascade re-executes only the cells
-that depend on it. Identical inputs produce the same artifact whether the
-second run comes a minute later or a year later, on the same machine or a
-different one.
+Coding agents explore by writing throwaway scripts: `python -c`, files in
+`/tmp`, invisible and gone by the next session. Point one at Strata and the
+work lands in a notebook instead. Every result is cached by what produced it,
+every cell records who wrote it, and the whole thing is open in your browser
+while the agent works. Come back tomorrow and it is all still there, already
+computed.
 
-Prompt cells make AI calls first-class DAG nodes, cached by template,
-inputs, and model config. `# @worker gpu-fly` dispatches a cell to a remote
-GPU. `# @mount data s3://bucket/prefix ro` makes an S3 prefix available as a
-local `pathlib.Path` inside the cell. The whole notebook is plain `.py`
-files plus a manifest, so commits are git-diffable and there are no JSON
-blobs or execution metadata bleeding into the history.
+That holds because of what a cell is. Each one is keyed by its source, its
+inputs and its environment, so the expensive step an agent ran ten turns ago
+is a cache hit now, and the same inputs give the same result a year later on
+another machine. Change one cell and only the cells below it run again.
+Nothing is recomputed to prove a point.
+
+It is a good notebook for a person, too. Ask a model a question in a prompt
+cell and the answer is cached like any other result. Send the slow cell to a
+GPU with one line. Read an S3 prefix as a local path. The notebook itself is
+plain `.py` files plus a manifest, so a commit is a readable diff rather than
+a wall of JSON.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/notebook-anatomy-dark.png">
@@ -34,14 +38,7 @@ blobs or execution metadata bleeding into the history.
 
 **Docs:** [bearing-research.github.io/strata](https://bearing-research.github.io/strata/)
 
-## Give your coding agent a cached scratchpad
-
-Coding agents explore by writing throwaway `python -c` and `/tmp` scripts:
-invisible, uncached, redone every session. Point one at Strata instead and it
-uses a **persistent, cached notebook** as its scratchpad: every snippet becomes a
-content-addressed cell, so the expensive step it ran ten turns ago is still a
-cache hit now, a human can watch it work live, and the work is a git-diffable
-directory instead of discarded scripts.
+## Point an agent at it
 
 Install it as a one-command [Claude Code plugin](plugins/strata-scratchpad/)
 (needs the `strata` CLI on `PATH`; `uv tool install strata-notebook`):
@@ -66,13 +63,21 @@ whether an un-primed session uses the notebook at all. See
 
 ## Highlights
 
-**The graph**
+**For an agent**
 
-- **content-addressed:** every cell output is keyed by source + inputs + environment, so identical work hits the cache forever
-- **reactive:** edit a cell and the cascade re-runs only what depends on it
-- **dag-from-ast:** Strata reads each cell's AST to wire upstream and downstream, with no decorators and no manual edges
-- **git-friendly:** notebooks are plain `.py` files plus a TOML manifest, so diffs are readable
-- **dag view:** the dependency graph renders alongside the cells; double-click a node to jump to its source
+- **a scratchpad that lasts:** a Claude Code plugin points an agent at a cached notebook cell instead of a `/tmp` script, so the snippet it ran ten turns ago is still there
+- **any MCP client:** a warm notebook session is exposed at `/mcp`, and you can watch the agent work in the browser or the terminal while it does
+- **built to be scripted:** `strata` inspects, runs and authors a notebook with JSON output and stable exit codes, offline or against a live session
+- **one command to start:** `strata agent ./nb` stands up the server, the session, the config and the viewer together
+- **you can tell who did what:** every cell records whether a person or an agent wrote it
+
+**Why nothing runs twice**
+
+- **results are keyed by what made them:** a cell's source, its inputs and its environment decide its identity, so identical work is a cache hit forever
+- **only what changed re-runs:** edit one cell and Strata re-runs the cells below it and nothing else
+- **no wiring:** Strata reads each cell to find what it uses and what it defines, so there are no decorators and no edges to maintain by hand
+- **readable in git:** a notebook is plain `.py` files plus a TOML manifest, so a diff shows the code that changed
+- **the graph is visible:** the dependency graph renders beside the cells, and double-clicking a node jumps to its source
 
 **Cell types**
 
@@ -84,12 +89,6 @@ whether an un-primed session uses the notebook at all. See
 - **widget cells:** declarative controls that downstream cells consume as inputs; with Live on, dragging one recomputes what depends on it
 - **cell unit tests:** a Tests panel runs real pytest against a cell's defs and upstream inputs, doubling as a health badge
 
-**Coding agents**
-
-- **scratchpad plugin:** a Claude Code plugin makes an agent use a cached notebook cell for throwaway Python instead of `/tmp` scripts
-- **MCP server:** expose a warm notebook session to any MCP client at `/mcp`, and watch it work in the browser or the terminal
-- **agent CLI:** `strata` inspects, runs and authors a notebook with `--format json` and stable exit codes, offline or against a live session
-- **one-command on-ramp:** `strata agent ./nb` stands up the server, session, config and viewer in one step
 
 **Compute and data**
 
