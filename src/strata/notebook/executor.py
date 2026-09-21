@@ -1357,13 +1357,19 @@ class CellExecutor:
                 )
             else:
                 current_display_outputs = []
+            # Gated on ``use_cache`` for the same reason the artifact lookup
+            # below is: a leaf cell's displayed value is a cached result like
+            # any other, and replaying it is the whole of what the cell did.
+            # Ungated, ``# @nocache``, an rw mount, force and rerun all read
+            # back the last displayed value and the effect they exist to
+            # re-trigger never happened.
             cached_display_outputs = (
                 self.session._resolve_cached_display_outputs(
                     cell_id,
                     provenance_hash,
                     current_display_outputs,
                 )
-                if cell is not None
+                if (cell is not None and use_cache)
                 else []
             )
             # A leaf cell (no consumed vars) has no artifact to cache, but its
@@ -2074,13 +2080,15 @@ class CellExecutor:
                 )
             else:
                 current_display_outputs = []
+            # Same gate as the Python path: an unguarded display replay makes
+            # ``# @nocache`` and force/rerun no-ops for a leaf cell.
             cached_display_outputs = (
                 self.session._resolve_cached_display_outputs(
                     cell_id,
                     provenance_hash,
                     current_display_outputs,
                 )
-                if cell is not None
+                if (cell is not None and use_cache)
                 else []
             )
             team_pull: TeamPull | None = None
