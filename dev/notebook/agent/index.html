@@ -2463,10 +2463,17 @@ the agent is told the same about yours. Neither is a merge. See
 agent's output with no live connection at all.</p>
 <p>One caveat on that row. <code>running</code> belongs to the session rather than to disk,
 so you never see it offline. What you do see is recomputed from the artifact
-store: a cell whose output another cell consumes reports <code>ready</code> or <code>stale</code>
-with the reasons why, and a <strong>leaf</strong> cell reports <code>idle</code> however many times it
-has run, because a leaf stores no artifact to recognise it by. For "what is it
-doing right now", attach one of the live views above.</p>
+store:</p>
+<ul>
+<li>A cell whose output another cell consumes reports <code>ready</code> or <code>stale</code>, with
+  the reasons why.</li>
+<li>A cell whose last run failed reports <code>error</code>, with its traceback, until it
+  is edited or run again.</li>
+<li>A <strong>leaf</strong> cell, one nothing else reads, can report either <code>idle</code> or <code>ready</code>
+  after it has run. A leaf stores no variable artifact, so <code>idle</code> on a leaf
+  does not mean it never ran.</li>
+</ul>
+<p>For "what is it doing right now", attach one of the live views above.</p>
 <p>If you would rather keep a browser tab than a terminal viewer, start with
 <code>strata agent --no-tui</code> and open the notebook in the web UI instead.</p>
 <h2 id="what-gets-written-into-the-notebook">What gets written into the notebook<a class="headerlink" href="#what-gets-written-into-the-notebook" title="Permanent link">&para;</a></h2>

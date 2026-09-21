@@ -2217,7 +2217,7 @@ The typical loop:</p>
 </tr>
 <tr>
 <td><code>save_cell_output(session_id, cell_id, index=-1)</code></td>
-<td>Write a display output (a plot, an image) to the notebook's <code>.strata/outputs/</code> and return the path, so the agent can open it.</td>
+<td>Write a display output (a plot, an image) to the notebook's <code>.strata/outputs/</code> and return the path, so the agent can open it. The path is on the <strong>server's</strong> machine: an agent on another host should use <code>strata cell output --server … --session …</code>, which downloads and writes the file locally.</td>
 </tr>
 <tr>
 <td><code>get_variable(session_id, name)</code></td>
