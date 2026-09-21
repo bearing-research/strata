@@ -1098,9 +1098,24 @@ class NotebookSession:
             if staleness is None:
                 continue
             cell.staleness = staleness
+            if staleness.status == CellStatus.IDLE and self._failure_still_stands(cell):
+                # A failed cell stored no artifact, so a staleness walk can only
+                # call it idle, which reads as "never run" and throws away the
+                # one thing worth knowing about it. Until it is edited or run
+                # again, the failure is still the truth about this source.
+                cell.status = CellStatus.ERROR
+                cell.cache_hit = False
+                continue
             cell.status = staleness.status
             if staleness.status != CellStatus.READY:
                 cell.cache_hit = False
+
+    @staticmethod
+    def _failure_still_stands(cell: CellState) -> bool:
+        """Whether ``cell``'s recorded error is still about the source it has."""
+        if cell.error is None or cell.error_source_hash is None:
+            return False
+        return cell.error_source_hash == compute_source_hash(cell.source)
 
     def mark_executed_ready(self, cell_id: str) -> None:
         """Preserve a just-executed cell as ready in backend state.
@@ -1175,12 +1190,41 @@ class NotebookSession:
             return
 
         cell.execution_method = result.execution_method
+        # What the run said went wrong, kept against the source that said it.
+        # Without this the traceback lives only in the response to whoever
+        # started the run: an agent that comes back to look at a failed cell
+        # reads an empty console and no error, and has to re-run the failure
+        # (side effects and all) to find out what it was.
+        had_error = cell.error is not None
+        if result.success:
+            cell.error = None
+            cell.error_source_hash = None
+        else:
+            # A Python traceback ends with the error message, so it is the
+            # fuller form of the same fact when the harness produced one.
+            detail = getattr(result, "traceback", None)
+            cell.error = (detail or result.error or "").strip()
+            cell.error_source_hash = compute_source_hash(cell.source)
+        if cell.error is not None or had_error:
+            # Runtime state, not notebook.toml (invariant 6). Written only when
+            # a failure appears or the one before it clears, so the ordinary
+            # green run does not rewrite the file for nothing.
+            from strata.notebook.runtime_state import persist_cell_error
+
+            persist_cell_error(
+                self.path,
+                cell_id,
+                error=cell.error,
+                source_hash=cell.error_source_hash,
+            )
         # Persist console on a real execution, and on a cache hit that *replays*
         # console (a leaf cell whose stdout/stderr were cached by provenance).
         # We must NOT write on a cache hit that carries no console, because
         # ``update_cell_console_output`` would *unlink* the file the original
         # execution wrote — silently deleting recoverable print() output.
-        if result.success and (not result.cache_hit or result.stdout or result.stderr):
+        # A failed run is a real execution: its prints are the last thing that
+        # happened before the traceback, which is exactly what is worth reading.
+        if not result.cache_hit or result.stdout or result.stderr:
             cell.console_stdout = result.stdout or ""
             cell.console_stderr = result.stderr or ""
             # Console output lives in .strata/console/, not notebook.toml —

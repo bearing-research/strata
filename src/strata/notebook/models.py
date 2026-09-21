@@ -761,6 +761,21 @@ class CellState(BaseModel):
         default="",
         description="Captured stderr from the last execution (persisted for reopen)",
     )
+    error: str | None = Field(
+        default=None,
+        description=(
+            "Error message and traceback from the last failed execution. "
+            "Cleared on the next success; dropped once the source changes."
+        ),
+    )
+    error_source_hash: str | None = Field(
+        default=None,
+        exclude=True,
+        description=(
+            "Runtime-only source hash the last failure happened at, so an "
+            "error is only claimed for the source that actually produced it"
+        ),
+    )
     cache_hit: bool = Field(
         default=False,
         description="Whether last execution was a cache hit",

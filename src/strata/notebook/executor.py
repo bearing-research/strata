@@ -404,6 +404,10 @@ class CellExecutionResult:
     display_output: dict[str, Any] | None = None
     duration_ms: float = 0
     error: str | None = None
+    # The harness's formatted traceback, when the failure came from running the
+    # cell body. Kept apart from ``error`` so the UI's one-line pill stays one
+    # line; the session stores the longer form for whoever reads the cell later.
+    traceback: str | None = None
     cache_hit: bool = False
     artifact_uri: str | None = None
     execution_method: str = "cold"  # cold, warm, cached
@@ -5632,6 +5636,7 @@ class CellExecutor:
                 stdout=result.get("stdout", ""),
                 stderr=stderr,
                 error=error_msg,
+                traceback=result.get("traceback") or None,
                 duration_ms=duration_ms,
                 execution_method=execution_method,
                 suggest_install=suggest_pkg,

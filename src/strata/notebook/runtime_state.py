@@ -45,6 +45,11 @@ class CellRuntime:
     # generic triplet above does not cover it, so a reopen comparing only that
     # would call a cell ready without having established anything of the sort.
     last_reopen_identity: str | None = None
+    # What the last run said went wrong, and the source hash it said it about.
+    # Kept next to the console file so a later process -- an offline CLI call,
+    # a reopen -- can read a failure instead of having to re-run it.
+    last_error: str | None = None
+    last_error_source_hash: str | None = None
     display_outputs: list[dict[str, Any]] = field(default_factory=list)
     display: dict[str, Any] | None = None
     test_result: dict[str, Any] | None = None
@@ -67,6 +72,7 @@ class CellRuntime:
             or self.last_source_hash
             or self.last_env_hash
             or self.last_reopen_identity
+            or self.last_error
             or self.display_outputs
             or self.display
             or self.test_result
@@ -222,6 +228,26 @@ def persist_cell_provenance(
     entry.last_source_hash = last_source_hash or None
     entry.last_env_hash = last_env_hash or None
     entry.last_reopen_identity = last_reopen_identity
+    save_runtime_state(notebook_dir, state)
+
+
+def persist_cell_error(
+    notebook_dir: Path,
+    cell_id: str,
+    *,
+    error: str | None,
+    source_hash: str | None,
+) -> None:
+    """Record (or clear) what a cell's last run failed with.
+
+    Paired with the source hash it happened at: a cell whose source has since
+    changed has an error about code nobody is running any more, and claiming
+    it would be worse than saying nothing.
+    """
+    state = load_runtime_state(notebook_dir)
+    entry = state.get_or_create_cell(cell_id)
+    entry.last_error = error or None
+    entry.last_error_source_hash = source_hash if error else None
     save_runtime_state(notebook_dir, state)
 
 

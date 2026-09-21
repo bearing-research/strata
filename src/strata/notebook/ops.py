@@ -31,7 +31,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
-from pydantic import BaseModel, JsonValue, field_validator
+from pydantic import BaseModel, Field, JsonValue, field_validator
 
 if TYPE_CHECKING:
     import httpx
@@ -87,11 +87,19 @@ class CellView(BaseModel):
     status: str
     source: str
     staleness_reasons: list[str]
+    # What the cell produces and what it needs. The MCP `get_notebook`
+    # description has always promised these; the projection did not carry them,
+    # so an agent asking what a cell defines had to go back out to `dag`.
+    defines: list[str] = Field(default_factory=list)
+    references: list[str] = Field(default_factory=list)
     upstream_ids: list[str]
     downstream_ids: list[str]
     outputs: list[OutputView]
     console_stdout: str
     console_stderr: str
+    # What the last run said went wrong, when the cell's source is still the
+    # one that produced it. ``None`` means nothing has failed here.
+    error: str | None = None
     test: CellTestView | None = None
     # Who wrote it. Empty for every cell added before authorship was recorded,
     # and on a personal server where the client declared nothing.
@@ -178,6 +186,10 @@ class CellStatusRow(BaseModel):
     language: str
     status: str
     staleness_reasons: list[str]
+    # "Look before you compute" is the workflow the agent skill pushes, and it
+    # starts here: a status listing that names each cell's variables answers
+    # "do I already have this?" without a second call per cell.
+    defines: list[str] = Field(default_factory=list)
 
 
 class NotebookStatus(BaseModel):
@@ -1232,11 +1244,14 @@ def _cell_view_from_wire(data: dict[str, Any]) -> CellView:
         status=data["status"],
         source=data.get("source") or "",
         staleness_reasons=list(data.get("staleness_reasons") or []),
+        defines=list(data.get("defines") or []),
+        references=list(data.get("references") or []),
         upstream_ids=list(data.get("upstream_ids") or []),
         downstream_ids=list(data.get("downstream_ids") or []),
         outputs=[_output_view_from_wire(output) for output in data.get("display_outputs") or []],
         console_stdout=data.get("console_stdout") or "",
         console_stderr=data.get("console_stderr") or "",
+        error=_cap_console(data["error"]) if data.get("error") else None,
         test=_test_view_from_wire(test) if test else None,
         created_by=data.get("created_by") or "",
         updated_by=data.get("updated_by") or "",
@@ -1251,6 +1266,7 @@ def _status_row_from_wire(data: dict[str, Any]) -> CellStatusRow:
         language=data["language"],
         status=data["status"],
         staleness_reasons=list(data.get("staleness_reasons") or []),
+        defines=list(data.get("defines") or []),
     )
 
 
