@@ -28,8 +28,10 @@ Strata's hosted preview runs on [Fly.io](https://fly.io) at [strata-notebook.fly
 - [Fly CLI](https://fly.io/docs/flyctl/install/) installed (`brew install flyctl` on macOS).
 - `fly auth login` completed (opens a browser; one-time).
 - A Fly.io account with a payment method on file. The default
-  `shared-cpu-4x` VM costs ~$5/mo if always-on, less if you let it
-  scale to zero.
+  `shared-cpu-4x` VM costs roughly $5/mo always-on, which is what the
+  shipped `fly.toml` configures: it suspends idle machines but keeps one
+  running, so it does not scale to zero unless you change
+  `min_machines_running`.
 
 ## Deploy
 
@@ -54,7 +56,7 @@ After `fly deploy` reports success:
 curl https://<your-app-name>.fly.dev/health
 ```
 
-Expected response: `{"status":"ok"}` (plus details). If you get a
+Expected response: exactly `{"status":"ok"}`. The detailed views are `/health/dependencies` and `/health/ready`. If you get a
 504 or connection error, run `fly logs` to inspect the startup -
 the most common cause is a cold-start delay on the first request.
 

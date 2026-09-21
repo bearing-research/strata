@@ -11,10 +11,12 @@ failed `assert df.shape == (200, 5)` shows you both sides), fixtures,
 `pytest` in the notebook's own environment.
 
 !!! note "Python cells only"
-    Cell tests are available on Python code cells. `pytest` must be installed in
-    the notebook's environment (`uv add pytest` - or it's already there if your
-    cells use it). A run with no `pytest` surfaces an actionable message rather
-    than failing silently.
+    Cell tests are available on Python code cells. `pytest` is installed into
+    the notebook's environment on the first test run if it is not already
+    there, and dev dependencies are excluded from the provenance environment
+    hash, so adding it does not invalidate any cached cell. If that install
+    fails, the run surfaces an actionable message rather than failing
+    silently.
 
 ---
 

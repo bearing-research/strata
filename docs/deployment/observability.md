@@ -189,7 +189,7 @@ sweep that hammers it with realistic Iceberg scans:
 
 ```bash
 uv run python benchmarks/capacity_sweep.py \
-  --quick \
+  --dry-run \
   --no-server \
   --base-url http://localhost:8765
 ```

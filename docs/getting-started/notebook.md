@@ -315,9 +315,9 @@ cell, or call from `display()`:
 | matplotlib `Figure` | Inline PNG. |
 | PIL `Image` | Inline PNG. |
 | dict / list / primitive | Fenced JSON block. |
-| numpy ndarray | Preview header (`shape`, `dtype`) + first few rows. |
+| numpy ndarray | A one-line summary of its shape and dtype. |
 | `Markdown("**hi**")` | The `Markdown` helper renders inline HTML. |
-| `Image.open(...)`, video, audio | Inline rendering of the appropriate type. |
+| `Image.open(...)` | Rendered inline as PNG. Video and audio are not display types; store them as artifacts and open them outside the notebook. |
 
 Use `display(x)` for **multiple** outputs in one cell (each call
 adds a new render below the cell). For one trailing expression at

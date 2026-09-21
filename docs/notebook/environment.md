@@ -6,7 +6,7 @@ Each notebook has its own isolated Python environment managed by [uv](https://do
 
 When you create a notebook, Strata:
 
-1. Generates a `pyproject.toml` with `pyarrow` as the default dependency
+1. Generates a `pyproject.toml` seeded with the packages a cell needs to hand values to the next one: `pyarrow`, `orjson` and `cloudpickle`
 2. Runs `uv sync` to create a `.venv/` and `uv.lock`
 3. All cell execution uses this notebook-local venv
 
@@ -132,7 +132,7 @@ my_notebook/
   gone unused for `STRATA_NOTEBOOK_SHARED_ENV_TTL_DAYS` (default 7), by an
   hourly sweep in the server or by `strata env gc`. An environment a notebook
   links to is never removed, opening a notebook counts as using it, and the
-  sweep removes only environments it built — a directory of your own under the
+  sweep removes only environments it built. A directory of your own under the
   store, or one whose build never finished, is left alone.
 
 R libraries are shared the same way. A notebook with an `renv.lock` restores

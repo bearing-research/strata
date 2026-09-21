@@ -47,7 +47,7 @@ Table URIs use the form `<scheme>://<warehouse-path>#<namespace>.<table>`:
 - `<warehouse-path>` is the path to the warehouse root (the directory containing Iceberg metadata).
 - The fragment after `#` names the Iceberg table inside the warehouse, as `<namespace>.<table>`.
 
-For the demo above, the warehouse lives at `/warehouse` and contains the `events` table in the `db` namespace, so the URI is `file:///warehouse#db.events`.
+A table URI is `<warehouse>#<namespace>.<table>`. The demo prints the exact one it created when it runs, because it builds its warehouse in a temporary directory rather than at a fixed path; copy that line rather than the shape below.
 
 ```python
 from strata_client import StrataClient
