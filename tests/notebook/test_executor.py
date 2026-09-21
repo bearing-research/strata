@@ -391,6 +391,69 @@ Display()
         assert second.success is True
         assert second.cache_hit is False  # never cached
 
+    @staticmethod
+    def _counting_source(counter, *, prefix: str = "") -> str:
+        """A leaf cell that bumps a file counter and *displays* the new count.
+
+        The displayed value is what the cell is for, so a replayed display is
+        indistinguishable from the cell not having run at all -- except that
+        the file on disk says how many times it really did.
+        """
+        return (
+            f"{prefix}from pathlib import Path\n"
+            f"_p = Path({str(counter)!r})\n"
+            "_p.write_text(str(int(_p.read_text()) + 1) if _p.exists() else '1')\n"
+            "int(_p.read_text())\n"
+        )
+
+    @pytest.mark.asyncio
+    async def test_nocache_leaf_reexecutes_its_displayed_value(self, sample_notebook, tmp_path):
+        """`# @nocache` must survive the leaf display-replay path too.
+
+        The print-only case above passed even while the replay was ungated: a
+        leaf's displayed value was resolved before the cache decision, so a
+        cell ending in a bare expression reported a hit and handed back the
+        first run's value forever, side effect and all.
+        """
+        executor = CellExecutor(sample_notebook)
+        counter = tmp_path / "nocache_counter.txt"
+        source = self._counting_source(counter, prefix="# @nocache\n")
+
+        first = await executor.execute_cell("cell1", source)
+        assert first.success is True
+        assert first.cache_hit is False
+        assert first.display_output["preview"] == 1
+
+        second = await executor.execute_cell("cell1", source)
+        assert second.success is True
+        assert second.cache_hit is False
+        assert second.display_output["preview"] == 2
+        assert counter.read_text() == "2"
+
+    @pytest.mark.asyncio
+    async def test_force_and_rerun_reexecute_a_displayed_leaf(self, sample_notebook, tmp_path):
+        """Force and rerun turn the cache off; a displayed leaf is not exempt."""
+        executor = CellExecutor(sample_notebook)
+        counter = tmp_path / "forced_counter.txt"
+        source = self._counting_source(counter)
+
+        first = await executor.execute_cell("cell1", source)
+        assert first.display_output["preview"] == 1
+
+        # Normal mode still replays -- that is the caching payoff.
+        cached = await executor.execute_cell("cell1", source)
+        assert cached.cache_hit is True
+        assert cached.display_output["preview"] == 1
+
+        forced = await executor.execute_cell_force("cell1", source)
+        assert forced.cache_hit is False
+        assert forced.display_output["preview"] == 2
+
+        reran = await executor.execute_cell_rerun("cell1", source)
+        assert reran.cache_hit is False
+        assert reran.display_output["preview"] == 3
+        assert counter.read_text() == "3"
+
     @pytest.mark.asyncio
     async def test_execute_markdown_display_output_is_cached_for_leaf_cells(self, sample_notebook):
         """Markdown display outputs should persist as display artifacts and cache-hit on rerun."""
