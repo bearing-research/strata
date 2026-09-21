@@ -90,6 +90,20 @@ which also mounts the project read-only as a `project` variable, so cells read
 your files as `project / "some/file.py"`. Adding `scratch/` to `.gitignore` is
 optional, since it is your workspace and some people keep it.
 
+!!! warning "The project mount is pinned, so editing a file does not restale a cell"
+
+    The mount is written with `pin = "project-root"`, which fingerprints the
+    pin rather than the tree. That is deliberate: hashing a whole repository
+    before every cell run would cost more than the cell. The consequence is
+    that a cell which read `project / "config.yaml"` keeps returning what that
+    file said the first time, however often you edit it, and nothing marks the
+    cell stale.
+
+    A cell that reads a file you are actively changing wants
+    [`# @nocache`](annotations.md#nocache), the same as a clock read. A cell
+    that reads a file you are not changing is fine as it is, and is the case
+    the pin exists for.
+
 ## Why it beats a temp script
 
 - **Unchanged work never recomputes.** Every cell is cached by provenance
@@ -99,10 +113,10 @@ optional, since it is your workspace and some people keep it.
   the whole point, because agents re-derive the same thing constantly.
 - **It persists and it can be seen.** Each snippet is a real cell on disk, not
   an invisible script in `/tmp`. You can open it later, or watch it live.
-- **Side effects stay honest.** A cell that writes a file, calls an API, or
-  reads the clock must not replay a stale result. Those get
-  [`# @nocache`](annotations.md#nocache) and always re-execute; everything else
-  stays cached.
+- **Side effects stay honest.** A cell that writes a file, calls an API, reads
+  the clock, or reads a file that changes underneath it must not replay a stale
+  result. Those get [`# @nocache`](annotations.md#nocache) and always
+  re-execute; everything else stays cached.
 
 ## Why the agent actually reaches for it
 
@@ -143,6 +157,13 @@ strata agent ./scratch        # starts a server scoped to it, then attaches the 
 Once something is attached, everything in
 [Watching an agent work](agent.md#watching-an-agent-work) applies here too,
 including opening it in the [web UI](../getting-started/notebook.md) instead.
+
+One thing changes for the agent, though: `strata cell run ./scratch …` opens
+its own offline session on the directory, so its runs do not appear in the
+viewer you just attached, and both sessions are writing the same files. Once
+someone is watching, point the agent at that server instead: MCP, or
+`--server`/`--session` on the same commands, both covered in the
+[CLI guide](cli.md#working-against-a-live-session-server-session).
 
 ## Related
 

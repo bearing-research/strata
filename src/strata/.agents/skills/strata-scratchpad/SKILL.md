@@ -36,7 +36,10 @@ If a `strata-notebook` **MCP server is connected** (you were launched via
 `strata agent`, or `.mcp.json` registers one), prefer the MCP tools below —
 your runs then appear **live in the human's terminal viewer**. Otherwise use the
 `strata` CLI against the directory; a human can attach a viewer anytime with
-`strata watch ./scratch`.
+`strata agent ./scratch`, which starts a server scoped to the scratchpad's
+parent. (Plain `strata watch ./scratch` usually cannot open it: a server only
+opens notebooks under its own storage root, and a scratchpad lives in the
+project.)
 
 ## Run a snippet (one call)
 
@@ -80,6 +83,13 @@ strata cell add ./scratch -c 'import json; print(len(json.load(open(project / "e
 
 Without the mount, pass an **absolute path** instead (`open("/abs/path/events.json")`),
 or add a per-cell `# @mount data /abs/path ro` (injects `data` as a `pathlib.Path`).
+
+**Reading a file that is changing? Mark the cell `# @nocache`.** The `project`
+mount is pinned, so editing a project file does not restale the cell that read
+it. The cell replays the old contents and nothing says it is out of date.
+That pin is why the mount is cheap, and it is the right default for files you
+are not touching. A cell whose point is to observe a file you are editing needs
+the annotation below, the same as a clock read.
 
 ## Look before you compute
 

@@ -43,6 +43,12 @@ terminal viewer; skip it if you plan to watch in a browser and pass `--no-tui`:
     uv sync --extra mcp --extra tui     # or: uv sync --all-extras
     ```
 
+    `uv sync` installs into the checkout's `.venv`, it does not put `strata` on
+    your `PATH`. Run every `strata …` command below as `uv run strata …` from
+    the checkout. A bare `strata` there is whatever else you have installed,
+    which on a machine that also has the released package is a different and
+    usually older build.
+
 ## Use it
 
 You need two terminals: one holding the notebook open, one for the agent.
