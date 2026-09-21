@@ -61,7 +61,7 @@ otel = [
 # Azure Blob Storage support
 azure = [
     "azure-storage-blob>=12.20.0",
-    "azure-identity>=1.15.0",
+    "azure-identity>=1.25.3",
 ]
 # Postgres metadata backend for the artifact store. Only needed to run the
 # store's system of record on a shared server instead of a local SQLite
