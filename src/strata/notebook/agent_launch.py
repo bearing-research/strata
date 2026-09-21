@@ -251,6 +251,9 @@ on your own prior work instead of recomputing it.
    a cell and runs it, returning the run outcome (`status`, `cache_hit`,
    `stdout`) under `run`. (Use `add_cell` without a run only to stage a cell.)
 4. Use `note` to narrate what you're about to do so the watcher can follow along.
+5. **Check a plot by looking at it.** A plotting cell's output reads as
+   `image/png` with no preview. `save_cell_output(session_id, cell_id)` writes
+   it to a file and returns the `path`; open that file to see what you drew.
 
 **The caching payoff — how to get it:**
 

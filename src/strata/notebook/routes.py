@@ -3496,6 +3496,43 @@ async def export_cell_data(
     )
 
 
+@router.get("/{notebook_id}/cells/{cell_id}/outputs/{index}/blob")
+async def get_cell_output_blob(
+    notebook_id: str,
+    session: SessionDep,
+    cell_id: str,
+    index: int,
+):
+    """Return one display output's stored bytes, as itself.
+
+    The curated cell view describes an image but cannot show it, and the
+    hydrated frontend payload carries a base64 data URL because that is what a
+    browser renders. A client that wants a file wants the bytes, so this
+    serves the blob under its own content type and nothing else.
+    """
+    from fastapi import Response
+
+    from strata.notebook.ops import NotebookOpsError, display_output_at
+
+    cell = session.notebook_state.get_cell(cell_id)
+    if cell is None:
+        raise HTTPException(status_code=404, detail=f"no cell with id {cell_id!r}")
+    try:
+        output, resolved = display_output_at(cell, index)
+    except NotebookOpsError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    try:
+        blob = session.read_display_blob(output)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    return Response(
+        content=blob,
+        media_type=output.content_type or "application/octet-stream",
+        headers={"X-Strata-Output-Index": str(resolved)},
+    )
+
+
 @router.get("/{notebook_id}/dependencies")
 async def get_dependencies(notebook_id: str, session: SessionDep) -> dict:
     """List current dependencies for a notebook.

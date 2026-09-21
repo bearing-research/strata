@@ -72,6 +72,45 @@ def _get_cell(session_manager: SessionManager, session_id: str, cell_id: str) ->
     return _resolve_ops(session_manager, session_id).get_cell(cell_id).model_dump(mode="json")
 
 
+# Extension by content type, so the file an agent is handed opens in whatever
+# it opens with. Anything unrecognised keeps ``.bin`` rather than pretending.
+_OUTPUT_EXTENSIONS = {
+    "image/png": ".png",
+    "text/markdown": ".md",
+    "json/object": ".json",
+    "arrow/ipc": ".arrow",
+    "pickle/object": ".pickle",
+}
+
+
+def _save_cell_output(
+    session_manager: SessionManager,
+    session_id: str,
+    cell_id: str,
+    index: int = -1,
+) -> dict[str, Any]:
+    """Write one display output into the notebook and return where it landed.
+
+    The destination is the notebook's own ``.strata/outputs/``, never a path
+    the caller names: a tool that wrote wherever it was asked would be a
+    filesystem write dressed as a notebook read.
+    """
+    from strata.notebook.ops import display_output_at
+
+    session = _live_session(session_manager, session_id)
+    cell = session.notebook_state.get_cell(cell_id)
+    if cell is None:
+        raise ValueError(f"no cell with id {cell_id!r}")
+    output, resolved = display_output_at(cell, index)
+
+    out_dir = session.path / ".strata" / "outputs"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    ext = _OUTPUT_EXTENSIONS.get(output.content_type or "", ".bin")
+    dest = out_dir / f"{cell_id}-{resolved}{ext}"
+    saved = _resolve_ops(session_manager, session_id).save_output(cell_id, dest, index=resolved)
+    return saved.model_dump(mode="json")
+
+
 def _dag(session_manager: SessionManager, session_id: str) -> dict[str, Any]:
     """Return the dependency graph (edges, topological order, roots, leaves)."""
     return _resolve_ops(session_manager, session_id).dag().model_dump(mode="json")
@@ -737,6 +776,22 @@ def build_mcp_app(session_manager: SessionManager) -> Starlette | None:
         Errors if the notebook session or the cell id does not exist.
         """
         return _get_cell(session_manager, session_id, cell_id)
+
+    @mcp.tool()
+    def save_cell_output(session_id: str, cell_id: str, index: int = -1) -> dict[str, Any]:
+        """Write a cell's display output to a file and return its path.
+
+        Use this to *look at* a plot or an image. `get_cell` tells you a cell
+        produced an `image/png` and how big it is, but an image has no useful
+        text preview, so reading the file is the only way to see it. Open the
+        returned `path` with your own file-reading tool.
+
+        `index` picks which display output in emission order; the default
+        `-1` is the last one, which is what a cell ending in an expression
+        produced. The file lands in the notebook's own `.strata/outputs/`
+        and is overwritten on each call.
+        """
+        return _save_cell_output(session_manager, session_id, cell_id, index)
 
     @mcp.tool()
     def get_variable(session_id: str, name: str) -> dict[str, Any]:

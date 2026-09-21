@@ -37,7 +37,7 @@ if TYPE_CHECKING:
     import httpx
 
     from strata.notebook.dag import NotebookDag
-    from strata.notebook.models import CellState, WorkerSpec
+    from strata.notebook.models import CellOutput, CellState, WorkerSpec
     from strata.notebook.session import NotebookSession
 
 
@@ -53,6 +53,21 @@ class OutputView(BaseModel):
     preview: JsonValue = None
     rows: int | None = None
     columns: list[str] | None = None
+    # An image or a binary blob has no useful ``preview``, so metadata alone
+    # said only that *something* was produced. These two say what it is and
+    # how big, and name the thing ``save_output`` writes to a file.
+    artifact_uri: str | None = None
+    bytes: int = 0
+
+
+class SavedOutput(BaseModel):
+    """Where a cell's display output was written, agent-facing."""
+
+    cell_id: str
+    index: int
+    path: str
+    content_type: str
+    bytes: int
 
 
 class TestCaseView(BaseModel):
@@ -278,6 +293,38 @@ class NotebookOps(Protocol):
         ------
         NotebookOpsError
             If no cell with ``cell_id`` exists in the notebook.
+        """
+        ...
+
+    def save_output(self, cell_id: str, dest: Path, *, index: int = -1) -> SavedOutput:
+        """Write one of a cell's display outputs to a file and say where.
+
+        A plot, a rendered image, any blob: the curated view can describe it
+        but not show it, and there is no other way to get the bytes out. The
+        caller chooses the destination, so nothing here decides where an
+        agent's files land.
+
+        Parameters
+        ----------
+        cell_id : str
+            Identifier of the cell that produced the output.
+        dest : Path
+            File to write. Its parent must exist. Overwritten if present.
+        index : int, default -1
+            Which display output, in the order the cell emitted them.
+            ``-1`` is the last, which is the one a cell ending in an
+            expression produced.
+
+        Returns
+        -------
+        SavedOutput
+            The path written, with the output's content type and size.
+
+        Raises
+        ------
+        NotebookOpsError
+            If the cell does not exist, has no display output at ``index``,
+            or its stored bytes cannot be read back.
         """
         ...
 
@@ -521,6 +568,10 @@ class LocalNotebookOps:
         if cell is None:
             raise NotebookOpsError(f"no cell with id {cell_id!r}")
         return _cell_view(cell)
+
+    def save_output(self, cell_id: str, dest: Path, *, index: int = -1) -> SavedOutput:
+        """Write a display output to *dest* (see :meth:`NotebookOps.save_output`)."""
+        return _save_blob(self._session, cell_id, dest, index)
 
     def dag(self) -> DagView:
         """Build the DAG view (see :meth:`NotebookOps.dag`)."""
@@ -997,6 +1048,33 @@ class RemoteNotebookOps:
                 return _cell_view_from_wire(cell)
         raise NotebookOpsError(f"no cell with id {cell_id!r}")
 
+    def save_output(self, cell_id: str, dest: Path, *, index: int = -1) -> SavedOutput:
+        """Fetch a display output's bytes and write them (see
+        :meth:`NotebookOps.save_output`).
+
+        The file is written by the client, here, not by the server: a server
+        that wrote to a path a caller named would be writing wherever it was
+        asked to.
+        """
+        resp = self._send(
+            "GET",
+            f"/v1/notebooks/{self._session_id}/cells/{cell_id}/outputs/{index}/blob",
+        )
+        if resp.status_code == 404:
+            raise NotebookOpsError(_error_detail(resp))
+        if resp.status_code >= 400:
+            raise NotebookOpsError(_error_detail(resp))
+        blob = resp.content
+        dest.write_bytes(blob)
+        resolved = int(resp.headers.get("X-Strata-Output-Index", index))
+        return SavedOutput(
+            cell_id=cell_id,
+            index=resolved,
+            path=str(dest),
+            content_type=resp.headers.get("content-type", "application/octet-stream"),
+            bytes=len(blob),
+        )
+
     def dag(self) -> DagView:
         """Build the DAG view (see :meth:`NotebookOps.dag`)."""
         return DagView.model_validate(self._state().get("dag") or _EMPTY_DAG)
@@ -1205,12 +1283,57 @@ class RemoteNotebookOps:
 # the server's JSON remotely — so the two paths produce identical view models.
 
 
+def display_output_at(cell: CellState, index: int) -> tuple[CellOutput, int]:
+    """One of *cell*'s display outputs by position, with the index resolved.
+
+    Negative indices count from the end, so the default ``-1`` is the value a
+    cell ending in a bare expression produced, which is the one an agent
+    almost always means.
+    """
+    outputs = cell.display_outputs or (
+        [cell.display_output] if cell.display_output is not None else []
+    )
+    if not outputs:
+        raise NotebookOpsError(
+            f"cell {cell.id!r} has no display output to save "
+            "(run it, and end it in an expression that renders)"
+        )
+    resolved = index if index >= 0 else len(outputs) + index
+    if not 0 <= resolved < len(outputs):
+        raise NotebookOpsError(
+            f"cell {cell.id!r} has {len(outputs)} display output(s); no index {index}"
+        )
+    return outputs[resolved], resolved
+
+
+def _save_blob(session: NotebookSession, cell_id: str, dest: Path, index: int) -> SavedOutput:
+    """Shared by the local backend and the route: resolve, read, write."""
+    cell = session.notebook_state.get_cell(cell_id)
+    if cell is None:
+        raise NotebookOpsError(f"no cell with id {cell_id!r}")
+    output, resolved = display_output_at(cell, index)
+    try:
+        blob = session.read_display_blob(output)
+    except ValueError as exc:
+        raise NotebookOpsError(f"cell {cell_id!r} output {resolved}: {exc}") from exc
+    dest.write_bytes(blob)
+    return SavedOutput(
+        cell_id=cell_id,
+        index=resolved,
+        path=str(dest),
+        content_type=output.content_type,
+        bytes=len(blob),
+    )
+
+
 def _output_view_from_wire(data: dict[str, Any]) -> OutputView:
     return OutputView(
         content_type=data.get("content_type"),
         preview=data.get("preview"),
         rows=data.get("rows"),
         columns=data.get("columns"),
+        artifact_uri=data.get("artifact_uri"),
+        bytes=int(data.get("bytes") or 0),
     )
 
 
