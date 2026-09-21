@@ -40,6 +40,12 @@ back, and an artifact store can be swept, pinned, and reported on per tenant.
 
 ### Added
 
+- **An agent can look at the plot it made.** A plotting cell's output used to
+  reach an agent as `image/png` with no preview, which says something was drawn
+  and nothing about what. `strata cell output <nb> <cell> --out plot.png`
+  writes a display output to a file, and the MCP tool `save_cell_output`
+  writes it into the notebook's `.strata/outputs/` and returns the path. The
+  cell view now also reports each output's size and artifact URI.
 - **The server image can use a Postgres artifact store.** Setting
   `STRATA_ARTIFACT_METADATA_DSN` on the published image previously refused to
   start, because the `postgres` extra was not in it and installing one means
