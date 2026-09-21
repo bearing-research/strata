@@ -76,7 +76,7 @@ The typical loop:
 | `list_notebooks` | The sessions currently open on the server: `session_id`, `name`, `path`. |
 | `get_notebook(session_id)` | Every cell of a session, in order. |
 | `get_cell(session_id, cell_id)` | One cell: source, status, outputs. |
-| `save_cell_output(session_id, cell_id, index=-1)` | Write a display output (a plot, an image) to the notebook's `.strata/outputs/` and return the path, so the agent can open it. |
+| `save_cell_output(session_id, cell_id, index=-1)` | Write a display output (a plot, an image) to the notebook's `.strata/outputs/` and return the path, so the agent can open it. The path is on the **server's** machine: an agent on another host should use `strata cell output --server … --session …`, which downloads and writes the file locally. |
 | `get_variable(session_id, name)` | The cell that defines a variable, "do I already have `name`?"; else the available names. |
 | `dag(session_id)` | The dependency graph - edges, topological order, roots, leaves. |
 | `status(session_id)` | Per-cell status + staleness summary. |

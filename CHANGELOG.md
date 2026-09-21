@@ -212,6 +212,14 @@ a case of the server reporting more confidence than it had:
   rerun all. For a cell whose point is what it displays, a clock read, a
   counter, a file it just wrote, the effect those callers exist to re-trigger
   never happened.
+- **A fresh value reaches the cells that read it.** A cell reading a
+  `# @nocache` cell's value kept serving what it had computed from an earlier
+  one: its cache key followed the producer's provenance, which is the same on
+  every run while the value is not. The key now follows the stored bytes for
+  producers like that. And one run of the notebook, whether headless
+  `strata run`, a cascade or Run All, executes each cell once: a `@nocache`
+  producer with two consumers used to execute three times and hand the two
+  consumers different values.
 - **A failed cell keeps what it failed with.** The traceback and the prints
   that preceded it went only to whoever started the run. Asking about the cell
   afterwards returned an empty console, no error, and a status of `idle` that

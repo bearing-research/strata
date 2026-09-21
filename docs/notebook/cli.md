@@ -187,7 +187,7 @@ success, `1` operation failure (e.g. unknown cell - a structured `{"error": …}
 on stdout), `2` invocation error (bad path) on stderr.
 
 ```bash
-strata cell list my_analysis | jq '.cells[] | select(.status == "error") | .id'
+strata cell list my_analysis | jq '.[] | select(.status == "error") | .id'
 ```
 
 ### Looking at a plot

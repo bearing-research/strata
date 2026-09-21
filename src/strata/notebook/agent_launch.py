@@ -318,7 +318,7 @@ def _write_agent_config(notebook_dir: Path, server_url: str, session_id: str) ->
     claude_md.write_text(new_text, encoding="utf-8")
 
 
-def _print_ready(notebook_dir: Path, server_url: str, session_id: str) -> None:
+def _print_ready(notebook_dir: Path, server_url: str, session_id: str, *, tui: bool = True) -> None:
     check = _green("✓")
     print()
     print(f"{check} notebook  {notebook_dir}")
@@ -330,7 +330,11 @@ def _print_ready(notebook_dir: Path, server_url: str, session_id: str) -> None:
     print(f"    cd {notebook_dir} && claude")
     print()
     print(_dim("The agent auto-connects via .mcp.json and drives this notebook;"))
-    print(_dim("watch it happen live in the TUI below. Quit the TUI to stop."))
+    if tui:
+        print(_dim("watch it happen live in the TUI below. Quit the TUI to stop."))
+    else:
+        # --no-tui: there is no viewer below to watch or quit.
+        print(_dim(f"watch it happen live in the web UI at {server_url}."))
     print()
 
 
@@ -402,7 +406,7 @@ def agent_main(args: argparse.Namespace) -> int:
         _write_agent_config(notebook_dir, server_url, session_id)
         if args.worker_ssh:
             _establish_ssh_worker(server_url, session_id, args.worker_ssh)
-        _print_ready(notebook_dir, server_url, session_id)
+        _print_ready(notebook_dir, server_url, session_id, tui=not args.no_tui)
 
         if args.no_tui:
             if spawned is not None:

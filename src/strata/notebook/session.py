@@ -45,6 +45,7 @@ from strata.notebook.models import (
     CellState,
     CellStatus,
     DatasetSpec,
+    MountMode,
     NotebookState,
     StalenessReason,
     VariantGroupState,
@@ -125,6 +126,28 @@ def _rewrite_variant_annotation(source: str, group: str, new_name: str) -> str:
     if count == 0:
         return f"# @variant {group} {new_name}\n{source}"
     return new_source
+
+
+def _value_outlives_provenance(cell: CellState) -> bool:
+    """Whether a cell's value can change while its provenance hash does not.
+
+    A provenance hash identifies a value only when source, inputs and
+    environment determine it. ``# @nocache`` declares that they do not (a
+    clock, a counter, a file being edited), and a read-write mount makes the
+    cell uncacheable for the same reason. For those cells a downstream cache
+    key has to follow the bytes rather than the hash, or a consumer keeps
+    serving what it computed from an older value.
+
+    Everything else stays keyed on provenance, deliberately: bytes can differ
+    across machines for a value that is the same result (float order, thread
+    counts), and keying on them would split the team cache for every
+    downstream cell.
+    """
+    annotations = parse_annotations(cell.source)
+    if annotations.nocache:
+        return True
+    mounts = resolve_cell_mounts([], cell.mounts, annotations.mounts)
+    return any(mount.mode == MountMode.READ_WRITE for mount in mounts)
 
 
 @dataclass(frozen=True)
@@ -1933,27 +1956,40 @@ class NotebookSession:
         hashes: list[str] = []
         sweep_buckets: dict[str, list[tuple[str, str]]] = {}
 
-        def _hash_from_uri(uri: str) -> str | None:
+        store = self.artifact_manager.artifact_store
+
+        def _hash_from_uri(uri: str, *, by_content: bool) -> str | None:
             try:
                 tail = uri.split("/")[-1]
                 artifact_id = tail.split("@")[0]
                 version = int(tail.split("@v=")[1])
             except (IndexError, ValueError):
                 return None
-            artifact = self.artifact_manager.artifact_store.get_artifact(artifact_id, version)
-            return artifact.provenance_hash if artifact else None
+            artifact = store.get_artifact(artifact_id, version)
+            if artifact is None:
+                return None
+            if not by_content:
+                return artifact.provenance_hash
+            # The producer's provenance hash is the same on every run, so on
+            # its own it cannot tell a consumer that the value changed. The
+            # bytes can. Recorded at finalize; backfilled once if absent.
+            digest = artifact.content_sha256 or store.content_digest(artifact_id, version)
+            if digest is None:
+                return artifact.provenance_hash
+            return derive_subkey(artifact.provenance_hash, f"content={digest}")
 
         for upstream_id in cell.upstream_ids:
             upstream_cell = self.notebook_state.get_cell(upstream_id)
             if upstream_cell is None:
                 continue
+            by_content = _value_outlives_provenance(upstream_cell)
 
             uri_items: list[tuple[str | None, str]] = list(upstream_cell.artifact_uris.items())
             if not uri_items and upstream_cell.artifact_uri:
                 uri_items = [(None, upstream_cell.artifact_uri)]
 
             for var_name, uri in uri_items:
-                provenance_hash = _hash_from_uri(uri)
+                provenance_hash = _hash_from_uri(uri, by_content=by_content)
                 if provenance_hash is None:
                     continue
                 if var_name is None:

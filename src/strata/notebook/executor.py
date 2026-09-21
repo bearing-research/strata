@@ -50,7 +50,8 @@ import shutil
 import tempfile
 import time
 import uuid
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Iterator
+from contextlib import contextmanager
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
@@ -608,6 +609,11 @@ class CellExecutor:
         # execute_cell() recursive tree. Each top-level call creates a fresh
         # CellExecutor, so the guard resets between independent executions.
         self._materializing: set[str] = set()
+        # What each cell's execution returned within the current multi-cell
+        # run, when one is open (see ``one_run``). ``None`` outside a run,
+        # which is every standalone single-cell execution, so their semantics
+        # do not change.
+        self._run_scope: dict[str, CellExecutionResult] | None = None
         # The digest each cell's fetches resolved to when its provenance was
         # last computed, as lineage inputs (``{url: "sha256:<hex>"}``). Kept
         # from that moment rather than read back from the fetch cache at store
@@ -895,6 +901,43 @@ class CellExecutor:
             on_cell_event=on_cell_event,
         )
 
+    @contextmanager
+    def one_run(self) -> Iterator[None]:
+        """Treat every execution inside the block as one run of the notebook.
+
+        A single-cell execution materialises its upstreams by asking each to
+        execute, which is a cache hit for a producer whose value its provenance
+        determines, and a fresh execution for a ``# @nocache`` one. A driver
+        that executes many cells in turn (headless ``strata run``, the
+        browser's cascade, Run All) hit that once per downstream: one run of a
+        producer with two consumers executed it three times, repeated its side
+        effects, and gave the two consumers different values in the same run.
+
+        Inside this block each cell executes at most once: a request for a
+        cell the run has already executed returns that execution's result.
+        That covers both ways a cell gets asked for, because materialising an
+        upstream is itself a request through ``_execute_cell``. The direct kind
+        matters too: Run All walks display order, so a consumer above its
+        producer materialises the producer before Run All reaches the
+        producer's row, and executing it again there would give the producer a
+        newer value than the one its consumer already read. Anything the run
+        has not reached yet is still materialised as before.
+
+        One exception keeps rerun-all honest: a request that bypasses the cache
+        is not satisfied by an earlier *cache hit*, only by an earlier real
+        execution.
+
+        Re-entrant: a nested block belongs to the run already open.
+        """
+        if self._run_scope is not None:
+            yield
+            return
+        self._run_scope = {}
+        try:
+            yield
+        finally:
+            self._run_scope = None
+
     async def _execute_cell(
         self,
         cell_id: str,
@@ -904,7 +947,36 @@ class CellExecutor:
         materialize_upstreams: bool,
         use_cache: bool,
     ) -> CellExecutionResult:
-        """Shared execution entrypoint with explicit cache/materialization policy."""
+        """Shared execution entrypoint with explicit cache/materialization policy.
+
+        One choke point for every mode and language, so a run scope records a
+        cell however it executed and whichever branch returned.
+        """
+        if self._run_scope is not None:
+            earlier = self._run_scope.get(cell_id)
+            if earlier is not None and (use_cache or not earlier.cache_hit):
+                return earlier
+        result = await self._dispatch_cell(
+            cell_id,
+            source,
+            timeout_seconds,
+            materialize_upstreams=materialize_upstreams,
+            use_cache=use_cache,
+        )
+        if self._run_scope is not None and result.success:
+            self._run_scope[cell_id] = result
+        return result
+
+    async def _dispatch_cell(
+        self,
+        cell_id: str,
+        source: str,
+        timeout_seconds: float,
+        *,
+        materialize_upstreams: bool,
+        use_cache: bool,
+    ) -> CellExecutionResult:
+        """Route one execution to its language / loop / fan-out pipeline."""
         annotations = parse_annotations(source)
         timeout_seconds = self._resolve_effective_timeout(
             cell_id,
