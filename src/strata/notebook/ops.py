@@ -1071,7 +1071,13 @@ class RemoteNotebookOps:
             cell_id=cell_id,
             index=resolved,
             path=str(dest),
-            content_type=resp.headers.get("content-type", "application/octet-stream"),
+            # The route serves the stored type, but Starlette appends
+            # `; charset=utf-8` to any text/* type on the way out. Without
+            # dropping it, a markdown output would read differently remotely
+            # than locally, and the two backends are meant to be one view.
+            content_type=resp.headers.get("content-type", "application/octet-stream")
+            .split(";", 1)[0]
+            .strip(),
             bytes=len(blob),
         )
 

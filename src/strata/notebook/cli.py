@@ -1321,6 +1321,11 @@ def cell_output_main(args: argparse.Namespace) -> int:
         except NotebookOpsError as e:
             print(f"error: {e}", file=sys.stderr)
             return 1
+        except OSError as e:
+            # The parent existing is not the same as the path being writable:
+            # `--out /tmp` names a directory, and a read-only target refuses.
+            print(f"error: cannot write {dest}: {e.strerror or e}", file=sys.stderr)
+            return 2
         if args.format == "json":
             _emit_json(saved.model_dump(mode="json"))
         else:

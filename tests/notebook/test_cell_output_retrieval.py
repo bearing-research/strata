@@ -194,6 +194,66 @@ def test_the_cli_refuses_a_directory_that_is_not_there(tmp_path: Path, capsys):
     assert "no such directory" in capsys.readouterr().err
 
 
+def test_the_cli_says_so_when_the_target_is_not_writable(tmp_path: Path, capsys):
+    """A parent that exists is not a path that can be written.
+
+    `--out` naming an existing directory passed the parent check and then
+    raised IsADirectoryError out of the command as a traceback.
+    """
+    from strata.cli import main
+
+    notebook_dir, _ = _notebook_with_a_plot(tmp_path)
+    a_directory = tmp_path / "already-a-dir"
+    a_directory.mkdir()
+
+    assert main(["cell", "output", str(notebook_dir), "p", "--out", str(a_directory)]) == 2
+    assert "cannot write" in capsys.readouterr().err
+
+
+MARKDOWN_CELL = """
+class Note:
+    def _repr_markdown_(self):
+        return "# Heading"
+
+Note()
+"""
+
+
+def test_local_and_remote_agree_on_a_text_content_type(tmp_path: Path, monkeypatch):
+    """Starlette appends `; charset=utf-8` to text/* responses.
+
+    The remote backend copied that header verbatim, so a markdown output was
+    `text/markdown` locally and `text/markdown; charset=utf-8` remotely. The
+    two backends are meant to be one view of the same notebook.
+    """
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from strata.notebook.routes import router
+
+    monkeypatch.setattr("strata.notebook.session._uv_sync", lambda path, **kw: True)
+    notebook_dir = create_notebook(tmp_path, "Notes", initialize_environment=False)
+    add_cell_to_notebook(notebook_dir, "m")
+    write_cell(notebook_dir, "m", MARKDOWN_CELL)
+    session = NotebookSession(parse_notebook(notebook_dir), notebook_dir)
+    assert asyncio.run(CellExecutor(session).execute_cell("m", MARKDOWN_CELL)).success
+
+    app = FastAPI()
+    app.include_router(router)
+    client = TestClient(app)
+    sid = client.post("/v1/notebooks/open", json={"path": str(notebook_dir)}).json()["session_id"]
+
+    # Drive RemoteNotebookOps against the real route by routing its httpx
+    # client through the TestClient's transport.
+    remote = RemoteNotebookOps("http://testserver", sid, client=client)
+    remote_saved = remote.save_output("m", tmp_path / "remote.md")
+    local_saved = LocalNotebookOps(notebook_dir).save_output("m", tmp_path / "local.md")
+
+    assert local_saved.content_type == "text/markdown"
+    assert remote_saved.content_type == local_saved.content_type
+    assert (tmp_path / "remote.md").read_bytes() == (tmp_path / "local.md").read_bytes()
+
+
 def test_the_new_tool_is_classified(tmp_path: Path):
     assert "save_cell_output" in CLASSIFIED_TOOLS
     assert required_scope_for_tool("save_cell_output") == NOTEBOOK_SCOPE_READ
