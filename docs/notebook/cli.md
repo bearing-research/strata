@@ -190,6 +190,22 @@ on stdout), `2` invocation error (bad path) on stderr.
 strata cell list my_analysis | jq '.cells[] | select(.status == "error") | .id'
 ```
 
+### Looking at a plot
+
+An image has no text form, so `cell show` reports a plotting cell's output as
+`image/png` with its size and an `artifact_uri`, and a `null` preview. To see
+it, write the bytes to a file:
+
+```bash
+strata cell output <notebook_dir> <cell_id> --out plot.png   # the last display output
+strata cell output <notebook_dir> <cell_id> --out first.png --index 0
+```
+
+`--index` counts display outputs in the order the cell emitted them; the
+default `-1` is the last, which is the value a cell ending in an expression
+produced. It works against a live session too, with `--server`/`--session`;
+the file is always written on the machine running the command.
+
 ### Working against a live session (`--server` / `--session`)
 
 Every command above also targets a session on a **running** `strata-notebook` -

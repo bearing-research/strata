@@ -159,6 +159,10 @@ _READ_TOOLS = frozenset(
         "list_notebooks",
         "get_notebook",
         "get_cell",
+        # Writes a file, but only into the notebook's own ``.strata/outputs/``,
+        # and changes nothing about the notebook. It hands back bytes a reader
+        # can already see the metadata for, so it is the read it looks like.
+        "save_cell_output",
         "get_variable",
         "dag",
         "status",

@@ -1459,6 +1459,22 @@ class NotebookSession:
         raw["inline_data_url"] = f"data:image/png;base64,{base64.b64encode(blob).decode('ascii')}"
         return raw
 
+    def read_display_blob(self, output: CellOutput) -> bytes:
+        """The stored bytes behind one display output.
+
+        Hydration hands the frontend a base64 data URL, because that is what a
+        browser renders. Anything that wants a file wants the bytes, and the
+        blob is the same one either way.
+
+        Raises ``ValueError`` when the output was never stored as an artifact,
+        or the artifact it names is gone.
+        """
+        artifact_uri = output.artifact_uri
+        if not artifact_uri:
+            raise ValueError("display output is not backed by an artifact")
+        artifact_id, version = self._parse_artifact_uri(artifact_uri)
+        return self.artifact_manager.load_artifact_data(artifact_id, version)
+
     @staticmethod
     def _parse_artifact_uri(artifact_uri: str) -> tuple[str, int]:
         """Parse a canonical artifact URI into (artifact_id, version)."""

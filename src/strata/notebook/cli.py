@@ -1153,6 +1153,27 @@ def add_cell_arguments(parser: argparse.ArgumentParser) -> None:
     show_p.add_argument("--format", choices=["human", "json"], default="json")
     show_p.set_defaults(func=cell_show_main)
 
+    output_p = sub.add_parser(
+        "output", help="Write a cell's display output (a plot, an image) to a file"
+    )
+    _add_target_args(output_p)
+    output_p.add_argument("cell_id", help="Cell id whose output to save")
+    output_p.add_argument(
+        "--out",
+        dest="out",
+        metavar="FILE",
+        required=True,
+        help="File to write the bytes to (overwritten if it exists)",
+    )
+    output_p.add_argument(
+        "--index",
+        type=int,
+        default=-1,
+        help="Which display output, in emission order; -1 (default) is the last",
+    )
+    output_p.add_argument("--format", choices=["human", "json"], default="json")
+    output_p.set_defaults(func=cell_output_main)
+
     run_p = sub.add_parser("run", help="Execute one cell")
     _add_target_args(run_p)
     run_p.add_argument("cell_id", help="Cell id to run")
@@ -1281,6 +1302,35 @@ def _print_cell_human(cell: CellView) -> None:
         print(cell.error.rstrip())
     print("--- source ---")
     print(cell.source)
+
+
+def cell_output_main(args: argparse.Namespace) -> int:
+    """Write one display output to a file, so an agent can open the plot."""
+    from strata.notebook.ops import NotebookOpsError
+
+    dest = Path(args.out).expanduser()
+    if not dest.parent.exists():
+        print(f"error: no such directory: {dest.parent}", file=sys.stderr)
+        return 2
+
+    with _read_ops(args) as ops:
+        if ops is None:
+            return 2
+        try:
+            saved = ops.save_output(args.cell_id, dest, index=args.index)
+        except NotebookOpsError as e:
+            print(f"error: {e}", file=sys.stderr)
+            return 1
+        except OSError as e:
+            # The parent existing is not the same as the path being writable:
+            # `--out /tmp` names a directory, and a read-only target refuses.
+            print(f"error: cannot write {dest}: {e.strerror or e}", file=sys.stderr)
+            return 2
+        if args.format == "json":
+            _emit_json(saved.model_dump(mode="json"))
+        else:
+            print(f"{saved.path}  ({saved.content_type}, {saved.bytes} bytes)")
+    return 0
 
 
 def cell_show_main(args: argparse.Namespace) -> int:

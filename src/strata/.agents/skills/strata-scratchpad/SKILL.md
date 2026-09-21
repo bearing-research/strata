@@ -101,6 +101,19 @@ That pin is why the mount is cheap, and it is the right default for files you
 are not touching. A cell whose point is to observe a file you are editing needs
 the annotation below, the same as a clock read.
 
+## Looking at a plot
+
+A plotting cell's output comes back as `image/png` with a size and no preview:
+an image has no text form. To check what you drew, write it to a file and open
+that file:
+
+```bash
+strata cell output ./scratch <cell_id> --out /tmp/plot.png
+```
+
+(MCP: `save_cell_output(session_id, cell_id)` returns the `path`.) Look at it
+before telling the human what the chart shows.
+
 ## Look before you compute
 
 Before recomputing something, check what the scratchpad already holds:
