@@ -199,6 +199,21 @@ a case of the server reporting more confidence than it had:
 
 ### Fixed
 
+- **A displayed value is a cached result like any other.** A leaf cell's
+  display output was resolved before the cache decision and returned
+  regardless of it, so every way of asking for a fresh run came back with the
+  first run's value: `# @nocache`, a read-write mount, "run this only", and
+  rerun all. For a cell whose point is what it displays, a clock read, a
+  counter, a file it just wrote, the effect those callers exist to re-trigger
+  never happened.
+- **A failed cell keeps what it failed with.** The traceback and the prints
+  that preceded it went only to whoever started the run. Asking about the cell
+  afterwards returned an empty console, no error, and a status of `idle` that
+  reads as "never run", so the only way to see what happened was to run the
+  failure again. A failure is now recorded against the source that produced it,
+  survives a reopen, and stops being erased when an unrelated edit elsewhere
+  recomputes staleness. The curated cell view also carries the `defines` and
+  `references` the MCP tool description has always promised.
 - **A worker that answers has answered.** A worker predating the health
   document replies 404, which says it is older than every feature it would
   list — so the cell runs in the worker's own environment, as documented,
