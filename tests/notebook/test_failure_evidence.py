@@ -82,16 +82,56 @@ def test_an_unrelated_change_does_not_erase_the_failure(tmp_path: Path):
     assert session.notebook_state.get_cell("c1").status == CellStatus.ERROR
 
 
+FIXED = 'print("fixed")\n'
+
+
 def test_editing_the_cell_drops_the_error(tmp_path: Path):
-    """An error is about one source. Change it and the claim expires."""
+    """An error is about one source. Change it and the claim expires.
+
+    Status was the first half of this. The error text is the other half: a
+    traceback still reported against source it never ran on attributes a
+    failure to code that does not contain the failing operation.
+    """
     notebook_dir = _notebook(tmp_path)
     session, _ = _run(notebook_dir, FAILING)
 
     cell = session.notebook_state.get_cell("c1")
-    cell.source = 'print("fixed")\n'
+    cell.source = FIXED
+    write_cell(notebook_dir, "c1", FIXED)
     session.compute_staleness()
 
     assert session.notebook_state.get_cell("c1").status != CellStatus.ERROR
+    assert cell.current_error() is None
+    assert cell.serialize()["error"] is None
+
+    # Every agent-facing surface projects through that wire dict, so none of
+    # them can hand back the obsolete traceback either.
+    view = LocalNotebookOps(notebook_dir).get_cell("c1")
+    assert view.error is None
+    assert view.status != CellStatus.ERROR.value
+
+    # And it stays gone across a reopen, which reads the error back out of
+    # runtime.json next to the source hash it belongs to.
+    reopened = NotebookSession(parse_notebook(notebook_dir), notebook_dir)
+    assert reopened.notebook_state.get_cell("c1").current_error() is None
+
+
+def test_a_comment_only_edit_keeps_the_error(tmp_path: Path):
+    """The hash is semantic, so the failing code is what the error tracks.
+
+    Adding a comment changes the text and not the behaviour. The traceback is
+    still about this cell, and withholding it there would lose the evidence
+    over an edit that cannot have fixed anything.
+    """
+    notebook_dir = _notebook(tmp_path)
+    session, _ = _run(notebook_dir, FAILING)
+
+    cell = session.notebook_state.get_cell("c1")
+    cell.source = "# a note to self\n" + FAILING
+    session.compute_staleness()
+
+    assert "ZeroDivisionError" in (cell.current_error() or "")
+    assert session.notebook_state.get_cell("c1").status == CellStatus.ERROR
 
 
 def test_a_successful_run_clears_the_error(tmp_path: Path):

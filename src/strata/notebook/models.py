@@ -765,7 +765,8 @@ class CellState(BaseModel):
         default=None,
         description=(
             "Error message and traceback from the last failed execution. "
-            "Cleared on the next success; dropped once the source changes."
+            "Cleared on the next success. Read it through ``current_error``, "
+            "which withholds it once the source it happened to has changed."
         ),
     )
     error_source_hash: str | None = Field(
@@ -833,6 +834,21 @@ class CellState(BaseModel):
         description="Runtime-only current values of a widget cell's controls",
     )
 
+    def current_error(self) -> str | None:
+        """The recorded error, but only while it is about this source.
+
+        An error describes one version of a cell. Edit the cell and the
+        traceback still sitting on it is about code that is no longer there,
+        so reporting it would attribute a failure to source that never
+        produced one. The pair (``error``, ``error_source_hash``) is what the
+        cell stores; this is what anyone asking is entitled to read.
+        """
+        if self.error is None or self.error_source_hash is None:
+            return None
+        from strata.notebook.provenance import compute_source_hash
+
+        return self.error if self.error_source_hash == compute_source_hash(self.source) else None
+
     def serialize(self) -> dict[str, Any]:
         """Return the cell-only wire view of this cell.
 
@@ -855,6 +871,10 @@ class CellState(BaseModel):
             else []
         )
         data["annotations"] = parse_annotations(self.source).to_wire_payload()
+        # The stored error outlives the source that produced it; the reported
+        # one must not. Only pay for the hash when there is an error to gate.
+        if data.get("error") is not None:
+            data["error"] = self.current_error()
 
         # Module-cell classification — drives the "module" pill in the
         # UI and the richer tooltip on the module_export_blocked
