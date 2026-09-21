@@ -271,6 +271,8 @@ def parse_notebook(directory: Path) -> NotebookState:
                 last_source_hash=runtime_cell.last_source_hash if runtime_cell else None,
                 last_env_hash=runtime_cell.last_env_hash if runtime_cell else None,
                 last_reopen_identity=(runtime_cell.last_reopen_identity if runtime_cell else None),
+                error=runtime_cell.last_error if runtime_cell else None,
+                error_source_hash=(runtime_cell.last_error_source_hash if runtime_cell else None),
                 widget_values=dict(runtime_cell.widget_values) if runtime_cell else {},
             )
         )

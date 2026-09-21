@@ -45,6 +45,20 @@ def test_local_ops_get_cell_and_unknown(chain_nb):
         ops.get_cell("ghost")
 
 
+def test_the_cell_view_names_what_the_cell_produces(chain_nb):
+    """`get_notebook`'s MCP description has always promised defines/references.
+
+    Without them on the view, an agent asking what a cell produces had to make
+    a second call to `dag` and match cells up by id.
+    """
+    ops = LocalNotebookOps(chain_nb)
+    assert ops.get_cell("a").defines == ["x"]
+    assert ops.get_cell("b").references == ["x"]
+    # And the status listing, which the skill tells agents to read first.
+    rows = {row.id: row for row in ops.status().cells}
+    assert rows["a"].defines == ["x"]
+
+
 def test_local_ops_dag_has_the_edge(chain_nb):
     dag = LocalNotebookOps(chain_nb).dag()
     assert any(

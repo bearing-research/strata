@@ -1273,6 +1273,12 @@ def _print_cell_human(cell: CellView) -> None:
     print(f"status:   {cell.status}")
     if cell.staleness_reasons:
         print(f"stale:    {', '.join(cell.staleness_reasons)}")
+    if cell.error:
+        # The one thing a status of `error` is useless without. Console and
+        # outputs stay JSON-only; a traceback is what the person asking came
+        # here to read.
+        print("--- error ---")
+        print(cell.error.rstrip())
     print("--- source ---")
     print(cell.source)
 
