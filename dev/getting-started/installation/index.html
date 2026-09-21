@@ -2362,15 +2362,27 @@ and CLI binary are both named <code>strata</code>.</p>
 </tr>
 <tr>
 <td><code>uv run strata export &lt;notebook-dir&gt;</code></td>
-<td>Render a notebook to markdown or HTML (add <code>--app-view</code> for a frozen dashboard snapshot). See <a href="../../notebook/export/">Export</a>.</td>
+<td>Render a notebook to markdown or HTML (add <code>--app-view</code> for a frozen dashboard snapshot), or write a portable snapshot zip with <code>--to snapshot</code>. See <a href="../../notebook/export/">Export</a>.</td>
 </tr>
 <tr>
-<td><code>uv run strata import &lt;ipynb-file&gt;</code></td>
-<td>Convert a Jupyter <code>.ipynb</code> into a Strata notebook directory. See <a href="../../notebook/import/">Import from Jupyter</a>.</td>
+<td><code>uv run strata import &lt;file&gt;</code></td>
+<td>Convert a Jupyter <code>.ipynb</code> into a Strata notebook directory, or unpack a snapshot zip back into one. See <a href="../../notebook/import/">Import</a>.</td>
 </tr>
 <tr>
 <td><code>uv run strata artifact &lt;cmd&gt; [dir]</code></td>
-<td>Inspect a local artifact store without a server: <code>list</code>, <code>show &lt;ref&gt;</code>, <code>lineage &lt;ref&gt;</code> (renders model ← features ← scan ← table @ snapshot), <code>pull &lt;ref&gt; --to FILE</code>, <code>audit [name]</code> (registry history), <code>pending</code> (approval queue), <code>verify</code>. <code>&lt;ref&gt;</code> is a name, <code>id@v=N</code>, or bare id.</td>
+<td>Inspect a local artifact store without a server: <code>list</code>, <code>show &lt;ref&gt;</code>, <code>lineage &lt;ref&gt;</code> (renders model ← features ← scan ← table @ snapshot), <code>pull &lt;ref&gt; --to FILE</code>, <code>audit [name]</code> (registry history), <code>pending</code> (approval queue), <code>verify</code>. Also publishes and moves results: <code>publish</code> / <code>unpublish</code> (a link anyone can open), <code>promote</code> (copy an artifact and its chain to the team store and name it there), <code>export</code> (write a tabular artifact into an Iceberg table), <code>archive</code> (a self-contained bundle: page, bytes, manifest, README). <code>&lt;ref&gt;</code> is a name, <code>id@v=N</code>, or bare id.</td>
+</tr>
+<tr>
+<td><code>uv run strata migrate --to-dsn &lt;dsn&gt;</code></td>
+<td>Copy artifact-store metadata from SQLite to Postgres. Setting <code>STRATA_ARTIFACT_METADATA_DSN</code> alone starts an empty store; this carries an existing one across. Metadata only — blobs are configured separately.</td>
+</tr>
+<tr>
+<td><code>uv run strata apikey &lt;cmd&gt;</code></td>
+<td>Mint, list and revoke API keys for a server running with <code>auth_mode="api_key"</code>: <code>create</code>, <code>list</code> (never shows secrets), <code>revoke &lt;id&gt;</code>.</td>
+</tr>
+<tr>
+<td><code>uv run strata env gc</code></td>
+<td>Remove shared environments no notebook links to. Only relevant with the shared environment backend. See <a href="../../notebook/environment/">Environments</a>.</td>
 </tr>
 <tr>
 <td><code>uv run strata watch [dir\|--session]</code></td>

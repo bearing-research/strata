@@ -3828,6 +3828,17 @@ this is blocking you.</p>
 </tr>
 </tbody>
 </table>
+<p><strong>On reopen.</strong> <code>fingerprint</code> and <code>snapshot</code> open idle. Both say, in the cell's
+own annotation, that the cached rows are good only while the source still
+agrees — and asking the source is a query, not something to do while opening a
+notebook. <code>forever</code>, <code>session</code> and <code>ttl</code> can come back ready, because each has
+already said what it depends on and that is settled locally: a <code>session</code> cell
+matches only within the session that ran it, and a <code>ttl</code> cell only inside the
+same time bucket, so one whose window has passed comes back idle anyway.</p>
+<p>The connection counts too. Repointing <code>[connections.&lt;name&gt;]</code> at another
+database, or at a different credential, means the cell is no longer ready about
+what it was ready about, so it opens idle rather than green with the previous
+database's rows.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-25-1" name="__codelineno-25-1" href="#__codelineno-25-1"></a><span class="o">#</span><span class="w"> </span><span class="o">@</span><span class="k">sql</span><span class="w"> </span><span class="k">connection</span><span class="o">=</span><span class="n">warehouse</span>
 <a id="__codelineno-25-2" name="__codelineno-25-2" href="#__codelineno-25-2"></a><span class="o">#</span><span class="w"> </span><span class="o">@</span><span class="k">cache</span><span class="w"> </span><span class="n">forever</span>
 <a id="__codelineno-25-3" name="__codelineno-25-3" href="#__codelineno-25-3"></a><span class="k">SELECT</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="k">FROM</span><span class="w"> </span><span class="n">dim_country</span>

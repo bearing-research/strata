@@ -2159,6 +2159,14 @@ producing artifacts that flow through an auto-built DAG.</p>
 <li><strong>isolated envs:</strong> every notebook gets its own uv-managed <code>.venv/</code>, locked and reproducible</li>
 <li><strong>auto-install:</strong> missing import in a cell? one click adds the package via uv and re-runs</li>
 <li><strong>headless:</strong> <code>strata run ./my-notebook</code> for CI and scheduled execution - same DAG, same cache</li>
+<li><strong>every input recorded:</strong> <code># @fetch</code> makes bytes from a URL an input and <code># @dataset</code> makes a registry name one, both content-addressed like everything else</li>
+<li><strong>lake-aware SQL:</strong> read a named catalog and the notebook's mounts in one query, pinned to the snapshot the cell's provenance records</li>
+<li><strong>the same environment, elsewhere:</strong> a remote cell runs in the notebook's own locked environment rather than whatever the worker image happens to hold</li>
+<li><strong>a figure gets a URL:</strong> publish an artifact and anyone with the link sees the plot, the code behind it, and the environment of every step - no account, no install</li>
+<li><strong>promote to the team:</strong> copy a result and its whole chain into a shared store, from the notebook, the CLI or inside a cell - and a teammate's earlier run can serve your cell</li>
+<li><strong>a notebook travels:</strong> export the whole state as one bundle, artifacts included, and import it back elsewhere</li>
+<li><strong>share a session:</strong> presence, cell focus and soft locks, with every cell recording who wrote it</li>
+<li><strong>worker pool</strong> (a separate package, <code>pip install strata-pool</code>)<strong>:</strong> machines start on demand - Fly, Docker or RunPod - are held for a tenant, hand out GPUs per cell, and stop when the work does</li>
 </ul>
 <h3 id="three-ways-to-drive-it">Three ways to drive it<a class="headerlink" href="#three-ways-to-drive-it" title="Permanent link">&para;</a></h3>
 <p>The same notebook - the same cells, the same cache, the same artifacts - has

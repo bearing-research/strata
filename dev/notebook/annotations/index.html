@@ -3259,12 +3259,17 @@ section is the per-annotation reference.</p>
   <code>[connections.&lt;name&gt;]</code> in <code>notebook.toml</code>. Manage these via the
   <strong>Connections panel</strong> in the sidebar; you don't need to edit the file
   directly.</li>
-<li><code>write=true</code>, opt the cell into writable execution. Without this flag,
-  the connection is opened in enforced read-only mode (SQLite <code>mode=ro</code> +
-  <code>PRAGMA query_only=ON</code>; PostgreSQL <code>SET default_transaction_read_only =
-  on</code>) and any DDL/DML errors before mutating the database. With it, the
-  cell can run setup scripts (<code>CREATE TABLE</code>, <code>INSERT</code>, <code>DROP</code>). The flag
-  is per-cell, read cells using the same connection stay read-only.</li>
+<li><code>write=true</code>, opt the cell into writable execution. Without this flag the
+  cell may only read: <code>SELECT</code>, set operations, <code>VALUES</code>, <code>TABLE</code>,
+  <code>SUMMARIZE</code>, <code>DESCRIBE</code>, <code>SHOW</code> and plain <code>EXPLAIN</code>. Anything else — DDL,
+  DML, <code>COPY</code>, <code>ATTACH</code>, <code>USE</code>, <code>CALL</code>, <code>SET</code>, <code>PRAGMA</code>, and <code>EXPLAIN
+  ANALYZE</code>, which runs the statement it describes — is refused before the
+  statement reaches the driver, naming it. The connection is still opened
+  read-only, but that is a second line rather than the boundary: the
+  read-only transaction a driver opens is one a <code>COMMIT</code> in the cell body
+  can end. With the flag the cell can run setup scripts (<code>CREATE TABLE</code>,
+  <code>INSERT</code>, <code>DROP</code>). It is per-cell; read cells on the same connection stay
+  read-only.</li>
 </ul>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-25-1" name="__codelineno-25-1" href="#__codelineno-25-1"></a><span class="o">#</span><span class="w"> </span><span class="o">@</span><span class="k">sql</span><span class="w"> </span><span class="k">connection</span><span class="o">=</span><span class="n">warehouse</span><span class="w"> </span><span class="k">write</span><span class="o">=</span><span class="k">true</span>
 <a id="__codelineno-25-2" name="__codelineno-25-2" href="#__codelineno-25-2"></a><span class="k">DROP</span><span class="w"> </span><span class="k">TABLE</span><span class="w"> </span><span class="k">IF</span><span class="w"> </span><span class="k">EXISTS</span><span class="w"> </span><span class="n">events</span><span class="p">;</span>

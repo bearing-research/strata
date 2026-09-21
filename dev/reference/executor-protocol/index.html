@@ -2316,7 +2316,7 @@
 <a id="__codelineno-1-27" name="__codelineno-1-27" href="#__codelineno-1-27"></a><span class="p">}</span>
 </code></pre></div>
 <p><code>active_executions</code> is the count of in-flight <code>/v1/*</code> calls - useful for autoscaler signals. <code>max_concurrent</code> and <code>gpu_slots</code> are the worker's limits (<code>null</code> when unset), and <code>free_gpu_slots</code> how many GPUs are unassigned, so a caller can plan rather than discover the limit by being refused. <code>hardware</code> is what the machine reports about itself: <code>cpus</code> (those this process may use) and <code>memory_mb</code> from the OS, and <code>accelerators</code> and <code>cuda</code> from <code>nvidia-smi</code> when it is on the worker's <code>PATH</code>. It lets a caller check a provider's machine against the class it was sold as without submitting a job. A field that could not be read is omitted, so a missing <code>accelerators</code> means unknown, not "no GPU". The notebook UI polls this and shows the worker badge red if <code>/health</code> fails or times out.</p>
-<p><code>locked_environments: true</code> says the worker runs a cell in the notebook's own locked environment when the request carries one (below). Strata sends that block only to a worker that advertises it; any other gets requests exactly as before.</p>
+<p><code>locked_environments: true</code> says the worker runs a cell in the notebook's own locked environment when the request carries one (below). Strata sends that block only to a worker that advertises it; any other gets requests exactly as before. Answer it honestly: building that environment is a <code>uv sync --frozen</code>, so the reference worker reports it by probing for <code>uv</code> on its own <code>PATH</code> rather than claiming it unconditionally. A worker that claims it without <code>uv</code> is sent work it will refuse, and every notebook has a lockfile.</p>
 <p>A cell runs with the worker's environment minus the worker's own secrets: <code>strata-worker</code> takes its token and credentials out of the process environment at startup and holds them in memory, so a cell cannot read them from its own environment or through <code>/proc</code>. <code>STRATA_NOTEBOOK_HARNESS_ENV_ALLOWLIST</code> narrows the rest, as <a href="../../notebook/workers/">the server's allowlist</a> narrows a cell there. A cell gets what its manifest carries.</p>
 <p><code>languages</code> lists the cell languages the worker can run: <code>r</code> when <code>Rscript</code> is on its <code>PATH</code>. An R cell's request says <code>"language": "r"</code>, in <code>transform.params.language</code> on <code>POST /v1/execute</code>, <code>language</code> in <code>POST /v1/notebook-execute</code> metadata, and <code>params.language</code> in a manifest; a Python cell's request carries no <code>language</code>. The worker runs <code>harness.R</code> under <code>Rscript</code> with the same manifest a Python cell's harness gets, and answers an R cell with <code>500</code> and <code>Rscript is not installed on this worker</code> when it has no R, or <code>400</code> for a language it does not know. An R cell carries no <code>environment</code> block.</p>
 <h3 id="the-environment-block">The <code>environment</code> block<a class="headerlink" href="#the-environment-block" title="Permanent link">&para;</a></h3>
@@ -2426,6 +2426,16 @@
 <td><code>transform.params.env</code></td>
 <td>object</td>
 <td>Env vars set in the cell subprocess.</td>
+</tr>
+<tr>
+<td><code>transform.params.mutation_defines</code></td>
+<td>array of string</td>
+<td>Present only when non-empty. Variables the cell changes in place without rebinding. The harness re-serializes exactly these: without the list it sees an unchanged <code>id()</code> and stores nothing, and the downstream cell reads the value from before — under a provenance hash that says otherwise.</td>
+</tr>
+<tr>
+<td><code>transform.params.tables</code></td>
+<td>object</td>
+<td>Present only when non-empty. <code>{name: {uri, snapshot_id}}</code> for each <code>@table</code> the cell declares. Injected as <code>&lt;name&gt;</code> and <code>&lt;name&gt;_snapshot</code>; no catalog access is needed at the worker to read them.</td>
 </tr>
 <tr>
 <td><code>inputs</code></td>
