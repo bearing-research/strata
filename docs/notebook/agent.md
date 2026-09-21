@@ -194,10 +194,17 @@ agent's output with no live connection at all.
 
 One caveat on that row. `running` belongs to the session rather than to disk,
 so you never see it offline. What you do see is recomputed from the artifact
-store: a cell whose output another cell consumes reports `ready` or `stale`
-with the reasons why, and a **leaf** cell reports `idle` however many times it
-has run, because a leaf stores no artifact to recognise it by. For "what is it
-doing right now", attach one of the live views above.
+store:
+
+- A cell whose output another cell consumes reports `ready` or `stale`, with
+  the reasons why.
+- A cell whose last run failed reports `error`, with its traceback, until it
+  is edited or run again.
+- A **leaf** cell, one nothing else reads, can report either `idle` or `ready`
+  after it has run. A leaf stores no variable artifact, so `idle` on a leaf
+  does not mean it never ran.
+
+For "what is it doing right now", attach one of the live views above.
 
 If you would rather keep a browser tab than a terminal viewer, start with
 `strata agent --no-tui` and open the notebook in the web UI instead.

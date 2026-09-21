@@ -176,3 +176,15 @@ def test_establish_ssh_worker_warns_on_network_error(monkeypatch, capsys) -> Non
     # A network failure is a warning, never an exception that aborts the launch.
     agent_launch._establish_ssh_worker("http://localhost:8765", "sess", "user@box")
     assert "could not connect" in capsys.readouterr().err
+
+
+def test_ready_message_matches_whether_a_viewer_is_attached(tmp_path, capsys):
+    """`--no-tui` attaches no viewer, so it must not say to watch or quit one."""
+    agent_launch._print_ready(tmp_path, "http://127.0.0.1:8765", "sid", tui=True)
+    with_tui = capsys.readouterr().out
+    assert "TUI below" in with_tui
+
+    agent_launch._print_ready(tmp_path, "http://127.0.0.1:8765", "sid", tui=False)
+    without = capsys.readouterr().out
+    assert "TUI" not in without
+    assert "web UI at http://127.0.0.1:8765" in without
