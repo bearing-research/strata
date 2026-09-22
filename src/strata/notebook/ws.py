@@ -2050,6 +2050,7 @@ async def execute_cell_exclusive(
     cell_id: str,
     notebook_id: str,
     mode: Literal["normal", "force", "rerun"] = "normal",
+    before_execute: Callable[[], None] | None = None,
 ) -> CellExecutionResult | None:
     """Reserve → execute → release for the non-WS drivers (REST, MCP).
 
@@ -2067,6 +2068,13 @@ async def execute_cell_exclusive(
     busy_cell = await _reserve_execution_request(execution_state, cell_id)
     if busy_cell is not None:
         raise NotebookBusyError(busy_cell)
+
+    # A caller that changes what the cell computes (a widget's control values)
+    # does it here and not before: a busy notebook rejects the request above,
+    # and a write made ahead of that would have changed the *next* run while
+    # the caller was told nothing happened.
+    if before_execute is not None:
+        before_execute()
 
     task = asyncio.create_task(
         execute_cell_and_broadcast(session, cell_id, execution_state, notebook_id, mode=mode),
@@ -3567,8 +3575,6 @@ async def _handle_widget_update(
         )
         return
 
-    persist_cell_widget_values(session.path, cell_id, coerced)
-
     seq = execution_state.next_sequence()
     busy_cell = await _reserve_execution_request(execution_state, cell_id)
     if busy_cell is not None:
@@ -3593,6 +3599,12 @@ async def _handle_widget_update(
     # is `# @live`, chain the cost-gated auto-cascade so cheap downstream cells
     # re-run on the change (Tier 1) instead of waiting for a manual run.
     async def _operation() -> None:
+        # Write the new values only once this update owns the execution slot.
+        # Persisting before the busy check left a rejected update on disk: the
+        # run in flight finished at the old value, the reply said the notebook
+        # was busy, and the *next* materialization silently used the value the
+        # server had refused.
+        cell.widget_values = persist_cell_widget_values(session.path, cell_id, coerced)
         await execute_cell_and_broadcast(
             session, cell_id, execution_state, notebook_id, mode="force"
         )

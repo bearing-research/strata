@@ -29,7 +29,7 @@ REST routes and the WebSocket:
 |---|---|
 | `notebook:read` | `list_notebooks`, `get_notebook`, `get_cell`, `save_cell_output`, `get_variable`, `dag`, `status`, `list_workers`, `lineage`, `publish_preflight` |
 | `notebook:write` | `add_cell`, `edit_cell`, `remove_cell`, `move_cell`, `note`, `add_worker`, `set_default_worker`, `set_variant`, `remove_worker`, `disconnect_ssh_worker`, `promote` |
-| `notebook:execute` | `run_cell`, `run_tests`, `run_snippet`, `add_dependency`, `remove_dependency`, `connect_ssh_worker`, and any tool not listed |
+| `notebook:execute` | `run_cell`, `run_tests`, `run_snippet`, `set_widget_value`, `add_dependency`, `remove_dependency`, `connect_ssh_worker`, and any tool not listed |
 | `artifacts:publish` | `publish` |
 
 Every open session on the server is visible to any caller holding
@@ -75,15 +75,16 @@ The typical loop:
 | --- | --- |
 | `list_notebooks` | The sessions currently open on the server: `session_id`, `name`, `path`. |
 | `get_notebook(session_id)` | Every cell of a session, in order. |
-| `get_cell(session_id, cell_id)` | One cell: source, status, outputs. |
+| `get_cell(session_id, cell_id)` | One cell: source, status, outputs. For a widget cell, its controls and what each is set to. |
 | `save_cell_output(session_id, cell_id, index=-1)` | Write a display output (a plot, an image) to the notebook's `.strata/outputs/` and return the path, so the agent can open it. The path is on the **server's** machine: an agent on another host should use `strata cell output --server … --session …`, which downloads and writes the file locally. |
 | `get_variable(session_id, name)` | The cell that defines a variable, "do I already have `name`?"; else the available names. For a swept variable, each variant's cell and the name `lineage` takes for it. |
 | `set_variant(session_id, group, active?, mode?)` | Pick which variant of a group runs, or set the group to `switch` / `sweep`. |
 | `dag(session_id)` | The dependency graph - edges, topological order, roots, leaves. |
 | `status(session_id)` | Per-cell status + staleness summary. |
 | `run_cell(session_id, cell_id, mode)` | Execute a cell (`normal` / `rerun` / `force`), broadcast live. |
+| `set_widget_value(session_id, cell_id, values)` | Set a widget cell's controls and re-run it at the new values, the same thing moving the slider does. |
 | `run_tests(session_id, cell_id)` | Run a cell's `cells/{id}.test.py`. |
-| `add_cell(session_id, source, after?, language?, author?)` | Add a cell (server mints the id). |
+| `add_cell(session_id, source, after?, language?, author?)` | Add a cell (server mints the id). `language` is one of `python`, `markdown`, `sql`, `r`, `prompt`, `widget`. |
 | `run_snippet(session_id, source, after?, language?, author?)` | Add a cell **and run it** in one call; returns the cell view with the run outcome nested under `run`. The scratchpad primitive. |
 | `edit_cell(session_id, cell_id, source, author?)` | Replace a cell's source. |
 | `remove_cell(session_id, cell_id)` | Delete a cell and its files. |
@@ -116,6 +117,16 @@ step's code and environment along with the result. `publish_preflight` returns
 that exposure list, and an agent should put it in front of the user and get
 their agreement before calling `publish`. Withdrawing is
 `strata artifact unpublish <token>`.
+
+A **widget cell** declares controls; what they are set to is runtime state,
+not source. Editing the cell therefore cannot change what the notebook
+computes, and reading the source cannot tell you what it is computing.
+`get_cell` reports a widget's `controls` with each one's kind, declared default
+and current `value`, and `set_widget_value(session_id, cell_id,
+{"utilization": 0.9})` sets them and re-materializes the cell, marking
+everything downstream stale. Send only the controls you are changing. A
+notebook that is mid-run refuses the call and leaves the stored values alone,
+so retry once that run finishes.
 
 `run_cell` modes match the UI and CLI: `normal` uses the cache and re-runs stale
 upstreams first; `rerun` bypasses the target's cache but still refreshes

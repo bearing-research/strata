@@ -414,6 +414,9 @@ def _write_runtime_state(
             {**output, "artifact_uri": rewrite_uri(output.get("artifact_uri"))}
             for output in cell.get("display_outputs") or []
         ]
+        # Absent from snapshots written before widget selections were carried;
+        # those import at each control's default, as they did before.
+        entry.widget_values = dict(cell.get("widget_values") or {})
 
         if not _SAFE_SEGMENT.match(cell_id):
             # The manifest names the cell, and the console is written to a path

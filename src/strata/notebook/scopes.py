@@ -193,6 +193,9 @@ _EXECUTE_TOOLS = frozenset(
         "run_cell",
         "run_tests",
         "run_snippet",
+        # Changes a control and re-materializes the widget cell, so it is a run
+        # rather than an edit — the same gate ``run_cell`` sits behind.
+        "set_widget_value",
         "add_dependency",
         "remove_dependency",
         "connect_ssh_worker",

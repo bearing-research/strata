@@ -90,7 +90,7 @@ job for the strip's **Promote to team…** or `strata artifact promote` once it 
 
 When a cell publishes with a name - `strata.put(inputs=[], transform=…, data=…, name="taxi/tip-model")` - the artifact appears in the [registry dashboard](../core/registry.md#in-the-notebook-the-registry-dashboard): a promote strip under the cell, and the Registry tab in the bottom drawer (promote, approve, lineage - all in the UI).
 
-> Calls through `strata` are **side effects**. On a cache hit the cell body doesn't re-run, so a `strata.set_alias(...)` won't re-fire - fine for idempotent calls (setting an alias to the version it already points at is a no-op), and side-effect-only cells (no stored output) re-run every time anyway.
+> Calls through `strata` are **side effects**. On a cache hit the cell body doesn't re-run, so a `strata.set_alias(...)` won't re-fire - fine for idempotent calls (setting an alias to the version it already points at is a no-op). A cell that stores no variable is cached too, keyed on its own provenance, so a cell whose whole point is the side effect needs `# @nocache` to re-fire.
 
 ### Library cells (cross-cell defs and classes)
 
@@ -665,6 +665,8 @@ control's current value is stored as a content-addressed artifact, so:
   that already computed for that value don't recompute.
 - The **declaration** (`slider(0, 1, …)`) is committed to `notebook.toml`; the
   **current value** is runtime state (a drag never churns the committed file).
+  It travels in a [snapshot](export.md#snapshots), so an imported copy computes
+  the scenario the bundle was taken from rather than the declared defaults.
 
 In the web UI a widget cell shows its controls in place of the code editor;
 click **✎ Edit controls** to edit the declaration. Widget cells render in the

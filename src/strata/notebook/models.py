@@ -871,6 +871,22 @@ class CellState(BaseModel):
             else []
         )
         data["annotations"] = parse_annotations(self.source).to_wire_payload()
+
+        # A widget cell's controls (parsed from its own source) and what each
+        # is currently set to. It lives here rather than on the session overlay
+        # because it needs nothing the session holds, and every reader of a
+        # cell needs it: a widget's value is runtime state, so source and
+        # outputs alone do not say what the notebook is computing.
+        if self.language == CellLanguage.WIDGET:
+            from strata.notebook.widget_analyzer import analyze_widget_cell
+
+            data["widget"] = {
+                "descriptors": [
+                    {"name": d.name, "kind": d.kind, "params": d.params, "default": d.default}
+                    for d in analyze_widget_cell(self.source).descriptors
+                ],
+                "values": dict(self.widget_values),
+            }
         # The stored error outlives the source that produced it; the reported
         # one must not. Only pay for the hash when there is an error to gate.
         if data.get("error") is not None:

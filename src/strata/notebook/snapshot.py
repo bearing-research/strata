@@ -241,6 +241,12 @@ def write_snapshot(
             # needs to resolve its cached display outputs on open, which it
             # does index by index and only when an entry exists for each.
             "display_outputs": list(cell_runtime.display_outputs) if cell_runtime else [],
+            # What a widget cell's controls were set to. Without them an
+            # imported copy of a notebook fell back to each control's declared
+            # default and recomputed a different scenario than the one the
+            # bundle was taken from, which is the opposite of a reproducible
+            # handoff.
+            "widget_values": dict(cell_runtime.widget_values) if cell_runtime else {},
         }
 
     from strata.artifact_transfer import record_metadata

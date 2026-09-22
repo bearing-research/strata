@@ -1453,21 +1453,6 @@ class NotebookSession:
             data["causality"] = asdict(causality, dict_factory=skip_none)
         if self.dag and cell.id in self.dag.shadow_warnings:
             data["shadow_warnings"] = self.dag.shadow_warnings[cell.id]
-        from strata.notebook.models import CellLanguage
-
-        if cell.language == CellLanguage.WIDGET:
-            # Controls (parsed from source) + their current runtime values, so the
-            # frontend can render the panel without a separate round-trip.
-            from strata.notebook.widget_analyzer import analyze_widget_cell
-
-            descriptors = analyze_widget_cell(cell.source).descriptors
-            data["widget"] = {
-                "descriptors": [
-                    {"name": d.name, "kind": d.kind, "params": d.params, "default": d.default}
-                    for d in descriptors
-                ],
-                "values": dict(cell.widget_values),
-            }
         return data
 
     def persist_display_outputs(

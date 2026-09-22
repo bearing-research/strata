@@ -88,6 +88,23 @@ class CellTestView(BaseModel):
     cases: list[TestCaseView]
 
 
+class WidgetControlView(BaseModel):
+    """One control of a widget cell, and what it is currently set to.
+
+    A widget cell's value is not in its source: the source declares the
+    controls, and the selection lives in runtime state. An agent reading only
+    source and outputs could not tell 0.9 from the declared default.
+    """
+
+    name: str
+    kind: str
+    params: dict[str, Any] = Field(default_factory=dict)
+    default: Any = None
+    # What the control is set to now, or ``None`` when nothing has been
+    # selected and the declared default is in force.
+    value: Any = None
+
+
 class CellView(BaseModel):
     """An agent-facing view of one cell, projected from ``CellState``.
 
@@ -120,6 +137,9 @@ class CellView(BaseModel):
     # and on a personal server where the client declared nothing.
     created_by: str = ""
     updated_by: str = ""
+    # A widget cell's controls with their current selections. Empty for every
+    # other kind of cell.
+    controls: list[WidgetControlView] = Field(default_factory=list)
 
 
 class DagEdgeView(BaseModel):
@@ -685,7 +705,7 @@ class LocalNotebookOps:
 
     # -- authoring + env (P2) ------------------------------------------------
 
-    _LANGUAGES = ("python", "markdown", "sql", "r", "prompt")
+    _LANGUAGES = ("python", "markdown", "sql", "r", "prompt", "widget")
 
     def add_cell(
         self, source: str, *, after: str | None = None, language: str = "python"
@@ -1384,7 +1404,25 @@ def _cell_view_from_wire(data: dict[str, Any]) -> CellView:
         test=_test_view_from_wire(test) if test else None,
         created_by=data.get("created_by") or "",
         updated_by=data.get("updated_by") or "",
+        controls=_control_views_from_wire(data.get("widget")),
     )
+
+
+def _control_views_from_wire(widget: dict[str, Any] | None) -> list[WidgetControlView]:
+    """The widget block of a serialized cell, or nothing for a non-widget cell."""
+    if not widget:
+        return []
+    values = widget.get("values") or {}
+    return [
+        WidgetControlView(
+            name=descriptor["name"],
+            kind=descriptor.get("kind") or "",
+            params=dict(descriptor.get("params") or {}),
+            default=descriptor.get("default"),
+            value=values.get(descriptor["name"]),
+        )
+        for descriptor in widget.get("descriptors") or []
+    ]
 
 
 def _status_row_from_wire(data: dict[str, Any]) -> CellStatusRow:

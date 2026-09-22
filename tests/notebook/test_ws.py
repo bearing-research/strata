@@ -2758,3 +2758,103 @@ async def test_a_failed_run_still_relabels_what_its_upstreams_changed(tmp_path):
     frames = [f["payload"] for f in fake.frames_of("cell_status")]
     assert any(f["cell_id"] == "avg" and f["status"] == "stale" for f in frames)
     assert any(f["cell_id"] == "diag" and f["status"] == "error" for f in frames)
+
+
+@pytest.mark.asyncio
+async def test_busy_widget_update_leaves_the_stored_value_alone(tmp_path):
+    """A widget_update refused as busy must not change what the next run computes.
+
+    The handler used to persist the new values before taking the execution
+    reservation, so a rejected update was already on disk: the reply said the
+    notebook was busy, nothing re-materialized, and the *next* materialization
+    silently used the value the server had refused.
+    """
+    from strata.notebook.models import CellLanguage
+    from strata.notebook.runtime_state import load_runtime_state
+    from strata.notebook.session import NotebookSession
+    from strata.notebook.ws import _handle_widget_update
+
+    nb = create_notebook(tmp_path, "Busy Widget")
+    add_cell_to_notebook(nb, "controls", None)
+    add_cell_to_notebook(nb, "consume", "controls")
+    session = NotebookSession(parse_notebook(nb), nb)
+    session.notebook_state.get_cell("controls").language = CellLanguage.WIDGET
+    session.notebook_state.get_cell("controls").source = "alpha = slider(0, 1, default=0.5)"
+    session.notebook_state.get_cell("consume").source = "beta = alpha * 2\nbeta"
+    session._analyze_and_build_dag()
+    session.environment_sync_state = "ready"
+
+    # Settle at 0.25 so the stored value is something other than the default.
+    fake, execution_state = _make_fake_ws(session)
+    await _handle_widget_update(
+        cast(WebSocket, fake),
+        session,
+        {"cell_id": "controls", "values": {"alpha": 0.25}},
+        execution_state,
+        session.id,
+    )
+    await _drain_execution(execution_state)
+    assert load_runtime_state(session.path).cells["controls"].widget_values == {"alpha": 0.25}
+
+    # Now hold the notebook busy and send a second update.
+    async def _never_finishes() -> None:
+        await asyncio.Event().wait()
+
+    blocker = asyncio.create_task(_never_finishes())
+    async with execution_state.control_lock:
+        execution_state.execution_task = blocker
+        execution_state.running_cell = "consume"
+    try:
+        busy_fake, _ = _make_fake_ws(session)
+        await _handle_widget_update(
+            cast(WebSocket, busy_fake),
+            session,
+            {"cell_id": "controls", "values": {"alpha": 0.75}},
+            execution_state,
+            session.id,
+        )
+        assert busy_fake.frames_of("error"), "a busy notebook must say so"
+    finally:
+        blocker.cancel()
+        async with execution_state.control_lock:
+            execution_state.reset_execution()
+
+    # The refused value is nowhere: not on disk, not on the live cell.
+    assert load_runtime_state(session.path).cells["controls"].widget_values == {"alpha": 0.25}
+    assert session.notebook_state.get_cell("controls").widget_values == {"alpha": 0.25}
+
+
+@pytest.mark.asyncio
+async def test_widget_update_shows_the_new_value_in_the_session_payload(tmp_path):
+    """The serialized session must report what the control is set to.
+
+    The handler persisted to ``runtime.json`` without touching the live cell, so
+    every payload built from the session reported an empty ``values`` map and a
+    reconnecting client could not tell the selection from the declared default.
+    """
+    from strata.notebook.models import CellLanguage
+    from strata.notebook.session import NotebookSession
+    from strata.notebook.ws import _handle_widget_update
+
+    nb = create_notebook(tmp_path, "Widget Payload")
+    add_cell_to_notebook(nb, "controls", None)
+    session = NotebookSession(parse_notebook(nb), nb)
+    session.notebook_state.get_cell("controls").language = CellLanguage.WIDGET
+    session.notebook_state.get_cell("controls").source = "alpha = slider(0, 1, default=0.5)"
+    session._analyze_and_build_dag()
+    session.environment_sync_state = "ready"
+
+    fake, execution_state = _make_fake_ws(session)
+    await _handle_widget_update(
+        cast(WebSocket, fake),
+        session,
+        {"cell_id": "controls", "values": {"alpha": 0.9}},
+        execution_state,
+        session.id,
+    )
+    await _drain_execution(execution_state)
+
+    payload = session.serialize_notebook_state()
+    controls = next(c for c in payload["cells"] if c["id"] == "controls")
+    assert controls["widget"]["values"] == {"alpha": 0.9}
+    assert controls["widget"]["descriptors"][0]["default"] == 0.5

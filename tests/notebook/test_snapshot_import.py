@@ -416,3 +416,50 @@ class TestABundleWritesOnlyIntoTheNotebook:
         imported = import_snapshot(bundle, tmp_path / "dst")
 
         assert (imported.notebook_dir / "cells").is_dir()
+
+
+class TestWidgetSelections:
+    """What a widget's controls were set to is part of the notebook's state.
+
+    A snapshot carried every cell's provenance and outputs but not the widget
+    values behind them, so an imported copy fell back to each control's
+    declared default and recomputed a different scenario than the one the
+    bundle was taken from.
+    """
+
+    @pytest.fixture
+    def swept(self, tmp_path):
+        from strata.notebook.executor import CellExecutor
+        from strata.notebook.runtime_state import persist_cell_widget_values
+
+        nb = create_notebook(tmp_path / "src", "Widget Snapshot", initialize_environment=False)
+        (nb / ".venv").mkdir(exist_ok=True)
+        add_cell_to_notebook(nb, "controls", None, language="widget")
+        write_cell(nb, "controls", "alpha = slider(0, 1, default=0.5)\n")
+
+        session = NotebookSession(parse_notebook(nb), nb)
+        session._analyze_and_build_dag()
+        # The selection a person made, which is not the declared default.
+        persist_cell_widget_values(nb, "controls", {"alpha": 0.25})
+        return nb, session, CellExecutor(session)
+
+    @pytest.mark.asyncio
+    async def test_the_selection_survives_the_round_trip(self, swept, tmp_path):
+        from strata.notebook.runtime_state import load_runtime_state
+
+        nb, session, executor = swept
+        await executor.execute_cell("controls", session.notebook_state.get_cell("controls").source)
+
+        bundle = _export(nb, tmp_path / "widget.zip")
+        imported = import_snapshot(bundle, tmp_path / "dst")
+
+        entry = load_runtime_state(imported.notebook_dir).cells["controls"]
+        assert entry.widget_values == {"alpha": 0.25}
+
+        # And the imported notebook reports it, rather than the 0.5 its source
+        # declares — the difference an importer would otherwise silently run.
+        opened = NotebookSession(parse_notebook(imported.notebook_dir), imported.notebook_dir)
+        payload = opened.serialize_notebook_state()
+        controls = next(c for c in payload["cells"] if c["id"] == "controls")
+        assert controls["widget"]["values"] == {"alpha": 0.25}
+        assert controls["widget"]["descriptors"][0]["default"] == 0.5
