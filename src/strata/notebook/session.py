@@ -93,6 +93,7 @@ from strata.notebook.ws_payloads import (
 )
 
 if TYPE_CHECKING:
+    from strata.artifact_store import ArtifactVersion
     from strata.notebook.artifact_integration import NotebookArtifactManager
     from strata.notebook.pool import WarmProcessPool
 
@@ -127,6 +128,20 @@ def _rewrite_variant_annotation(source: str, group: str, new_name: str) -> str:
     if count == 0:
         return f"# @variant {group} {new_name}\n{source}"
     return new_source
+
+
+def stored_display(artifact: ArtifactVersion) -> tuple[dict[str, Any], int] | None:
+    """A display artifact's own description and its run's display count.
+
+    ``None`` for an artifact written before displays recorded themselves;
+    callers fall back to the cell's current description for those.
+    """
+    if not artifact.transform_spec:
+        return None
+    params = json.loads(artifact.transform_spec).get("params", {})
+    if "display" not in params or "display_count" not in params:
+        return None
+    return json.loads(params["display"]), int(params["display_count"])
 
 
 def _value_outlives_provenance(cell: CellState) -> bool:
@@ -1193,12 +1208,14 @@ class NotebookSession:
             if staleness is None:
                 continue
             cell.staleness = staleness
-            if staleness.status != CellStatus.READY and self._failure_still_stands(cell):
+            if self._failure_still_stands(cell):
                 # A failed cell stored no artifact for this run, so the walk
                 # calls it idle, or stale when an older result of it exists
-                # and an upstream has since moved. Either way that throws away
-                # the one thing worth knowing about it: until it is edited or
-                # run again, the failure is still the truth about this source.
+                # and an upstream has since moved, or even ready when a rerun
+                # failed at the key an earlier success is cached under. Any of
+                # those throws away the one thing worth knowing about it: until
+                # it is edited or runs again successfully (a cache hit counts,
+                # and clears the error), the failure is the truth about it.
                 cell.status = CellStatus.ERROR
                 cell.cache_hit = False
                 continue
@@ -1473,24 +1490,56 @@ class NotebookSession:
         provenance_hash: str,
         current_outputs: list[CellOutput],
     ) -> list[CellOutput]:
-        """Return cached ordered display outputs for a cell when available."""
-        if not current_outputs:
+        """Return the display outputs cached for ``provenance_hash``, if all are.
+
+        A display artifact records its own description and how many displays
+        its run produced (``executor.display_metadata_params``), so the set
+        comes back exactly as that run left it: its previews, not the cell's
+        current ones, and all of them, however many the cell shows right now.
+        Borrowing the current description reported a reverted value's bytes
+        under the later value's preview, and a cell whose last run failed
+        (showing nothing) resolved to nothing and lost its display on the way
+        back.
+
+        Artifacts written before they described themselves still resolve the
+        old way: bounded by, and described by, ``current_outputs``.
+        """
+        notebook_id = self.notebook_state.id
+        store = self.artifact_manager.artifact_store
+
+        def _matching(index: int) -> ArtifactVersion | None:
+            artifact_id = f"nb_{notebook_id}_cell_{cell_id}_var___display__{index}"
+            expected = hashlib.sha256(f"{provenance_hash}:__display__{index}".encode()).hexdigest()
+            artifact = store.get_latest_version(artifact_id)
+            if artifact is None or artifact.provenance_hash != expected:
+                return None
+            return artifact
+
+        first = _matching(0)
+        if first is None:
             return []
 
-        resolved: list[CellOutput] = []
-        notebook_id = self.notebook_state.id
-        for index, current_output in enumerate(current_outputs):
-            artifact_id = f"nb_{notebook_id}_cell_{cell_id}_var___display__{index}"
-            expected_hash = hashlib.sha256(
-                f"{provenance_hash}:__display__{index}".encode()
-            ).hexdigest()
-            artifact = self.artifact_manager.artifact_store.get_latest_version(artifact_id)
-            if artifact is None or artifact.provenance_hash != expected_hash:
+        described = stored_display(first)
+        pairs: list[tuple[ArtifactVersion, CellOutput]] = []
+        if described is not None:
+            for index in range(described[1]):
+                artifact = first if index == 0 else _matching(index)
+                stored = stored_display(artifact) if artifact is not None else None
+                if artifact is None or stored is None:
+                    return []
+                pairs.append((artifact, CellOutput(**stored[0])))
+        else:
+            if not current_outputs:
                 return []
+            for index, current_output in enumerate(current_outputs):
+                artifact = first if index == 0 else _matching(index)
+                if artifact is None:
+                    return []
+                pairs.append((artifact, current_output.model_copy(deep=True)))
 
-            artifact_uri = f"strata://artifact/{artifact.id}@v={artifact.version}"
-            output = current_output.model_copy(deep=True)
-            output.artifact_uri = artifact_uri
+        resolved: list[CellOutput] = []
+        for artifact, output in pairs:
+            output.artifact_uri = f"strata://artifact/{artifact.id}@v={artifact.version}"
             hydrated = self._hydrate_display_output(output)
             resolved.append(CellOutput(**hydrated) if hydrated is not None else output)
         return resolved
@@ -1573,11 +1622,17 @@ class NotebookSession:
 
     @staticmethod
     def _parse_artifact_uri(artifact_uri: str) -> tuple[str, int]:
-        """Parse a canonical artifact URI into (artifact_id, version)."""
-        parts = artifact_uri.split("/")
-        artifact_id = parts[-1].split("@")[0]
-        version = int(parts[-1].split("@v=")[1])
-        return artifact_id, version
+        """Parse a canonical artifact URI into (artifact_id, version).
+
+        Splits on the *last* ``@v=``. A fan-out instance's id carries an ``@``
+        of its own (``..._var_score@variant=triple``), and cutting at the first
+        one named an artifact that does not exist. Raises ``ValueError`` when
+        there is no version.
+        """
+        artifact_id, sep, version = artifact_uri.split("/")[-1].rpartition("@v=")
+        if not sep:
+            raise ValueError(f"not a versioned artifact URI: {artifact_uri!r}")
+        return artifact_id, int(version)
 
     def serialize_cells(self) -> list[dict[str, Any]]:
         """Serialize all cells with runtime-derived metadata."""
@@ -2033,10 +2088,8 @@ class NotebookSession:
 
         def _hash_from_uri(uri: str, *, by_content: bool) -> str | None:
             try:
-                tail = uri.split("/")[-1]
-                artifact_id = tail.split("@")[0]
-                version = int(tail.split("@v=")[1])
-            except (IndexError, ValueError):
+                artifact_id, version = self._parse_artifact_uri(uri)
+            except ValueError:
                 return None
             artifact = store.get_artifact(artifact_id, version)
             if artifact is None:
@@ -2071,6 +2124,33 @@ class NotebookSession:
 
             for var_name, uri in uri_items:
                 if by_content and var_name is not None and var_name not in reads:
+                    continue
+                fanout = dag.variable_producer.get(var_name) if dag and var_name else None
+                if (
+                    var_name is not None
+                    and isinstance(fanout, SweepProducer)
+                    and fanout.fanout_cell == upstream_id
+                ):
+                    # A @per_variant cell keeps one URI per variable, whichever
+                    # variant stored last, while a consumer reads every
+                    # variant's instance. Keyed on that one URI, a change to any
+                    # other variant left the key where it was and the consumer
+                    # returned the old dict. Key on every instance it reads.
+                    instances = []
+                    for variant_name, _ in fanout.variants:
+                        instance = store.get_latest_version(
+                            self.artifact_manager.cell_artifact_id(
+                                upstream_id, var_name, variant=variant_name
+                            )
+                        )
+                        if instance is None:
+                            continue  # not run yet: the loader drops it too
+                        instance_hash = _hash_from_uri(
+                            f"strata://artifact/{instance.id}@v={instance.version}",
+                            by_content=by_content,
+                        )
+                        instances.append(f"{variant_name}={instance_hash}")
+                    hashes.append(f"fanout:{var_name}:{';'.join(sorted(instances))}")
                     continue
                 provenance_hash = _hash_from_uri(uri, by_content=by_content)
                 if provenance_hash is None:
