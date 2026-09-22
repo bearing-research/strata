@@ -1554,13 +1554,18 @@ class CellExecutor:
                 # provenance, and the resolver above already returned []
                 # because their canonical latest carries the edited hash. Left
                 # out of the promotion set, a reverted cell would come back as
-                # a cache hit with its plot silently gone. The count is
-                # index-driven off the cell's current list because that is what
-                # _resolve_cached_display_outputs will iterate; a cell whose
-                # display count changed across the edit cannot be restored that
-                # way, so it re-executes.
+                # a cache hit with its plot silently gone. How many to restore
+                # is what the reverted run recorded on its displays, not how
+                # many the cell shows now: that is the later value's count, or
+                # zero after a failed run. Displays written before they
+                # recorded a count fall back to the current list.
                 if invalid is None:
-                    for index in range(len(current_display_outputs)):
+                    display_count = self._recorded_display_count(
+                        cell_id, provenance_hash, fanout_variant
+                    )
+                    if display_count is None:
+                        display_count = len(current_display_outputs)
+                    for index in range(display_count):
                         display_id = artifact_mgr.cell_artifact_id(
                             cell_id, f"__display__{index}", variant=fanout_variant
                         )
@@ -1941,6 +1946,29 @@ class CellExecutor:
             self.session.persist_display_output(cell_id, None)
             self.session.apply_execution_result_metadata(cell_id, error_result)
             return error_result
+
+    def _recorded_display_count(
+        self, cell_id: str, provenance_hash: str, variant: str | None
+    ) -> int | None:
+        """How many display outputs the run cached under ``provenance_hash``
+        produced, as its first display recorded; ``None`` if it recorded none."""
+        from strata.notebook.session import stored_display
+
+        store = self.session.get_artifact_manager().artifact_store
+        display_id = self.session.get_artifact_manager().cell_artifact_id(
+            cell_id, "__display__0", variant=variant
+        )
+        display_prov = derive_subkey(provenance_hash, "__display__0")
+        latest = store.get_latest_version(display_id)
+        artifact = (
+            latest
+            if latest is not None and latest.provenance_hash == display_prov
+            else store.find_version_by_provenance(display_id, display_prov)
+        )
+        if artifact is None:
+            return None
+        described = stored_display(artifact)
+        return described[1] if described is not None else None
 
     def _fanout_info(self, cell_id: str) -> tuple[str, tuple[str, ...]] | None:
         """Return ``(group, variant_names)`` if ``cell_id`` is a @per_variant
@@ -4797,6 +4825,7 @@ class CellExecutor:
                 source_hash=source_hash,
                 source=source,
                 env_hash=env_hash,
+                extra_params=display_metadata_params(display_output, len(display_outputs)),
             )
             display_uri = f"strata://artifact/{artifact_version.id}@v={artifact_version.version}"
             stored_display = dict(display_output)
@@ -6589,6 +6618,33 @@ class CellExecutor:
 # ---------------------------------------------------------------------------
 # Batch helpers (module-level)
 # ---------------------------------------------------------------------------
+
+
+# Keys a display output carries only for the run in hand: the harness's temp
+# file name, the inline data URL hydration rebuilds from the blob, the markdown
+# text likewise, and the artifact URI the store assigns.
+_DISPLAY_TRANSIENT_KEYS = frozenset({"file", "inline_data_url", "markdown_text", "artifact_uri"})
+
+
+def display_metadata_params(display_output: dict[str, Any], count: int) -> dict[str, str]:
+    """What a display artifact records about itself, as transform params.
+
+    A display output's bytes were stored and its description was not: the
+    preview an agent reads, the rows and columns of a table. Serving one from
+    cache borrowed that description from whatever the cell showed at the time,
+    so a reverted cell reported the later value's preview over the earlier
+    value's bytes, and a cell whose last run failed (showing nothing) had
+    nothing to borrow and came back without its display.
+
+    ``count`` is how many display outputs the run produced, so whoever
+    restores the set restores all of it rather than as many as the cell
+    happens to be showing now.
+    """
+    metadata = {k: v for k, v in display_output.items() if k not in _DISPLAY_TRANSIENT_KEYS}
+    return {
+        "display": json.dumps(metadata, sort_keys=True, default=str),
+        "display_count": str(count),
+    }
 
 
 _ARTIFACT_EXT_BY_CONTENT_TYPE: dict[str, str] = {

@@ -613,11 +613,14 @@ def _hydrate_output(output: CellOutput, *, notebook_dir: Path, notebook_id: str)
 
 
 def _parse_artifact_uri(artifact_uri: str) -> tuple[str, int]:
-    """Parse a canonical ``strata://artifact/<id>@v=<n>`` URI."""
-    parts = artifact_uri.split("/")
-    artifact_id = parts[-1].split("@")[0]
-    version = int(parts[-1].split("@v=")[1])
-    return artifact_id, version
+    """Parse a canonical ``strata://artifact/<id>@v=<n>`` URI.
+
+    Splits on the last ``@v=``: a fan-out instance's id has an ``@`` of its own.
+    """
+    artifact_id, sep, version = artifact_uri.split("/")[-1].rpartition("@v=")
+    if not sep:
+        raise ValueError(f"not a versioned artifact URI: {artifact_uri!r}")
+    return artifact_id, int(version)
 
 
 def _cell_chips(cell: CellState, annotations, state: NotebookState) -> list[tuple[str, str]]:
