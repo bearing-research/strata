@@ -230,6 +230,11 @@ def write_snapshot(
             "source_hash": cell_runtime.last_source_hash if cell_runtime else None,
             "env_hash": cell_runtime.last_env_hash if cell_runtime else None,
             "execution_samples": list(cell_runtime.execution_samples) if cell_runtime else [],
+            # The failure the last run ended with, and the source it was about.
+            # Without them an imported copy of a red cell opened idle: the
+            # console that led up to the error came across and the error did not.
+            "error": cell_runtime.last_error if cell_runtime else None,
+            "error_source_hash": cell_runtime.last_error_source_hash if cell_runtime else None,
             "outputs": outputs,
             # The persisted form, verbatim, for an importer to write back. The
             # `outputs` list above is for a reader; this is what the notebook

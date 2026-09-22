@@ -98,10 +98,16 @@ For each cell, the exporter emits in order:
     - **Markdown** rendered as content.
     - **Pickled** values become a placeholder with the type hint
       from the serializer (e.g. *Pickled output (`<MyThing object>`) not rendered in export*).
-    - **Errors** render as text blocks.
+    - **An output that could not be stored** (a serialization error)
+      renders its error as a text block.
 4. **Console output**: `stdout` / `stderr` snapshots if present.
    ANSI escape sequences are stripped so coloured output stays
    readable in a non-terminal viewer.
+5. **The error a failed run ended with**, traceback included, as long as
+   the cell's source is unchanged since it failed. An edited cell drops it
+   rather than attributing a failure to code that is no longer there.
+   App-view snapshots do not show failed cells: they mirror the live app
+   view, which shows only cells with output.
 
 ## Cell-kind specifics
 
@@ -149,7 +155,8 @@ format.
 ## Snapshots
 
 `--to snapshot` writes a zip rather than a rendering: the committed files, the
-per-cell runtime state, and as many artifact bytes as you ask for. `strata
+per-cell runtime state (including each cell's last failure and the source it
+was about), and as many artifact bytes as you ask for. `strata
 import <file>.zip` unpacks one back into a notebook directory — see
 [Importing a snapshot](import.md#importing-a-snapshot).
 
