@@ -46,6 +46,19 @@ back, and an artifact store can be swept, pinned, and reported on per tenant.
   writes a display output to a file, and the MCP tool `save_cell_output`
   writes it into the notebook's `.strata/outputs/` and returns the path. The
   cell view now also reports each output's size and artifact URI.
+- **An agent can drive a variant group and a widget, and read what they hold.**
+  The tab strip could switch a variant group and move a slider; an agent
+  holding the same session over MCP could do neither, and after running a sweep
+  had no way to find out what it had produced. `set_variant` picks a variant or
+  sets the group to `switch` / `sweep`, `set_widget_value` sets a control and
+  re-materializes the cell, and both refuse a name the notebook does not
+  declare rather than reporting success for a change that did not happen.
+  `get_variable` names each instance of a swept variable and the spelling
+  `lineage` takes for it; `get_cell` reports a widget's controls with their
+  defaults and current values; `add_cell` accepts `widget`, which the HTTP
+  route already did. Lineage also records the fan-out instances a consumer
+  reads: every instance for a collapse consumer, and for a chained
+  `# @per_variant` cell the one it zipped to.
 - **The server image can use a Postgres artifact store.** Setting
   `STRATA_ARTIFACT_METADATA_DSN` on the published image previously refused to
   start, because the `postgres` extra was not in it and installing one means
@@ -244,6 +257,17 @@ environment pinned below them has to move before it can install 0.8.0.
   exports, and stops being erased when an unrelated edit elsewhere recomputes
   staleness. The curated cell view also carries the `defines` and
   `references` the MCP tool description has always promised.
+- **A widget's selection is state the notebook keeps.** A `widget_update`
+  refused because the notebook was busy had already written the new values to
+  disk: the reply named the run that owned the notebook, nothing
+  re-materialized, and the next materialization quietly computed at the value
+  the server had refused. The write now happens under the execution
+  reservation. The values also never reached the live session, so every payload
+  reported an empty control map and a reconnecting client could not tell a
+  selected 0.7 from a declared default of 0.5. And a snapshot carried every
+  cell's provenance and outputs but not the selection behind them, so an
+  imported copy fell back to each control's default and recomputed a different
+  scenario than the bundle was taken from.
 - **A worker that answers has answered.** A worker predating the health
   document replies 404, which says it is older than every feature it would
   list — so the cell runs in the worker's own environment, as documented,
