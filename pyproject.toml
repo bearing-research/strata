@@ -149,7 +149,7 @@ dev = [
     "pytest-xdist>=3.6.0",
     "pytest-timeout>=2.3.0",
     "ruff>=0.8.0",
-    "moto[s3]>=5.0.0",
+    "moto[s3]>=5.2.3",
     "boto3>=1.35.0",
     "psutil>=5.9.0",
     # 4.15 is where testcontainers.community lives; the old top-level module
