@@ -200,7 +200,10 @@ jobs:
     # Backstop so a deadlocked test (e.g. the intermittent py3.12/macOS WS portal
     # hang) fails the job in minutes instead of running to GitHub's 6h cap. The
     # per-test pytest-timeout below normally trips first (and dumps the stack).
-    timeout-minutes: 30
+    # 45, not 30: a normal macOS run takes about 23 minutes, and on a congested
+    # runner that crossed 30 and cancelled suites that were passing. Hang
+    # detection is the per-test timeout's job, not this one.
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:

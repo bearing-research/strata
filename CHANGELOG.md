@@ -5,7 +5,7 @@ All notable changes to Strata will be documented in this file.
 Entries focus on user-visible changes and release framing rather than
 exhaustive commit history.
 
-## 0.8.0 - 2026-09-16
+## 0.8.0 - 2026-09-21
 
 A notebook stops being one person's machine. This release is about the three
 things that were in the way: the work runs somewhere else, it reads the
