@@ -156,7 +156,8 @@ format.
 
 `--to snapshot` writes a zip rather than a rendering: the committed files, the
 per-cell runtime state (including each cell's last failure and the source it
-was about), and as many artifact bytes as you ask for. `strata
+was about, and what a widget's controls were set to), and as many artifact
+bytes as you ask for. `strata
 import <file>.zip` unpacks one back into a notebook directory — see
 [Importing a snapshot](import.md#importing-a-snapshot).
 

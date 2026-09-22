@@ -276,6 +276,80 @@ async def _run_cell(
     return run
 
 
+async def _set_widget_value(
+    session_manager: SessionManager,
+    session_id: str,
+    cell_id: str,
+    values: dict[str, Any],
+) -> dict[str, Any]:
+    """Set a widget cell's controls and re-materialize it at the new values.
+
+    The same thing dragging the slider does: the values are persisted and the
+    widget cell re-runs in force mode, which re-stores its value artifacts and
+    marks everything downstream stale. A widget's selection is runtime state,
+    not source, so an agent that only edits the cell cannot change what the
+    notebook computes.
+    """
+    from strata.notebook.models import CellLanguage
+    from strata.notebook.ops import NotebookOpsError, _run_result_from_wire
+    from strata.notebook.runtime_state import persist_cell_widget_values
+    from strata.notebook.widget_analyzer import analyze_widget_cell, coerce_widget_values
+    from strata.notebook.ws import NotebookBusyError, execute_cell_exclusive
+
+    session = session_manager.get_session(session_id)
+    if session is None:
+        raise ValueError(f"no open notebook session {session_id!r}; call list_notebooks first")
+    cell = session.notebook_state.get_cell(cell_id)
+    if cell is None:
+        raise NotebookOpsError(f"no cell with id {cell_id!r}")
+    if cell.language != CellLanguage.WIDGET:
+        raise NotebookOpsError(f"cell {cell_id!r} is a {cell.language} cell, not a widget")
+
+    descriptors = analyze_widget_cell(cell.source).descriptors
+    coerced = coerce_widget_values(descriptors, values)
+    if not coerced:
+        # Naming the controls is the whole of the help here: the caller either
+        # misspelled one or sent a value the control cannot take.
+        declared = ", ".join(sorted(d.name for d in descriptors)) or "none"
+        raise NotebookOpsError(
+            f"no value in {sorted(values)} matches a control of cell {cell_id!r} "
+            f"(declared: {declared})"
+        )
+
+    block_reason = session.environment_execution_block_message()
+    if block_reason:
+        raise ValueError(block_reason)
+
+    try:
+        result = await execute_cell_exclusive(
+            session,
+            cell_id,
+            session_id,
+            mode="force",
+            # Written under the reservation, so a busy notebook leaves the
+            # stored values exactly as they were.
+            before_execute=lambda: setattr(
+                cell, "widget_values", persist_cell_widget_values(session.path, cell_id, coerced)
+            ),
+        )
+    except NotebookBusyError as exc:
+        raise NotebookOpsError(f"{exc} Retry after the current run finishes.")
+    if result is None:
+        raise NotebookOpsError(f"widget cell {cell_id!r} could not be re-materialized")
+
+    await _sync_and_broadcast(session_id, session)
+    await _agent_note(
+        session_id,
+        "mcp",
+        "widget " + ", ".join(f"{name}={value}" for name, value in sorted(coerced.items())),
+    )
+    return {
+        "cell_id": cell_id,
+        "values": dict(cell.widget_values),
+        "run": _run_result_from_wire(result.to_dict()).model_dump(mode="json"),
+    }
+
+
 async def _run_tests(
     session_manager: SessionManager, session_id: str, cell_id: str
 ) -> dict[str, Any]:
@@ -938,6 +1012,20 @@ def build_mcp_app(session_manager: SessionManager) -> Starlette | None:
         get_cell afterwards for the rendered outputs.
         """
         return await _run_cell(session_manager, session_id, cell_id, mode)
+
+    @mcp.tool()
+    async def set_widget_value(
+        session_id: str, cell_id: str, values: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Set a widget cell's controls and re-run it at the new values.
+
+        ``values`` maps control name to value, as ``get_cell`` reports them
+        under ``controls``; send only the ones you are changing. The widget
+        re-materializes and everything downstream goes stale, exactly as when a
+        person moves the slider, and anyone watching the session sees it.
+        Returns the controls' new values and the widget's run outcome.
+        """
+        return await _set_widget_value(session_manager, session_id, cell_id, values)
 
     @mcp.tool()
     async def run_tests(session_id: str, cell_id: str) -> dict[str, Any]:

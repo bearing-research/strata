@@ -12,7 +12,7 @@ Every frame type below corresponds to a member of `strata.notebook.protocol.Mess
 ws://localhost:8765/v1/notebooks/ws/{session_id}
 ```
 
-The `{session_id}` is the one returned by `POST /v1/notebooks/open` or `/create`. A session is single-process: opening the same notebook from a second tab returns a different session ID and runs an isolated execution context.
+The `{session_id}` is the one returned by `POST /v1/notebooks/open` or `/create`. A session is single-process. On a personal server, opening the same notebook again returns the session already open on that path, so a second tab, the terminal viewer and an agent all drive one execution context and see each other's runs. In service mode each open creates its own session.
 
 In service mode (proxy auth), the same headers required for REST endpoints - `X-Strata-Principal`, `X-Strata-Proxy-Token`, and `X-Tenant-ID` if multi-tenant - must be present on the WebSocket upgrade. A missing or invalid token closes the connection with `1008 Policy Violation`.
 
