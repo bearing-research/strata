@@ -406,6 +406,10 @@ def _write_runtime_state(
         entry.last_source_hash = cell.get("source_hash")
         entry.last_env_hash = cell.get("env_hash")
         entry.execution_samples = list(cell.get("execution_samples") or [])
+        # Absent from snapshots written before the error pair was carried; a
+        # missing pair is simply no recorded failure.
+        entry.last_error = cell.get("error") or None
+        entry.last_error_source_hash = cell.get("error_source_hash") if entry.last_error else None
         entry.display_outputs = [
             {**output, "artifact_uri": rewrite_uri(output.get("artifact_uri"))}
             for output in cell.get("display_outputs") or []

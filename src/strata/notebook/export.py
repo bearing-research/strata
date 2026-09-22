@@ -312,6 +312,7 @@ def _render_cell(
     if options.include_console:
         blocks.extend(_render_console(cell, max_bytes=options.max_output_bytes))
 
+    blocks.extend(_render_error(cell, max_bytes=options.max_output_bytes))
     return blocks
 
 
@@ -421,6 +422,22 @@ def _render_console(cell: CellState, *, max_bytes: int) -> list[Block]:
     if stderr:
         blocks.append(CodeBlock(language="text", body=stderr, title="stderr"))
     return blocks
+
+
+def _render_error(cell: CellState, *, max_bytes: int) -> list[Block]:
+    """The error the cell's last run ended with, while it still describes it.
+
+    A failed run stores no display output, so the output loop above renders
+    nothing for it, and a reader of the export saw the source and whatever it
+    printed with no sign that it failed. ``current_error`` is empty once the
+    source has changed since the failure, so an edited cell does not carry a
+    traceback for code it no longer contains.
+    """
+    error = cell.current_error()
+    if not error:
+        return []
+    body = _truncate_text(_strip_ansi(error).rstrip(), max_bytes)
+    return [CodeBlock(language="text", body=body, title="Error")]
 
 
 _PREVIEW_ROW_LIMIT = 20
