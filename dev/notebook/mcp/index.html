@@ -2152,7 +2152,7 @@ REST routes and the WebSocket:</p>
 </tr>
 <tr>
 <td><code>notebook:write</code></td>
-<td><code>add_cell</code>, <code>edit_cell</code>, <code>remove_cell</code>, <code>move_cell</code>, <code>note</code>, <code>add_worker</code>, <code>set_default_worker</code>, <code>remove_worker</code>, <code>disconnect_ssh_worker</code>, <code>promote</code></td>
+<td><code>add_cell</code>, <code>edit_cell</code>, <code>remove_cell</code>, <code>move_cell</code>, <code>note</code>, <code>add_worker</code>, <code>set_default_worker</code>, <code>set_variant</code>, <code>remove_worker</code>, <code>disconnect_ssh_worker</code>, <code>promote</code></td>
 </tr>
 <tr>
 <td><code>notebook:execute</code></td>
@@ -2221,7 +2221,11 @@ The typical loop:</p>
 </tr>
 <tr>
 <td><code>get_variable(session_id, name)</code></td>
-<td>The cell that defines a variable, "do I already have <code>name</code>?"; else the available names.</td>
+<td>The cell that defines a variable, "do I already have <code>name</code>?"; else the available names. For a swept variable, each variant's cell and the name <code>lineage</code> takes for it.</td>
+</tr>
+<tr>
+<td><code>set_variant(session_id, group, active?, mode?)</code></td>
+<td>Pick which variant of a group runs, or set the group to <code>switch</code> / <code>sweep</code>.</td>
 </tr>
 <tr>
 <td><code>dag(session_id)</code></td>
@@ -2330,18 +2334,15 @@ their agreement before calling <code>publish</code>. Withdrawing is
 upstreams first; <code>rerun</code> bypasses the target's cache but still refreshes
 upstreams; <code>force</code> ("run this only") runs against whatever upstream artifacts
 already exist.</p>
-<p>There is no tool for <a href="../annotations/#variant-cells">variant groups</a> yet. To switch
-which variant runs, or move a group between switch and sweep mode, call the
-session's REST route directly; it is the one the UI's tab strip uses:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="c1"># Run the &quot;service&quot; variant of the &quot;policy&quot; group</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>curl<span class="w"> </span>-X<span class="w"> </span>PUT<span class="w"> </span>http://127.0.0.1:8765/v1/notebooks/<span class="nv">$SID</span>/variant-groups/policy<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="w">  </span>-H<span class="w"> </span><span class="s1">&#39;content-type: application/json&#39;</span><span class="w"> </span>-d<span class="w"> </span><span class="s1">&#39;{&quot;active&quot;: &quot;service&quot;}&#39;</span>
-<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>
-<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="c1"># Run every variant at once</span>
-<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>curl<span class="w"> </span>-X<span class="w"> </span>PUT<span class="w"> </span>http://127.0.0.1:8765/v1/notebooks/<span class="nv">$SID</span>/variant-groups/policy<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="w">  </span>-H<span class="w"> </span><span class="s1">&#39;content-type: application/json&#39;</span><span class="w"> </span>-d<span class="w"> </span><span class="s1">&#39;{&quot;mode&quot;: &quot;sweep&quot;}&#39;</span>
-</code></pre></div>
-<p>Either field can be sent alone.</p>
+<p><code>set_variant</code> drives <a href="../annotations/#variant-cells">variant groups</a>:
+<code>set_variant(session_id, "policy", active="service")</code> picks one variant,
+<code>set_variant(session_id, "policy", mode="sweep")</code> runs them all, and either
+argument can be sent alone. It makes the same two calls the UI's tab strip
+does, so staleness recomputes against the new selection; the equivalent REST
+route is <code>PUT /v1/notebooks/{session_id}/variant-groups/{group}</code>.</p>
+<p>For a swept variable, <code>get_variable</code> names each instance and the spelling
+<code>lineage</code> takes for it (<code>score@variant=triple</code> for a <code># @per_variant</code> cell's
+instances; the plain name on the member cell for a sweep group).</p>
 <h2 id="watching-the-agent">Watching the agent<a class="headerlink" href="#watching-the-agent" title="Permanent link">&para;</a></h2>
 <p>The built-in AI panel streams its own reasoning into the <strong>Agent panel</strong>. An
 external agent's reasoning lives in its own client, so instead its <strong>tool
