@@ -22,7 +22,7 @@ import asyncio
 from pathlib import Path
 
 from strata.notebook.executor import CellExecutor
-from strata.notebook.models import CellStatus
+from strata.notebook.models import CellStatus, StalenessReason
 from strata.notebook.parser import parse_notebook
 from strata.notebook.session import NotebookSession
 from tests.notebook.test_cli import _build_notebook, _mk_fake_venv
@@ -117,6 +117,74 @@ def test_staleness_sees_a_changed_fresh_input(tmp_path: Path):
 
     assert staleness["c"].status != CellStatus.READY
     assert staleness["d"].status != CellStatus.READY
+
+
+# -- the label: what a cell says once its fresh input moved ----------------
+
+
+def test_a_consumer_of_a_moved_fresh_value_reads_stale_upstream(tmp_path: Path):
+    """``stale · upstream changed``, not ``idle``, which reads as never run.
+
+    ``c`` holds a stored artifact (``d`` consumes it). The producer re-runs on
+    its own with a new value, so ``c``'s result was made from a version of the
+    upstream that is no longer current: the definition of stale-upstream.
+    """
+    counter = tmp_path / "count.txt"
+    nb = _build_notebook(
+        tmp_path,
+        cells=[
+            ("p", _producer(counter), None),
+            ("c", "seen = run_count\n", "p"),
+            ("d", "seen\n", "c"),
+        ],
+    )
+    session = _session(nb)
+    _run(CellExecutor(session), session, "d")
+    _run(CellExecutor(session), session, "p")
+
+    staleness = session.compute_staleness()
+    assert staleness["c"].status == CellStatus.STALE
+    assert staleness["c"].reasons == [StalenessReason.UPSTREAM]
+
+
+def test_the_reported_leaf_consumer_reads_stale_upstream(tmp_path: Path):
+    """The round-3 shape exactly: the consumer is a leaf that displays.
+
+    A leaf stores no variable artifact, only its display output, which records
+    the same inputs and the same source and environment hashes.
+    """
+    counter = tmp_path / "count.txt"
+    nb = _build_notebook(tmp_path, cells=[("p", _producer(counter), None), ("c", CONSUMER, "p")])
+    session = _session(nb)
+    _run(CellExecutor(session), session, "c")
+    _run(CellExecutor(session), session, "p")
+
+    staleness = session.compute_staleness()
+    assert staleness["c"].status == CellStatus.STALE
+    assert staleness["c"].reasons == [StalenessReason.UPSTREAM]
+
+
+def test_an_edit_is_not_called_an_upstream_change(tmp_path: Path):
+    """The label says what moved. An edited cell did not see its upstream move,
+    even if the producer also re-ran; that keeps its existing classification."""
+    counter = tmp_path / "count.txt"
+    nb = _build_notebook(tmp_path, cells=[("p", _producer(counter), None), ("c", CONSUMER, "p")])
+    session = _session(nb)
+    _run(CellExecutor(session), session, "c")
+    _run(CellExecutor(session), session, "p")
+    session.notebook_state.get_cell("c").source = "seen = run_count * 2\nseen\n"
+
+    staleness = session.compute_staleness()
+    assert StalenessReason.UPSTREAM not in staleness["c"].reasons
+
+
+def test_a_cell_that_never_ran_is_still_idle(tmp_path: Path):
+    counter = tmp_path / "count.txt"
+    nb = _build_notebook(tmp_path, cells=[("p", _producer(counter), None), ("c", CONSUMER, "p")])
+    session = _session(nb)
+    _run(CellExecutor(session), session, "p")
+
+    assert session.compute_staleness()["c"].status == CellStatus.IDLE
 
 
 # -- finding 2: one run executes each cell once ----------------------------

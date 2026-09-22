@@ -14,6 +14,7 @@ import threading
 import time as _time
 import tomllib
 import uuid
+from collections.abc import Iterable
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -1091,6 +1092,16 @@ class NotebookSession:
                         # uris are still empty here — and a downstream cell
                         # reads them to build its own provenance.
                         self._restore_alternate_scheme_outputs(cell)
+                    elif self._upstream_moved_under(cell, source_hash, env_hash):
+                        # It has a result, made from upstream artifacts that
+                        # have since been replaced by newer versions of the
+                        # same ones, with its own source and environment
+                        # unchanged. That is stale because an upstream moved,
+                        # and saying idle would read as "never ran".
+                        staleness_map[cell_id] = CellStaleness(
+                            status=CellStatus.STALE, reasons=[StalenessReason.UPSTREAM]
+                        )
+                        stale_cells.add(cell_id)
                     else:
                         # No cached artifact — cell is stale/idle unless we can
                         # prove it still matches the last successful uncached run.
@@ -1113,6 +1124,67 @@ class NotebookSession:
         self.causality_map = compute_causality_on_staleness(self)
 
         return staleness_map
+
+    def _upstream_moved_under(self, cell: CellState, source_hash: str, env_hash: str) -> bool:
+        """Whether *cell*'s last result is out of date only because an upstream
+        artifact it read was replaced by a newer version.
+
+        The walk otherwise classifies any cell whose key no longer matches its
+        stored result as idle, and only reaches stale by propagation from an
+        upstream that is itself stale. Two common cases fell between those:
+        the consumer of a ``# @nocache`` producer whose value changed (the
+        producer is never stale, since its key never moves), and the direct
+        downstream of an upstream that was edited and re-run (the upstream is
+        ready again by the time the walk reaches it). Both held a result, and
+        both read idle, which says "never ran". One step further down, the
+        same situation already read stale (#361).
+
+        This recognises them from what the last result recorded, and nothing
+        else: the same upstream artifacts at newer versions, with the cell's
+        own source and environment hashes unchanged. The cell's own edit, an
+        environment change, or a reference added or removed keeps its
+        existing classification.
+
+        The last result is the cell's variable artifact when it has one, or its
+        first display output for a leaf, which records the same inputs.
+        """
+        uri = cell.artifact_uri or next(
+            (output.artifact_uri for output in cell.display_outputs if output.artifact_uri),
+            None,
+        )
+        if not uri:
+            return False
+        try:
+            artifact_id, version = self._parse_artifact_uri(uri)
+        except (IndexError, ValueError):
+            return False
+        artifact = self.artifact_manager.artifact_store.get_artifact(artifact_id, version)
+        if artifact is None or not artifact.transform_spec or not artifact.input_versions:
+            return False
+
+        params = json.loads(artifact.transform_spec).get("params", {})
+        if params.get("source_hash") != source_hash or params.get("env_hash") != env_hash:
+            return False
+
+        def _versions(refs: Iterable[str]) -> dict[str, int]:
+            out: dict[str, int] = {}
+            for ref in refs:
+                if not ref.startswith("strata://artifact/"):
+                    continue  # a fetch or a dataset, not an upstream cell
+                try:
+                    ref_id, ref_version = self._parse_artifact_uri(ref)
+                except (IndexError, ValueError):
+                    continue
+                out[ref_id] = ref_version
+            return out
+
+        recorded = _versions(json.loads(artifact.input_versions))
+        current = _versions(self._collect_input_refs(cell.id))
+        return (
+            bool(recorded)
+            and recorded.keys() == current.keys()
+            and any(current[ref_id] != recorded[ref_id] for ref_id in recorded)
+        )
 
     def _apply_staleness_map(self, staleness_map: dict[str, CellStaleness]) -> None:
         """Persist computed staleness back onto in-memory cell state."""
