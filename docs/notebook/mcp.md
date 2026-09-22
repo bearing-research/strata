@@ -96,7 +96,7 @@ The typical loop:
 | `remove_worker(session_id, name)` | Remove a notebook-scoped worker. |
 | `connect_ssh_worker(session_id, ssh_target, name?, set_default?, install?)` | Provision + tunnel + register a worker on a machine you reach over SSH (see [Distributed Workers](workers.md#run-cells-on-a-machine-you-can-ssh-to)). |
 | `disconnect_ssh_worker(session_id, name, stop_remote?)` | Close an SSH worker's tunnel and unregister it. |
-| `lineage(session_id, cell_id, variable, max_depth?)` | The chain behind one of a cell's outputs: every step with the code it ran, the environment it ran in, who computed it and the digest of its bytes. |
+| `lineage(session_id, cell_id, variable, max_depth?)` | The chain behind one of a cell's outputs: every step with the code it ran, the environment it ran in, who computed it and the digest of its bytes. For one instance of a `# @per_variant` cell, name it `variable@variant=<name>` (for example `score@variant=triple`); the error on a bare name lists the stored ones. |
 | `promote(session_id, cell_id, variable, name, alias?, tags?)` | Copy the output **and everything behind it** into the team's store, under a name colleagues can ask for. Mints no public link. A protected alias comes back `pending`. Needs `STRATA_NOTEBOOK_REMOTE_STORE_URL`. |
 | `publish_preflight(session_id, cell_id, variable)` | What publishing would expose - the whole chain, step by step. Read this to the user before `publish`. |
 | `publish(session_id, cell_id, variable, title?)` | Mint a URL that needs no credentials. Copies the chain into the store the link resolves from first. |
@@ -120,6 +120,22 @@ their agreement before calling `publish`. Withdrawing is
 upstreams first; `rerun` bypasses the target's cache but still refreshes
 upstreams; `force` ("run this only") runs against whatever upstream artifacts
 already exist.
+
+There is no tool for [variant groups](annotations.md#variant-cells) yet. To switch
+which variant runs, or move a group between switch and sweep mode, call the
+session's REST route directly; it is the one the UI's tab strip uses:
+
+```bash
+# Run the "service" variant of the "policy" group
+curl -X PUT http://127.0.0.1:8765/v1/notebooks/$SID/variant-groups/policy \
+  -H 'content-type: application/json' -d '{"active": "service"}'
+
+# Run every variant at once
+curl -X PUT http://127.0.0.1:8765/v1/notebooks/$SID/variant-groups/policy \
+  -H 'content-type: application/json' -d '{"mode": "sweep"}'
+```
+
+Either field can be sent alone.
 
 ## Watching the agent
 
