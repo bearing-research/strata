@@ -4512,8 +4512,10 @@ class CellExecutor:
 
                         spec = _load_artifact_spec(artifact_id, f"{var_name}__{variant_name}")
                         if spec is None:
-                            # A failed/missing variant is dropped from the dict
-                            # (partial-set policy); downstream still runs once.
+                            # A variant with no artifact at all is dropped from
+                            # the dict. One that *failed* never gets here:
+                            # _materialize_upstreams raises on it first, so the
+                            # consumer fails rather than running on a partial set.
                             logger.error(
                                 "Sweep variant '%s' of '%s' has no artifact — "
                                 "dropping it from the dict.",
