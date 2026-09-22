@@ -1193,11 +1193,12 @@ class NotebookSession:
             if staleness is None:
                 continue
             cell.staleness = staleness
-            if staleness.status == CellStatus.IDLE and self._failure_still_stands(cell):
-                # A failed cell stored no artifact, so a staleness walk can only
-                # call it idle, which reads as "never run" and throws away the
-                # one thing worth knowing about it. Until it is edited or run
-                # again, the failure is still the truth about this source.
+            if staleness.status != CellStatus.READY and self._failure_still_stands(cell):
+                # A failed cell stored no artifact for this run, so the walk
+                # calls it idle, or stale when an older result of it exists
+                # and an upstream has since moved. Either way that throws away
+                # the one thing worth knowing about it: until it is edited or
+                # run again, the failure is still the truth about this source.
                 cell.status = CellStatus.ERROR
                 cell.cache_hit = False
                 continue
@@ -2050,6 +2051,14 @@ class NotebookSession:
                 return artifact.provenance_hash
             return derive_subkey(artifact.provenance_hash, f"content={digest}")
 
+        # What this cell reads. For a producer keyed by content, only these of
+        # its variables are this cell's inputs: a changing sibling it never
+        # reads (a counter beside a constant) otherwise missed its cache on
+        # every run. Producers keyed by provenance keep every variable, because
+        # their variables' hashes only ever move together, and narrowing them
+        # would change the key of every existing downstream cell for nothing.
+        reads = set(cell.references) | set(cell.builtin_references)
+
         for upstream_id in cell.upstream_ids:
             upstream_cell = self.notebook_state.get_cell(upstream_id)
             if upstream_cell is None:
@@ -2061,6 +2070,8 @@ class NotebookSession:
                 uri_items = [(None, upstream_cell.artifact_uri)]
 
             for var_name, uri in uri_items:
+                if by_content and var_name is not None and var_name not in reads:
+                    continue
                 provenance_hash = _hash_from_uri(uri, by_content=by_content)
                 if provenance_hash is None:
                     continue

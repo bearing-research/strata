@@ -332,8 +332,17 @@ async def _refresh_and_broadcast_changed_staleness(
     previous_snapshot: dict[str, CellStateSnapshot],
     *,
     preserve_ready_cell_id: str | None = None,
+    mark_error_cell_id: str | None = None,
 ) -> dict[str, CellStaleness]:
-    """Recompute notebook staleness and broadcast only changed cells."""
+    """Recompute notebook staleness and broadcast only changed cells.
+
+    ``mark_error_cell_id`` is the failure counterpart of
+    ``preserve_ready_cell_id``: after the recompute, that cell is error and
+    whatever read its last good result stops claiming ready, as a failure has
+    always marked them. The recompute before it is the point: a failed attempt
+    can have re-run upstreams on its way to failing, and those carry new
+    artifacts that their readers' labels have to follow.
+    """
     # Deliberately not the off-loop form. This one runs between a cell's
     # result and the frames that describe it, and an await here lets other
     # frames land in the middle: the end-to-end suite waits forever for a
@@ -348,6 +357,10 @@ async def _refresh_and_broadcast_changed_staleness(
             status=CellStatus.READY,
             reasons=[],
         )
+    if mark_error_cell_id is not None:
+        for stale_id in session.mark_cell_error(mark_error_cell_id):
+            staleness_map[stale_id] = CellStaleness(status=CellStatus.STALE, reasons=[])
+        staleness_map[mark_error_cell_id] = CellStaleness(status=CellStatus.ERROR, reasons=[])
     changed: dict[str, CellStaleness] = {}
 
     for cell in session.notebook_state.cells:
@@ -2161,14 +2174,18 @@ async def execute_cell_and_broadcast(
                 preserve_ready_cell_id=cell_id,
             )
         else:
-            downstream_stale = session.mark_cell_error(cell_id)
-            await _broadcast_message(
+            # Re-classify everything before marking the failure: the attempt
+            # may have re-run upstreams on its way to failing, and leaving
+            # their readers labelled from the old artifacts read "ready" over
+            # results computed from a value that no longer holds.
+            previous_snapshot = session.capture_cell_state_snapshot()
+            await _refresh_and_broadcast_changed_staleness(
+                session,
                 notebook_id,
-                _make_message(
-                    MessageType.CELL_STATUS, seq, cell_status_payload(cell_id, CellStatus.ERROR)
-                ),
+                seq,
+                previous_snapshot,
+                mark_error_cell_id=cell_id,
             )
-            await _broadcast_downstream_stale(notebook_id, seq, downstream_stale)
 
         return result
 

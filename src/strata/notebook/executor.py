@@ -951,11 +951,30 @@ class CellExecutor:
 
         One choke point for every mode and language, so a run scope records a
         cell however it executed and whichever branch returned.
+
+        A request made with no run open is a run of its own: its whole
+        recursive materialisation shares one scope. Without that, a single
+        target over a diamond (a ``# @nocache`` producer read through two
+        branches that the target joins) executed the producer once per
+        branch, and the target joined two different reads of it. Every
+        single-cell path (WebSocket, REST, MCP, the CLI, the in-app agent)
+        comes through here, so none of them has to remember to open one; the
+        scope closes when the request returns, so the next independent
+        request still refreshes the producer.
         """
-        if self._run_scope is not None:
-            earlier = self._run_scope.get(cell_id)
-            if earlier is not None and (use_cache or not earlier.cache_hit):
-                return earlier
+        if self._run_scope is None:
+            with self.one_run():
+                return await self._execute_cell(
+                    cell_id,
+                    source,
+                    timeout_seconds,
+                    materialize_upstreams=materialize_upstreams,
+                    use_cache=use_cache,
+                )
+        scope = self._run_scope
+        earlier = scope.get(cell_id)
+        if earlier is not None and (use_cache or not earlier.cache_hit):
+            return earlier
         result = await self._dispatch_cell(
             cell_id,
             source,
@@ -963,8 +982,8 @@ class CellExecutor:
             materialize_upstreams=materialize_upstreams,
             use_cache=use_cache,
         )
-        if self._run_scope is not None and result.success:
-            self._run_scope[cell_id] = result
+        if result.success:
+            scope[cell_id] = result
         return result
 
     async def _dispatch_cell(

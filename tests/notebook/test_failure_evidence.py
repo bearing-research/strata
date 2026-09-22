@@ -147,3 +147,43 @@ def test_a_successful_run_clears_the_error(tmp_path: Path):
     assert session.notebook_state.get_cell("c1").error is None
     reopened = NotebookSession(parse_notebook(notebook_dir), notebook_dir)
     assert reopened.notebook_state.get_cell("c1").error is None
+
+
+def test_a_failure_over_an_older_success_survives_a_recompute(tmp_path: Path):
+    """The failure-preservation rule has to cover stale as well as idle.
+
+    ``c`` succeeded once, then failed on its next run because the fresh value
+    it reads moved. It holds an older successful result and its upstream has
+    moved since, so the walk now classifies it stale (upstream changed) rather
+    than idle. Preserving the error only over idle let any recompute (an
+    unrelated edit, a status call) turn this red cell back into a plain stale.
+    """
+    from tests.notebook.test_cli import _build_notebook
+
+    counter = tmp_path / "count.txt"
+    producer = (
+        "# @nocache\n"
+        "from pathlib import Path as _P\n"
+        f"_c = _P({str(counter)!r})\n"
+        "_c.write_text(str(int(_c.read_text()) + 1) if _c.exists() else '1')\n"
+        "run_count = int(_c.read_text())\n"
+    )
+    # ``c``'s variable is consumed by ``sink``, so its older result is a stored
+    # artifact that outlives the failure. (A leaf's only result is its display
+    # output, which a failed run clears; a leaf therefore falls back to idle,
+    # which the narrower rule already covered, and would not test this.)
+    consumer = "seen = run_count\nassert seen < 2, seen\n"
+    nb = _build_notebook(
+        tmp_path,
+        cells=[("p", producer, None), ("c", consumer, "p"), ("sink", "seen\n", "c")],
+    )
+    session = NotebookSession(parse_notebook(nb), nb)
+
+    assert asyncio.run(CellExecutor(session).execute_cell("sink", "seen\n")).success
+    failed = asyncio.run(CellExecutor(session).execute_cell("c", consumer))
+    assert failed.success is False
+    session.mark_cell_error("c")
+
+    session.compute_staleness()
+
+    assert session.notebook_state.get_cell("c").status == CellStatus.ERROR
