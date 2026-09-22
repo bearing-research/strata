@@ -5,7 +5,7 @@ All notable changes to Strata will be documented in this file.
 Entries focus on user-visible changes and release framing rather than
 exhaustive commit history.
 
-## 0.8.0 - 2026-09-21
+## 0.8.0 - 2026-09-22
 
 A notebook stops being one person's machine. This release is about the three
 things that were in the way: the work runs somewhere else, it reads the
@@ -221,17 +221,21 @@ environment pinned below them has to move before it can install 0.8.0.
   `# @nocache` cell's value kept serving what it had computed from an earlier
   one: its cache key followed the producer's provenance, which is the same on
   every run while the value is not. The key now follows the stored bytes for
-  producers like that. And one run of the notebook, whether headless
-  `strata run`, a cascade or Run All, executes each cell once: a `@nocache`
-  producer with two consumers used to execute three times and hand the two
-  consumers different values.
+  producers like that, narrowed to the variables the consumer actually reads,
+  so a steady value beside a changing one still hits. And one run executes
+  each cell once, whether it is a whole notebook (headless `strata run`, a
+  cascade, Run All) or a single requested cell: a `@nocache` producer read
+  through two branches used to execute once per branch and hand them
+  different values. Cells whose upstream moved read `stale · upstream
+  changed` rather than `idle`, including after a run that failed.
 - **A failed cell keeps what it failed with.** The traceback and the prints
   that preceded it went only to whoever started the run. Asking about the cell
   afterwards returned an empty console, no error, and a status of `idle` that
   reads as "never run", so the only way to see what happened was to run the
   failure again. A failure is now recorded against the source that produced it,
-  survives a reopen, and stops being erased when an unrelated edit elsewhere
-  recomputes staleness. The curated cell view also carries the `defines` and
+  survives a reopen and a snapshot round trip, appears in Markdown and HTML
+  exports, and stops being erased when an unrelated edit elsewhere recomputes
+  staleness. The curated cell view also carries the `defines` and
   `references` the MCP tool description has always promised.
 - **A worker that answers has answered.** A worker predating the health
   document replies 404, which says it is older than every feature it would
