@@ -3391,7 +3391,7 @@ cell - a cell's own outputs are stored after it returns, so promoting one is a
 job for the strip's <strong>Promote to team…</strong> or <code>strata artifact promote</code> once it has run.</p>
 <p>When a cell publishes with a name - <code>strata.put(inputs=[], transform=…, data=…, name="taxi/tip-model")</code> - the artifact appears in the <a href="../../core/registry/#in-the-notebook-the-registry-dashboard">registry dashboard</a>: a promote strip under the cell, and the Registry tab in the bottom drawer (promote, approve, lineage - all in the UI).</p>
 <blockquote>
-<p>Calls through <code>strata</code> are <strong>side effects</strong>. On a cache hit the cell body doesn't re-run, so a <code>strata.set_alias(...)</code> won't re-fire - fine for idempotent calls (setting an alias to the version it already points at is a no-op), and side-effect-only cells (no stored output) re-run every time anyway.</p>
+<p>Calls through <code>strata</code> are <strong>side effects</strong>. On a cache hit the cell body doesn't re-run, so a <code>strata.set_alias(...)</code> won't re-fire - fine for idempotent calls (setting an alias to the version it already points at is a no-op). A cell that stores no variable is cached too, keyed on its own provenance, so a cell whose whole point is the side effect needs <code># @nocache</code> to re-fire.</p>
 </blockquote>
 <h3 id="library-cells-cross-cell-defs-and-classes">Library cells (cross-cell defs and classes)<a class="headerlink" href="#library-cells-cross-cell-defs-and-classes" title="Permanent link">&para;</a></h3>
 <p>Top-level <code>def</code> and <code>class</code> definitions are shared across cells via a synthetic Python module, write a helper once, call it anywhere.</p>
@@ -4034,7 +4034,9 @@ control's current value is stored as a content-addressed artifact, so:</p>
 <li><strong>Returning a control to a previous value is a cache hit</strong> - downstream cells
   that already computed for that value don't recompute.</li>
 <li>The <strong>declaration</strong> (<code>slider(0, 1, …)</code>) is committed to <code>notebook.toml</code>; the
-  <strong>current value</strong> is runtime state (a drag never churns the committed file).</li>
+  <strong>current value</strong> is runtime state (a drag never churns the committed file).
+  It travels in a <a href="../export/#snapshots">snapshot</a>, so an imported copy computes
+  the scenario the bundle was taken from rather than the declared defaults.</li>
 </ul>
 <p>In the web UI a widget cell shows its controls in place of the code editor;
 click <strong>✎ Edit controls</strong> to edit the declaration. Widget cells render in the

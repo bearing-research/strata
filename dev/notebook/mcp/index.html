@@ -2156,7 +2156,7 @@ REST routes and the WebSocket:</p>
 </tr>
 <tr>
 <td><code>notebook:execute</code></td>
-<td><code>run_cell</code>, <code>run_tests</code>, <code>run_snippet</code>, <code>add_dependency</code>, <code>remove_dependency</code>, <code>connect_ssh_worker</code>, and any tool not listed</td>
+<td><code>run_cell</code>, <code>run_tests</code>, <code>run_snippet</code>, <code>set_widget_value</code>, <code>add_dependency</code>, <code>remove_dependency</code>, <code>connect_ssh_worker</code>, and any tool not listed</td>
 </tr>
 <tr>
 <td><code>artifacts:publish</code></td>
@@ -2213,7 +2213,7 @@ The typical loop:</p>
 </tr>
 <tr>
 <td><code>get_cell(session_id, cell_id)</code></td>
-<td>One cell: source, status, outputs.</td>
+<td>One cell: source, status, outputs. For a widget cell, its controls and what each is set to.</td>
 </tr>
 <tr>
 <td><code>save_cell_output(session_id, cell_id, index=-1)</code></td>
@@ -2240,12 +2240,16 @@ The typical loop:</p>
 <td>Execute a cell (<code>normal</code> / <code>rerun</code> / <code>force</code>), broadcast live.</td>
 </tr>
 <tr>
+<td><code>set_widget_value(session_id, cell_id, values)</code></td>
+<td>Set a widget cell's controls and re-run it at the new values, the same thing moving the slider does.</td>
+</tr>
+<tr>
 <td><code>run_tests(session_id, cell_id)</code></td>
 <td>Run a cell's <code>cells/{id}.test.py</code>.</td>
 </tr>
 <tr>
 <td><code>add_cell(session_id, source, after?, language?, author?)</code></td>
-<td>Add a cell (server mints the id).</td>
+<td>Add a cell (server mints the id). <code>language</code> is one of <code>python</code>, <code>markdown</code>, <code>sql</code>, <code>r</code>, <code>prompt</code>, <code>widget</code>.</td>
 </tr>
 <tr>
 <td><code>run_snippet(session_id, source, after?, language?, author?)</code></td>
@@ -2330,6 +2334,15 @@ step's code and environment along with the result. <code>publish_preflight</code
 that exposure list, and an agent should put it in front of the user and get
 their agreement before calling <code>publish</code>. Withdrawing is
 <code>strata artifact unpublish &lt;token&gt;</code>.</p>
+<p>A <strong>widget cell</strong> declares controls; what they are set to is runtime state,
+not source. Editing the cell therefore cannot change what the notebook
+computes, and reading the source cannot tell you what it is computing.
+<code>get_cell</code> reports a widget's <code>controls</code> with each one's kind, declared default
+and current <code>value</code>, and <code>set_widget_value(session_id, cell_id,
+{"utilization": 0.9})</code> sets them and re-materializes the cell, marking
+everything downstream stale. Send only the controls you are changing. A
+notebook that is mid-run refuses the call and leaves the stored values alone,
+so retry once that run finishes.</p>
 <p><code>run_cell</code> modes match the UI and CLI: <code>normal</code> uses the cache and re-runs stale
 upstreams first; <code>rerun</code> bypasses the target's cache but still refreshes
 upstreams; <code>force</code> ("run this only") runs against whatever upstream artifacts

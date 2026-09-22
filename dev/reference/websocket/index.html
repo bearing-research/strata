@@ -2595,7 +2595,7 @@
 <h2 id="connection">Connection<a class="headerlink" href="#connection" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>ws://localhost:8765/v1/notebooks/ws/{session_id}
 </code></pre></div>
-<p>The <code>{session_id}</code> is the one returned by <code>POST /v1/notebooks/open</code> or <code>/create</code>. A session is single-process: opening the same notebook from a second tab returns a different session ID and runs an isolated execution context.</p>
+<p>The <code>{session_id}</code> is the one returned by <code>POST /v1/notebooks/open</code> or <code>/create</code>. A session is single-process. On a personal server, opening the same notebook again returns the session already open on that path, so a second tab, the terminal viewer and an agent all drive one execution context and see each other's runs. In service mode each open creates its own session.</p>
 <p>In service mode (proxy auth), the same headers required for REST endpoints - <code>X-Strata-Principal</code>, <code>X-Strata-Proxy-Token</code>, and <code>X-Tenant-ID</code> if multi-tenant - must be present on the WebSocket upgrade. A missing or invalid token closes the connection with <code>1008 Policy Violation</code>.</p>
 <h2 id="envelope">Envelope<a class="headerlink" href="#envelope" title="Permanent link">&para;</a></h2>
 <p>All messages are JSON with this shape:</p>
