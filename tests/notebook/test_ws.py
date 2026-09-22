@@ -2712,3 +2712,49 @@ def test_unknown_frames_default_to_execute_scope():
     assert required_scope_for_frame("notebook_sync") == "notebook:read"
     assert required_scope_for_frame("cell_source_update") == "notebook:write"
     assert required_scope_for_frame("inspect_eval") == "notebook:execute"
+
+
+@pytest.mark.asyncio
+async def test_a_failed_run_still_relabels_what_its_upstreams_changed(tmp_path):
+    """Round 4: a failing target re-ran a fresh upstream on its way to failing.
+
+    ``avg`` holds a result from the producer's previous read. Running the
+    failing diagnostic ``diag`` materialised the ``@nocache`` producer again,
+    so ``avg`` is now out of date, but only a *successful* run refreshed
+    staleness, and ``avg`` kept saying ready with no reasons.
+    """
+    from strata.notebook.models import CellStatus
+
+    counter = tmp_path / "count.txt"
+    producer = (
+        "# @nocache\n"
+        "from pathlib import Path as _P\n"
+        f"_c = _P({str(counter)!r})\n"
+        "_c.write_text(str(int(_c.read_text()) + 1) if _c.exists() else '1')\n"
+        "run_count = int(_c.read_text())\n"
+    )
+    notebook_dir = create_notebook(tmp_path, "failure_staleness")
+    for cell_id, source, after in (
+        ("p", producer, None),
+        ("avg", "avg_seen = run_count\n", "p"),
+        ("sink", "avg_seen\n", "avg"),
+        ("diag", "print(run_count)\n1 / 0\n", "sink"),
+    ):
+        add_cell_to_notebook(notebook_dir, cell_id, after)
+        write_cell(notebook_dir, cell_id, source)
+    session = open_session(notebook_dir)
+
+    # Everything up to the sink runs and reads ready.
+    await _run_cell_to_terminal(session, "sink")
+    assert session.notebook_state.get_cell("avg").status == CellStatus.READY
+
+    fake = await _run_cell_to_terminal(session, "diag")
+
+    assert session.notebook_state.get_cell("diag").status == CellStatus.ERROR
+    assert counter.read_text() == "2"  # diag's attempt re-read the producer
+    avg = session.notebook_state.get_cell("avg")
+    assert avg.status == CellStatus.STALE
+    assert avg.staleness.reasons  # "upstream changed", not a bare label
+    frames = [f["payload"] for f in fake.frames_of("cell_status")]
+    assert any(f["cell_id"] == "avg" and f["status"] == "stale" for f in frames)
+    assert any(f["cell_id"] == "diag" and f["status"] == "error" for f in frames)

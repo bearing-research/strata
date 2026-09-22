@@ -366,3 +366,81 @@ def test_a_cascade_executes_a_fresh_producer_once(tmp_path: Path):
 
     assert counter.read_text() == "1"
     assert session.notebook_state.get_cell("second").display_output.preview == 1
+
+
+# -- round 4: one requested cell is one run --------------------------------
+
+
+def _diamond(tmp_path: Path, counter: Path):
+    """A fresh producer read through two branches that a comparison joins."""
+    return _build_notebook(
+        tmp_path,
+        cells=[
+            ("p", _producer(counter), None),
+            ("avg", "avg_seen = run_count\n", "p"),
+            ("peak", "peak_seen = run_count\n", "avg"),
+            ("cmp", "assert avg_seen == peak_seen, (avg_seen, peak_seen)\navg_seen\n", "peak"),
+        ],
+    )
+
+
+def test_one_requested_cell_executes_a_shared_fresh_ancestor_once(tmp_path: Path):
+    """Both branches must read the same snapshot of the shared producer.
+
+    Materialising ``cmp`` reaches ``p`` through ``avg`` and again through
+    ``peak``. Without one scope over the whole traversal, a ``@nocache`` ``p``
+    executed once per branch and the comparison joined two different reads.
+    """
+    counter = tmp_path / "count.txt"
+    session = _session(_diamond(tmp_path, counter))
+
+    result = _run(CellExecutor(session), session, "cmp")
+
+    assert result.success, result.error
+    assert counter.read_text() == "1"
+    assert result.display_output["preview"] == 1
+
+
+def test_an_independent_request_still_refreshes_the_fresh_ancestor(tmp_path: Path):
+    """The scope is one request, not the executor's lifetime."""
+    counter = tmp_path / "count.txt"
+    session = _session(_diamond(tmp_path, counter))
+    executor = CellExecutor(session)  # long-lived, as LocalNotebookOps keeps one
+
+    assert _run(executor, session, "cmp").display_output["preview"] == 1
+    second = _run(executor, session, "cmp")
+
+    assert second.success, second.error
+    assert counter.read_text() == "2"
+    assert second.display_output["preview"] == 2
+
+
+# -- round 4: a consumer is keyed on the variables it reads ----------------
+
+
+def test_a_consumer_of_a_stable_variable_hits_despite_a_changing_sibling(tmp_path: Path):
+    """``price`` reads only ``unit_price``, which never changes.
+
+    The fresh producer also defines a changing ``run_count``. Keying the
+    consumer on every variable the producer stored made it miss on every run
+    for a value it never read.
+    """
+    counter = tmp_path / "count.txt"
+    producer = _producer(counter) + "unit_price = 12\n"
+    nb = _build_notebook(
+        tmp_path,
+        cells=[
+            ("p", producer, None),
+            ("price", "price_quote = unit_price * 10\nprice_quote\n", "p"),
+            ("other", "seen = run_count\nseen\n", "price"),
+        ],
+    )
+    session = _session(nb)
+    _run(CellExecutor(session), session, "other")  # p stores both variables
+    first = _run(CellExecutor(session), session, "price")
+    assert first.display_output["preview"] == 120
+
+    second = _run(CellExecutor(session), session, "price")  # re-reads p: run_count moves
+    assert counter.read_text() != "1"
+    assert second.cache_hit is True
+    assert second.display_output["preview"] == 120
