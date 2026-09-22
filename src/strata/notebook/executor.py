@@ -1497,7 +1497,7 @@ class CellExecutor:
                         source_hash=source_hash,
                         source=source,
                         env_hash=env_hash,
-                        input_versions=self._input_refs(cell_id),
+                        input_versions=self._input_refs(cell_id, fanout_variant),
                         variant=fanout_variant,
                     )
                     if team_pull is not None:
@@ -3762,12 +3762,17 @@ class CellExecutor:
                 "uri": f"strata://artifact/{dataset.local_ref}",
             }
 
-    def _input_refs(self, cell_id: str) -> dict[str, str]:
+    def _input_refs(self, cell_id: str, variant: str | None = None) -> dict[str, str]:
         """What an artifact of *cell_id* records as its inputs: upstream
         artifacts, each fetched URL with the digest of the bytes read, and each
-        dataset with the version it resolved to."""
+        dataset with the version it resolved to.
+
+        ``variant`` is the fan-out instance being stored, so a chained
+        ``# @per_variant`` cell records the upstream instance it zipped to
+        rather than every variant of the group.
+        """
         return {
-            **self.session._collect_input_refs(cell_id),
+            **self.session._collect_input_refs(cell_id, variant=variant),
             **self._fetch_refs.get(cell_id, {}),
             **self._dataset_refs.get(cell_id, {}),
         }
@@ -4625,7 +4630,7 @@ class CellExecutor:
             return True
 
         artifact_mgr = self.session.get_artifact_manager()
-        input_versions = self._input_refs(cell_id)
+        input_versions = self._input_refs(cell_id, variant)
         consumed_vars = self.session.dag.consumed_variables.get(cell_id, set())
 
         try:
