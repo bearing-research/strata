@@ -129,12 +129,98 @@ def _get_variable(session_manager: SessionManager, session_id: str, name: str) -
     if producer is None:
         return {"variable": name, "defined": False, "available": sorted(producers)}
     if producer.startswith(("sweep:", "fanout:")):
-        # A variant/sweep group has no single producing cell.
-        return {"variable": name, "defined": True, "defined_in": producer}
+        # A variant/sweep group has no single producing cell. Name the
+        # instances behind it and, for each, the spelling `lineage` takes:
+        # without them an agent knows only that the variable is swept.
+        from strata.notebook.dag import SweepProducer
+
+        session = _live_session(session_manager, session_id)
+        group = session.dag.variable_producer.get(name) if session.dag else None
+        variants: list[dict[str, str]] = []
+        if isinstance(group, SweepProducer):
+            variants = [
+                {
+                    "variant": variant_name,
+                    "cell_id": cell_id,
+                    # A fan-out's instances share one cell and differ by an
+                    # ``@variant=`` subkey; a sweep group's members are cells
+                    # of their own, each storing the plain name.
+                    "lineage_variable": (
+                        f"{name}@variant={variant_name}" if group.fanout_cell is not None else name
+                    ),
+                }
+                for variant_name, cell_id in group.variants
+            ]
+        return {"variable": name, "defined": True, "defined_in": producer, "variants": variants}
     # A plain cell-id producer that get_cell can't fetch is a real error — let it
     # propagate rather than masking it as "defined".
     cell = ops.get_cell(producer).model_dump(mode="json")
     return {"variable": name, "defined": True, "defined_in": cell["id"], "cell": cell}
+
+
+async def _set_variant(
+    session_manager: SessionManager,
+    session_id: str,
+    group: str,
+    active: str | None = None,
+    mode: str | None = None,
+) -> dict[str, Any]:
+    """Switch a variant group's active variant and/or its mode.
+
+    The same two session calls the UI's tab strip makes, so a run afterwards
+    uses the selection and downstream staleness recomputes against it. Without
+    this an agent had to drive the REST route itself.
+
+    The group and the variant name are checked against the ones cells declare.
+    The writer appends an entry for whatever it is given, so a typo would
+    otherwise add a junk ``[[variant_group]]`` block to the *committed*
+    notebook.toml and report success, and an unknown variant name would leave
+    the DAG on the first variant in source order while the answer said
+    otherwise. The tab strip can only offer names that exist; an agent types
+    them.
+    """
+    if active is None and mode is None:
+        raise ValueError("Provide `active` and/or `mode`.")
+    if mode is not None and mode not in ("switch", "sweep"):
+        raise ValueError(f"unknown mode {mode!r} (switch|sweep)")
+
+    session = _live_session(session_manager, session_id)
+    cells = session.notebook_state.cells
+    groups = sorted({c.variant_group for c in cells if c.variant_group})
+    if group not in groups:
+        raise ValueError(
+            f"no variant group {group!r}. Declared: {', '.join(groups) or 'none'} — "
+            "a group exists once a cell carries `# @variant <group> <name>`."
+        )
+    if active is not None:
+        names = sorted(
+            {c.variant_name for c in cells if c.variant_group == group and c.variant_name}
+        )
+        if active not in names:
+            raise ValueError(
+                f"group {group!r} has no variant {active!r}. Variants: {', '.join(names)}"
+            )
+
+    # Mode first: `active` is ignored in sweep mode anyway, and this is the
+    # order the route applies them in.
+    if mode is not None:
+        session.set_variant_mode(group, mode)
+    if active is not None:
+        session.set_variant_active(group, active)
+    # Every other notebook-mutating tool reloads and broadcasts; without it an
+    # attached viewer keeps the old tab strip and pre-switch staleness badges
+    # until some unrelated mutation forces a resync.
+    await _sync_and_broadcast(session_id, session)
+    await _agent_note(session_id, "mcp", f"variant {group} → {active or mode}")
+    return {
+        "variant_groups": [
+            vg.model_dump(mode="json") for vg in session.notebook_state.variant_groups
+        ],
+        "cells": [
+            cell.model_dump(mode="json")
+            for cell in _resolve_ops(session_manager, session_id).list_cells()
+        ],
+    }
 
 
 def _status(session_manager: SessionManager, session_id: str) -> dict[str, Any]:
@@ -792,6 +878,23 @@ def build_mcp_app(session_manager: SessionManager) -> Starlette | None:
         and is overwritten on each call.
         """
         return _save_cell_output(session_manager, session_id, cell_id, index)
+
+    @mcp.tool()
+    async def set_variant(
+        session_id: str,
+        group: str,
+        active: str | None = None,
+        mode: str | None = None,
+    ) -> dict[str, Any]:
+        """Choose which variant of a group runs, or sweep them all.
+
+        `active` picks one variant by name (switch mode). `mode` is `switch`
+        (one at a time) or `sweep` (every variant runs, and a downstream cell
+        reading the group receives a `{variant: value}` dict). Send either or
+        both. Returns the group's state and the notebook's cells, whose
+        staleness has been recomputed against the new selection.
+        """
+        return await _set_variant(session_manager, session_id, group, active, mode)
 
     @mcp.tool()
     def get_variable(session_id: str, name: str) -> dict[str, Any]:

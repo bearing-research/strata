@@ -2177,7 +2177,18 @@ class NotebookSession:
 
         return hashes
 
-    def _collect_input_refs(self, cell_id: str) -> dict[str, str]:
+    def _fanout_group_of(self, cell_id: str) -> str | None:
+        """The sweep group ``cell_id`` fans out over, if it is a fan-out cell."""
+        from strata.notebook.dag import SweepProducer
+
+        if self.dag is None:
+            return None
+        for producer in self.dag.variable_producer.values():
+            if isinstance(producer, SweepProducer) and producer.fanout_cell == cell_id:
+                return producer.group
+        return None
+
+    def _collect_input_refs(self, cell_id: str, *, variant: str | None = None) -> dict[str, str]:
         """Upstream artifact refs in the form the lineage walk resolves.
 
         Returns ``{strata://artifact/<id>@v=<n>: <id>@v=<n>}`` — the shape
@@ -2213,14 +2224,48 @@ class NotebookSession:
         if cell is None or not cell.upstream_ids:
             return {}
 
+        from strata.notebook.dag import SweepProducer
+
+        # What this cell's own instance zips to, when it is itself a fan-out
+        # instance over the same group: the harness binds that one variant as a
+        # scalar, so recording the whole set would name variants it never read.
+        own_group = self._fanout_group_of(cell_id) if variant is not None else None
+
         refs: dict[str, str] = {}
         for upstream_id in cell.upstream_ids:
             upstream_cell = self.notebook_state.get_cell(upstream_id)
             if upstream_cell is None:
                 continue
 
-            uris: list[str] = list(upstream_cell.artifact_uris.values())
-            if not uris and upstream_cell.artifact_uri:
+            uris: list[str] = []
+            for var_name, uri in upstream_cell.artifact_uris.items():
+                producer = self.dag.variable_producer.get(var_name) if self.dag else None
+                if isinstance(producer, SweepProducer) and producer.fanout_cell == upstream_id:
+                    # A fan-out cell keeps one URI per variable, whichever
+                    # variant stored last, while a collapse consumer read them
+                    # all. Recording that one left lineage showing a single
+                    # variant behind a dict built from every instance. A
+                    # chained instance is the other case: it read exactly its
+                    # own variant.
+                    wanted = (
+                        [(variant, None)]
+                        if own_group == producer.group and variant is not None
+                        else producer.variants
+                    )
+                    for variant_name, _ in wanted:
+                        instance = self.artifact_manager.artifact_store.get_latest_version(
+                            self.artifact_manager.cell_artifact_id(
+                                upstream_id, var_name, variant=variant_name
+                            )
+                        )
+                        if instance is not None:
+                            uris.append(f"strata://artifact/{instance.id}@v={instance.version}")
+                    continue
+                uris.append(uri)
+            # Only when the cell recorded no per-variable URIs at all: a
+            # fan-out upstream whose instances are all missing must not fall
+            # back to the cell-level URI, which names an unrelated variant.
+            if not upstream_cell.artifact_uris and upstream_cell.artifact_uri:
                 uris = [upstream_cell.artifact_uri]
 
             for uri in uris:

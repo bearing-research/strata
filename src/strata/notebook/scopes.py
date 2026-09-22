@@ -181,6 +181,7 @@ _WRITE_TOOLS = frozenset(
         "note",
         "add_worker",
         "set_default_worker",
+        "set_variant",
         "remove_worker",
         "disconnect_ssh_worker",
         "promote",

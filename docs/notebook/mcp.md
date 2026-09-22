@@ -28,7 +28,7 @@ REST routes and the WebSocket:
 | Scope | Tools |
 |---|---|
 | `notebook:read` | `list_notebooks`, `get_notebook`, `get_cell`, `save_cell_output`, `get_variable`, `dag`, `status`, `list_workers`, `lineage`, `publish_preflight` |
-| `notebook:write` | `add_cell`, `edit_cell`, `remove_cell`, `move_cell`, `note`, `add_worker`, `set_default_worker`, `remove_worker`, `disconnect_ssh_worker`, `promote` |
+| `notebook:write` | `add_cell`, `edit_cell`, `remove_cell`, `move_cell`, `note`, `add_worker`, `set_default_worker`, `set_variant`, `remove_worker`, `disconnect_ssh_worker`, `promote` |
 | `notebook:execute` | `run_cell`, `run_tests`, `run_snippet`, `add_dependency`, `remove_dependency`, `connect_ssh_worker`, and any tool not listed |
 | `artifacts:publish` | `publish` |
 
@@ -77,7 +77,8 @@ The typical loop:
 | `get_notebook(session_id)` | Every cell of a session, in order. |
 | `get_cell(session_id, cell_id)` | One cell: source, status, outputs. |
 | `save_cell_output(session_id, cell_id, index=-1)` | Write a display output (a plot, an image) to the notebook's `.strata/outputs/` and return the path, so the agent can open it. The path is on the **server's** machine: an agent on another host should use `strata cell output --server … --session …`, which downloads and writes the file locally. |
-| `get_variable(session_id, name)` | The cell that defines a variable, "do I already have `name`?"; else the available names. |
+| `get_variable(session_id, name)` | The cell that defines a variable, "do I already have `name`?"; else the available names. For a swept variable, each variant's cell and the name `lineage` takes for it. |
+| `set_variant(session_id, group, active?, mode?)` | Pick which variant of a group runs, or set the group to `switch` / `sweep`. |
 | `dag(session_id)` | The dependency graph - edges, topological order, roots, leaves. |
 | `status(session_id)` | Per-cell status + staleness summary. |
 | `run_cell(session_id, cell_id, mode)` | Execute a cell (`normal` / `rerun` / `force`), broadcast live. |
@@ -121,21 +122,16 @@ upstreams first; `rerun` bypasses the target's cache but still refreshes
 upstreams; `force` ("run this only") runs against whatever upstream artifacts
 already exist.
 
-There is no tool for [variant groups](annotations.md#variant-cells) yet. To switch
-which variant runs, or move a group between switch and sweep mode, call the
-session's REST route directly; it is the one the UI's tab strip uses:
+`set_variant` drives [variant groups](annotations.md#variant-cells):
+`set_variant(session_id, "policy", active="service")` picks one variant,
+`set_variant(session_id, "policy", mode="sweep")` runs them all, and either
+argument can be sent alone. It makes the same two calls the UI's tab strip
+does, so staleness recomputes against the new selection; the equivalent REST
+route is `PUT /v1/notebooks/{session_id}/variant-groups/{group}`.
 
-```bash
-# Run the "service" variant of the "policy" group
-curl -X PUT http://127.0.0.1:8765/v1/notebooks/$SID/variant-groups/policy \
-  -H 'content-type: application/json' -d '{"active": "service"}'
-
-# Run every variant at once
-curl -X PUT http://127.0.0.1:8765/v1/notebooks/$SID/variant-groups/policy \
-  -H 'content-type: application/json' -d '{"mode": "sweep"}'
-```
-
-Either field can be sent alone.
+For a swept variable, `get_variable` names each instance and the spelling
+`lineage` takes for it (`score@variant=triple` for a `# @per_variant` cell's
+instances; the plain name on the member cell for a sweep group).
 
 ## Watching the agent
 
