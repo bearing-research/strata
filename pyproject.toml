@@ -37,12 +37,12 @@ dependencies = [
     # (WebSocketsSansIOProtocol); server.main selects ws="websockets-sansio" to
     # avoid the deprecated legacy asyncio protocol that breaks on CPython 3.14+.
     "uvicorn>=0.35.0",
-    "websockets>=13.0",
+    "websockets>=17.1",
     "httpx>=0.28.0",
     "duckdb>=1.1.0",
     "python-multipart>=0.0.9", # Required for executor multipart form handling
     "pydantic>=2.0.0", # For configuration validation
-    "pydantic-settings>=2.0.0", # For configuration with env var support
+    "pydantic-settings>=2.15.0", # For configuration with env var support
     "tomli_w>=1.0.0", # For writing TOML files
     "jsonschema>=4.0.0",
     "infisicalsdk>=1.0.16",
@@ -61,7 +61,7 @@ otel = [
 # Azure Blob Storage support
 azure = [
     "azure-storage-blob>=12.20.0",
-    "azure-identity>=1.15.0",
+    "azure-identity>=1.25.3",
 ]
 # Postgres metadata backend for the artifact store. Only needed to run the
 # store's system of record on a shared server instead of a local SQLite
