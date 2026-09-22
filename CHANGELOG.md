@@ -217,6 +217,13 @@ environment pinned below them has to move before it can install 0.8.0.
   rerun all. For a cell whose point is what it displays, a clock read, a
   counter, a file it just wrote, the effect those callers exist to re-trigger
   never happened.
+- **A cache hit hands back the value its key identifies.** A consumer of a
+  `# @per_variant` fan-out had nothing from the fan-out in its cache key, so a
+  change to any variant came back as the consumer's old dict. Reverting a cell
+  to an earlier value served that value's bytes under the later value's
+  preview, and recovering from a failure through a cache hit lost the cell's
+  display. Each stored display now records its own description, and a
+  fan-out consumer is keyed on every variant it reads.
 - **A fresh value reaches the cells that read it.** A cell reading a
   `# @nocache` cell's value kept serving what it had computed from an earlier
   one: its cache key followed the producer's provenance, which is the same on
