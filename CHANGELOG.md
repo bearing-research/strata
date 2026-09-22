@@ -178,6 +178,11 @@ a case of the server reporting more confidence than it had:
   absolute path, so the same notebook on two machines no longer shares those
   cache entries.
 
+Dependencies now require higher minimum versions: `websockets>=17.1` and
+`pydantic-settings>=2.15.0` for every install, and `azure-identity>=1.25.3` for
+the `[azure]` extra. These match the versions the test suite runs against; an
+environment pinned below them has to move before it can install 0.8.0.
+
 ### Security
 
 - **A cell cannot read the server's secrets.** The worker takes its token and
