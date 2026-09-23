@@ -257,6 +257,13 @@ environment pinned below them has to move before it can install 0.8.0.
   exports, and stops being erased when an unrelated edit elsewhere recomputes
   staleness. The curated cell view also carries the `defines` and
   `references` the MCP tool description has always promised.
+- **An agent moving a slider gets what a person gets.** `set_widget_value` ran
+  the widget and stopped, so a `# @live` notebook that auto-computes for a
+  person left an agent looking at stale downstream cells and the previous
+  answer. Both callers now run one path. A control nobody has moved also
+  reports the declared default as its value rather than `null`: that default is
+  what the cell runs at, so reporting nothing described the storage instead of
+  the notebook.
 - **A widget's selection is state the notebook keeps.** A `widget_update`
   refused because the notebook was busy had already written the new values to
   disk: the reply named the run that owned the notebook, nothing
@@ -268,6 +275,17 @@ environment pinned below them has to move before it can install 0.8.0.
   cell's provenance and outputs but not the selection behind them, so an
   imported copy fell back to each control's default and recomputed a different
   scenario than the bundle was taken from.
+- **A SQL cell's result is a display like any other.** The table was the one
+  display in the notebook backed by no artifact, and everything built on that
+  record went wrong with it: a SQL cell reached as an upstream sat at `idle`
+  showing nothing while its value was current and in use downstream, one whose
+  consumer had recomputed at a new parameter went on showing the table from
+  before the change, `save_cell_output` refused it, and an export rendered the
+  query and dropped its result. The table is now stored and recorded like any
+  other display, without loosening the check that keeps a reopened SQL cell
+  honest about the connection it read. A query also records the notebook
+  variables it bound, so the chain behind a result names the value it was run
+  at rather than stopping at the query.
 - **A worker that answers has answered.** A worker predating the health
   document replies 404, which says it is older than every feature it would
   list — so the cell runs in the worker's own environment, as documented,
