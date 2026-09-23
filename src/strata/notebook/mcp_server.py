@@ -284,17 +284,17 @@ async def _set_widget_value(
 ) -> dict[str, Any]:
     """Set a widget cell's controls and re-materialize it at the new values.
 
-    The same thing dragging the slider does: the values are persisted and the
-    widget cell re-runs in force mode, which re-stores its value artifacts and
-    marks everything downstream stale. A widget's selection is runtime state,
-    not source, so an agent that only edits the cell cannot change what the
-    notebook computes.
+    The same thing dragging the slider does, through the same code: the values
+    are persisted, the widget re-runs in force mode to re-store its value
+    artifacts, everything downstream goes stale, and a ``# @live`` widget
+    chains the cost-gated cascade that re-runs the cheap ones. A widget's
+    selection is runtime state, not source, so an agent that only edits the
+    cell cannot change what the notebook computes.
     """
     from strata.notebook.models import CellLanguage
     from strata.notebook.ops import NotebookOpsError, _run_result_from_wire
-    from strata.notebook.runtime_state import persist_cell_widget_values
     from strata.notebook.widget_analyzer import analyze_widget_cell, coerce_widget_values
-    from strata.notebook.ws import NotebookBusyError, execute_cell_exclusive
+    from strata.notebook.ws import NotebookBusyError, apply_widget_values, execute_cell_exclusive
 
     session = session_manager.get_session(session_id)
     if session is None:
@@ -326,10 +326,12 @@ async def _set_widget_value(
             cell_id,
             session_id,
             mode="force",
-            # Written under the reservation, so a busy notebook leaves the
-            # stored values exactly as they were.
-            before_execute=lambda: setattr(
-                cell, "widget_values", persist_cell_widget_values(session.path, cell_id, coerced)
+            # The same path the WebSocket handler runs, so this is the whole of
+            # what moving the slider does: the values are written under the
+            # reservation, and a `# @live` widget chains the same cost-gated
+            # cascade rather than leaving the downstream stale.
+            operation=lambda execution_state: apply_widget_values(
+                session, cell_id, coerced, execution_state, session_id
             ),
         )
     except NotebookBusyError as exc:
@@ -337,7 +339,11 @@ async def _set_widget_value(
     if result is None:
         raise NotebookOpsError(f"widget cell {cell_id!r} could not be re-materialized")
 
-    await _sync_and_broadcast(session_id, session)
+    # No reload here, unlike the tools that edit committed config: this is a
+    # run, and the shared path already broadcast the widget's status, its
+    # output and the downstream staleness, exactly as ``run_cell`` does. A
+    # reload re-derives that state from disk and left the cells the live
+    # cascade had just recomputed labelled stale.
     await _agent_note(
         session_id,
         "mcp",

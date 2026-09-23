@@ -82,9 +82,11 @@ def test_get_cell_reports_the_controls_and_their_defaults(widget_nb):
     alpha = next(c for c in view["controls"] if c["name"] == "alpha")
     assert alpha["kind"] == "slider"
     assert alpha["default"] == 0.5
-    # Nothing selected yet: the declared default is what is in force, and the
-    # value is empty rather than a guess at it.
-    assert alpha["value"] is None
+    # Nothing selected yet, so the declared default is what the cell runs at,
+    # and that is what ``value`` reports. It used to be ``None`` here, which
+    # described the storage rather than the notebook: an agent looking for the
+    # input behind a result read it as "unset".
+    assert alpha["value"] == 0.5
 
 
 def test_a_non_widget_cell_has_no_controls(widget_nb):
@@ -177,23 +179,26 @@ async def test_setting_a_control_tells_an_attached_viewer(widget_nb, monkeypatch
     """Moving the slider in the browser broadcasts; an agent doing the same
     thing must too, or a watching human keeps the pre-change staleness badges."""
     import strata.notebook.mcp_server as mcp_server
+    import strata.notebook.ws as ws
 
     sm, session_id, _ = _registered(widget_nb)
-    broadcast: list[str] = []
+    frames: list[tuple[str, str]] = []
     notes: list[str] = []
 
-    async def _fake_broadcast(sid, session):
-        broadcast.append(sid)
+    async def _fake_broadcast_message(nb_id, message):
+        frames.append((message.get("type", ""), str(message.get("payload", ""))))
 
     async def _fake_note(sid, source, text):
         notes.append(text)
 
-    monkeypatch.setattr(mcp_server, "_sync_and_broadcast", _fake_broadcast)
+    monkeypatch.setattr(ws, "_broadcast_message", _fake_broadcast_message)
     monkeypatch.setattr(mcp_server, "_agent_note", _fake_note)
 
     await _set_widget_value(sm, session_id, "controls", {"alpha": 0.9})
 
-    assert broadcast == [session_id]
+    # The run broadcasts its own frames, the way ``run_cell`` does; the tool
+    # adds no reload on top, because it changes no committed config.
+    assert any(kind == "cell_status" and "controls" in payload for kind, payload in frames), frames
     assert notes and "alpha=0.9" in notes[0]
 
 

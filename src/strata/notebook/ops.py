@@ -100,8 +100,8 @@ class WidgetControlView(BaseModel):
     kind: str
     params: dict[str, Any] = Field(default_factory=dict)
     default: Any = None
-    # What the control is set to now, or ``None`` when nothing has been
-    # selected and the declared default is in force.
+    # What the control is set to now: the selection when there is one, and the
+    # declared default when there is not, matching what the cell computes with.
     value: Any = None
 
 
@@ -1419,7 +1419,12 @@ def _control_views_from_wire(widget: dict[str, Any] | None) -> list[WidgetContro
             kind=descriptor.get("kind") or "",
             params=dict(descriptor.get("params") or {}),
             default=descriptor.get("default"),
-            value=values.get(descriptor["name"]),
+            # The *effective* value, which is what the cell computes with: the
+            # widget executor falls back to the declared default for a control
+            # nobody has touched. Reporting ``None`` there described the
+            # storage rather than the notebook, and an agent looking for the
+            # input a result came from read it as "unset".
+            value=values.get(descriptor["name"], descriptor.get("default")),
         )
         for descriptor in widget.get("descriptors") or []
     ]

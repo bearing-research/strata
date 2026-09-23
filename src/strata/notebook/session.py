@@ -1040,11 +1040,25 @@ class NotebookSession:
             )
 
             if cached_outputs is None:
-                if cached_display_outputs:
+                # A cell whose artifacts are keyed under its own scheme now has
+                # display artifacts like any other, and resolving one says only
+                # that the generic triplet is unchanged. That is not enough to
+                # call such a cell ready: the connection it read and the policy
+                # it cached under are no part of that hash, so the branch below
+                # has to settle it. Restore what it showed either way, since a
+                # cell that is not ready still shows its last result.
+                keyed_elsewhere = (
+                    language_executor.has_alternate_cache_scheme
+                    or parse_annotations(cell.source).per_variant
+                )
+                if cached_display_outputs and not keyed_elsewhere:
                     cell.display_outputs = cached_display_outputs
                     cell.display_output = cached_display_outputs[-1]
                     staleness_map[cell_id] = CellStaleness(status=CellStatus.READY, reasons=[])
                 else:
+                    if cached_display_outputs:
+                        cell.display_outputs = cached_display_outputs
+                        cell.display_output = cached_display_outputs[-1]
                     # Languages with an alternate per-variable cache
                     # scheme (today PROMPT + SQL) store artifacts under
                     # a hash the generic per-variable lookup above
@@ -1057,7 +1071,6 @@ class NotebookSession:
                     # outputs live under variant-scoped ``@variant=``
                     # artifact ids the generic lookup can't see, while
                     # the fan-out orchestrator records the base hash.
-                    is_fanout = parse_annotations(cell.source).per_variant
                     # A cell whose artifacts are keyed under its own scheme is
                     # preserved from IDLE as well as READY: a cold open starts
                     # every cell IDLE (status is not persisted), so requiring
@@ -1067,7 +1080,6 @@ class NotebookSession:
                     # with nothing changed. A leaf still needs READY: its
                     # structural comparison on reload (mounts, worker, env)
                     # catches changes its provenance hash does not.
-                    keyed_elsewhere = language_executor.has_alternate_cache_scheme or is_fanout
                     allowed_status = (
                         (CellStatus.READY, CellStatus.IDLE)
                         if keyed_elsewhere

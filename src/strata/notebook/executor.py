@@ -87,6 +87,7 @@ from strata.notebook.immutability import MutationWarning
 from strata.notebook.models import (
     CellLanguage,
     CellOutput,
+    CellStatus,
     CellTestCase,
     CellTestResult,
     DatasetSpec,
@@ -4224,6 +4225,33 @@ class CellExecutor:
                 prov.source_hash,
                 prov.env_hash,
             )
+            # The result table renders as a markdown preview, and that preview
+            # was the one display in the notebook backed by nothing: no
+            # artifact, so `save_cell_output` refused it, an export dropped the
+            # table (``markdown_text`` is stripped at persist time and
+            # re-fetched through the uri), and staleness could not resolve a
+            # cached display for the cell. A SQL cell reached as an upstream
+            # therefore stayed idle showing nothing while its value was
+            # current, and one whose consumer had recomputed went on showing
+            # the table from before the change.
+            stored_displays = self._store_inline_display_outputs(
+                cell_id,
+                prov.provenance_hash,
+                result_dict.get("display_outputs") or [],
+                source_hash=prov.source_hash,
+                source=source,
+                env_hash=prov.env_hash,
+            )
+            if stored_displays:
+                result_dict["display_outputs"] = stored_displays
+                result_dict["display_output"] = stored_displays[-1]
+            # And record them where a reopen and an export read from. The
+            # Python and R paths do this after every run; SQL never did, so a
+            # notebook reopened or exported from disk showed a SQL cell's
+            # source and nothing it had produced.
+            self.session.persist_display_outputs(
+                cell_id, result_dict.get("display_outputs") or None
+            )
 
         # Account for the duration the wrapper itself adds (materialize
         # upstreams, dispatch overhead). ``execute_sql_cell`` measures
@@ -4348,6 +4376,14 @@ class CellExecutor:
                 raise RuntimeError(
                     f"Failed to materialise upstream cell {upstream_id}: {result.error}"
                 )
+            # Say that it ran. A cell rebuilt here produced the value this cell
+            # is about to read, but nothing recorded that, so the next
+            # staleness pass had to infer it — and for a language with its own
+            # cache scheme that inference is deliberately conservative (a SQL
+            # cell's rows depend on a connection no generic hash covers). A
+            # SQL upstream therefore sat at `idle` with no result showing while
+            # its value was current and in use downstream.
+            upstream_cell.status = CellStatus.READY
             executed_upstreams.add(upstream_id)
 
     # ------------------------------------------------------------------
@@ -4787,6 +4823,70 @@ class CellExecutor:
             source=source,
             env_hash=env_hash,
         )
+
+    def _store_inline_display_outputs(
+        self,
+        cell_id: str,
+        provenance_hash: str,
+        display_outputs: list[dict[str, Any]],
+        *,
+        source_hash: str = "",
+        source: str = "",
+        env_hash: str = "",
+    ) -> list[dict[str, Any]]:
+        """Persist displays a cell built in memory, rather than as output files.
+
+        The Python harness writes each display to a file and
+        ``_store_display_outputs`` reads it back; a SQL cell renders its result
+        table as markdown in this process and has no output directory. Same
+        artifacts either way: keyed on the cell's generic provenance under
+        ``__display__{i}``, carrying their own description, so a cache hit, a
+        reopen, an export and ``save_cell_output`` all find them.
+        """
+        if not display_outputs:
+            return []
+
+        artifact_mgr = self.session.get_artifact_manager()
+        notebook_id = self.session.notebook_state.id
+        input_versions = self._input_refs(cell_id)
+        stored: list[dict[str, Any]] = []
+
+        for index, display_output in enumerate(display_outputs):
+            text = display_output.get("markdown_text")
+            content_type = str(display_output.get("content_type", "")).strip()
+            if not isinstance(text, str) or content_type != "text/markdown":
+                stored.append(dict(display_output))
+                continue
+            blob = text.encode()
+            # Set before the artifact records its own description, so a display
+            # restored from cache carries the size too rather than reporting 0.
+            entry = {**display_output, "bytes": len(blob)}
+            display_provenance = derive_subkey(provenance_hash, f"__display__{index}")
+            canonical_id = f"nb_{notebook_id}_cell_{cell_id}_var___display__{index}"
+            # A cache hit runs through here too: the query was not re-issued,
+            # so the display it rebuilt is the stored one. Reuse that version
+            # rather than writing an identical blob under a new one every time
+            # the cell is asked for.
+            canonical = artifact_mgr.artifact_store.get_latest_version(canonical_id)
+            if canonical is not None and canonical.provenance_hash == display_provenance:
+                version = canonical.version
+            else:
+                version = artifact_mgr.store_cell_output(
+                    cell_id=cell_id,
+                    variable_name=f"__display__{index}",
+                    blob_data=blob,
+                    content_type=content_type,
+                    provenance_hash=display_provenance,
+                    input_versions=input_versions,
+                    source_hash=source_hash,
+                    source=source,
+                    env_hash=env_hash,
+                    extra_params=display_metadata_params(entry, len(display_outputs)),
+                ).version
+            entry["artifact_uri"] = f"strata://artifact/{canonical_id}@v={version}"
+            stored.append(entry)
+
+        return stored
 
     def _store_display_outputs(
         self,
