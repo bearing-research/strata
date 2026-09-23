@@ -305,10 +305,15 @@ async def _broadcast_downstream_stale(
 async def _broadcast_staleness_updates(
     session: NotebookSession,
     notebook_id: str,
-    seq: int,
     staleness_map: dict[str, CellStaleness],
 ) -> None:
-    """Broadcast backend staleness state to all notebook clients."""
+    """Broadcast backend staleness state to all notebook clients.
+
+    Each cell's frame takes its own sequence. Reusing one number for the whole
+    batch made a client that follows the documented advice -- dedupe on ``seq``
+    -- drop every status but the first, including the one saying a cell had
+    finished.
+    """
     for cell_id, staleness in staleness_map.items():
         causality = session.causality_map.get(cell_id)
         payload = cell_status_payload(
@@ -321,7 +326,7 @@ async def _broadcast_staleness_updates(
         )
         await _broadcast_message(
             notebook_id,
-            _make_message(MessageType.CELL_STATUS, seq, payload),
+            _make_message(MessageType.CELL_STATUS, next_notebook_sequence(notebook_id), payload),
         )
 
 
@@ -378,7 +383,7 @@ async def _refresh_and_broadcast_changed_staleness(
             changed[cell.id] = staleness
 
     if changed:
-        await _broadcast_staleness_updates(session, notebook_id, seq, changed)
+        await _broadcast_staleness_updates(session, notebook_id, changed)
 
     return staleness_map
 
@@ -1790,7 +1795,7 @@ async def _handle_cell_source_update(
             ),
         )
 
-        await _broadcast_staleness_updates(session, notebook_id, seq, staleness_map)
+        await _broadcast_staleness_updates(session, notebook_id, staleness_map)
 
     except Exception as e:
         await websocket.send_text(
@@ -1891,7 +1896,7 @@ async def _handle_variant_set_active(
             ),
         )
 
-        await _broadcast_staleness_updates(session, notebook_id, seq, staleness_map)
+        await _broadcast_staleness_updates(session, notebook_id, staleness_map)
 
     except Exception as e:
         await websocket.send_text(
@@ -1949,7 +1954,7 @@ async def _handle_variant_add(
             _make_message(MessageType.NOTEBOOK_STATE, seq, state_payload),
         )
 
-        await _broadcast_staleness_updates(session, notebook_id, seq, staleness_map)
+        await _broadcast_staleness_updates(session, notebook_id, staleness_map)
 
     except ValueError as e:
         await websocket.send_text(
@@ -1981,7 +1986,13 @@ async def _handle_notebook_sync(
         "topological_order": (session.dag.topological_order if session.dag else []),
     }
 
-    await websocket.send_text(_json_encode(_make_message(MessageType.NOTEBOOK_STATE, 0, state)))
+    # Its own sequence, not 0: a client told to treat a lower number as a gap
+    # saw the reply to its own sync as one.
+    await websocket.send_text(
+        _json_encode(
+            _make_message(MessageType.NOTEBOOK_STATE, next_notebook_sequence(notebook_id), state)
+        )
+    )
 
 
 # ============================================================================
@@ -3128,7 +3139,11 @@ async def execute_cell_for_agent(
     # Broadcast running status
     await _broadcast_message(
         notebook_id,
-        _make_message(MessageType.CELL_STATUS, 0, _running_payload(session, cell_id, source)),
+        _make_message(
+            MessageType.CELL_STATUS,
+            next_notebook_sequence(notebook_id),
+            _running_payload(session, cell_id, source),
+        ),
     )
 
     cell = session.notebook_state.get_cell(cell_id)
@@ -3162,7 +3177,11 @@ async def execute_cell_for_agent(
 
         await _broadcast_message(
             notebook_id,
-            _make_message(MessageType.CELL_STATUS, 0, cell_status_payload(cell_id, status)),
+            _make_message(
+                MessageType.CELL_STATUS,
+                next_notebook_sequence(notebook_id),
+                cell_status_payload(cell_id, status),
+            ),
         )
 
         return result
@@ -3170,9 +3189,15 @@ async def execute_cell_for_agent(
         downstream_stale = session.mark_cell_error(cell_id)
         await _broadcast_message(
             notebook_id,
-            _make_message(MessageType.CELL_STATUS, 0, cell_status_payload(cell_id, "error")),
+            _make_message(
+                MessageType.CELL_STATUS,
+                next_notebook_sequence(notebook_id),
+                cell_status_payload(cell_id, "error"),
+            ),
         )
-        await _broadcast_downstream_stale(notebook_id, 0, downstream_stale)
+        await _broadcast_downstream_stale(
+            notebook_id, next_notebook_sequence(notebook_id), downstream_stale
+        )
         raise
 
 
@@ -3194,7 +3219,7 @@ async def broadcast_notebook_sync(notebook_id: str, session: Any) -> None:
 
     await _broadcast_message(
         notebook_id,
-        _make_message(MessageType.NOTEBOOK_STATE, 0, state),
+        _make_message(MessageType.NOTEBOOK_STATE, next_notebook_sequence(notebook_id), state),
     )
 
 

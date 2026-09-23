@@ -4252,6 +4252,12 @@ class CellExecutor:
             self.session.persist_display_outputs(
                 cell_id, result_dict.get("display_outputs") or None
             )
+        else:
+            # A failed run clears what the cell was showing, the same as the
+            # Python and R paths. Without this a SQL cell that started failing
+            # kept its last successful table on screen and in an export, which
+            # reads as a current result for a query that no longer runs.
+            self.session.persist_display_outputs(cell_id, None)
 
         # Account for the duration the wrapper itself adds (materialize
         # upstreams, dispatch overhead). ``execute_sql_cell`` measures
@@ -4259,7 +4265,7 @@ class CellExecutor:
         # reference for the cell's total duration.
         duration_ms = (time.time() - start_time) * 1000
 
-        return CellExecutionResult(
+        result = CellExecutionResult(
             cell_id=cell_id,
             success=result_dict["success"],
             outputs=result_dict["outputs"],
@@ -4274,6 +4280,12 @@ class CellExecutor:
             artifact_uri=result_dict.get("artifact_uri"),
             mutation_warnings=result_dict.get("mutation_warnings", []),
         )
+        # What the run said went wrong, kept against the source that said it,
+        # and cleared when the next run succeeds. The Python and R paths do
+        # this on every run; SQL did not, so a fixed query came back green
+        # still carrying the error of the one before it.
+        self.session.apply_execution_result_metadata(cell_id, result)
+        return result
 
     async def _execute_widget_cell(
         self,
@@ -4373,6 +4385,10 @@ class CellExecutor:
                 upstream_cell.source,
             )
             if not result.success:
+                # The cell that failed records its own error and clears its own
+                # output, in the language wrapper, the same as a direct run --
+                # which is what makes it read as `error` here rather than as a
+                # cell that never ran.
                 raise RuntimeError(
                     f"Failed to materialise upstream cell {upstream_id}: {result.error}"
                 )

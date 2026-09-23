@@ -25,6 +25,7 @@ the cell's output panel without special handling.
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import io
 import json
@@ -205,7 +206,9 @@ async def execute_sql_cell(
         freshness = FreshnessToken(value=f"at:{pin.at}".encode(), is_snapshot=True)
     elif policy.freshness_required or policy.schema_required:
         try:
-            freshness, schema_fp = _run_probes(adapter, runtime_spec, analysis.tables, policy)
+            freshness, schema_fp = await asyncio.to_thread(
+                _run_probes, adapter, runtime_spec, analysis.tables, policy
+            )
         except Exception as exc:  # noqa: BLE001
             return _error_result(f"probe failed: {exc}", start_time)
         if policy.snapshot_required and (freshness is None or not freshness.is_snapshot):
@@ -252,7 +255,8 @@ async def execute_sql_cell(
 
     # ---- execute query ---------------------------------------------
     try:
-        table = _execute_query(
+        table = await asyncio.to_thread(
+            _execute_query,
             adapter,
             runtime_spec,
             analysis,
@@ -471,7 +475,9 @@ async def _execute_write_cell(
                 )
 
     try:
-        stats = _execute_write_statements(adapter, runtime_spec, analysis.sql_body, namespace)
+        stats = await asyncio.to_thread(
+            _execute_write_statements, adapter, runtime_spec, analysis.sql_body, namespace
+        )
     except Exception as exc:  # noqa: BLE001
         return _error_result(f"SQL execution failed: {_exception_message(exc)}", start_time)
 
