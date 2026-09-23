@@ -10,7 +10,7 @@ import asyncio
 import inspect
 import json
 import logging
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Coroutine
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from functools import cache
@@ -2050,7 +2050,8 @@ async def execute_cell_exclusive(
     cell_id: str,
     notebook_id: str,
     mode: Literal["normal", "force", "rerun"] = "normal",
-    before_execute: Callable[[], None] | None = None,
+    operation: Callable[[NotebookExecutionState], Coroutine[Any, Any, CellExecutionResult | None]]
+    | None = None,
 ) -> CellExecutionResult | None:
     """Reserve → execute → release for the non-WS drivers (REST, MCP).
 
@@ -2069,15 +2070,15 @@ async def execute_cell_exclusive(
     if busy_cell is not None:
         raise NotebookBusyError(busy_cell)
 
-    # A caller that changes what the cell computes (a widget's control values)
-    # does it here and not before: a busy notebook rejects the request above,
-    # and a write made ahead of that would have changed the *next* run while
-    # the caller was told nothing happened.
-    if before_execute is not None:
-        before_execute()
-
+    # ``operation`` is for a caller whose run is more than the cell: a widget
+    # update writes its new control values and may chain the live cascade, and
+    # all of that belongs inside the reservation. A write made ahead of it
+    # would have changed the *next* run while the caller was told the notebook
+    # was busy and nothing had happened.
     task = asyncio.create_task(
-        execute_cell_and_broadcast(session, cell_id, execution_state, notebook_id, mode=mode),
+        operation(execution_state)
+        if operation is not None
+        else execute_cell_and_broadcast(session, cell_id, execution_state, notebook_id, mode=mode),
         name=f"notebook-exec-{notebook_id}-{cell_id}",
     )
     async with execution_state.control_lock:
@@ -3536,6 +3537,44 @@ async def _run_live_cascade(
             blocked.add(cid)
 
 
+async def apply_widget_values(
+    session: NotebookSession,
+    cell_id: str,
+    coerced: dict[str, Any],
+    execution_state: NotebookExecutionState,
+    notebook_id: str,
+) -> CellExecutionResult | None:
+    """Set a widget's controls and re-materialize it, chaining the live cascade.
+
+    The whole of what moving a slider does, so the WebSocket handler and the MCP
+    tool run the same code rather than two copies that drift: an agent's
+    ``set_widget_value`` used to skip the ``# @live`` cascade the browser got,
+    leaving the downstream stale while the docs said the two were the same act.
+
+    The caller must already hold the execution reservation. The values are
+    written here, inside it, so an update refused as busy leaves the stored
+    values exactly as they were: persisting before the busy check left a
+    rejected value on disk for the next materialization to pick up.
+    """
+    from strata.notebook.annotations import parse_annotations
+    from strata.notebook.runtime_state import persist_cell_widget_values
+
+    cell = session.notebook_state.get_cell(cell_id)
+    if cell is None:
+        return None
+    cell.widget_values = persist_cell_widget_values(session.path, cell_id, coerced)
+    # force = cache-off, no upstream materialization (widgets have none). The
+    # shared path broadcasts the widget's status and the downstream staleness.
+    result = await execute_cell_and_broadcast(
+        session, cell_id, execution_state, notebook_id, mode="force"
+    )
+    if parse_annotations(cell.source).live:
+        # Tier 1: the cost-gated auto-cascade re-runs the cheap downstream
+        # cells on the change instead of leaving them for a manual run.
+        await _run_live_cascade(session, cell_id, execution_state, notebook_id)
+    return result
+
+
 async def _handle_widget_update(
     websocket: WebSocket,
     session: NotebookSession,
@@ -3565,7 +3604,6 @@ async def _handle_widget_update(
         )
         return
 
-    from strata.notebook.runtime_state import persist_cell_widget_values
     from strata.notebook.widget_analyzer import analyze_widget_cell, coerce_widget_values
 
     coerced = coerce_widget_values(analyze_widget_cell(cell.source).descriptors, values)
@@ -3589,27 +3627,8 @@ async def _handle_widget_update(
         )
         return
 
-    from strata.notebook.annotations import parse_annotations
-
-    is_live = parse_annotations(cell.source).live
-
-    # Re-materialize the widget cell at the new values (force = cache-off, no
-    # upstream materialization — widgets have none). The shared path broadcasts
-    # the widget cell's status + the downstream staleness changes. When the cell
-    # is `# @live`, chain the cost-gated auto-cascade so cheap downstream cells
-    # re-run on the change (Tier 1) instead of waiting for a manual run.
     async def _operation() -> None:
-        # Write the new values only once this update owns the execution slot.
-        # Persisting before the busy check left a rejected update on disk: the
-        # run in flight finished at the old value, the reply said the notebook
-        # was busy, and the *next* materialization silently used the value the
-        # server had refused.
-        cell.widget_values = persist_cell_widget_values(session.path, cell_id, coerced)
-        await execute_cell_and_broadcast(
-            session, cell_id, execution_state, notebook_id, mode="force"
-        )
-        if is_live:
-            await _run_live_cascade(session, cell_id, execution_state, notebook_id)
+        await apply_widget_values(session, cell_id, coerced, execution_state, notebook_id)
 
     scheduled = await _schedule_execution(
         websocket, execution_state, notebook_id, cell_id, seq, _operation

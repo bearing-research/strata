@@ -122,10 +122,13 @@ A **widget cell** declares controls; what they are set to is runtime state,
 not source. Editing the cell therefore cannot change what the notebook
 computes, and reading the source cannot tell you what it is computing.
 `get_cell` reports a widget's `controls` with each one's kind, declared default
-and current `value`, and `set_widget_value(session_id, cell_id,
+and current `value` (the default itself, for a control nobody has moved, since
+that is what the cell runs at), and `set_widget_value(session_id, cell_id,
 {"utilization": 0.9})` sets them and re-materializes the cell, marking
-everything downstream stale. Send only the controls you are changing. A
-notebook that is mid-run refuses the call and leaves the stored values alone,
+everything downstream stale. On a [`# @live`](cells.md#live-mode) widget it
+runs the same cost-gated cascade a drag does, so the cheap downstream cells
+come back computed rather than stale. Send only the controls you are changing.
+A notebook that is mid-run refuses the call and leaves the stored values alone,
 so retry once that run finishes.
 
 `run_cell` modes match the UI and CLI: `normal` uses the cache and re-runs stale

@@ -133,7 +133,7 @@ async def execute_sql_cell(
         return _error_result(violation, start_time)
 
     # ---- bind params -----------------------------------------------
-    namespace, upstream_input_hashes = _load_upstream_variables(
+    namespace, upstream_input_hashes, input_refs = _load_upstream_variables(
         session, cell_id, analysis.references
     )
     try:
@@ -275,6 +275,10 @@ async def execute_sql_cell(
         provenance_hash=var_provenance,
         source_hash=provenance_hash,  # cell-level provenance for staleness
         source=source,
+        # The notebook variables this query bound, so the chain behind the
+        # result names them. A hash is not an artifact reference: without
+        # these the lineage walk stopped at the query itself.
+        input_versions=input_refs,
         extra_params=(
             {
                 PARAM_BASIS: basis,
@@ -414,7 +418,7 @@ async def _execute_write_cell(
     # Without these in provenance, an upstream variable change
     # wouldn't invalidate the write cell's cache and the seed would
     # silently use stale values.
-    namespace, upstream_input_hashes = _load_upstream_variables(
+    namespace, upstream_input_hashes, input_refs = _load_upstream_variables(
         session, cell_id, analysis.references
     )
     try:
@@ -486,6 +490,7 @@ async def _execute_write_cell(
         provenance_hash=var_provenance,
         source_hash=provenance_hash,
         source=source,
+        input_versions=input_refs,
     )
     uri = f"strata://artifact/{artifact.id}@v={artifact.version}"
 
@@ -884,18 +889,24 @@ def _load_upstream_variables(
     session: NotebookSession,
     cell_id: str,
     references: list[str],
-) -> tuple[dict[str, Any], dict[str, str]]:
-    """Load upstream variable values + per-variable artifact hashes.
+) -> tuple[dict[str, Any], dict[str, str], dict[str, str]]:
+    """Load upstream variable values, their artifact hashes, and their refs.
 
-    Returns (namespace, upstream_input_hashes). The hashes feed into
-    the provenance hash so a change in any referenced variable's
-    artifact invalidates this cell's cache.
+    Returns (namespace, upstream_input_hashes, input_refs). The hashes feed
+    into the provenance hash so a change in any referenced variable's artifact
+    invalidates this cell's cache. The refs are the same artifacts in the
+    ``{strata://artifact/<id>@v=<n>: <id>@v=<n>}`` form the lineage walk
+    follows: a hash identifies no artifact, so recording only hashes left a
+    bound variable out of the chain behind the result. A query reading
+    ``:minimum_amount`` from a widget came back as a single step, naming
+    nothing about the value it was run at.
     """
     namespace: dict[str, Any] = {}
     hashes: dict[str, str] = {}
+    refs: dict[str, str] = {}
     cell = next((c for c in session.notebook_state.cells if c.id == cell_id), None)
     if cell is None:
-        return namespace, hashes
+        return namespace, hashes, refs
 
     artifact_mgr = session.get_artifact_manager()
     notebook_id = session.notebook_state.id
@@ -916,11 +927,13 @@ def _load_upstream_variables(
             if artifact is None:
                 continue
             hashes[var_name] = artifact.provenance_hash
+            ref = f"{canonical_id}@v={artifact.version}"
+            refs[f"strata://artifact/{ref}"] = ref
             blob = artifact_mgr.load_artifact_data(canonical_id, artifact.version)
             content_type = _content_type_of(artifact)
             namespace[var_name] = _deserialize_blob(blob, content_type)
 
-    return namespace, hashes
+    return namespace, hashes, refs
 
 
 def _content_type_of(artifact: Any) -> str:
