@@ -2338,10 +2338,13 @@ their agreement before calling <code>publish</code>. Withdrawing is
 not source. Editing the cell therefore cannot change what the notebook
 computes, and reading the source cannot tell you what it is computing.
 <code>get_cell</code> reports a widget's <code>controls</code> with each one's kind, declared default
-and current <code>value</code>, and <code>set_widget_value(session_id, cell_id,
+and current <code>value</code> (the default itself, for a control nobody has moved, since
+that is what the cell runs at), and <code>set_widget_value(session_id, cell_id,
 {"utilization": 0.9})</code> sets them and re-materializes the cell, marking
-everything downstream stale. Send only the controls you are changing. A
-notebook that is mid-run refuses the call and leaves the stored values alone,
+everything downstream stale. On a <a href="../cells/#live-mode"><code># @live</code></a> widget it
+runs the same cost-gated cascade a drag does, so the cheap downstream cells
+come back computed rather than stale. Send only the controls you are changing.
+A notebook that is mid-run refuses the call and leaves the stored values alone,
 so retry once that run finishes.</p>
 <p><code>run_cell</code> modes match the UI and CLI: <code>normal</code> uses the cache and re-runs stale
 upstreams first; <code>rerun</code> bypasses the target's cache but still refreshes
