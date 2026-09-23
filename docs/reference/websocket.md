@@ -41,7 +41,7 @@ All messages are JSON with this shape:
 | `cell_execute_cascade` | `{ "cell_id": "...", "plan_id": "..." }` | Confirm cascade execution                                   |
 | `cell_execute_force`   | `{ "cell_id": "..." }`                   | Run cell ignoring staleness (no upstream materialization)   |
 | `cell_execute_rerun`   | `{ "cell_id": "..." }`                   | Force re-execute target cell while cascading upstream rebuilds |
-| `cell_cancel`          | `{ "cell_id": "..." }`                   | Cancel running cell                                         |
+| `cell_cancel`          | `{ "cell_id": "..." }`                   | Cancel running cell (see [Cancelling a SQL cell](#cancelling-a-sql-cell)) |
 | `notebook_run_all`     | `{ "continue_on_error": true }`          | Run all cells in topological order (default continues on error) |
 | `notebook_rerun_all`   | `{ "continue_on_error": true }`          | Re-execute every cell with cache off                        |
 
@@ -190,6 +190,15 @@ Disconnects happen - proxy timeouts, network drops, server restarts, tab sleep. 
 4. **Client replaces local state** with the synced payload and resumes listening.
 
 There is **no replay** of missed messages - events emitted while the client was disconnected are lost. State persisted to the artifact store (`cell_output`, finished cell statuses) is recovered via `notebook_sync`; transient progress events (`cell_console` mid-stream, `cell_output_delta` for a streaming prompt cell, `cell_iteration_progress` for a `@loop` cell, `cell_variant_progress` for a `# @per_variant` fan-out cell, `cascade_progress`) are not.
+
+### Cancelling a SQL cell
+
+A cancel stops the notebook waiting for the cell: the run is abandoned, no
+result is published, the cell leaves `running`, and the next cell can start.
+The query itself keeps going in the database until it finishes, because ADBC
+exposes cancellation per driver and several drivers (SQLite among them) answer
+`NOT_IMPLEMENTED`. So a cancelled long query still costs the database what it
+was going to cost; what it no longer costs is the notebook.
 
 ### Cancel-on-disconnect grace window
 

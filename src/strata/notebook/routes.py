@@ -4315,7 +4315,7 @@ async def run_agent(notebook_id: str, session: SessionDep, req: AgentRequest) ->
 
     async def _progress(event_type: str, payload: dict[str, Any]) -> None:
         """Translate a structured agent event into the right WS message."""
-        from strata.notebook.ws import _broadcast_message
+        from strata.notebook.ws import _broadcast_message, next_notebook_sequence
 
         ts = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
         try:
@@ -4324,7 +4324,7 @@ async def run_agent(notebook_id: str, session: SessionDep, req: AgentRequest) ->
                     notebook_id,
                     {
                         "type": MessageType.AGENT_TEXT_DELTA,
-                        "seq": 0,
+                        "seq": next_notebook_sequence(notebook_id),
                         "ts": ts,
                         "payload": {"job_id": job_id, "text": payload.get("text", "")},
                     },
@@ -4335,7 +4335,7 @@ async def run_agent(notebook_id: str, session: SessionDep, req: AgentRequest) ->
                     notebook_id,
                     {
                         "type": MessageType.AGENT_CONFIRM_REQUEST,
-                        "seq": 0,
+                        "seq": next_notebook_sequence(notebook_id),
                         "ts": ts,
                         "payload": {**payload, "job_id": job_id},
                     },
@@ -4345,7 +4345,7 @@ async def run_agent(notebook_id: str, session: SessionDep, req: AgentRequest) ->
                 notebook_id,
                 {
                     "type": MessageType.AGENT_PROGRESS,
-                    "seq": 0,
+                    "seq": next_notebook_sequence(notebook_id),
                     "ts": ts,
                     "payload": {
                         "event": event_type,
@@ -4359,7 +4359,11 @@ async def run_agent(notebook_id: str, session: SessionDep, req: AgentRequest) ->
             pass
 
     async def _run_agent_task() -> None:
-        from strata.notebook.ws import _broadcast_message, broadcast_notebook_sync
+        from strata.notebook.ws import (
+            _broadcast_message,
+            broadcast_notebook_sync,
+            next_notebook_sequence,
+        )
 
         try:
             result = await run_agent_loop(
@@ -4378,7 +4382,7 @@ async def run_agent(notebook_id: str, session: SessionDep, req: AgentRequest) ->
                 notebook_id,
                 {
                     "type": MessageType.AGENT_DONE,
-                    "seq": 0,
+                    "seq": next_notebook_sequence(notebook_id),
                     "ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
                     "payload": {
                         "job_id": job_id,
@@ -4410,7 +4414,7 @@ async def run_agent(notebook_id: str, session: SessionDep, req: AgentRequest) ->
                     notebook_id,
                     {
                         "type": MessageType.AGENT_DONE,
-                        "seq": 0,
+                        "seq": next_notebook_sequence(notebook_id),
                         "ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
                         "payload": {
                             "job_id": job_id,
