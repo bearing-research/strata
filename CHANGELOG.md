@@ -275,6 +275,25 @@ environment pinned below them has to move before it can install 0.8.0.
   cell's provenance and outputs but not the selection behind them, so an
   imported copy fell back to each control's default and recomputed a different
   scenario than the bundle was taken from.
+- **A query holds the database, not the server.** A SQL cell ran its driver
+  work on the event loop, so for as long as a query lasted nothing else on the
+  server was served and a cancel could not be delivered until the query it
+  meant to stop had finished on its own, at which point the run published its
+  result anyway. The query, the freshness probes and the write path now run off
+  the loop: a cancel lands at once, the run is abandoned without publishing,
+  and the next cell can start. The query itself keeps running in the database,
+  because ADBC exposes cancellation per driver and several answer
+  `NOT_IMPLEMENTED`; the protocol reference now says what a cancel does and
+  does not stop. A SQL cell that failed while being materialized for a
+  consumer also says so now, rather than staying `idle` with its last
+  successful table showing, and a repaired query no longer comes back green
+  still carrying the error before it.
+- **Every frame the server sends carries its own sequence number.** The
+  protocol reference promises one counter that increments on every outbound
+  message and tells clients to deduplicate on it, but a batch of staleness
+  frames shared one number and both a sync reply and an agent note were fixed
+  at 0. A client following that advice dropped legitimate frames, including the
+  status saying a cell had finished.
 - **A SQL cell's result is a display like any other.** The table was the one
   display in the notebook backed by no artifact, and everything built on that
   record went wrong with it: a SQL cell reached as an upstream sat at `idle`
