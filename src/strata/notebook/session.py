@@ -1230,6 +1230,14 @@ class NotebookSession:
                 # and clears the error), the failure is the truth about it.
                 cell.status = CellStatus.ERROR
                 cell.cache_hit = False
+                # And say so in the map, not only on the cell. The map is what
+                # the WebSocket broadcasts from, so overriding one and not the
+                # other told an attached client `idle` for a cell this call
+                # had just decided was failed: a viewer applying deltas kept
+                # the old table until it resynced, while every other reader of
+                # the session saw the error.
+                cell.staleness = CellStaleness(status=CellStatus.ERROR, reasons=staleness.reasons)
+                staleness_map[cell.id] = cell.staleness
                 continue
             cell.status = staleness.status
             if staleness.status != CellStatus.READY:

@@ -532,6 +532,38 @@ async def _execute_write_cell(
     }
 
 
+def _split_statements(body: str, dialect: str) -> list[str]:
+    """The body's statements, sliced out of the text the cell declares.
+
+    Split on the tokenizer's semicolons rather than regenerated from the parse
+    tree. sqlglot's generator does not round-trip every construct: a named
+    recursive CTE came back as ``WITH RECURSIVE counter AS (VALUES (0) ...)``,
+    with the ``(n)`` column list dropped, and SQLite then refused the statement
+    with "no such column: n". A rewritten statement is not the one the cell
+    declares, and for a write cell that difference lands in the database.
+
+    Returns ``[]`` when the body cannot be tokenized, which the caller reads as
+    "run it whole".
+    """
+    import sqlglot
+    from sqlglot.tokens import TokenType
+
+    try:
+        tokens = sqlglot.tokenize(body, read=dialect)
+    except Exception:  # noqa: BLE001 - any tokenizer failure means "run it whole"
+        return []
+
+    statements: list[str] = []
+    start = 0
+    cuts = [token.start for token in tokens if token.token_type is TokenType.SEMICOLON]
+    for cut in [*cuts, len(body)]:
+        statement = body[start:cut].strip()
+        if statement:
+            statements.append(statement)
+        start = cut + 1
+    return statements
+
+
 def _execute_write_statements(
     adapter: DriverAdapter,
     spec: ConnectionSpec,
@@ -572,20 +604,21 @@ def _execute_write_statements(
     from strata.notebook.sql.analyzer import _extract_placeholder_positions
 
     parsed = [s for s in sqlglot.parse(body, dialect=adapter.sqlglot_dialect) if s]
-    if not parsed:
-        # sqlglot returned no statements — treat the whole body as a
-        # single opaque statement (covers vendor-specific syntax we
-        # can't fully parse). Placeholders still get extracted via
-        # the regex path so :name bindings keep working.
-        prepared = [(body, _statement_kind_from_text(body))]
+    texts = _split_statements(body, adapter.sqlglot_dialect)
+    if texts and len(texts) == len(parsed):
+        # The statement as written, with the parse used only to say what kind
+        # of statement it is.
+        prepared = list(zip(texts, (_statement_kind_from_expr(stmt) for stmt in parsed)))
+    elif texts:
+        # Split but not parsed one-to-one: still run what the cell says, and
+        # fall back to reading the kind off the text.
+        prepared = [(text, _statement_kind_from_text(text)) for text in texts]
     else:
-        prepared = [
-            (
-                stmt.sql(dialect=adapter.sqlglot_dialect, comments=False),
-                _statement_kind_from_expr(stmt),
-            )
-            for stmt in parsed
-        ]
+        # Nothing tokenized: treat the whole body as a single opaque
+        # statement (covers vendor-specific syntax we can't parse).
+        # Placeholders still get extracted via the regex path so :name
+        # bindings keep working.
+        prepared = [(body, _statement_kind_from_text(body))]
 
     statements: list[dict[str, Any]] = []
     conn = adapter.open(spec, read_only=False)
