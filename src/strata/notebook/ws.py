@@ -869,7 +869,7 @@ async def notebook_websocket(websocket: WebSocket, notebook_id: str):
                     _json_encode(
                         _make_message(
                             MessageType.ERROR,
-                            execution_state.sequence,
+                            execution_state.next_sequence(),
                             error_payload(f"Unknown message type: {msg_type}"),
                         )
                     )
@@ -884,7 +884,7 @@ async def notebook_websocket(websocket: WebSocket, notebook_id: str):
                     _json_encode(
                         _make_message(
                             MessageType.ERROR,
-                            execution_state.sequence,
+                            execution_state.next_sequence(),
                             error_payload(scope_error, code="insufficient_scope"),
                         )
                     )
@@ -895,7 +895,7 @@ async def notebook_websocket(websocket: WebSocket, notebook_id: str):
                     _json_encode(
                         _make_message(
                             MessageType.ERROR,
-                            execution_state.sequence,
+                            execution_state.next_sequence(),
                             error_payload(
                                 f"'{msg_type}' is not allowed in read-only app view",
                                 code="read_only",
@@ -946,7 +946,9 @@ async def _handle_cell_execute(
         await websocket.send_text(
             _json_encode(
                 _make_message(
-                    MessageType.ERROR, execution_state.sequence, error_payload("Missing cell_id")
+                    MessageType.ERROR,
+                    execution_state.next_sequence(),
+                    error_payload("Missing cell_id"),
                 )
             )
         )
@@ -1230,7 +1232,7 @@ async def _handle_cell_execute_cascade(
             _json_encode(
                 _make_message(
                     MessageType.ERROR,
-                    execution_state.sequence,
+                    execution_state.next_sequence(),
                     error_payload("Missing cell_id or plan_id"),
                 )
             )
@@ -1308,7 +1310,9 @@ async def _handle_cell_execute_force(
         await websocket.send_text(
             _json_encode(
                 _make_message(
-                    MessageType.ERROR, execution_state.sequence, error_payload("Missing cell_id")
+                    MessageType.ERROR,
+                    execution_state.next_sequence(),
+                    error_payload("Missing cell_id"),
                 )
             )
         )
@@ -1375,7 +1379,9 @@ async def _handle_cell_execute_rerun(
         await websocket.send_text(
             _json_encode(
                 _make_message(
-                    MessageType.ERROR, execution_state.sequence, error_payload("Missing cell_id")
+                    MessageType.ERROR,
+                    execution_state.next_sequence(),
+                    error_payload("Missing cell_id"),
                 )
             )
         )
@@ -1644,7 +1650,7 @@ async def _handle_cell_source_update(
             _json_encode(
                 _make_message(
                     MessageType.ERROR,
-                    execution_state.sequence,
+                    execution_state.next_sequence(),
                     error_payload("Missing cell_id or source"),
                 )
             )
@@ -1656,7 +1662,7 @@ async def _handle_cell_source_update(
             _json_encode(
                 _make_message(
                     MessageType.ERROR,
-                    execution_state.sequence,
+                    execution_state.next_sequence(),
                     error_payload("Cell source exceeds 1MB limit"),
                 )
             )
@@ -1680,7 +1686,7 @@ async def _handle_cell_source_update(
             _json_encode(
                 _make_message(
                     MessageType.ERROR,
-                    execution_state.sequence,
+                    execution_state.next_sequence(),
                     error_payload(
                         f"Cannot update cell {cell_id} while it is executing; "
                         "retry after cell finishes",
@@ -1700,7 +1706,7 @@ async def _handle_cell_source_update(
             _json_encode(
                 _make_message(
                     MessageType.ERROR,
-                    execution_state.sequence,
+                    execution_state.next_sequence(),
                     error_payload(
                         f"{held_by} changed cell {cell_id} moments ago; "
                         "resend with force to take it over",
@@ -1824,7 +1830,7 @@ async def _handle_variant_set_active(
             _json_encode(
                 _make_message(
                     MessageType.ERROR,
-                    execution_state.sequence,
+                    execution_state.next_sequence(),
                     error_payload("Missing group or name"),
                 )
             )
@@ -1922,7 +1928,9 @@ async def _handle_variant_add(
         await websocket.send_text(
             _json_encode(
                 _make_message(
-                    MessageType.ERROR, execution_state.sequence, error_payload("Missing group")
+                    MessageType.ERROR,
+                    execution_state.next_sequence(),
+                    error_payload("Missing group"),
                 )
             )
         )
@@ -3433,11 +3441,18 @@ async def broadcast_presence(notebook_id: str, session: NotebookSession) -> None
     if not connections:
         return
     principals = session.presence.snapshot()
+    # One sequence for the update, not the counter's current value. Reusing it
+    # made two presence changes carry the number of whatever was sent before
+    # them, and a client deduping on `seq` as the reference tells it to threw
+    # both away. Allocated once rather than per recipient: the frames differ
+    # only in `you`, and one number each would leave every client's stream
+    # with a gap the size of the audience.
+    seq = next_notebook_sequence(notebook_id)
     for ws in list(connections):
         you = session.presence.principal_of(ws) or resolve_author()
         message = _make_message(
             MessageType.PRESENCE,
-            _ensure_execution_state(notebook_id).sequence,
+            seq,
             PresencePayload.model_validate({"principals": principals, "you": you}).model_dump(
                 mode="json"
             ),
@@ -3619,13 +3634,15 @@ async def _handle_widget_update(
     cell_id = payload.get("cell_id")
     values = payload.get("values")
     if not cell_id or not isinstance(values, dict):
-        await _send_error_message(websocket, execution_state.sequence, "Missing cell_id or values")
+        await _send_error_message(
+            websocket, execution_state.next_sequence(), "Missing cell_id or values"
+        )
         return
 
     cell = session.notebook_state.get_cell(cell_id)
     if cell is None or cell.language != CellLanguage.WIDGET:
         await _send_error_message(
-            websocket, execution_state.sequence, f"Cell {cell_id} is not a widget cell"
+            websocket, execution_state.next_sequence(), f"Cell {cell_id} is not a widget cell"
         )
         return
 
@@ -3634,7 +3651,7 @@ async def _handle_widget_update(
     coerced = coerce_widget_values(analyze_widget_cell(cell.source).descriptors, values)
     if not coerced:
         await _send_error_message(
-            websocket, execution_state.sequence, "No valid widget values in update"
+            websocket, execution_state.next_sequence(), "No valid widget values in update"
         )
         return
 
