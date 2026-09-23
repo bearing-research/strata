@@ -275,6 +275,20 @@ environment pinned below them has to move before it can install 0.8.0.
   cell's provenance and outputs but not the selection behind them, so an
   imported copy fell back to each control's default and recomputed a different
   scenario than the bundle was taken from.
+- **A watching client is told what every other reader is told.** A SQL cell
+  that failed while being materialized for a consumer recorded its error, and
+  the MCP view, a sync and an export all reported it; only the live stream said
+  `idle`, because the override that makes a standing failure win was applied to
+  the cell and not to the state the WebSocket broadcasts from. A viewer
+  applying updates kept the table from before the failure until it resynced.
+  Presence frames also reused the sequence of whatever was sent before them,
+  which a client deduplicating on that number, as the reference tells it to,
+  reads as nothing having happened.
+- **A write cell runs the statement it declares.** Each statement was
+  regenerated from its parse tree before being executed, and that is not always
+  the statement the cell contains: a named recursive CTE lost its column list,
+  so `counter(n)` reached the database as `counter` and was refused. Statements
+  are now taken from the cell's own text.
 - **A query holds the database, not the server.** A SQL cell ran its driver
   work on the event loop, so for as long as a query lasted nothing else on the
   server was served and a cancel could not be delivered until the query it
