@@ -275,6 +275,18 @@ environment pinned below them has to move before it can install 0.8.0.
   cell's provenance and outputs but not the selection behind them, so an
   imported copy fell back to each control's default and recomputed a different
   scenario than the bundle was taken from.
+- **A failed Run All publishes nothing built on the failure.** Continuing past a
+  failed cell ran every cell after it without refreshing what it read, so a
+  cell downstream of the failure used the results from before it and reported
+  a fresh success; a cell with side effects would have run them. Cells the
+  failure reached are now skipped and say they did not run because something
+  they read from failed, while cells it did not reach run as normal. A cell
+  that reads two broken cells now reports both in one run, rather than naming
+  one and leaving the other for the next attempt to find.
+- **A cell that recovers stops showing its old error.** Fixing a broken cell and
+  running something downstream of it told a client only that the cell was
+  ready, and a client kept showing the error it had been sent over a result
+  that was no longer wrong. The cell now sends the result that replaces it.
 - **Every cell a broken chain passed through says what happened.** A chain
   fails more than once: the cell that breaks, and each consumer that could not
   run without it. Only the last one seen was reported, so a client running the
