@@ -2065,7 +2065,7 @@ async def test_final_output_seq_is_newer_than_streamed_deltas(notebook_session, 
         def __init__(self, session, warm_pool=None):
             self.on_iteration_complete = None
             self.on_prompt_delta = None
-            self.failed_upstream = None
+            self.failed_upstreams = {}
 
         async def execute_cell(self, cell_id, source):
             assert self.on_prompt_delta is not None
@@ -2371,9 +2371,9 @@ class _GatedStubExecutor:
     def __init__(self, session, warm_pool=None):
         self.on_iteration_complete = None
         self.on_prompt_delta = None
-        # The real executor records the upstream whose failure stopped a run;
-        # the caller reads it to tell a client about that cell.
-        self.failed_upstream = None
+        # The real executor records the upstreams whose failures stopped a
+        # run; the caller reads them to tell a client about those cells.
+        self.failed_upstreams = {}
 
     async def execute_cell(self, cell_id, source):
         from strata.notebook.executor import CellExecutionResult

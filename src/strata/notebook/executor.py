@@ -610,11 +610,17 @@ class CellExecutor:
         # execute_cell() recursive tree. Each top-level call creates a fresh
         # CellExecutor, so the guard resets between independent executions.
         self._materializing: set[str] = set()
-        # The upstream whose failure stopped this run, with the result it
-        # failed with, so the caller can tell a watching client what happened
-        # to *that* cell and not only to the one that was asked for. Only the
-        # code that saw the failure holds everything it knows about it.
-        self.failed_upstream: tuple[str, CellExecutionResult] | None = None
+        # Every upstream this run found broken, with the result each failed
+        # with, so the caller can tell a watching client what happened to those
+        # cells and not only to the one that was asked for. Only the code that
+        # saw a failure holds everything known about it.
+        #
+        # A chain fails more than once: the cell that broke raises, its
+        # consumer returns a failed result, and the materialization above sees
+        # that too. Each is a cell showing a stale result to somebody, so each
+        # is recorded. In recording order, which is innermost first, so what
+        # broke is announced before what it broke.
+        self.failed_upstreams: dict[str, CellExecutionResult] = {}
         # What each cell's execution returned within the current multi-cell
         # run, when one is open (see ``one_run``). ``None`` outside a run,
         # which is every standalone single-cell execution, so their semantics
@@ -4122,7 +4128,9 @@ class CellExecutor:
         from strata.notebook.routes import _get_llm_config
 
         if materialize_upstreams:
-            await self._materialize_upstreams(cell_id)
+            failure = await self._materialize_upstreams_or_failure(cell_id, start_time, "prompt")
+            if failure is not None:
+                return failure
 
         llm_config = _get_llm_config(self.session)
         if llm_config is None:
@@ -4200,7 +4208,9 @@ class CellExecutor:
         from strata.notebook.sql.cell_executor import execute_sql_cell
 
         if materialize_upstreams:
-            await self._materialize_upstreams(cell_id)
+            failure = await self._materialize_upstreams_or_failure(cell_id, start_time, "sql")
+            if failure is not None:
+                return failure
 
         result_dict = await execute_sql_cell(
             self.session,
@@ -4354,6 +4364,33 @@ class CellExecutor:
     # ① Materialise upstream cells
     # ------------------------------------------------------------------
 
+    async def _materialize_upstreams_or_failure(
+        self, cell_id: str, start_time: float, execution_method: str
+    ) -> CellExecutionResult | None:
+        """Materialize the upstreams, or hand the failure back as this cell's result.
+
+        The Python and R paths already turn a broken upstream into a failed
+        result, through the same ``except`` that catches everything else they
+        can raise. SQL, prompt and loop cells let the error out instead, and an
+        escaping exception skips the bookkeeping a returned result goes
+        through: the cell was left unrecorded, so a chain broken through one of
+        them announced neither that cell nor the one further up that actually
+        broke.
+        """
+        try:
+            await self._materialize_upstreams(cell_id)
+        except Exception as exc:  # noqa: BLE001 - reported as this cell's failure
+            result = CellExecutionResult(
+                cell_id=cell_id,
+                success=False,
+                error=str(exc),
+                duration_ms=int((time.time() - start_time) * 1000),
+                execution_method=execution_method,
+            )
+            self.session.apply_execution_result_metadata(cell_id, result)
+            return result
+        return None
+
     async def _materialize_upstreams(self, cell_id: str) -> None:
         """Ensure every upstream variable has a *current* artifact.
 
@@ -4394,7 +4431,7 @@ class CellExecutor:
                 # output, in the language wrapper, the same as a direct run --
                 # which is what makes it read as `error` here rather than as a
                 # cell that never ran.
-                self.failed_upstream = (upstream_id, result)
+                self.failed_upstreams.setdefault(upstream_id, result)
                 raise RuntimeError(
                     f"Failed to materialise upstream cell {upstream_id}: {result.error}"
                 )
@@ -5420,7 +5457,9 @@ class CellExecutor:
             )
 
         if materialize_upstreams:
-            await self._materialize_upstreams(cell_id)
+            failure = await self._materialize_upstreams_or_failure(cell_id, start_time, "loop")
+            if failure is not None:
+                return failure
 
         if annotations.datasets:
             return CellExecutionResult(
