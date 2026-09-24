@@ -12,34 +12,56 @@ cheaper approaches do pay off:
   invariants depend on (pruning soundness, cache-key injectivity), using
   SMT solvers or property-based tests.
 
-As a proof of concept, one TLA+ model (under 200 lines) of the artifact
-lifecycle found two real bugs in about a second. A review of the
-assumptions behind the pruning and cache-key invariants found two more.
-All four reproduce against the real code (`replay_counterexamples.py`).
+As a proof of concept, two TLA+ models of 190–260 lines each found
+five real bugs, each in about a second of model checking:
+
+- The **artifact lifecycle** model found findings 1–2.
+- The **build lease protocol** model found findings 5–7.
+
+A review of the assumptions behind the pruning and cache-key invariants
+found two more (findings 3–4). All seven reproduce against the real code
+(`uv run pytest formal/`).
 
 ## What's here
 
 | File | Purpose |
 | --- | --- |
 | `tla/ArtifactLifecycle.tla` | Model of `artifact_versions`: create, write blob, fail, `finalize_artifact`, `force_finalize_canonical`, `garbage_collect` |
-| `tla/GC_Rebuild.cfg` | One id with GC on. Finds finding 1 |
-| `tla/CrossIdDedup.cfg` | Two ids sharing a provenance, GC off. Finds finding 2 |
-| `tla/Patched.cfg` | Both ids, GC on, with the proposed fix. **All invariants hold** (5,997,420 distinct states, exhaustive, about 2 min) |
-| `replay_counterexamples.py` | Runs each counterexample against the real `ArtifactStore` / `ReadPlanner` / `CacheKey` |
+| `tla/Artifact_GCRebuild.cfg` | One id with GC on. Finds finding 1 |
+| `tla/Artifact_CrossIdDedup.cfg` | Two ids sharing a provenance, GC off. Finds finding 2 |
+| `tla/Artifact_Patched.cfg` | Both ids, GC on, with the proposed fix. **All invariants hold** (5,997,420 distinct states, exhaustive, about 2 min) |
+| `tla/BuildLease.tla` | Model of one build and its lease: `BuildRunner` claim / reclaim / heartbeat / publish / finalize / complete / fail, and the v2 pull routes (manifest, upload, finalize) |
+| `tla/Build_RunnerPath.cfg` | Two runners, lease can expire mid-build. Finds findings 5 and 6 |
+| `tla/Build_PullPath.cfg` | Two executors fetch the same build's manifest. Finds finding 7 |
+| `tla/Build_Patched.cfg` | Runners and executors with the proposed fix. **All invariants hold** (exhaustive) |
+| `test_artifact_counterexamples.py` | Findings 1–4 against the real `ArtifactStore` / `ReadPlanner` / `CacheKey` |
+| `test_build_runner_counterexamples.py` | Findings 5–6 against two real `BuildRunner`s (only the executor HTTP call is stubbed) |
+| `test_build_pull_counterexamples.py` | Finding 7 through the real HTTP routes (`TestClient`) |
+
+Each `test_*` file **passes while its bug exists**, because it asserts
+the violating outcome. When a fix lands, invert its assertion and move
+it into `tests/` as a regression test. `formal/` sits outside
+`testpaths`, so the normal `uv run pytest` does not run these.
 
 ```bash
 curl -sSLO https://github.com/tlaplus/tlaplus/releases/latest/download/tla2tools.jar
 cd formal/tla
-java -cp ../../tla2tools.jar tlc2.TLC -config GC_Rebuild.cfg   -deadlock ArtifactLifecycle.tla   # violation
-java -cp ../../tla2tools.jar tlc2.TLC -config CrossIdDedup.cfg -deadlock ArtifactLifecycle.tla   # violation
-java -cp ../../tla2tools.jar tlc2.TLC -config Patched.cfg      -deadlock -workers auto ArtifactLifecycle.tla  # passes
-cd ../.. && uv run python formal/replay_counterexamples.py
+TLC="java -cp ../../tla2tools.jar tlc2.TLC -deadlock -workers auto"
+$TLC -config Artifact_GCRebuild.cfg    ArtifactLifecycle.tla   # violation
+$TLC -config Artifact_CrossIdDedup.cfg ArtifactLifecycle.tla   # violation
+$TLC -config Artifact_Patched.cfg      ArtifactLifecycle.tla   # passes
+$TLC -config Build_RunnerPath.cfg      BuildLease.tla          # violation
+$TLC -config Build_PullPath.cfg        BuildLease.tla          # violation
+$TLC -config Build_Patched.cfg         BuildLease.tla          # passes
+cd ../.. && uv run pytest formal/ -v
 ```
 
-`-deadlock` disables deadlock checking, because a bounded model with
-every version slot used has no enabled action. That is expected, not a bug.
+`-deadlock` disables deadlock checking, because a bounded model that
+has used every version or lease epoch has no enabled action. That is
+expected, not a bug. TLC stops at the first violated invariant. To see a
+particular one, list only that invariant in the config's `INVARIANTS` line.
 
-## The model
+## Model 1: artifact lifecycle
 
 Each SQL transaction is one atomic TLA+ action. The notebook write path
 (`artifact_integration.store_cell_output`) is **two** transactions,
@@ -58,8 +80,6 @@ Invariants checked:
   `get_latest_version(id)` keeps returning one. Notebook cells load their
   inputs this way (`executor._load_input_blobs`), and a `None` silently
   leaves the variable out of the downstream cell's namespace. **Violated.**
-
-## Findings
 
 ### 1. GC deletes a notebook's current value while a rebuild is in flight
 
@@ -102,6 +122,36 @@ A@v1 ready (prov p) → B@v1 finalize → deduped, failed → force_finalize_can
 Running A again restores A and strands B, so the two notebooks keep
 invalidating each other.
 
+### Proposed fix for 1 and 2 (verified in the model)
+
+`Patched = TRUE` in the spec:
+
+1. `get_latest_version` treats `superseded` as current along with `ready`.
+   A superseded row is already defined as "still fetchable by id+version,
+   excluded only from provenance lookups", so this fits its meaning, and a
+   refresh rebuild still resolves to the newer `ready` version because its
+   version number is higher.
+2. `garbage_collect` additionally skips each id's latest current
+   (`ready`/`superseded`) version. It **must keep** the existing
+   `MAX(version)` rule as well. An earlier draft of this patch dropped
+   that rule, and TLC found a new 11-step bug: deleting the highest row
+   lets `create_artifact` (`MAX(version)+1`) reuse its version number,
+   and a still-pending `force_finalize_canonical` for the old row then
+   promotes the new row, which has no blob, to `ready`. This is the kind
+   of interleaving that is hard to find by reading or testing.
+
+With both changes, TLC exhaustively checks all four invariants for 2 ids,
+2 provenances and 3 versions per id. The other callers of
+`get_latest_version` (names, registry, CLI) need to be checked before
+change 1 ships. If any of them relies on "ready only", add a separate
+`get_current_version` for the notebook instead.
+
+## Assumption checks: data plane
+
+These two are not model-checking results. They came from asking what
+the pure functions behind invariants 1 and 2 assume, then testing each
+assumption.
+
 ### 3. `!=` pruning drops NaN rows (pruning soundness)
 
 `Filter.matches_stats` is sound only if `[min, max]` bounds every value
@@ -132,37 +182,132 @@ Suggested fix: hash a length-prefixed or JSON encoding (for example
 `json.dumps(columns)`). This changes every projection cache key once,
 which is safe because the cache is content-addressed and simply refills.
 
-## Proposed fix for 1 and 2 (verified in the model)
+## Model 2: build lease protocol
 
-`Patched = TRUE` in the spec:
+`BuildLease.tla` models one transform build and the lease that is
+supposed to guarantee a single writer. It covers two ways the build can
+be executed:
 
-1. `get_latest_version` treats `superseded` as current along with `ready`.
-   A superseded row is already defined as "still fetchable by id+version,
-   excluded only from provenance lookups", so this fits its meaning, and a
-   refresh rebuild still resolves to the newer `ready` version because its
-   version number is higher.
-2. `garbage_collect` additionally skips each id's latest current
-   (`ready`/`superseded`) version. It **must keep** the existing
-   `MAX(version)` rule as well. An earlier draft of this patch dropped
-   that rule, and TLC found a new 11-step bug: deleting the highest row
-   lets `create_artifact` (`MAX(version)+1`) reuse its version number,
-   and a still-pending `force_finalize_canonical` for the old row then
-   promotes the new row, which has no blob, to `ready`. This is the kind
-   of interleaving that is hard to find by reading or testing.
+- **Runners**, in-process `BuildRunner._execute_build`: claim or reclaim
+  a lease, renew it from the heartbeat loop, `publish_blob_from_path`,
+  `finalize_artifact`, `complete_build(lease_owner=me)`, and on error
+  `fail_build` + `fail_artifact`.
+- **Executors**, the v2 pull routes: `GET …/manifest` claims or renews
+  the lease as `external:manifest` and mints the signed URLs plus a lease
+  token; `POST /v1/artifacts/upload` writes the blob; `POST …/finalize`
+  checks the lease token, runs `finalize_and_set_name`, then
+  `complete_build`.
 
-With both changes, TLC exhaustively checks all four invariants for 2 ids,
-2 provenances and 3 versions per id. The other callers of
-`get_latest_version` (names, registry, CLI) need to be checked before
-change 1 ships. If any of them relies on "ready only", add a separate
-`get_current_version` for the notebook instead.
+A lease token is modelled as a lease *epoch*: every claim, reclaim and
+manifest re-fetch changes `(lease_owner, lease_expires_at)`. A runner's
+lease may expire at any moment, which stands in for a GC pause, a blocked
+event loop, or a database outage longer than the lease. Blob bytes are
+modelled as "which attempt wrote them".
+
+Invariants:
+
+- `ReadyBuildHasArtifact`: a completed build has a ready artifact. **Holds.**
+- `ReadyBytesStable`: a ready artifact's bytes never change, so they always
+  match the digest recorded at finalize (what `verify_artifacts` checks). **Violated.**
+- `NoStaleBytesPublished`: the bytes that get published come from the
+  attempt that passed the fence. **Violated.**
+- `OnlyLeaseHolderFails`: only the attempt holding the lease can fail the
+  build or its artifact. **Violated.**
+
+Findings 5–7 matter most when two attempts produce different bytes: a
+nondeterministic transform, `now()`, sampling, a moving input, or a
+different executor version. For a byte-identical transform, findings 5
+and 7 are harmless, but finding 6 is not.
+
+### 5. A runner that lost its lease still publishes, and the winner rewrites a ready artifact
+
+`complete_build` is the only step fenced on the lease, and
+`publish_blob_from_path` and `finalize_artifact` both run before it. So
+a runner whose lease was reclaimed still writes its bytes and makes them
+the **ready** artifact, with their digest recorded. Only afterwards is it
+told it lost ("discarding the result", which by then is too late). The
+rightful owner then writes its own bytes to the same `(artifact_id,
+version)` key. `finalize_artifact` treats the artifact as already ready
+and does nothing. The result is a ready artifact whose bytes changed
+under readers and no longer match the recorded digest
+(`verify_artifacts` reports `digest_mismatch`). TLC trace (6 steps):
+
+```
+r1 claim → lease expires → r1 publish → r1 finalize (ready, digest=r1)
+→ r2 reclaim → r2 publish            ⇒ ready bytes are now r2's
+```
+
+The replay runs two real `BuildRunner`s and stubs only the executor
+HTTP call.
+
+### 6. A runner that lost its lease can fail the build that replaced it
+
+`fail_build` and `fail_artifact` don't check the lease. If the stale
+runner's executor times out after another runner has reclaimed the
+build, the stale runner marks the build and its artifact `failed`. The
+new owner then sees `failed` and stops, so a build that would have
+succeeded is reported as failed, and the error is the stale attempt's.
+`BuildRunner.stop()` has the same pattern: on shutdown it fails every
+in-flight build without checking the lease. The replay does not cover
+that path. TLC trace (5 steps): `r1 claim → expire → r2 reclaim → r1 error → r1 fail_build`.
+
+### 7. A retired manifest's upload URL still writes the blob
+
+Re-fetching a manifest renews the lease, which retires the previous
+*finalize* URL: its lease token no longer matches, and
+`test_refetching_a_manifest_retires_the_previous_capability` checks
+this. The *upload* URL carries no lease token, so it stays valid.
+`verify_upload_signature` checks only the build id, the size and the
+expiry. As a result, the "one live capability set at a time … makes two
+writers impossible by construction" claim in that test does not hold for
+uploads. TLC trace (5 steps):
+
+```
+e1 manifest → e2 manifest (renews; e1's finalize URL retired)
+→ e2 upload → e1 upload (accepted) → e2 finalize   ⇒ e1's bytes published under e2's claim
+```
+
+The model also finds a narrower variant in which an upload lands between
+`finalize_and_set_name` and `complete_build` and rewrites a ready
+artifact (`ReadyBytesStable`). With `artifact_presigned_urls` on, uploads
+go straight to the object store and never reach Strata. So a route-side
+lease check can't close this, and the fix has to change *where* the
+bytes land.
+
+### Proposed fix for 5–7 (verified in the model)
+
+`Patched = TRUE` in `BuildLease.tla`:
+
+1. **Each attempt writes its own blob key**, scoped by lease epoch or
+   token (for example a per-attempt staging key), instead of the shared
+   `(artifact_id, version)` key. A stale attempt, including a presigned
+   upload, can then only write bytes nobody will read.
+2. **One fenced step promotes the attempt**: in a single transaction,
+   check that the lease is still held, record which attempt's key the
+   artifact reads from, mark the artifact ready and complete the build.
+   Otherwise discard. This replaces the unfenced `finalize_artifact`
+   followed by the fenced `complete_build`.
+3. **`fail_build` / `fail_artifact` take the lease owner**, the same
+   way `complete_build` already does.
+
+With all three, TLC finds no violation of any invariant, for two runners
+and two executors (exhaustive). The state space is small because only
+one kind of claimant can hold a build at a time.
+
+Change 3 is small and independent and fixes finding 6 completely. The
+cheap alternative for 1 and 2 is to re-check the lease right before each
+write. That narrows the window but can't close it, because the lease can
+expire between the check and the write (the model has no variant for
+this; it follows from reading the code). It also does nothing for
+presigned uploads.
 
 ## Where else formal methods would pay off
 
-Ranked by (likely bugs × consequence) ÷ modelling effort:
+Ranked by (likely bugs × consequence) ÷ modelling effort. The build
+protocol was at the top of this list and is now done (model 2):
 
 | Component | Technique | Why |
 | --- | --- | --- |
-| **v2 pull build protocol** (`transforms/runner.py`, `build_store.py`, `signed_urls.py`, finalize callback) | TLA+ | Distributed: executor retries, duplicate or late `finalize_url` POSTs, lease expiry versus `sweep_zombie_builds`, crash between upload and finalize. The same style as the model here, and it could reuse the lifecycle actions. |
 | **Notebook cascade + staleness** (`cascade.py`, `dag.py`, `session.compute_staleness`) | TLA+ or Hypothesis stateful testing | Invariants such as "after a cascade the target's inputs are READY and match current provenance", and "a source edit marks exactly the downstream closure stale". The concurrency comes from WS source flushes arriving during execution. |
 | **Two-tier QoS / per-tenant limiters** (`rate_limiter.py`, `transforms/build_qos.py`) | TLA+ with fairness (liveness) | "Interactive requests are never starved by bulk" is a liveness property. Tests can't show it; TLC can, under weak fairness. |
 | **Pruning soundness** (`filters.py`, manifest pruning, `_convert_stats`) | Z3 / CrossHair over the comparison logic, plus Hypothesis round-trips through real Parquet files | Finding 3 shows the value is in encoding the stats assumptions (NaN, null, type coercion) explicitly. |
@@ -177,12 +322,12 @@ covered by benchmarks and fuzzing) and the Rust IPC concat
 
 A model helps only while it matches the code. Suggested practice:
 
-- Keep the model next to this README and name the Python functions each
-  action mirrors, as `ArtifactLifecycle.tla` does, so a review of
-  `artifact_store.py` knows to look here.
-- Run `Patched.cfg` (renamed to the default config once the fix lands) in
-  CI. It takes about 2 minutes. A smaller bound (`MaxVer = 2`) runs in
+- Keep each model next to this README and name the Python functions each
+  action mirrors, as both specs do, so a review of `artifact_store.py`
+  or `transforms/runner.py` knows to look here.
+- Run the `*_Patched.cfg` configs in CI once the fixes land.
+  `Artifact_Patched` takes about 2 minutes. With `MaxVer = 2` it runs in
   about 2 seconds (27k states) and still catches findings 1 and 2.
-- Add each TLC counterexample to `tests/` as a regression test (as
-  `replay_counterexamples.py` does), so the code is checked even when
-  the model isn't.
+  `Build_Patched` takes about a second.
+- Move each counterexample test into `tests/` with its assertion
+  inverted, so the code is checked even when the model isn't.
