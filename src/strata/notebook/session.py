@@ -4101,6 +4101,13 @@ class SessionManager:
         session = self._sessions.pop(session_id, None)
         if session is None:
             return
+        # The session's outbound sequence counter outlives a disconnect, so
+        # something has to end it, and this is every way a session ends: the
+        # delete routes, the TTL sweep and the max-count eviction. Imported
+        # here because ws imports this module.
+        from strata.notebook.ws import forget_notebook_execution_state
+
+        forget_notebook_execution_state(session_id)
         # Drain warm pools if present
         for pool in (session.warm_pool, session.r_warm_pool):
             if pool is None:

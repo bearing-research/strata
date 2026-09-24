@@ -1510,7 +1510,10 @@ async def test_grace_window_expiry_cancels_active_execution(notebook_session):
 
     assert task.done()
     assert task.cancelled()
-    assert session.id not in _notebook_execution_state
+    # The execution is cleared; the bookkeeping object stays, because the
+    # outbound sequence counter lives on it and the session is still open.
+    assert _notebook_execution_state[session.id].execution_task is None
+    assert _notebook_execution_state[session.id].running_cell is None
 
 
 @pytest.mark.asyncio
@@ -1545,7 +1548,7 @@ async def test_last_websocket_disconnect_cancels_running_execution(notebook_sess
     await _tear_down_notebook_state(session.id)
 
     assert cancelled.is_set()
-    assert session.id not in _notebook_execution_state
+    assert _notebook_execution_state[session.id].execution_task is None
 
 
 # ---------------------------------------------------------------------------
@@ -2062,6 +2065,7 @@ async def test_final_output_seq_is_newer_than_streamed_deltas(notebook_session, 
         def __init__(self, session, warm_pool=None):
             self.on_iteration_complete = None
             self.on_prompt_delta = None
+            self.failed_upstream = None
 
         async def execute_cell(self, cell_id, source):
             assert self.on_prompt_delta is not None
@@ -2367,6 +2371,9 @@ class _GatedStubExecutor:
     def __init__(self, session, warm_pool=None):
         self.on_iteration_complete = None
         self.on_prompt_delta = None
+        # The real executor records the upstream whose failure stopped a run;
+        # the caller reads it to tell a client about that cell.
+        self.failed_upstream = None
 
     async def execute_cell(self, cell_id, source):
         from strata.notebook.executor import CellExecutionResult

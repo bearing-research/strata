@@ -532,7 +532,7 @@ async def _execute_write_cell(
     }
 
 
-def _split_statements(body: str, dialect: str) -> list[str]:
+def _split_statements(body: str, dialect: str) -> list[str] | None:
     """The body's statements, sliced out of the text the cell declares.
 
     Split on the tokenizer's semicolons rather than regenerated from the parse
@@ -542,8 +542,9 @@ def _split_statements(body: str, dialect: str) -> list[str]:
     with "no such column: n". A rewritten statement is not the one the cell
     declares, and for a write cell that difference lands in the database.
 
-    Returns ``[]`` when the body cannot be tokenized, which the caller reads as
-    "run it whole".
+    Returns ``None`` when the body cannot be tokenized, which the caller reads
+    as "run it whole"; an empty list means it tokenized and holds nothing to
+    run, which is not the same thing.
     """
     import sqlglot
     from sqlglot.tokens import TokenType
@@ -551,15 +552,28 @@ def _split_statements(body: str, dialect: str) -> list[str]:
     try:
         tokens = sqlglot.tokenize(body, read=dialect)
     except Exception:  # noqa: BLE001 - any tokenizer failure means "run it whole"
-        return []
+        return None
 
+    # A fragment is a statement only when it holds a token. The tokenizer emits
+    # nothing for comments or whitespace, so the text after the last semicolon
+    # of `CREATE TABLE ...;\n-- done` has none and is not something to run.
+    # Testing the text for non-whitespace instead handed the driver a bare
+    # comment as though it were a statement, and it answered "INTERNAL:
+    # (unknown error)" for a script that had already done its work.
+    cuts = [token.start for token in tokens if token.token_type is TokenType.SEMICOLON]
+    code = [token.start for token in tokens if token.token_type is not TokenType.SEMICOLON]
+
+    # Both lists are in source order, so one forward walk answers every
+    # fragment. Scanning all of `code` per fragment is quadratic, and a seed
+    # script with a few thousand statements spends seconds in it.
     statements: list[str] = []
     start = 0
-    cuts = [token.start for token in tokens if token.token_type is TokenType.SEMICOLON]
+    index = 0
     for cut in [*cuts, len(body)]:
-        statement = body[start:cut].strip()
-        if statement:
-            statements.append(statement)
+        while index < len(code) and code[index] < start:
+            index += 1
+        if index < len(code) and code[index] < cut:
+            statements.append(body[start:cut].strip())
         start = cut + 1
     return statements
 
@@ -603,9 +617,24 @@ def _execute_write_statements(
 
     from strata.notebook.sql.analyzer import _extract_placeholder_positions
 
-    parsed = [s for s in sqlglot.parse(body, dialect=adapter.sqlglot_dialect) if s]
+    # A trailing comment parses to a bare ``Semicolon`` node carrying it, and
+    # the split below drops that fragment. Dropping it here too keeps the two
+    # lists the same length, which is what lets each statement's kind come
+    # from its parse rather than from a guess at its text: read off the text,
+    # a ``WITH ... INSERT`` reads as "WITH", not as DML, and the run reports no
+    # row count for a statement that has one.
+    parsed = [
+        statement
+        for statement in sqlglot.parse(body, dialect=adapter.sqlglot_dialect)
+        if statement is not None and not isinstance(statement, sqlglot.exp.Semicolon)
+    ]
     texts = _split_statements(body, adapter.sqlglot_dialect)
-    if texts and len(texts) == len(parsed):
+    if texts is None:
+        # Nothing tokenized: treat the whole body as a single opaque statement
+        # (covers vendor-specific syntax we cannot parse). Placeholders still
+        # get extracted via the regex path so :name bindings keep working.
+        prepared = [(body, _statement_kind_from_text(body))]
+    elif len(texts) == len(parsed):
         # The statement as written, with the parse used only to say what kind
         # of statement it is.
         prepared = list(zip(texts, (_statement_kind_from_expr(stmt) for stmt in parsed)))
@@ -614,11 +643,10 @@ def _execute_write_statements(
         # fall back to reading the kind off the text.
         prepared = [(text, _statement_kind_from_text(text)) for text in texts]
     else:
-        # Nothing tokenized: treat the whole body as a single opaque
-        # statement (covers vendor-specific syntax we can't parse).
-        # Placeholders still get extracted via the regex path so :name
-        # bindings keep working.
-        prepared = [(body, _statement_kind_from_text(body))]
+        # It tokenized and holds no statement, which a body of nothing but
+        # comments does. There is nothing to send, and sending the comment is
+        # what the driver answered "INTERNAL: (unknown error)" to.
+        prepared = []
 
     statements: list[dict[str, Any]] = []
     conn = adapter.open(spec, read_only=False)
