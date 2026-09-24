@@ -295,21 +295,25 @@ async def _set_cell_idle(
     )
 
 
-async def _broadcast_downstream_stale(
-    notebook_id: str, seq: int, affected_cell_ids: list[str]
-) -> None:
+async def _broadcast_downstream_stale(notebook_id: str, affected_cell_ids: list[str]) -> None:
     """Broadcast STALE status for cells downstream of a just-errored cell.
 
     ``Session.mark_cell_error`` returns the list of downstream cells
     whose status it flipped from READY → STALE; this helper pushes
     a cell_status frame for each so the frontend stops showing them
     green when an upstream cell is red.
+
+    A sequence each, for the reason the staleness batch beside this one takes
+    them: a client that dedupes on the number, as the protocol reference tells
+    it to, keeps the first of a shared batch and drops the rest.
     """
     for cell_id in affected_cell_ids:
         await _broadcast_message(
             notebook_id,
             _make_message(
-                MessageType.CELL_STATUS, seq, cell_status_payload(cell_id, CellStatus.STALE)
+                MessageType.CELL_STATUS,
+                next_notebook_sequence(notebook_id),
+                cell_status_payload(cell_id, CellStatus.STALE),
             ),
         )
 
@@ -349,7 +353,6 @@ async def _broadcast_staleness_updates(
 async def _refresh_and_broadcast_changed_staleness(
     session: NotebookSession,
     notebook_id: str,
-    seq: int,
     previous_snapshot: dict[str, CellStateSnapshot],
     *,
     preserve_ready_cell_id: str | None = None,
@@ -2192,13 +2195,6 @@ async def execute_cell_and_broadcast(
         else:
             result = await executor.execute_cell(cell_id, cell.source)
 
-        # Post-execution frames draw a fresh sequence: streaming frames
-        # emitted during execution (cell_output_delta,
-        # cell_iteration_progress) pull from the same per-notebook
-        # counter, so reusing the pre-execution seq would make the
-        # canonical result look older than the deltas it supersedes.
-        seq = execution_state.next_sequence()
-
         # Record execution for profiling before broadcasting so the
         # output payload reflects the just-recorded metadata.
         session.record_execution(
@@ -2212,7 +2208,7 @@ async def execute_cell_and_broadcast(
         )
         session.apply_execution_result_metadata(cell_id, result)
 
-        await _broadcast_execution_result(notebook_id, seq, cell_id, result)
+        await _broadcast_execution_result(notebook_id, cell_id, result)
 
         # After the requested cell's own frame, so sequence order still matches
         # send order, and innermost first, so the cell that broke is announced
@@ -2224,7 +2220,6 @@ async def execute_cell_and_broadcast(
             await _refresh_and_broadcast_changed_staleness(
                 session,
                 notebook_id,
-                seq,
                 previous_snapshot,
                 preserve_ready_cell_id=cell_id,
             )
@@ -2237,7 +2232,6 @@ async def execute_cell_and_broadcast(
             await _refresh_and_broadcast_changed_staleness(
                 session,
                 notebook_id,
-                seq,
                 previous_snapshot,
                 mark_error_cell_id=cell_id,
             )
@@ -2248,19 +2242,24 @@ async def execute_cell_and_broadcast(
         await _set_cell_idle(session, notebook_id, execution_state.next_sequence(), cell_id)
         raise
     except Exception as e:
-        # Fresh seq for the same reason as the success path: deltas may
-        # have streamed before the failure.
-        seq = execution_state.next_sequence()
         downstream_stale = session.mark_cell_error(cell_id)
         await _broadcast_message(
             notebook_id,
-            _make_message(MessageType.CELL_ERROR, seq, {"cell_id": cell_id, "error": str(e)}),
+            _make_message(
+                MessageType.CELL_ERROR,
+                next_notebook_sequence(notebook_id),
+                {"cell_id": cell_id, "error": str(e)},
+            ),
         )
         await _broadcast_message(
             notebook_id,
-            _make_message(MessageType.CELL_STATUS, seq, cell_status_payload(cell_id, "error")),
+            _make_message(
+                MessageType.CELL_STATUS,
+                next_notebook_sequence(notebook_id),
+                cell_status_payload(cell_id, "error"),
+            ),
         )
-        await _broadcast_downstream_stale(notebook_id, seq, downstream_stale)
+        await _broadcast_downstream_stale(notebook_id, downstream_stale)
         return None
     finally:
         execution_state.running_cell = None
@@ -2281,7 +2280,6 @@ async def _execute_cascade(
     steps still go through normal cached execution.
     """
     del websocket
-    seq = execution_state.next_sequence()
 
     executor = _make_executor_with_progress(session, notebook_id)
 
@@ -2323,7 +2321,9 @@ async def _execute_cascade(
                     await _broadcast_message(
                         notebook_id,
                         _make_message(
-                            MessageType.CELL_STATUS, seq, cell_status_payload(cell_id, "stale")
+                            MessageType.CELL_STATUS,
+                            next_notebook_sequence(notebook_id),
+                            cell_status_payload(cell_id, "stale"),
                         ),
                     )
                     continue
@@ -2335,7 +2335,7 @@ async def _execute_cascade(
                     notebook_id,
                     _make_message(
                         MessageType.CASCADE_PROGRESS,
-                        seq,
+                        next_notebook_sequence(notebook_id),
                         CascadeProgressPayload(
                             plan_id=plan.plan_id,
                             current_cell_id=cell_id,
@@ -2351,7 +2351,7 @@ async def _execute_cascade(
                     notebook_id,
                     _make_message(
                         MessageType.CELL_STATUS,
-                        seq,
+                        next_notebook_sequence(notebook_id),
                         _running_payload(session, cell_id, cell.source),
                     ),
                 )
@@ -2361,12 +2361,6 @@ async def _execute_cascade(
                         result = await executor.execute_cell_rerun(cell_id, cell.source)
                     else:
                         result = await executor.execute_cell(cell_id, cell.source)
-
-                    # Fresh seq after execution — streaming frames drew from
-                    # the same counter; the result must not look older.
-                    seq = execution_state.next_sequence()
-
-                    # v1.1: Record execution for profiling
                     session.record_execution(
                         cell_id,
                         result.duration_ms,
@@ -2382,7 +2376,7 @@ async def _execute_cascade(
                     # same shape as the direct-execute path. Note: cascade
                     # previously skipped the stderr console broadcast — that
                     # drift is fixed by going through the shared helper.
-                    await _broadcast_execution_result(notebook_id, seq, cell_id, result)
+                    await _broadcast_execution_result(notebook_id, cell_id, result)
 
                     # Mark as ready — update backend state AND broadcast
                     status = CellStatus.READY if result.success else CellStatus.ERROR
@@ -2392,7 +2386,9 @@ async def _execute_cascade(
                     await _broadcast_message(
                         notebook_id,
                         _make_message(
-                            MessageType.CELL_STATUS, seq, cell_status_payload(cell_id, status)
+                            MessageType.CELL_STATUS,
+                            next_notebook_sequence(notebook_id),
+                            cell_status_payload(cell_id, status),
                         ),
                     )
 
@@ -2415,28 +2411,30 @@ async def _execute_cascade(
                     )
                     raise
                 except Exception as e:
-                    seq = execution_state.next_sequence()
                     downstream_stale = session.mark_cell_error(cell_id)
                     await _broadcast_message(
                         notebook_id,
                         _make_message(
-                            MessageType.CELL_ERROR, seq, {"cell_id": cell_id, "error": str(e)}
+                            MessageType.CELL_ERROR,
+                            next_notebook_sequence(notebook_id),
+                            {"cell_id": cell_id, "error": str(e)},
                         ),
                     )
                     await _broadcast_message(
                         notebook_id,
                         _make_message(
-                            MessageType.CELL_STATUS, seq, cell_status_payload(cell_id, "error")
+                            MessageType.CELL_STATUS,
+                            next_notebook_sequence(notebook_id),
+                            cell_status_payload(cell_id, "error"),
                         ),
                     )
-                    await _broadcast_downstream_stale(notebook_id, seq, downstream_stale)
+                    await _broadcast_downstream_stale(notebook_id, downstream_stale)
                     cascade_failed = True
             if not cascade_failed:
                 previous_snapshot = session.capture_cell_state_snapshot()
                 await _refresh_and_broadcast_changed_staleness(
                     session,
                     notebook_id,
-                    seq,
                     previous_snapshot,
                     preserve_ready_cell_id=plan.target_cell_id,
                 )
@@ -2467,7 +2465,6 @@ async def _execute_run_all(
     re-executed via ``_materialize_upstreams``.
     """
     del websocket
-    seq = execution_state.next_sequence()
 
     executor = _make_executor_with_progress(session, notebook_id)
 
@@ -2513,7 +2510,6 @@ async def _execute_run_all(
                         session=session,
                         executor=executor,
                         cells_in_run=cells_in_run,
-                        seq=seq,
                         notebook_id=notebook_id,
                         force=force,
                         execution_state=execution_state,
@@ -2537,7 +2533,6 @@ async def _execute_run_all(
                                 session=session,
                                 executor=executor,
                                 cell=cell,
-                                seq=seq,
                                 notebook_id=notebook_id,
                                 force=force,
                                 skip_upstream=True,
@@ -2552,7 +2547,6 @@ async def _execute_run_all(
                         session=session,
                         executor=executor,
                         cell=cell,
-                        seq=seq,
                         notebook_id=notebook_id,
                         force=force,
                         skip_upstream=had_failure,
@@ -2569,7 +2563,6 @@ async def _run_partition_batch(
     session: NotebookSession,
     executor: CellExecutor,
     cells_in_run: list,
-    seq: int,
     notebook_id: str,
     force: bool,
     execution_state: NotebookExecutionState,
@@ -2683,7 +2676,7 @@ async def _run_partition_batch(
             notebook_id,
             _make_message(
                 MessageType.CELL_STATUS,
-                seq,
+                next_notebook_sequence(notebook_id),
                 _running_payload(session, result.cell_id, cell.source),
             ),
         )
@@ -2704,14 +2697,13 @@ async def _run_partition_batch(
 
         session.record_execution(result.cell_id, 0.0, result.cache_hit)
         session.apply_execution_result_metadata(result.cell_id, synthetic)
-        await _broadcast_execution_result(notebook_id, seq, result.cell_id, synthetic)
+        await _broadcast_execution_result(notebook_id, result.cell_id, synthetic)
 
         if synthetic.success:
             previous_snapshot = session.capture_cell_state_snapshot()
             await _refresh_and_broadcast_changed_staleness(
                 session,
                 notebook_id,
-                seq,
                 previous_snapshot,
                 preserve_ready_cell_id=result.cell_id,
             )
@@ -2721,11 +2713,11 @@ async def _run_partition_batch(
                 notebook_id,
                 _make_message(
                     MessageType.CELL_STATUS,
-                    seq,
+                    next_notebook_sequence(notebook_id),
                     cell_status_payload(result.cell_id, CellStatus.ERROR),
                 ),
             )
-            await _broadcast_downstream_stale(notebook_id, seq, downstream_stale)
+            await _broadcast_downstream_stale(notebook_id, downstream_stale)
 
     from strata.notebook.executor import BatchExecutionResult
 
@@ -2780,7 +2772,6 @@ async def _run_partition_single_cell(
     session: NotebookSession,
     executor: CellExecutor,
     cell,
-    seq: int,
     notebook_id: str,
     force: bool,
     skip_upstream: bool,
@@ -2799,7 +2790,9 @@ async def _run_partition_single_cell(
     await _broadcast_message(
         notebook_id,
         _make_message(
-            MessageType.CELL_STATUS, seq, _running_payload(session, cell_id, cell.source)
+            MessageType.CELL_STATUS,
+            next_notebook_sequence(notebook_id),
+            _running_payload(session, cell_id, cell.source),
         ),
     )
 
@@ -2820,10 +2813,6 @@ async def _run_partition_single_cell(
         else:
             result = await executor.execute_cell(cell_id, cell.source)
 
-        # Fresh seq after execution — streaming frames drew from the
-        # same counter; the result must not look older.
-        seq = execution_state.next_sequence()
-
         session.record_execution(
             cell_id,
             result.duration_ms,
@@ -2834,14 +2823,13 @@ async def _run_partition_single_cell(
             team_saved_ms=result.team_cache_saved_ms,
         )
         session.apply_execution_result_metadata(cell_id, result)
-        await _broadcast_execution_result(notebook_id, seq, cell_id, result)
+        await _broadcast_execution_result(notebook_id, cell_id, result)
 
         if result.success:
             previous_snapshot = session.capture_cell_state_snapshot()
             await _refresh_and_broadcast_changed_staleness(
                 session,
                 notebook_id,
-                seq,
                 previous_snapshot,
                 preserve_ready_cell_id=cell_id,
             )
@@ -2852,32 +2840,35 @@ async def _run_partition_single_cell(
             notebook_id,
             _make_message(
                 MessageType.CELL_STATUS,
-                seq,
+                next_notebook_sequence(notebook_id),
                 cell_status_payload(cell_id, CellStatus.ERROR),
             ),
         )
-        await _broadcast_downstream_stale(notebook_id, seq, downstream_stale)
+        await _broadcast_downstream_stale(notebook_id, downstream_stale)
         return False
 
     except asyncio.CancelledError:
         await _set_cell_idle(session, notebook_id, execution_state.next_sequence(), cell_id)
         raise
     except Exception as exc:
-        seq = execution_state.next_sequence()
         downstream_stale = session.mark_cell_error(cell_id)
         await _broadcast_message(
             notebook_id,
-            _make_message(MessageType.CELL_ERROR, seq, {"cell_id": cell_id, "error": str(exc)}),
+            _make_message(
+                MessageType.CELL_ERROR,
+                next_notebook_sequence(notebook_id),
+                {"cell_id": cell_id, "error": str(exc)},
+            ),
         )
         await _broadcast_message(
             notebook_id,
             _make_message(
                 MessageType.CELL_STATUS,
-                seq,
+                next_notebook_sequence(notebook_id),
                 cell_status_payload(cell_id, CellStatus.ERROR),
             ),
         )
-        await _broadcast_downstream_stale(notebook_id, seq, downstream_stale)
+        await _broadcast_downstream_stale(notebook_id, downstream_stale)
         return False
 
 
@@ -3231,9 +3222,7 @@ async def execute_cell_for_agent(
                 cell_status_payload(cell_id, "error"),
             ),
         )
-        await _broadcast_downstream_stale(
-            notebook_id, next_notebook_sequence(notebook_id), downstream_stale
-        )
+        await _broadcast_downstream_stale(notebook_id, downstream_stale)
         raise
 
 
@@ -3369,14 +3358,11 @@ async def _broadcast_failed_upstreams(notebook_id: str, executor: Any) -> None:
     a run that found one always reaches here.
     """
     for upstream_id, upstream_result in getattr(executor, "failed_upstreams", {}).items():
-        await _broadcast_execution_result(
-            notebook_id, next_notebook_sequence(notebook_id), upstream_id, upstream_result
-        )
+        await _broadcast_execution_result(notebook_id, upstream_id, upstream_result)
 
 
 async def _broadcast_execution_result(
     notebook_id: str,
-    seq: int,
     cell_id: str,
     result: CellExecutionResult,
 ) -> None:
@@ -3387,6 +3373,11 @@ async def _broadcast_execution_result(
     1. ``cell_console`` for stdout (if any)
     2. ``cell_console`` for stderr (if any)
     3. ``cell_output`` (success) or ``cell_error`` (failure)
+
+    Each takes its own sequence, drawn as it is sent. Sharing one across the
+    three described one event but broke the contract the protocol reference
+    states, and a client deduping on the number kept the console and dropped
+    the result.
 
     All four execution-driving handlers (``execute_cell_and_broadcast``,
     ``_execute_cascade``, ``_execute_run_all``,
@@ -3409,14 +3400,14 @@ async def _broadcast_execution_result(
                     notebook_id,
                     _make_message(
                         MessageType.CELL_CONSOLE,
-                        seq,
+                        next_notebook_sequence(notebook_id),
                         CellConsolePayload(cell_id=cell_id, stream=stream, text=tail).model_dump(
                             mode="json"
                         ),
                         ts=ts,
                     ),
                 )
-        await _broadcast_output_or_error(notebook_id, seq, cell_id, result, ts)
+        await _broadcast_output_or_error(notebook_id, cell_id, result, ts)
         return
 
     if result.stdout:
@@ -3424,7 +3415,7 @@ async def _broadcast_execution_result(
             notebook_id,
             _make_message(
                 MessageType.CELL_CONSOLE,
-                seq,
+                next_notebook_sequence(notebook_id),
                 CellConsolePayload(cell_id=cell_id, stream="stdout", text=result.stdout).model_dump(
                     mode="json"
                 ),
@@ -3437,7 +3428,7 @@ async def _broadcast_execution_result(
             notebook_id,
             _make_message(
                 MessageType.CELL_CONSOLE,
-                seq,
+                next_notebook_sequence(notebook_id),
                 CellConsolePayload(cell_id=cell_id, stream="stderr", text=result.stderr).model_dump(
                     mode="json"
                 ),
@@ -3445,12 +3436,11 @@ async def _broadcast_execution_result(
             ),
         )
 
-    await _broadcast_output_or_error(notebook_id, seq, cell_id, result, ts)
+    await _broadcast_output_or_error(notebook_id, cell_id, result, ts)
 
 
 async def _broadcast_output_or_error(
     notebook_id: str,
-    seq: int,
     cell_id: str,
     result: CellExecutionResult,
     ts: str,
@@ -3469,7 +3459,7 @@ async def _broadcast_output_or_error(
         notebook_id,
         _make_message(
             MessageType.CELL_OUTPUT if result.success else MessageType.CELL_ERROR,
-            seq,
+            next_notebook_sequence(notebook_id),
             payload,
             ts=ts,
         ),

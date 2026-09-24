@@ -149,7 +149,7 @@ class TestNoDoubleDelivery:
         sent.clear()
 
         result = CellExecutionResult(cell_id="cell9", success=True, stdout="epoch 1\n", stderr="")
-        await _broadcast_execution_result("nb1", 5, "cell9", result)
+        await _broadcast_execution_result("nb1", "cell9", result)
 
         assert [m["type"] for m in sent] == ["cell_output"], (
             "the streamed console must not be sent again at the end"
@@ -171,7 +171,7 @@ class TestNoDoubleDelivery:
         result = CellExecutionResult(
             cell_id="cell9", success=True, stdout="hello\n", stderr="oops\n"
         )
-        await _broadcast_execution_result("nb1", 5, "cell9", result)
+        await _broadcast_execution_result("nb1", "cell9", result)
 
         assert [m["type"] for m in sent] == ["cell_console", "cell_console", "cell_output"]
 
@@ -349,7 +349,7 @@ class TestWhatStreamingDropped:
         result = CellExecutionResult(
             cell_id="cell9", success=True, stdout="epoch 1\nepoch 2\nepoch 3\n", stderr=""
         )
-        await _broadcast_execution_result("nb1", 5, "cell9", result)
+        await _broadcast_execution_result("nb1", "cell9", result)
 
         console = [m for m in sent if m["type"] == "cell_console"]
         assert [m["payload"]["text"] for m in console] == ["epoch 2\nepoch 3\n"]
@@ -374,7 +374,7 @@ class TestWhatStreamingDropped:
         result = CellExecutionResult(
             cell_id="cell9", success=True, stdout="epoch 1\n", stderr="warn\n"
         )
-        await _broadcast_execution_result("nb1", 5, "cell9", result)
+        await _broadcast_execution_result("nb1", "cell9", result)
 
         assert [m["type"] for m in sent] == ["cell_output"]
 

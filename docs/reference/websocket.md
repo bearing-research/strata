@@ -176,7 +176,7 @@ Every server → client message carries a `seq` from a single counter scoped to 
 
 What the client uses `seq` for:
 
-- **Ordering.** Messages arrive in `seq` order under normal conditions. If your client coalesces state updates, key dedupe on `seq` rather than `type`.
+- **Ordering.** Messages arrive in `seq` order under normal conditions. Every frame carries its own number, including the console and result of one execution and each cell of a batch, so if your client coalesces state updates, key dedupe on `seq` rather than `type`.
 - **Gap detection across reconnects.** After reconnecting, the first message you receive may have a `seq` far higher than the last one you saw - events emitted while you were disconnected are not buffered. Treat any gap (or any reconnect) as a reason to send `notebook_sync` and replace local state.
 - **One-way ack.** The client doesn't echo `seq` back; the server tracks no per-connection ack state.
 

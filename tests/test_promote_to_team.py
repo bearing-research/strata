@@ -587,7 +587,7 @@ class TestEveryOutputIsOfferedForPromotion:
         result = CellExecutionResult(
             cell_id="c1", success=True, artifact_uri=uris["scaler"], stdout="", stderr=""
         )
-        await _broadcast_execution_result("nb1", 1, "c1", result)
+        await _broadcast_execution_result("nb1", "c1", result)
 
         (output,) = [m for m in sent if m["type"] == "cell_output"]
         assert output["payload"]["artifact_uris"] == uris
