@@ -86,6 +86,7 @@ def stored_value(session, cell_id: str):
     return json.loads(blob)
 
 
+@pytest.mark.timeout(1800)  # real cells: well past the suite's 180 s default
 @settings(
     max_examples=int(os.environ.get("STALENESS_EXAMPLES", "15")),
     deadline=None,
