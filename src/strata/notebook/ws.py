@@ -32,7 +32,13 @@ from strata.notebook.executor import (
 from strata.notebook.harness_user import LocalExecutionRefused, resolve_harness_user
 from strata.notebook.impact import ImpactAnalyzer
 from strata.notebook.inspect_repl import InspectManager
-from strata.notebook.models import CellLanguage, CellStaleness, CellStatus, WorkerBackendType
+from strata.notebook.models import (
+    CellLanguage,
+    CellStaleness,
+    CellStatus,
+    StalenessReason,
+    WorkerBackendType,
+)
 from strata.notebook.presence import lock_window_seconds
 from strata.notebook.protocol import MessageType
 from strata.notebook.scopes import (
@@ -439,10 +445,14 @@ async def _schedule_execution(
     execution_state: NotebookExecutionState,
     notebook_id: str,
     requested_cell: str,
-    seq: int,
     operation_factory: Any,
 ) -> bool:
-    """Schedule notebook execution so the WebSocket can keep receiving messages."""
+    """Schedule notebook execution so the WebSocket can keep receiving messages.
+
+    Draws a sequence only if it sends the busy refusal. Taking one up front
+    spent a number on every successful request without a frame behind it, and
+    the protocol reference tells a client to resync on the gap that leaves.
+    """
     busy_cell: str | None = None
     operation: Any | None = None
 
@@ -473,7 +483,7 @@ async def _schedule_execution(
     if busy_cell is not None:
         await _send_error_message(
             websocket,
-            seq,
+            next_notebook_sequence(notebook_id),
             (
                 f"Notebook is already executing cell {busy_cell}"
                 if busy_cell
@@ -979,13 +989,11 @@ async def _handle_cell_execute(
         )
         return
 
-    seq = execution_state.next_sequence()
-
     busy_cell = await _reserve_execution_request(execution_state, cell_id)
     if busy_cell is not None:
         await _send_error_message(
             websocket,
-            seq,
+            next_notebook_sequence(notebook_id),
             (
                 f"Notebook is already executing cell {busy_cell}"
                 if busy_cell
@@ -1002,7 +1010,7 @@ async def _handle_cell_execute(
     # as busy.
     try:
         await _handle_cell_execute_reserved(
-            websocket, session, execution_state, notebook_id, cell_id, seq
+            websocket, session, execution_state, notebook_id, cell_id
         )
     except BaseException:
         await _release_execution_request(execution_state, cell_id)
@@ -1015,7 +1023,6 @@ async def _handle_cell_execute_reserved(
     execution_state: NotebookExecutionState,
     notebook_id: str,
     cell_id: str,
-    seq: int,
 ) -> None:
     """The post-reservation body of ``_handle_cell_execute``."""
     environment_block_reason = session.environment_execution_block_message()
@@ -1025,7 +1032,7 @@ async def _handle_cell_execute_reserved(
             _json_encode(
                 _make_message(
                     MessageType.ERROR,
-                    seq,
+                    next_notebook_sequence(notebook_id),
                     error_payload(environment_block_reason, code="ENVIRONMENT_BUSY"),
                 )
             )
@@ -1038,7 +1045,11 @@ async def _handle_cell_execute_reserved(
         await _release_execution_request(execution_state, cell_id)
         await websocket.send_text(
             _json_encode(
-                _make_message(MessageType.ERROR, seq, error_payload(f"Cell {cell_id} not found"))
+                _make_message(
+                    MessageType.ERROR,
+                    next_notebook_sequence(notebook_id),
+                    error_payload(f"Cell {cell_id} not found"),
+                )
             )
         )
         return
@@ -1067,7 +1078,7 @@ async def _handle_cell_execute_reserved(
             websocket,
             _make_message(
                 MessageType.CASCADE_PROMPT,
-                seq,
+                next_notebook_sequence(notebook_id),
                 CascadePromptPayload(
                     cell_id=cell_id,
                     plan_id=plan.plan_id,
@@ -1084,7 +1095,6 @@ async def _handle_cell_execute_reserved(
             execution_state,
             notebook_id,
             cell_id,
-            seq,
             lambda: execute_cell_and_broadcast(session, cell_id, execution_state, notebook_id),
         )
         if not scheduled:
@@ -1105,7 +1115,6 @@ async def _handle_notebook_run_all(
     cell — historically the loop stopped on first failure; with batching
     (issue #26) the per-cell granularity makes continuing useful.
     """
-    seq = execution_state.next_sequence()
     continue_on_error = bool(payload.get("continue_on_error", True))
 
     # Skip inactive variants — they aren't in the DAG, so their references
@@ -1124,7 +1133,7 @@ async def _handle_notebook_run_all(
     if busy_cell is not None:
         await _send_error_message(
             websocket,
-            seq,
+            next_notebook_sequence(notebook_id),
             (
                 f"Notebook is already executing cell {busy_cell}"
                 if busy_cell
@@ -1140,7 +1149,7 @@ async def _handle_notebook_run_all(
             _json_encode(
                 _make_message(
                     MessageType.ERROR,
-                    seq,
+                    next_notebook_sequence(notebook_id),
                     error_payload(environment_block_reason, code="ENVIRONMENT_BUSY"),
                 )
             )
@@ -1152,7 +1161,6 @@ async def _handle_notebook_run_all(
         execution_state,
         notebook_id,
         requested_cell,
-        seq,
         lambda: _execute_run_all(
             websocket,
             session,
@@ -1179,7 +1187,6 @@ async def _handle_notebook_rerun_all(
     entire notebook is re-executed end-to-end. Accepts the same
     ``continue_on_error`` (default ``True``) field as ``run_all``.
     """
-    seq = execution_state.next_sequence()
     continue_on_error = bool(payload.get("continue_on_error", True))
 
     runnable_cells = [
@@ -1195,7 +1202,7 @@ async def _handle_notebook_rerun_all(
     if busy_cell is not None:
         await _send_error_message(
             websocket,
-            seq,
+            next_notebook_sequence(notebook_id),
             (
                 f"Notebook is already executing cell {busy_cell}"
                 if busy_cell
@@ -1211,7 +1218,7 @@ async def _handle_notebook_rerun_all(
             _json_encode(
                 _make_message(
                     MessageType.ERROR,
-                    seq,
+                    next_notebook_sequence(notebook_id),
                     error_payload(environment_block_reason, code="ENVIRONMENT_BUSY"),
                 )
             )
@@ -1223,7 +1230,6 @@ async def _handle_notebook_rerun_all(
         execution_state,
         notebook_id,
         requested_cell,
-        seq,
         lambda: _execute_run_all(
             websocket,
             session,
@@ -1264,13 +1270,11 @@ async def _handle_cell_execute_cascade(
         )
         return
 
-    seq = execution_state.next_sequence()
-
     busy_cell = await _reserve_execution_request(execution_state, cell_id)
     if busy_cell is not None:
         await _send_error_message(
             websocket,
-            seq,
+            next_notebook_sequence(notebook_id),
             (
                 f"Notebook is already executing cell {busy_cell}"
                 if busy_cell
@@ -1286,7 +1290,7 @@ async def _handle_cell_execute_cascade(
             _json_encode(
                 _make_message(
                     MessageType.ERROR,
-                    seq,
+                    next_notebook_sequence(notebook_id),
                     error_payload(environment_block_reason, code="ENVIRONMENT_BUSY"),
                 )
             )
@@ -1300,7 +1304,9 @@ async def _handle_cell_execute_cascade(
         await websocket.send_text(
             _json_encode(
                 _make_message(
-                    MessageType.ERROR, seq, error_payload("Cascade plan not found or expired")
+                    MessageType.ERROR,
+                    next_notebook_sequence(notebook_id),
+                    error_payload("Cascade plan not found or expired"),
                 )
             )
         )
@@ -1312,7 +1318,6 @@ async def _handle_cell_execute_cascade(
         execution_state,
         notebook_id,
         cell_id,
-        seq,
         lambda: _execute_cascade(websocket, session, plan, execution_state, notebook_id),
     )
     if not scheduled:
@@ -1343,13 +1348,11 @@ async def _handle_cell_execute_force(
         )
         return
 
-    seq = execution_state.next_sequence()
-
     busy_cell = await _reserve_execution_request(execution_state, cell_id)
     if busy_cell is not None:
         await _send_error_message(
             websocket,
-            seq,
+            next_notebook_sequence(notebook_id),
             (
                 f"Notebook is already executing cell {busy_cell}"
                 if busy_cell
@@ -1365,7 +1368,7 @@ async def _handle_cell_execute_force(
             _json_encode(
                 _make_message(
                     MessageType.ERROR,
-                    seq,
+                    next_notebook_sequence(notebook_id),
                     error_payload(environment_block_reason, code="ENVIRONMENT_BUSY"),
                 )
             )
@@ -1378,7 +1381,6 @@ async def _handle_cell_execute_force(
         execution_state,
         notebook_id,
         cell_id,
-        seq,
         lambda: execute_cell_and_broadcast(
             session, cell_id, execution_state, notebook_id, mode="force"
         ),
@@ -1412,13 +1414,11 @@ async def _handle_cell_execute_rerun(
         )
         return
 
-    seq = execution_state.next_sequence()
-
     busy_cell = await _reserve_execution_request(execution_state, cell_id)
     if busy_cell is not None:
         await _send_error_message(
             websocket,
-            seq,
+            next_notebook_sequence(notebook_id),
             (
                 f"Notebook is already executing cell {busy_cell}"
                 if busy_cell
@@ -1431,7 +1431,7 @@ async def _handle_cell_execute_rerun(
     # between reserve and schedule must not leave requested_cell set.
     try:
         await _handle_cell_execute_rerun_reserved(
-            websocket, session, execution_state, notebook_id, cell_id, seq
+            websocket, session, execution_state, notebook_id, cell_id
         )
     except BaseException:
         await _release_execution_request(execution_state, cell_id)
@@ -1444,7 +1444,6 @@ async def _handle_cell_execute_rerun_reserved(
     execution_state: NotebookExecutionState,
     notebook_id: str,
     cell_id: str,
-    seq: int,
 ) -> None:
     """The post-reservation body of ``_handle_cell_execute_rerun``."""
     environment_block_reason = session.environment_execution_block_message()
@@ -1454,7 +1453,7 @@ async def _handle_cell_execute_rerun_reserved(
             _json_encode(
                 _make_message(
                     MessageType.ERROR,
-                    seq,
+                    next_notebook_sequence(notebook_id),
                     error_payload(environment_block_reason, code="ENVIRONMENT_BUSY"),
                 )
             )
@@ -1473,7 +1472,6 @@ async def _handle_cell_execute_rerun_reserved(
             execution_state,
             notebook_id,
             cell_id,
-            seq,
             lambda: _execute_cascade(
                 websocket,
                 session,
@@ -1489,7 +1487,6 @@ async def _handle_cell_execute_rerun_reserved(
             execution_state,
             notebook_id,
             cell_id,
-            seq,
             lambda: execute_cell_and_broadcast(
                 session, cell_id, execution_state, notebook_id, mode="rerun"
             ),
@@ -1613,8 +1610,6 @@ async def _handle_cell_cancel(
     if not cell_id:
         return
 
-    seq = execution_state.next_sequence()
-
     async with execution_state.control_lock:
         running_cell = execution_state.running_cell
         requested_cell = execution_state.requested_cell
@@ -1627,12 +1622,14 @@ async def _handle_cell_cancel(
     if should_cancel and task is not None:
         await asyncio.gather(task, return_exceptions=True)
         if requested_cell and requested_cell != running_cell and requested_cell == cell_id:
-            await _set_cell_idle(session, notebook_id, seq, requested_cell)
+            await _set_cell_idle(
+                session, notebook_id, next_notebook_sequence(notebook_id), requested_cell
+            )
         return
 
     cell = session.notebook_state.get_cell(cell_id)
     if cell is not None and cell.status in {CellStatus.IDLE, CellStatus.RUNNING}:
-        await _set_cell_idle(session, notebook_id, seq, cell_id)
+        await _set_cell_idle(session, notebook_id, next_notebook_sequence(notebook_id), cell_id)
 
 
 async def _handle_agent_cancel(notebook_id: str) -> None:
@@ -1744,8 +1741,6 @@ async def _handle_cell_source_update(
         )
         return
 
-    seq = execution_state.next_sequence()
-
     try:
         # Write to disk
         write_cell(session.path, cell_id, source, author=author)
@@ -1810,7 +1805,7 @@ async def _handle_cell_source_update(
             notebook_id,
             _make_message(
                 MessageType.DAG_UPDATE,
-                seq,
+                next_notebook_sequence(notebook_id),
                 dag_update_payload(
                     {
                         "edges": dag_edges,
@@ -1830,7 +1825,11 @@ async def _handle_cell_source_update(
 
     except Exception as e:
         await websocket.send_text(
-            _json_encode(_make_message(MessageType.ERROR, seq, error_payload(str(e))))
+            _json_encode(
+                _make_message(
+                    MessageType.ERROR, next_notebook_sequence(notebook_id), error_payload(str(e))
+                )
+            )
         )
 
 
@@ -1867,8 +1866,6 @@ async def _handle_variant_set_active(
     # silent no-op rather than churning notebook.toml or restalening downstream.
     if session.notebook_state.variant_modes.get(group) == "sweep":
         return
-
-    seq = execution_state.next_sequence()
 
     try:
         session.set_variant_active(group, variant_name)
@@ -1911,7 +1908,7 @@ async def _handle_variant_set_active(
             notebook_id,
             _make_message(
                 MessageType.DAG_UPDATE,
-                seq,
+                next_notebook_sequence(notebook_id),
                 dag_update_payload(
                     {
                         "edges": dag_edges,
@@ -1931,7 +1928,11 @@ async def _handle_variant_set_active(
 
     except Exception as e:
         await websocket.send_text(
-            _json_encode(_make_message(MessageType.ERROR, seq, error_payload(str(e))))
+            _json_encode(
+                _make_message(
+                    MessageType.ERROR, next_notebook_sequence(notebook_id), error_payload(str(e))
+                )
+            )
         )
 
 
@@ -1961,8 +1962,6 @@ async def _handle_variant_add(
         )
         return
 
-    seq = execution_state.next_sequence()
-
     try:
         session.add_variant(group, author=resolve_author(payload.get("author")))
         staleness_map = await session.compute_staleness_async()
@@ -1984,18 +1983,28 @@ async def _handle_variant_add(
 
         await _broadcast_message(
             notebook_id,
-            _make_message(MessageType.NOTEBOOK_STATE, seq, state_payload),
+            _make_message(
+                MessageType.NOTEBOOK_STATE, next_notebook_sequence(notebook_id), state_payload
+            ),
         )
 
         await _broadcast_staleness_updates(session, notebook_id, staleness_map)
 
     except ValueError as e:
         await websocket.send_text(
-            _json_encode(_make_message(MessageType.ERROR, seq, error_payload(str(e))))
+            _json_encode(
+                _make_message(
+                    MessageType.ERROR, next_notebook_sequence(notebook_id), error_payload(str(e))
+                )
+            )
         )
     except Exception as e:
         await websocket.send_text(
-            _json_encode(_make_message(MessageType.ERROR, seq, error_payload(str(e))))
+            _json_encode(
+                _make_message(
+                    MessageType.ERROR, next_notebook_sequence(notebook_id), error_payload(str(e))
+                )
+            )
         )
 
 
@@ -2213,7 +2222,7 @@ async def execute_cell_and_broadcast(
         # After the requested cell's own frame, so sequence order still matches
         # send order, and innermost first, so the cell that broke is announced
         # before the one whose failure was only a consequence.
-        await _broadcast_failed_upstreams(notebook_id, executor)
+        await _broadcast_upstream_results(notebook_id, executor)
 
         if result.success:
             previous_snapshot = session.capture_cell_state_snapshot()
@@ -2491,6 +2500,12 @@ async def _execute_run_all(
     )
 
     had_failure = False
+    # What failed in this run, and what could only have been computed from it.
+    # Continuing past a failure used to run every later cell with upstream
+    # materialization turned off, which for a cell downstream of the failure
+    # meant reading the artifacts from before it and publishing a fresh
+    # success built on them.
+    failed: set[str] = set()
     # One run: each cell executes at most once. Run All walks display order,
     # so without this a consumer above its producer materialises it and the
     # producer's own row then executes it again.
@@ -2524,36 +2539,53 @@ async def _execute_run_all(
                         not_run_ids = {
                             r.cell_id for r in batch_result.cell_results if r.status == "not_run"
                         }
+                        # Anything the batch did not finish cleanly and did
+                        # not simply leave unrun. Matching on one spelling of
+                        # failure missed the one it actually uses.
+                        failed.update(
+                            r.cell_id
+                            for r in batch_result.cell_results
+                            if r.status not in ("ok", "cache_hit", "not_run")
+                        )
                         for cell in cells_in_run:
                             if cell.id not in not_run_ids:
                                 continue
                             if not continue_on_error:
                                 break
-                            await _run_partition_single_cell(
+                            if _upstream_that_failed(session, cell.id, failed) is not None:
+                                await _mark_blocked_by_failure(session, notebook_id, cell.id)
+                                failed.add(cell.id)
+                                continue
+                            ok = await _run_partition_single_cell(
                                 session=session,
                                 executor=executor,
                                 cell=cell,
                                 notebook_id=notebook_id,
                                 force=force,
-                                skip_upstream=True,
                                 execution_state=execution_state,
                             )
+                            if not ok:
+                                failed.add(cell.id)
                     continue
 
                 for cell in cells_in_run:
                     if had_failure and not continue_on_error:
                         break
+                    if _upstream_that_failed(session, cell.id, failed) is not None:
+                        await _mark_blocked_by_failure(session, notebook_id, cell.id)
+                        failed.add(cell.id)
+                        continue
                     ok = await _run_partition_single_cell(
                         session=session,
                         executor=executor,
                         cell=cell,
                         notebook_id=notebook_id,
                         force=force,
-                        skip_upstream=had_failure,
                         execution_state=execution_state,
                     )
                     if not ok:
                         had_failure = True
+                        failed.add(cell.id)
         finally:
             execution_state.running_cell = None
 
@@ -2767,6 +2799,55 @@ async def _run_partition_batch(
     return batch_result
 
 
+def _upstream_that_failed(session: NotebookSession, cell_id: str, failed: set[str]) -> str | None:
+    """The failed cell this one reads from, directly or through others.
+
+    Run All walks display order rather than topological order, so a consumer
+    can come before its producer and the answer has to look past the immediate
+    upstreams.
+    """
+    dag = session.dag
+    if dag is None or not failed:
+        return None
+    seen: set[str] = set()
+    queue = list(dag.cell_upstream.get(cell_id, []))
+    while queue:
+        upstream_id = queue.pop()
+        if upstream_id in seen:
+            continue
+        seen.add(upstream_id)
+        if upstream_id in failed:
+            return upstream_id
+        queue.extend(dag.cell_upstream.get(upstream_id, []))
+    return None
+
+
+async def _mark_blocked_by_failure(
+    session: NotebookSession, notebook_id: str, cell_id: str
+) -> None:
+    """Say a cell did not run because what it reads from failed.
+
+    Stale rather than error: nothing went wrong in this cell, and its last
+    result, if it has one, is still the last thing it computed.
+    """
+    cell = session.notebook_state.get_cell(cell_id)
+    if cell is not None:
+        cell.status = CellStatus.STALE
+        cell.staleness = CellStaleness(status=CellStatus.STALE, reasons=[StalenessReason.UPSTREAM])
+    await _broadcast_message(
+        notebook_id,
+        _make_message(
+            MessageType.CELL_STATUS,
+            next_notebook_sequence(notebook_id),
+            # With the reason, so a client can say why it did not run rather
+            # than showing it as stale for no stated cause.
+            cell_status_payload(
+                cell_id, CellStatus.STALE, staleness_reasons=[StalenessReason.UPSTREAM.value]
+            ),
+        ),
+    )
+
+
 async def _run_partition_single_cell(
     *,
     session: NotebookSession,
@@ -2774,15 +2855,15 @@ async def _run_partition_single_cell(
     cell,
     notebook_id: str,
     force: bool,
-    skip_upstream: bool,
     execution_state: NotebookExecutionState,
 ) -> bool:
     """Existing per-cell broadcast flow. Returns True on success.
 
-    ``skip_upstream`` is set when a prior cell in this run-all has failed —
-    avoids ``_materialize_upstreams`` recursively re-executing the failed
-    cell. Equivalent to single-cell continuation after batch failure per
-    issue #26 round-6 finding #3.
+    No cell reaches here with a failed producer behind it: the caller blocks
+    those rather than running them, so upstream materialization is always safe
+    and always correct. It used to be turned off for every cell after a
+    failure, which let a consumer of the failed cell read the artifacts from
+    before it and publish a fresh success built on them.
     """
     cell_id = cell.id
     execution_state.running_cell = cell_id
@@ -2797,19 +2878,8 @@ async def _run_partition_single_cell(
     )
 
     try:
-        if force and skip_upstream:
-            # Continuation after a batch failure during rerun-all needs
-            # BOTH "bypass target cache" AND "don't recursively
-            # materialize the failed upstream." execute_cell_force is
-            # exactly this combination (materialize_upstreams=False +
-            # use_cache=False).
-            result = await executor.execute_cell_force(cell_id, cell.source)
-        elif force:
+        if force:
             result = await executor.execute_cell_rerun(cell_id, cell.source)
-        elif skip_upstream:
-            result = await executor.execute_cell(
-                cell_id, cell.source, skip_upstream_materialization=True
-            )
         else:
             result = await executor.execute_cell(cell_id, cell.source)
 
@@ -3209,7 +3279,7 @@ async def execute_cell_for_agent(
                 cell_status_payload(cell_id, status),
             ),
         )
-        await _broadcast_failed_upstreams(notebook_id, executor)
+        await _broadcast_upstream_results(notebook_id, executor)
 
         return result
     except Exception:
@@ -3346,18 +3416,21 @@ def _execution_result_payload(cell_id: str, result: CellExecutionResult) -> dict
     return payload
 
 
-async def _broadcast_failed_upstreams(notebook_id: str, executor: Any) -> None:
-    """Announce every cell this run found broken, each with its own result.
+async def _broadcast_upstream_results(notebook_id: str, executor: Any) -> None:
+    """Announce every cell this run settled on the way to the one asked for.
 
     A client needs the result and not just a status: the status changes a
     badge, the result replaces the output the cell is showing and carries what
-    only that run knows, such as an offer to install a missing package.
+    only that run knows, such as an offer to install a missing package. That
+    cuts both ways. A cell that broke needs its error, and a cell that was
+    broken and has now run clean needs the output that takes the error back,
+    or it stays red over a result that is no longer wrong.
 
     Called from every path that drives an executor. Every cell kind turns a
     broken upstream into a failed result rather than letting the error out, so
     a run that found one always reaches here.
     """
-    for upstream_id, upstream_result in getattr(executor, "failed_upstreams", {}).items():
+    for upstream_id, upstream_result in getattr(executor, "upstream_results", {}).items():
         await _broadcast_execution_result(notebook_id, upstream_id, upstream_result)
 
 
@@ -3690,12 +3763,11 @@ async def _handle_widget_update(
         )
         return
 
-    seq = execution_state.next_sequence()
     busy_cell = await _reserve_execution_request(execution_state, cell_id)
     if busy_cell is not None:
         await _send_error_message(
             websocket,
-            seq,
+            next_notebook_sequence(notebook_id),
             (
                 f"Notebook is already executing cell {busy_cell}"
                 if busy_cell
@@ -3708,7 +3780,11 @@ async def _handle_widget_update(
         await apply_widget_values(session, cell_id, coerced, execution_state, notebook_id)
 
     scheduled = await _schedule_execution(
-        websocket, execution_state, notebook_id, cell_id, seq, _operation
+        websocket,
+        execution_state,
+        notebook_id,
+        cell_id,
+        _operation,
     )
     if not scheduled:
         await _release_execution_request(execution_state, cell_id)
