@@ -2214,18 +2214,10 @@ async def execute_cell_and_broadcast(
 
         await _broadcast_execution_result(notebook_id, seq, cell_id, result)
 
-        # The cell that actually failed, when this run stopped because an
-        # upstream did. Announced with its own result, so the client replaces
-        # the output it was showing and keeps whatever that result carries --
-        # an install suggestion, the worker it ran on -- rather than a bare
-        # message the cell state cannot reconstruct. After the requested
-        # cell's own frame, so sequence order still matches send order.
-        failed_upstream = executor.failed_upstream
-        if failed_upstream is not None:
-            upstream_id, upstream_result = failed_upstream
-            await _broadcast_execution_result(
-                notebook_id, execution_state.next_sequence(), upstream_id, upstream_result
-            )
+        # After the requested cell's own frame, so sequence order still matches
+        # send order, and innermost first, so the cell that broke is announced
+        # before the one whose failure was only a consequence.
+        await _broadcast_failed_upstreams(notebook_id, executor)
 
         if result.success:
             previous_snapshot = session.capture_cell_state_snapshot()
@@ -3207,7 +3199,7 @@ async def execute_cell_for_agent(
                 notebook_id,
                 _make_message(
                     MessageType.CELL_OUTPUT,
-                    0,
+                    next_notebook_sequence(notebook_id),
                     {
                         "cell_id": cell_id,
                         "outputs": result.outputs,
@@ -3226,6 +3218,7 @@ async def execute_cell_for_agent(
                 cell_status_payload(cell_id, status),
             ),
         )
+        await _broadcast_failed_upstreams(notebook_id, executor)
 
         return result
     except Exception:
@@ -3362,6 +3355,23 @@ def _execution_result_payload(cell_id: str, result: CellExecutionResult) -> dict
             payload[field_name] = value
 
     return payload
+
+
+async def _broadcast_failed_upstreams(notebook_id: str, executor: Any) -> None:
+    """Announce every cell this run found broken, each with its own result.
+
+    A client needs the result and not just a status: the status changes a
+    badge, the result replaces the output the cell is showing and carries what
+    only that run knows, such as an offer to install a missing package.
+
+    Called from every path that drives an executor. Every cell kind turns a
+    broken upstream into a failed result rather than letting the error out, so
+    a run that found one always reaches here.
+    """
+    for upstream_id, upstream_result in getattr(executor, "failed_upstreams", {}).items():
+        await _broadcast_execution_result(
+            notebook_id, next_notebook_sequence(notebook_id), upstream_id, upstream_result
+        )
 
 
 async def _broadcast_execution_result(

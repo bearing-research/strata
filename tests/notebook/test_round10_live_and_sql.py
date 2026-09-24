@@ -368,3 +368,159 @@ async def test_typing_elsewhere_does_not_re_announce_a_failure(tmp_path):
     assert not [f for f in observer.sent if f["type"] == "cell_error"], (
         "a source flush replayed a failure that had already been announced"
     )
+
+
+@pytest.mark.asyncio
+async def test_every_cell_a_chain_broke_gets_its_own_error(tmp_path):
+    """Round 11: a chain fails more than once, and each failure is somebody's
+    stale result.
+
+    Recording one upstream per run kept only the last one seen. The outer
+    materialization sees the *consumer* fail after the inner one saw the cell
+    that actually broke, so the client heard about the middle of the chain and
+    never about its start, and the cell at fault went on showing its table.
+    """
+    from strata.notebook.ws import _notebook_connections
+
+    nb = _notebook(
+        tmp_path,
+        [
+            ("q", "sql", GOOD),
+            ("mid", "python", "total = len(rev)\ntotal\n"),
+            ("rep", "python", "doubled = total * 2\n{'doubled': doubled}\n"),
+        ],
+        _db(tmp_path),
+    )
+    session = _session(nb)
+    warm = await _run(session, "rep")
+    assert warm is not None and warm.success, warm and warm.error
+
+    observer = Observer()
+    _notebook_connections.setdefault(session.id, []).append(observer)
+    try:
+        write_cell(nb, "q", BAD)
+        session.reload()
+        session._analyze_and_build_dag()
+        await _run(session, "rep")
+    finally:
+        _notebook_connections.get(session.id, []).remove(observer)
+
+    errored = [
+        (f.get("payload") or {}).get("cell_id") for f in observer.sent if f["type"] == "cell_error"
+    ]
+    assert set(errored) == {"q", "mid", "rep"}, f"only these were told about: {errored}"
+    # The cell that broke is announced before the one its failure broke.
+    assert errored.index("q") < errored.index("mid")
+    # Order, not uniqueness: one execution's console and result frames share a
+    # sequence by design, so a cell that printed would fail a uniqueness check
+    # here while nothing was wrong.
+    seqs = [f["seq"] for f in observer.sent]
+    assert seqs == sorted(seqs), f"frames went out of order: {seqs}"
+
+
+@pytest.mark.asyncio
+async def test_the_whole_chain_recovers_when_the_query_is_fixed(tmp_path):
+    nb = _notebook(
+        tmp_path,
+        [
+            ("q", "sql", GOOD),
+            ("mid", "python", "total = len(rev)\ntotal\n"),
+            ("rep", "python", "doubled = total * 2\n{'doubled': doubled}\n"),
+        ],
+        _db(tmp_path),
+    )
+    session = _session(nb)
+    await _run(session, "rep")
+    write_cell(nb, "q", BAD)
+    session.reload()
+    session._analyze_and_build_dag()
+    await _run(session, "rep")
+
+    write_cell(nb, "q", GOOD)
+    session.reload()
+    session._analyze_and_build_dag()
+    result = await _run(session, "rep")
+
+    assert result is not None and result.success, result and result.error
+    for cell_id in ("q", "mid", "rep"):
+        cell = session.notebook_state.get_cell(cell_id)
+        assert cell.status == CellStatus.READY, f"{cell_id} is {cell.status}"
+        assert cell.error is None, f"{cell_id} still carries {cell.error!r}"
+
+
+@pytest.mark.asyncio
+async def test_a_broken_chain_is_announced_whatever_language_it_runs_through(tmp_path):
+    """The guarantee cannot depend on what kind of cell sits in the chain.
+
+    Python and R turn a broken upstream into a failed result through their own
+    ``except``; SQL, prompt and loop cells let the error out instead, and an
+    escaping exception reached the caller by a route that never looked at what
+    the run had found. So a SQL cell in the middle was never recorded and never
+    announced, and a SQL cell at the end took the whole run with it.
+    """
+    from strata.notebook.ws import _notebook_connections
+
+    db = _db(tmp_path)
+    nb = _notebook(
+        tmp_path,
+        [
+            ("up", "python", "import definitely_not_installed_round11\nlimit = 1\n"),
+            (
+                "q",
+                "sql",
+                "# @sql connection=db\n# @name rev\nSELECT region FROM orders LIMIT :limit\n",
+            ),
+            ("rep", "python", "seen = len(rev)\n{'seen': seen}\n"),
+        ],
+        db,
+    )
+    session = _session(nb)
+
+    observer = Observer()
+    _notebook_connections.setdefault(session.id, []).append(observer)
+    try:
+        await _run(session, "rep")
+    finally:
+        _notebook_connections.get(session.id, []).remove(observer)
+
+    errored = [
+        (f.get("payload") or {}).get("cell_id") for f in observer.sent if f["type"] == "cell_error"
+    ]
+    assert "up" in errored, f"the cell that broke was never announced: {errored}"
+    assert "q" in errored, f"the SQL cell in the chain was never announced: {errored}"
+    assert session.notebook_state.get_cell("q").status == CellStatus.ERROR
+
+
+@pytest.mark.asyncio
+async def test_a_sql_target_still_reports_the_upstream_that_broke(tmp_path):
+    """A SQL cell asked for directly, whose own upstream is broken. The error
+    used to escape as an exception, and the path that catches one never told
+    the client anything about the cell that had actually failed."""
+    from strata.notebook.ws import _notebook_connections
+
+    nb = _notebook(
+        tmp_path,
+        [
+            ("up", "python", "import definitely_not_installed_round11\nlimit = 1\n"),
+            (
+                "q",
+                "sql",
+                "# @sql connection=db\n# @name rev\nSELECT region FROM orders LIMIT :limit\n",
+            ),
+        ],
+        _db(tmp_path),
+    )
+    session = _session(nb)
+
+    observer = Observer()
+    _notebook_connections.setdefault(session.id, []).append(observer)
+    try:
+        await _run(session, "q")
+    finally:
+        _notebook_connections.get(session.id, []).remove(observer)
+
+    errored = [
+        (f.get("payload") or {}).get("cell_id") for f in observer.sent if f["type"] == "cell_error"
+    ]
+    assert "up" in errored, f"only the SQL cell was mentioned: {errored}"
+    assert session.notebook_state.get_cell("up").status == CellStatus.ERROR
