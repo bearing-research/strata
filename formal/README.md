@@ -12,15 +12,16 @@ cheaper approaches do pay off:
   invariants depend on (pruning soundness, cache-key injectivity), using
   SMT solvers or property-based tests.
 
-As a proof of concept, three TLA+ models of 160–260 lines each found
-eight real bugs, each in about a second of model checking:
+As a proof of concept, four TLA+ models of about 140–260 lines each found
+nine real bugs, each in about a second of model checking:
 
 - The **artifact lifecycle** model found findings 1–2.
 - The **build lease protocol** model found findings 5–7.
 - The **admission limiter** model found findings 8–10.
+- The **notebook staleness** model found finding 11.
 
 A review of the assumptions behind the pruning and cache-key invariants
-found two more (findings 3–4). All ten reproduce against the real code
+found two more (findings 3–4). All eleven reproduce against the real code
 (`uv run pytest formal/`; finding 8 needs CPython 3.12, see below).
 
 ## What's here
@@ -43,6 +44,10 @@ found two more (findings 3–4). All ten reproduce against the real code
 | `tla/Admission_Eviction.cfg` | LRU eviction of a limiter in use. Finds findings 9 and 10 |
 | `tla/Admission_Patched.cfg` | Both fixes. **All invariants hold** (exhaustive) |
 | `test_admission_counterexamples.py` | Findings 8–10 against the real `ResizableLimiter` / `TenantRegistry` |
+| `tla/Staleness.tla` | Model of cell status for a chain `a → b → c` under edits and runs, one run at a time |
+| `tla/Staleness_EditDuringRun.cfg` | An upstream is edited while a downstream runs. Finds finding 11 |
+| `tla/Staleness_Patched.cfg` | The proposed fix. **All invariants hold** (60,102 distinct states, exhaustive) |
+| `test_staleness_counterexamples.py` | Finding 11 through the real notebook WebSocket, with cells really executing |
 
 Each `test_*` file **passes while its bug exists**, because it asserts
 the violating outcome. When a fix lands, invert its assertion and move
@@ -62,6 +67,8 @@ $TLC -config Build_Patched.cfg         BuildLease.tla          # passes
 $TLC -config Admission_Py312.cfg       Admission.tla           # violation
 $TLC -config Admission_Eviction.cfg    Admission.tla           # violation
 $TLC -config Admission_Patched.cfg     Admission.tla           # passes
+$TLC -config Staleness_EditDuringRun.cfg Staleness.tla         # violation
+$TLC -config Staleness_Patched.cfg     Staleness.tla           # passes
 cd ../.. && uv run pytest formal/ -v
 # finding 8 only reproduces on CPython 3.12 (skipped on 3.13+):
 uv run --no-project --python 3.12 --with pytest pytest formal/test_admission_counterexamples.py -k wakeup
@@ -404,15 +411,87 @@ violation with both changes:
    waiters. The registry can then briefly exceed 1000 entries, which is
    a much smaller risk than an unbounded quota.
 
+## Model 4: notebook staleness
+
+`Staleness.tla` models the status of a chain of cells `a → b → c`, with
+one run at a time. It follows `notebook/ws.py` and `session.py`:
+
+- **Edit** is `cell_source_update`. The cell that is executing is
+  refused (`running_cell` / `requested_cell`), and any other cell is
+  accepted. `compute_staleness_async()` then writes the walk's verdict
+  into every cell's status.
+- **Start**: a run reads its upstream's current result when it starts.
+- **Finish**: the run stores its result, then
+  `_refresh_and_broadcast_changed_staleness` recomputes the walk and,
+  through `preserve_ready_cell_id`, marks the cell READY.
+
+The walk is modelled by what it decides: a cell is ready when its latest
+result was computed from its current source and its upstream's latest
+result, and that upstream is ready too.
+
+Invariants:
+
+- `ReadyMeansCurrent`: a cell reported READY holds a result computed from
+  its current source and its upstream's current result. **Violated.**
+- `RunningShown`: the executing cell is reported as running. **Violated.**
+
+### 11. Editing an upstream mid-run leaves the downstream reported READY
+
+The source-update guard locks only the executing cell, so while `b`
+runs, its upstream `a` can be edited. Two things then go wrong:
+
+1. The flush's walk writes a status for every cell, the running one
+   included, so `b` stops being reported as running while it still runs.
+2. When `b` finishes, the walk correctly finds it stale because its
+   upstream is. `preserve_ready_cell_id` then sets it READY
+   unconditionally, and that override is broadcast. `a` reads stale and
+   `b` reads ready, although `b` was built from the old `a`.
+
+TLC trace (5 steps):
+
+```
+a start → a finish → b start → edit a → b finish
+⇒ a stale, b READY (built from the old a)
+```
+
+Model checking alone overstated the impact here. The replay showed that
+the harm stops at the reported status. When `c` runs next, no cascade is
+offered, but the executor re-checks provenance on its own, silently
+rebuilds `a` and `b`, and computes `c` from the new source. The replay
+asserts both halves.
+
+What reads the wrong status: the UI, `GET /cells`, agents and MCP tools,
+the impact preview (`impact.py` lists only READY downstream cells), and
+the cascade planner's decision whether to *offer* a cascade. It
+self-corrects on the next recompute. Severity: low.
+
+`preserve_ready_cell_id` exists so that leaf cells whose output isn't
+cached still show READY after a successful run. The fix keeps that and
+stops it from overriding a stale upstream.
+
+### Proposed fix for 11 (verified in the model)
+
+`Patched = TRUE`, which passes exhaustively with 2 edits and 3 runs per
+cell:
+
+1. `_apply_staleness_map` leaves the executing cell's status alone.
+2. After a run, preserve READY only when the walk did not find a stale
+   upstream (no `UPSTREAM` reason and every upstream READY). Otherwise
+   keep the walk's verdict.
+
+The model has no uncached leaf cells, so in the model change 2 simply
+keeps the walk's verdict. The leaf case needs a test against the real
+walk.
+
 ## Where else formal methods would pay off
 
 Ranked by (likely bugs × consequence) ÷ modelling effort. The build
-protocol and the QoS limiters were on this list and are now done
-(models 2 and 3):
+protocol, the QoS limiters and a first pass at notebook staleness were
+on this list and are now done (models 2–4):
 
 | Component | Technique | Why |
 | --- | --- | --- |
-| **Notebook cascade + staleness** (`cascade.py`, `dag.py`, `session.compute_staleness`) | TLA+ or Hypothesis stateful testing | Invariants such as "after a cascade the target's inputs are READY and match current provenance", and "a source edit marks exactly the downstream closure stale". The concurrency comes from WS source flushes arriving during execution. |
+| **Notebook staleness, deeper** (`session._compute_staleness_locked`) | Hypothesis stateful testing against a real session | Model 4 covers only chains and single-variable cells. The walk has many special cases (leaves, `@nocache`, alternate cache schemes, `@per_variant`, errors, mounts), which suit a property test more than a hand-written model: random edit and run sequences, checking "READY implies the provenance matches" after each step. |
 | **Pruning soundness** (`filters.py`, manifest pruning, `_convert_stats`) | Z3 / CrossHair over the comparison logic, plus Hypothesis round-trips through real Parquet files | Finding 3 shows the value is in encoding the stats assumptions (NaN, null, type coercion) explicitly. |
 | **Hash/key encodings** (`CacheKey.to_hex`, `derive_subkey`, provenance, `transform_spec.to_json`) | Property tests for injectivity | Finding 4. Cheap, and a collision means serving wrong data. |
 | **ACL deny-first** (`auth.AclEvaluator`) | Z3 or exhaustive enumeration | Small and pure. Prove "a matching deny cannot be overridden by any allow set" and pattern/tenant corner cases. Low risk today, but a cheap guard against regressions. |
@@ -431,7 +510,8 @@ A model helps only while it matches the code. Suggested practice:
 - Run the `*_Patched.cfg` configs in CI once the fixes land.
   `Artifact_Patched` takes about 2 minutes. With `MaxVer = 2` it runs in
   about 2 seconds (27k states) and still catches findings 1 and 2.
-  `Build_Patched` and `Admission_Patched` take about a second each.
+  `Build_Patched`, `Admission_Patched` and `Staleness_Patched` take a
+  few seconds each.
 - CI runs on 3.12, 3.13 and 3.14. Run the finding 8 test on the 3.12 job;
   it skips itself on 3.13+.
 - Move each counterexample test into `tests/` with its assertion
