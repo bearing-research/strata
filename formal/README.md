@@ -12,15 +12,16 @@ cheaper approaches do pay off:
   invariants depend on (pruning soundness, cache-key injectivity), using
   SMT solvers or property-based tests.
 
-As a proof of concept, two TLA+ models of 190–260 lines each found
-five real bugs, each in about a second of model checking:
+As a proof of concept, three TLA+ models of 160–260 lines each found
+eight real bugs, each in about a second of model checking:
 
 - The **artifact lifecycle** model found findings 1–2.
 - The **build lease protocol** model found findings 5–7.
+- The **admission limiter** model found findings 8–10.
 
 A review of the assumptions behind the pruning and cache-key invariants
-found two more (findings 3–4). All seven reproduce against the real code
-(`uv run pytest formal/`).
+found two more (findings 3–4). All ten reproduce against the real code
+(`uv run pytest formal/`; finding 8 needs CPython 3.12, see below).
 
 ## What's here
 
@@ -37,6 +38,11 @@ found two more (findings 3–4). All seven reproduce against the real code
 | `test_artifact_counterexamples.py` | Findings 1–4 against the real `ArtifactStore` / `ReadPlanner` / `CacheKey` |
 | `test_build_runner_counterexamples.py` | Findings 5–6 against two real `BuildRunner`s (only the executor HTTP call is stubbed) |
 | `test_build_pull_counterexamples.py` | Finding 7 through the real HTTP routes (`TestClient`) |
+| `tla/Admission.tla` | Model of one tenant's `ResizableLimiter` (acquire with deadline, release, cancel while queued) and the `TenantRegistry` LRU that owns it |
+| `tla/Admission_Py312.cfg` | CPython 3.12 `asyncio.Condition` semantics. Finds finding 8 |
+| `tla/Admission_Eviction.cfg` | LRU eviction of a limiter in use. Finds findings 9 and 10 |
+| `tla/Admission_Patched.cfg` | Both fixes. **All invariants hold** (exhaustive) |
+| `test_admission_counterexamples.py` | Findings 8–10 against the real `ResizableLimiter` / `TenantRegistry` |
 
 Each `test_*` file **passes while its bug exists**, because it asserts
 the violating outcome. When a fix lands, invert its assertion and move
@@ -53,7 +59,12 @@ $TLC -config Artifact_Patched.cfg      ArtifactLifecycle.tla   # passes
 $TLC -config Build_RunnerPath.cfg      BuildLease.tla          # violation
 $TLC -config Build_PullPath.cfg        BuildLease.tla          # violation
 $TLC -config Build_Patched.cfg         BuildLease.tla          # passes
+$TLC -config Admission_Py312.cfg       Admission.tla           # violation
+$TLC -config Admission_Eviction.cfg    Admission.tla           # violation
+$TLC -config Admission_Patched.cfg     Admission.tla           # passes
 cd ../.. && uv run pytest formal/ -v
+# finding 8 only reproduces on CPython 3.12 (skipped on 3.13+):
+uv run --no-project --python 3.12 --with pytest pytest formal/test_admission_counterexamples.py -k wakeup
 ```
 
 `-deadlock` disables deadlock checking, because a bounded model that
@@ -301,15 +312,107 @@ expire between the check and the write (the model has no variant for
 this; it follows from reading the code). It also does nothing for
 presigned uploads.
 
+## Model 3: admission limiter
+
+`Admission.tla` models one tenant's stream admission for one tier. The
+limiter is `ResizableLimiter` (`adaptive_concurrency.py`), an
+`asyncio.Condition` guarding `(capacity, in_use)`:
+
+- `acquire(timeout)` waits while the limiter is full, and its timeout
+  handler re-checks `in_use`.
+- `release()` decrements `in_use` and calls `notify(1)`.
+
+A queued request can also be cancelled outright, for example by a
+client disconnect or by shutdown (the #238 path in `QoSAdmission.admit`).
+The limiter belongs to the tenant's quotas in `TenantRegistry`, which
+LRU-evicts them once more than `MAX_TRACKED_TENANTS` (1000) tenants are
+tracked. The model abstracts that pressure into an `Evict` action that
+may fire at any time.
+
+The property the earlier ranking listed, that interactive requests are
+never starved by bulk ones, **holds by construction**: the two tiers
+use separate limiters and never wait on each other, so it needed no
+model. The model looked inside a tier instead.
+
+Invariants:
+
+- `NoLostWakeup`: whenever a slot is free and a request is queued, some
+  queued request has been notified. **Violated on CPython 3.12.**
+- `WithinQuota`: a tenant never holds more slots than its quota. **Violated.**
+- `DrainSeesAll`: `aggregate_limiter_usage()`, which graceful shutdown
+  uses to wait for streams, counts every live stream. **Violated.**
+
+### 8. On Python 3.12, a cancelled waiter swallows the wakeup
+
+When a waiter that `notify(1)` picked is cancelled before it runs,
+CPython 3.13+ `Condition.wait()` notifies another waiter, but 3.12 does
+not. `ResizableLimiter` relies on the condition alone, so on 3.12 the
+wakeup is lost. The other queued requests sleep until their deadline
+(`interactive_queue_timeout` 10 s, `bulk_queue_timeout` 30 s) while the
+slot is free. A request arriving in that time takes the free slot
+straight away, ahead of them. If that leaves the limiter full when a
+queued request's deadline passes, the re-check fails and it gets a 429.
+Strata supports 3.12 (`requires-python >= 3.12`) and CI tests it. The
+Docker image uses 3.13, so this affects installs from PyPI or source on 3.12.
+TLC trace (5 steps):
+
+```
+r1 admit (holds) → r2 admit (queued) → r3 admit (queued)
+→ r1 release (notifies r2) → r2 cancelled   ⇒ slot free, r3 not notified
+```
+
+The replay runs the real `ResizableLimiter` on CPython 3.12. C waits the
+full 0.5 s deadline with `in_use == 0`, while on 3.13.7 the same scenario
+returns in 0.0 s.
+
+Suggested fix: in `ResizableLimiter.acquire`, catch `BaseException`
+around the wait and call `self._cv.notify(1)` before re-raising, which
+is the same re-notify 3.13 added. `Admission_Patched` models exactly
+that behaviour.
+
+### 9. An evicted limiter lets a tenant exceed its quota
+
+`get_or_create_quotas` evicts the least recently used tenant regardless
+of whether its limiters have slots in use. The tenant's next request
+builds a fresh limiter at full capacity, while the evicted one is still
+held by live streams, so the tenant runs up to twice its quota, and more
+after each further eviction. This needs more than 1000 tenants active
+at once, so it only affects multi-tenant service deployments. TLC trace
+(3 steps): `r1 admit → evict → r2 admit ⇒ 2 slots held on a quota of 1`.
+
+`QoSAdmission._get_client_semaphore` LRU-evicts per-client semaphores
+(10,000 entries) the same way, which can let one client exceed
+`per_client_*`. I found that by reading the code; it is not modelled
+or replayed.
+
+### 10. Graceful shutdown doesn't count streams on an evicted limiter
+
+`_graceful_shutdown` waits while `aggregate_limiter_usage()` reports
+in-flight scans, then cancels the remaining stream tasks. That count
+only sums the limiters the registry still tracks, so a stream on an
+evicted limiter is invisible to it. Shutdown can then report "drained"
+and cancel that stream mid-response, which is exactly what #185 set
+out to prevent. TLC trace (2 steps): `r1 admit → evict`.
+
+### Proposed fix for 8–10 (verified in the model)
+
+`Admission_Patched` (4 requests, capacity 2, 3 generations) finds no
+violation with both changes:
+
+1. Re-notify on cancellation in `ResizableLimiter.acquire` (above).
+2. Evict only quotas whose limiters are idle: `in_use == 0` and no
+   waiters. The registry can then briefly exceed 1000 entries, which is
+   a much smaller risk than an unbounded quota.
+
 ## Where else formal methods would pay off
 
 Ranked by (likely bugs × consequence) ÷ modelling effort. The build
-protocol was at the top of this list and is now done (model 2):
+protocol and the QoS limiters were on this list and are now done
+(models 2 and 3):
 
 | Component | Technique | Why |
 | --- | --- | --- |
 | **Notebook cascade + staleness** (`cascade.py`, `dag.py`, `session.compute_staleness`) | TLA+ or Hypothesis stateful testing | Invariants such as "after a cascade the target's inputs are READY and match current provenance", and "a source edit marks exactly the downstream closure stale". The concurrency comes from WS source flushes arriving during execution. |
-| **Two-tier QoS / per-tenant limiters** (`rate_limiter.py`, `transforms/build_qos.py`) | TLA+ with fairness (liveness) | "Interactive requests are never starved by bulk" is a liveness property. Tests can't show it; TLC can, under weak fairness. |
 | **Pruning soundness** (`filters.py`, manifest pruning, `_convert_stats`) | Z3 / CrossHair over the comparison logic, plus Hypothesis round-trips through real Parquet files | Finding 3 shows the value is in encoding the stats assumptions (NaN, null, type coercion) explicitly. |
 | **Hash/key encodings** (`CacheKey.to_hex`, `derive_subkey`, provenance, `transform_spec.to_json`) | Property tests for injectivity | Finding 4. Cheap, and a collision means serving wrong data. |
 | **ACL deny-first** (`auth.AclEvaluator`) | Z3 or exhaustive enumeration | Small and pure. Prove "a matching deny cannot be overridden by any allow set" and pattern/tenant corner cases. Low risk today, but a cheap guard against regressions. |
@@ -328,6 +431,8 @@ A model helps only while it matches the code. Suggested practice:
 - Run the `*_Patched.cfg` configs in CI once the fixes land.
   `Artifact_Patched` takes about 2 minutes. With `MaxVer = 2` it runs in
   about 2 seconds (27k states) and still catches findings 1 and 2.
-  `Build_Patched` takes about a second.
+  `Build_Patched` and `Admission_Patched` take about a second each.
+- CI runs on 3.12, 3.13 and 3.14. Run the finding 8 test on the 3.12 job;
+  it skips itself on 3.13+.
 - Move each counterexample test into `tests/` with its assertion
   inverted, so the code is checked even when the model isn't.
