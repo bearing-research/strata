@@ -50,6 +50,8 @@ reproduce against the real code
 | `tla/Staleness_Patched.cfg` | The proposed fix. **All invariants hold** (60,102 distinct states, exhaustive) |
 | `test_staleness_counterexamples.py` | Finding 11 through the real notebook WebSocket, with cells really executing |
 | `test_acl_counterexamples.py` | Finding 12 through the real `authorize_table_access` gate and catalog loader |
+| `test_pruning_properties.py` | Property test: a pruned row group holds no matching row (Hypothesis, real Parquet files) |
+| `test_staleness_properties.py` | Property test: random edit and run sequences on a real notebook match a fresh evaluation (Hypothesis) |
 
 Each `test_*` file **passes while its bug exists**, because it asserts
 the violating outcome. When a fix lands, invert its assertion and move
@@ -72,6 +74,8 @@ $TLC -config Admission_Patched.cfg     Admission.tla           # passes
 $TLC -config Staleness_EditDuringRun.cfg Staleness.tla         # violation
 $TLC -config Staleness_Patched.cfg     Staleness.tla           # passes
 cd ../.. && uv run pytest formal/ -v
+# the two property tests need Hypothesis, which is not a project dependency:
+uv run --with hypothesis pytest formal/test_pruning_properties.py formal/test_staleness_properties.py
 # finding 8 only reproduces on CPython 3.12 (skipped on 3.13+):
 uv run --no-project --python 3.12 --with pytest pytest formal/test_admission_counterexamples.py -k wakeup
 ```
@@ -529,6 +533,60 @@ The model has no uncached leaf cells, so in the model change 2 simply
 keeps the walk's verdict. The leaf case needs a test against the real
 walk.
 
+## Property tests
+
+Where a hand-written model would miss too many special cases, the next
+step is a property test: Hypothesis generates inputs, the real code runs,
+and an oracle that doesn't share Strata's logic checks the result. Both
+tests read their example count from the environment
+(`PRUNING_EXAMPLES`, default 3000; `STALENESS_EXAMPLES`, default 15).
+
+**Pruning soundness** (`test_pruning_properties.py`). Random columns of
+float64, int64, string, timestamp and decimal values, with nulls, are
+written through pyarrow's real Parquet writer with 1–4 rows per group.
+Each row group that `_should_prune_row_group` prunes, given the file's
+real statistics, must contain no row that an exact Python comparison
+would keep. The generators mix a small pool of boundary values (±0.0,
+NaN, ±inf, 2⁵³ and 2⁵³+1, int64 limits, long shared string prefixes,
+one-microsecond timestamp steps) with the full range. That made the
+difference: with plain random values, Hypothesis did not produce the
+finding 3 shape even in 3,000 examples, and with the pool it
+rediscovered it on its own after about 30,000.
+
+- Result: with finding 3 excluded as known, **60,000 examples pass**
+  (4 min). No other pruning violation turned up for these types and
+  operators, including an int64 column filtered with a float (compared
+  exactly, so 2⁵³+1 is not confused with 2⁵³). Not covered: mixing
+  naive and tz-aware timestamps, and types beyond these five.
+
+**Notebook staleness** (`test_staleness_properties.py`). A diamond
+`a → (b, c) → d` of integer cells, plus a sink that reads `d`. Each
+example is a random sequence of up to six source edits and runs, sent
+through the real notebook WebSocket with real cell execution. The oracle
+evaluates the current sources from scratch. After each step, a run's
+stored value must equal that evaluation, and every cell reported READY
+must hold the value the evaluation gives.
+
+- Result: **40 sequences pass** (3 min). Sequential edits and runs keep
+  statuses and values consistent, including cascades and re-runs of
+  cells whose upstream changed. Finding 11 needs an edit to land
+  *during* a run, which this sequential test doesn't generate. Covering
+  that needs concurrent steps, which the WebSocket harness can't easily
+  drive.
+
+**Checked and found safe** (by reading the code; no test needed):
+
+- `derive_subkey` joins labels with `:`, but no label can be ambiguous.
+  Variable names can't contain `:` or `=`, and names starting with `_`
+  are never stored (`analyzer.py`, `harness.py`), so a variable can't
+  collide with the `__display__N` or `__console__` keys. The other labels
+  have their own prefixes (`variant=`, `content=`, `iter=`).
+- `CacheKey.to_hex` joins fields with `|`. A collision would need a
+  table name containing `|` and a data file path starting with digits
+  followed by `|`. Real file paths start with a scheme or `/`, so this
+  can't happen in practice. The projection fingerprint (finding 4) is
+  the real hole in the key.
+
 ## Where else formal methods would pay off
 
 Ranked by (likely bugs × consequence) ÷ modelling effort. The build
@@ -538,9 +596,9 @@ finding 12):
 
 | Component | Technique | Why |
 | --- | --- | --- |
-| **Notebook staleness, deeper** (`session._compute_staleness_locked`) | Hypothesis stateful testing against a real session | Model 4 covers only chains and single-variable cells. The walk has many special cases (leaves, `@nocache`, alternate cache schemes, `@per_variant`, errors, mounts), which suit a property test more than a hand-written model: random edit and run sequences, checking "READY implies the provenance matches" after each step. |
-| **Pruning soundness** (`filters.py`, manifest pruning, `_convert_stats`) | Z3 / CrossHair over the comparison logic, plus Hypothesis round-trips through real Parquet files | Finding 3 shows the value is in encoding the stats assumptions (NaN, null, type coercion) explicitly. |
-| **Hash/key encodings** (`CacheKey.to_hex`, `derive_subkey`, provenance, `transform_spec.to_json`) | Property tests for injectivity | Finding 4. Cheap, and a collision means serving wrong data. |
+| **Notebook staleness, wider** (`session._compute_staleness_locked`) | Extend `test_staleness_properties.py` | It covers plain Python cells only. The walk's special cases (leaves, `@nocache`, prompt and SQL cells, `@per_variant`, loops, errors, mounts) each need their own cell kinds in the generator, and concurrent steps would reach finding 11. |
+| **Manifest-level pruning** (Iceberg file skipping) | Extend `test_pruning_properties.py` to real Iceberg tables | The property test covers the Parquet row-group level only. File-level pruning uses Iceberg manifest bounds, which have their own NaN and truncation rules. |
+| **`transform_spec.to_json`** (core provenance) | Property test for canonical JSON | The other key encodings are covered above; this one wasn't checked. |
 | **Table naming for ACLs** (`TableRef`, `table_identity_for`, `named_catalog`) | Property test over URI forms | Finding 12 generalised: for every configured catalog shape, every URI form that loads a table should produce the same ACL name. |
 
 Not worth it: the data plane's streaming and memory bounds (better
