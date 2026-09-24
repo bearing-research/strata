@@ -20,7 +20,7 @@ from strata.fetcher import create_fetcher
 from strata.notebook.models import TableSpec
 from strata.notebook.tables import resolve_table_snapshot
 from strata.planner import ReadPlanner
-from tests.conftest import start_container_or_skip
+from tests.conftest import MINIO_IMAGE, start_container_or_skip
 
 
 def _docker_daemon_reachable() -> bool:
@@ -120,7 +120,7 @@ def test_a_glue_catalog_table_is_read_by_name(tmp_path, monkeypatch):
     monkeypatch.setenv("AWS_ACCESS_KEY_ID", "testing")
     monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "testing")
     monkeypatch.setenv("AWS_DEFAULT_REGION", "us-east-1")
-    with MinioContainer("quay.io/minio/minio:RELEASE.2024-11-07T00-52-20Z") as minio:
+    with MinioContainer(MINIO_IMAGE) as minio:
         minio_config = minio.get_config()
         endpoint = f"http://{minio_config['endpoint']}"
         minio.get_client().make_bucket("lake")

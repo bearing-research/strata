@@ -26,6 +26,8 @@ if not _docker_daemon_reachable():
 
 from testcontainers.community.minio import MinioContainer  # noqa: E402
 
+from tests.conftest import MINIO_IMAGE  # noqa: E402
+
 pytestmark = [pytest.mark.integration, pytest.mark.slow]
 
 BUCKET = "strata-presign"
@@ -33,7 +35,7 @@ BUCKET = "strata-presign"
 
 @pytest.fixture(scope="module")
 def minio():
-    with MinioContainer("quay.io/minio/minio:RELEASE.2024-11-07T00-52-20Z") as container:
+    with MinioContainer(MINIO_IMAGE) as container:
         client = container.get_client()
         if not client.bucket_exists(BUCKET):
             client.make_bucket(BUCKET)

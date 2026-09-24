@@ -31,6 +31,7 @@ from strata.config import StrataConfig
 from strata.fetcher import PyArrowFetcher
 from strata.planner import ReadPlanner
 from strata.types import Filter, FilterOp
+from tests.conftest import MINIO_IMAGE
 
 
 def _docker_daemon_reachable() -> bool:
@@ -91,7 +92,7 @@ def minio_container():
 
     Using module scope to avoid repeated container startup overhead.
     """
-    with MinioContainer("minio/minio:RELEASE.2024-11-07T00-52-20Z") as minio:
+    with MinioContainer(MINIO_IMAGE) as minio:
         # Wait for MinIO to be ready
         client = minio.get_client()
         # Create test bucket

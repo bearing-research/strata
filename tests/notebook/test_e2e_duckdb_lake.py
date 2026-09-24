@@ -29,7 +29,7 @@ from strata.notebook.writer import (
     update_notebook_mounts,
     write_cell,
 )
-from tests.conftest import start_container_or_skip
+from tests.conftest import MINIO_IMAGE, start_container_or_skip
 
 
 def _docker_daemon_reachable() -> bool:
@@ -174,7 +174,7 @@ def test_the_query_reads_the_snapshot_its_provenance_names(tmp_path, monkeypatch
 
 @pytest.mark.asyncio
 async def test_an_s3_mount_is_a_view_read_with_its_storage_options(tmp_path):
-    with MinioContainer("quay.io/minio/minio:RELEASE.2024-11-07T00-52-20Z") as minio:
+    with MinioContainer(MINIO_IMAGE) as minio:
         minio_config = minio.get_config()
         client = minio.get_client()
         client.make_bucket("raw")
