@@ -209,6 +209,18 @@ def _ensure_execution_state(notebook_id: str) -> NotebookExecutionState:
     return _notebook_execution_state.setdefault(notebook_id, NotebookExecutionState())
 
 
+def forget_notebook_execution_state(notebook_id: str) -> None:
+    """Drop a closed session's bookkeeping, including its sequence counter.
+
+    The counter outlives a disconnect on purpose, so this is the one place it
+    is allowed to go: the session it counted for no longer exists, and the id
+    is never handed out again. The connections list is left alone -- a socket
+    that is still open has to reach its own cleanup, which is what closes the
+    inspect sessions behind it.
+    """
+    _notebook_execution_state.pop(notebook_id, None)
+
+
 def next_notebook_sequence(notebook_id: str) -> int:
     """Increment and return the next outbound sequence for a notebook."""
     return _ensure_execution_state(notebook_id).next_sequence()
@@ -313,6 +325,10 @@ async def _broadcast_staleness_updates(
     batch made a client that follows the documented advice -- dedupe on ``seq``
     -- drop every status but the first, including the one saying a cell had
     finished.
+
+    Status only. What a cell failed *with* is announced by whoever saw it fail,
+    which is the only place that holds the whole of it: an install suggestion
+    and the worker that ran it are on the result, not on the cell.
     """
     for cell_id, staleness in staleness_map.items():
         causality = session.causality_map.get(cell_id)
@@ -504,7 +520,13 @@ async def _tear_down_notebook_state(notebook_id: str) -> None:
         if task is not None:
             task.cancel()
             await asyncio.gather(task, return_exceptions=True)
-        _notebook_execution_state.pop(notebook_id, None)
+        # Clear what the connection was doing, and keep the bookkeeping. The
+        # outbound sequence lives here and belongs to the session, which is
+        # still open: dropping the object restarted the count at 1 when
+        # somebody reconnected after the grace window, and a client holding
+        # the last number it saw, as the protocol reference tells it to, reads
+        # that as frames it has already handled.
+        execution_state.reset_execution()
 
     inspect_manager = _notebook_inspect_managers.pop(notebook_id, None)
     if inspect_manager is not None:
@@ -2191,6 +2213,19 @@ async def execute_cell_and_broadcast(
         session.apply_execution_result_metadata(cell_id, result)
 
         await _broadcast_execution_result(notebook_id, seq, cell_id, result)
+
+        # The cell that actually failed, when this run stopped because an
+        # upstream did. Announced with its own result, so the client replaces
+        # the output it was showing and keeps whatever that result carries --
+        # an install suggestion, the worker it ran on -- rather than a bare
+        # message the cell state cannot reconstruct. After the requested
+        # cell's own frame, so sequence order still matches send order.
+        failed_upstream = executor.failed_upstream
+        if failed_upstream is not None:
+            upstream_id, upstream_result = failed_upstream
+            await _broadcast_execution_result(
+                notebook_id, execution_state.next_sequence(), upstream_id, upstream_result
+            )
 
         if result.success:
             previous_snapshot = session.capture_cell_state_snapshot()

@@ -610,6 +610,11 @@ class CellExecutor:
         # execute_cell() recursive tree. Each top-level call creates a fresh
         # CellExecutor, so the guard resets between independent executions.
         self._materializing: set[str] = set()
+        # The upstream whose failure stopped this run, with the result it
+        # failed with, so the caller can tell a watching client what happened
+        # to *that* cell and not only to the one that was asked for. Only the
+        # code that saw the failure holds everything it knows about it.
+        self.failed_upstream: tuple[str, CellExecutionResult] | None = None
         # What each cell's execution returned within the current multi-cell
         # run, when one is open (see ``one_run``). ``None`` outside a run,
         # which is every standalone single-cell execution, so their semantics
@@ -4389,6 +4394,7 @@ class CellExecutor:
                 # output, in the language wrapper, the same as a direct run --
                 # which is what makes it read as `error` here rather than as a
                 # cell that never ran.
+                self.failed_upstream = (upstream_id, result)
                 raise RuntimeError(
                     f"Failed to materialise upstream cell {upstream_id}: {result.error}"
                 )
