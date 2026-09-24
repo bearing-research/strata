@@ -275,6 +275,18 @@ environment pinned below them has to move before it can install 0.8.0.
   cell's provenance and outputs but not the selection behind them, so an
   imported copy fell back to each control's default and recomputed a different
   scenario than the bundle was taken from.
+- **A write cell ending in a comment runs.** Splitting a body into statements
+  kept the text after the last semicolon whatever it held, so a script closing
+  with `-- done` handed the database a bare comment and was told it had failed,
+  after doing its work. A comment is not a statement now, wherever it sits, and
+  a statement after one keeps the row count it reported.
+- **A failed dependency says what went wrong, not only that something did.** A
+  cell that failed while being materialized for another one turned its error
+  colour on over the result it produced before the failure, with nothing to
+  read. It now sends what that run returned, which is also what carries the
+  offer to install a missing package. Reconnecting to a session that is still
+  open no longer restarts the message numbering either, which a client
+  following the protocol reference reads as messages it has already seen.
 - **A watching client is told what every other reader is told.** A SQL cell
   that failed while being materialized for a consumer recorded its error, and
   the MCP view, a sync and an export all reported it; only the live stream said
