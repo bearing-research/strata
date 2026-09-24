@@ -3089,7 +3089,7 @@
 <p>Every server → client message carries a <code>seq</code> from a single counter scoped to the <strong>notebook session</strong> (not the WebSocket connection). The counter increments on every outbound message; it persists across reconnects to the same session and only resets when the session itself is closed (via <code>DELETE /v1/notebooks/{session_id}</code> or a server restart).</p>
 <p>What the client uses <code>seq</code> for:</p>
 <ul>
-<li><strong>Ordering.</strong> Messages arrive in <code>seq</code> order under normal conditions. If your client coalesces state updates, key dedupe on <code>seq</code> rather than <code>type</code>.</li>
+<li><strong>Ordering.</strong> Messages arrive in <code>seq</code> order under normal conditions. Every frame carries its own number, including the console and result of one execution and each cell of a batch, so if your client coalesces state updates, key dedupe on <code>seq</code> rather than <code>type</code>.</li>
 <li><strong>Gap detection across reconnects.</strong> After reconnecting, the first message you receive may have a <code>seq</code> far higher than the last one you saw - events emitted while you were disconnected are not buffered. Treat any gap (or any reconnect) as a reason to send <code>notebook_sync</code> and replace local state.</li>
 <li><strong>One-way ack.</strong> The client doesn't echo <code>seq</code> back; the server tracks no per-connection ack state.</li>
 </ul>
