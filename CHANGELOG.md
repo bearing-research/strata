@@ -275,6 +275,19 @@ environment pinned below them has to move before it can install 0.8.0.
   cell's provenance and outputs but not the selection behind them, so an
   imported copy fell back to each control's default and recomputed a different
   scenario than the bundle was taken from.
+- **Every cell a broken chain passed through says what happened.** A chain
+  fails more than once: the cell that breaks, and each consumer that could not
+  run without it. Only the last one seen was reported, so a client running the
+  end of a chain heard about its middle and never about its start, and the cell
+  at fault went on showing the result it produced before the break. The kind of
+  cell no longer decides this either: SQL, prompt and loop cells used to let the
+  failure escape by a route that reported nothing, so one of them in a chain was
+  passed over and one at the end took the whole run with it.
+- **Every message the server sends carries its own number.** The protocol
+  reference asks clients to deduplicate on it, and several batches shared one:
+  an execution's console and its result, every cell a Run All started, every
+  cell a failure made stale. A client following that advice dropped the rest of
+  each batch, including the message saying a cell had finished.
 - **A write cell ending in a comment runs.** Splitting a body into statements
   kept the text after the last semicolon whatever it held, so a script closing
   with `-- done` handed the database a bare comment and was told it had failed,
