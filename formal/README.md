@@ -25,6 +25,9 @@ control invariants found three more (findings 3, 4 and 12). All twelve
 reproduce against the real code
 (`uv run pytest formal/`; finding 8 needs CPython 3.12, see below).
 
+Picking this up? Start with [`HANDOFF.md`](HANDOFF.md): state, how to
+run everything, conventions, gotchas and the prioritized next steps.
+
 ## What's here
 
 | File | Purpose |
