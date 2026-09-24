@@ -135,6 +135,20 @@ def _reset_process_globals():
 # =============================================================================
 
 
+# The S3 emulator every MinIO-backed test starts, in one place. The pin used to
+# be written out in each file, and it split: three pulled from quay.io and two
+# from Docker Hub, the same tag either way. Both registries have since stopped
+# serving MinIO without credentials (every tag, ``latest`` included), which
+# failed Integration Tests on every branch.
+#
+# Chainguard still publishes it anonymously. Its free tier offers only
+# ``latest``, which would let CI change underneath a passing commit, so this is
+# pinned by digest instead. To move it: ``docker pull cgr.dev/chainguard/minio``
+# and take the digest from ``docker inspect --format '{{index .RepoDigests 0}}'``.
+_MINIO_DIGEST = "sha256:bd014394a80898e68c149f2311fdf8d5a2c2f3bb2c33b9327ae6d02b4b065ae1"
+MINIO_IMAGE = f"cgr.dev/chainguard/minio@{_MINIO_DIGEST}"
+
+
 def start_container_or_skip(container, *, label: str, ready=None):
     """Start a testcontainers container, skipping the module if startup fails.
 
