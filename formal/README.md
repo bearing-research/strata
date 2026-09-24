@@ -20,8 +20,9 @@ nine real bugs, each in about a second of model checking:
 - The **admission limiter** model found findings 8–10.
 - The **notebook staleness** model found finding 11.
 
-A review of the assumptions behind the pruning and cache-key invariants
-found two more (findings 3–4). All eleven reproduce against the real code
+A review of the assumptions behind the pruning, cache-key and access
+control invariants found three more (findings 3, 4 and 12). All twelve
+reproduce against the real code
 (`uv run pytest formal/`; finding 8 needs CPython 3.12, see below).
 
 ## What's here
@@ -48,6 +49,7 @@ found two more (findings 3–4). All eleven reproduce against the real code
 | `tla/Staleness_EditDuringRun.cfg` | An upstream is edited while a downstream runs. Finds finding 11 |
 | `tla/Staleness_Patched.cfg` | The proposed fix. **All invariants hold** (60,102 distinct states, exhaustive) |
 | `test_staleness_counterexamples.py` | Finding 11 through the real notebook WebSocket, with cells really executing |
+| `test_acl_counterexamples.py` | Finding 12 through the real `authorize_table_access` gate and catalog loader |
 
 Each `test_*` file **passes while its bug exists**, because it asserts
 the violating outcome. When a fix lands, invert its assertion and move
@@ -199,6 +201,50 @@ integer fields make a collision there much harder to construct.
 Suggested fix: hash a length-prefixed or JSON encoding (for example
 `json.dumps(columns)`). This changes every projection cache key once,
 which is safe because the cache is content-addressed and simply refills.
+
+## Assumption checks: access control
+
+`AclEvaluator.authorize` is deny-first by construction: deny rules, then
+allow rules, then the default. There is nothing to model in that loop.
+Invariant 7 (*explicit denies cannot be bypassed by allows*) also rests
+on an assumption outside it: that a table has one ACL name. `TableRef`
+names a table by the *form of the URI it was requested under*: the store
+prefix of a warehouse URI, `file:` for anything else, or a named
+catalog's name.
+
+### 12. A deny rule can be sidestepped by addressing the table another way
+
+In a service deployment with a SQL catalog (`catalog_properties["uri"]`,
+Postgres in production), every warehouse URI builds `SqlCatalog("strata")`
+over that one database, whatever path or scheme comes before `#`. A bare
+`namespace.table` reads the default catalog. So one table in S3 can be
+requested as:
+
+| URI | ACL name |
+| --- | --- |
+| `s3://bucket/wh#finance.ledger` | `s3:finance.ledger` |
+| `/not/a/real/path#finance.ledger` | `file:finance.ledger` |
+| `finance.ledger` | `file:finance.ledger` |
+
+A deny on `s3:finance.*` refuses only the first. The replay runs the
+real `authorize_table_access` gate: the S3 form gets a 403, the other two
+pass, and `PyIcebergCatalog.load_table` returns the same metadata
+location for all three. Only default-allow configurations are exposed;
+with `default = "deny"`, the aliases fall back to the default and are
+refused.
+
+This is partly documented. `docs/reference/configuration.md` says a
+table reachable under two prefixes needs both patterns, and its example
+denies `file:`, `s3:` and `lake:` together. But it also says `file:` is
+"for a local warehouse". An operator whose data is all in S3 has no
+reason to write a `file:` rule, and here `file:` names S3 data behind a
+path that doesn't exist.
+
+Suggested fix: name a table by the catalog that actually serves it, not
+by the address form. When `catalog_properties` is set, every warehouse
+URI and the bare form resolve to the same catalog, so they should share
+one ACL name. Until then, the docs should recommend `*:finance.*` for
+deny rules. fnmatch lets `*` match any prefix, which covers every alias.
 
 ## Model 2: build lease protocol
 
@@ -486,15 +532,16 @@ walk.
 ## Where else formal methods would pay off
 
 Ranked by (likely bugs × consequence) ÷ modelling effort. The build
-protocol, the QoS limiters and a first pass at notebook staleness were
-on this list and are now done (models 2–4):
+protocol, the QoS limiters, a first pass at notebook staleness and the
+deny-first ACL were on this list and are now done (models 2–4 and
+finding 12):
 
 | Component | Technique | Why |
 | --- | --- | --- |
 | **Notebook staleness, deeper** (`session._compute_staleness_locked`) | Hypothesis stateful testing against a real session | Model 4 covers only chains and single-variable cells. The walk has many special cases (leaves, `@nocache`, alternate cache schemes, `@per_variant`, errors, mounts), which suit a property test more than a hand-written model: random edit and run sequences, checking "READY implies the provenance matches" after each step. |
 | **Pruning soundness** (`filters.py`, manifest pruning, `_convert_stats`) | Z3 / CrossHair over the comparison logic, plus Hypothesis round-trips through real Parquet files | Finding 3 shows the value is in encoding the stats assumptions (NaN, null, type coercion) explicitly. |
 | **Hash/key encodings** (`CacheKey.to_hex`, `derive_subkey`, provenance, `transform_spec.to_json`) | Property tests for injectivity | Finding 4. Cheap, and a collision means serving wrong data. |
-| **ACL deny-first** (`auth.AclEvaluator`) | Z3 or exhaustive enumeration | Small and pure. Prove "a matching deny cannot be overridden by any allow set" and pattern/tenant corner cases. Low risk today, but a cheap guard against regressions. |
+| **Table naming for ACLs** (`TableRef`, `table_identity_for`, `named_catalog`) | Property test over URI forms | Finding 12 generalised: for every configured catalog shape, every URI form that loads a table should produce the same ACL name. |
 
 Not worth it: the data plane's streaming and memory bounds (better
 covered by benchmarks and fuzzing) and the Rust IPC concat
