@@ -407,11 +407,16 @@ class TestRunAllBatching:
     def test_rerun_all_continues_after_failure_without_re_running_failed_upstream(
         self, setup, monkeypatch
     ):
-        """rerun-all + mid-batch failure: continuation cells use
-        execute_cell_force (no materialize, no cache) instead of
-        execute_cell_rerun (which would materialize the failed upstream).
+        """rerun-all + mid-batch failure: the cell that failed is not run again
+        by the cells that continue after it.
 
-        Regression for #33 review finding #2.
+        Regression for #33 review finding #2. It used to be served by running
+        every continuation cell with upstream materialization off, which also
+        let a cell *downstream* of the failure read the artifacts from before
+        it and publish a success built on them. Now a cell the failure reached
+        does not run at all, and one it did not reach materializes its own
+        upstreams normally, which never include the failed cell. The invariant
+        is the same; what enforces it is not.
         """
         from strata.notebook import executor as executor_mod
 
@@ -446,17 +451,13 @@ class TestRunAllBatching:
                 ws.receive_until("cell_error", cell_id="c2_bad")
                 ws.receive_until("cell_output", cell_id="c3")
 
-        # After the batch fails at c2_bad, c3's continuation must use
-        # execute_cell_force (no materialize, no cache) — NOT
-        # execute_cell_rerun (which would re-materialize c2_bad and
-        # recursively re-run the failed cell).
+        # c3 reads nothing c2_bad produces, so it runs. What it must not do is
+        # drag c2_bad through a second execution on its way.
         force_cell_ids = {cid for cid, _src in force_calls}
         rerun_cell_ids = {cid for cid, _src in rerun_calls}
-        assert "c3" in force_cell_ids, (
-            f"c3 continuation should call execute_cell_force; "
-            f"got force={force_cell_ids} rerun={rerun_cell_ids}"
-        )
-        assert "c3" not in rerun_cell_ids, (
-            f"c3 continuation must not call execute_cell_rerun (would "
-            f"re-materialize failed upstream c2_bad); got rerun={rerun_cell_ids}"
+        ran = force_cell_ids | rerun_cell_ids
+        assert "c3" in ran, f"c3 never continued; force={force_cell_ids} rerun={rerun_cell_ids}"
+        assert "c2_bad" not in ran, (
+            f"the failed cell was executed again by the continuation; "
+            f"force={force_cell_ids} rerun={rerun_cell_ids}"
         )

@@ -152,6 +152,49 @@ async def test_a_failure_numbers_its_console_its_error_and_its_status_apart(chai
 
 
 @pytest.mark.asyncio
+async def test_requests_through_the_handlers_leave_no_gaps(chain):
+    """Driven through the incoming handlers, with one client throughout.
+
+    The other tests here call the execution helper directly, which skips the
+    reservation the real handlers take, and that is where a sequence was drawn
+    before anything knew whether a frame would follow. A successful request
+    never sent it, and the reference tells a client to treat the gap it leaves
+    as a reason to resync and replace its whole state.
+
+    One observer across every request, because a fresh one per request hides
+    the gap between them.
+    """
+    from strata.notebook.ws import (
+        _ensure_execution_state,
+        _handle_cell_execute,
+        _handle_cell_execute_force,
+        _handle_cell_execute_rerun,
+        _handle_notebook_rerun_all,
+    )
+
+    session = _session(chain)
+    state = _ensure_execution_state(session.id)
+
+    with _watching(session) as observer:
+        for handler in (
+            _handle_cell_execute,
+            _handle_cell_execute_rerun,
+            _handle_cell_execute_force,
+        ):
+            await handler(observer, session, {"cell_id": "b"}, state, session.id)
+            task = state.execution_task
+            if task is not None:
+                await asyncio.gather(task, return_exceptions=True)
+
+        await _handle_notebook_rerun_all(observer, session, state, session.id, {})
+        task = state.execution_task
+        if task is not None:
+            await asyncio.gather(task, return_exceptions=True)
+
+    _assert_one_sequence_each(observer, "four requests, one client")
+
+
+@pytest.mark.asyncio
 async def test_run_all_numbers_every_cell_it_starts_apart(chain):
     """Every cell's running frame drew the one sequence the run began with."""
     from strata.notebook.ws import _ensure_execution_state, _handle_notebook_run_all

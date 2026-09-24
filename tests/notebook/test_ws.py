@@ -692,8 +692,14 @@ display(Markdown("# First"))
 async def test_run_all_on_a_host_that_refuses_says_so_on_every_cell(notebook_session, monkeypatch):
     """Run-all batches consecutive cells into one harness. On a service-mode host
     with no harness user that spawn is refused, and a refused batch would leave
-    the rest of the notebook idle with nothing said — so each cell goes through
-    single-cell instead, and each one reports why it did not run."""
+    the rest of the notebook idle with nothing said, so each cell goes through
+    single-cell instead.
+
+    The first cell reports the refusal. The cells that read from it are not
+    attempted at all now: running them would have meant computing from the
+    artifacts of an earlier run and publishing that as a fresh result. They say
+    they did not run, and why.
+    """
     from strata.notebook.harness_user import REFUSAL
 
     _, session = notebook_session
@@ -707,8 +713,16 @@ async def test_run_all_on_a_host_that_refuses_says_so_on_every_cell(notebook_ses
     fake = await _run_cell_to_terminal(session, "root", msg_type="notebook_run_all")
 
     errors = {f["payload"]["cell_id"]: f["payload"]["error"] for f in fake.frames_of("cell_error")}
-    assert set(errors) == {"root", "middle", "leaf"}
+    assert set(errors) == {"root"}
     assert all(REFUSAL in error for error in errors.values())
+
+    blocked = {
+        f["payload"]["cell_id"]: f["payload"].get("staleness_reasons")
+        for f in fake.frames_of("cell_status")
+        if f["payload"].get("status") == "stale"
+    }
+    assert {"middle", "leaf"} <= set(blocked), f"the rest of the notebook said nothing: {blocked}"
+    assert all(reasons == ["upstream"] for reasons in blocked.values()), blocked
 
 
 @pytest.mark.asyncio
@@ -813,10 +827,9 @@ def test_environment_job_submission_rejects_execution_already_accepted(monkeypat
         execution_state_arg,
         notebook_id,
         requested_cell,
-        seq,
         operation_factory,
     ):
-        del websocket, notebook_id, requested_cell, seq, operation_factory
+        del websocket, notebook_id, requested_cell, operation_factory
         assert execution_state_arg is execution_state
         entered_schedule.set()
         await release_schedule.wait()
@@ -2065,7 +2078,7 @@ async def test_final_output_seq_is_newer_than_streamed_deltas(notebook_session, 
         def __init__(self, session, warm_pool=None):
             self.on_iteration_complete = None
             self.on_prompt_delta = None
-            self.failed_upstreams = {}
+            self.upstream_results = {}
 
         async def execute_cell(self, cell_id, source):
             assert self.on_prompt_delta is not None
@@ -2371,9 +2384,9 @@ class _GatedStubExecutor:
     def __init__(self, session, warm_pool=None):
         self.on_iteration_complete = None
         self.on_prompt_delta = None
-        # The real executor records the upstreams whose failures stopped a
-        # run; the caller reads them to tell a client about those cells.
-        self.failed_upstreams = {}
+        # The real executor records the upstreams a run settled; the caller
+        # reads them to tell a client about those cells.
+        self.upstream_results = {}
 
     async def execute_cell(self, cell_id, source):
         from strata.notebook.executor import CellExecutionResult

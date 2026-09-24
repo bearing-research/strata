@@ -610,17 +610,19 @@ class CellExecutor:
         # execute_cell() recursive tree. Each top-level call creates a fresh
         # CellExecutor, so the guard resets between independent executions.
         self._materializing: set[str] = set()
-        # Every upstream this run found broken, with the result each failed
-        # with, so the caller can tell a watching client what happened to those
-        # cells and not only to the one that was asked for. Only the code that
-        # saw a failure holds everything known about it.
+        # Every upstream this run has something to say about, with the result
+        # that settled it, so the caller can tell a watching client what became
+        # of those cells and not only of the one that was asked for. Only the
+        # code that ran them holds everything known about them.
         #
-        # A chain fails more than once: the cell that broke raises, its
-        # consumer returns a failed result, and the materialization above sees
-        # that too. Each is a cell showing a stale result to somebody, so each
-        # is recorded. In recording order, which is innermost first, so what
-        # broke is announced before what it broke.
-        self.failed_upstreams: dict[str, CellExecutionResult] = {}
+        # Two kinds go in. A chain fails more than once: the cell that broke
+        # raises, its consumer returns a failed result, and the materialization
+        # above sees that too, so each is recorded. And a cell that was
+        # carrying an error and has now run clean goes in as well, because a
+        # client was told about that error and nothing else would take it back.
+        # In recording order, which is innermost first, so what broke is
+        # announced before what it broke.
+        self.upstream_results: dict[str, CellExecutionResult] = {}
         # What each cell's execution returned within the current multi-cell
         # run, when one is open (see ``one_run``). ``None`` outside a run,
         # which is every standalone single-cell execution, so their semantics
@@ -4410,6 +4412,12 @@ class CellExecutor:
         # We only need to execute a given upstream once even if it
         # produces multiple variables we reference.
         executed_upstreams: set[str] = set()
+        # The first upstream that failed, reported once every upstream has been
+        # tried. Raising at the first one left a broken sibling untouched and
+        # unmentioned, so fixing the one the message named and running again
+        # only turned up the next, one round trip at a time. They are the cells
+        # this run needed anyway.
+        first_failure: tuple[str, CellExecutionResult] | None = None
 
         for upstream_id in cell.upstream_ids:
             if upstream_id in executed_upstreams:
@@ -4422,6 +4430,9 @@ class CellExecutor:
             # Always materialise the upstream. execute_cell() will
             # return immediately on cache hit (provenance matches),
             # or re-execute if the upstream is stale.
+            # Before the run clears it: a client shown this error needs the
+            # result that replaces it, and a status alone cannot carry one.
+            carried_error = upstream_cell.error is not None
             result = await self.execute_cell(
                 upstream_id,
                 upstream_cell.source,
@@ -4431,10 +4442,10 @@ class CellExecutor:
                 # output, in the language wrapper, the same as a direct run --
                 # which is what makes it read as `error` here rather than as a
                 # cell that never ran.
-                self.failed_upstreams.setdefault(upstream_id, result)
-                raise RuntimeError(
-                    f"Failed to materialise upstream cell {upstream_id}: {result.error}"
-                )
+                self.upstream_results.setdefault(upstream_id, result)
+                if first_failure is None:
+                    first_failure = (upstream_id, result)
+                continue
             # Say that it ran. A cell rebuilt here produced the value this cell
             # is about to read, but nothing recorded that, so the next
             # staleness pass had to infer it — and for a language with its own
@@ -4443,7 +4454,15 @@ class CellExecutor:
             # SQL upstream therefore sat at `idle` with no result showing while
             # its value was current and in use downstream.
             upstream_cell.status = CellStatus.READY
+            if carried_error:
+                self.upstream_results.setdefault(upstream_id, result)
             executed_upstreams.add(upstream_id)
+
+        if first_failure is not None:
+            failed_id, failed_result = first_failure
+            raise RuntimeError(
+                f"Failed to materialise upstream cell {failed_id}: {failed_result.error}"
+            )
 
     # ------------------------------------------------------------------
     # ② Collect input hashes (upstream artifacts are guaranteed to exist)
