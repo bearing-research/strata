@@ -411,11 +411,9 @@ async def test_every_cell_a_chain_broke_gets_its_own_error(tmp_path):
     assert set(errored) == {"q", "mid", "rep"}, f"only these were told about: {errored}"
     # The cell that broke is announced before the one its failure broke.
     assert errored.index("q") < errored.index("mid")
-    # Order, not uniqueness: one execution's console and result frames share a
-    # sequence by design, so a cell that printed would fail a uniqueness check
-    # here while nothing was wrong.
     seqs = [f["seq"] for f in observer.sent]
     assert seqs == sorted(seqs), f"frames went out of order: {seqs}"
+    assert len(set(seqs)) == len(seqs), f"frames share a sequence: {seqs}"
 
 
 @pytest.mark.asyncio
