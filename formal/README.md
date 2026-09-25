@@ -22,8 +22,10 @@ nine real bugs, each in about a second of model checking:
 
 A review of the assumptions behind the pruning, cache-key and access
 control invariants found three more (findings 3, 4 and 12). All twelve
-reproduce against the real code
+reproduced against the real code
 (`uv run pytest formal/`; finding 8 needs CPython 3.12, see below).
+Fixed findings are marked **Fixed** below; their replays are now
+regression tests under `tests/`.
 
 Picking this up? Start with [`HANDOFF.md`](HANDOFF.md): state, how to
 run everything, conventions, gotchas and the prioritized next steps.
@@ -329,6 +331,12 @@ succeeded is reported as failed, and the error is the stale attempt's.
 `BuildRunner.stop()` has the same pattern: on shutdown it fails every
 in-flight build without checking the lease. The replay does not cover
 that path. TLC trace (5 steps): `r1 claim → expire → r2 reclaim → r1 error → r1 fail_build`.
+
+**Fixed.** `fail_build` takes `lease_owner` like `complete_build`, and
+both the runner's failure path and `stop()` pass it. The artifact is
+failed only when the fenced `fail_build` succeeds, so a runner that lost
+its lease leaves the build and artifact to the owner. Regression tests:
+`tests/test_build_runner.py::TestALeaseDecidesWhoMayFail`.
 
 ### 7. A retired manifest's upload URL still writes the blob
 
