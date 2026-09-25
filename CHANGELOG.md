@@ -471,6 +471,14 @@ environment pinned below them has to move before it can install 0.8.0.
 - **A column named `a,b` has its own cache entries.** The projection fingerprint
   joined column names with commas, so projecting that one column and
   projecting `a` and `b` shared cached row groups.
+- **A build's output is published once, by the attempt that holds it.** A
+  runner whose lease had been taken over still wrote its result over the
+  version's bytes and marked it ready, and the runner that took over then
+  replaced those bytes under readers, so a ready artifact's content changed and
+  no longer matched its digest. Likewise, a pull executor still holding an
+  earlier manifest could upload into the slot the current holder then
+  finalized. Each attempt now writes under its own key, and publishing the
+  artifact and completing the build commit together or not at all.
 
 ## 0.7.0 - 2026-09-06
 
