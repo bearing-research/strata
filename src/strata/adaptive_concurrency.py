@@ -53,6 +53,7 @@ class ResizableLimiter:
     def __init__(self, capacity: int):
         self._capacity = capacity
         self._in_use = 0
+        self._pending = 0  # acquire() calls not yet returned
         self._lock = asyncio.Lock()
         self._cv = asyncio.Condition(self._lock)
 
@@ -71,6 +72,11 @@ class ResizableLimiter:
         """Number of available slots."""
         return max(0, self._capacity - self._in_use)
 
+    @property
+    def idle(self) -> bool:
+        """No slot is held and no acquire() is waiting for one."""
+        return self._in_use == 0 and self._pending == 0
+
     async def acquire(self, timeout: float | None = None) -> bool:
         """Acquire a slot, optionally bounded by a timeout.
 
@@ -84,6 +90,13 @@ class ResizableLimiter:
         bool
             ``True`` if a slot was acquired, ``False`` if the timeout expired.
         """
+        self._pending += 1
+        try:
+            return await self._acquire(timeout)
+        finally:
+            self._pending -= 1
+
+    async def _acquire(self, timeout: float | None) -> bool:
         async with self._cv:
             try:
                 if timeout is None:

@@ -48,7 +48,6 @@ run everything, conventions, gotchas and the prioritized next steps.
 | `tla/Admission_Py312.cfg` | CPython 3.12 `asyncio.Condition` semantics. Finds finding 8 |
 | `tla/Admission_Eviction.cfg` | LRU eviction of a limiter in use. Finds findings 9 and 10 |
 | `tla/Admission_Patched.cfg` | Both fixes. **All invariants hold** (exhaustive) |
-| `test_admission_counterexamples.py` | Findings 8–10 against the real `ResizableLimiter` / `TenantRegistry` |
 | `tla/Staleness.tla` | Model of cell status for a chain `a → b → c` under edits and runs, one run at a time |
 | `tla/Staleness_EditDuringRun.cfg` | An upstream is edited while a downstream runs. Finds finding 11 |
 | `tla/Staleness_Patched.cfg` | The proposed fix. **All invariants hold** (60,102 distinct states, exhaustive) |
@@ -508,6 +507,18 @@ violation with both changes:
 2. Evict only quotas whose limiters are idle: `in_use == 0` and no
    waiters. The registry can then briefly exceed 1000 entries, which is
    a much smaller risk than an unbounded quota.
+
+**Fixed (9 and 10).** `get_or_create_quotas` evicts, oldest first, only
+tenants whose limiters are idle: no slot held and no `acquire()` pending,
+which `ResizableLimiter` now counts. The code needed one change the model
+could not show: `QoSAdmission.admit` looked up the tenant's limiters and
+then awaited the per-client semaphore before acquiring, and a tenant
+idle at the lookup could be evicted during that wait. `admit` now looks
+the limiters up immediately before acquiring, with no await between, so
+the acquire it counts is on the pair the registry tracks. The model
+treats admit as one step, which is why it did not find this. Regression
+tests: `tests/test_multitenancy.py::TestEvictionSparesBusyTenants` and
+`tests/test_qos_admission.py::test_admit_acquires_the_limiter_the_registry_counts`.
 
 ## Model 4: notebook staleness
 

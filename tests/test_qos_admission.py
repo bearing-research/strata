@@ -361,3 +361,30 @@ async def test_admission_works_with_no_controller_attached(monkeypatch):
 
     assert limiter.released == 1
     assert qos.qos_metrics()["interactive_queue_wait_count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_admit_acquires_the_limiter_the_registry_counts(monkeypatch):
+    """A tenant idle when admit starts can be evicted while its request waits
+    for the per-client slot. The request must then acquire the limiter the
+    registry tracks, or the shutdown drain and the quota never see it."""
+    from strata.tenant_registry import MAX_TRACKED_TENANTS, TenantRegistry
+
+    registry = TenantRegistry(default_interactive_slots=1, default_bulk_slots=1)
+    monkeypatch.setattr("strata.streaming.qos.get_tenant_id", lambda: "a")
+    monkeypatch.setattr("strata.streaming.qos.get_tenant_registry", lambda: registry)
+    qos = QoSAdmission(StrataConfig(per_client_interactive=1))
+    client_slot = qos._get_client_semaphore("test-client", "interactive")
+    take_client_slot = client_slot.acquire
+
+    async def other_tenants_arrive_meanwhile():
+        for i in range(MAX_TRACKED_TENANTS):
+            registry.get_or_create_limiters(f"other-{i}")
+        return await take_client_slot()
+
+    monkeypatch.setattr(client_slot, "acquire", other_tenants_arrive_meanwhile)
+
+    admission = await qos.admit(_FakePlan(), _FakeRequest(), "scan-1")
+    interactive_in_use, _, _, _ = registry.aggregate_limiter_usage()
+    assert interactive_in_use == 1
+    await admission.release()

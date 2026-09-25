@@ -199,13 +199,9 @@ class QoSAdmission:
         """
         tier = self.classify(plan)
         tenant_id = get_tenant_id()
-        interactive_limiter, bulk_limiter = get_tenant_registry().get_or_create_limiters(tenant_id)
-
         if tier == "interactive":
-            limiter = interactive_limiter
             queue_timeout = self._config.interactive_queue_timeout
         else:
-            limiter = bulk_limiter
             queue_timeout = self._config.bulk_queue_timeout
 
         # Per-client fairness
@@ -226,6 +222,13 @@ class QoSAdmission:
         # semaphore grabbed above before propagating — CancelledError is a
         # BaseException, and the `if not acquired:` path below only handles the
         # timeout (False) case, so the semaphore would otherwise leak a slot.
+        #
+        # The limiters are looked up here, with no await before the acquire:
+        # an idle tenant can be evicted from the registry while its request
+        # waits for the per-client slot, and a limiter fetched before that
+        # wait would then be one the registry no longer counts.
+        interactive_limiter, bulk_limiter = get_tenant_registry().get_or_create_limiters(tenant_id)
+        limiter = interactive_limiter if tier == "interactive" else bulk_limiter
         queue_start = time.perf_counter()
         try:
             acquired = await limiter.acquire(timeout=queue_timeout)

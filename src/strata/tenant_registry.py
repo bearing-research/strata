@@ -101,11 +101,17 @@ class TenantRegistry:
             quotas = TenantQuotas(tenant_id=tenant_id)
             self._quotas[tenant_id] = quotas
 
-            # LRU eviction if over limit
-            while len(self._quotas) > MAX_TRACKED_TENANTS:
-                # Remove oldest (first) entry
-                oldest = next(iter(self._quotas))
-                del self._quotas[oldest]
+            # LRU eviction if over limit, oldest first, of idle tenants only.
+            # Evicting a tenant whose limiters hold or await a slot would give
+            # its next request a fresh pair: it could run up to twice its
+            # quota, and the old pair's streams would drop out of
+            # aggregate_limiter_usage, which the shutdown drain waits on. The
+            # registry runs over the cap while that many tenants are busy.
+            for candidate in list(self._quotas):
+                if len(self._quotas) <= MAX_TRACKED_TENANTS:
+                    break
+                if candidate != tenant_id and self._quotas[candidate].is_idle():
+                    del self._quotas[candidate]
 
             return quotas
 
