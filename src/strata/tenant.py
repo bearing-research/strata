@@ -157,6 +157,13 @@ class TenantQuotas:
 
     last_access: float = field(default_factory=time.time)
 
+    def is_idle(self) -> bool:
+        """No request holds or awaits a slot on this tenant's limiters."""
+        return all(
+            limiter is None or limiter.idle
+            for limiter in (self.interactive_limiter, self.bulk_limiter)
+        )
+
     def touch(self) -> None:
         """Update ``last_access`` to now for LRU tracking."""
         self.last_access = time.time()

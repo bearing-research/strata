@@ -1,5 +1,7 @@
 """Tests for multi-tenancy functionality."""
 
+import asyncio
+
 import pytest
 
 from strata.tenant import (
@@ -228,6 +230,76 @@ class TestTenantRegistry:
 
         # get_tenant_registry should return same instance
         assert get_tenant_registry() is registry
+
+
+class TestEvictionSparesBusyTenants:
+    """LRU eviction drops a tenant's limiters with its quotas. A tenant that
+    still held or awaited a slot kept admitting on the old pair while its next
+    request got a fresh one: twice its quota, with the old pair's streams
+    invisible to the shutdown drain."""
+
+    @staticmethod
+    def _crowd_out(registry):
+        for i in range(MAX_TRACKED_TENANTS):
+            registry.get_or_create_limiters(f"other-{i}")
+
+    @staticmethod
+    def _registry():
+        return TenantRegistry(default_interactive_slots=1, default_bulk_slots=1)
+
+    @pytest.mark.asyncio
+    async def test_a_tenant_holding_a_slot_keeps_its_quota(self):
+        registry = self._registry()
+        first, _ = registry.get_or_create_limiters("a")
+        assert await first.acquire(timeout=0.1)
+
+        self._crowd_out(registry)
+
+        again, _ = registry.get_or_create_limiters("a")
+        assert again is first
+        assert not await again.acquire(timeout=0.01)  # still one slot
+
+    @pytest.mark.asyncio
+    async def test_the_shutdown_drain_counts_a_busy_tenants_stream(self):
+        registry = self._registry()
+        limiter, _ = registry.get_or_create_limiters("a")
+        assert await limiter.acquire(timeout=0.1)
+
+        self._crowd_out(registry)
+
+        interactive_in_use, _, bulk_in_use, _ = registry.aggregate_limiter_usage()
+        assert interactive_in_use + bulk_in_use == 1
+
+    @pytest.mark.asyncio
+    async def test_a_tenant_waiting_for_a_slot_keeps_its_quota(self):
+        registry = self._registry()
+        limiter, _ = registry.get_or_create_limiters("a")
+        assert await limiter.acquire()
+        waiter = asyncio.create_task(limiter.acquire())
+        await asyncio.sleep(0)  # queued on the limiter
+        await limiter.release()  # free, but the waiter has not run yet
+
+        self._crowd_out(registry)
+
+        assert registry.get_or_create_limiters("a")[0] is limiter
+        assert await waiter
+
+    @pytest.mark.asyncio
+    async def test_idle_tenants_are_still_evicted(self):
+        registry = self._registry()
+        busy, _ = registry.get_or_create_limiters("busy")
+        assert await busy.acquire()
+        registry.get_or_create_limiters("idle")
+
+        self._crowd_out(registry)
+        assert "idle" not in registry._quotas
+        assert "busy" in registry._quotas  # a newer idle tenant went instead
+        assert len(registry._quotas) == MAX_TRACKED_TENANTS
+
+        await busy.release()
+        registry.get_or_create_limiters("newcomer")
+        assert "busy" not in registry._quotas
+        assert len(registry._quotas) == MAX_TRACKED_TENANTS
 
 
 class TestCacheKeyTenantIsolation:

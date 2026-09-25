@@ -98,8 +98,8 @@ column points at the regression test that replaced the replay.
 | 6 | Stale runner fails the build that replaced it | `tests/test_build_runner.py::TestALeaseDecidesWhoMayFail` | Fence `fail_build` / `fail_artifact` on the lease ✓ | **Fixed** |
 | 7 | Old manifest's upload URL still writes | `test_build_pull_counterexamples.py` | Per-attempt blob keys ✓ | Needs the same change as 5 |
 | 8 | Lost wakeup on Python 3.12 | `tests/test_adaptive_concurrency.py` (teeth on 3.12) | Re-notify on cancel in `ResizableLimiter.acquire` ✓ | **Fixed** |
-| 9 | Evicted limiter lets a tenant exceed its quota | `test_admission_counterexamples.py` | Evict only idle limiters ✓ | `get_or_create_quotas` |
-| 10 | Shutdown drain misses evicted limiters' streams | `test_admission_counterexamples.py` | Same as 9 ✓ | Same as 9 |
+| 9 | Evicted limiter lets a tenant exceed its quota | `tests/test_multitenancy.py::TestEvictionSparesBusyTenants` | Evict only idle limiters ✓ | **Fixed** |
+| 10 | Shutdown drain misses evicted limiters' streams | Same as 9 | Same as 9 ✓ | **Fixed** |
 | 11 | Mid-run upstream edit leaves the downstream READY | `tests/notebook/test_e2e_staleness.py::TestAnEditDuringARun` | Keep the walk's verdict; leave running cells alone ✓ | **Fixed** |
 | 12 | Deny rule sidestepped by another address form | `test_acl_counterexamples.py` | Name tables by serving catalog | Docs done (`*:ns.*` deny patterns); code fix open |
 
@@ -179,8 +179,8 @@ suspicion from reading code that hasn't been confirmed.
    exactly once, and a stream's bytes are sent at most once per attach.
 8. **Per-client semaphore eviction.** `QoSAdmission._get_client_semaphore`
    LRU-evicts semaphores still in use, the same pattern as finding 9.
-   Replay it the way `test_admission_counterexamples.py` does for
-   tenants (10,000 entries).
+   Test it the way `tests/test_multitenancy.py::TestEvictionSparesBusyTenants`
+   does for tenants (10,000 entries).
 9. **`transform_spec.to_json` canonical form.** A property test that
    equal specs always serialize to the same bytes (key order, float
    formatting, tagged filter values) and that different specs differ.
