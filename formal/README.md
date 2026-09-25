@@ -42,7 +42,6 @@ run everything, conventions, gotchas and the prioritized next steps.
 | `tla/Build_RunnerPath.cfg` | Two runners, lease can expire mid-build. Finds findings 5 and 6 |
 | `tla/Build_PullPath.cfg` | Two executors fetch the same build's manifest. Finds finding 7 |
 | `tla/Build_Patched.cfg` | Runners and executors with the proposed fix. **All invariants hold** (exhaustive) |
-| `test_artifact_counterexamples.py` | Finding 4 against the real `CacheKey` |
 | `test_build_runner_counterexamples.py` | Findings 5–6 against two real `BuildRunner`s (only the executor HTTP call is stubbed) |
 | `test_build_pull_counterexamples.py` | Finding 7 through the real HTTP routes (`TestClient`) |
 | `tla/Admission.tla` | Model of one tenant's `ResizableLimiter` (acquire with deadline, release, cancel while queued) and the `TenantRegistry` LRU that owns it |
@@ -230,6 +229,10 @@ integer fields make a collision there much harder to construct.
 Suggested fix: hash a length-prefixed or JSON encoding (for example
 `json.dumps(columns)`). This changes every projection cache key once,
 which is safe because the cache is content-addressed and simply refills.
+
+**Fixed** as suggested: the fingerprint hashes `json.dumps(columns)`.
+Regression test:
+`tests/test_smoke.py::TestCacheKey::test_a_comma_in_a_column_name_is_not_a_separator`.
 
 ## Assumption checks: access control
 

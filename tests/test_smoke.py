@@ -155,6 +155,12 @@ class TestCacheKey:
         # None means all columns
         assert fp_all == "*"
 
+    def test_a_comma_in_a_column_name_is_not_a_separator(self):
+        # Iceberg and Parquet both allow "a,b" as one column name, and it
+        # used to share a fingerprint, so a cache key, with ["a", "b"].
+        fp = CacheKey.compute_projection_fingerprint
+        assert fp(["a,b"]) != fp(["a", "b"])
+
 
 class TestFilter:
     """Tests for Filter."""

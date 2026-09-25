@@ -1,6 +1,7 @@
 """Core types for Strata."""
 
 import hashlib
+import json
 import uuid
 from dataclasses import dataclass, field
 from datetime import date, datetime
@@ -367,11 +368,13 @@ class CacheKey:
         """Compute a fingerprint for the column projection.
 
         Column order is preserved in the fingerprint because it matters for
-        consumers who expect columns in a specific order.
+        consumers who expect columns in a specific order. The list is hashed
+        as JSON, not joined: a column name may contain a comma, and ``"a,b"``
+        must not share a fingerprint with ``["a", "b"]``.
         """
         if columns is None:
             return "*"
-        return hashlib.sha256(",".join(columns).encode()).hexdigest()[:16]
+        return hashlib.sha256(json.dumps(columns).encode()).hexdigest()[:16]
 
 
 @dataclass
