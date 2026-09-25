@@ -220,6 +220,12 @@ environment pinned below them has to move before it can install 0.8.0.
   publication is kept out of the garbage collector's sweep.
 - **A manifest may only point at named hosts**, and a worker's job URL is
   checked against the manifest's own origin.
+- **A deny rule can cover every address of a table.** A table pattern names the
+  address a table was requested under. With a SQL catalog configured, one S3
+  table is `s3:` under its S3 URI and `file:` as a bare name or behind any other
+  path, so a deny on `s3:finance.*` left the other two readable under
+  `default = "allow"`. The configuration reference now says what each prefix
+  names and recommends deny patterns of the form `*:finance.*`.
 
 ### Fixed
 
@@ -434,6 +440,37 @@ environment pinned below them has to move before it can install 0.8.0.
   replacing.
 - **A cell's dtype survives the cell boundary**, and a fetch annotation is
   honoured on R cells and refused on loop cells rather than ignored.
+- **Only the runner that holds a build can fail it.** A runner whose lease had
+  moved on to another could, when its own attempt then errored, fail the build
+  the other runner was about to finish, so a build that would have succeeded
+  was reported failed with the stale attempt's error. Shutdown did the same to
+  builds it no longer held.
+- **A request that gives up its turn in the queue passes it on.** On Python
+  3.12, a queued scan cancelled just as a slot was handed to it left that slot
+  idle, and the next request in line waited out its whole queue deadline, and
+  could then be refused with a 429. Python 3.13 and later were not affected.
+- **`!=` keeps rows whose value is NaN.** Parquet leaves NaN out of a float
+  column's minimum and maximum, so a row group holding only `5.0` and `NaN` was
+  pruned for `value != 5.0` and its NaN rows were missing from the result.
+- **Garbage collection keeps a value while it is being rebuilt.** Rerunning a
+  cell whose last result was older than the collection cutoff let a sweep
+  during the run delete that result, and if the run then failed, the cells
+  reading it had nothing to read.
+- **Two notebooks with identical cells each keep their own values.** A
+  duplicated notebook's cells produce the same provenance under different ids,
+  and running one took the other's current value away from the cells reading
+  it; running the other took it back.
+- **A busy tenant keeps its limiter.** With more than 1,000 tenants active, the
+  registry could evict one whose scans were still running. Its next request
+  got fresh slots, so it could run over its quota, and graceful shutdown no
+  longer counted the scans still streaming.
+- **A cell that is running says so when its upstream is edited.** Editing a
+  cell's upstream while it ran reported it as stopped, and it then finished as
+  ready although it had read the old value, so running a cell downstream
+  offered no cascade. It now stays running and finishes stale.
+- **A column named `a,b` has its own cache entries.** The projection fingerprint
+  joined column names with commas, so projecting that one column and
+  projecting `a` and `b` shared cached row groups.
 
 ## 0.7.0 - 2026-09-06
 
