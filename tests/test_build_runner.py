@@ -9,6 +9,7 @@ These tests verify:
 """
 
 import asyncio
+import time
 import uuid
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -186,6 +187,109 @@ def create_test_artifact(artifact_store, build_store, executor_ref="test_sql@v1"
     )
 
     return artifact_id, version, build_id
+
+
+def make_runner(runner_id, artifact_store, build_store, transform_registry, artifact_dir):
+    """A runner with a fixed id, so a test can name who holds the lease."""
+    return BuildRunner(
+        config=RunnerConfig(runner_id=runner_id),
+        artifact_store=artifact_store,
+        build_store=build_store,
+        transform_registry=transform_registry,
+        artifact_dir=artifact_dir,
+    )
+
+
+def steal_lease(build_store, build_id, new_owner):
+    """The lease runs out (a GC pause, a blocked loop) and another node reclaims it."""
+    conn = build_store._get_connection()
+    conn.execute(
+        "UPDATE artifact_builds SET lease_expires_at = ? WHERE build_id = ?",
+        (time.time() - 1.0, build_id),
+    )
+    conn.commit()
+    conn.close()
+    assert build_store.reclaim_expired_build(build_id, new_lease_owner=new_owner)
+
+
+def fake_executor(tmp_path, name, values, before_return=None):
+    """Stand-in for ``_call_executor``: an optional side effect, then an Arrow file."""
+
+    async def call(**_kwargs):
+        if before_return is not None:
+            before_return()
+        path = tmp_path / f"{name}.arrow"
+        path.write_bytes(create_arrow_ipc_bytes({"x": values}))
+        return path, ""
+
+    return call
+
+
+@pytest.fixture
+def two_runners(artifact_store, build_store, transform_registry, artifact_dir):
+    """Runners "A" and "B" over the same stores."""
+    args = (artifact_store, build_store, transform_registry, artifact_dir)
+    return make_runner("A", *args), make_runner("B", *args)
+
+
+class TestALeaseDecidesWhoMayFail:
+    """Found by formal verification (BuildLease.tla, OnlyLeaseHolderFails).
+
+    A runner whose lease was taken over keeps executing, by design. When its
+    executor then timed out, it failed the build and the artifact the new
+    owner was running: ``fail_build`` and ``fail_artifact`` checked no lease,
+    though ``complete_build`` did. The new owner found its build failed and
+    gave up on work that would have succeeded.
+    """
+
+    async def test_a_runner_that_lost_its_lease_leaves_the_build_alone(
+        self, two_runners, artifact_store, build_store, tmp_path
+    ):
+        a, b = two_runners
+        artifact_id, version, build_id = create_test_artifact(artifact_store, build_store)
+
+        def steal_then_time_out():
+            steal_lease(build_store, build_id, "B")
+            raise TimeoutError("executor timed out")
+
+        a._call_executor = fake_executor(tmp_path, "a", [1], before_return=steal_then_time_out)
+        await a._execute_build(build_store.get_build(build_id))
+
+        build = build_store.get_build(build_id)
+        assert build.state == "building", "a runner that no longer held the lease failed it"
+        assert build.lease_owner == "B"
+        assert artifact_store.get_artifact(artifact_id, version).state == "building"
+
+    async def test_the_owner_it_lost_to_finishes_the_build(
+        self, two_runners, artifact_store, build_store, tmp_path
+    ):
+        a, b = two_runners
+        artifact_id, version, build_id = create_test_artifact(artifact_store, build_store)
+
+        def steal_then_time_out():
+            steal_lease(build_store, build_id, "B")
+            raise TimeoutError("executor timed out")
+
+        a._call_executor = fake_executor(tmp_path, "a", [1], before_return=steal_then_time_out)
+        await a._execute_build(build_store.get_build(build_id))
+
+        b._call_executor = fake_executor(tmp_path, "b", [2])
+        await b._execute_build(build_store.get_build(build_id), already_claimed=True)
+
+        assert build_store.get_build(build_id).state == "ready"
+        assert artifact_store.get_artifact(artifact_id, version).state == "ready"
+
+    def test_a_build_the_caller_does_not_hold_is_not_failed(self, artifact_store, build_store):
+        """The fence on its own, below the runner: a named owner that is not
+        the lease holder changes nothing, and the holder can still fail it."""
+        _artifact_id, _version, build_id = create_test_artifact(artifact_store, build_store)
+        assert build_store.claim_build(build_id, lease_owner="B")
+
+        assert not build_store.fail_build(build_id, "stale", lease_owner="A")
+        assert build_store.get_build(build_id).state == "building"
+
+        assert build_store.fail_build(build_id, "real", lease_owner="B")
+        assert build_store.get_build(build_id).state == "failed"
 
 
 class TestBuildRunnerBasics:
@@ -869,9 +973,9 @@ class TestBuildPolling:
         # Create a pending build
         artifact_id, version, build_id = create_test_artifact(artifact_store, build_store)
 
-        # Mock slow execution
+        # Mock slow execution, claimed the way _execute_build claims it
         async def slow_execute(build, already_claimed=False):
-            build_store.start_build(build.build_id)
+            build_store.claim_build(build.build_id, build_runner._runner_id)
             await asyncio.sleep(10.0)  # Long sleep
 
         with patch.object(build_runner, "_execute_build", slow_execute):

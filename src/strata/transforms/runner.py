@@ -197,11 +197,14 @@ class BuildRunner:
                 await task
             except asyncio.CancelledError:
                 pass
-            # Mark as failed due to shutdown
+            # Mark as failed due to shutdown, but only a build this runner
+            # still holds: one taken over by another runner is still running
+            # there, and shutting down here is no reason to fail it.
             self.build_store.fail_build(
                 build_id,
                 error_message="Build cancelled due to server shutdown",
                 error_code="SERVER_SHUTDOWN",
+                lease_owner=self._runner_id,
             )
 
         self._build_tasks.clear()
@@ -604,14 +607,24 @@ class BuildRunner:
                         error_code=error_code,
                     )
 
-                self.build_store.fail_build(
+                # Only if this runner still holds the lease. One whose lease
+                # was taken over keeps executing, and failing here would fail
+                # the build its successor is running. The artifact row carries
+                # no lease of its own, so its failure is gated on this one.
+                failed = self.build_store.fail_build(
                     build_id=build_id,
                     error_message=error_msg,
                     error_code=error_code,
+                    lease_owner=self._runner_id,
                 )
-
-                # Also mark artifact as failed
-                self.artifact_store.fail_artifact(build.artifact_id, build.version)
+                if failed:
+                    self.artifact_store.fail_artifact(build.artifact_id, build.version)
+                else:
+                    logger.info(
+                        f"Build {build_id} failed here after its lease moved on; "
+                        "leaving it to the runner that holds it",
+                        extra={"runner_id": self._runner_id},
+                    )
 
             finally:
                 # Clean up temp files

@@ -667,6 +667,7 @@ class BuildStore:
         error_message: str,
         error_code: str | None = None,
         logs: str | None = None,
+        lease_owner: str | None = None,
     ) -> bool:
         """Mark build as failed (building -> failed).
 
@@ -675,20 +676,29 @@ class BuildStore:
             error_message: Error details
             error_code: Error code for programmatic handling
             logs: Executor stdout/stderr logs (optional)
+            lease_owner: When given, the update only applies if this owner
+                still holds the lease, the same fence ``complete_build``
+                takes. A runner whose lease was taken over keeps executing,
+                and when its executor then timed out it failed the build the
+                new owner was running, which gave up on a build that would
+                have succeeded.
 
         Returns:
-            True if updated, False if not found or wrong state
+            True if updated, False if not found, wrong state, or the lease is
+            held by someone else
         """
         conn = self._get_connection()
         try:
-            cursor = conn.execute(
-                """
+            sql = """
                 UPDATE artifact_builds
                 SET state = 'failed', completed_at = ?, error_message = ?, error_code = ?, logs = ?
                 WHERE build_id = ? AND state IN ('pending', 'building')
-                """,
-                (self._clock(), error_message, error_code, logs, build_id),
-            )
+            """
+            params: list[Any] = [self._clock(), error_message, error_code, logs, build_id]
+            if lease_owner is not None:
+                sql += " AND lease_owner = ?"
+                params.append(lease_owner)
+            cursor = conn.execute(sql, params)
             conn.commit()
             return cursor.rowcount > 0
         finally:

@@ -8,17 +8,8 @@ next.
 
 ## State
 
-- **Branch:** `claude/strata-formal-verification-fepou7`, eight commits
-  on top of `64b3756` (`ec932a8` … `249181c`). No production code is
-  changed: everything is under `formal/`.
-- **Not pushed.** Pushing from the original session returned 403: the
-  Claude GitHub App had no access to `bearing-research/strata`. If the
-  branch is missing on the remote, the commits are in
-  `formal-verification.patch`, attached to the findings page
-  (<https://claude.ai/artifact/9caDYdAbWK5jddJJ7pqk8i>, private to its
-  owner). Restore them with
-  `git checkout -b claude/strata-formal-verification-fepou7 64b3756 && git am formal-verification.patch`.
-- **Findings:** 12, all reproduced against the real code, **none fixed**.
+- **Branch:** merged to `main` in #867. Fixes land as separate PRs.
+- **Findings:** 12, all reproduced against the real code. The status table below marks which are fixed.
   See the status table below.
 - **Property tests:** two, both passing apart from known findings.
 
@@ -96,7 +87,8 @@ any of this, and CI doesn't either.
 
 ## Findings status
 
-All open. Numbers match `README.md`.
+Numbers match `README.md`. A fixed finding keeps its row, and its Replay
+column points at the regression test that replaced the replay.
 
 | # | Finding | Replay | Proposed fix (verified in the model where marked) | Smallest first step |
 | --- | --- | --- | --- | --- |
@@ -105,7 +97,7 @@ All open. Numbers match `README.md`.
 | 3 | `!=` pruning drops NaN rows | `…::test_nan_ne_pruning` | Don't prune `!=` on float columns | One-line guard in `matches_stats` |
 | 4 | Projection fingerprint not injective | `…::test_projection_fingerprint_collision` | Hash `json.dumps(columns)` | Changes every projection cache key once |
 | 5 | Stale runner publishes; winner rewrites a ready artifact | `test_build_runner_counterexamples.py` | Per-attempt blob keys + one fenced promote ✓ | Largest change on the list |
-| 6 | Stale runner fails the build that replaced it | `test_build_runner_counterexamples.py` | Fence `fail_build` / `fail_artifact` on the lease ✓ | Mirror `complete_build(lease_owner=…)` |
+| 6 | Stale runner fails the build that replaced it | `tests/test_build_runner.py::TestALeaseDecidesWhoMayFail` | Fence `fail_build` / `fail_artifact` on the lease ✓ | **Fixed** |
 | 7 | Old manifest's upload URL still writes | `test_build_pull_counterexamples.py` | Per-attempt blob keys ✓ | Needs the same change as 5 |
 | 8 | Lost wakeup on Python 3.12 | `test_admission_counterexamples.py` (3.12 only) | Re-notify on cancel in `ResizableLimiter.acquire` ✓ | ~5 lines |
 | 9 | Evicted limiter lets a tenant exceed its quota | `test_admission_counterexamples.py` | Evict only idle limiters ✓ | `get_or_create_quotas` |
