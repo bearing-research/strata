@@ -42,7 +42,7 @@ run everything, conventions, gotchas and the prioritized next steps.
 | `tla/Build_RunnerPath.cfg` | Two runners, lease can expire mid-build. Finds findings 5 and 6 |
 | `tla/Build_PullPath.cfg` | Two executors fetch the same build's manifest. Finds finding 7 |
 | `tla/Build_Patched.cfg` | Runners and executors with the proposed fix. **All invariants hold** (exhaustive) |
-| `test_artifact_counterexamples.py` | Findings 1–4 against the real `ArtifactStore` / `ReadPlanner` / `CacheKey` |
+| `test_artifact_counterexamples.py` | Finding 4 against the real `CacheKey` |
 | `test_build_runner_counterexamples.py` | Findings 5–6 against two real `BuildRunner`s (only the executor HTTP call is stubbed) |
 | `test_build_pull_counterexamples.py` | Finding 7 through the real HTTP routes (`TestClient`) |
 | `tla/Admission.tla` | Model of one tenant's `ResizableLimiter` (acquire with deadline, release, cancel while queued) and the `TenantRegistry` LRU that owns it |
@@ -133,13 +133,11 @@ rebuild. It triggers when periodic GC
 re-runs a cell whose last successful run is older than
 `artifact_gc_max_age_days`.
 
-**Fixed.** `garbage_collect` also spares each id's newest `ready` version,
-the one `get_latest_version` resolves, and keeps the `MAX(version)` rule.
-It spares `ready` only, not `ready`/`superseded` as in change 2 below,
-because `get_latest_version` still accepts only `ready`: sparing the
-newest of either state would guard a superseded row above the value
-readers get. When finding 2's fix widens `get_latest_version`, GC's rule
-must widen with it. Regression tests:
+**Fixed.** `garbage_collect` also spares each id's current value, the
+version `get_latest_version` resolves, and keeps the `MAX(version)` rule.
+It first shipped as "newest `ready`", matching `get_latest_version` at
+the time; finding 2's fix widened both to `ready`/`superseded` together,
+as in change 2 below. Regression tests:
 `tests/test_artifact_store.py::TestGcSparesCurrentValues::test_gc_spares_the_current_value_while_a_rebuild_is_in_flight`,
 and the same scenario on Postgres in `tests/test_artifact_store_postgres.py`.
 
@@ -160,6 +158,16 @@ A@v1 ready (prov p) → B@v1 finalize → deduped, failed → force_finalize_can
 
 Running A again restores A and strands B, so the two notebooks keep
 invalidating each other.
+
+**Fixed.** `get_latest_version` (and its prefix twin
+`list_latest_by_id_prefix`) returns the newest `ready` or `superseded`
+version, change 1 below, and GC spares that version, change 2. The other
+callers were audited first: outside the notebook they need only a row
+with bytes (the tenant check on append, CLI and `latest` URI
+resolution); inside it they compare provenance or read the blob, and
+several (loop seeds, iteration lookups, the team store) already accepted
+`superseded`, which `ready`-only never returned. Regression tests:
+`tests/test_artifact_store.py::TestTwoIdsOneComputation`.
 
 ### Proposed fix for 1 and 2 (verified in the model)
 
