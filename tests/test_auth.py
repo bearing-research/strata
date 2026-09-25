@@ -699,3 +699,46 @@ class TestARuleIsAsNarrowAsItReads:
         from strata.config import AclRule
 
         assert AclRule(principal="bob", tables=["*"], tenant="acme").tenant == "acme"
+
+
+class TestADenyForEveryPrefixCoversEveryAddress:
+    """With a SQL catalog configured, one table answers to an ACL name per
+    address form: ``s3:`` for its S3 URI, ``file:`` for a bare name or any
+    other path before ``#``. The configuration docs therefore recommend
+    ``*:namespace.*`` deny patterns; this holds the gate to that advice."""
+
+    def test_every_address_of_the_table_is_refused(self, temp_warehouse, tmp_path, monkeypatch):
+        from types import SimpleNamespace
+
+        from fastapi import HTTPException
+
+        import strata.server as server_module
+        from strata.api.dependencies import authorize_table_access
+        from strata.iceberg import table_identity_for
+
+        config = StrataConfig(
+            deployment_mode="service",
+            artifact_dir=tmp_path / "artifacts",
+            cache_dir=tmp_path / "cache",
+            auth_mode="trusted_proxy",
+            proxy_token="t",
+            catalog_name="strata",
+            catalog_properties={"uri": temp_warehouse["catalog"].properties["uri"]},
+            acl_config=AclConfig(
+                default="allow",
+                deny_rules=[AclRule(principal="*", tables=("*:test_db.*",))],
+            ),
+        )
+        monkeypatch.setattr(server_module, "get_state", lambda: SimpleNamespace(config=config))
+        set_principal(Principal(id="alice"))
+        try:
+            for uri in (
+                "s3://any-bucket/warehouse#test_db.events",
+                "test_db.events",
+                "/not/a/real/path#test_db.events",
+            ):
+                with pytest.raises(HTTPException) as refused:
+                    authorize_table_access(uri, table_identity_for(uri, config))
+                assert refused.value.status_code in (403, 404), uri
+        finally:
+            set_principal(None)

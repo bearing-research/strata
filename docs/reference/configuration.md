@@ -293,7 +293,7 @@ Evaluation is deny-first: deny rules, then allow rules, then `default`.
 default = "deny"
 
 deny = [
-  { principal = "*", tables = ["file:finance.*"] },
+  { principal = "*", tables = ["*:finance.*"] },
 ]
 
 allow = [
@@ -308,20 +308,30 @@ The same shape as JSON in the env var:
 export STRATA_ACL_CONFIG='{"default":"deny","allow":[{"principal":"bi","tables":["file:analytics.*"]}]}'
 ```
 
-**A table pattern names the store or catalog the table is in.** The prefix is
-`file:` for a local warehouse, `s3:`, `gs:` or `az:` for one in object storage,
-and the catalog's own name for a table in a configured catalog
-(`STRATA_CATALOGS`), which is addressed as `<name>:<namespace>.<table>`:
+**A table pattern names the address a table was requested under, not the
+table itself.** The prefix is `s3:`, `gs:` or `az:` for a warehouse URI in
+object storage, the catalog's own name for a table in a configured catalog
+(`STRATA_CATALOGS`, addressed as `<name>:<namespace>.<table>`), and `file:`
+for everything else: a `file://` warehouse, any other path, and a bare
+`<namespace>.<table>`.
+
+So one table can have several names. A table reachable as
+`s3://bucket/wh#finance.ledger` and as `lake:finance.ledger` is
+`s3:finance.ledger` under the first and `lake:finance.ledger` under the
+second. With a SQL catalog (`catalog_properties`), every warehouse URI reads
+that one catalog whatever comes before `#`, so the same S3 table is also
+`file:finance.ledger` when requested as `finance.ledger` or behind a path
+that doesn't exist. **Write deny rules with a `*` prefix** so they cover every
+name:
 
 ```toml
 deny = [
-  { principal = "*", tables = ["file:finance.*", "s3:finance.*", "lake:finance.*"] },
+  { principal = "*", tables = ["*:finance.*"] },
 ]
 ```
 
-A rule written for one prefix does not match another, so a table reachable
-both as `s3://bucket/wh#finance.ledger` and as `lake:finance.ledger` needs
-both patterns. **If you added a named catalog, or a GCS or Azure warehouse,
+An allow rule can name one prefix: an address it misses falls through to
+`default`. **If you added a named catalog, or a GCS or Azure warehouse,
 check your deny rules**: before this release every warehouse table matched
 `file:` whatever store held it, so a rule written then covers less than it
 used to.

@@ -233,9 +233,10 @@ A tenant registry tracks active tenants (LRU-bounded). [Implementation details a
 default = "deny"
 
 # Deny rules evaluate first; explicit denies cannot be bypassed.
+# "*:" covers every address of a table (see the configuration reference).
 [[tool.strata.acl_config.deny]]
 principal = "guest@example.com"
-tables = ["file:internal.*"]
+tables = ["*:internal.*"]
 
 [[tool.strata.acl_config.allow]]
 principal = "analyst@example.com"
