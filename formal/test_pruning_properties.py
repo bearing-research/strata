@@ -116,13 +116,6 @@ def _matches(rows: pa.Array, op: FilterOp, value) -> bool:
     return False
 
 
-def _is_finding_3(rows: pa.Array, op: FilterOp) -> bool:
-    """``!=`` on a row group with NaN in it: NaN is left out of the stats."""
-    return op is FilterOp.NE and any(
-        isinstance(x, float) and math.isnan(x) for x in rows.to_pylist()
-    )
-
-
 @settings(
     max_examples=int(os.environ.get("PRUNING_EXAMPLES", "3000")),
     deadline=None,
@@ -140,8 +133,6 @@ def test_a_pruned_row_group_has_no_matching_row(case):
     for i in range(parquet.num_row_groups):
         if _PLANNER._should_prune_row_group(parquet.metadata.row_group(i), [(0, f)]):
             rows = parquet.read_row_group(i).column("v").combine_chunks()
-            if _is_finding_3(rows, op):
-                continue  # known: test_artifact_counterexamples::test_nan_ne_pruning
             assert not _matches(rows, op, value), (
                 f"pruned row group {i} holds a row matching v {op.value} {value!r}: "
                 f"{rows.to_pylist()}"

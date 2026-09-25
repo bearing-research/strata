@@ -22,8 +22,10 @@ nine real bugs, each in about a second of model checking:
 
 A review of the assumptions behind the pruning, cache-key and access
 control invariants found three more (findings 3, 4 and 12). All twelve
-reproduce against the real code
+reproduced against the real code
 (`uv run pytest formal/`; finding 8 needs CPython 3.12, see below).
+Fixed findings are marked **Fixed** below; their replays are now
+regression tests under `tests/`.
 
 Picking this up? Start with [`HANDOFF.md`](HANDOFF.md): state, how to
 run everything, conventions, gotchas and the prioritized next steps.
@@ -194,6 +196,11 @@ already caught by the `except` and not pruned).
 
 Suggested fix: for `NE` on floating-point columns, never prune (or prune
 only when the column's `nan_count` is known to be 0).
+
+**Fixed.** `matches_stats` never prunes `!=` when the stats are floats.
+Regression tests: `tests/test_filters.py::TestPruningKeepsNaNRows` and
+`TestFilterMatching::test_ne_all_same_float_value`. The pruning property
+test no longer excludes this shape.
 
 ### 4. Projection fingerprint is not injective (cache-key soundness)
 
@@ -557,7 +564,7 @@ finding 3 shape even in 3,000 examples, and with the pool it
 rediscovered it on its own after about 30,000.
 
 - Result: with finding 3 excluded as known, **60,000 examples pass**
-  (4 min). No other pruning violation turned up for these types and
+  (4 min). Since the fix, they pass with no exclusion. No other pruning violation turned up for these types and
   operators, including an int64 column filtered with a float (compared
   exactly, so 2⁵³+1 is not confused with 2⁵³). Not covered: mixing
   naive and tz-aware timestamps, and types beyond these five.

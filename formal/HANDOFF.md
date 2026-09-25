@@ -8,19 +8,10 @@ next.
 
 ## State
 
-- **Branch:** `claude/strata-formal-verification-fepou7`, eight commits
-  on top of `64b3756` (`ec932a8` … `249181c`). No production code is
-  changed: everything is under `formal/`.
-- **Not pushed.** Pushing from the original session returned 403: the
-  Claude GitHub App had no access to `bearing-research/strata`. If the
-  branch is missing on the remote, the commits are in
-  `formal-verification.patch`, attached to the findings page
-  (<https://claude.ai/artifact/9caDYdAbWK5jddJJ7pqk8i>, private to its
-  owner). Restore them with
-  `git checkout -b claude/strata-formal-verification-fepou7 64b3756 && git am formal-verification.patch`.
-- **Findings:** 12, all reproduced against the real code, **none fixed**.
+- **Branch:** merged to `main` in #867. Fixes land as separate PRs.
+- **Findings:** 12, all reproduced against the real code. The status table below marks which are fixed.
   See the status table below.
-- **Property tests:** two, both passing apart from known findings.
+- **Property tests:** two, both passing; the pruning one no longer excludes finding 3.
 
 ## Running everything
 
@@ -96,14 +87,15 @@ any of this, and CI doesn't either.
 
 ## Findings status
 
-All open. Numbers match `README.md`.
+Numbers match `README.md`. A fixed finding keeps its row, and its Replay
+column points at the regression test that replaced the replay.
 
 | # | Finding | Replay | Proposed fix (verified in the model where marked) | Smallest first step |
 | --- | --- | --- | --- | --- |
 | 1 | GC deletes a notebook's current value during a rebuild | `test_artifact_counterexamples.py::test_gc_during_rebuild` | GC also protects the latest ready/superseded version ✓ | Same change in `garbage_collect` |
 | 2 | Promoting one notebook's output strands another's | `…::test_cross_id_dedup` | `get_latest_version` accepts `superseded` ✓ | Audit the other callers first |
-| 3 | `!=` pruning drops NaN rows | `…::test_nan_ne_pruning` | Don't prune `!=` on float columns | One-line guard in `matches_stats` |
-| 4 | Projection fingerprint not injective | `…::test_projection_fingerprint_collision` | Hash `json.dumps(columns)` | Changes every projection cache key once |
+| 3 | `!=` pruning drops NaN rows | `tests/test_filters.py::TestPruningKeepsNaNRows` | Don't prune `!=` on float columns | **Fixed** |
+| 4 | Projection fingerprint not injective | `test_artifact_counterexamples.py::test_projection_fingerprint_collision` | Hash `json.dumps(columns)` | Changes every projection cache key once |
 | 5 | Stale runner publishes; winner rewrites a ready artifact | `test_build_runner_counterexamples.py` | Per-attempt blob keys + one fenced promote ✓ | Largest change on the list |
 | 6 | Stale runner fails the build that replaced it | `test_build_runner_counterexamples.py` | Fence `fail_build` / `fail_artifact` on the lease ✓ | Mirror `complete_build(lease_owner=…)` |
 | 7 | Old manifest's upload URL still writes | `test_build_pull_counterexamples.py` | Per-attempt blob keys ✓ | Needs the same change as 5 |
@@ -126,7 +118,7 @@ Suggested fix order, cheapest and safest first: 6, 8, 3, 12 (docs), 1,
 - `CacheKey.to_hex` `|` separator: not collidable with real file paths.
 - Signed URLs sign `json.dumps(data, sort_keys=True)`, which is canonical.
 - Row-group pruning for float64, int64, string, timestamp and decimal:
-  60,000 random examples; only finding 3.
+  60,000 random examples; only finding 3, now fixed.
 - Sequential edits and runs on a diamond of plain Python cells: 40 random
   sequences, all consistent.
 

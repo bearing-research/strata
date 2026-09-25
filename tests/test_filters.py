@@ -5,6 +5,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pyarrow as pa
+import pyarrow.parquet as pq
 import pytest
 from pyiceberg.catalog.sql import SqlCatalog
 from pyiceberg.schema import Schema
@@ -284,6 +285,20 @@ class TestCompileFilters:
         assert compiled == []
 
 
+class TestPruningKeepsNaNRows:
+    """A row group whose float stats leave out NaN must not be pruned."""
+
+    def test_a_ne_filter_keeps_the_nan_row(self, tmp_path):
+        path = tmp_path / "nan.parquet"
+        pq.write_table(pa.table({"value": [5.0, float("nan")]}), path)
+        rg = pq.ParquetFile(path).metadata.row_group(0)
+        stats = rg.column(0).statistics
+        assert stats.min == stats.max == 5.0  # NaN is not in the stats
+
+        planner = ReadPlanner.__new__(ReadPlanner)  # the method only uses _convert_stats
+        assert not planner._should_prune_row_group(rg, [(0, Filter("value", FilterOp.NE, 5.0))])
+
+
 class TestFilterMatching:
     """Tests for Filter.matches_stats."""
 
@@ -303,6 +318,11 @@ class TestFilterMatching:
         f = Filter(column="value", op=FilterOp.NE, value=50)
         # If min == max == filter_value, no rows can match
         assert f.matches_stats(50, 50) is False
+
+    def test_ne_all_same_float_value(self):
+        f = Filter(column="value", op=FilterOp.NE, value=50.0)
+        # Float stats leave NaN out, so the row group may still hold a NaN
+        assert f.matches_stats(50.0, 50.0) is True
 
     def test_ne_different_values(self):
         f = Filter(column="value", op=FilterOp.NE, value=50)
