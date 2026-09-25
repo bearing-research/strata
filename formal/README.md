@@ -253,6 +253,14 @@ URI and the bare form resolve to the same catalog, so they should share
 one ACL name. Until then, the docs should recommend `*:finance.*` for
 deny rules. fnmatch lets `*` match any prefix, which covers every alias.
 
+**Mitigated in the docs; the code fix is open.** The configuration
+reference now says a pattern names the address form, not the table, and
+recommends `*:` deny patterns; its examples use them.
+`tests/test_auth.py::TestADenyForEveryPrefixCoversEveryAddress` checks
+that `*:test_db.*` refuses all three forms above through the real gate.
+The replay here still reproduces, because an `s3:`-only deny is still
+sidestepped.
+
 ## Model 2: build lease protocol
 
 `BuildLease.tla` models one transform build and the lease that is

@@ -111,7 +111,7 @@ All open. Numbers match `README.md`.
 | 9 | Evicted limiter lets a tenant exceed its quota | `test_admission_counterexamples.py` | Evict only idle limiters ✓ | `get_or_create_quotas` |
 | 10 | Shutdown drain misses evicted limiters' streams | `test_admission_counterexamples.py` | Same as 9 ✓ | Same as 9 |
 | 11 | Mid-run upstream edit leaves the downstream READY | `test_staleness_counterexamples.py` | Keep the walk's verdict; leave running cells alone ✓ | `_refresh_and_broadcast_changed_staleness` |
-| 12 | Deny rule sidestepped by another address form | `test_acl_counterexamples.py` | Name tables by serving catalog | Docs: recommend `*:ns.*` deny patterns |
+| 12 | Deny rule sidestepped by another address form | `test_acl_counterexamples.py` | Name tables by serving catalog | Docs done (`*:ns.*` deny patterns); code fix open |
 
 Suggested fix order, cheapest and safest first: 6, 8, 3, 12 (docs), 1,
 9/10, 11, 2, 4, then 5/7.
