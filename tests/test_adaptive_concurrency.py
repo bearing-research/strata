@@ -152,6 +152,37 @@ class TestResizableLimiter:
         assert limiter.in_use == 2
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize("timeout", [None, 60.0])
+    async def test_a_cancelled_waiter_passes_its_wakeup_on(self, timeout):
+        """A waiter cancelled after release() picked it doesn't strand the slot.
+
+        On CPython 3.12, asyncio.Condition drops a notify whose waiter is
+        cancelled before it runs, so the next waiter slept with the slot
+        free until its deadline.
+        """
+        limiter = ResizableLimiter(1)
+        await limiter.acquire()
+        picked = asyncio.create_task(limiter.acquire(timeout=timeout))
+        next_in_line = asyncio.create_task(limiter.acquire(timeout=timeout))
+        for _ in range(3):
+            await asyncio.sleep(0)  # both queue on the condition
+
+        await limiter.release()  # notify(1) picks the first waiter
+        picked.cancel()  # its client disconnects before it runs
+        for _ in range(10):
+            if next_in_line.done():
+                break
+            await asyncio.sleep(0)
+
+        try:
+            assert picked.cancelled()
+            assert next_in_line.done(), "the free slot was left idle"
+            assert next_in_line.result() is True
+            assert limiter.in_use == 1
+        finally:
+            next_in_line.cancel()
+
+    @pytest.mark.asyncio
     async def test_release_without_acquire_raises(self):
         """Release without acquire should raise."""
         limiter = ResizableLimiter(2)

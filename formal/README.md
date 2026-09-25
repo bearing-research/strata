@@ -23,7 +23,7 @@ nine real bugs, each in about a second of model checking:
 A review of the assumptions behind the pruning, cache-key and access
 control invariants found three more (findings 3, 4 and 12). All twelve
 reproduced against the real code
-(`uv run pytest formal/`; finding 8 needs CPython 3.12, see below).
+(`uv run pytest formal/`; finding 8 needed CPython 3.12).
 Fixed findings are marked **Fixed** below; their replays are now
 regression tests under `tests/`.
 
@@ -81,8 +81,6 @@ $TLC -config Staleness_Patched.cfg     Staleness.tla           # passes
 cd ../.. && uv run pytest formal/ -v
 # the two property tests need Hypothesis, which is not a project dependency:
 uv run --with hypothesis pytest formal/test_pruning_properties.py formal/test_staleness_properties.py
-# finding 8 only reproduces on CPython 3.12 (skipped on 3.13+):
-uv run --no-project --python 3.12 --with pytest pytest formal/test_admission_counterexamples.py -k wakeup
 ```
 
 `-deadlock` disables deadlock checking, because a bounded model that
@@ -446,6 +444,12 @@ around the wait and call `self._cv.notify(1)` before re-raising, which
 is the same re-notify 3.13 added. `Admission_Patched` models exactly
 that behaviour.
 
+**Fixed.** `ResizableLimiter.acquire` re-notifies on any exception out of
+the wait, as proposed. Regression test:
+`tests/test_adaptive_concurrency.py::TestResizableLimiter::test_a_cancelled_waiter_passes_its_wakeup_on`,
+which fails without the fix on the CI 3.12 job and passes either way on
+3.13+.
+
 ### 9. An evicted limiter lets a tenant exceed its quota
 
 `get_or_create_quotas` evicts the least recently used tenant regardless
@@ -636,7 +640,5 @@ A model helps only while it matches the code. Suggested practice:
   about 2 seconds (27k states) and still catches findings 1 and 2.
   `Build_Patched`, `Admission_Patched` and `Staleness_Patched` take a
   few seconds each.
-- CI runs on 3.12, 3.13 and 3.14. Run the finding 8 test on the 3.12 job;
-  it skips itself on 3.13+.
 - Move each counterexample test into `tests/` with its assertion
   inverted, so the code is checked even when the model isn't.
