@@ -1605,6 +1605,21 @@ class TestGcSparesCurrentValues:
         assert store.get_artifact("model", 1) is None
         assert store.get_artifact("model", 2) is not None  # current value kept
 
+    def test_gc_spares_the_current_value_while_a_rebuild_is_in_flight(self, store):
+        """A rebuild's ``building`` row is the highest version of the id, so
+        "spare MAX(version)" left the value readers resolve unprotected for the
+        whole build, and for good once the rebuild failed."""
+        artifact_id = "nb_x_cell_c1_var_df"
+        _make_ready_artifact(store, artifact_id, "prov-v1")
+        rebuild = store.create_artifact(artifact_id, "prov-v2")
+
+        assert store.garbage_collect(max_age_days=0)["deleted_count"] == 0
+        assert store.get_latest_version(artifact_id).version == 1
+
+        store.fail_artifact(artifact_id, rebuild)
+        store.garbage_collect(max_age_days=0)
+        assert store.get_latest_version(artifact_id).version == 1
+
     def test_collect_latest_opt_in_still_reclaims(self, store):
         _make_ready_artifact(store, "loose", "prov-loose")
         assert store.garbage_collect(max_age_days=0)["deleted_count"] == 0
@@ -1737,3 +1752,39 @@ class TestAnIdTwoComputationsClaim:
             store.import_artifact(self._record("b" * 64), b"BOBBY")
 
         assert store.read_blob("nb_shared_cell_c1_var_rows", 1) == b"ALICE"
+
+
+class TestTwoIdsOneComputation:
+    """Two notebook cells with the same source, inputs and lockfile (a
+    duplicated notebook) produce one provenance under two ids. The second to
+    finalize is promoted by ``force_finalize_canonical``, which supersedes the
+    first id's row. That row keeps its bytes, and it is still the first id's
+    current value: its downstream cells load it by ``get_latest_version``."""
+
+    A = "nb_A_cell_c1_var_df"
+    B = "nb_B_cell_c1_var_df"
+
+    def _both_finalized(self, store):
+        _make_ready_artifact(store, self.A, "same-prov")
+        vb = store.create_artifact(self.B, "same-prov")
+        store.write_blob(self.B, vb, _ipc_bytes(1))
+        deduped = store.finalize_artifact(self.B, vb, "{}", 1, 10)
+        assert deduped is not None and deduped.id == self.A  # the collision
+        store.force_finalize_canonical(self.B, vb, "{}", 1, 10)  # what store_cell_output does
+        assert store.get_artifact(self.A, 1).state == "superseded"
+
+    def test_promoting_one_id_leaves_the_other_its_value(self, store):
+        self._both_finalized(store)
+
+        a = store.get_latest_version(self.A)
+        assert a is not None and a.version == 1
+        assert store.read_blob(self.A, a.version) is not None
+        assert store.get_latest_version(self.B) is not None
+        assert [v.id for v in store.list_latest_by_id_prefix("nb_A_")] == [self.A]
+
+    def test_gc_spares_a_superseded_current_value_during_a_rebuild(self, store):
+        self._both_finalized(store)
+        store.create_artifact(self.A, "prov-a-edited")  # A reruns after an edit
+
+        assert store.garbage_collect(max_age_days=0)["deleted_count"] == 0
+        assert store.get_latest_version(self.A).version == 1

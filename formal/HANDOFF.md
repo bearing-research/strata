@@ -90,8 +90,8 @@ column points at the regression test that replaced the replay.
 
 | # | Finding | Replay | Proposed fix (verified in the model where marked) | Smallest first step |
 | --- | --- | --- | --- | --- |
-| 1 | GC deletes a notebook's current value during a rebuild | `test_artifact_counterexamples.py::test_gc_during_rebuild` | GC also protects the latest ready/superseded version ✓ | Same change in `garbage_collect` |
-| 2 | Promoting one notebook's output strands another's | `…::test_cross_id_dedup` | `get_latest_version` accepts `superseded` ✓ | Audit the other callers first |
+| 1 | GC deletes a notebook's current value during a rebuild | `tests/test_artifact_store.py::TestGcSparesCurrentValues` | GC also protects the latest ready/superseded version ✓ | **Fixed** |
+| 2 | Promoting one notebook's output strands another's | `tests/test_artifact_store.py::TestTwoIdsOneComputation` | `get_latest_version` accepts `superseded` ✓ | **Fixed** (callers audited) |
 | 3 | `!=` pruning drops NaN rows | `tests/test_filters.py::TestPruningKeepsNaNRows` | Don't prune `!=` on float columns | **Fixed** |
 | 4 | Projection fingerprint not injective | `test_artifact_counterexamples.py::test_projection_fingerprint_collision` | Hash `json.dumps(columns)` | Changes every projection cache key once |
 | 5 | Stale runner publishes; winner rewrites a ready artifact | `test_build_runner_counterexamples.py` | Per-attempt blob keys + one fenced promote ✓ | Largest change on the list |

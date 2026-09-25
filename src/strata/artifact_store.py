@@ -2047,13 +2047,18 @@ class ArtifactStore:
             conn.close()
 
     def get_latest_version(self, artifact_id: str) -> ArtifactVersion | None:
-        """Get the latest ready version of an artifact.
+        """Get the current value of an artifact: its newest servable version.
+
+        Superseded counts. A superseded version keeps its bytes and is only
+        left out of provenance lookups, and one id's newest result is
+        superseded when another id finalizes the same provenance (two
+        notebooks with identical cells): ready-only gave that id no value.
 
         Args:
             artifact_id: Artifact ID
 
         Returns:
-            Latest ArtifactVersion with state="ready", or None if not found
+            Newest ArtifactVersion with state "ready" or "superseded", or None
         """
         conn = self._get_connection()
         try:
@@ -2063,7 +2068,7 @@ class ArtifactStore:
                        row_count, byte_size, created_at, transform_spec,
                        input_versions, tenant, principal, content_sha256
                 FROM artifact_versions
-                WHERE id = ? AND state = 'ready'
+                WHERE id = ? AND state IN ('ready', 'superseded')
                 ORDER BY version DESC
                 LIMIT 1
                 """,
@@ -2091,7 +2096,10 @@ class ArtifactStore:
             conn.close()
 
     def list_latest_by_id_prefix(self, prefix: str) -> list[ArtifactVersion]:
-        """Return the latest ready version of each artifact whose id starts with ``prefix``.
+        """Return the current value of each artifact whose id starts with ``prefix``.
+
+        Current as in :meth:`get_latest_version`: the newest ready or
+        superseded version.
 
         Used by the notebook layer to enumerate loop-cell iteration
         artifacts (ids of the form ``nb_..._var_<name>@iter=<k>``) and
@@ -2110,7 +2118,7 @@ class ArtifactStore:
                 """
                 SELECT id, MAX(version) AS max_version
                 FROM artifact_versions
-                WHERE id LIKE ? ESCAPE '\\' AND state = 'ready'
+                WHERE id LIKE ? ESCAPE '\\' AND state IN ('ready', 'superseded')
                 GROUP BY id
                 ORDER BY id
                 """,
@@ -4181,11 +4189,27 @@ class ArtifactStore:
                   AND av.created_at < ?
             """
             if not collect_latest:
+                # Two rules, and both are needed. The version
+                # ``get_latest_version`` resolves (its newest ready or
+                # superseded row) is spared, because a rebuild's building row,
+                # or a failed one, outranks it in MAX(version) while it is
+                # still the value readers get. MAX(version) stays spared too:
+                # deleting the highest row lets ``create_artifact`` reuse its
+                # number.
                 query += """
                   AND av.version < (
                       SELECT MAX(latest.version)
                       FROM artifact_versions latest
                       WHERE latest.id = av.id
+                  )
+                  AND NOT (
+                      av.state IN ('ready', 'superseded')
+                      AND NOT EXISTS (
+                          SELECT 1 FROM artifact_versions newer
+                          WHERE newer.id = av.id
+                            AND newer.state IN ('ready', 'superseded')
+                            AND newer.version > av.version
+                      )
                   )
                 """
             params: list[float | str] = [cutoff]
