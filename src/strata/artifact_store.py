@@ -4181,11 +4181,26 @@ class ArtifactStore:
                   AND av.created_at < ?
             """
             if not collect_latest:
+                # Two rules, and both are needed. The version
+                # ``get_latest_version`` resolves (its newest ready row) is
+                # spared, because a rebuild's building row, or a failed one,
+                # outranks it in MAX(version) while it is still the value
+                # readers get. MAX(version) stays spared too: deleting the
+                # highest row lets ``create_artifact`` reuse its number.
                 query += """
                   AND av.version < (
                       SELECT MAX(latest.version)
                       FROM artifact_versions latest
                       WHERE latest.id = av.id
+                  )
+                  AND NOT (
+                      av.state = 'ready'
+                      AND NOT EXISTS (
+                          SELECT 1 FROM artifact_versions newer
+                          WHERE newer.id = av.id
+                            AND newer.state = 'ready'
+                            AND newer.version > av.version
+                      )
                   )
                 """
             params: list[float | str] = [cutoff]

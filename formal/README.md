@@ -133,6 +133,16 @@ rebuild. It triggers when periodic GC
 re-runs a cell whose last successful run is older than
 `artifact_gc_max_age_days`.
 
+**Fixed.** `garbage_collect` also spares each id's newest `ready` version,
+the one `get_latest_version` resolves, and keeps the `MAX(version)` rule.
+It spares `ready` only, not `ready`/`superseded` as in change 2 below,
+because `get_latest_version` still accepts only `ready`: sparing the
+newest of either state would guard a superseded row above the value
+readers get. When finding 2's fix widens `get_latest_version`, GC's rule
+must widen with it. Regression tests:
+`tests/test_artifact_store.py::TestGcSparesCurrentValues::test_gc_spares_the_current_value_while_a_rebuild_is_in_flight`,
+and the same scenario on Postgres in `tests/test_artifact_store_postgres.py`.
+
 ### 2. `force_finalize_canonical` strands the *other* notebook's output
 
 Two notebook cells with the same provenance (same source, inputs and

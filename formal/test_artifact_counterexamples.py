@@ -28,21 +28,6 @@ def _build(store: ArtifactStore, artifact_id: str, prov: str) -> int:
     return v
 
 
-def test_gc_during_rebuild(tmp_path: Path) -> None:
-    """TLA+ config Artifact_GCRebuild.
-
-    Trace: a@v1 ready -> create a@v2 (rebuild starts) -> garbage_collect
-    deletes a@v1, because it is no longer MAX(version) -> the rebuild
-    fails -> ``a`` has no ready version, so get_latest_version returns None.
-    """
-    store = _store(tmp_path)
-    _build(store, "nb_x_cell_c1_var_df", "p1")
-    v2 = store.create_artifact("nb_x_cell_c1_var_df", "p2")
-    store.garbage_collect(max_age_days=0)  # "old enough" = anything, as in the model
-    store.fail_artifact("nb_x_cell_c1_var_df", v2)
-    assert store.get_latest_version("nb_x_cell_c1_var_df") is None
-
-
 def test_cross_id_dedup(tmp_path: Path) -> None:
     """TLA+ config Artifact_CrossIdDedup.
 

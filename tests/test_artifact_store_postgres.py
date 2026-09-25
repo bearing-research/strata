@@ -294,6 +294,18 @@ class TestCanonicalPromotion:
         assert promoted.state == "ready"
 
 
+class TestGarbageCollection:
+    def test_the_current_value_survives_a_rebuild_in_flight(self, store):
+        # The spare-the-current-value clause is a correlated NOT EXISTS; run
+        # it on the dialect that has never seen it in a unit test.
+        first = store.create_artifact("nb_x_cell_c1_var_df", "prov-v1", _spec())
+        store.finalize_artifact("nb_x_cell_c1_var_df", first, "{}", row_count=0, byte_size=0)
+        store.create_artifact("nb_x_cell_c1_var_df", "prov-v2", _spec())
+
+        assert store.garbage_collect(max_age_days=0)["deleted_count"] == 0
+        assert store.get_latest_version("nb_x_cell_c1_var_df").version == first
+
+
 class TestConnectionPool:
     """A bounded pool is only safe here because acquisition is re-entrant."""
 

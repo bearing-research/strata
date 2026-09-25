@@ -1605,6 +1605,21 @@ class TestGcSparesCurrentValues:
         assert store.get_artifact("model", 1) is None
         assert store.get_artifact("model", 2) is not None  # current value kept
 
+    def test_gc_spares_the_current_value_while_a_rebuild_is_in_flight(self, store):
+        """A rebuild's ``building`` row is the highest version of the id, so
+        "spare MAX(version)" left the value readers resolve unprotected for the
+        whole build, and for good once the rebuild failed."""
+        artifact_id = "nb_x_cell_c1_var_df"
+        _make_ready_artifact(store, artifact_id, "prov-v1")
+        rebuild = store.create_artifact(artifact_id, "prov-v2")
+
+        assert store.garbage_collect(max_age_days=0)["deleted_count"] == 0
+        assert store.get_latest_version(artifact_id).version == 1
+
+        store.fail_artifact(artifact_id, rebuild)
+        store.garbage_collect(max_age_days=0)
+        assert store.get_latest_version(artifact_id).version == 1
+
     def test_collect_latest_opt_in_still_reclaims(self, store):
         _make_ready_artifact(store, "loose", "prov-loose")
         assert store.garbage_collect(max_age_days=0)["deleted_count"] == 0
