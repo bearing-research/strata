@@ -156,8 +156,13 @@ def s3_table(minio_container, s3_config, s3_catalog_db):
     warehouse_path = f"s3://{bucket}/warehouse"
     endpoint = _get_s3_endpoint(config)
 
+    # "strata", not pyiceberg's usual "default". A table URI with a warehouse
+    # path makes the planner open ``SqlCatalog("strata", ...)`` over that
+    # warehouse (``iceberg.py``), the same name ``temp_warehouse`` uses, and a
+    # SQL catalog keys its tables by name. Under "default" the planner reported
+    # ``NoSuchTableError`` for a table sitting in the very same SQLite file.
     catalog = SqlCatalog(
-        "default",
+        "strata",
         uri=f"sqlite:///{s3_catalog_db}",
         warehouse=warehouse_path,
         **{
@@ -271,7 +276,7 @@ class TestS3EndToEnd:
         warehouse_path = f"s3://{bucket}/warehouse"
 
         catalog = SqlCatalog(
-            "default",
+            "strata",
             uri=f"sqlite:///{s3_catalog_db}",
             warehouse=warehouse_path,
             **{
@@ -329,7 +334,7 @@ class TestS3PathHandling:
 
         catalog_db = tmp_path_factory.mktemp("special_catalog") / "catalog.db"
         catalog = SqlCatalog(
-            "default",
+            "strata",
             uri=f"sqlite:///{catalog_db}",
             warehouse=warehouse_path,
             **{
