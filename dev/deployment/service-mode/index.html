@@ -2675,14 +2675,15 @@ alphanumeric / <code>_</code> / <code>-</code> characters and hashed into:</p>
 <a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="n">default</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;deny&quot;</span>
 <a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a>
 <a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="c1"># Deny rules evaluate first; explicit denies cannot be bypassed.</span>
-<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a><span class="k">[[tool.strata.acl_config.deny]]</span>
-<a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a><span class="n">principal</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;guest@example.com&quot;</span>
-<a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a><span class="n">tables</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;file:internal.*&quot;</span><span class="p">]</span>
-<a id="__codelineno-5-10" name="__codelineno-5-10" href="#__codelineno-5-10"></a>
-<a id="__codelineno-5-11" name="__codelineno-5-11" href="#__codelineno-5-11"></a><span class="k">[[tool.strata.acl_config.allow]]</span>
-<a id="__codelineno-5-12" name="__codelineno-5-12" href="#__codelineno-5-12"></a><span class="n">principal</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;analyst@example.com&quot;</span>
-<a id="__codelineno-5-13" name="__codelineno-5-13" href="#__codelineno-5-13"></a><span class="n">tenant</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;marketing&quot;</span><span class="w">          </span><span class="c1"># optional; omit to match any tenant</span>
-<a id="__codelineno-5-14" name="__codelineno-5-14" href="#__codelineno-5-14"></a><span class="n">tables</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;file:marketing.*&quot;</span><span class="p">,</span><span class="w"> </span><span class="s2">&quot;file:public.*&quot;</span><span class="p">]</span>
+<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a><span class="c1"># &quot;*:&quot; covers every address of a table (see the configuration reference).</span>
+<a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a><span class="k">[[tool.strata.acl_config.deny]]</span>
+<a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a><span class="n">principal</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;guest@example.com&quot;</span>
+<a id="__codelineno-5-10" name="__codelineno-5-10" href="#__codelineno-5-10"></a><span class="n">tables</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;*:internal.*&quot;</span><span class="p">]</span>
+<a id="__codelineno-5-11" name="__codelineno-5-11" href="#__codelineno-5-11"></a>
+<a id="__codelineno-5-12" name="__codelineno-5-12" href="#__codelineno-5-12"></a><span class="k">[[tool.strata.acl_config.allow]]</span>
+<a id="__codelineno-5-13" name="__codelineno-5-13" href="#__codelineno-5-13"></a><span class="n">principal</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;analyst@example.com&quot;</span>
+<a id="__codelineno-5-14" name="__codelineno-5-14" href="#__codelineno-5-14"></a><span class="n">tenant</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;marketing&quot;</span><span class="w">          </span><span class="c1"># optional; omit to match any tenant</span>
+<a id="__codelineno-5-15" name="__codelineno-5-15" href="#__codelineno-5-15"></a><span class="n">tables</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;file:marketing.*&quot;</span><span class="p">,</span><span class="w"> </span><span class="s2">&quot;file:public.*&quot;</span><span class="p">]</span>
 </code></pre></div>
 <p>A rule matches when the principal matches (<code>*</code> matches any, and is the
 default), the tenant matches if the rule names one, and <strong>at least one</strong> table

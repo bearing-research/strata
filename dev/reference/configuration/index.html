@@ -3304,7 +3304,7 @@ affects callers writing build rows directly.</p>
 <a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="n">default</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;deny&quot;</span>
 <a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>
 <a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="n">deny</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span>
-<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="w">  </span><span class="p">{</span><span class="w"> </span><span class="n">principal</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="s2">&quot;*&quot;</span><span class="p">,</span><span class="w"> </span><span class="n">tables</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;file:finance.*&quot;</span><span class="p">]</span><span class="w"> </span><span class="p">},</span>
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="w">  </span><span class="p">{</span><span class="w"> </span><span class="n">principal</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="s2">&quot;*&quot;</span><span class="p">,</span><span class="w"> </span><span class="n">tables</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;*:finance.*&quot;</span><span class="p">]</span><span class="w"> </span><span class="p">},</span>
 <a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="p">]</span>
 <a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a>
 <a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a><span class="n">allow</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span>
@@ -3315,17 +3315,26 @@ affects callers writing build rows directly.</p>
 <p>The same shape as JSON in the env var:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="nb">export</span><span class="w"> </span><span class="nv">STRATA_ACL_CONFIG</span><span class="o">=</span><span class="s1">&#39;{&quot;default&quot;:&quot;deny&quot;,&quot;allow&quot;:[{&quot;principal&quot;:&quot;bi&quot;,&quot;tables&quot;:[&quot;file:analytics.*&quot;]}]}&#39;</span>
 </code></pre></div>
-<p><strong>A table pattern names the store or catalog the table is in.</strong> The prefix is
-<code>file:</code> for a local warehouse, <code>s3:</code>, <code>gs:</code> or <code>az:</code> for one in object storage,
-and the catalog's own name for a table in a configured catalog
-(<code>STRATA_CATALOGS</code>), which is addressed as <code>&lt;name&gt;:&lt;namespace&gt;.&lt;table&gt;</code>:</p>
+<p><strong>A table pattern names the address a table was requested under, not the
+table itself.</strong> The prefix is <code>s3:</code>, <code>gs:</code> or <code>az:</code> for a warehouse URI in
+object storage, the catalog's own name for a table in a configured catalog
+(<code>STRATA_CATALOGS</code>, addressed as <code>&lt;name&gt;:&lt;namespace&gt;.&lt;table&gt;</code>), and <code>file:</code>
+for everything else: a <code>file://</code> warehouse, any other path, and a bare
+<code>&lt;namespace&gt;.&lt;table&gt;</code>.</p>
+<p>So one table can have several names. A table reachable as
+<code>s3://bucket/wh#finance.ledger</code> and as <code>lake:finance.ledger</code> is
+<code>s3:finance.ledger</code> under the first and <code>lake:finance.ledger</code> under the
+second. With a SQL catalog (<code>catalog_properties</code>), every warehouse URI reads
+that one catalog whatever comes before <code>#</code>, so the same S3 table is also
+<code>file:finance.ledger</code> when requested as <code>finance.ledger</code> or behind a path
+that doesn't exist. <strong>Write deny rules with a <code>*</code> prefix</strong> so they cover every
+name:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="n">deny</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span>
-<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="w">  </span><span class="p">{</span><span class="w"> </span><span class="n">principal</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="s2">&quot;*&quot;</span><span class="p">,</span><span class="w"> </span><span class="n">tables</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;file:finance.*&quot;</span><span class="p">,</span><span class="w"> </span><span class="s2">&quot;s3:finance.*&quot;</span><span class="p">,</span><span class="w"> </span><span class="s2">&quot;lake:finance.*&quot;</span><span class="p">]</span><span class="w"> </span><span class="p">},</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="w">  </span><span class="p">{</span><span class="w"> </span><span class="n">principal</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="s2">&quot;*&quot;</span><span class="p">,</span><span class="w"> </span><span class="n">tables</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;*:finance.*&quot;</span><span class="p">]</span><span class="w"> </span><span class="p">},</span>
 <a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="p">]</span>
 </code></pre></div>
-<p>A rule written for one prefix does not match another, so a table reachable
-both as <code>s3://bucket/wh#finance.ledger</code> and as <code>lake:finance.ledger</code> needs
-both patterns. <strong>If you added a named catalog, or a GCS or Azure warehouse,
+<p>An allow rule can name one prefix: an address it misses falls through to
+<code>default</code>. <strong>If you added a named catalog, or a GCS or Azure warehouse,
 check your deny rules</strong>: before this release every warehouse table matched
 <code>file:</code> whatever store held it, so a rule written then covers less than it
 used to.</p>
