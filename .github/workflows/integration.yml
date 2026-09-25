@@ -94,4 +94,5 @@ jobs:
             tests/test_presigned_urls_minio.py \
             tests/test_lake_catalogs_integration.py \
             tests/notebook/test_e2e_duckdb_lake.py \
+            tests/test_s3_integration.py \
             -v --tb=short -p no:cacheprovider
