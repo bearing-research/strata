@@ -55,6 +55,8 @@ from typing import TYPE_CHECKING, Any
 
 import httpx
 
+from strata.artifact_store import BuildLeaseLost
+
 if TYPE_CHECKING:
     from strata.artifact_store import ArtifactStore
     from strata.cache import CachedFetcher
@@ -489,18 +491,53 @@ class BuildRunner:
                 # marked the artifact ready — a ready artifact whose blob does
                 # not exist in the configured store. Every other writer already
                 # goes through this API.
+                #
+                # Under this attempt's own id, not the version's: a runner whose
+                # lease was taken over keeps executing by design (see the
+                # heartbeat loop), so it gets this far too, and writing the
+                # shared key let it replace bytes already published as ready.
+                attempt = uuid.uuid4().hex
                 self.artifact_store.publish_blob_from_path(
-                    build.artifact_id, build.version, output_path
+                    build.artifact_id, build.version, output_path, attempt=attempt
                 )
 
-                # Finalize artifact
-                finalized_artifact = self.artifact_store.finalize_artifact(
-                    artifact_id=build.artifact_id,
-                    version=build.version,
-                    schema_json=schema_json,
-                    row_count=row_count,
-                    byte_size=output_bytes,
-                )
+                # Publishing the attempt and completing the build are one
+                # transaction, fenced on the lease: the commit point that
+                # decides which runner won, the mirror of ``claim_build``
+                # deciding which one started. Checking the lease only after
+                # finalize told a stale runner it lost once its result was
+                # already the ready artifact.
+                def _complete(conn: Any, artifact_id: str, version: int) -> bool:
+                    return self.build_store.complete_within(
+                        conn,
+                        build_id,
+                        artifact_id=artifact_id,
+                        version=version,
+                        lease_owner=self._runner_id,
+                        output_byte_count=output_bytes,
+                        logs=executor_logs,
+                    )
+
+                try:
+                    finalized_artifact = self.artifact_store.finalize_artifact(
+                        artifact_id=build.artifact_id,
+                        version=build.version,
+                        schema_json=schema_json,
+                        row_count=row_count,
+                        byte_size=output_bytes,
+                        blob_attempt=attempt,
+                        fence=_complete,
+                    )
+                except BuildLeaseLost:
+                    self.artifact_store.delete_attempt_blob(
+                        build.artifact_id, build.version, attempt
+                    )
+                    logger.warning(
+                        f"Build {build_id} finished after its lease moved on; "
+                        "discarding the result and leaving the name pointer alone",
+                        extra={"runner_id": self._runner_id},
+                    )
+                    return
                 if finalized_artifact is None:
                     raise ValueError(
                         f"Failed to finalize build artifact {build.artifact_id}@v={build.version}"
@@ -509,34 +546,11 @@ class BuildRunner:
                     finalized_artifact.id != build.artifact_id
                     or finalized_artifact.version != build.version
                 ):
-                    self.build_store.update_build_output(
-                        build.build_id,
-                        finalized_artifact.id,
-                        finalized_artifact.version,
+                    # Deduplicated to an artifact that already existed, and the
+                    # build now points at it; nothing reads this attempt.
+                    self.artifact_store.delete_attempt_blob(
+                        build.artifact_id, build.version, attempt
                     )
-
-                # Mark build as complete (include executor logs for debugging).
-                #
-                # Lease-checked, and BEFORE the name pointer: this is the
-                # commit point that decides which runner won, the mirror of
-                # ``claim_build`` deciding which one started. A runner whose
-                # lease was stolen keeps executing by design (see the
-                # heartbeat loop), so it arrives here too — and setting the
-                # name first let it repoint a registry name at its own result
-                # after another runner had legitimately taken the build over.
-                won = self.build_store.complete_build(
-                    build_id=build_id,
-                    output_byte_count=output_bytes,
-                    logs=executor_logs,
-                    lease_owner=self._runner_id,
-                )
-                if not won:
-                    logger.warning(
-                        f"Build {build_id} completed without its lease; "
-                        "discarding the result and leaving the name pointer alone",
-                        extra={"runner_id": self._runner_id},
-                    )
-                    return
 
                 # Set the requested name pointer now that the artifact is
                 # ready — the materialize endpoint can't (the build is async).

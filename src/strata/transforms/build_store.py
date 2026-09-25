@@ -661,6 +661,56 @@ class BuildStore:
         finally:
             conn.close()
 
+    def complete_within(
+        self,
+        conn: Any,
+        build_id: str,
+        *,
+        artifact_id: str,
+        version: int,
+        lease_owner: str,
+        lease_expires_at: float | None = None,
+        output_byte_count: int | None = None,
+        logs: str | None = None,
+    ) -> bool:
+        """Complete a build on the caller's connection, without committing.
+
+        The fence ``ArtifactStore.finalize_artifact`` runs inside its own
+        transaction, so marking the artifact ready and completing the build
+        commit together or not at all: an attempt that lost its lease can no
+        longer make its result the ready artifact first and be told it lost
+        afterwards. Builds live in the artifact store's database, which is what
+        makes one transaction possible.
+
+        ``lease_expires_at`` pins the claim, not just the owner: every
+        executor holds the lease as ``external:manifest``, and only the
+        deadline tells one manifest's claim from the next. The build is
+        repointed at ``artifact_id``/``version``, which differ from its own
+        when finalize deduplicated to an existing artifact.
+
+        Returns:
+            True if this caller held the lease and the build is now complete.
+        """
+        sql = """
+            UPDATE artifact_builds
+            SET state = 'ready', completed_at = ?, output_byte_count = ?, logs = ?,
+                artifact_id = ?, version = ?
+            WHERE build_id = ? AND state = 'building' AND lease_owner = ?
+        """
+        params: list[Any] = [
+            self._clock(),
+            output_byte_count,
+            logs,
+            artifact_id,
+            version,
+            build_id,
+            lease_owner,
+        ]
+        if lease_expires_at is not None:
+            sql += " AND lease_expires_at = ?"
+            params.append(lease_expires_at)
+        return conn.execute(sql, params).rowcount > 0
+
     def fail_build(
         self,
         build_id: str,

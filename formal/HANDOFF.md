@@ -94,9 +94,9 @@ column points at the regression test that replaced the replay.
 | 2 | Promoting one notebook's output strands another's | `tests/test_artifact_store.py::TestTwoIdsOneComputation` | `get_latest_version` accepts `superseded` ✓ | **Fixed** (callers audited) |
 | 3 | `!=` pruning drops NaN rows | `tests/test_filters.py::TestPruningKeepsNaNRows` | Don't prune `!=` on float columns | **Fixed** |
 | 4 | Projection fingerprint not injective | `tests/test_smoke.py::TestCacheKey` | Hash `json.dumps(columns)` | **Fixed** |
-| 5 | Stale runner publishes; winner rewrites a ready artifact | `test_build_runner_counterexamples.py` | Per-attempt blob keys + one fenced promote ✓ | Largest change on the list |
+| 5 | Stale runner publishes; winner rewrites a ready artifact | `tests/test_build_runner.py::TestOnlyTheLeaseHolderPublishes` | Per-attempt blob keys + one fenced promote ✓ | **Fixed** |
 | 6 | Stale runner fails the build that replaced it | `tests/test_build_runner.py::TestALeaseDecidesWhoMayFail` | Fence `fail_build` / `fail_artifact` on the lease ✓ | **Fixed** |
-| 7 | Old manifest's upload URL still writes | `test_build_pull_counterexamples.py` | Per-attempt blob keys ✓ | Needs the same change as 5 |
+| 7 | Old manifest's upload URL still writes | `tests/test_pull_model.py::TestARetiredManifestCannotWriteTheOutput` | Per-attempt blob keys ✓ | **Fixed** |
 | 8 | Lost wakeup on Python 3.12 | `tests/test_adaptive_concurrency.py` (teeth on 3.12) | Re-notify on cancel in `ResizableLimiter.acquire` ✓ | **Fixed** |
 | 9 | Evicted limiter lets a tenant exceed its quota | `test_admission_counterexamples.py` | Evict only idle limiters ✓ | `get_or_create_quotas` |
 | 10 | Shutdown drain misses evicted limiters' streams | `test_admission_counterexamples.py` | Same as 9 ✓ | Same as 9 |

@@ -158,6 +158,21 @@ class TestPull:
         table = ipc.open_stream(out_file.read_bytes()).read_all()
         assert table.num_rows == 1
 
+    def test_pull_reads_a_build_attempts_bytes(self, tmp_path):
+        """A transform build's output lives under its attempt's key, not the id."""
+        artifact_dir = tmp_path / "artifacts"
+        artifact_dir.mkdir()
+        store = ArtifactStore(artifact_dir)
+        store.create_artifact("built-1", "prov-built")
+        store.write_blob("built-1", 1, _ipc_bytes(3), attempt="ab" * 16)
+        store.finalize_artifact("built-1", 1, "{}", 3, 100, blob_attempt="ab" * 16)
+
+        out_file = tmp_path / "built.arrow"
+        rc = cmd_pull(_args(ref="built-1@v=1", artifact_dir=str(artifact_dir), to=str(out_file)))
+        assert rc == 0
+        assert ipc.open_stream(out_file.read_bytes()).read_all().num_rows == 3
+        reset_artifact_store()
+
     def test_pull_unknown_exits_one(self, chain_store, tmp_path):
         rc = cmd_pull(_args(ref="ghost", artifact_dir=chain_store["dir"], to=str(tmp_path / "x")))
         assert rc == 1

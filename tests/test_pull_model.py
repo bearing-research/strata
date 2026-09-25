@@ -10,6 +10,7 @@ Tests the complete pull model flow:
 
 from __future__ import annotations
 
+import re
 import tempfile
 import time
 from pathlib import Path
@@ -708,9 +709,9 @@ class TestFinalizeEndpoint:
 
         real_open_blob_reader = artifact_store.open_blob_reader
 
-        def _recording_open_blob_reader(artifact_id, version_):
+        def _recording_open_blob_reader(artifact_id, version_, attempt=None):
             reader_thread_idents.append(threading.get_ident())
-            return real_open_blob_reader(artifact_id, version_)
+            return real_open_blob_reader(artifact_id, version_, attempt)
 
         monkeypatch.setattr(artifact_store, "open_blob_reader", _recording_open_blob_reader)
 
@@ -1274,7 +1275,7 @@ class TestManifestClaimsTheBuild:
     def test_the_current_holder_can_still_finalize(self, client, build_store, artifact_store):
         self._pending(build_store, artifact_store, "fresh-1")
         manifest = client.get("/v1/builds/fresh-1/manifest").json()
-        artifact_store.write_blob("out-fresh-1", 1, create_test_arrow_blob())
+        _upload(client, manifest, create_test_arrow_blob())
 
         response = client.post(manifest["finalize_url"])
 
@@ -1292,10 +1293,11 @@ class TestManifestClaimsTheBuild:
         impossible by construction rather than by durations lining up.
         """
         self._pending(build_store, artifact_store, "refetch-1")
-        first = client.get("/v1/builds/refetch-1/manifest").json()["finalize_url"]
-        second = client.get("/v1/builds/refetch-1/manifest").json()["finalize_url"]
+        first_manifest = client.get("/v1/builds/refetch-1/manifest").json()
+        second_manifest = client.get("/v1/builds/refetch-1/manifest").json()
+        first, second = first_manifest["finalize_url"], second_manifest["finalize_url"]
         assert first != second
-        artifact_store.write_blob("out-refetch-1", 1, create_test_arrow_blob())
+        _upload(client, second_manifest, create_test_arrow_blob())
 
         # 409, not 403: the older URL is properly signed, so it is not a
         # forgery — it names a claim that is no longer current.
@@ -1318,3 +1320,97 @@ class TestManifestClaimsTheBuild:
         self._pending(build_store, artifact_store, "claim-4")
         assert client.get("/v1/builds/claim-4/manifest").status_code == 200
         assert client.get("/v1/builds/claim-4/manifest").status_code == 200
+
+
+class TestARetiredManifestCannotWriteTheOutput:
+    """Found by formal verification (BuildLease.tla, NoStaleBytesPublished).
+
+    Re-fetching a manifest retires the previous finalize URL, but the upload
+    URL carried no lease token, so an executor still holding the earlier
+    manifest could upload into the same (artifact_id, version) slot, and the
+    current holder's finalize published those bytes. Each claim now uploads
+    under its own attempt key, and finalize reads only its own.
+    """
+
+    def test_finalize_publishes_the_current_claims_bytes(self, client, build_store, artifact_store):
+        version = create_test_artifact(artifact_store, "out-pull", finalize=False)
+        build_store.create_build(
+            build_id="pull-1",
+            artifact_id="out-pull",
+            version=version,
+            executor_ref="duckdb_sql@v1",
+            input_uris=[],
+            params={},
+        )
+        first = client.get("/v1/builds/pull-1/manifest").json()
+        second = client.get("/v1/builds/pull-1/manifest").json()
+
+        _upload(client, second, _ipc_values([2]))
+        _upload(client, first, _ipc_values([1]))  # still signed, but its own key
+
+        assert client.post(second["finalize_url"]).status_code == 200
+
+        data = artifact_store.read_blob("out-pull", version)
+        assert pa.ipc.open_stream(data).read_all().column("x").to_pylist() == [2]
+        assert not [f for f in artifact_store.verify_artifacts() if f["artifact_id"] == "out-pull"]
+
+    def test_a_losing_duplicate_finalize_keeps_the_published_bytes(
+        self, client, build_store, artifact_store
+    ):
+        """Two finalizes under one lease share an attempt id. The one that
+        loses the commit race cleans up its attempt, which is the attempt the
+        winner just published, so the cleanup must leave it alone."""
+        version = create_test_artifact(artifact_store, "out-pull-3", finalize=False)
+        build_store.create_build(
+            build_id="pull-3",
+            artifact_id="out-pull-3",
+            version=version,
+            executor_ref="duckdb_sql@v1",
+            input_uris=[],
+            params={},
+        )
+        first = client.get("/v1/builds/pull-3/manifest").json()
+        second = client.get("/v1/builds/pull-3/manifest").json()
+        _upload(client, first, _ipc_values([1]))
+        _upload(client, second, _ipc_values([2]))
+        assert client.post(second["finalize_url"]).status_code == 200
+
+        def attempt_of(manifest):
+            return parse_qs(urlparse(manifest["output"]["url"]).query)["attempt"][0]
+
+        artifact_store.delete_attempt_blob("out-pull-3", version, attempt_of(second))
+        artifact_store.delete_attempt_blob("out-pull-3", version, attempt_of(first))
+
+        data = artifact_store.read_blob("out-pull-3", version)
+        assert pa.ipc.open_stream(data).read_all().column("x").to_pylist() == [2]
+        assert not artifact_store.blob_exists("out-pull-3", version, attempt_of(first))
+
+    def test_an_attempt_the_url_did_not_sign_is_refused(self, client, build_store, artifact_store):
+        version = create_test_artifact(artifact_store, "out-pull-2", finalize=False)
+        build_store.create_build(
+            build_id="pull-2",
+            artifact_id="out-pull-2",
+            version=version,
+            executor_ref="duckdb_sql@v1",
+            input_uris=[],
+            params={},
+        )
+        url = client.get("/v1/builds/pull-2/manifest").json()["output"]["url"]
+        assert "attempt=" in url
+        forged = re.sub(r"attempt=[0-9a-f]+", "attempt=" + "0" * 32, url)
+
+        assert client.post(forged, content=_ipc_values([9])).status_code == 403
+
+
+def _ipc_values(values):
+    sink = pa.BufferOutputStream()
+    table = pa.table({"x": values})
+    with pa.ipc.new_stream(sink, table.schema) as writer:
+        writer.write_table(table)
+    return sink.getvalue().to_pybytes()
+
+
+def _upload(client, manifest, blob):
+    """Upload through the manifest's signed URL, as an executor does."""
+    response = client.post(manifest["output"]["url"], content=blob)
+    assert response.status_code == 200, response.text

@@ -19,9 +19,12 @@ import hashlib
 import hmac
 import json
 import time
+from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from typing import Any
 from urllib.parse import urlencode
+
+from strata.artifact_store import attempt_blob_id
 
 
 def lease_token(lease_owner: str | None, lease_expires_at: float | None) -> str:
@@ -44,6 +47,20 @@ def lease_token(lease_owner: str | None, lease_expires_at: float | None) -> str:
     if not lease_owner or lease_expires_at is None:
         return ""
     return f"{lease_owner}:{lease_expires_at!r}"
+
+
+def lease_attempt(lease: str) -> str | None:
+    """The blob attempt id an executor holding ``lease`` writes under.
+
+    Each manifest renews the lease, so each one gets its own attempt: an
+    executor still holding an earlier manifest can upload, but only to a key
+    finalize never reads. A digest because the token itself (``owner:deadline``)
+    is not a safe blob key. ``None`` without a lease, which keeps the shared
+    key for the notebook's in-process signed path and legacy rows.
+    """
+    if not lease:
+        return None
+    return hashlib.sha256(lease.encode()).hexdigest()[:32]
 
 
 @dataclass(frozen=True)
@@ -329,6 +346,7 @@ class URLSigner:
         build_id: str,
         max_bytes: int,
         expiry_seconds: float = 600.0,
+        attempt: str | None = None,
     ) -> SignedUploadURL:
         """Sign a URL for uploading build output.
 
@@ -343,6 +361,9 @@ class URLSigner:
             raised by tampering with the URL).
         expiry_seconds : float, optional
             URL validity window in seconds (default 600, i.e. 10 minutes).
+        attempt : str, optional
+            The build attempt the bytes belong to (``lease_attempt``). Signed,
+            so an upload cannot be pointed at another attempt's key.
 
         Returns
         -------
@@ -350,7 +371,7 @@ class URLSigner:
             The signed URL and its metadata.
         """
         expires_at = time.time() + expiry_seconds
-        data = {
+        data: dict[str, Any] = {
             "op": "upload",
             "build_id": build_id,
             "max_bytes": max_bytes,
@@ -360,8 +381,11 @@ class URLSigner:
             "build_id": build_id,
             "max_bytes": str(max_bytes),
             "expires_at": str(expires_at),
-            "signature": self._sign(data),
         }
+        if attempt:
+            data["attempt"] = attempt
+            params["attempt"] = attempt
+        params["signature"] = self._sign(data)
         url = f"{base_url}/v1/artifacts/upload?{urlencode(params)}"
         return SignedUploadURL(
             url=url,
@@ -376,6 +400,7 @@ class URLSigner:
         max_bytes: int,
         expires_at: float,
         signature: str,
+        attempt: str = "",
     ) -> bool:
         """Verify an upload URL's signature and expiry.
 
@@ -397,12 +422,14 @@ class URLSigner:
         """
         if time.time() > expires_at:
             return False
-        data = {
+        data: dict[str, Any] = {
             "op": "upload",
             "build_id": build_id,
             "max_bytes": max_bytes,
             "expires_at": expires_at,
         }
+        if attempt:
+            data["attempt"] = attempt
         return self._verify(data, signature)
 
     def generate_log_url(
@@ -534,6 +561,7 @@ class URLSigner:
         lease_owner: str | None = None,
         lease_expires_at: float | None = None,
         blob_store: Any = None,
+        blob_id: Callable[[str, int], str] | None = None,
     ) -> BuildManifest:
         """Assemble the full signed-URL manifest for a build.
 
@@ -559,6 +587,9 @@ class URLSigner:
             uploaded straight from the object store, and only finalize (and
             the log) stay Strata routes. The output's key is the build's
             artifact, named by ``metadata["artifact_id"]`` and ``["version"]``.
+        blob_id : callable, optional
+            ``(artifact_id, version) -> blob id`` for an input's presigned
+            read, which may be a build attempt's key rather than the id.
 
         Returns
         -------
@@ -566,10 +597,14 @@ class URLSigner:
             The assembled manifest.
         """
         expires_at = time.time() + url_expiry_seconds
+        # The executor writes under this claim's own attempt, so an earlier
+        # manifest's upload URL lands where finalize never looks.
+        attempt = lease_attempt(lease_token(lease_owner, lease_expires_at))
         input_urls = []
         for artifact_id, version in input_artifacts:
+            stored_as = blob_id(artifact_id, version) if blob_id is not None else artifact_id
             presigned = (
-                blob_store.presign_get(artifact_id, version, int(url_expiry_seconds))
+                blob_store.presign_get(stored_as, version, int(url_expiry_seconds))
                 if blob_store is not None
                 else None
             )
@@ -592,7 +627,9 @@ class URLSigner:
         output_artifact = metadata.get("artifact_id"), metadata.get("version")
         presigned_upload = (
             blob_store.presign_post(
-                str(output_artifact[0]),
+                attempt_blob_id(str(output_artifact[0]), attempt)
+                if attempt
+                else str(output_artifact[0]),
                 int(output_artifact[1]),
                 max_output_bytes,
                 int(url_expiry_seconds),
@@ -614,6 +651,7 @@ class URLSigner:
                 build_id=build_id,
                 max_bytes=max_output_bytes,
                 expiry_seconds=url_expiry_seconds,
+                attempt=attempt,
             )
         )
         finalize_url = self.generate_finalize_url(

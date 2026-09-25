@@ -746,7 +746,7 @@ def cmd_pull(args: argparse.Namespace) -> int:
         print(f"artifact is not readable (state={artifact.state})", file=sys.stderr)
         return 1
 
-    blob = store.blob_store.read_blob(artifact.id, artifact.version)
+    blob = store.read_blob(artifact.id, artifact.version)
     if blob is None:
         print(f"blob missing for {artifact.id}@v={artifact.version}", file=sys.stderr)
         return 1

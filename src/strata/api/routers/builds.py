@@ -22,6 +22,7 @@ import os
 import tempfile
 from hmac import compare_digest
 from pathlib import Path
+from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
@@ -31,9 +32,10 @@ from strata.api.dependencies import (
     build_transport_available,
     runtime_build_store,
 )
+from strata.artifact_store import BuildLeaseLost
 from strata.blob_store import BLOB_STREAM_CHUNK_BYTES
 from strata.services.build import build_service
-from strata.transforms.signed_urls import lease_token
+from strata.transforms.signed_urls import lease_attempt, lease_token
 from strata.types import BuildStatusResponse
 
 router = APIRouter(tags=["builds"])
@@ -388,6 +390,7 @@ async def upload_artifact_signed(
     expires_at: str,
     signature: str,
     request: Request,
+    attempt: str = "",
 ):
     """Upload artifact blob using a signed URL.
 
@@ -400,6 +403,10 @@ async def upload_artifact_signed(
         max_bytes: Maximum allowed upload size
         expires_at: URL expiry timestamp (Unix epoch)
         signature: HMAC-SHA256 signature
+        attempt: The build attempt the bytes belong to, when the manifest was
+            issued under a lease. Signed; the bytes land under that attempt's
+            own key, so an earlier manifest's URL cannot reach what finalize
+            reads.
 
     Body:
         Raw Arrow IPC stream bytes
@@ -425,6 +432,7 @@ async def upload_artifact_signed(
         max_bytes=max_bytes_int,
         expires_at=expires_at_float,
         signature=signature,
+        attempt=attempt,
     ):
         raise HTTPException(status_code=403, detail="Invalid or expired signature")
 
@@ -464,7 +472,11 @@ async def upload_artifact_signed(
         if byte_size == 0:
             raise HTTPException(status_code=400, detail="Empty request body")
         await asyncio.to_thread(
-            store.publish_blob_from_path, build.artifact_id, build.version, staged
+            store.publish_blob_from_path,
+            build.artifact_id,
+            build.version,
+            staged,
+            attempt or None,
         )
     finally:
         staged.unlink(missing_ok=True)
@@ -556,6 +568,9 @@ async def finalize_build(
     if build is None:
         raise HTTPException(status_code=404, detail="Build not found")
 
+    # The claim this request's lease token was verified against; None unless
+    # a signed finalize URL carried one.
+    current = None
     if signature is not None or expires_at is not None:
         if signature is None or expires_at is None:
             raise HTTPException(status_code=400, detail="Missing finalize signature parameters")
@@ -613,15 +628,18 @@ async def finalize_build(
 
     output_format = str(finalize_payload.get("output_format", "")).strip()
 
-    # Verify blob was uploaded
+    # Verify blob was uploaded. Under a lease, the executor uploaded to that
+    # claim's own attempt key, and that is the only upload finalize reads: an
+    # executor still holding an earlier manifest wrote somewhere else.
+    attempt = lease_attempt(lease) if current is not None else None
     store = _get_artifact_store(allow_server_mode=True)
-    if not store.blob_exists(build.artifact_id, build.version):
+    if not store.blob_exists(build.artifact_id, build.version, attempt):
         raise HTTPException(
             status_code=400,
             detail="Blob not uploaded. Upload using the signed URL first.",
         )
 
-    byte_size = store.blob_size(build.artifact_id, build.version) or 0
+    byte_size = store.blob_size(build.artifact_id, build.version, attempt) or 0
     if byte_size == 0:
         raise HTTPException(status_code=500, detail="Failed to read uploaded blob")
 
@@ -648,7 +666,7 @@ async def finalize_build(
                 read_notebook_output_bundle_manifest_path,
             )
 
-            reader_cm = store.open_blob_reader(build.artifact_id, build.version)
+            reader_cm = store.open_blob_reader(build.artifact_id, build.version, attempt)
             if reader_cm is None:
                 raise RuntimeError("Uploaded blob disappeared before validation")
             fd, staged_name = tempfile.mkstemp(prefix="strata_bundle_validate_", suffix=".tar")
@@ -679,7 +697,7 @@ async def finalize_build(
         def _parse_arrow_stream() -> tuple[str, int]:
             import pyarrow.ipc as arrow_ipc
 
-            reader_cm = store.open_blob_reader(build.artifact_id, build.version)
+            reader_cm = store.open_blob_reader(build.artifact_id, build.version, attempt)
             if reader_cm is None:
                 raise RuntimeError("Uploaded blob disappeared before validation")
             row_count_inner = 0
@@ -700,6 +718,25 @@ async def finalize_build(
                 detail=f"Invalid Arrow IPC format: {e}",
             )
 
+    # Under a lease, publishing the attempt and completing the build are one
+    # transaction, fenced on the claim this request was issued under. Checking
+    # the token at the top of the request still left a window before the
+    # commit in which the lease could move.
+    fence = None
+    if current is not None and current.lease_owner is not None:
+        claim_owner, claim_deadline = current.lease_owner, current.lease_expires_at
+
+        def fence(conn, artifact_id: str, version: int) -> bool:
+            return build_store.complete_within(
+                conn,
+                build_id,
+                artifact_id=artifact_id,
+                version=version,
+                lease_owner=claim_owner,
+                lease_expires_at=claim_deadline,
+                output_byte_count=byte_size,
+            )
+
     # Finalize the artifact atomically with name if provided
     try:
         finalized_artifact = store.finalize_and_set_name(
@@ -710,6 +747,15 @@ async def finalize_build(
             byte_size=byte_size,
             name=build.name,
             tenant=build.tenant,
+            blob_attempt=attempt,
+            fence=fence,
+        )
+    except BuildLeaseLost:
+        if attempt is not None:
+            store.delete_attempt_blob(build.artifact_id, build.version, attempt)
+        raise HTTPException(
+            status_code=409,
+            detail="Build lease is no longer held by this caller; nothing was published",
         )
     except ValueError as e:
         build_store.fail_build(build_id, str(e), "FINALIZE_FAILED")
@@ -719,6 +765,11 @@ async def finalize_build(
         build_store.fail_build(build_id, "Failed to finalize artifact", "FINALIZE_FAILED")
         store.fail_artifact(build.artifact_id, build.version)
         raise HTTPException(status_code=500, detail="Failed to finalize artifact")
+
+    if fence is not None:
+        # The fence completed the build in finalize's own transaction.
+        await record_build_output_bytes(build.tenant_id, byte_size)
+        return _finalized(build, finalized_artifact, byte_size, row_count)
 
     # Mark build as complete
     # First start the build if it's still pending (pull model may finalize directly)
@@ -741,15 +792,16 @@ async def finalize_build(
             detail="Build lease is no longer held by this caller; result not recorded",
         )
     await record_build_output_bytes(build.tenant_id, byte_size)
+    return _finalized(build, finalized_artifact, byte_size, row_count)
 
-    artifact_uri = f"strata://artifact/{finalized_artifact.id}@v={finalized_artifact.version}"
-    name_uri = f"strata://name/{build.name}" if build.name else None
 
+def _finalized(build: Any, artifact: Any, byte_size: int, row_count: int) -> dict:
+    """The finalize route's response, for the build and what it produced."""
     return {
         "status": "finalized",
-        "build_id": build_id,
-        "artifact_uri": artifact_uri,
-        "name_uri": name_uri,
+        "build_id": build.build_id,
+        "artifact_uri": f"strata://artifact/{artifact.id}@v={artifact.version}",
+        "name_uri": f"strata://name/{build.name}" if build.name else None,
         "byte_size": byte_size,
         "row_count": row_count,
     }
