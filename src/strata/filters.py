@@ -72,6 +72,10 @@ class Filter:
             case FilterOp.EQ:
                 return min_orderable <= filter_value <= max_orderable
             case FilterOp.NE:
+                # Parquet leaves NaN out of float min/max, so min == max ==
+                # value doesn't rule out a NaN row, and NaN != value holds.
+                if isinstance(min_val, float):
+                    return True
                 return not (min_val == max_val == self.value)
             case FilterOp.LT:
                 return min_orderable < filter_value

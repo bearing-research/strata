@@ -1,4 +1,4 @@
-"""Replay ArtifactLifecycle.tla's counterexamples, plus two assumption checks.
+"""Replay ArtifactLifecycle.tla's counterexamples, plus an assumption check.
 
 A TLC trace is a claim about the model. Running the same steps against
 the real code shows the code behaves the same way. Each test passes while
@@ -12,12 +12,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pyarrow as pa
-import pyarrow.parquet as pq
-
 from strata.artifact_store import ArtifactStore
-from strata.filters import Filter, FilterOp
-from strata.planner import ReadPlanner
 from strata.types import CacheKey
 
 
@@ -68,22 +63,6 @@ def test_cross_id_dedup(tmp_path: Path) -> None:
     store.force_finalize_canonical(b, vb, "", 1, 5)  # what store_cell_output does
     assert store.get_latest_version(a) is None
     assert store.get_latest_version(b) is not None
-
-
-def test_nan_ne_pruning(tmp_path: Path) -> None:
-    """Assumption check for _should_prune_row_group (outside the TLA+ model).
-
-    Filter.matches_stats is sound *if* [min, max] bounds every value in
-    the row group. Parquet writers leave NaN out of min/max, so a row group
-    holding [5.0, NaN] has min == max == 5.0. The filter ``value != 5.0``
-    then prunes it, and the NaN row is dropped, even though
-    ``NaN != 5.0`` is true in Arrow compute, DuckDB and Python.
-    """
-    path = tmp_path / "nan.parquet"
-    pq.write_table(pa.table({"value": [5.0, float("nan")]}), path)
-    rg = pq.ParquetFile(path).metadata.row_group(0)
-    planner = ReadPlanner.__new__(ReadPlanner)  # the method only uses _convert_stats
-    assert planner._should_prune_row_group(rg, [(0, Filter("value", FilterOp.NE, 5.0))])
 
 
 def test_projection_fingerprint_collision() -> None:
