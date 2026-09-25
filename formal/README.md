@@ -42,8 +42,6 @@ run everything, conventions, gotchas and the prioritized next steps.
 | `tla/Build_RunnerPath.cfg` | Two runners, lease can expire mid-build. Finds findings 5 and 6 |
 | `tla/Build_PullPath.cfg` | Two executors fetch the same build's manifest. Finds finding 7 |
 | `tla/Build_Patched.cfg` | Runners and executors with the proposed fix. **All invariants hold** (exhaustive) |
-| `test_build_runner_counterexamples.py` | Findings 5–6 against two real `BuildRunner`s (only the executor HTTP call is stubbed) |
-| `test_build_pull_counterexamples.py` | Finding 7 through the real HTTP routes (`TestClient`) |
 | `tla/Admission.tla` | Model of one tenant's `ResizableLimiter` (acquire with deadline, release, cancel while queued) and the `TenantRegistry` LRU that owns it |
 | `tla/Admission_Py312.cfg` | CPython 3.12 `asyncio.Condition` semantics. Finds finding 8 |
 | `tla/Admission_Eviction.cfg` | LRU eviction of a limiter in use. Finds findings 9 and 10 |
@@ -409,6 +407,25 @@ write. That narrows the window but can't close it, because the lease can
 expire between the check and the write (the model has no variant for
 this; it follows from reading the code). It also does nothing for
 presigned uploads.
+
+**Fixed (5 and 7)** as proposed. Each attempt writes under its own blob
+id, `{artifact_id}~{attempt}`, and `artifact_versions.blob_attempt`
+records the one promoted; `ArtifactStore` resolves every read, delete and
+verification through it, so the blob backends are unchanged. A runner
+takes a fresh attempt per execution. An executor's attempt is a digest of
+its manifest's lease token: signed into the upload URL and the presigned
+POST key, and the only upload finalize reads. `finalize_artifact` and
+`finalize_and_set_name` take a fence, `BuildStore.complete_within`, that
+completes the build under its lease (owner, and for executors the
+deadline) inside the same transaction, so publishing and completing
+commit together or not at all. Paths with no lease (the notebook's
+in-process signed path, legacy rows) keep the shared key and the old
+completion. An attempt that loses, or deduplicates to an existing
+artifact, deletes its bytes. Not cleaned: a stale executor's upload,
+which Strata never sees for a presigned URL, and an attempt whose runner
+fails after publishing. Regression tests:
+`tests/test_build_runner.py::TestOnlyTheLeaseHolderPublishes` and
+`tests/test_pull_model.py::TestARetiredManifestCannotWriteTheOutput`.
 
 ## Model 3: admission limiter
 

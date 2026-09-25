@@ -232,6 +232,59 @@ def two_runners(artifact_store, build_store, transform_registry, artifact_dir):
     return make_runner("A", *args), make_runner("B", *args)
 
 
+class TestOnlyTheLeaseHolderPublishes:
+    """Found by formal verification (BuildLease.tla, ReadyBytesStable and
+    NoStaleBytesPublished).
+
+    A runner whose lease was taken over keeps executing, and it used to
+    publish its bytes to the version's key and finalize them as the ready
+    artifact before ``complete_build`` told it it had lost. The rightful owner
+    then wrote its own bytes over that ready artifact, so readers saw its
+    content change and the recorded digest no longer matched.
+    """
+
+    async def test_a_runner_that_lost_its_lease_publishes_nothing(
+        self, two_runners, artifact_store, build_store, tmp_path
+    ):
+        a, b = two_runners
+        artifact_id, version, build_id = create_test_artifact(artifact_store, build_store)
+
+        a._call_executor = fake_executor(
+            tmp_path, "a", [1], before_return=lambda: steal_lease(build_store, build_id, "B")
+        )
+        await a._execute_build(build_store.get_build(build_id))
+
+        assert build_store.get_build(build_id).state == "building"
+        assert artifact_store.get_artifact(artifact_id, version).state == "building"
+        assert not artifact_store.blob_exists(artifact_id, version)  # nothing readable
+
+    async def test_the_owner_publishes_its_own_bytes_once(
+        self, two_runners, artifact_store, build_store, tmp_path
+    ):
+        a, b = two_runners
+        artifact_id, version, build_id = create_test_artifact(artifact_store, build_store)
+        a._call_executor = fake_executor(
+            tmp_path, "a", [1], before_return=lambda: steal_lease(build_store, build_id, "B")
+        )
+        await a._execute_build(build_store.get_build(build_id))
+
+        b._call_executor = fake_executor(tmp_path, "b", [2])
+        await b._execute_build(build_store.get_build(build_id), already_claimed=True)
+
+        assert build_store.get_build(build_id).state == "ready"
+        data = artifact_store.read_blob(artifact_id, version)
+        assert pa.ipc.open_stream(data).read_all().column("x").to_pylist() == [2]
+        assert not [f for f in artifact_store.verify_artifacts() if f["artifact_id"] == artifact_id]
+        # The loser's attempt is cleaned up, not left for nobody to read.
+        leftovers = [p.name for p in artifact_dir_blobs(artifact_store) if "~" in p.name]
+        assert len(leftovers) == 1
+
+
+def artifact_dir_blobs(artifact_store):
+    """Every blob file the local store holds."""
+    return list(artifact_store.blob_store.blobs_dir.iterdir())
+
+
 class TestALeaseDecidesWhoMayFail:
     """Found by formal verification (BuildLease.tla, OnlyLeaseHolderFails).
 

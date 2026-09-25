@@ -30,6 +30,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import re
 import secrets
 import time
 from collections.abc import Callable
@@ -76,6 +77,30 @@ def reject_unsafe_artifact_id(artifact_id: str) -> None:
         raise ValueError("an artifact id is required")
     if "/" in artifact_id or "\\" in artifact_id or ".." in Path(artifact_id).parts:
         raise ValueError(f"an artifact id cannot name a path: {artifact_id!r}")
+
+
+_ATTEMPT_PATTERN = re.compile(r"[0-9a-f]{16,64}")
+
+
+def attempt_blob_id(artifact_id: str, attempt: str) -> str:
+    """The blob id one build attempt writes a version's bytes under.
+
+    An attempt id reaches this from a signed upload URL, so it is held to
+    lowercase hex: it becomes part of a blob key, and anything else could name
+    a path.
+    """
+    if not _ATTEMPT_PATTERN.fullmatch(attempt):
+        raise ValueError(f"not a build attempt id: {attempt!r}")
+    return f"{artifact_id}~{attempt}"
+
+
+class BuildLeaseLost(RuntimeError):
+    """A build attempt tried to publish after its lease moved to another."""
+
+
+# Completes a build inside finalize's transaction, given the artifact the
+# build produced; False when the caller no longer holds the build's lease.
+BuildFence = Callable[[StoreConnection, str, int], bool]
 
 
 def _ancestor_of(input_uri: str, recorded: object) -> tuple[str, int] | None:
@@ -517,10 +542,22 @@ def _add_pins(conn: StoreConnection, dialect: SqlDialect) -> None:
     )
 
 
+def _add_blob_attempt(conn: StoreConnection, dialect: SqlDialect) -> None:
+    """Give a version somewhere to record which build attempt's bytes it reads.
+
+    Nullable, and NULL means the shared ``(id, version)`` key every version
+    used before this. Only a transform build writes per-attempt blobs, so
+    nothing older needs a value.
+    """
+    if not dialect.column_exists(conn, "artifact_versions", "blob_attempt"):
+        conn.execute("ALTER TABLE artifact_versions ADD COLUMN blob_attempt TEXT")
+
+
 _MIGRATIONS: list[_Migration] = [
     _Migration(1, "artifact_versions.content_sha256", _add_content_sha256),
     _Migration(2, "artifact_publications.authors + external_ids", _add_publication_credits),
     _Migration(3, "artifact_pins", _add_pins),
+    _Migration(4, "artifact_versions.blob_attempt", _add_blob_attempt),
 ]
 
 _LATEST_SCHEMA_VERSION = max((m.version for m in _MIGRATIONS), default=_BASELINE_SCHEMA_VERSION)
@@ -543,6 +580,7 @@ CREATE TABLE IF NOT EXISTS artifact_versions (
     tenant TEXT NOT NULL DEFAULT '',  -- Tenant ID ('' = tenantless, matches names/aliases/tags)
     principal TEXT,  -- Principal ID that created this artifact
     content_sha256 TEXT,  -- Digest of the stored bytes (see migration 1)
+    blob_attempt TEXT,  -- Build attempt whose bytes this reads; NULL = shared key (migration 4)
     PRIMARY KEY (id, version)
 );
 
@@ -1346,6 +1384,9 @@ class ArtifactStore:
         row_count: int,
         byte_size: int,
         content_sha256: str | None = None,
+        *,
+        blob_attempt: str | None = None,
+        fence: BuildFence | None = None,
     ) -> ArtifactVersion | None:
         """Mark artifact as ready after blob is written.
 
@@ -1364,13 +1405,29 @@ class ArtifactStore:
                 either way, but a caller that just wrote the bytes has the
                 digest for free and a remote blob store would otherwise be
                 read a second time.
+            blob_attempt: The build attempt whose bytes this version reads,
+                recorded on the row (see ``_blob_id``).
+            fence: For a transform build, run inside this transaction before
+                it commits, with the artifact the build produced. It completes
+                the build if the caller still holds its lease; when it cannot,
+                nothing is committed and ``BuildLeaseLost`` is raised.
 
         Returns:
             The finalized ArtifactVersion, or the existing artifact if duplicate
 
         Raises:
             ValueError: If artifact not found or not in "building" state
+            BuildLeaseLost: If ``fence`` found the lease held by someone else
         """
+
+        def _commit_through_fence(conn: StoreConnection, target_id: str, target_v: int) -> None:
+            if fence is not None and not fence(conn, target_id, target_v):
+                conn.rollback()
+                raise BuildLeaseLost(
+                    f"{artifact_id}@v={version}: the build's lease is held by another attempt"
+                )
+            conn.commit()
+
         conn = self._get_connection()
         try:
             # Get the artifact being finalized to check tenant/provenance
@@ -1388,6 +1445,7 @@ class ArtifactStore:
 
             if row["state"] == "ready":
                 # Already finalized - return it (idempotent)
+                _commit_through_fence(conn, artifact_id, version)
                 return self.get_artifact(artifact_id, version)
 
             if row["state"] != "building":
@@ -1413,7 +1471,7 @@ class ArtifactStore:
                     """,
                     (artifact_id, version),
                 )
-                conn.commit()
+                _commit_through_fence(conn, existing.id, existing.version)
                 return existing
 
             if existing is not None and existing.version != version:
@@ -1437,7 +1495,7 @@ class ArtifactStore:
             # published from disk, an import — and this is the moment the
             # artifact becomes readable, so it is the moment its bytes are
             # final.
-            digest = content_sha256 or self.blob_digest(artifact_id, version)
+            digest = content_sha256 or self.blob_digest(artifact_id, version, blob_attempt)
 
             # Proceed with finalization
             try:
@@ -1445,16 +1503,20 @@ class ArtifactStore:
                     """
                     UPDATE artifact_versions
                     SET state = 'ready', schema_json = ?, row_count = ?, byte_size = ?,
-                        content_sha256 = ?
+                        content_sha256 = ?, blob_attempt = ?
                     WHERE id = ? AND version = ? AND state = 'building'
                     """,
-                    (schema_json, row_count, byte_size, digest, artifact_id, version),
+                    (schema_json, row_count, byte_size, digest, blob_attempt, artifact_id, version),
                 )
                 if cursor.rowcount == 0:
                     # Race condition: another process may have finalized
                     conn.rollback()
+                    if fence is not None:
+                        raise BuildLeaseLost(
+                            f"{artifact_id}@v={version} was finalized by another attempt"
+                        )
                     return self.get_artifact(artifact_id, version)
-                conn.commit()
+                _commit_through_fence(conn, artifact_id, version)
                 return self.get_artifact(artifact_id, version)
             except self._dialect.integrity_error:
                 # Unique constraint violation - duplicate (tenant, provenance_hash)
@@ -1471,7 +1533,7 @@ class ArtifactStore:
                         """,
                         (artifact_id, version),
                     )
-                    conn.commit()
+                    _commit_through_fence(conn, existing.id, existing.version)
                     return existing
                 raise
         finally:
@@ -1557,7 +1619,7 @@ class ArtifactStore:
         # Open the source before registering anything. A blob that has gone
         # missing must leave no trace behind: registering the row first would
         # strand a ``building`` version pointing at nothing when the read fails.
-        reader_cm = self.blob_store.open_blob_reader(artifact_id, version)
+        reader_cm = self.open_blob_reader(artifact_id, version)
         if reader_cm is None:
             return None
 
@@ -1745,6 +1807,9 @@ class ArtifactStore:
         byte_size: int,
         name: str | None = None,
         tenant: str | None = None,
+        *,
+        blob_attempt: str | None = None,
+        fence: BuildFence | None = None,
     ) -> ArtifactVersion | None:
         """Atomically finalize artifact and set name pointer in one transaction.
 
@@ -1761,13 +1826,26 @@ class ArtifactStore:
             byte_size: Size of blob in bytes
             name: Optional name to set (if None, no name is set)
             tenant: Tenant ID for the name (if setting name)
+            blob_attempt: As for ``finalize_artifact``.
+            fence: As for ``finalize_artifact``: the build completes in this
+                transaction, or nothing commits and ``BuildLeaseLost`` is raised.
 
         Returns:
             The finalized ArtifactVersion (or existing duplicate)
 
         Raises:
             ValueError: If artifact not found or not in "building" state
+            BuildLeaseLost: If ``fence`` found the lease held by someone else
         """
+
+        def _commit_through_fence(conn: StoreConnection, target_id: str, target_v: int) -> None:
+            if fence is not None and not fence(conn, target_id, target_v):
+                conn.rollback()
+                raise BuildLeaseLost(
+                    f"{artifact_id}@v={version}: the build's lease is held by another attempt"
+                )
+            conn.commit()
+
         conn = self._get_connection()
         try:
             # Get the artifact being finalized
@@ -1793,7 +1871,7 @@ class ArtifactStore:
                             f"{artifact_tenant}, cannot assign name in tenant {tenant}"
                         )
                     self._set_name_in_connection(conn, name, artifact_id, version, tenant)
-                    conn.commit()
+                _commit_through_fence(conn, artifact_id, version)
                 return self.get_artifact(artifact_id, version)
 
             if row["state"] != "building":
@@ -1827,7 +1905,7 @@ class ArtifactStore:
                 )
                 if name:
                     self._set_name_in_connection(conn, name, existing.id, existing.version, tenant)
-                conn.commit()
+                _commit_through_fence(conn, existing.id, existing.version)
                 return existing
 
             if existing is not None and existing.version != version:
@@ -1849,14 +1927,19 @@ class ArtifactStore:
                 cursor = conn.execute(
                     """
                     UPDATE artifact_versions
-                    SET state = 'ready', schema_json = ?, row_count = ?, byte_size = ?
+                    SET state = 'ready', schema_json = ?, row_count = ?, byte_size = ?,
+                        blob_attempt = ?
                     WHERE id = ? AND version = ? AND state = 'building'
                     """,
-                    (schema_json, row_count, byte_size, artifact_id, version),
+                    (schema_json, row_count, byte_size, blob_attempt, artifact_id, version),
                 )
                 if cursor.rowcount == 0:
                     # Race condition
                     conn.rollback()
+                    if fence is not None:
+                        raise BuildLeaseLost(
+                            f"{artifact_id}@v={version} was finalized by another attempt"
+                        )
                     artifact = self.get_artifact(artifact_id, version)
                     if artifact and artifact.state == "ready" and name:
                         # Still set the name
@@ -1867,7 +1950,7 @@ class ArtifactStore:
                 if name:
                     self._set_name_in_connection(conn, name, artifact_id, version, tenant)
 
-                conn.commit()
+                _commit_through_fence(conn, artifact_id, version)
                 return self.get_artifact(artifact_id, version)
 
             except self._dialect.integrity_error:
@@ -1888,7 +1971,7 @@ class ArtifactStore:
                         self._set_name_in_connection(
                             conn, name, existing.id, existing.version, tenant
                         )
-                    conn.commit()
+                    _commit_through_fence(conn, existing.id, existing.version)
                     return existing
                 raise
         finally:
@@ -2206,7 +2289,31 @@ class ArtifactStore:
     # Blob I/O
     # -----------------------------------------------------------------------
 
-    def write_blob(self, artifact_id: str, version: int, data: bytes) -> None:
+    def _blob_id(self, artifact_id: str, version: int, attempt: str | None = None) -> str:
+        """The id a version's bytes are stored under in the blob store.
+
+        A transform build writes each attempt's output under its own id, so an
+        attempt that lost its lease can only write bytes nobody reads, and the
+        row records which attempt was promoted. Everything else, and every row
+        from before, uses the artifact id itself. ``attempt`` names one
+        explicitly, for the writer and for finalize reading what an attempt
+        wrote before the row records it.
+        """
+        if attempt is None:
+            conn = self._get_connection()
+            try:
+                row = conn.execute(
+                    "SELECT blob_attempt FROM artifact_versions WHERE id = ? AND version = ?",
+                    (artifact_id, version),
+                ).fetchone()
+            finally:
+                conn.close()
+            attempt = row["blob_attempt"] if row is not None else None
+        return attempt_blob_id(artifact_id, attempt) if attempt else artifact_id
+
+    def write_blob(
+        self, artifact_id: str, version: int, data: bytes, attempt: str | None = None
+    ) -> None:
         """Write artifact blob to storage.
 
         Delegates to the configured blob store backend (local, S3, etc.).
@@ -2215,10 +2322,12 @@ class ArtifactStore:
             artifact_id: Artifact ID
             version: Version number
             data: Arrow IPC stream bytes
+            attempt: The build attempt writing, if any (see ``_blob_id``)
         """
-        self.blob_store.write_blob(artifact_id, version, data)
+        blob_id = attempt_blob_id(artifact_id, attempt) if attempt else artifact_id
+        self.blob_store.write_blob(blob_id, version, data)
 
-    def read_blob(self, artifact_id: str, version: int) -> bytes | None:
+    def read_blob(self, artifact_id: str, version: int, attempt: str | None = None) -> bytes | None:
         """Read artifact blob from storage.
 
         Delegates to the configured blob store backend (local, S3, etc.).
@@ -2226,19 +2335,22 @@ class ArtifactStore:
         Args:
             artifact_id: Artifact ID
             version: Version number
+            attempt: Read this build attempt's bytes rather than the version's
 
         Returns:
             Arrow IPC stream bytes, or None if not found
         """
-        return self.blob_store.read_blob(artifact_id, version)
+        return self.blob_store.read_blob(self._blob_id(artifact_id, version, attempt), version)
 
-    def open_blob_reader(self, artifact_id: str, version: int):
+    def open_blob_reader(self, artifact_id: str, version: int, attempt: str | None = None):
         """Open a streaming reader for an artifact blob.
 
         Returns ``None`` if the blob does not exist. Otherwise returns a
         context manager yielding a binary file-like object.
         """
-        return self.blob_store.open_blob_reader(artifact_id, version)
+        return self.blob_store.open_blob_reader(
+            self._blob_id(artifact_id, version, attempt), version
+        )
 
     def open_blob_writer(self, artifact_id: str, version: int):
         """Open a streaming writer for an artifact blob.
@@ -2248,19 +2360,35 @@ class ArtifactStore:
         """
         return self.blob_store.open_blob_writer(artifact_id, version)
 
-    def blob_size(self, artifact_id: str, version: int) -> int | None:
+    def blob_size(self, artifact_id: str, version: int, attempt: str | None = None) -> int | None:
         """Return the size of an artifact blob without materializing it."""
-        return self.blob_store.blob_size(artifact_id, version)
+        return self.blob_store.blob_size(self._blob_id(artifact_id, version, attempt), version)
 
-    def publish_blob_from_path(self, artifact_id: str, version: int, source_path: Path) -> None:
+    def publish_blob_from_path(
+        self, artifact_id: str, version: int, source_path: Path, attempt: str | None = None
+    ) -> None:
         """Atomically publish an artifact blob from a prepared local file.
 
         Intended to be invoked via ``asyncio.to_thread`` so the potentially
-        blocking remote publish does not tie up the event loop.
+        blocking remote publish does not tie up the event loop. A build passes
+        its ``attempt``, and the bytes land under that attempt's own id.
         """
-        self.blob_store.publish_blob_from_path(artifact_id, version, source_path)
+        blob_id = attempt_blob_id(artifact_id, attempt) if attempt else artifact_id
+        self.blob_store.publish_blob_from_path(blob_id, version, source_path)
 
-    def blob_exists(self, artifact_id: str, version: int) -> bool:
+    def delete_attempt_blob(self, artifact_id: str, version: int, attempt: str) -> None:
+        """Remove what a build attempt wrote, once it will never be promoted.
+
+        Leaves the bytes alone when the version was promoted from this very
+        attempt. Two finalize requests under one lease share an attempt id, so
+        the one that loses the race would otherwise delete what the winner
+        just published.
+        """
+        if self._blob_id(artifact_id, version) == attempt_blob_id(artifact_id, attempt):
+            return
+        self.blob_store.delete_blob(attempt_blob_id(artifact_id, attempt), version)
+
+    def blob_exists(self, artifact_id: str, version: int, attempt: str | None = None) -> bool:
         """Check if blob exists in storage.
 
         Delegates to the configured blob store backend (local, S3, etc.).
@@ -2268,11 +2396,12 @@ class ArtifactStore:
         Args:
             artifact_id: Artifact ID
             version: Version number
+            attempt: Check this build attempt's bytes rather than the version's
 
         Returns:
             True if blob exists
         """
-        return self.blob_store.blob_exists(artifact_id, version)
+        return self.blob_store.blob_exists(self._blob_id(artifact_id, version, attempt), version)
 
     # -----------------------------------------------------------------------
     # Name Pointers
@@ -2572,14 +2701,14 @@ class ArtifactStore:
             conn.close()
         return digest
 
-    def blob_digest(self, artifact_id: str, version: int) -> str | None:
+    def blob_digest(self, artifact_id: str, version: int, attempt: str | None = None) -> str | None:
         """SHA-256 of an artifact's bytes, streamed. ``None`` if there is no blob.
 
         Streamed rather than read whole: a published artifact can be a table of
         any size, and publishing must not be the operation that decides how
         much memory the server needs.
         """
-        reader_cm = self.open_blob_reader(artifact_id, version)
+        reader_cm = self.open_blob_reader(artifact_id, version, attempt)
         if reader_cm is None:
             return None
         hasher = hashlib.sha256()
@@ -3926,6 +4055,14 @@ class ArtifactStore:
             # the two paths cannot drift on what a version has to shed first.
             self._delete_version_children(conn, artifact_id, version)
 
+            # Which key the bytes are under is on the row about to go.
+            attempt_row = conn.execute(
+                "SELECT blob_attempt FROM artifact_versions WHERE id = ? AND version = ?",
+                (artifact_id, version),
+            ).fetchone()
+            attempt = attempt_row["blob_attempt"] if attempt_row is not None else None
+            blob_id = attempt_blob_id(artifact_id, attempt) if attempt else artifact_id
+
             # Delete metadata
             conn.execute(
                 "DELETE FROM artifact_versions WHERE id = ? AND version = ?",
@@ -3938,7 +4075,7 @@ class ArtifactStore:
         # Blob deletion is network I/O against S3 / GCS / Azure, and it runs
         # after the metadata is durably gone, so it needs no connection.
         # Holding a pooled one across it parks a slot for the round trip.
-        self.blob_store.delete_blob(artifact_id, version)
+        self.blob_store.delete_blob(blob_id, version)
         return True
 
     def _delete_version_children(
@@ -4179,7 +4316,7 @@ class ArtifactStore:
             # for a published chain, which is exactly a chain whose ancestors
             # are expected to be superseded while the published version stays.
             query = """
-                SELECT av.id, av.version, av.byte_size
+                SELECT av.id, av.version, av.byte_size, av.blob_attempt
                 FROM artifact_versions av
                 LEFT JOIN artifact_names an ON av.id = an.artifact_id AND av.version = an.version
                 LEFT JOIN artifact_aliases aa ON av.id = aa.artifact_id AND av.version = aa.version
@@ -4260,7 +4397,9 @@ class ArtifactStore:
                     )
                     continue
 
-                collected.append((artifact_id, version))
+                attempt = row["blob_attempt"]
+                blob_id = attempt_blob_id(artifact_id, attempt) if attempt else artifact_id
+                collected.append((blob_id, version))
                 deleted_count += 1
                 deleted_bytes += byte_size
 
@@ -4277,14 +4416,14 @@ class ArtifactStore:
         # concurrent sweeps would exhaust the pool and fail unrelated requests
         # with PoolTimeout. `collected` is already materialized, so nothing
         # here needs the database.
-        for artifact_id, version in collected:
+        for blob_id, version in collected:
             try:
-                self.blob_store.delete_blob(artifact_id, version)
+                self.blob_store.delete_blob(blob_id, version)
             except Exception:
                 logger.exception(
                     "garbage_collect: failed to delete blob for %s@v=%d "
                     "(metadata already removed; bytes orphaned)",
-                    artifact_id,
+                    blob_id,
                     version,
                 )
 
@@ -4442,7 +4581,7 @@ class ArtifactStore:
         conn = self._get_connection()
         try:
             query = """
-                SELECT id, version, state, row_count, content_sha256
+                SELECT id, version, state, row_count, content_sha256, blob_attempt
                 FROM artifact_versions
                 WHERE state IN ('ready', 'superseded')
             """
@@ -4457,7 +4596,9 @@ class ArtifactStore:
         findings: list[dict] = []
         for row in rows:
             artifact_id, version = row["id"], row["version"]
-            data = self.blob_store.read_blob(artifact_id, version)
+            attempt = row["blob_attempt"]
+            blob_id = attempt_blob_id(artifact_id, attempt) if attempt else artifact_id
+            data = self.blob_store.read_blob(blob_id, version)
             if data is None:
                 findings.append(
                     {
@@ -4530,7 +4671,7 @@ class ArtifactStore:
             cutoff = time.time() - max_age_seconds
             cursor = conn.execute(
                 """
-                SELECT id, version FROM artifact_versions
+                SELECT id, version, blob_attempt FROM artifact_versions
                 WHERE state = 'failed' AND created_at < ?
                 """,
                 (cutoff,),
@@ -4554,7 +4695,9 @@ class ArtifactStore:
         # and would otherwise park a pooled slot for the whole sweep.
         for row in rows:
             try:
-                self.blob_store.delete_blob(row["id"], row["version"])
+                attempt = row["blob_attempt"]
+                blob_id = attempt_blob_id(row["id"], attempt) if attempt else row["id"]
+                self.blob_store.delete_blob(blob_id, row["version"])
             except Exception:
                 logger.exception(
                     "cleanup_failed: failed to delete blob for %s@v=%d "
