@@ -382,11 +382,27 @@ async def _refresh_and_broadcast_changed_staleness(
     # blocking, and it does.
     staleness_map = session.compute_staleness()
     if preserve_ready_cell_id is not None:
-        session.mark_executed_ready(preserve_ready_cell_id)
-        staleness_map[preserve_ready_cell_id] = CellStaleness(
-            status=CellStatus.READY,
-            reasons=[],
-        )
+        # Ready although the walk may say idle: a leaf whose output is not
+        # cached still ran. But not over an upstream the walk finds out of
+        # date, as when one was edited during the run: the run read its old
+        # value, so the cell is stale, and saying ready hid that.
+        ran = session.notebook_state.get_cell(preserve_ready_cell_id)
+        if ran is not None and any(
+            staleness_map[upstream_id].status != CellStatus.READY
+            for upstream_id in ran.upstream_ids
+            if upstream_id in staleness_map
+        ):
+            ran.status = CellStatus.STALE
+            ran.staleness = CellStaleness(
+                status=CellStatus.STALE, reasons=[StalenessReason.UPSTREAM]
+            )
+            staleness_map[preserve_ready_cell_id] = ran.staleness
+        else:
+            session.mark_executed_ready(preserve_ready_cell_id)
+            staleness_map[preserve_ready_cell_id] = CellStaleness(
+                status=CellStatus.READY,
+                reasons=[],
+            )
     if mark_error_cell_id is not None:
         for stale_id in session.mark_cell_error(mark_error_cell_id):
             staleness_map[stale_id] = CellStaleness(status=CellStatus.STALE, reasons=[])
@@ -1760,8 +1776,10 @@ async def _handle_cell_source_update(
         session.re_analyze_cell(cell_id)
         session._run_annotation_validation()
 
-        # Recompute staleness
-        staleness_map = await session.compute_staleness_async()
+        # Recompute staleness, leaving a cell that is running as running
+        staleness_map = await session.compute_staleness_async(
+            executing=execution_state.running_cell
+        )
 
         # Build DAG update message
         dag_edges = session.dag.serialize_edges() if session.dag else []
@@ -1869,7 +1887,9 @@ async def _handle_variant_set_active(
 
     try:
         session.set_variant_active(group, variant_name)
-        staleness_map = await session.compute_staleness_async()
+        staleness_map = await session.compute_staleness_async(
+            executing=execution_state.running_cell
+        )
 
         dag_edges = session.dag.serialize_edges() if session.dag else []
         from strata.notebook.module_export import build_module_export_plan
@@ -1964,7 +1984,9 @@ async def _handle_variant_add(
 
     try:
         session.add_variant(group, author=resolve_author(payload.get("author")))
-        staleness_map = await session.compute_staleness_async()
+        staleness_map = await session.compute_staleness_async(
+            executing=execution_state.running_cell
+        )
 
         # variant_add creates a new cell, so the frontend store needs
         # the full cell payload (source, language, order, ...). The

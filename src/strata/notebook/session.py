@@ -851,7 +851,9 @@ class NotebookSession:
         """
         return self.artifact_manager
 
-    async def compute_staleness_async(self) -> dict[str, CellStaleness]:
+    async def compute_staleness_async(
+        self, executing: str | None = None
+    ) -> dict[str, CellStaleness]:
         """``compute_staleness`` without holding up everything else.
 
         Deciding whether a cell is stale reads the outside world: an ``@fetch``
@@ -866,13 +868,17 @@ class NotebookSession:
         Serialized, because the work mutates the cells it walks. On the loop
         that was free; two of these in threads at once would not be.
         """
-        return await asyncio.to_thread(self.compute_staleness)
+        return await asyncio.to_thread(self.compute_staleness, executing)
 
-    def compute_staleness(self) -> dict[str, CellStaleness]:
+    def compute_staleness(self, executing: str | None = None) -> dict[str, CellStaleness]:
         """Compute staleness status for all cells.
 
         Reads the outside world for ``@fetch``, ``@dataset`` and ``@table``
         cells, so an async caller wants :meth:`compute_staleness_async`.
+
+        ``executing`` is a cell that is running while this recompute happens,
+        as when another cell is edited mid-run. Its status stays running and
+        it is left out of the returned map; the run's own finish decides it.
 
         Walk cells in topological order and check if cached artifacts
         match the current provenance hash. Updates cell.staleness.
@@ -891,7 +897,7 @@ class NotebookSession:
         # the process has.
         prefetched = self._outside_world_fingerprints()
         with self._staleness_lock:
-            return self._compute_staleness_locked(prefetched)
+            return self._compute_staleness_locked(prefetched, executing)
 
     def _outside_world_fingerprints(self) -> dict[str, _OutsideWorld]:
         """Fingerprint what each cell reads from outside, before the lock.
@@ -927,7 +933,7 @@ class NotebookSession:
         )
 
     def _compute_staleness_locked(
-        self, prefetched: dict[str, _OutsideWorld]
+        self, prefetched: dict[str, _OutsideWorld], executing: str | None = None
     ) -> dict[str, CellStaleness]:
         staleness_map: dict[str, CellStaleness] = {}
         stale_cells: set[str] = set()  # Track stale cells for propagation
@@ -935,7 +941,7 @@ class NotebookSession:
             # No DAG — all cells are idle
             for cell in self.notebook_state.cells:
                 staleness_map[cell.id] = CellStaleness(status=CellStatus.IDLE)
-            self._apply_staleness_map(staleness_map)
+            self._apply_staleness_map(staleness_map, executing)
             self.causality_map = {}
             return staleness_map
 
@@ -1145,7 +1151,7 @@ class NotebookSession:
                 cell.display_outputs = cached_display_outputs or []
                 cell.display_output = cached_display_outputs[-1] if cached_display_outputs else None
 
-        self._apply_staleness_map(staleness_map)
+        self._apply_staleness_map(staleness_map, executing)
 
         # v1.1: Compute causality chains for stale cells
         self.causality_map = compute_causality_on_staleness(self)
@@ -1213,9 +1219,16 @@ class NotebookSession:
             and any(current[ref_id] != recorded[ref_id] for ref_id in recorded)
         )
 
-    def _apply_staleness_map(self, staleness_map: dict[str, CellStaleness]) -> None:
+    def _apply_staleness_map(
+        self, staleness_map: dict[str, CellStaleness], executing: str | None = None
+    ) -> None:
         """Persist computed staleness back onto in-memory cell state."""
         for cell in self.notebook_state.cells:
+            if cell.id == executing:
+                # Still running: a verdict now would tell every client it had
+                # stopped. Out of the map too, which is what gets broadcast.
+                staleness_map.pop(cell.id, None)
+                continue
             staleness = staleness_map.get(cell.id)
             if staleness is None:
                 continue
