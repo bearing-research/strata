@@ -102,7 +102,7 @@ column points at the regression test that replaced the replay.
 | 8 | Lost wakeup on Python 3.12 | `test_admission_counterexamples.py` (3.12 only) | Re-notify on cancel in `ResizableLimiter.acquire` ✓ | ~5 lines |
 | 9 | Evicted limiter lets a tenant exceed its quota | `test_admission_counterexamples.py` | Evict only idle limiters ✓ | `get_or_create_quotas` |
 | 10 | Shutdown drain misses evicted limiters' streams | `test_admission_counterexamples.py` | Same as 9 ✓ | Same as 9 |
-| 11 | Mid-run upstream edit leaves the downstream READY | `test_staleness_counterexamples.py` | Keep the walk's verdict; leave running cells alone ✓ | `_refresh_and_broadcast_changed_staleness` |
+| 11 | Mid-run upstream edit leaves the downstream READY | `tests/notebook/test_e2e_staleness.py::TestAnEditDuringARun` | Keep the walk's verdict; leave running cells alone ✓ | **Fixed** |
 | 12 | Deny rule sidestepped by another address form | `test_acl_counterexamples.py` | Name tables by serving catalog | Docs done (`*:ns.*` deny patterns); code fix open |
 
 Suggested fix order, cheapest and safest first: 6, 8, 3, 12 (docs), 1,

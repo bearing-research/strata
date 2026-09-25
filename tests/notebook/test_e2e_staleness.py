@@ -133,6 +133,59 @@ class TestStalenessDetection:
                 assert updated["payload"]["outputs"]["result"]["preview"] == 6
 
 
+class TestAnEditDuringARun:
+    """Only the running cell is locked against edits, so its upstream can be
+    edited while it runs. The run then read the upstream's old value."""
+
+    def test_the_run_stays_running_and_finishes_stale(self, setup):
+        client, tmp = setup
+        release = tmp / "release"  # b runs until the test has edited a
+        nb = (
+            NotebookBuilder(tmp)
+            .add_cell("a", "x = 1")
+            .add_cell(
+                "b",
+                "import pathlib, time\n"
+                f"while not pathlib.Path({str(release)!r}).exists():\n"
+                "    time.sleep(0.05)\n"
+                "y = x + 1",
+                "a",
+            )
+            .add_cell("c", "z = y * 10\nz", "b")
+        )
+        with open_notebook_session(client, nb.path) as (sid, session):
+            with ws_connect(client, sid) as ws:
+                execute_cell_and_wait(ws, "a")
+
+                ws.execute_cell("b")
+                ws.receive_until("cell_status", cell_id="b", status="running")
+                ws.clear()
+                ws.update_source("a", "x = 100")
+                ws.receive_until("dag_update")
+                ws.receive_until("cell_status", cell_id="c")  # the edit's verdicts are out
+
+                # The edit's recompute left the running cell alone, in the
+                # session and on the wire.
+                assert session.notebook_state.get_cell("b").status.value == "running"
+                assert not [
+                    m for m in ws.messages_of_type("cell_status") if m["payload"]["cell_id"] == "b"
+                ]
+
+                release.touch()
+                finished = ws.receive_until("cell_status", cell_id="b", max_messages=200)
+                assert finished["payload"]["status"] == "stale"  # not ready
+                statuses = {cell["id"]: cell["status"] for cell in ws.sync()["payload"]["cells"]}
+                assert statuses["a"] in ("idle", "stale")  # edited, not re-run
+                assert statuses["b"] == "stale"  # built from the old a
+
+                ws.clear()
+                output = execute_cell_and_wait(ws, "c")
+                # Stale says so, so running c offers the cascade that
+                # rebuilds a and b, and c computes from x = 100.
+                assert ws.messages_of_type("cascade_prompt")
+                assert "1010" in str(output["payload"])
+
+
 class TestDAGRestructuring:
     """Edits that change the DAG structure."""
 

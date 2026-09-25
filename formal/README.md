@@ -53,7 +53,6 @@ run everything, conventions, gotchas and the prioritized next steps.
 | `tla/Staleness.tla` | Model of cell status for a chain `a → b → c` under edits and runs, one run at a time |
 | `tla/Staleness_EditDuringRun.cfg` | An upstream is edited while a downstream runs. Finds finding 11 |
 | `tla/Staleness_Patched.cfg` | The proposed fix. **All invariants hold** (60,102 distinct states, exhaustive) |
-| `test_staleness_counterexamples.py` | Finding 11 through the real notebook WebSocket, with cells really executing |
 | `test_acl_counterexamples.py` | Finding 12 through the real `authorize_table_access` gate and catalog loader |
 | `test_pruning_properties.py` | Property test: a pruned row group holds no matching row (Hypothesis, real Parquet files) |
 | `test_staleness_properties.py` | Property test: random edit and run sequences on a real notebook match a fresh evaluation (Hypothesis) |
@@ -556,6 +555,20 @@ cell:
 The model has no uncached leaf cells, so in the model change 2 simply
 keeps the walk's verdict. The leaf case needs a test against the real
 walk.
+
+**Fixed.** Change 1 applies where the model's Edit is: the source flush
+and the variant handlers pass the running cell to the recompute, which
+leaves its status alone and keeps it out of the broadcast map. It is
+not applied to every recompute, because a run's own finish relies on
+the walk to move its cell off running. Change 2: after a run, a cell
+whose upstream the walk finds not ready becomes stale with reason
+`upstream` instead of ready. It is set explicitly rather than taken from
+the walk, since a cached cell records no `last_provenance_hash` and the
+walk calls it idle, which would read as never run. An uncached leaf whose
+upstreams are ready is still kept ready. Regression test:
+`tests/notebook/test_e2e_staleness.py::TestAnEditDuringARun`. Now that b
+reads stale, running `c` offers the cascade that the replay showed
+missing.
 
 ## Property tests
 

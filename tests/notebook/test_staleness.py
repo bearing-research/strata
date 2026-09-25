@@ -167,9 +167,9 @@ class TestStalenessOffTheEventLoop:
         ran_on: list[int] = []
         original = session.compute_staleness
 
-        def _record():
+        def _record(executing=None):
             ran_on.append(threading.get_ident())
-            return original()
+            return original(executing)
 
         monkeypatch.setattr(session, "compute_staleness", _record)
 
@@ -199,14 +199,14 @@ class TestStalenessOffTheEventLoop:
         guard = threading.Lock()
         original = session._compute_staleness_locked
 
-        def _watch(prefetched):
+        def _watch(prefetched, executing=None):
             nonlocal inside, overlapped
             with guard:
                 inside += 1
                 if inside > 1:
                     overlapped = True
             try:
-                return original(prefetched)
+                return original(prefetched, executing)
             finally:
                 with guard:
                     inside -= 1
@@ -236,14 +236,14 @@ class TestStalenessOffTheEventLoop:
         # whether or not the serialization works.
         original = session._compute_staleness_locked
 
-        def _watch(prefetched):
+        def _watch(prefetched, executing=None):
             nonlocal inside, overlapped
             with guard:
                 inside += 1
                 if inside > 1:
                     overlapped = True
             try:
-                return original(prefetched)
+                return original(prefetched, executing)
             finally:
                 with guard:
                     inside -= 1
