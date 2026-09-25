@@ -20,9 +20,7 @@ uv sync --all-extras                       # as CLAUDE.md says
 
 # Replays: one pytest per finding, each PASSES while its bug exists
 uv run pytest formal/ -v                   # ~15 s; property tests skip without
-                                           # Hypothesis, finding 8's test on 3.13+
-uv run --no-project --python 3.12 --with pytest \
-    pytest formal/test_admission_counterexamples.py -k wakeup   # finding 8 on 3.12
+                                           # Hypothesis
 
 # Property tests (Hypothesis is not a project dependency)
 uv run --with hypothesis pytest formal/test_pruning_properties.py formal/test_staleness_properties.py
@@ -99,7 +97,7 @@ column points at the regression test that replaced the replay.
 | 5 | Stale runner publishes; winner rewrites a ready artifact | `test_build_runner_counterexamples.py` | Per-attempt blob keys + one fenced promote ✓ | Largest change on the list |
 | 6 | Stale runner fails the build that replaced it | `tests/test_build_runner.py::TestALeaseDecidesWhoMayFail` | Fence `fail_build` / `fail_artifact` on the lease ✓ | **Fixed** |
 | 7 | Old manifest's upload URL still writes | `test_build_pull_counterexamples.py` | Per-attempt blob keys ✓ | Needs the same change as 5 |
-| 8 | Lost wakeup on Python 3.12 | `test_admission_counterexamples.py` (3.12 only) | Re-notify on cancel in `ResizableLimiter.acquire` ✓ | ~5 lines |
+| 8 | Lost wakeup on Python 3.12 | `tests/test_adaptive_concurrency.py` (teeth on 3.12) | Re-notify on cancel in `ResizableLimiter.acquire` ✓ | **Fixed** |
 | 9 | Evicted limiter lets a tenant exceed its quota | `test_admission_counterexamples.py` | Evict only idle limiters ✓ | `get_or_create_quotas` |
 | 10 | Shutdown drain misses evicted limiters' streams | `test_admission_counterexamples.py` | Same as 9 ✓ | Same as 9 |
 | 11 | Mid-run upstream edit leaves the downstream READY | `test_staleness_counterexamples.py` | Keep the walk's verdict; leave running cells alone ✓ | `_refresh_and_broadcast_changed_staleness` |

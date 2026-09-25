@@ -85,28 +85,36 @@ class ResizableLimiter:
             ``True`` if a slot was acquired, ``False`` if the timeout expired.
         """
         async with self._cv:
-            if timeout is None:
-                # Wait indefinitely
+            try:
+                if timeout is None:
+                    # Wait indefinitely
+                    while self._in_use >= self._capacity:
+                        await self._cv.wait()
+                    self._in_use += 1
+                    return True
+
+                # Wait with timeout
+                loop = asyncio.get_running_loop()
+                end = loop.time() + timeout
                 while self._in_use >= self._capacity:
-                    await self._cv.wait()
+                    remaining = end - loop.time()
+                    if remaining <= 0:
+                        return False
+                    try:
+                        await asyncio.wait_for(self._cv.wait(), timeout=remaining)
+                    except TimeoutError:
+                        # Check one more time in case we were notified
+                        if self._in_use >= self._capacity:
+                            return False
                 self._in_use += 1
                 return True
-
-            # Wait with timeout
-            loop = asyncio.get_running_loop()
-            end = loop.time() + timeout
-            while self._in_use >= self._capacity:
-                remaining = end - loop.time()
-                if remaining <= 0:
-                    return False
-                try:
-                    await asyncio.wait_for(self._cv.wait(), timeout=remaining)
-                except TimeoutError:
-                    # Check one more time in case we were notified
-                    if self._in_use >= self._capacity:
-                        return False
-            self._in_use += 1
-            return True
+            except BaseException:
+                # Before 3.13, asyncio.Condition drops a notify whose waiter
+                # is cancelled before it runs. Pass the wakeup on, as 3.13
+                # does, so a free slot isn't left idle while others wait. A
+                # spurious wakeup is harmless: waiters re-check the count.
+                self._cv.notify(1)
+                raise
 
     async def release(self) -> None:
         """Release a slot, waking one waiting acquirer."""
