@@ -155,8 +155,10 @@ Creates `<parent>/my_analysis/` with `notebook.toml`, `pyproject.toml`
 directory and a `.gitignore` that keeps `.strata/`, `.venv/` and
 `renv/library/` out of version control (skip it with `--no-git`; an existing
 `.gitignore` is never replaced), then syncs the venv (skip with `--no-env`;
-`strata run` syncs it later). Idempotent on an existing notebook directory: the `notebook_id` and
-any existing cells are preserved, so re-running it never orphans artifacts.
+`strata run` syncs it later). Idempotent on an existing notebook directory:
+the notebook is left as it is (its id, cells, configuration and
+dependencies), and only missing scaffolding is added, so re-running it never
+orphans artifacts or loses settings.
 
 `--project-mount [NAME]` adds a notebook-level **read-only mount of `--parent`**
 (the project directory) as a `Path` variable `NAME` (default `project`) in every

@@ -1469,7 +1469,8 @@ async def auth_middleware(request: Request, call_next):
 
     When auth_mode="trusted_proxy":
     1. Verify X-Strata-Proxy-Token matches configured secret
-    2. Parse X-Strata-Principal, X-Strata-Tenant, X-Strata-Scopes headers
+    2. Parse the principal, tenant and scopes headers (X-Strata-Principal,
+       the configured tenant_header, X-Tenant-ID by default, X-Strata-Scopes)
     3. Set principal context for downstream use
 
     Skips auth for health/metrics endpoints.

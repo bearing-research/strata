@@ -168,6 +168,11 @@ async def test_run_cell_broadcasts_and_maps(sm_with_session, monkeypatch):
         and "ran cell a" in m["payload"]["text"]
         for m in notes
     )
+    # With the envelope every server frame carries: its own sequence and a
+    # timestamp, which this frame alone went without.
+    note = next(m for m in notes if m["type"] == "agent_note")
+    assert note["seq"] > 0
+    assert note["ts"].endswith("Z")
 
 
 @pytest.mark.asyncio
@@ -335,6 +340,28 @@ async def test_authoring_add_edit_move_remove_and_broadcast(sm_with_session, mon
 
     # add, edit, move, remove → four live syncs, all for this session.
     assert broadcasts == [session_id] * 4
+
+
+@pytest.mark.asyncio
+async def test_an_agent_edit_honours_the_soft_lock(sm_with_session, monkeypatch):
+    """An MCP edit wrote a cell without the soft lock REST and the WebSocket
+    enforce, so an agent could overwrite a cell a person changed moments ago,
+    and its own change held nothing against them."""
+
+    async def fake_sync(*_args, **_kwargs):
+        return None
+
+    monkeypatch.setattr("strata.notebook.ws.broadcast_notebook_sync", fake_sync)
+    sm, session_id, _ = sm_with_session
+    session = sm.get_session(session_id)
+    session.presence.record_edit("a", "alice")
+
+    with pytest.raises(NotebookOpsError, match="alice changed cell"):
+        await _edit_cell(sm, session_id, "a", "x = 2", author="claude")
+    assert _get_cell(sm, session_id, "a")["source"] == "x = 1"
+
+    await _edit_cell(sm, session_id, "b", "y = x + 2", author="claude")
+    assert session.presence.holder("b", "alice", 60.0) == "claude"
 
 
 @pytest.mark.asyncio

@@ -719,6 +719,29 @@ def test_create_notebook_preserves_existing_id():
         assert reopened.cells[0].id == "c1"
 
 
+def test_create_notebook_leaves_an_existing_notebook_as_it_is():
+    """``strata new`` on an existing notebook kept its id and cells but
+    rewrote notebook.toml without its env, workers, mounts or connections,
+    and pyproject.toml without its dependencies."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        nb_dir = create_notebook(Path(tmpdir), "Configured", initialize_environment=False)
+        add_cell_to_notebook(nb_dir, "c1")
+        write_cell(nb_dir, "c1", "x = 1")
+        toml_path = nb_dir / "notebook.toml"
+        toml_path.write_text(
+            toml_path.read_text() + '\n[env]\nREGION = "eu"\n\n[ai]\nmodel = "claude-sonnet-5"\n'
+        )
+        pyproject = nb_dir / "pyproject.toml"
+        pyproject.write_text(
+            pyproject.read_text().replace("dependencies = [", 'dependencies = [\n    "polars",')
+        )
+        before = (toml_path.read_bytes(), pyproject.read_bytes())
+
+        assert create_notebook(Path(tmpdir), "Configured", initialize_environment=False) == nb_dir
+
+        assert (toml_path.read_bytes(), pyproject.read_bytes()) == before
+
+
 def test_update_notebook_connections_round_trip():
     """``update_notebook_connections`` writes a [connections.<name>]
     block that survives a parser round-trip. SQLite path stays

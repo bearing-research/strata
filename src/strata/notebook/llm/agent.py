@@ -49,7 +49,7 @@ from typing import TYPE_CHECKING, Any
 
 import httpx
 
-from strata.notebook.authorship import resolve_assistant_author
+from strata.notebook.authorship import resolve_assistant_author, resolve_author
 from strata.notebook.llm.config import (
     DEFAULT_APPROVAL_TOOLS,
     LlmConfig,
@@ -57,6 +57,7 @@ from strata.notebook.llm.config import (
 )
 from strata.notebook.llm.context import build_notebook_context
 from strata.notebook.llm.usage import record_llm_usage
+from strata.notebook.presence import lock_window_seconds
 
 if TYPE_CHECKING:
     from strata.notebook.session import NotebookSession
@@ -570,7 +571,19 @@ async def execute_tool(
             if not cell_id:
                 valid = [v for c in session.notebook_state.cells for v in c.defines]
                 return f"Error: No cell defines '{var_name}'. Valid variables: {valid}"
+            # The assistant edits for the person who asked it to, so for the
+            # soft lock it is that person: it waits for anyone else's recent
+            # change, and never locks its own user out of the cell it just
+            # fixed. The cell's author still records that the assistant wrote it.
+            person = resolve_author()
+            held_by = session.presence.holder(cell_id, person, lock_window_seconds())
+            if held_by is not None:
+                return (
+                    f"Error: {held_by} changed cell {cell_id} moments ago; "
+                    "try again in a few seconds"
+                )
             write_cell(session.path, cell_id, new_source, author=resolve_assistant_author())
+            session.presence.record_edit(cell_id, person)
             session.reload()
             await _sync_frontend()
             return f"Edited cell {cell_id} (was defining: {var_name})"

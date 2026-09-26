@@ -421,6 +421,52 @@ class TestExecuteTool:
         assert result == "Installed pandas successfully."
 
 
+class TestTheAssistantAndSoftLocks:
+    """The assistant's edit_cell wrote a cell without looking at the soft lock
+    every other editing surface honours."""
+
+    @staticmethod
+    def _session(tmp_path):
+        from strata.notebook.parser import parse_notebook
+        from strata.notebook.session import NotebookSession
+        from strata.notebook.writer import add_cell_to_notebook, create_notebook, write_cell
+
+        nb_dir = create_notebook(tmp_path, "locks")
+        add_cell_to_notebook(nb_dir, "c1")
+        write_cell(nb_dir, "c1", "x = 1")
+        return NotebookSession(parse_notebook(nb_dir), nb_dir), nb_dir
+
+    @pytest.mark.asyncio
+    async def test_it_waits_for_someone_elses_recent_change(self, tmp_path):
+        session, nb_dir = self._session(tmp_path)
+        session.presence.record_edit("c1", "alice")
+
+        result = await execute_tool(
+            session, "edit_cell", {"variable_name": "x", "new_source": "x = 2"}
+        )
+
+        assert result.startswith("Error: alice changed cell c1")
+        assert (nb_dir / "cells" / "c1.py").read_text().strip() == "x = 1"
+
+    @pytest.mark.asyncio
+    async def test_it_does_not_lock_its_own_user_out(self, tmp_path):
+        """It edits for the person who asked, so that person's own recent
+        change does not stop it, and its edit does not stop them."""
+        from strata.notebook.authorship import resolve_author
+
+        session, nb_dir = self._session(tmp_path)
+        person = resolve_author()
+        session.presence.record_edit("c1", person)
+
+        result = await execute_tool(
+            session, "edit_cell", {"variable_name": "x", "new_source": "x = 2"}
+        )
+
+        assert result.startswith("Edited cell c1")
+        assert session.presence.holder("c1", person, 60.0) is None
+        assert session.presence.holder("c1", "alice", 60.0) == person
+
+
 class TestBuildNotebookContext:
     """Tests for notebook context building."""
 

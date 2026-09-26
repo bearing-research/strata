@@ -249,6 +249,21 @@ environment pinned below them has to move before it can install 0.8.0.
 
 ### Fixed
 
+- **`strata new` on an existing notebook leaves it as it is.** It kept the
+  notebook's id and cells but rewrote `notebook.toml` without its env,
+  workers, mounts, connections, AI settings or variant groups, and
+  `pyproject.toml` without its dependencies. A `notebook.toml` it could not
+  parse was replaced outright, under a new id. It now adds only missing
+  scaffolding.
+- **An agent's edit honours the soft lock.** Edits through MCP and through the
+  built-in assistant skipped the check REST and the WebSocket make, so an agent
+  could overwrite a cell someone changed moments ago, and its own change held
+  nothing against them. Both now wait out someone else's recent change and
+  hold the cell in turn. The assistant counts as the person using it, so it
+  never locks its own user out of a cell it just edited.
+- **A cell on a remote worker shows every display it made.** Only the last
+  one travelled back, because it is also the variable `_`, so a remote cell
+  that drew three figures showed one.
 - **Shift+Enter runs the cell.** In the cell editor it inserted a newline:
   CodeMirror's default keymap binds Enter with a Shift variant, and it was
   listed ahead of the run binding at the same precedence, so it always won.

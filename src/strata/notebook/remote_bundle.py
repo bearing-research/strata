@@ -104,6 +104,25 @@ def pack_notebook_output_bundle(
         bundle_meta["file"] = bundle_file
         bundle_manifest["variables"][var_name] = bundle_meta
 
+    # Every display the cell produced, not only the last: the last is also the
+    # variable ``_`` and so travelled anyway, which is why a remote cell drawing
+    # three figures came back showing one.
+    raw_displays = result_manifest.get("displays", [])
+    if not isinstance(raw_displays, list):
+        raise ValueError("Bundle manifest displays must be a list")
+    bundle_manifest["displays"] = []
+    for display in raw_displays:
+        if not isinstance(display, dict):
+            raise ValueError("Each display must be a dict")
+        bundle_display = dict(display)
+        file_name = display.get("file")
+        if "error" not in display and isinstance(file_name, str) and file_name:
+            src = output_dir / file_name
+            if not src.exists():
+                raise ValueError(f"Output file for a display does not exist: {src}")
+            bundle_display["file"] = f"files/{src.name}"
+        bundle_manifest["displays"].append(bundle_display)
+
     with tarfile.open(bundle_path, "w") as tar:
         _add_bytes(
             tar,
@@ -121,12 +140,16 @@ def pack_notebook_output_bundle(
             str(result_manifest.get("stderr", "")).encode("utf-8"),
         )
 
-        for meta in bundle_manifest["variables"].values():
+        # The last display is also ``_``, so the same file is named twice.
+        added: set[str] = set()
+        for meta in [*bundle_manifest["variables"].values(), *bundle_manifest["displays"]]:
             if not isinstance(meta, dict) or "error" in meta:
                 continue
-            arcname = meta["file"]
-            src = output_dir / Path(arcname).name
-            tar.add(src, arcname=arcname)
+            arcname = meta.get("file")
+            if not isinstance(arcname, str) or arcname in added:
+                continue
+            added.add(arcname)
+            tar.add(output_dir / Path(arcname).name, arcname=arcname)
 
 
 def unpack_notebook_output_bundle(
@@ -189,6 +212,26 @@ def unpack_notebook_output_bundle(
             var_meta = dict(meta)
             var_meta["file"] = file_name
             result["variables"][var_name] = var_meta
+
+        displays = manifest_data.get("displays", [])
+        if not isinstance(displays, list):
+            raise ValueError("Bundle manifest displays must be a list")
+        result["displays"] = []
+        for display in displays:
+            if not isinstance(display, dict):
+                raise ValueError("Each display must be a dict")
+            unpacked = dict(display)
+            bundle_file = display.get("file")
+            if "error" not in display and bundle_file is not None:
+                if not isinstance(bundle_file, str) or not bundle_file.startswith("files/"):
+                    raise ValueError(f"Invalid bundle file path for a display: {bundle_file}")
+                file_name = Path(bundle_file).name
+                dest = output_dir / file_name
+                if not dest.exists():
+                    with open(dest, "wb") as dst:
+                        dst.write(_read_member(tar, bundle_file))
+                unpacked["file"] = file_name
+            result["displays"].append(unpacked)
 
     # Match the local harness contract: write to harness-result.json
     # so downstream code that reads the executor output from disk
