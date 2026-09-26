@@ -2267,7 +2267,7 @@
 <tr>
 <td><code>STRATA_AI_API_KEY</code></td>
 <td>Custom (requires <code>[ai]</code> config)</td>
-<td>,</td>
+<td>set in <code>[ai]</code></td>
 </tr>
 </tbody>
 </table>
@@ -2280,8 +2280,8 @@
 <p>For standard providers you only need step 2: drop your API key into the Runtime panel and Strata auto-picks the matching default base URL and model. The AI panel's model picker lets you switch models without leaving the UI (it persists the choice to <code>[ai].model</code>).</p>
 <div class="admonition note">
 <p class="admonition-title">Process environment is not consulted</p>
-</div>
 <p>A shell-exported <code>OPENAI_API_KEY</code> does <strong>not</strong> leak into notebooks. This is intentional, each notebook must explicitly opt in to an AI provider. See the <a href="../annotations/">Annotations</a> page for how env vars flow.</p>
+</div>
 <h3 id="custom-provider-configuration">Custom Provider Configuration<a class="headerlink" href="#custom-provider-configuration" title="Permanent link">&para;</a></h3>
 <p>For self-hosted models (Ollama, vLLM) or custom endpoints there's no UI for the <code>base_url</code> / timeout / token-ceiling fields, so you add an <code>[ai]</code> section to <code>notebook.toml</code> directly:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="k">[ai]</span>
@@ -2297,6 +2297,7 @@
 <li><code>max_output_tokens</code></li>
 <li><code>timeout_seconds</code></li>
 <li><code>approval_timeout_seconds</code>, how long an agent confirm prompt waits before being treated as a decline (default 120)</li>
+<li><code>approval_tools</code>, extra agent tools that need confirmation (adds to the server's list; see <a href="#safety-surface">Safety surface</a>)</li>
 </ul>
 <h3 id="supported-providers">Supported Providers<a class="headerlink" href="#supported-providers" title="Permanent link">&para;</a></h3>
 <p>Any service that implements the OpenAI <code>/v1/chat/completions</code> endpoint works, including:</p>
@@ -2337,7 +2338,7 @@
 </tr>
 <tr>
 <td><code>create_cell</code></td>
-<td>Add a new Python or prompt cell</td>
+<td>Add a new Python, prompt or markdown cell</td>
 </tr>
 <tr>
 <td><code>edit_cell</code></td>
@@ -2436,9 +2437,10 @@
 <li><strong>Filesystem reads outside the notebook directory.</strong> Same as a hand-written cell - Python <code>open()</code> works wherever the strata-notebook process has permission. Inside a Docker / Fly deployment this is usually limited to the container, but a local-dev <code>uv run strata-notebook</code> has full user-account access.</li>
 </ul>
 <h3 id="package-install-scoping">Package install scoping<a class="headerlink" href="#package-install-scoping" title="Permanent link">&para;</a></h3>
-<p><code>add_package</code> calls <code>uv add &lt;package&gt;</code> against the <strong>per-notebook</strong>
-<code>pyproject.toml</code> (<code>dependencies.py:688</code>). The package gets resolved
-into the notebook's local <code>.venv/</code>, the local <code>uv.lock</code> is updated,
+<p><code>add_package</code> runs <code>uv add &lt;package&gt;</code> as the notebook's environment job,
+against the <strong>per-notebook</strong> <code>pyproject.toml</code>. The package gets resolved
+into the notebook's <code>.venv/</code> (with the shared environment backend, a link to
+the environment for the new lockfile), the local <code>uv.lock</code> is updated,
 and <code>pyproject.toml</code> records the new entry on disk. Three
 consequences:</p>
 <ul>
@@ -2461,16 +2463,19 @@ into the system Python and cannot reach across to another notebook.</p>
 <ul>
 <li>The agent writes the new source to <code>cells/&lt;id&gt;.py</code> and calls
   <code>session.reload()</code>, then broadcasts a fresh <code>notebook_state</code> over
-  WebSocket via <code>broadcast_notebook_sync</code> (<code>agent.py:450</code>).</li>
-<li>Every connected frontend tab - including the user's - replaces its
-  cached state with the broadcast. The editor view re-renders with
-  the agent's new source.</li>
-<li><strong>The user's unflushed keystrokes are lost.</strong> Source edits are
+  WebSocket via <code>broadcast_notebook_sync</code> (in <code>ws.py</code>).</li>
+<li>Every connected frontend tab, including the user's, replaces its
+  cached state with the broadcast. A cell nobody is typing in
+  re-renders with the agent's new source.</li>
+<li><strong>A cell with unflushed keystrokes keeps them.</strong> Source edits are
   buffered locally in the frontend and flush via debounced
-  <code>cell_source_update</code> after 2 s idle / on blur / before run. If
-  the agent's broadcast arrives while a buffer is pending, the
-  buffer is overwritten by the broadcast on the next render. There
-  is no merge-conflict prompt.</li>
+  <code>cell_source_update</code> after 2 s idle / on blur / before run. While a
+  buffer is pending, the tab does not adopt the broadcast source, so
+  the editor keeps your text; when it flushes, your text replaces the
+  agent's edit. There is no merge-conflict prompt. The exception is a
+  broadcast that adds or removes a cell (<code>create_cell</code>, <code>delete_cell</code>):
+  the tab then replaces its whole cell list, and unflushed keystrokes in
+  any cell are lost.</li>
 <li>For <code>delete_cell</code>, the cell disappears from the user's view
   entirely; the editor focus moves to the next cell.</li>
 <li>For <code>run_cell</code>, the user's tab sees the cell transition through

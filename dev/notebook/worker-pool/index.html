@@ -2232,7 +2232,7 @@
 <p class="admonition-title">This page is the <code>strata-pool</code> package README</p>
 <p>It is included verbatim from <code>packages/strata-pool/README.md</code>, which is
 also the package's PyPI landing page. One source, so the two cannot drift.</p>
-<p>The pool is a <strong>separate package</strong> — <code>pip install strata-pool</code>.</p>
+<p>The pool is a <strong>separate package</strong>: <code>pip install strata-pool</code>.</p>
 <p>It sits at a <strong>different layer</strong> from the workers a notebook dispatches to:
 nothing in <code>strata</code> imports it, and <code># @worker</code> cannot name a pool machine.
 A proxy above both composes them, checking the artifact store first and
@@ -2243,9 +2243,9 @@ submitting to the pool only on a miss. Machines run the same
 compares the two side by side.</p>
 </div>
 <p>Worker pool for dispatching Strata jobs to ephemeral machines. This is the
-bring-your-own-hardware path: it manages machines <em>you</em> own. It is complete and
-tested rather than growing — if you want a provider to autoscale for you,
-register a serverless executor as a Strata worker instead.</p>
+bring-your-own-hardware path: it manages machines <em>you</em> own. If you want a
+provider to autoscale for you, register a serverless executor as a Strata
+worker instead.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>pip<span class="w"> </span>install<span class="w"> </span>strata-pool<span class="w">            </span><span class="c1"># library</span>
 <a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>pip<span class="w"> </span>install<span class="w"> </span><span class="s2">&quot;strata-pool[server]&quot;</span><span class="w">  </span><span class="c1"># plus the HTTP service</span>
 </code></pre></div>
@@ -2253,8 +2253,8 @@ register a serverless executor as a Strata worker instead.</p>
 that type, starts a machine when there is none, forwards the payload over
 HTTP, records the result, and meters the execution. A backend provides start /
 stop / health and nothing else, so the pool does not know which it is talking
-to. Three ship: local Docker, RunPod, and Fly Machines. Anything satisfying the <code>Backend</code>
-protocol works.</p>
+to. Three ship: local Docker, RunPod, and Fly Machines. Anything satisfying
+the <code>Backend</code> protocol works.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">strata_pool</span><span class="w"> </span><span class="kn">import</span> <span class="n">DockerBackend</span><span class="p">,</span> <span class="n">MachineType</span><span class="p">,</span> <span class="n">Pool</span><span class="p">,</span> <span class="n">PoolStore</span>
 <a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>
 <a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="n">pool</span> <span class="o">=</span> <span class="n">Pool</span><span class="p">(</span>
@@ -2278,7 +2278,7 @@ per-tenant cap.</p>
 it may take the whole host. Both are enforced by the daemon, asserted against
 a real one in <code>test_docker_live.py</code>.</p>
 <p>What that buys is process-level isolation, which is <strong>not</strong> a boundary for
-untrusted code — a shared kernel is one CVE away from a cross-tenant escape.
+untrusted code: a shared kernel is one CVE away from a cross-tenant escape.
 A deployment running untrusted work wants a VM-backed runtime (Kata, gVisor)
 or a backend whose machines are already microVMs. The <code>Backend</code> protocol is
 where that choice lives.</p>
@@ -2311,10 +2311,10 @@ process holds a <strong>lease</strong> on the jobs and machines it is acting on 
 starting, running a job or stopping; a job dispatched or running) and renews it
 while it works. When a process dies, the scaler in another one fails its jobs
 and stops its machines once the lease runs out (<code>lease_seconds</code>, default 30),
-through that process's own backend. A process restarted under its old
+through the surviving process's own backend. A process restarted under its old
 <code>instance_id</code> takes its own rows back at once, as a single process does today.
 A pool given no <code>instance_id</code> generates one per process, so two processes over
-one SQLite file are never one name — under a shared name each would read the
+one SQLite file are never one name. Under a shared name each would read the
 other's leases as its own and stop machines running the other's cells. The
 trade is that a generated name is new on every start, so a process restarted
 within <code>lease_seconds</code> waits its old leases out instead of reclaiming them at
@@ -2326,15 +2326,17 @@ catalogue, and the others pick it up when they restart.</p>
 <h2 id="what-it-is-not">What it is not<a class="headerlink" href="#what-it-is-not" title="Permanent link">&para;</a></h2>
 <p><strong>It is not a cache.</strong> The pool has no idea Strata deduplicates work.
 Submitting a job whose result already exists boots a machine and recomputes
-it — so the caller checks <code>find_by_provenance</code> <em>before</em> submitting. Getting
+it, so the caller checks <code>find_by_provenance</code> <em>before</em> submitting. Getting
 that order wrong bills customers for cache hits.</p>
 <p><strong>It is not the metering layer.</strong> The pool records one <code>UsageEvent</code> per
 terminal job, including failures, with a monotonic duration. What is billable,
 and at what price, is decided above it.</p>
 <p><strong>It does not keep machines warm on purpose.</strong> <code>start_scaler()</code> stops
 machines idle past their type's <code>cool_down_seconds</code>, and nothing else in the
-pool ever ends a machine that finished its work — a deployment that forgets
-that call bills for every machine it ever started. A warm floor is
+pool ever ends a machine that finished its work: a deployment that forgets
+that call bills for every machine it ever started. A machine whose stop fails
+keeps its row, still counted against the fleet cap, and the next pass tries
+the stop again. A warm floor is
 deliberately absent: per tenant it means paying for everyone who ever showed
 up, per machine type it means choosing whose latency to subsidise, and
 pre-warming belongs with the layer that knows a user just opened a
@@ -2346,10 +2348,11 @@ and retiring on that trades a cold start for every hiccup; three is a machine
 that is gone. Probes run concurrently, so a provider black-holing packets
 cannot stall the reaper behind one timeout per machine. And a pass in which
 <em>every</em> machine fails is treated as this process's own network rather than as
-the fleet dying at once — retiring everything for a local DNS blip would hand
-every user a cold start for a fault that was never on the machines. Without this a dead warm machine is discovered by the next job
-being sent to it, and that job fails — for reasons that have nothing to do
-with the code in the cell.</p>
+the fleet dying at once, since retiring everything for a local DNS blip would
+hand every user a cold start for a fault that was never on the machines.
+Without this a dead warm machine is discovered by the next job being sent to
+it, and that job fails for reasons that have nothing to do with the code in
+the cell. A machine running a job is neither probed nor reaped.</p>
 <h2 id="layout">Layout<a class="headerlink" href="#layout" title="Permanent link">&para;</a></h2>
 <table>
 <thead>
@@ -2365,11 +2368,19 @@ with the code in the cell.</p>
 </tr>
 <tr>
 <td><code>backend.py</code></td>
-<td>The <code>Backend</code> protocol — start / stop / health</td>
+<td>The <code>Backend</code> protocol: start / stop / health</td>
 </tr>
 <tr>
 <td><code>backends/docker.py</code></td>
 <td>Containers on the local Docker daemon</td>
+</tr>
+<tr>
+<td><code>backends/runpod.py</code></td>
+<td>RunPod pods, reached through RunPod's proxy</td>
+</tr>
+<tr>
+<td><code>backends/fly.py</code></td>
+<td>Fly Machines, reached on the organization's private network</td>
 </tr>
 <tr>
 <td><code>store.py</code></td>
@@ -2377,7 +2388,11 @@ with the code in the cell.</p>
 </tr>
 <tr>
 <td><code>pool.py</code></td>
-<td>Submission, dispatch, boot, execution, metering, restart recovery</td>
+<td>Submission, dispatch, boot, execution, metering, restart recovery, the scaler</td>
+</tr>
+<tr>
+<td><code>api.py</code></td>
+<td>The HTTP service (the <code>server</code> extra)</td>
 </tr>
 </tbody>
 </table>
@@ -2417,7 +2432,7 @@ deployment cannot forget the call that stops it paying for idle machines.</p>
 </tr>
 <tr>
 <td><code>GET /v1/machine-types</code></td>
-<td>What a caller may ask for — the catalogue an annotation resolves against</td>
+<td>What a caller may ask for: the catalogue an annotation resolves against</td>
 </tr>
 <tr>
 <td><code>PUT /v1/machine-types</code></td>
@@ -2450,7 +2465,7 @@ the pool forwards them to the machine it runs on. With OpenTelemetry installed
 time on the machine. The machine's work then sits under that span, which sits
 under the caller's.</p>
 <p>A job that fails <strong>on the worker</strong> comes back as 502, and one that times out
-as 504 — the caller has to be able to tell "your code raised" from "we could
+as 504. The caller has to be able to tell "your code raised" from "we could
 not run it".</p>
 <p>Every route but <code>/health</code> requires <code>Authorization: Bearer &lt;api_token&gt;</code>, and
 job routes require <code>X-Strata-Tenant</code>. <strong>The caller is trusted for tenant
@@ -2458,8 +2473,8 @@ identity</strong>: it authenticates as itself and asserts whose work this is. Th
 pool does not authenticate end users and must never be reachable from
 anywhere but the proxy.</p>
 <h2 id="the-runpod-backend">The RunPod backend<a class="headerlink" href="#the-runpod-backend" title="Permanent link">&para;</a></h2>
-<p>Rents real hardware. <code>MachineType.gpu_type</code> is the provider's own string —
-<code>"NVIDIA H100 80GB PCIe"</code> — deliberately not a normalised label, because one
+<p>Rents real hardware. <code>MachineType.gpu_type</code> is the provider's own string
+(<code>"NVIDIA H100 80GB PCIe"</code>), deliberately not a normalised label, because one
 that maps cleanly across providers does not exist and inventing it would put a
 lossy translation between a user and the hardware they asked for.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="n">RunPodBackend</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="p">[</span><span class="s2">&quot;RUNPOD_API_KEY&quot;</span><span class="p">])</span>
@@ -2479,7 +2494,8 @@ booted, answered, and terminated with nothing left running.</p>
 <p><strong>Two things that run stayed silent on</strong>, because a CPU pod does not exercise
 them: <code>gpuTypeIds</code> + <code>gpuCount</code>, and reading a region from <code>machine</code>. Every pod
 in the account listing carried <code>machine: {}</code> with no <code>dataCenterId</code>, so <code>region</code>
-is probably always <code>None</code> today — harmless, being metadata, but do not trust it.</p>
+is probably always <code>None</code> today. That is harmless, being metadata, but do not
+trust it.</p>
 <p>RunPod has moved its API surface before. Every field lives in <code>_create_body</code>
 and is asserted by a test, so a wrong one is a one-line fix; <code>provider_options</code>
 overrides anything in the body, so a deployment can correct a field without
@@ -2490,7 +2506,7 @@ close the GPU gap with <code>STRATA_POOL_RUNPOD_GPU</code>:</p>
 </code></pre></div>
 <p>That <strong>starts a billed pod</strong>, which is why it is opt-in and never runs in CI.
 It terminates what it starts, but a crashed interpreter can still leave a pod
-running — check the console. Pods are named <code>strata-{machine_type}-{id}</code> so an
+running, so check the console. Pods are named <code>strata-{machine_type}-{id}</code> so an
 orphan is findable.</p>
 <p>A pod's port is published on the public internet through RunPod's proxy. The
 per-machine credential is what stands between that URL and anyone who finds
@@ -2510,9 +2526,9 @@ notebook servers on Fly hands them workers that never face the internet.</p>
 <a id="__codelineno-8-8" name="__codelineno-8-8" href="#__codelineno-8-8"></a>    <span class="n">cool_down_seconds</span><span class="o">=</span><span class="mi">120</span><span class="p">,</span>
 <a id="__codelineno-8-9" name="__codelineno-8-9" href="#__codelineno-8-9"></a><span class="p">)</span>
 </code></pre></div>
-<p><code>start</code> creates the machine with the worker token and the machine type's
-<code>STRATA_WORKER_*</code> settings in its environment, with <code>restart: no</code> and
-<code>auto_destroy: false</code> so its lifetime stays the pool's. <code>stop</code> destroys it by
+<p><code>start</code> creates the machine with the worker token and the machine type's <code>env</code>
+in its environment, with restart policy <code>no</code> and <code>auto_destroy: false</code> so its
+lifetime stays the pool's. <code>stop</code> destroys it by
 force (a second destroy is a no-op). <code>health</code> needs Fly to report the machine
 <code>started</code> before it probes the worker's <code>/health</code>, because a stopped machine's
 private address can be reused.</p>
@@ -2531,35 +2547,38 @@ too.</p>
 can reach every other.</p>
 <h2 id="the-worker-contract">The worker contract<a class="headerlink" href="#the-worker-contract" title="Permanent link">&para;</a></h2>
 <p><code>strata-worker</code>, shipped in <code>strata-notebook</code>, satisfies this contract as of
-0.7.0 — build it with the Dockerfile in the Strata repo and the pool can drive
+0.7.0. Build it with the Dockerfile in the Strata repo and the pool can drive
 it unmodified:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a>docker<span class="w"> </span>build<span class="w"> </span>-f<span class="w"> </span>worker.Dockerfile<span class="w"> </span>-t<span class="w"> </span>strata-worker:latest<span class="w"> </span>.
 </code></pre></div>
-<p>The image installs <code>strata-notebook</code> from PyPI and needs <strong>0.7.0 or newer</strong> —
-<code>POST /execute</code>, the path the pool dispatches to, ships in that release. It
-also means building inside a checkout does not pick up local worker changes;
-build a wheel for that.</p>
+<p>The image installs a pinned <code>strata-notebook</code> from PyPI (the <code>STRATA_VERSION</code>
+build arg) and needs <strong>0.7.0 or newer</strong>: <code>POST /execute</code>, the path the pool
+dispatches to, ships in that release. Installing from PyPI also means building
+inside a checkout does not pick up local worker changes; build a wheel for
+that.</p>
 <p>Layer your cells' dependencies on top (<code>FROM strata-worker:latest</code>). The image
 binds 8080 because that is <code>DockerBackend</code>'s default <code>worker_port</code>; the
 worker's own default is 9000, so the two are made to agree explicitly rather
 than by luck. The pool does not pull, so build on the host that will run it.
 It runs as a non-root user and <strong>refuses to start without
-<code>STRATA_WORKER_TOKEN</code></strong> — the pool mints one per machine, so this only bites
+<code>STRATA_WORKER_TOKEN</code></strong>. The pool mints one per machine, so this only bites
 when running it by hand.</p>
-<p><strong>Local Docker needs the SSRF guard relaxed.</strong> The worker rejects manifest
-URLs that resolve to loopback or private addresses — a real defense, since a
-buggy or compromised orchestrator could otherwise point it at internal
-services. With <code>DockerBackend</code> on a local daemon the Strata server <em>is</em> at a
-private address, so the first job fails with <code>resolves to non-routable
-address</code> until the worker starts with <code>STRATA_WORKER_ALLOW_LOCAL_HOSTS=1</code>.
-That is a local-development setting: leave it unset anywhere the server is
-reachable at a routable address, which is every real deployment.</p>
-<p>The payload the pool forwards is a <strong>build manifest</strong> — the same JSON document
+<p><strong>A server on a private address has to be named.</strong> The worker rejects manifest
+URLs that resolve to loopback or private addresses. That is a real defense,
+since a buggy or compromised orchestrator could otherwise point it at internal
+services. With <code>DockerBackend</code> on a local daemon, or workers on Fly's private
+network, the Strata server <em>is</em> at a private address, so the first job fails
+with <code>resolves to non-routable address</code>. In a deployment, list the server's
+host in the machine type's <code>env</code> as <code>STRATA_WORKER_ALLOWED_HOSTS</code>
+(comma-separated; a leading dot is a suffix, e.g. <code>.internal</code>).
+<code>STRATA_WORKER_ALLOW_LOCAL_HOSTS=1</code> relaxes the check for every host and is a
+local-development setting only.</p>
+<p>The payload the pool forwards is a <strong>build manifest</strong>: the same JSON document
 <code>/v1/execute-manifest</code> takes, carrying signed URLs for the inputs, the output,
 and finalization. The worker fetches its own inputs and uploads its own result,
 so the bytes never flow through the pool. That is also why the payload has to
 be self-describing: the pool forwards it verbatim and sets no content type.</p>
-<p>The pool remains image-agnostic — anything holding up these four points works:</p>
+<p>The pool remains image-agnostic. Anything holding up these four points works:</p>
 <table>
 <thead>
 <tr>
@@ -2574,7 +2593,7 @@ be self-describing: the pool forwards it verbatim and sets no content type.</p>
 </tr>
 <tr>
 <td><code>GET /health</code> → 200 when ready</td>
-<td>No auth. It is polled before the machine is trusted with anything, and it reveals nothing</td>
+<td>No auth. It is polled before the machine is trusted with anything, and it reveals nothing secret (<code>strata-worker</code> reports its capabilities and hardware)</td>
 </tr>
 <tr>
 <td><code>POST /execute</code> → 200 with the result body</td>
@@ -2588,7 +2607,7 @@ be self-describing: the pool forwards it verbatim and sets no content type.</p>
 </table>
 <p>The token is minted per machine before it boots and passed in its
 environment. Without that check, <code>/execute</code> is an unauthenticated
-remote-code-execution endpoint — survivable only while the machine is bound to
+remote-code-execution endpoint, survivable only while the machine is bound to
 loopback, which stops being true the moment a backend hands out a routable
 address.</p>
 <h2 id="the-docker-backend">The Docker backend<a class="headerlink" href="#the-docker-backend" title="Permanent link">&para;</a></h2>
@@ -2605,7 +2624,7 @@ host port Docker picked. It does not care what runs inside the container.</p>
 and skip when no daemon is reachable. Set <code>STRATA_POOL_DOCKER_SOCKET</code> if yours
 is not at <code>/var/run/docker.sock</code> (Docker Desktop on macOS puts it in
 <code>~/.docker/run/docker.sock</code>), and <code>STRATA_POOL_REQUIRE_DOCKER=1</code> to make a
-missing daemon an error instead of a skip — CI sets that, so a runner whose
+missing daemon an error instead of a skip. CI sets that, so a runner whose
 socket moved fails loudly rather than reporting coverage it never ran.</p>
 <p>CI additionally installs the package into a venv with only its own
 dependencies, to keep it from quietly growing a dependency on the server.</p>

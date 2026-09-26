@@ -2413,6 +2413,11 @@
 <td>float</td>
 <td>How long an agent destructive-tool confirm prompt waits before being treated as a decline. Default 120.</td>
 </tr>
+<tr>
+<td><code>approval_tools</code></td>
+<td>list of strings</td>
+<td>Built-in assistant tools that ask before running, added to the server's <code>STRATA_AI_APPROVAL_TOOLS</code>. It can add a gate but not remove one; an unknown tool name is logged and gates nothing.</td>
+</tr>
 </tbody>
 </table>
 <p>Advanced provider fields (<code>base_url</code>, <code>timeout_seconds</code>, token ceilings, …) are documented in <a href="../../notebook/ai/#custom-provider-configuration">AI Integration</a>.</p>
@@ -2545,7 +2550,7 @@
 <tr>
 <td><code>config</code></td>
 <td>table</td>
-<td>Backend-specific. For <code>"executor"</code>: <code>url</code>, <code>transport</code> (<code>"direct"</code> push, the default, or <code>"signed"</code> pull-model), <code>token</code> (literal - dev only), <code>token_env</code> (env var name - preferred). See <a href="../../notebook/workers/">Distributed Workers</a>.</td>
+<td>Backend-specific. For <code>"executor"</code>: <code>url</code>, <code>transport</code> (<code>"direct"</code> push, the default, or <code>"signed"</code> pull-model), <code>token</code> (literal - dev only), <code>token_env</code> (env var name - preferred), and for <code>"signed"</code> an optional <code>strata_url</code>, the server address the worker uses for the manifest's URLs (default: the server's own URL). See <a href="../../notebook/workers/">Distributed Workers</a>.</td>
 </tr>
 </tbody>
 </table>
@@ -2620,6 +2625,7 @@
 <div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="k">[[variant_group]]</span>
 <a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="n">group</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;model_choice&quot;</span>
 <a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="n">active</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;logistic&quot;</span>
+<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="n">mode</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;sweep&quot;</span><span class="w">                </span><span class="c1"># optional; absent means &quot;switch&quot;</span>
 </code></pre></div>
 <p>Cells declare group membership via <code># @variant &lt;group&gt; &lt;name&gt;</code> in their source. This block records which member is currently active - only the active cell participates in the DAG.</p>
 <table>
@@ -2639,20 +2645,25 @@
 <tr>
 <td><code>active</code></td>
 <td>string (required)</td>
-<td>Currently active variant name within the group.</td>
+<td>Currently active variant name within the group. Empty means the first variant in source order. Ignored in sweep mode.</td>
+</tr>
+<tr>
+<td><code>mode</code></td>
+<td><code>"switch"</code> | <code>"sweep"</code> | absent</td>
+<td><code>switch</code> (the default, written by leaving the key out) runs only the active variant; <code>sweep</code> runs every variant and hands downstream cells a <code>{variant: value}</code> dict. Any other value is treated as <code>switch</code> and flagged by annotation validation.</td>
 </tr>
 </tbody>
 </table>
 <h2 id="cells-cell-registry"><code>[[cells]]</code> - Cell registry<a class="headerlink" href="#cells-cell-registry" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="k">[[cells]]</span>
 <a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="n">id</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;a1b2c3d4&quot;</span>
-<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="n">file</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;a1b2c3d4_load_data.py&quot;</span>
+<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="n">file</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;a1b2c3d4.py&quot;</span>
 <a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="n">language</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;python&quot;</span>
 <a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a><span class="n">order</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">100</span>
 <a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a>
 <a id="__codelineno-10-7" name="__codelineno-10-7" href="#__codelineno-10-7"></a><span class="k">[[cells]]</span>
 <a id="__codelineno-10-8" name="__codelineno-10-8" href="#__codelineno-10-8"></a><span class="n">id</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;e5f6g7h8&quot;</span>
-<a id="__codelineno-10-9" name="__codelineno-10-9" href="#__codelineno-10-9"></a><span class="n">file</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;e5f6g7h8_train.py&quot;</span>
+<a id="__codelineno-10-9" name="__codelineno-10-9" href="#__codelineno-10-9"></a><span class="n">file</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;e5f6g7h8.py&quot;</span>
 <a id="__codelineno-10-10" name="__codelineno-10-10" href="#__codelineno-10-10"></a><span class="n">language</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;python&quot;</span>
 <a id="__codelineno-10-11" name="__codelineno-10-11" href="#__codelineno-10-11"></a><span class="n">order</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">200</span>
 <a id="__codelineno-10-12" name="__codelineno-10-12" href="#__codelineno-10-12"></a><span class="n">worker</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;fly-cpu&quot;</span><span class="w">            </span><span class="c1"># cell-level override of notebook default</span>
@@ -2683,7 +2694,7 @@
 <tr>
 <td><code>file</code></td>
 <td>string (required)</td>
-<td>Path to the cell source under <code>cells/</code>.</td>
+<td>Path to the cell source under <code>cells/</code>. The backend names it <code>&lt;id&gt;.py</code>, or <code>&lt;id&gt;.md</code>, <code>&lt;id&gt;.r</code> and <code>&lt;id&gt;.widget</code> for markdown, R and widget cells.</td>
 </tr>
 <tr>
 <td><code>language</code></td>
@@ -2780,9 +2791,9 @@ one; <code>strata new --no-git</code> skips it.</p>
 <li>everything under <code>cells/</code>, including cell tests</li>
 <li>the <code>.gitignore</code> itself</li>
 </ul>
-<p>The rules live in <code>strata.notebook.layout</code> — <code>committed_paths()</code> returns the
+<p>The rules live in <code>strata.notebook.layout</code>: <code>committed_paths()</code> returns the
 set for a given directory and <code>IGNORED_PATTERNS</code> is what the <code>.gitignore</code>
-contains — so this list is a rendering of the code rather than a second source
+contains, so this list is a rendering of the code rather than a second source
 that drifts from it.</p>
 <h2 id="round-trip-safety">Round-trip safety<a class="headerlink" href="#round-trip-safety" title="Permanent link">&para;</a></h2>
 <p>The writer preserves unknown top-level keys verbatim. If you hand-edit the file with a key the parser doesn't know about, it survives saves - useful for experimental settings or external tooling. A malformed <code>[connections.&lt;name&gt;]</code> block (no <code>driver</code>, etc.) is likewise written back verbatim under its own <code>[connections.&lt;name&gt;]</code> table so you don't lose the data while you debug.</p>

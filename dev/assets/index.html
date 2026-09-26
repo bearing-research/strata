@@ -2027,7 +2027,7 @@ rather than recorded, and <code>tui-agent-live.gif</code>, which is not canned a
 authoritative, so the way these stay honest is that regenerating all of them is
 one command rather than an afternoon of cropping:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>uv<span class="w"> </span>run<span class="w"> </span>python<span class="w"> </span>scripts/capture_docs_shots.py<span class="w">           </span><span class="c1"># everything</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>uv<span class="w"> </span>run<span class="w"> </span>python<span class="w"> </span>scripts/capture_docs_shots.py<span class="w"> </span>--only<span class="w"> </span>tui<span class="w"> </span><span class="c1"># just the SVGs (fast, no server)</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>uv<span class="w"> </span>run<span class="w"> </span>python<span class="w"> </span>scripts/capture_docs_shots.py<span class="w"> </span>--only<span class="w"> </span>tui<span class="w"> </span><span class="c1"># only the SVGs (fast, no server)</span>
 </code></pre></div>
 <p>Re-run it whenever the notebook UI or the TUI changes shape, and commit the
 result alongside that change.</p>
@@ -2044,7 +2044,7 @@ result alongside that change.</p>
 <tr>
 <td><code>notebook-anatomy-{light,dark}.png</code></td>
 <td>Web UI</td>
-<td>Notebook quickstart, <code>README.md</code></td>
+<td>Docs home, Notebook quickstart, <code>README.md</code></td>
 </tr>
 <tr>
 <td><code>cascade-stale-{light,dark}.png</code></td>
@@ -2094,7 +2094,7 @@ result alongside that change.</p>
 <tr>
 <td><code>tui-agent-live.gif</code></td>
 <td>TUI</td>
-<td>Terminal viewer, watching a coding agent</td>
+<td>Docs home, <code>README.md</code>, Terminal viewer (watching a coding agent)</td>
 </tr>
 <tr>
 <td><code>agent-demo.gif</code></td>
@@ -2134,8 +2134,8 @@ mistimed GIF.</p>
 <h3 id="live-captures">Live captures<a class="headerlink" href="#live-captures" title="Permanent link">&para;</a></h3>
 <p><code>tui-agent-live.gif</code> is the exception to everything above: it is not fed canned
 frames. It runs a real server, scaffolds a real notebook, drives it with the
-real <code>strata</code> CLI over <code>--server</code>/<code>--session</code> — the same path a coding agent
-takes — and screenshots a real TUI attached over a real WebSocket.</p>
+real <code>strata</code> CLI over <code>--server</code>/<code>--session</code> (the same path a coding agent
+takes), and screenshots a real TUI attached over a real WebSocket.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>uv<span class="w"> </span>run<span class="w"> </span>python<span class="w"> </span>scripts/capture_agent_drive.py
 <a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="nb">cd</span><span class="w"> </span>frontend<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>node<span class="w"> </span>scripts/rasterize-svg.mjs<span class="w"> </span>--in<span class="w"> </span>/tmp/strata-agent-drive/frames
 <a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>uv<span class="w"> </span>run<span class="w"> </span>python<span class="w"> </span>scripts/assemble_gif.py<span class="w"> </span>--in<span class="w"> </span>/tmp/strata-agent-drive/frames<span class="w"> </span>--name<span class="w"> </span>tui-agent-live
@@ -2151,7 +2151,7 @@ end-to-end check of the live-mirror path.</p>
 pane of that recording - and carries the cache payoff, but no agent appears in
 it. The two are different assets.</p>
 <h2 id="agent-demogif-to-be-recorded"><code>agent-demo.gif</code> (to be recorded)<a class="headerlink" href="#agent-demogif-to-be-recorded" title="Permanent link">&para;</a></h2>
-<p>A clip for the README's "cached scratchpad" section: a coding agent builds a
+<p>A screen recording in which a coding agent builds a
 Strata notebook live and reuses the cached model when only the evaluation
 changes. Unlike the shots above it cannot be scripted from here - it is a screen
 recording.</p>
@@ -2159,9 +2159,9 @@ recording.</p>
 <li><strong>How to record it:</strong> follow <a href="https://github.com/bearing-research/strata/blob/main/examples/agent_demo/RECORDING.md"><code>examples/agent_demo/RECORDING.md</code></a>
   (two side-by-side panes, <code>strata agent</code>, two prompts, ~15-25s, &lt; 5 MB).</li>
 <li><strong>Where it goes:</strong> save the exported GIF here as <code>docs/assets/agent-demo.gif</code>.</li>
-<li><strong>Wire it in:</strong> uncomment the image line in the README's "Give your coding
-  agent a cached scratchpad" section (it's a commented slot so the README never
-  renders a broken image before the GIF exists).</li>
+<li><strong>Wire it in:</strong> there is no reserved slot for it any more. The README's
+  "Point an agent at it" section now shows <code>tui-agent-live.gif</code>, so decide where
+  the recording goes when it exists.</li>
 </ul>
 
 

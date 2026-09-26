@@ -2900,7 +2900,7 @@
 <a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="kn">import</span><span class="w"> </span><span class="nn">pandas</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">pd</span>
 <a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="n">papers</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_parquet</span><span class="p">(</span><span class="s2">&quot;https://...&quot;</span><span class="p">)</span>
 </code></pre></div>
-<p>For <strong>Python cells</strong>, any non-empty string is accepted, spaces, parentheses, and special characters are fine.</p>
+<p>For <strong>Python cells</strong>, any non-empty string is accepted: spaces, parentheses, and special characters are fine.</p>
 <p>For <strong>prompt cells</strong>, <code>@name</code> also sets the output variable name and must be a valid Python identifier:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a># @name research_themes
 <a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>Given these paper counts: {{ category_stats }}
@@ -2939,9 +2939,9 @@ and <code>@loop start_from=</code> reference across cells. The defaults:</p>
 <a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="o">#</span><span class="w"> </span><span class="o">@</span><span class="k">after</span><span class="w"> </span><span class="n">seed</span>
 <a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="k">SELECT</span><span class="w"> </span><span class="n">category</span><span class="p">,</span><span class="w"> </span><span class="k">COUNT</span><span class="p">(</span><span class="o">*</span><span class="p">)</span><span class="w"> </span><span class="k">FROM</span><span class="w"> </span><span class="n">products</span><span class="w"> </span><span class="k">GROUP</span><span class="w"> </span><span class="k">BY</span><span class="w"> </span><span class="n">category</span>
 </code></pre></div>
-<p>The <code>@after seed</code> resolves to the cell with <code>id = "seed"</code>. If you'd
-rather not hand-edit, opening the notebook in the UI also lets you
-rename cell IDs via the cell's metadata panel.</p>
+<p>The <code>@after seed</code> resolves to the cell with <code>id = "seed"</code>. There is no
+UI for renaming a cell ID; a friendly ID is set by editing
+<code>notebook.toml</code>.</p>
 <p><code>@name</code> and <code>id</code> are independent: a cell can have <code>id = "seed"</code> and
 <code>@name "Seed database"</code> simultaneously. The DAG view shows the
 <code>@name</code>; <code>@after</code> and <code>@loop start_from=</code> use the <code>id</code>.</p>
@@ -2951,7 +2951,7 @@ rename cell IDs via the cell's metadata panel.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="c1"># @worker df-cluster</span>
 <a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="n">category_stats</span> <span class="o">=</span> <span class="n">ctx</span><span class="o">.</span><span class="n">sql</span><span class="p">(</span><span class="s2">&quot;SELECT topic, COUNT(*) FROM papers GROUP BY topic&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">to_pandas</span><span class="p">()</span>
 </code></pre></div>
-<p>Workers are HTTP endpoints that implement the Strata executor protocol. Register them via the <strong>Workers panel</strong> in the sidebar, the persisted result lands in <code>notebook.toml</code> as:</p>
+<p>Workers are HTTP endpoints that implement the Strata executor protocol. Register them via the <strong>Workers panel</strong> in the sidebar; the persisted result lands in <code>notebook.toml</code> as:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="k">[[workers]]</span>
 <a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="n">name</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;df-cluster&quot;</span>
 <a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="n">backend</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;executor&quot;</span>
@@ -2969,7 +2969,7 @@ rename cell IDs via the cell's metadata panel.</p>
 <hr />
 <h2 id="timeout">@timeout<a class="headerlink" href="#timeout" title="Permanent link">&para;</a></h2>
 <p>Override the execution timeout for a single cell, in seconds. The default
-is 300 seconds (5 minutes); the value must satisfy <code>0 &lt; t ≤ 86400</code> (one day max).</p>
+is 300 seconds (5 minutes); the value must be a positive number.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="c1"># @timeout 300</span>
 <a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="c1"># @worker my-gpu</span>
 <a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="n">embeddings</span> <span class="o">=</span> <span class="n">model</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span><span class="n">abstracts</span><span class="p">,</span> <span class="n">batch_size</span><span class="o">=</span><span class="mi">256</span><span class="p">)</span>
@@ -3014,11 +3014,11 @@ or <code>OMP_NUM_THREADS</code>.</p>
 </div>
 <hr />
 <h2 id="mount">@mount<a class="headerlink" href="#mount" title="Permanent link">&para;</a></h2>
-<p>Attach a filesystem mount to the cell. Mounts provide read or read-write access to external storage (S3, local paths) during execution.</p>
+<p>Attach a filesystem mount to the cell. Mounts provide read or read-write access to external storage (local paths, S3, GCS, Azure) during execution.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="c1"># @mount raw_data s3://my-bucket/dataset ro</span>
 <a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="c1"># @mount scratch file:///tmp/work rw</span>
 <a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="n">df</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_parquet</span><span class="p">(</span><span class="n">raw_data</span> <span class="o">/</span> <span class="s2">&quot;events.parquet&quot;</span><span class="p">)</span>
-<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="n">scratch</span> <span class="o">/</span> <span class="s2">&quot;summary.txt&quot;</span>  <span class="c1"># → Path(&quot;/tmp/strata/mounts/.../summary.txt&quot;)</span>
+<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="n">scratch</span> <span class="o">/</span> <span class="s2">&quot;summary.txt&quot;</span>  <span class="c1"># → Path(&quot;/tmp/work/summary.txt&quot;)</span>
 </code></pre></div>
 <p><strong>The mount name becomes a <code>pathlib.Path</code> variable in the cell's namespace.</strong> No
 <code>/mnt/&lt;name&gt;</code> directory convention - the variable directly references the
@@ -3058,11 +3058,13 @@ run read as one of its inputs. That record is how a
 <a href="../publishing/">publication</a> page and its RO-Crate list the URL under
 "External inputs". A snapshot export lists every fetch with whether it is
 pinned, so an unpinned one can be flagged before the snapshot is shared.</p>
-<p>Only <code>http</code> and <code>https</code> are fetched, and every redirect hop passes the same
-guard as a worker's URLs: no private, loopback or link-local address unless the
-host is listed in <code>STRATA_NOTEBOOK_FETCH_ALLOWED_HOSTS</code>. A URL that cannot be
-checked shows the cell as stale, and running it fails with the reason. A cell
-with <code>@fetch</code> runs on its own in Run All rather than in a batch.</p>
+<p>Only <code>http</code> and <code>https</code> are fetched. In service mode every redirect hop passes
+the same guard as a worker's URLs: no private, loopback or link-local address
+unless the host is listed in <code>STRATA_NOTEBOOK_FETCH_ALLOWED_HOSTS</code>. Personal
+mode allows those addresses, so <code>http://localhost:8000/data.csv</code> works on your
+own machine. A URL that cannot be checked shows the cell as stale, and running
+it fails with the reason. A cell with <code>@fetch</code> runs on its own in Run All rather
+than in a batch.</p>
 <p>On a remote worker the server does the fetching: the bytes travel with the
 cell's other inputs, uploaded on the direct transport and staged behind a
 signed URL on the signed one, so the worker never contacts the URL and needs no
@@ -3086,10 +3088,9 @@ in the source hash and the version is in nothing.</p>
 <li><strong><code>taxi/model@v=3</code></strong> pins version 3 of the artifact the name points at. A
   pinned dataset never makes the cell stale, as <code>snapshot=</code> does for <code>@table</code>.</li>
 </ul>
-<p>The name resolves in the registry the cell's <code>strata</code> client uses: the
-server's own store, or the team store when <code>STRATA_NOTEBOOK_REMOTE_STORE_URL</code>
-is set. The version is copied into the notebook's own store, keeping its id and
-version, and <code>&lt;name&gt;</code> is bound to its value like an upstream variable: a
+<p>The server resolves the name in its own registry, or in the team store when
+<code>STRATA_NOTEBOOK_REMOTE_STORE_URL</code> is set. The version is copied into the
+notebook's own store, keeping its id and version, and <code>&lt;name&gt;</code> is bound to its value like an upstream variable: a
 table as a DataFrame, a JSON value or a pickled object as itself. Artifacts
 written outside a notebook (a core transform, <code>strata.put</code>) are Arrow tables.
 Anything else, such as an image, arrives as a <code>pathlib.Path</code> to its bytes.</p>
@@ -3109,7 +3110,7 @@ bookkeeping. For an end-to-end walkthrough (build a warehouse, scan it,
 retrain on new data, pin a snapshot), see
 <a href="../lake-aware-cells/">Lake-Aware Cells</a>.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="c1"># @table trips file:///data/warehouse#nyc.trips</span>
-<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a><span class="n">art</span> <span class="o">=</span> <span class="n">client</span><span class="o">.</span><span class="n">materialize</span><span class="p">(</span>
+<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a><span class="n">art</span> <span class="o">=</span> <span class="n">strata</span><span class="o">.</span><span class="n">materialize</span><span class="p">(</span>
 <a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a>    <span class="n">inputs</span><span class="o">=</span><span class="p">[</span><span class="n">trips</span><span class="p">],</span>
 <a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a>    <span class="n">transform</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;executor&quot;</span><span class="p">:</span> <span class="s2">&quot;scan@v1&quot;</span><span class="p">,</span> <span class="s2">&quot;params&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;snapshot_id&quot;</span><span class="p">:</span> <span class="n">trips_snapshot</span><span class="p">}},</span>
 <a id="__codelineno-13-5" name="__codelineno-13-5" href="#__codelineno-13-5"></a><span class="p">)</span>
@@ -3167,6 +3168,12 @@ wrong for a cell whose <em>point</em> is a side effect or fresh value:</p>
 override a default you set elsewhere). It applies to every language and sits
 alongside the read-write-<code>@mount</code> rule, which already forces re-execution for
 the same reason.</p>
+<p>A cell that reads a <code>@nocache</code> (or read-write-mount) cell's value is keyed on
+the bytes that value stored rather than on the producer's provenance, which is
+the same on every run. A new value re-runs the consumer; a run that produces the
+same bytes is still a cache hit for it. Within one run (a cascade, Run All,
+headless <code>strata run</code>) each cell executes once, so two consumers of a
+<code>@nocache</code> cell see the same value.</p>
 <hr />
 <h2 id="prompt-cell-annotations">Prompt Cell Annotations<a class="headerlink" href="#prompt-cell-annotations" title="Permanent link">&para;</a></h2>
 <p>Prompt cells (language <code>prompt</code>) accept an additional set of annotations that
@@ -3188,7 +3195,7 @@ configure the AI call.</p>
 <p>System prompt prepended to the conversation.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-18-1" name="__codelineno-18-1" href="#__codelineno-18-1"></a># @system You are a terse data analyst. Answer in bullet points.
 </code></pre></div>
-<p>Multiple <code>@system</code> lines are concatenated with newlines.</p>
+<p>Only one <code>@system</code> line counts: when there are several, the last one wins.</p>
 <h3 id="output"><code>@output</code><a class="headerlink" href="#output" title="Permanent link">&para;</a></h3>
 <p>Force the response format.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-19-1" name="__codelineno-19-1" href="#__codelineno-19-1"></a># @output json
@@ -3202,11 +3209,11 @@ need to appear together.</p>
 dispatches to provider-native structured output (OpenAI's <code>json_schema</code> with
 strict mode; Anthropic's native tool-use) so the response comes back as
 validated JSON rather than free-form text. Providers without schema support
-fall back to <code>json_object</code>, valid JSON, shape not enforced, and the
+fall back to <code>json_object</code> (valid JSON, shape not enforced), and the
 <code>@validate_retries</code> loop catches shape violations.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-20-1" name="__codelineno-20-1" href="#__codelineno-20-1"></a># @output_schema {&quot;type&quot;: &quot;object&quot;, &quot;properties&quot;: {&quot;themes&quot;: {&quot;type&quot;: &quot;array&quot;, &quot;items&quot;: {&quot;type&quot;: &quot;string&quot;}}}, &quot;required&quot;: [&quot;themes&quot;]}
 </code></pre></div>
-<p>Editing the schema invalidates the cell's cache, the schema is part of the
+<p>Editing the schema invalidates the cell's cache: the schema is part of the
 provenance hash.</p>
 <h3 id="validate_retries"><code>@validate_retries</code><a class="headerlink" href="#validate_retries" title="Permanent link">&para;</a></h3>
 <p>Total attempts for the validate-and-retry loop (1 initial call + N-1 retries).
@@ -3222,9 +3229,10 @@ iteration and the <code>carry</code> variable threads state between them.</p>
 <h3 id="loop"><code>@loop</code><a class="headerlink" href="#loop" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-22-1" name="__codelineno-22-1" href="#__codelineno-22-1"></a><span class="c1"># @loop max_iter=50 carry=state</span>
 <a id="__codelineno-22-2" name="__codelineno-22-2" href="#__codelineno-22-2"></a><span class="c1"># @loop_until state[&quot;converged&quot;]</span>
-<a id="__codelineno-22-3" name="__codelineno-22-3" href="#__codelineno-22-3"></a><span class="n">state</span> <span class="o">=</span> <span class="n">state</span> <span class="k">if</span> <span class="s2">&quot;state&quot;</span> <span class="ow">in</span> <span class="nb">dir</span><span class="p">()</span> <span class="k">else</span> <span class="n">initial</span>
-<a id="__codelineno-22-4" name="__codelineno-22-4" href="#__codelineno-22-4"></a><span class="n">state</span> <span class="o">=</span> <span class="n">step</span><span class="p">(</span><span class="n">state</span><span class="p">)</span>
+<a id="__codelineno-22-3" name="__codelineno-22-3" href="#__codelineno-22-3"></a><span class="n">state</span> <span class="o">=</span> <span class="n">step</span><span class="p">(</span><span class="n">state</span><span class="p">)</span>
 </code></pre></div>
+<p>Iteration 0 reads <code>state</code> from the upstream cell that defines it (or from
+<code>start_from=</code>, below); the body must rebind it every iteration.</p>
 <p>Key/value parameters:</p>
 <ul>
 <li><code>max_iter=&lt;N&gt;</code>, hard upper bound on iterations.</li>
@@ -3261,9 +3269,9 @@ section is the per-annotation reference.</p>
   directly.</li>
 <li><code>write=true</code>, opt the cell into writable execution. Without this flag the
   cell may only read: <code>SELECT</code>, set operations, <code>VALUES</code>, <code>TABLE</code>,
-  <code>SUMMARIZE</code>, <code>DESCRIBE</code>, <code>SHOW</code> and plain <code>EXPLAIN</code>. Anything else — DDL,
-  DML, <code>COPY</code>, <code>ATTACH</code>, <code>USE</code>, <code>CALL</code>, <code>SET</code>, <code>PRAGMA</code>, and <code>EXPLAIN
-  ANALYZE</code>, which runs the statement it describes — is refused before the
+  <code>SUMMARIZE</code>, <code>PIVOT</code>, <code>DESCRIBE</code>, <code>SHOW</code> and plain <code>EXPLAIN</code>. Anything else
+  (DDL, DML, <code>COPY</code>, <code>ATTACH</code>, <code>USE</code>, <code>CALL</code>, <code>SET</code>, <code>PRAGMA</code>, and <code>EXPLAIN
+  ANALYZE</code>, which runs the statement it describes) is refused before the
   statement reaches the driver, naming it. The connection is still opened
   read-only, but that is a second line rather than the boundary: the
   read-only transaction a driver opens is one a <code>COMMIT</code> in the cell body
@@ -3293,7 +3301,7 @@ has no anchor when the cell mutates state.</p>
 <tbody>
 <tr>
 <td><code>fingerprint</code></td>
-<td>Default. Probe-derived freshness token + schema fingerprint folded into the hash.</td>
+<td>Default. Probe-derived freshness token + schema fingerprint folded into the hash. The cell opens idle, because trusting the cache means asking the source.</td>
 </tr>
 <tr>
 <td><code>forever</code></td>
@@ -3370,7 +3378,7 @@ reference <code>model</code> without caring which variant produced it.</p>
 (<code>classifier</code>) and different names (<code>logreg</code>, <code>rf</code>). At any given time
 exactly one variant is <strong>active</strong>; only the active variant participates
 in the DAG, so downstream cells see one producer for <code>model</code>. In the UI
-the group renders as a tab strip, clicking a tab switches the active
+the group renders as a tab strip: clicking a tab switches the active
 variant, and the cell editor shows that variant's source.</p>
 <h3 id="switching-variants">Switching variants<a class="headerlink" href="#switching-variants" title="Permanent link">&para;</a></h3>
 <p>The active variant per group is persisted in <code>notebook.toml</code>:</p>
@@ -3455,11 +3463,11 @@ supported. The validator flags the mistakes: <code>per_variant_no_sweep_source</
 <h3 id="defines-contract">Defines contract<a class="headerlink" href="#defines-contract" title="Permanent link">&para;</a></h3>
 <p>All variants in a group must produce the same set of top-level
 bindings. The validator compares each variant's <code>defines</code> against its
-siblings and flags <code>variant_contract_mismatch</code> on any outlier, if
+siblings and flags <code>variant_contract_mismatch</code> on any outlier. If
 <code>logreg</code> exposes only <code>model</code> and <code>rf</code> exposes <code>model + feature_importance</code>,
 downstream cells that depend on the missing name would break under one
 selection but not the other.</p>
-<p>Imports don't count toward the contract, they're scaffolding, not
+<p>Imports don't count toward the contract: they're scaffolding, not
 interface. The variants above each bring in a different sklearn class,
 which is fine; only the <em>values</em> the cells produce need to match.</p>
 <h3 id="mixing-cell-kinds">Mixing cell kinds<a class="headerlink" href="#mixing-cell-kinds" title="Permanent link">&para;</a></h3>
@@ -3498,8 +3506,9 @@ between them.</p>
 </code></pre></div>
 <p>Multiple <code>@after</code> lines stack; each cell ID adds one edge. Whitespace-
 separated IDs on a single line work too: <code># @after seed migrate</code>. Self-
-references and unknown cell IDs are silently dropped at the DAG layer
-(annotation_validation surfaces them as a diagnostic for the user).</p>
+references and unknown cell IDs are silently dropped at the DAG layer, and
+no diagnostic reports them, so a misspelled ID leaves the cell without the
+edge.</p>
 <p><code>&lt;cell-id&gt;</code> is the <code>id</code> field in <code>notebook.toml</code>, <strong>not</strong> the cell's
 <code>@name</code>. See <a href="#cell-ids">Cell IDs</a> for how to set friendly IDs like
 <code>seed</code> or <code>migrate</code>.</p>
@@ -3546,19 +3555,19 @@ doesn't affect per-variable provenance hashes.</p>
 <tr>
 <td><strong>SQL connection</strong></td>
 <td><code># @sql connection=X</code></td>
-<td>,</td>
-<td>none, required for SQL cells</td>
+<td>(annotation only)</td>
+<td>none; required for SQL cells</td>
 </tr>
 <tr>
 <td><strong>Cache policy</strong></td>
 <td><code># @cache &lt;policy&gt;</code></td>
-<td>,</td>
+<td>(annotation only)</td>
 <td><code>fingerprint</code> (read), <code>session</code> (write)</td>
 </tr>
 <tr>
 <td><strong>Cache opt-out</strong></td>
 <td><code># @nocache</code></td>
-<td>,</td>
+<td>(annotation only)</td>
 <td>cache on (serve provenance hits)</td>
 </tr>
 </tbody>

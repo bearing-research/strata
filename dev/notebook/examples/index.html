@@ -814,7 +814,7 @@
   <a href="#walkthroughs-start-here" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Walkthroughs, start here
+        Walkthroughs: start here
       
     </span>
   </a>
@@ -859,6 +859,17 @@
     <span class="md-ellipsis">
       
         Loop cells
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#widget-cells" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Widget cells
       
     </span>
   </a>
@@ -2090,7 +2101,7 @@
   <a href="#walkthroughs-start-here" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Walkthroughs, start here
+        Walkthroughs: start here
       
     </span>
   </a>
@@ -2135,6 +2146,17 @@
     <span class="md-ellipsis">
       
         Loop cells
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#widget-cells" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Widget cells
       
     </span>
   </a>
@@ -2208,7 +2230,7 @@
 <h1 id="examples">Examples<a class="headerlink" href="#examples" title="Permanent link">&para;</a></h1>
 <p>Every notebook under <code>examples/</code> in the repo demonstrates a specific
 Strata capability. Each example is also rendered into the docs site
-automatically, click through to read the cell sources and any cached
+automatically: click through to read the cell sources and any cached
 outputs without cloning the repo.</p>
 <p>To run examples locally, point the server's storage root at the
 repo's <code>examples/</code> directory and start in personal mode:</p>
@@ -2217,11 +2239,11 @@ repo's <code>examples/</code> directory and start in personal mode:</p>
 <a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="w">  </span>uv<span class="w"> </span>run<span class="w"> </span>strata-notebook
 </code></pre></div>
 <p>Every example then appears on the Strata home page. No copying
-required, open the notebook, click Run, edit, watch the cascade.</p>
+required: open the notebook, click Run, edit, watch the cascade.</p>
 <p>(If you'd rather keep examples separate from your own work, copy
 the directory you want under your existing storage root instead:
-<code>cp -R examples/iris_classification /tmp/strata-notebooks/</code>.)</p>
-<h2 id="walkthroughs-start-here">Walkthroughs, start here<a class="headerlink" href="#walkthroughs-start-here" title="Permanent link">&para;</a></h2>
+<code>cp -R examples/iris_classification ~/.strata/notebooks/</code>.)</p>
+<h2 id="walkthroughs-start-here">Walkthroughs: start here<a class="headerlink" href="#walkthroughs-start-here" title="Permanent link">&para;</a></h2>
 <table>
 <thead>
 <tr>
@@ -2232,7 +2254,7 @@ the directory you want under your existing storage root instead:
 <tbody>
 <tr>
 <td><a href="../../examples/iris_classification/"><code>iris_classification</code></a></td>
-<td>End-to-end ML in seven cells, load → split → train → evaluate → plot. The canonical "multi-cell DAG with caching" demo.</td>
+<td>End-to-end ML in seven cells: load → split → train → evaluate → plot. The canonical "multi-cell DAG with caching" demo.</td>
 </tr>
 <tr>
 <td><a href="../../examples/pandas_basics/"><code>pandas_basics</code></a></td>
@@ -2241,6 +2263,14 @@ the directory you want under your existing storage root instead:
 <tr>
 <td><a href="../../examples/titanic_ml/"><code>titanic_ml</code></a></td>
 <td>Feature engineering plus comparison of two classifiers, closer to a real ML workflow.</td>
+</tr>
+<tr>
+<td><a href="../../examples/data_viewer/"><code>data_viewer</code></a></td>
+<td>A DataFrame larger than the inline preview, in the interactive viewer: page through and sort the full cached artifact.</td>
+</tr>
+<tr>
+<td><a href="../../examples/agent_demo/"><code>agent_demo</code></a></td>
+<td>The notebook a coding agent builds live in the <code>strata agent</code> demo: an expensive training cell stays cached while only the evaluation re-runs.</td>
 </tr>
 </tbody>
 </table>
@@ -2257,6 +2287,10 @@ the directory you want under your existing storage root instead:
 <td><a href="../../examples/model_variants/"><code>model_variants</code></a></td>
 <td>Three classifier variants (logistic regression, random forest, gradient boosting) sharing one DAG slot. Switch tabs, re-cascade downstream; the others stay cached.</td>
 </tr>
+<tr>
+<td><a href="../../examples/model_variants_sweep/"><code>model_variants_sweep</code></a></td>
+<td>Sweep mode: every variant runs and one downstream cell compares them as a <code>{variant: value}</code> dict, plus a <code># @per_variant</code> fan-out.</td>
+</tr>
 </tbody>
 </table>
 <h2 id="prompt-cells-and-ai">Prompt cells and AI<a class="headerlink" href="#prompt-cells-and-ai" title="Permanent link">&para;</a></h2>
@@ -2270,7 +2304,7 @@ the directory you want under your existing storage root instead:
 <tbody>
 <tr>
 <td><a href="../../examples/arxiv_classifier/"><code>arxiv_classifier</code></a></td>
-<td>AI-powered paper classification, prompt cells + distributed workers in one pipeline.</td>
+<td>AI-powered paper classification: prompt cells + distributed workers in one pipeline.</td>
 </tr>
 <tr>
 <td><a href="../../examples/review_triage/"><code>review_triage</code></a></td>
@@ -2309,6 +2343,21 @@ the directory you want under your existing storage root instead:
 <tr>
 <td><a href="../../examples/loop_hill_climb/"><code>loop_hill_climb</code></a></td>
 <td><code># @loop</code> with carry state and an early-termination predicate.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="widget-cells">Widget cells<a class="headerlink" href="#widget-cells" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Notebook</th>
+<th>What you'll see</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a href="../../examples/widget_playground/"><code>widget_playground</code></a></td>
+<td>A widget cell (slider, number, dropdown) driving a downstream DataFrame, with <code># @live</code> recomputing on every change.</td>
 </tr>
 </tbody>
 </table>
@@ -2353,7 +2402,7 @@ the directory you want under your existing storage root instead:
 <tbody>
 <tr>
 <td><a href="../../examples/markdown_showcase/"><code>markdown_showcase</code></a></td>
-<td>Every markdown rendering path, headings, lists, tables, code blocks, security guards, dynamic <code>Markdown(...)</code> output.</td>
+<td>Every markdown rendering path: headings, lists, tables, code blocks, security guards, dynamic <code>Markdown(...)</code> output.</td>
 </tr>
 </tbody>
 </table>

@@ -2217,8 +2217,8 @@
 with content-addressed provenance. The registry layer adds the pointers and
 history that turn the artifact store into a lightweight model registry:
 <strong>names</strong>, <strong>aliases</strong>, <strong>tags</strong>, an append-only <strong>audit</strong>, and optional
-<strong>approval gates</strong> - all in the same SQLite metadata store, no extra
-services.</p>
+<strong>approval gates</strong> - all in the artifact store's own metadata database
+(SQLite, or Postgres with <code>STRATA_ARTIFACT_METADATA_DSN</code>), no extra services.</p>
 <h2 id="names">Names<a class="headerlink" href="#names" title="Permanent link">&para;</a></h2>
 <p>A name is a mutable, human-readable pointer to one artifact version:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="n">client</span><span class="o">.</span><span class="n">materialize</span><span class="p">(</span><span class="n">inputs</span><span class="o">=</span><span class="p">[</span><span class="o">...</span><span class="p">],</span> <span class="n">transform</span><span class="o">=...</span><span class="p">,</span> <span class="n">name</span><span class="o">=</span><span class="s2">&quot;taxi/tip-model&quot;</span><span class="p">)</span>
@@ -2295,8 +2295,8 @@ a crash can never swallow an approval:</p>
 <p>If a pending change's target artifact disappears before approval, the
 approve fails cleanly and the pending entry stays for an explicit reject.
 Unprotected aliases apply immediately; the default is no gating.</p>
-<p><strong>Authorization (service mode).</strong> When exposed under trusted-proxy auth,
-approve and reject require the <code>admin:registry</code> scope, and approval
+<p><strong>Authorization (service mode).</strong> Under principal auth (trusted proxy or API
+keys), approve and reject require the <code>admin:registry</code> scope, and approval
 enforces separation of duty - the requester cannot self-approve their own
 move unless they hold the <code>admin:*</code> break-glass scope. The audit log is
 tenant-scoped: a principal reads only its own tenant's history (<code>admin:*</code>
@@ -2359,7 +2359,7 @@ where you trained the model, without leaving the cell.</p>
 <ul>
 <li>a <strong>pending-approval</strong> banner with <strong>Approve / Reject</strong> - the human gate, in
   the UI (a protected-alias move queues here);</li>
-<li>a <strong>names table</strong> - each name with its alias chips (<code>★champ</code>, <code>cand</code>),
+<li>a <strong>names table</strong> - each name with its alias chips (<code>★champion=v1</code>, <code>candidate=v2</code>),
   latest version, tags, and <code>[Promote▾]</code>;</li>
 <li>a collapsible <strong>audit</strong> timeline.</li>
 </ul>
@@ -2373,10 +2373,13 @@ as an interactive view.</p>
 <p>So the same promote → gate → approve → audit loop the SDK/CLI drives is a few
 clicks in the notebook, backed by the identical audited routes.</p>
 <h2 id="storage-durability">Storage &amp; durability<a class="headerlink" href="#storage-durability" title="Permanent link">&para;</a></h2>
-<p>Registry state lives in the same <code>artifacts.sqlite</code> as artifact metadata
-(WAL mode, transaction-per-mutation). Everything commits before the API
-responds; the audit is in-transaction with its mutation; server restarts
-are non-events. The CLI reads the store directly - server up or down.</p>
+<p>Registry state lives in the same database as artifact metadata:
+<code>artifacts.sqlite</code> under the artifact directory (WAL mode), or the Postgres
+database named by <code>STRATA_ARTIFACT_METADATA_DSN</code>, with <code>strata migrate</code> to
+carry an existing SQLite store across. Each mutation is one transaction.
+Everything commits before the API responds; the audit is in-transaction with
+its mutation; server restarts are non-events. The <code>strata artifact</code> CLI reads
+a SQLite store directly (<code>--artifact-dir</code>), server up or down.</p>
 
 
 

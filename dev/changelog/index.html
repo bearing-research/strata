@@ -492,15 +492,15 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#080-2026-09-16" class="md-nav__link">
+  <a href="#080-2026-09-22" class="md-nav__link">
     <span class="md-ellipsis">
       
-        0.8.0 - 2026-09-16
+        0.8.0 - 2026-09-22
       
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="0.8.0 - 2026-09-16">
+    <nav class="md-nav" aria-label="0.8.0 - 2026-09-22">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
@@ -2601,15 +2601,15 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#080-2026-09-16" class="md-nav__link">
+  <a href="#080-2026-09-22" class="md-nav__link">
     <span class="md-ellipsis">
       
-        0.8.0 - 2026-09-16
+        0.8.0 - 2026-09-22
       
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="0.8.0 - 2026-09-16">
+    <nav class="md-nav" aria-label="0.8.0 - 2026-09-22">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
@@ -3246,7 +3246,7 @@
 <p>Entries focus on user-visible changes and release framing rather than
 exhaustive commit history.</p>
 <p>The authoritative copy of this file lives at <a href="https://github.com/bearing-research/strata/blob/main/CHANGELOG.md"><code>CHANGELOG.md</code></a> in the repo root; this docs page mirrors it. Maintainers: keep the two in sync when editing.</p>
-<h2 id="080-2026-09-16">0.8.0 - 2026-09-16<a class="headerlink" href="#080-2026-09-16" title="Permanent link">&para;</a></h2>
+<h2 id="080-2026-09-22">0.8.0 - 2026-09-22<a class="headerlink" href="#080-2026-09-22" title="Permanent link">&para;</a></h2>
 <p>A notebook stops being one person's machine. This release is about the three
 things that were in the way: the work runs somewhere else, it reads the
 organization's data, and several people share the server it runs on.</p>
@@ -3272,9 +3272,37 @@ from the same table the WebSocket uses, and an MCP tool call runs as its caller
 within those scopes.</p>
 <p>Around the edges: a result travels to the team by promotion rather than by
 copying a directory, a notebook's whole state exports as one bundle and imports
-back, and an artifact store can be swept, pinned, and reported on per tenant.</p>
+back, and an artifact store can be swept, pinned, and reported on per tenant.
+A publication carries its authors and a DOI, every version carries a content
+digest, and a chain can be copied into a central store over HTTP and archived
+from it as a zip that is the same bytes on every fetch.</p>
 <h3 id="added">Added<a class="headerlink" href="#added" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>An import can upload its bytes first.</strong> <code>PUT
+  /v1/artifacts/import/blobs/{content_sha256}</code> streams a version's bytes to the store
+  and checks them against the digest, and <code>POST /v1/artifacts/import</code> with a
+  JSON record imports the version whose <code>content_sha256</code> names them, so a large
+  artifact is never held in memory. Uploads are per tenant, and one nothing
+  imports is dropped a day later. The multipart form the CLI sends still works.</li>
+<li><strong>An agent can look at the plot it made.</strong> A plotting cell's output used to
+  reach an agent as <code>image/png</code> with no preview, which says something was drawn
+  and nothing about what. <code>strata cell output &lt;nb&gt; &lt;cell&gt; --out plot.png</code>
+  writes a display output to a file, and the MCP tool <code>save_cell_output</code>
+  writes it into the notebook's <code>.strata/outputs/</code> and returns the path. The
+  cell view now also reports each output's size and artifact URI.</li>
+<li><strong>An agent can drive a variant group and a widget, and read what they hold.</strong>
+  The tab strip could switch a variant group and move a slider; an agent
+  holding the same session over MCP could do neither, and after running a sweep
+  had no way to find out what it had produced. <code>set_variant</code> picks a variant or
+  sets the group to <code>switch</code> / <code>sweep</code>, <code>set_widget_value</code> sets a control and
+  re-materializes the cell, and both refuse a name the notebook does not
+  declare rather than reporting success for a change that did not happen.
+  <code>get_variable</code> names each instance of a swept variable and the spelling
+  <code>lineage</code> takes for it; <code>get_cell</code> reports a widget's controls with their
+  defaults and current values; <code>add_cell</code> accepts <code>widget</code>, which the HTTP
+  route already did. Lineage also records the fan-out instances a consumer
+  reads: every instance for a collapse consumer, and for a chained
+  <code># @per_variant</code> cell the one it zipped to.</li>
 <li><strong>The server image can use a Postgres artifact store.</strong> Setting
   <code>STRATA_ARTIFACT_METADATA_DSN</code> on the published image previously refused to
   start, because the <code>postgres</code> extra was not in it and installing one means
@@ -3335,8 +3363,8 @@ back, and an artifact store can be swept, pinned, and reported on per tenant.</p
   through its parent process. A service host without such a user refuses to run
   cells rather than running them as the server.</li>
 <li><strong>Presence, cell focus and soft locks.</strong> Two people in one notebook can see
-  where each other is working, and every cell records who wrote it — in the
-  notebook, and on every surface that writes one.</li>
+  where each other is working, and every cell records who wrote it, in the
+  notebook and on every surface that writes one.</li>
 <li><strong>Notebook scopes on the REST routes</strong>, read from the same table the WebSocket
   uses, and MCP tool calls that run as their caller within those scopes. An
   agent can read lineage, promote and publish through MCP.</li>
@@ -3345,8 +3373,8 @@ back, and an artifact store can be swept, pinned, and reported on per tenant.</p
   principal and model.</li>
 <li><strong>Quiesce a notebook or project</strong> so it can be copied consistently while the
   server is running.</li>
-<li><strong>A shared environment backend, one environment per lockfile</strong> — and one
-  <code>renv</code> library per <code>renv.lock</code> — so notebooks that declare the same
+<li><strong>A shared environment backend, one environment per lockfile</strong> (and one
+  <code>renv</code> library per <code>renv.lock</code>), so notebooks that declare the same
   dependencies stop each building their own.</li>
 <li><strong>Trace context is carried</strong> from the server through the pool to the worker,
   and a signed build manifest says who and what it is for. Build manifests can
@@ -3358,6 +3386,12 @@ back, and an artifact store can be swept, pinned, and reported on per tenant.</p
 <p>Upgrading changes some behaviour that was previously silent. Each of these was
 a case of the server reporting more confidence than it had:</p>
 <ul>
+<li><strong>Service mode refuses an artifact store without <code>STRATA_ARTIFACT_DIR</code>.</strong> The
+  store is created only when that directory is set, even when
+  <code>STRATA_ARTIFACT_METADATA_DSN</code> and an object-store blob backend hold
+  everything. A deployment with a DSN, a non-local blob backend or service
+  writes and no directory used to boot and then fail every artifact route with
+  a 404 or a 500; it now stops at startup and says so.</li>
 <li><strong>A read SQL cell may only read.</strong> <code>SET</code>, <code>PRAGMA</code>, <code>ATTACH</code>, <code>CALL</code>,
   <code>COPY … TO</code> and <code>EXPLAIN ANALYZE</code> are refused, naming the statement, because
   a read cell's connection is a transaction its body could end. Use
@@ -3388,7 +3422,7 @@ a case of the server reporting more confidence than it had:</p>
   Set <code>STRATA_NOTEBOOK_HARNESS_USER</code> to a second OS account (the server must be
   able to become it) or send the work to remote workers. A service deployment
   upgrading from 0.7.0 that ran cells on the server host runs none until one of
-  those is true — the alternative was continuing to run notebook code as the
+  those is true. The alternative was continuing to run notebook code as the
   server user, which is what the rest of this release is about not doing.</li>
 <li><strong>Every notebook REST route is scope gated under principal auth.</strong> A
   principal that holds only <code>notebook:read</code> can no longer reach the routes that
@@ -3396,16 +3430,20 @@ a case of the server reporting more confidence than it had:</p>
   <code>notebook:write</code> and <code>notebook:execute</code> where a client needs them; a route
   nobody has classified requires <code>notebook:execute</code>.</li>
 <li><strong>An ACL rule refuses a key it does not recognise.</strong> A rule dropped anything
-  misspelled, so <code>tenants = "acme"</code> — the plural — left <code>tenant</code> unset and the
+  misspelled, so <code>tenants = "acme"</code> (the plural) left <code>tenant</code> unset and the
   rule applied to every tenant while still reading correctly in the file. A
   deployment whose ACL carries a key Strata never understood will now fail to
   start, naming it, rather than enforcing something narrower than it looks.</li>
 <li><strong>A mount's fingerprint covers its uri</strong>, so every <code>@mount</code> cell is stale once
-  after upgrade and re-runs. Nothing cached is wrong — the key changed, not the
+  after upgrade and re-runs. Nothing cached is wrong: the key changed, not the
   data. One consequence to know: a mounted cell's provenance now carries an
   absolute path, so the same notebook on two machines no longer shares those
   cache entries.</li>
 </ul>
+<p>Dependencies now require higher minimum versions: <code>websockets&gt;=17.1</code> and
+<code>pydantic-settings&gt;=2.15.0</code> for every install, and <code>azure-identity&gt;=1.25.3</code> for
+the <code>[azure]</code> extra. These match the versions the test suite runs against; an
+environment pinned below them has to move before it can install 0.8.0.</p>
 <h3 id="security">Security<a class="headerlink" href="#security" title="Permanent link">&para;</a></h3>
 <ul>
 <li><strong>A cell cannot read the server's secrets.</strong> The worker takes its token and
@@ -3413,9 +3451,9 @@ a case of the server reporting more confidence than it had:</p>
   memory, so a cell cannot recover them from <code>/proc/&lt;ppid&gt;/environ</code>; the
   harness runs as its own OS user; and the cell's manifest no longer carries the
   team store's proxy token, which would have let a cell assert any principal.</li>
-<li><strong>A read SQL cell cannot write files.</strong> <code>COPY … TO</code> inside a read cell — and
-  the <code>EXPLAIN ANALYZE</code> and <code>EXPLAIN /*comment*/ ANALYZE</code> forms that run the
-  statement they describe — are refused before anything reaches the driver.</li>
+<li><strong>A read SQL cell cannot write files.</strong> <code>COPY … TO</code> inside a read cell is
+  refused before anything reaches the driver, and so are the <code>EXPLAIN ANALYZE</code>
+  and <code>EXPLAIN /*comment*/ ANALYZE</code> forms that run the statement they describe.</li>
 <li><strong>A bundle writes only inside the notebook it imports.</strong> Member names, cell
   ids and artifact ids from an uploaded snapshot are all checked before
   anything is written; an artifact id becomes a blob key, so one naming a path
@@ -3430,6 +3468,15 @@ a case of the server reporting more confidence than it had:</p>
   publication is kept out of the garbage collector's sweep.</li>
 <li><strong>A manifest may only point at named hosts</strong>, and a worker's job URL is
   checked against the manifest's own origin.</li>
+<li><strong>A deny rule covers every address of a table.</strong> A table pattern names the
+  address a table was requested under. With a SQL catalog configured, one S3
+  table is <code>s3:</code> under its S3 URI and <code>file:</code> as a bare name or behind any other
+  path, so a deny on <code>s3:finance.*</code> left the other two readable under
+  <code>default = "allow"</code>. With a SQL catalog, a deny is now checked against every
+  name the table answers to. Allow rules still match only the name requested.
+  The configuration reference says what each prefix names and still recommends
+  <code>*:finance.*</code> deny patterns, which also cover a named catalog holding the
+  same data.</li>
 </ul>
 <h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Permanent link">&para;</a></h3>
 <ul>
@@ -3438,20 +3485,172 @@ a case of the server reporting more confidence than it had:</p>
   listed ahead of the run binding at the same precedence, so it always won.
   Cmd/Ctrl+Shift+Enter (rerun) was unaffected. The button's tooltip and the
   docs said Shift+Enter all along.</li>
+<li><strong>A refreshed secret replaces the one it rotated.</strong> The first fetch from a
+  secret manager left each value in the notebook's environment, and a refresh
+  treated any value already there as one set by hand, so a rotated secret kept
+  its old value until the notebook was reopened. A value you set yourself in
+  the Runtime panel still wins over the provider.</li>
+<li><strong>Traces and the OpenAPI document report the installed version.</strong> Both still
+  said <code>0.2.0</code>, as <code>/health</code> did until it was fixed.</li>
+<li><strong>A chain is walked past a step that was rerun.</strong> Rerunning a cell
+  supersedes its earlier version, which a result computed from it still names
+  and still reads. The lineage walk treated a superseded step as unknown and
+  stopped there, so a publication's page showed the chain ending at it, and
+  promoting or publishing to another store left everything upstream of it
+  behind.</li>
+<li><strong>A publication's archive is the same zip every time.</strong> Each member of
+  <code>/p/{token}/archive.zip</code> carried the modification time of a file written
+  moments before, so two fetches of one publication differed in bytes and in
+  <code>Content-Digest</code> though no file inside did. <code>strata artifact archive --token</code>
+  builds that zip from the store, with the publication's authors and
+  identifiers, and a <code>--to</code> ending in <code>.zip</code> writes it byte for byte.</li>
+<li><strong>A displayed value is a cached result like any other.</strong> A leaf cell's
+  display output was resolved before the cache decision and returned
+  regardless of it, so every way of asking for a fresh run came back with the
+  first run's value: <code># @nocache</code>, a read-write mount, "run this only", and
+  rerun all. For a cell whose point is what it displays, a clock read, a
+  counter, a file it just wrote, the effect those callers exist to re-trigger
+  never happened.</li>
+<li><strong>A cache hit hands back the value its key identifies.</strong> A consumer of a
+  <code># @per_variant</code> fan-out had nothing from the fan-out in its cache key, so a
+  change to any variant came back as the consumer's old dict. Reverting a cell
+  to an earlier value served that value's bytes under the later value's
+  preview, and recovering from a failure through a cache hit lost the cell's
+  display. Each stored display now records its own description, and a
+  fan-out consumer is keyed on every variant it reads.</li>
+<li><strong>A fresh value reaches the cells that read it.</strong> A cell reading a
+  <code># @nocache</code> cell's value kept serving what it had computed from an earlier
+  one: its cache key followed the producer's provenance, which is the same on
+  every run while the value is not. The key now follows the stored bytes for
+  producers like that, narrowed to the variables the consumer actually reads,
+  so a steady value beside a changing one still hits. And one run executes
+  each cell once, whether it is a whole notebook (headless <code>strata run</code>, a
+  cascade, Run All) or a single requested cell: a <code>@nocache</code> producer read
+  through two branches used to execute once per branch and hand them
+  different values. Cells whose upstream moved read <code>stale · upstream
+  changed</code> rather than <code>idle</code>, including after a run that failed.</li>
+<li><strong>A failed cell keeps what it failed with.</strong> The traceback and the prints
+  that preceded it went only to whoever started the run. Asking about the cell
+  afterwards returned an empty console, no error, and a status of <code>idle</code> that
+  reads as "never run", so the only way to see what happened was to run the
+  failure again. A failure is now recorded against the source that produced it,
+  survives a reopen and a snapshot round trip, appears in Markdown and HTML
+  exports, and stops being erased when an unrelated edit elsewhere recomputes
+  staleness. The curated cell view also carries the <code>defines</code> and
+  <code>references</code> the MCP tool description has always promised.</li>
+<li><strong>An agent moving a slider gets what a person gets.</strong> <code>set_widget_value</code> ran
+  the widget and stopped, so a <code># @live</code> notebook that auto-computes for a
+  person left an agent looking at stale downstream cells and the previous
+  answer. Both callers now run one path. A control nobody has moved also
+  reports the declared default as its value rather than <code>null</code>: that default is
+  what the cell runs at, so reporting nothing described the storage instead of
+  the notebook.</li>
+<li><strong>A widget's selection is state the notebook keeps.</strong> A <code>widget_update</code>
+  refused because the notebook was busy had already written the new values to
+  disk: the reply named the run that owned the notebook, nothing
+  re-materialized, and the next materialization quietly computed at the value
+  the server had refused. The write now happens under the execution
+  reservation. The values also never reached the live session, so every payload
+  reported an empty control map and a reconnecting client could not tell a
+  selected 0.7 from a declared default of 0.5. And a snapshot carried every
+  cell's provenance and outputs but not the selection behind them, so an
+  imported copy fell back to each control's default and recomputed a different
+  scenario than the bundle was taken from.</li>
+<li><strong>A failed Run All publishes nothing built on the failure.</strong> Continuing past a
+  failed cell ran every cell after it without refreshing what it read, so a
+  cell downstream of the failure used the results from before it and reported
+  a fresh success; a cell with side effects would have run them. Cells the
+  failure reached are now skipped and say they did not run because something
+  they read from failed, while cells it did not reach run as normal. A cell
+  that reads two broken cells now reports both in one run, rather than naming
+  one and leaving the other for the next attempt to find.</li>
+<li><strong>A cell that recovers stops showing its old error.</strong> Fixing a broken cell and
+  running something downstream of it told a client only that the cell was
+  ready, and a client kept showing the error it had been sent over a result
+  that was no longer wrong. The cell now sends the result that replaces it.</li>
+<li><strong>Every cell a broken chain passed through says what happened.</strong> A chain
+  fails more than once: the cell that breaks, and each consumer that could not
+  run without it. Only the last one seen was reported, so a client running the
+  end of a chain heard about its middle and never about its start, and the cell
+  at fault went on showing the result it produced before the break. The kind of
+  cell no longer decides this either: SQL, prompt and loop cells used to let the
+  failure escape by a route that reported nothing, so one of them in a chain was
+  passed over and one at the end took the whole run with it.</li>
+<li><strong>Every message the server sends carries its own number.</strong> The protocol
+  reference asks clients to deduplicate on it, and several batches shared one:
+  an execution's console and its result, every cell a Run All started, every
+  cell a failure made stale. A client following that advice dropped the rest of
+  each batch, including the message saying a cell had finished.</li>
+<li><strong>A write cell ending in a comment runs.</strong> Splitting a body into statements
+  kept the text after the last semicolon whatever it held, so a script closing
+  with <code>-- done</code> handed the database a bare comment and was told it had failed,
+  after doing its work. A comment is not a statement now, wherever it sits, and
+  a statement after one keeps the row count it reported.</li>
+<li><strong>A failed dependency says what went wrong, not only that something did.</strong> A
+  cell that failed while being materialized for another one turned its error
+  colour on over the result it produced before the failure, with nothing to
+  read. It now sends what that run returned, which is also what carries the
+  offer to install a missing package. Reconnecting to a session that is still
+  open no longer restarts the message numbering either, which a client
+  following the protocol reference reads as messages it has already seen.</li>
+<li><strong>A watching client is told what every other reader is told.</strong> A SQL cell
+  that failed while being materialized for a consumer recorded its error, and
+  the MCP view, a sync and an export all reported it; only the live stream said
+  <code>idle</code>, because the override that makes a standing failure win was applied to
+  the cell and not to the state the WebSocket broadcasts from. A viewer
+  applying updates kept the table from before the failure until it resynced.
+  Presence frames also reused the sequence of whatever was sent before them,
+  which a client deduplicating on that number, as the reference tells it to,
+  reads as nothing having happened.</li>
+<li><strong>A write cell runs the statement it declares.</strong> Each statement was
+  regenerated from its parse tree before being executed, and that is not always
+  the statement the cell contains: a named recursive CTE lost its column list,
+  so <code>counter(n)</code> reached the database as <code>counter</code> and was refused. Statements
+  are now taken from the cell's own text.</li>
+<li><strong>A query holds the database, not the server.</strong> A SQL cell ran its driver
+  work on the event loop, so for as long as a query lasted nothing else on the
+  server was served and a cancel could not be delivered until the query it
+  meant to stop had finished on its own, at which point the run published its
+  result anyway. The query, the freshness probes and the write path now run off
+  the loop: a cancel lands at once, the run is abandoned without publishing,
+  and the next cell can start. The query itself keeps running in the database,
+  because ADBC exposes cancellation per driver and several answer
+  <code>NOT_IMPLEMENTED</code>; the protocol reference now says what a cancel does and
+  does not stop. A SQL cell that failed while being materialized for a
+  consumer also says so now, rather than staying <code>idle</code> with its last
+  successful table showing, and a repaired query no longer comes back green
+  still carrying the error before it.</li>
+<li><strong>Every frame the server sends carries its own sequence number.</strong> The
+  protocol reference promises one counter that increments on every outbound
+  message and tells clients to deduplicate on it, but a batch of staleness
+  frames shared one number and both a sync reply and an agent note were fixed
+  at 0. A client following that advice dropped legitimate frames, including the
+  status saying a cell had finished.</li>
+<li><strong>A SQL cell's result is a display like any other.</strong> The table was the one
+  display in the notebook backed by no artifact, and everything built on that
+  record went wrong with it: a SQL cell reached as an upstream sat at <code>idle</code>
+  showing nothing while its value was current and in use downstream, one whose
+  consumer had recomputed at a new parameter went on showing the table from
+  before the change, <code>save_cell_output</code> refused it, and an export rendered the
+  query and dropped its result. The table is now stored and recorded like any
+  other display, without loosening the check that keeps a reopened SQL cell
+  honest about the connection it read. A query also records the notebook
+  variables it bound, so the chain behind a result names the value it was run
+  at rather than stopping at the query.</li>
 <li><strong>A worker that answers has answered.</strong> A worker predating the health
   document replies 404, which says it is older than every feature it would
-  list — so the cell runs in the worker's own environment, as documented,
+  list, so the cell runs in the worker's own environment, as documented,
   instead of being refused. Only a transport failure or a 5xx leaves the
   question open. The probe also waits longer than the <code>/health</code> it asks:
   reporting a machine's hardware shells out to <code>nvidia-smi</code>, so the first cell
   on a freshly started GPU worker used to time out and be refused.</li>
 <li><strong>Run All takes part in the team cache.</strong> It neither offered what it computed
-  nor looked before computing, so a team running notebooks the ordinary way —
-  top to bottom — shared nothing and reused nothing, while the same notebook
+  nor looked before computing, so a team running notebooks the ordinary way,
+  top to bottom, shared nothing and reused nothing, while the same notebook
   run cell by cell did both.</li>
 <li><strong><code>strata status</code>, <code>strata cell ls</code> and <code>strata cell show</code> report what they
   found.</strong> Offline they answered <code>idle</code>, with no staleness reasons and no
-  outputs, for every cell of every notebook — the state a session starts in,
+  outputs, for every cell of every notebook: the state a session starts in,
   not one about the notebook. This is the surface agents read.</li>
 <li><strong><code>@fetch</code> may reach your own machine.</strong> <code>http://localhost:8000/data.csv</code> was
   refused in personal mode by a guard meant for a shared server. Service mode
@@ -3476,14 +3675,14 @@ a case of the server reporting more confidence than it had:</p>
   cache; and a mount naming a credential failed to resolve.</li>
 <li><strong>Deciding whether a cell is stale cannot stall the server.</strong> The check reads
   an <code>@fetch</code> URL, an <code>@table</code> catalog and a <code>@dataset</code> registry, and it now
-  does that before taking the lock that serializes it — held across those, one
+  does that before taking the lock that serializes it. Held across those, one
   slow host blocked every socket in the process.</li>
 <li><strong>A cell's in-place mutations and its <code>@table</code> inputs reach a worker.</strong> Both
   were dropped on the way to an HTTP worker while the provenance hash claimed
   otherwise, so a cell that changed a value without rebinding it stored nothing
   and downstream cells read the value from before, from cache, indefinitely.</li>
 <li><strong>The reference worker image can do what it says.</strong> <code>/health</code> answered that
-  it builds locked environments whether or not <code>uv</code> was installed — and the
+  it builds locked environments whether or not <code>uv</code> was installed, and the
   image shipped without it, so every Python cell failed. It probes now, and the
   image ships <code>uv</code>.</li>
 <li><strong>An edit made while Run All is working is not mistaken for what ran.</strong> The
@@ -3495,7 +3694,7 @@ a case of the server reporting more confidence than it had:</p>
   downstream of a loop re-ran the whole loop.</li>
 <li><strong>A reopened cell says ready only about what it checked.</strong> A SQL, prompt or
   widget cell was restored on a hash that never covered its connection, its
-  cache policy or its model — so a notebook repointed at another database
+  cache policy or its model, so a notebook repointed at another database
   reopened green, showing the first database's rows.</li>
 <li><strong>A cell's console leaves the process while the cell runs.</strong> The harness
   captured the cell's output for the result manifest and nothing wrote it
@@ -3505,7 +3704,7 @@ a case of the server reporting more confidence than it had:</p>
   empty directories, or two paths that do not exist yet, hashed alike.</li>
 <li><strong>A SQLite cell sees writes</strong> made outside it, through the file's size, mtime,
   header change counter and <code>-wal</code> sidecar.</li>
-<li><strong>A catalog table is pinned however it is written</strong> — qualified, unqualified,
+<li><strong>A catalog table is pinned however it is written</strong>: qualified, unqualified,
   quoted or in a different case.</li>
 <li><strong>Two pool processes over one store are two processes</strong>, each with its own
   instance id, so a restart waits out the old leases rather than adopting them.
@@ -3516,6 +3715,47 @@ a case of the server reporting more confidence than it had:</p>
   replacing.</li>
 <li><strong>A cell's dtype survives the cell boundary</strong>, and a fetch annotation is
   honoured on R cells and refused on loop cells rather than ignored.</li>
+<li><strong>Only the runner that holds a build can fail it.</strong> A runner whose lease had
+  moved on to another could, when its own attempt then errored, fail the build
+  the other runner was about to finish, so a build that would have succeeded
+  was reported failed with the stale attempt's error. Shutdown did the same to
+  builds it no longer held.</li>
+<li><strong>A request that gives up its turn in the queue passes it on.</strong> On Python
+  3.12, a queued scan cancelled just as a slot was handed to it left that slot
+  idle, and the next request in line waited out its whole queue deadline, and
+  could then be refused with a 429. Python 3.13 and later were not affected.</li>
+<li><strong><code>!=</code> keeps rows whose value is NaN.</strong> Parquet leaves NaN out of a float
+  column's minimum and maximum, so a row group holding only <code>5.0</code> and <code>NaN</code> was
+  pruned for <code>value != 5.0</code> and its NaN rows were missing from the result.</li>
+<li><strong>Garbage collection keeps a value while it is being rebuilt.</strong> Rerunning a
+  cell whose last result was older than the collection cutoff let a sweep
+  during the run delete that result, and if the run then failed, the cells
+  reading it had nothing to read.</li>
+<li><strong>Two notebooks with identical cells each keep their own values.</strong> A
+  duplicated notebook's cells produce the same provenance under different ids,
+  and running one took the other's current value away from the cells reading
+  it; running the other took it back.</li>
+<li><strong>A busy tenant keeps its limiter.</strong> With more than 1,000 tenants active, the
+  registry could evict one whose scans were still running. Its next request
+  got fresh slots, so it could run over its quota, and graceful shutdown no
+  longer counted the scans still streaming.</li>
+<li><strong>A cell that is running says so when its upstream is edited.</strong> Editing a
+  cell's upstream while it ran reported it as stopped, and it then finished as
+  ready although it had read the old value, so running a cell downstream
+  offered no cascade. It now stays running and finishes stale.</li>
+<li><strong>A column named <code>a,b</code> has its own cache entries.</strong> The projection fingerprint
+  joined column names with commas, so projecting that one column and
+  projecting <code>a</code> and <code>b</code> shared cached row groups.</li>
+<li><strong>A build's output is published once, by the attempt that holds it.</strong> A
+  runner whose lease had been taken over still wrote its result over the
+  version's bytes and marked it ready, and the runner that took over then
+  replaced those bytes under readers, so a ready artifact's content changed and
+  no longer matched its digest. Likewise, a pull executor still holding an
+  earlier manifest could upload into the slot the current holder then
+  finalized. Each attempt now writes under its own key, and publishing the
+  artifact and completing the build commit together or not at all. The build
+  runner removes what an attempt wrote once its build is over and nothing can
+  still write to it, unless that attempt was the one published.</li>
 </ul>
 <h2 id="070-2026-09-06">0.7.0 - 2026-09-06<a class="headerlink" href="#070-2026-09-06" title="Permanent link">&para;</a></h2>
 <p>A result can now leave the notebook without leaving its history behind. <strong>A
@@ -4088,8 +4328,8 @@ cell.featurize(cell.trips)…</code> - <code>cell.X</code> is any def or input a
   warnings in both human and JSON output. Strata also warns when two of a cell's
   outputs <strong>share a mutable object</strong> (the optimizer-over-a-model footgun: stored
   as separate artifacts they decouple downstream). New
-  <a href="../notebook/concepts/">Stateful objects &amp; value semantics</a> docs cover the
-  one-cell training pattern.</p>
+  <a href="https://bearing-research.github.io/strata/latest/notebook/concepts/">Stateful objects &amp; value semantics</a>
+  docs cover the one-cell training pattern.</p>
 </li>
 <li>
 <p><strong>Variant sweep mode.</strong> A variant group can now run in <strong>sweep mode</strong>
@@ -4249,7 +4489,7 @@ cell.featurize(cell.trips)…</code> - <code>cell.X</code> is any def or input a
   <code>materialize</code>/<code>put</code>/<code>fetch</code>/scan, the registry surface (aliases, tags, names,
   audit), the <code>Filter</code> helpers, and the duckdb/pandas/polars/datafusion
   integrations (as extras, e.g. <code>strata-client[duckdb]</code>): <code>pip install
-  strata-client</code>, then <code>from strata_client import StrataClient</code>. It resolves its
+strata-client</code>, then <code>from strata_client import StrataClient</code>. It resolves its
   server URL from <code>STRATA_SERVER_URL</code> / <code>STRATA_HOST</code> / <code>STRATA_PORT</code> /
   <code>pyproject.toml</code> with no pydantic. The client and the server (<code>strata-notebook</code>)
   are <strong>independent</strong> - they share only the JSON wire protocol, neither depends
@@ -4257,7 +4497,7 @@ cell.featurize(cell.trips)…</code> - <code>cell.X</code> is any def or input a
 </ul>
 <p><strong>Breaking (import paths):</strong> the client moved out of the <code>strata</code> namespace.
   <code>from strata.client import StrataClient</code> → <code>from strata_client import
-  StrataClient</code>; the integrations moved from <code>strata.integration.*</code> /
+StrataClient</code>; the integrations moved from <code>strata.integration.*</code> /
   <code>strata.duckdb_ext</code> / <code>strata.polars_ext</code> to <code>strata_client.integration.*</code>.
   The server keeps <code>from strata.types import Filter</code> working (it owns its own
   copy of the dependency-free <code>Filter</code> wire types).</p>
@@ -4415,9 +4655,9 @@ cell.featurize(cell.trips)…</code> - <code>cell.X</code> is any def or input a
   <code>&lt;name&gt;_snapshot</code> injected so the cell scans exactly the snapshot its
   provenance recorded. <code>snapshot=&lt;id&gt;</code> pins a cell to one snapshot forever.</li>
 <li><strong>Artifact inspection CLI</strong>: <code>strata artifact list / show / lineage /
-  pull</code> work directly against a local store, no server needed. <code>lineage</code>
+pull</code> work directly against a local store, no server needed. <code>lineage</code>
   renders the provenance chain down to the lake - <code>model ← features ←
-  scan ← table @ snapshot</code> - answering "which snapshot trained this
+scan ← table @ snapshot</code> - answering "which snapshot trained this
   model?" in one command. References accept a name, <code>id@v=N</code>, or a bare
   artifact id; name resolution is tenant-agnostic so legacy stores
   inspect cleanly.</li>
@@ -4542,7 +4782,7 @@ cell.featurize(cell.trips)…</code> - <code>cell.X</code> is any def or input a
   intact for an explicit reject. Concurrent refresh rebuilds of one
   artifact no longer race version allocation. Alias writes targeting the
   version already pointed at are idempotent no-ops (<code>status:
-  "unchanged"</code>) - re-running a promote cell doesn't refile approvals or
+"unchanged"</code>) - re-running a promote cell doesn't refile approvals or
   spam the audit.</p>
 </li>
 <li>
@@ -4656,7 +4896,7 @@ The example notebook below shows the shape.</p>
   the CLI for CI / scheduled jobs, not only through the server.</li>
 <li>New <code>examples/r_lm_vs_sklearn/</code> notebook - Python cell builds a
   housing DataFrame, R cell fits <code>lm(price ~ sqft + bedrooms + age +
-  location)</code>, Python cell fits the same model with sklearn and prints
+location)</code>, Python cell fits the same model with sklearn and prints
   a side-by-side comparison.</li>
 <li>New <code>examples/r_mtcars_analysis/</code> notebook - a pure-R analysis (every
   cell R): <code>lm()</code> + <code>aggregate()</code> + inline ggplot2 and base-graphics
@@ -4686,7 +4926,7 @@ partition into per-language runs automatically.</p>
   the whole run).</li>
 <li><code>is_cell_batchable</code> gate keeps the partitioner conservative -
   prompts, SQL, R cells, and any cell with <code># @worker</code> / <code># @mount
-  rw</code> opt out automatically.</li>
+rw</code> opt out automatically.</li>
 </ul>
 <h4 id="reconnect-resilience">Reconnect resilience<a class="headerlink" href="#reconnect-resilience" title="Permanent link">&para;</a></h4>
 <ul>
@@ -4812,7 +5052,7 @@ partition into per-language runs automatically.</p>
 <li><strong>WS protocol:</strong> the new <code>MessageType</code> extraction is purely a
   refactor - frame strings are unchanged. The new reconnect-grace</li>
 <li>per-cell-watchdog frames are additive; clients that ignore unknown
-  frames continue to work.</li>
+    frames continue to work.</li>
 <li><strong>REST API:</strong> unchanged.</li>
 <li><strong>Wheel ABI:</strong> still <code>abi3-py312</code> (one wheel per platform covers 3.12+).</li>
 <li><strong>Python deps:</strong> no breaking changes; R support is fully optional

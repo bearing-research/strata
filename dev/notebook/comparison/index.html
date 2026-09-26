@@ -2173,7 +2173,7 @@ as first-class cell behaviors rather than escape hatches.</p>
 <tr>
 <td>First-class AI/LLM cells</td>
 <td>Prompt cells participate in the DAG and cache by template + inputs + model config</td>
-<td>Marimo bills itself as an "AI-native editor": cell-level code generation, inline autocompletion, and a <code>marimo pair</code> agent skill for collaborative coding (added in v0.22.5). All editor-side; an LLM call inside a cell is just a regular Python expression.</td>
+<td>Marimo bills itself as an "AI-native editor": cell-level code generation, inline autocompletion, and a <code>marimo pair</code> agent skill for collaborative coding (added in v0.22.5). All editor-side; an LLM call inside a cell is a regular Python expression.</td>
 <td>No</td>
 <td>No</td>
 </tr>
@@ -2225,8 +2225,8 @@ of zero work. Re-running a notebook nobody's touched costs milliseconds.</p>
 <p><strong>Remote compute is a one-line annotation.</strong> Marimo can be run on a remote
 host (SkyPilot integration, SSH port-forwarding), but the granularity is
 the whole notebook process. Strata's <code># @worker gpu-fly</code> annotation routes
-a single cell, fitting one classifier on a GPU, fingerprinting one file
-on a high-memory box, without rewriting the rest of the pipeline.</p>
+a single cell (fitting one classifier on a GPU, fingerprinting one file
+on a high-memory box) without rewriting the rest of the pipeline.</p>
 <p><strong>AI calls are first-class DAG nodes.</strong> Marimo's "AI-native editor"
 framing - including the <code>marimo pair</code> agent skill they shipped in
 v0.22.5 - covers code-authoring assistance: generating cells from a
@@ -2248,7 +2248,7 @@ the downstream cells that read them) per variant.</p>
 as one <code>.py</code> file per cell, <code>notebook.toml</code> as the manifest, and all
 runtime state (display outputs, console snapshots, the artifact store) in
 a gitignored <code>.strata/</code> directory. <code>notebook.toml</code>'s <code>updated_at</code> only
-bumps on structural edits, adding/removing cells, changing workers:
+bumps on structural edits (adding or removing cells, changing workers),
 so re-running a cell never touches the tracked tree. Jupyter <code>.ipynb</code>
 files JSON-encode source, outputs (base64 images and all), and execution
 counts in the same blob; Marimo and Pluto avoid the JSON issue with one
@@ -2344,7 +2344,7 @@ moat is compute provisioning, not notebook-engine innovation.</p>
   other artifact, with schema-constrained output and retry-on-validation.</li>
 </ul>
 <p>For light interactive exploration where the work is a few seconds per
-cell, you're not really paying for what Strata gives you, Jupyter and
+cell, you're not really paying for what Strata gives you; Jupyter and
 Marimo are fine. The value lands when your work is too expensive to
 re-run on every refresh.</p>
 

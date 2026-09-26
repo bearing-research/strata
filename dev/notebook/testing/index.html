@@ -2215,7 +2215,7 @@ your upstream cell produced, not a mock. If the cell source itself raises, every
 test that requests <code>cell</code> reports a clear <em>setup</em> error rather than an opaque
 collection failure.</p>
 <h2 id="writing-and-running-tests">Writing and running tests<a class="headerlink" href="#writing-and-running-tests" title="Permanent link">&para;</a></h2>
-<p>Open the <strong>Tests</strong> panel on any Python cell - the <code>🧪</code> toggle next to Inspect -
+<p>Open the <strong>Tests</strong> panel on any Python cell (the flask toggle next to Inspect)
 and write your tests. They're saved as a committed sibling file,
 <code>cells/&lt;cell-id&gt;.test.py</code>, so they version and review alongside the cell source.
 A cell with no tests carries no <code>.test.py</code> file.</p>
@@ -2233,7 +2233,7 @@ source, a green &quot;2 passed&quot; summary, and a tick beside each test name. 
 toggle on the cell's left rail carries a green 2/2
 badge." src="../../assets/cell-tests-dark.png#only-dark" /></p>
 <h3 id="the-health-badge">The health badge<a class="headerlink" href="#the-health-badge" title="Permanent link">&para;</a></h3>
-<p>The <code>🧪</code> toggle doubles as a status badge, so a cell's test health is visible
+<p>The flask toggle doubles as a status badge, so a cell's test health is visible
 without opening the panel:</p>
 <table>
 <thead>
@@ -2292,7 +2292,11 @@ invariant, and an aggregation - a good template for the common shapes:</p>
 <h2 id="limitations">Limitations<a class="headerlink" href="#limitations" title="Permanent link">&para;</a></h2>
 <ul>
 <li><strong>Python cells only</strong> (not prompt, SQL, R, or markdown cells).</li>
-<li><code>pytest</code> must be in the notebook environment.</li>
+<li><code>pytest</code> must be installable into the notebook environment (it is added to
+  the dev dependencies on the first run if missing).</li>
+<li>Tests run the cell's source, so they run as the same OS user a cell does. A
+  service host with no <code>STRATA_NOTEBOOK_HARNESS_USER</code> refuses them, and the
+  run reports one errored test saying why.</li>
 <li>Tests run against a <strong>re-executed copy</strong> of the cell with injected inputs -
   they don't share live state with an interactive run, so they're deterministic
   but won't see, e.g., a variable you only set in the REPL.</li>

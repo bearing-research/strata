@@ -2039,7 +2039,7 @@ notebook's Runtime panel, then run-all.</p>
 </code></pre></div>
 <h2 id="triage">triage<a class="headerlink" href="#triage" title="Permanent link">&para;</a></h2>
 <p><sub><strong>kind</strong> prompt</sub></p>
-<p><em>Prompt cell — response intentionally excluded from export.</em></p>
+<p><em>Prompt cell: response intentionally excluded from export.</em></p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a># @name triage
 <a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a># @temperature 0.0
 <a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a># @output_schema {&quot;type&quot;: &quot;object&quot;, &quot;properties&quot;: {&quot;items&quot;: {&quot;type&quot;: &quot;array&quot;, &quot;items&quot;: {&quot;type&quot;: &quot;object&quot;, &quot;properties&quot;: {&quot;review_index&quot;: {&quot;type&quot;: &quot;integer&quot;}, &quot;sentiment&quot;: {&quot;type&quot;: &quot;string&quot;, &quot;enum&quot;: [&quot;positive&quot;, &quot;negative&quot;, &quot;neutral&quot;]}, &quot;priority&quot;: {&quot;type&quot;: &quot;string&quot;, &quot;enum&quot;: [&quot;low&quot;, &quot;medium&quot;, &quot;high&quot;]}, &quot;tags&quot;: {&quot;type&quot;: &quot;array&quot;, &quot;items&quot;: {&quot;type&quot;: &quot;string&quot;}, &quot;minItems&quot;: 1, &quot;maxItems&quot;: 3}}, &quot;required&quot;: [&quot;review_index&quot;, &quot;sentiment&quot;, &quot;priority&quot;, &quot;tags&quot;]}}}, &quot;required&quot;: [&quot;items&quot;]}

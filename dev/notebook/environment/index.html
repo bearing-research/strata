@@ -2292,12 +2292,13 @@
 <li>Runs <code>uv sync</code> to create a <code>.venv/</code> and <code>uv.lock</code></li>
 <li>All cell execution uses this notebook-local venv</li>
 </ol>
-<p>The environment lockfile hash (<code>sha256(uv.lock)</code>) participates in provenance. Changing the environment invalidates all cached cell outputs.</p>
+<p>A hash of the lockfiles (<code>uv.lock</code>, plus <code>renv.lock</code> when the notebook has one) participates in provenance, so changing the environment invalidates all cached cell outputs. When <code>uv.lock</code> has a dev group, only the runtime dependency closure is hashed, so adding a dev tool such as <code>pytest</code> leaves the cache alone.</p>
+<p>A cell sent to a <a href="../workers/">remote worker</a> runs in this same locked environment when the worker supports it, so the lock describes what the cell ran against there too.</p>
 <h2 id="python-version">Python Version<a class="headerlink" href="#python-version" title="Permanent link">&para;</a></h2>
-<p>At notebook creation time, you can select a Python version from the versions configured on the server. The default is the server's own Python version.</p>
+<p>At notebook creation time, you can select a Python version from the versions configured on the server. The first one listed is the default.</p>
 <div class="admonition note">
 <p class="admonition-title">Note</p>
-<p>The available versions depend on the server's <code>STRATA_NOTEBOOK_PYTHON_VERSIONS</code> configuration. On the hosted preview, both 3.12 and 3.13 are available.</p>
+<p>The available versions come from the server's <code>STRATA_NOTEBOOK_PYTHON_VERSIONS</code>. Unset, they are the Python versions <code>uv</code> reports as installed on the server that Strata supports, with the server's own version included.</p>
 </div>
 <h2 id="installing-packages">Installing Packages<a class="headerlink" href="#installing-packages" title="Permanent link">&para;</a></h2>
 <h3 id="from-the-ui">From the UI<a class="headerlink" href="#from-the-ui" title="Permanent link">&para;</a></h3>

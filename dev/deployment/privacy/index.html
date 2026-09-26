@@ -2269,12 +2269,13 @@
 
 
 <h1 id="privacy-sharing-model">Privacy &amp; Sharing Model<a class="headerlink" href="#privacy-sharing-model" title="Permanent link">&para;</a></h1>
-<p>Strata's sharing model is <strong>URL-based</strong>, similar to Google Docs:
-notebook IDs are unguessable, and anyone with the ID can open and
-execute the notebook. Some endpoints (delete, rename) are owner-
-gated; the rest are not. This page lays out the model honestly so
-you can pick the deployment shape that matches your trust
-boundary.</p>
+<p>Strata's notebook sharing model is <strong>URL-based</strong>, similar to Google
+Docs: notebook IDs are unguessable, and without per-user scoping
+anyone who can reach the server and has the ID can open and execute
+the notebook. Personal mode's per-user header gates every notebook
+route on the owner; service mode gates them by scope, not by owner.
+This page lays out the model honestly so you can pick the deployment
+shape that matches your trust boundary.</p>
 <h2 id="whats-shared-what-isnt">What's shared, what isn't<a class="headerlink" href="#whats-shared-what-isnt" title="Permanent link">&para;</a></h2>
 <h3 id="iceberg-scan-cache-shared-by-design">Iceberg scan cache, shared by design<a class="headerlink" href="#iceberg-scan-cache-shared-by-design" title="Permanent link">&para;</a></h3>
 <p>The original Strata value prop: identical scans hit the same cache.
@@ -2287,12 +2288,17 @@ performance win that makes Strata interesting. In multi-tenant
 service mode, the <code>tenant</code> term in the hash isolates one tenant
 from another.</p>
 <h3 id="notebook-artifacts-not-actually-shared">Notebook artifacts, not actually shared<a class="headerlink" href="#notebook-artifacts-not-actually-shared" title="Permanent link">&para;</a></h3>
-<p>Per-cell variable outputs are stored as
-<code>nb_{notebook_id}_cell_{cell_id}_var_{name}.arrow</code>. Two users with
+<p>Per-cell variable outputs are stored in each notebook's own
+<code>.strata/artifacts/</code> store as
+<code>nb_{notebook_id}_cell_{cell_id}_var_{name}</code>. Two users with
 identical notebook code but different notebooks each produce their
 own artifacts under different <code>notebook_id</code>s, they don't dedupe
 across notebooks. So sharing a Strata instance with a teammate
-does <strong>not</strong> mean your cell outputs cross-pollinate.</p>
+does <strong>not</strong> mean your cell outputs cross-pollinate. The exception
+is opt-in: the <a href="../service-mode/#the-team-cache-sharing-results-nobody-named">team cache</a>
+(<code>STRATA_NOTEBOOK_TEAM_CACHE_ENABLED</code>) offers results to a shared
+store by provenance, so identical cells in different notebooks hit
+each other there.</p>
 <h3 id="notebook-access-url-based">Notebook access, URL-based<a class="headerlink" href="#notebook-access-url-based" title="Permanent link">&para;</a></h3>
 <p>Notebook IDs are full UUIDs (8-char prefix for display, full UUID
 for the actual ID). They're not in any global enumeration and
@@ -2372,19 +2378,17 @@ scoping, because their path resolution is confined to their own root. Use
 <a href="../../notebook/publishing/">publishing</a> to hand someone a result, or service
 mode for a genuinely shared deployment.</p>
 <h2 id="how-notebook-ownership-gets-stamped">How notebook ownership gets stamped<a class="headerlink" href="#how-notebook-ownership-gets-stamped" title="Permanent link">&para;</a></h2>
-<p>The <code>owner</code> field on <code>notebook.toml</code> is set when:</p>
-<ul>
-<li><strong>Personal-mode-with-proxy</strong> (<code>STRATA_PERSONAL_MODE_USER_HEADER</code>
-  set) <code>POST /create</code> and <code>POST /import</code> stamp the caller's
-  identity from the configured header (typically
-  <code>Cf-Access-Authenticated-User-Email</code>, <code>X-Forwarded-Email</code>, etc.).</li>
-<li><strong>Service mode</strong>: <code>_caller_identity(request)</code> resolves from
-  <code>X-Strata-Principal</code> and stamps the same way.</li>
-</ul>
-<p>When <code>personal_mode_user_header</code> is unset and the caller has no
-identity, <code>owner</code> stays <code>None</code>, all notebooks are unowned and the
-single-user pattern applies. This is the default for a developer
-running on localhost.</p>
+<p>The <code>owner</code> field on <code>notebook.toml</code> is set only in
+personal-mode-with-proxy (<code>STRATA_PERSONAL_MODE_USER_HEADER</code> set):
+<code>POST /create</code>, <code>POST /import</code> and <code>POST /import-snapshot</code> stamp the
+caller's identity from the configured header (typically
+<code>Cf-Access-Authenticated-User-Email</code>, <code>X-Forwarded-Email</code>, etc.).</p>
+<p>Service mode stamps no owner: it refuses <code>personal_mode_user_header</code>,
+and <code>X-Strata-Principal</code> is not used for notebook ownership. There,
+notebook scopes decide what a principal can do.</p>
+<p>When <code>personal_mode_user_header</code> is unset, <code>owner</code> stays <code>None</code>, all
+notebooks are unowned and the single-user pattern applies. This is
+the default for a developer running on localhost.</p>
 <p>Unowned notebooks (<code>owner is None</code>) remain accessible to any
 caller. Migrating an unowned notebook to ownership requires
 manually editing <code>notebook.toml</code>.</p>
@@ -2398,27 +2402,31 @@ Use this shape unless something else applies.</p>
 (Cloudflare Access, Pomerium, corporate SSO) +
 <code>STRATA_PERSONAL_MODE_USER_HEADER=Cf-Access-Authenticated-User-Email</code>
 (or whatever your proxy injects).</p>
-<p>Every notebook is stamped with its creator's identity. <code>discover</code>
-filters to your notebooks. Direct URL access still works for
-collaboration. Delete / rename are owner-only.</p>
-<p><strong>This is the right shape for most teams.</strong> Trust the URL boundary,
-share by sending the link, accept that anyone with the link can
-look at the notebook. If you wouldn't put it in a shared Google Doc,
-don't put it in a shared Strata notebook.</p>
+<p>Every notebook is stamped with its creator's identity and lives
+under that user's own storage root. <code>discover</code> filters to your
+notebooks, and every notebook route answers <code>404</code> to anyone else, so
+a link to an owned notebook works only for its owner. Unowned
+notebooks stay open to everyone.</p>
+<p><strong>This is the right shape for most teams.</strong> Share results by
+<a href="../../notebook/publishing/">publishing</a> them rather than by sending a
+notebook link.</p>
 <h3 id="multi-tenant-or-hard-isolation-requirements">Multi-tenant or hard-isolation requirements<a class="headerlink" href="#multi-tenant-or-hard-isolation-requirements" title="Permanent link">&para;</a></h3>
 <p><code>STRATA_DEPLOYMENT_MODE=service</code> + multi-tenancy. Each tenant gets
 its own QoS pools, cache namespacing, and metric labels. Notebook routes
-are scope gated, so what a principal can reach depends on the scopes the
-proxy asserts for it.</p>
+are scope gated (<code>notebook:read</code>, <code>notebook:write</code>, <code>notebook:execute</code>),
+so what a principal can reach depends on the scopes the proxy asserts
+for it.</p>
 <p>Notes:</p>
 <ul>
-<li><strong>The URL-access property still holds within a tenant.</strong> Multi-
-  tenancy isolates one tenant from another; it does NOT add per-
-  notebook ACLs within a tenant. If Alice and Bob are on the same
-  tenant and Alice's notebook ID leaks to Bob, he can open it.</li>
-<li><strong>Cross-tenant isolation is hard.</strong> Tenant A and tenant B can't
-  see each other's cache, artifacts, or notebooks, the tenant
-  dimension is hashed into every key.</li>
+<li><strong>Notebooks are not tenant-scoped.</strong> Tenancy isolates the scan
+  cache and the server's artifact store: the tenant is hashed into
+  cache keys, and artifact and name reads are filtered by tenant.
+  Notebook sessions and the notebook storage root are shared by the
+  whole server, and there are no per-notebook ACLs. If Alice's
+  notebook ID leaks to Bob and Bob holds <code>notebook:read</code>, he can open
+  it, whatever tenant either of them is in.</li>
+<li><strong>Notebook deletion is personal-mode only.</strong> Service mode refuses
+  <code>DELETE /v1/notebooks/{id}</code> and <code>delete-by-path</code>.</li>
 </ul>
 <h3 id="per-user-isolation-every-user-truly-private">Per-user isolation (every user truly private)<a class="headerlink" href="#per-user-isolation-every-user-truly-private" title="Permanent link">&para;</a></h3>
 <p><strong>Not supported in a single instance.</strong> If you need every user to

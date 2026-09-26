@@ -2460,8 +2460,6 @@ can open in the UI, run headlessly, edit, or export.</p>
 <li><strong><code>%env</code>, <code>%set_env</code></strong> - translated to <code># @env KEY=VAL</code> cell
   annotations.</li>
 <li><strong><code>%run script.py</code></strong> - translated to <code>exec(Path(...).read_text())</code>.</li>
-<li><strong><code>%%bash</code>, <code>%%sh</code>, <code>%%script</code></strong> - bodies wrapped in
-  <code>subprocess.run(..., shell=True)</code>.</li>
 <li><strong><code>%%writefile</code></strong> - translated to <code>Path(...).write_text(...)</code>.</li>
 <li><strong><code>%timeit</code>, <code>%time</code> (line form)</strong> - the magic prefix is dropped;
   the body keeps running.</li>
@@ -2479,8 +2477,9 @@ can open in the UI, run headlessly, edit, or export.</p>
 <li><strong><code>%matplotlib inline</code> / <code>notebook</code>.</strong> Dropped. Strata captures
   figures via the display protocol automatically.</li>
 <li><strong>Raw cells.</strong> Skipped entirely (counted in the import report).</li>
-<li><strong><code>!shell</code> commands</strong> other than <code>pip install</code>. Dropped with a
-  marker comment; assignment-form (<code>var = !cmd</code>) drops the command
+<li><strong><code>!shell</code> commands</strong> other than <code>pip install</code>, and <strong><code>%%bash</code>,
+  <code>%%sh</code>, <code>%%script</code> cells</strong>. Dropped with a marker comment (a shell
+  cell keeps its body as comments below the marker); assignment-form (<code>var = !cmd</code>) drops the command
   and stubs <code>var = []</code> so downstream code still parses. Restore
   manually with <code>subprocess.run(...)</code> if the escape was load-bearing.</li>
 <li><strong>Non-Python <code>%%</code> cell magics</strong> (<code>%%R</code>, <code>%%ruby</code>, <code>%%javascript</code>,
@@ -2490,9 +2489,9 @@ can open in the UI, run headlessly, edit, or export.</p>
 <li><strong>REPL-inspection magics</strong> (<code>%who</code>, <code>%whos</code>, <code>%lsmagic</code>, <code>%history</code>,
   <code>%alias</code>, etc.). Dropped; no Strata equivalent.</li>
 </ul>
-<p>Everything that's "dropped" is reported in the import report
-(<code>&lt;notebook_dir&gt;/import_report.md</code>) with the exact line number and
-the marker comment placed in the cell source - there's no silent
+<p>Everything that's "dropped" is listed in the import report
+(<code>&lt;notebook_dir&gt;/import_report.md</code>), and the cell source carries a
+<code># strata: ...</code> marker comment where it was, so there's no silent
 data loss.</p>
 <h2 id="when-to-use-it">When to use it<a class="headerlink" href="#when-to-use-it" title="Permanent link">&para;</a></h2>
 <ul>
@@ -2524,7 +2523,7 @@ from then on. There's no "save back to ipynb", that's a separate
 <tbody>
 <tr>
 <td><code>--out &lt;dir&gt;</code></td>
-<td>Target notebook directory. Defaults to a sibling directory named after the <code>.ipynb</code> stem.</td>
+<td>Target notebook directory. Defaults to a sibling directory named after the file's stem.</td>
 </tr>
 <tr>
 <td><code>--check-deps</code></td>
@@ -2577,7 +2576,8 @@ from then on. There's no "save back to ipynb", that's a separate
 plus an <code>import_report</code> field with the conversion details. On
 malformed input, invalid JSON, non-nbformat structure, path
 traversal in <code>name</code>, collision with an existing notebook, returns a
-clean <code>400</code> or <code>409</code> with <code>detail</code> set.</p>
+clean <code>400</code> or <code>409</code> with <code>detail</code> set. An upload over the cap is a
+<code>413</code>.</p>
 <h2 id="what-the-converter-does">What the converter does<a class="headerlink" href="#what-the-converter-does" title="Permanent link">&para;</a></h2>
 <h3 id="cell-by-cell-in-source-order">Cell-by-cell, in source order<a class="headerlink" href="#cell-by-cell-in-source-order" title="Permanent link">&para;</a></h3>
 <table>
@@ -2658,7 +2658,7 @@ extends support; rows can be:</p>
 </tr>
 <tr>
 <td><code>%%bash</code>, <code>%%sh</code>, <code>%%script</code></td>
-<td>Body wrapped in <code>subprocess.run(..., shell=True)</code>.</td>
+<td>Dropped; the body is kept as comments under a marker, so re-enabling it is a deliberate edit.</td>
 </tr>
 <tr>
 <td><code>%%writefile &lt;path&gt;</code>, <code>%%file &lt;path&gt;</code></td>
@@ -2694,6 +2694,8 @@ the converter is conservative:</p>
   manually with <code>subprocess.run(...)</code> if the shell escape matters.</li>
 <li><strong>Other <code>!cmd</code></strong>: dropped with a marker comment. Surfaces in the
   import report's <em>Shell commands dropped</em> section.</li>
+<li><strong><code>%%bash</code>, <code>%%sh</code>, <code>%%script</code> cells</strong>: dropped the same way, with
+  the body kept as comments under the marker.</li>
 </ul>
 <h3 id="dependencies">Dependencies<a class="headerlink" href="#dependencies" title="Permanent link">&para;</a></h3>
 <p>Four sources, in priority order, earlier sources shadow later ones,
@@ -2738,7 +2740,7 @@ Sections that surface when applicable:</p>
 <li><strong>Magics dropped</strong>: magics with no Strata equivalent; the source
   carries a marker comment where each one used to live.</li>
 <li><strong>Shell commands dropped</strong>: <code>!cmd</code> lines (except <code>!pip install</code>)
-  that the converter removed.</li>
+  and shell cell magics that the converter removed.</li>
 <li><strong>Dependencies captured</strong>: what landed in <code>pyproject.toml</code>,
   ready for <code>uv sync</code> to resolve.</li>
 <li><strong>Warnings</strong>: anything noteworthy; e.g. pip-only specs skipped
@@ -2753,8 +2755,9 @@ Sections that surface when applicable:</p>
   is built to validate. Pre-loaded author outputs would mask
   execution incompatibilities.</li>
 <li><strong>No widgets.</strong> <code>application/vnd.jupyter.widget-view+json</code>
-  outputs and <code>%%javascript</code> cells are dropped with a warning.
-  Strata's display protocol doesn't model interactive widgets.</li>
+  outputs go with every other output, and <code>%%javascript</code> cells are
+  dropped like any renderer magic. Strata's display protocol doesn't
+  model Jupyter's interactive widgets.</li>
 <li><strong>No round-trip back to <code>.ipynb</code>.</strong> Tracked as a follow-up; out
   of scope for the import path itself.</li>
 <li><strong>Kaggle hard-coded paths.</strong> Notebooks that reference
@@ -2794,8 +2797,7 @@ verify the entry clears the bar you set, commit the manifest line.</p>
 <h2 id="round-trip-back-to-ipynb">Round-trip back to <code>.ipynb</code><a class="headerlink" href="#round-trip-back-to-ipynb" title="Permanent link">&para;</a></h2>
 <p>Out of scope today. Tracked as a follow-up because preserving the
 import-lossy parts (Jupyter outputs, widget metadata, original
-magic text) would compromise the import itself. See
-<code>docs/internal/design-jupyter-import.md</code> if you're picking this up.</p>
+magic text) would compromise the import itself.</p>
 <h2 id="importing-a-snapshot">Importing a snapshot<a class="headerlink" href="#importing-a-snapshot" title="Permanent link">&para;</a></h2>
 <p>A snapshot is the bundle <code>strata export &lt;dir&gt; --to snapshot</code> writes (or
 <code>GET …/export?fmt=snapshot</code> serves): the committed files, the per-cell runtime
@@ -2804,6 +2806,9 @@ same verb reads it back, told apart by the file:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>strata<span class="w"> </span>import<span class="w"> </span>analysis.ipynb<span class="w">        </span><span class="c1"># Jupyter</span>
 <a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>strata<span class="w"> </span>import<span class="w"> </span>demo.snapshot.zip<span class="w">     </span><span class="c1"># a snapshot → ./demo/</span>
 </code></pre></div>
+<p>Over REST the same bundle is a multipart upload to
+<code>POST /v1/notebooks/import-snapshot</code>, with the <code>file</code>, <code>name</code> and
+<code>parent_path</code> fields of the Jupyter route and a 2 GiB cap.</p>
 <p>What you get:</p>
 <ul>
 <li><strong>Carried cells are cache hits</strong> before anything runs, with their outputs
@@ -2818,8 +2823,12 @@ same verb reads it back, told apart by the file:</p>
   publish to a shared store. A copy living outside the storage root can't be
   seen, so it can't be detected.</li>
 </ul>
-<p>The import is built beside the destination and moved into place only once it's
-complete. A failure partway leaves nothing behind, and a retry works.</p>
+<p>The destination must be absent or empty. The import is built beside it and
+moved into place only once it's complete. A failure partway leaves nothing
+behind, and a retry works.</p>
+<p>A bundle is a file somebody sent you, so its member names, cell ids and
+artifact ids are checked before anything is written. One that names a path
+outside the notebook is refused rather than unpacked.</p>
 
 
 

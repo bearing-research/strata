@@ -1309,6 +1309,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#panel-shortcuts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Panel Shortcuts
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#cell-actions-buttons" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2054,6 +2065,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#panel-shortcuts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Panel Shortcuts
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#cell-actions-buttons" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2096,7 +2118,9 @@
 
 
 <h1 id="keyboard-shortcuts">Keyboard Shortcuts<a class="headerlink" href="#keyboard-shortcuts" title="Permanent link">&para;</a></h1>
-<p>Press <strong>?</strong> anywhere in the notebook (outside a code editor) to show the shortcuts modal.</p>
+<p>Press <strong>?</strong> anywhere in the notebook (outside a code editor or text field) to
+show the shortcuts modal.</p>
+<p>On macOS, read <span class="keys"><kbd class="key-control">Ctrl</kbd></span> as <span class="keys"><kbd class="key-command">Cmd</kbd></span> in the shortcuts below.</p>
 <h2 id="editor-shortcuts">Editor Shortcuts<a class="headerlink" href="#editor-shortcuts" title="Permanent link">&para;</a></h2>
 <table>
 <thead>
@@ -2111,23 +2135,26 @@
 <td>Run the current cell</td>
 </tr>
 <tr>
-<td><span class="keys"><kbd class="key-control">Ctrl</kbd><span>+</span><kbd class="key-z">Z</kbd></span></td>
-<td>Undo (in editor)</td>
+<td><span class="keys"><kbd class="key-control">Ctrl</kbd><span>+</span><kbd class="key-shift">Shift</kbd><span>+</span><kbd class="key-enter">Enter</kbd></span></td>
+<td>Rerun the current cell, bypassing the cache</td>
 </tr>
 <tr>
-<td><span class="keys"><kbd class="key-control">Ctrl</kbd><span>+</span><kbd class="key-shift">Shift</kbd><span>+</span><kbd class="key-z">Z</kbd></span></td>
-<td>Redo (in editor)</td>
+<td><span class="keys"><kbd class="key-control">Ctrl</kbd><span>+</span><kbd class="key-z">Z</kbd></span></td>
+<td>Undo</td>
+</tr>
+<tr>
+<td><span class="keys"><kbd class="key-control">Ctrl</kbd><span>+</span><kbd class="key-y">Y</kbd></span> (<span class="keys"><kbd class="key-command">Cmd</kbd><span>+</span><kbd class="key-shift">Shift</kbd><span>+</span><kbd class="key-z">Z</kbd></span> on macOS)</td>
+<td>Redo</td>
 </tr>
 <tr>
 <td><span class="keys"><kbd class="key-control">Ctrl</kbd><span>+</span><kbd class="key-a">A</kbd></span></td>
-<td>Select all (in editor)</td>
-</tr>
-<tr>
-<td><span class="keys"><kbd class="key-control">Ctrl</kbd><span>+</span><kbd class="key-d">D</kbd></span></td>
-<td>Select next occurrence</td>
+<td>Select all</td>
 </tr>
 </tbody>
 </table>
+<p>The editor also carries CodeMirror's default keymap: <span class="keys"><kbd class="key-control">Ctrl</kbd><span>+</span><kbd class="key-slash">/</kbd></span> toggles a
+comment, <span class="keys"><kbd class="key-control">Ctrl</kbd><span>+</span><kbd class="key-bracket-left">[</kbd></span> / <span class="keys"><kbd class="key-control">Ctrl</kbd><span>+</span><kbd class="key-bracket-right">]</kbd></span> change indentation,
+and <span class="keys"><kbd class="key-alt">Alt</kbd><span>+</span><kbd class="key-arrow-up">Up</kbd></span> / <span class="keys"><kbd class="key-alt">Alt</kbd><span>+</span><kbd class="key-arrow-down">Down</kbd></span> move the current line.</p>
 <h2 id="notebook-shortcuts">Notebook Shortcuts<a class="headerlink" href="#notebook-shortcuts" title="Permanent link">&para;</a></h2>
 <table>
 <thead>
@@ -2139,16 +2166,49 @@
 <tbody>
 <tr>
 <td><span class="keys"><kbd class="key-question">?</kbd></span></td>
-<td>Show keyboard shortcuts help</td>
+<td>Show or hide the keyboard shortcuts modal</td>
 </tr>
 <tr>
 <td><span class="keys"><kbd class="key-escape">Esc</kbd></span></td>
-<td>Close modal / dialog</td>
+<td>Close the shortcuts modal, or an open menu</td>
+</tr>
+</tbody>
+</table>
+<h2 id="panel-shortcuts">Panel Shortcuts<a class="headerlink" href="#panel-shortcuts" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Shortcut</th>
+<th>Where</th>
+<th>Action</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><span class="keys"><kbd class="key-enter">Enter</kbd></span></td>
+<td>Inspect panel input</td>
+<td>Evaluate the expression</td>
+</tr>
+<tr>
+<td><span class="keys"><kbd class="key-control">Ctrl</kbd><span>+</span><kbd class="key-enter">Enter</kbd></span></td>
+<td>Tests panel</td>
+<td>Run the cell's tests</td>
+</tr>
+<tr>
+<td><span class="keys"><kbd class="key-enter">Enter</kbd></span></td>
+<td>AI assistant input</td>
+<td>Send as chat</td>
+</tr>
+<tr>
+<td><span class="keys"><kbd class="key-shift">Shift</kbd><span>+</span><kbd class="key-enter">Enter</kbd></span></td>
+<td>AI assistant input</td>
+<td>Send in agent mode</td>
 </tr>
 </tbody>
 </table>
 <h2 id="cell-actions-buttons">Cell Actions (Buttons)<a class="headerlink" href="#cell-actions-buttons" title="Permanent link">&para;</a></h2>
-<p>These are available in the cell gutter (visible on hover):</p>
+<p>These are in the cell gutter, visible on hover. The glyphs are the buttons'
+actual labels:</p>
 <table>
 <thead>
 <tr>
@@ -2160,6 +2220,14 @@
 <tr>
 <td>▶</td>
 <td>Run cell</td>
+</tr>
+<tr>
+<td>↻</td>
+<td>Rerun cell, bypassing the cache</td>
+</tr>
+<tr>
+<td>■</td>
+<td>Cancel the running cell (replaces ▶ and ↻ while it runs)</td>
 </tr>
 <tr>
 <td>▲ / ▼</td>
@@ -2178,32 +2246,43 @@
 <td>Delete cell</td>
 </tr>
 <tr>
+<td>▽ / ▷</td>
+<td>Collapse / expand cell</td>
+</tr>
+<tr>
 <td>🔍</td>
 <td>Inspect cell inputs (REPL)</td>
+</tr>
+<tr>
+<td>🧪</td>
+<td>Unit tests (Python cells)</td>
 </tr>
 </tbody>
 </table>
 <div class="admonition tip">
 <p class="admonition-title">Tip</p>
-<p>The cell gutter buttons appear when you hover over a cell. The status dot on the left shows the cell's current state (idle, running, ready, error, stale).</p>
+<p>The status glyph at the top of the gutter shows the cell's current state
+(idle, queued, running, ready, stale, error); hover it for details.</p>
 </div>
 <h2 id="not-yet-bound-to-keyboard">Not yet bound to keyboard<a class="headerlink" href="#not-yet-bound-to-keyboard" title="Permanent link">&para;</a></h2>
-<p>These operations exist in the UI / WebSocket protocol but don't have
-dedicated keyboard shortcuts yet - use the buttons or menu:</p>
+<p>These operations exist in the UI but don't have dedicated keyboard shortcuts
+yet. Use the buttons:</p>
 <ul>
-<li><strong>Run all cells</strong> (WebSocket <code>notebook_run_all</code>)</li>
-<li><strong>Add cell below / above</strong> (use <code>+</code> in the cell gutter)</li>
-<li><strong>Delete cell</strong> (use <code>×</code> in the cell gutter; it deletes immediately, with no confirmation, and does nothing when only one cell is left)</li>
-<li><strong>Reorder cells</strong> (use <code>▲</code> / <code>▼</code> in the gutter, or drag the cell handle)</li>
+<li><strong>Run all / rerun all cells</strong> (<strong>▶ Run All</strong> and <strong>↻ Rerun All</strong> in the header)</li>
+<li><strong>Add cell</strong> (<code>+</code> in the cell gutter adds below; <strong>Add cell</strong> in the header
+  appends a cell of the kind you pick). There is no "add above".</li>
+<li><strong>Delete cell</strong> (use <code>×</code> in the cell gutter; it deletes immediately, with no
+  confirmation, and does nothing when only one cell is left)</li>
+<li><strong>Reorder cells</strong> (use <code>▲</code> / <code>▼</code> in the gutter; there is no drag to reorder)</li>
 <li><strong>Navigate cells</strong> (no arrow-key navigation between cells; click to
   focus, or use the editor <code>↑</code> / <code>↓</code> to move the cursor within a cell)</li>
-<li><strong>Cancel running cell</strong> (Stop button on running cells)</li>
 </ul>
 <p>This list is intentionally explicit so you know what's wired up
 versus what's still UI-only. Missing bindings are usually a one-line
-addition in <code>frontend/src/components/KeyboardShortcutsModal.vue</code>
-plus the matching handler - open an issue if a specific shortcut is
-high-friction for you.</p>
+addition to the keymap in <code>frontend/src/composables/useCodemirror.ts</code> (or the
+global handler in <code>frontend/src/views/NotebookPage.vue</code>), plus a row in
+<code>frontend/src/components/KeyboardShortcutsModal.vue</code>. Open an issue if a
+specific shortcut is high-friction for you.</p>
 
 
 

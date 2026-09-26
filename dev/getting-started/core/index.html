@@ -2198,9 +2198,9 @@
 <div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>uv<span class="w"> </span>run<span class="w"> </span>python<span class="w"> </span>examples/hello_world.py
 </code></pre></div>
 <p>This creates a local Iceberg table with 100K rows and times three reads against it:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>Cold run     (no cache)             ~500ms  , read Parquet, cache as Arrow IPC
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>Warm run     (in-memory cache hit)  ~50ms   , serve from process memory
-<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>Restart run  (disk cache hit)       ~60ms   , serve from on-disk Arrow IPC
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>Cold run     (no cache)             ~500ms   read Parquet, cache as Arrow IPC
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>Warm run     (in-memory cache hit)  ~50ms    serve from process memory
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>Restart run  (disk cache hit)       ~60ms    serve from on-disk Arrow IPC
 </code></pre></div>
 <p>Same inputs, same transform, three different cache states, and the third is still ~10× faster than the first because the disk cache survives restarts.</p>
 <h2 id="3-materialize-a-result">3. Materialize a result<a class="headerlink" href="#3-materialize-a-result" title="Permanent link">&para;</a></h2>
@@ -2229,7 +2229,7 @@
 <a id="__codelineno-4-16" name="__codelineno-4-16" href="#__codelineno-4-16"></a><span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;URI: </span><span class="si">{</span><span class="n">artifact</span><span class="o">.</span><span class="n">uri</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
 <a id="__codelineno-4-17" name="__codelineno-4-17" href="#__codelineno-4-17"></a><span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Cache hit: </span><span class="si">{</span><span class="n">artifact</span><span class="o">.</span><span class="n">cache_hit</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
 </code></pre></div>
-<div class="highlight"><span class="filename">Output</span><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>URI: strata://artifact/scan_a7b3c9d1e5f2@v=1
+<div class="highlight"><span class="filename">Output</span><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>URI: strata://artifact/3f6c1a2e-8b4d-4e7a-9c15-2d0b7e4f8a61@v=1
 <a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>Cache hit: False
 </code></pre></div>
 <p>Re-running the same call returns the same URI with <code>Cache hit: True</code>.</p>
@@ -2289,9 +2289,9 @@ dropping a row you asked for.</p>
 </ul>
 <h2 id="whats-next">What's next<a class="headerlink" href="#whats-next" title="Permanent link">&para;</a></h2>
 <ul>
-<li><a href="../../reference/configuration/">Configuration</a> all environment variables (cache, fetcher, S3 / GCS / Azure, auth, timeouts)</li>
-<li><a href="../../deployment/modes/">Deployment Modes</a> <code>personal</code> vs <code>service</code> mode and the auth boundary</li>
-<li><a href="../../reference/rest-api/">REST API</a> notebook protocol surface (separate from the <code>/v1/materialize</code> endpoint this page calls into)</li>
+<li><a href="../../reference/configuration/">Configuration</a>: all environment variables (cache, fetcher, S3 / GCS / Azure, auth, timeouts)</li>
+<li><a href="../../deployment/modes/">Deployment Modes</a>: <code>personal</code> vs <code>service</code> mode and the auth boundary</li>
+<li><a href="../../reference/rest-api/">REST API</a>: notebook protocol surface (separate from the <code>/v1/materialize</code> endpoint this page calls into)</li>
 </ul>
 
 

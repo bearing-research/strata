@@ -2372,7 +2372,7 @@ in the notebook header, same engine, browser triggers a file download.</p>
 <tbody>
 <tr>
 <td><code>--to {markdown,html,snapshot}</code></td>
-<td>Output format. Default <code>markdown</code>. <code>snapshot</code> writes a portable zip — see <a href="#snapshots">Snapshots</a>.</td>
+<td>Output format. Default <code>markdown</code>. <code>snapshot</code> writes a portable zip; see <a href="#snapshots">Snapshots</a>.</td>
 </tr>
 <tr>
 <td><code>--force</code></td>
@@ -2445,7 +2445,8 @@ alongside Markdown and HTML.</p>
 <p>For each cell, the exporter emits in order:</p>
 <ol>
 <li><strong>Banner</strong>: the cell's <code># @name</code> (if set) or its ID, plus small
-   chips for <code># @worker</code>, <code># @variant</code>, <code># @loop</code>, <code># @mount</code>.</li>
+   chips for the cell's language, <code># @worker</code>, <code># @variant</code>, <code># @loop</code>
+   and <code># @mount</code>.</li>
 <li><strong>Source</strong>: fenced code block in the cell's language. The fence
    length auto-grows to cover embedded triple-backticks safely.</li>
 <li><strong>Cached display outputs</strong>: per content type:<ul>
@@ -2483,8 +2484,8 @@ never included in exports, with or without flags. Reasons:</p>
 <p>If you want a response in the export, paste it into a markdown cell
 manually, that signals "yes I want this published."</p>
 <h3 id="variant-cells-active-member-by-default">Variant cells, active member by default<a class="headerlink" href="#variant-cells-active-member-by-default" title="Permanent link">&para;</a></h3>
-<p>A variant group renders only its <strong>active</strong> variant by default, plus
-a small banner note ("Variant <code>&lt;name&gt;</code> of group <code>&lt;group&gt;</code>"). Pass
+<p>A variant group renders only its <strong>active</strong> variant by default, with
+a <code>variant</code> chip reading <code>&lt;name&gt; of &lt;group&gt;</code>. Pass
 <code>--include-inactive-variants</code> to render all members stacked.</p>
 <h3 id="loop-cells-final-iteration-only">Loop cells, final iteration only<a class="headerlink" href="#loop-cells-final-iteration-only" title="Permanent link">&para;</a></h3>
 <p>Loop cells render the body and the <strong>final iteration's display
@@ -2524,8 +2525,8 @@ format.</p>
 per-cell runtime state (including each cell's last failure and the source it
 was about, and what a widget's controls were set to), and as many artifact
 bytes as you ask for. <code>strata
-import &lt;file&gt;.zip</code> unpacks one back into a notebook directory — see
-<a href="../import/#importing-a-snapshot">Importing a snapshot</a>.</p>
+import &lt;file&gt;.zip</code> unpacks one back into a notebook directory (see
+<a href="../import/#importing-a-snapshot">Importing a snapshot</a>).</p>
 <p>What travels is <code>--include</code>:</p>
 <table>
 <thead>
@@ -2545,7 +2546,7 @@ import &lt;file&gt;.zip</code> unpacks one back into a notebook directory — se
 </tr>
 <tr>
 <td><code>none</code></td>
-<td>No artifact bytes — the notebook and its provenance, nothing to replay from.</td>
+<td>No artifact bytes: the notebook and its provenance, nothing to replay from.</td>
 </tr>
 </tbody>
 </table>
@@ -2555,8 +2556,8 @@ import &lt;file&gt;.zip</code> unpacks one back into a notebook directory — se
 <a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="c1"># A review copy: one cell&#39;s results, the rest by reference</span>
 <a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>strata<span class="w"> </span><span class="nb">export</span><span class="w"> </span>./my_analysis<span class="w"> </span>--to<span class="w"> </span>snapshot<span class="w"> </span>--cells<span class="w"> </span>a1b2c3d4<span class="w"> </span>--out<span class="w"> </span>review.zip
 </code></pre></div>
-<p><code>--out</code> is required for a snapshot — it is a zip, not text — and it refuses to
-overwrite a path that already holds something unless you pass <code>--force</code>.</p>
+<p><code>--out</code> is required for a snapshot, since it is a zip rather than text, and it
+refuses to overwrite a path that already holds something unless you pass <code>--force</code>.</p>
 <h2 id="integration-mkdocs-hook">Integration: mkdocs hook<a class="headerlink" href="#integration-mkdocs-hook" title="Permanent link">&para;</a></h2>
 <p>The docs site uses a small mkdocs hook
 (<code>docs_hooks/export_examples.py</code>) to render every <code>examples/*/</code>

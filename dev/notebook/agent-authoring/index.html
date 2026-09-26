@@ -2285,18 +2285,20 @@ the <a href="../cli/">Notebook CLI</a> for the full command surface. The rest of
 is the file-format contract underneath both.</p>
 <h2 id="on-disk-layout">On-disk layout<a class="headerlink" href="#on-disk-layout" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>my_analysis/
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>├── notebook.toml          # committed config: cells, env, workers, mounts
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>├── pyproject.toml         # uv-managed dependencies
-<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>├── uv.lock                # written by uv; do not hand-edit
-<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>├── cells/
-<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>│   ├── load.py
-<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a>│   ├── notes.md
-<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a>│   └── stats.py
-<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a>└── .strata/               # runtime state - NEVER create, edit, or commit
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>├── .gitignore             # written by `strata new`: keeps .strata/ and .venv/ out of git
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>├── notebook.toml          # committed config: cells, env, workers, mounts
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>├── pyproject.toml         # uv-managed dependencies
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>├── uv.lock                # written by uv; do not hand-edit
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>├── cells/
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a>│   ├── load.py
+<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a>│   ├── notes.md
+<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a>│   └── stats.py
+<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a>└── .strata/               # runtime state - NEVER create, edit, or commit
 </code></pre></div>
 <p><strong><code>.strata/</code> is hands-off.</strong> Display outputs, provenance hashes, console
 snapshots, and the artifact store live there; the server and CLI manage
-it entirely. It's gitignored. If you are generating a notebook from
+it entirely, and the <code>.gitignore</code> that <code>strata new</code> writes keeps it out of
+git. If you are generating a notebook from
 scratch, don't create it.</p>
 <h2 id="notebooktoml-the-minimum-that-works">notebook.toml - the minimum that works<a class="headerlink" href="#notebooktoml-the-minimum-that-works" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="n">notebook_id</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;my-analysis-001&quot;</span>
@@ -2325,11 +2327,13 @@ when writing it by hand:</p>
   API routes. The server generates 8-char UUID prefixes; hand-written
   short names (<code>load</code>, <code>stats</code>) are fine. Don't reuse an ID after
   deleting a cell.</li>
-<li><strong><code>file</code></strong> - relative to <code>cells/</code>. Conventional extensions: <code>.py</code>
-  (python, prompt), <code>.R</code> (r), <code>.sql</code> (sql), <code>.md</code> (markdown).</li>
+<li><strong><code>file</code></strong> - relative to <code>cells/</code>. The extension is never read (the
+  language comes from <code>language</code>); the server writes <code>.py</code> for python,
+  prompt and sql, <code>.r</code> for r, <code>.md</code> for markdown and <code>.widget</code> for widget.</li>
 <li><strong><code>order</code></strong> - display order <em>and</em> reference-resolution order (see
   below). Keep it consistent with the list order.</li>
-<li><strong><code>language</code></strong> - one of <code>python</code>, <code>r</code>, <code>sql</code>, <code>prompt</code>, <code>markdown</code>.</li>
+<li><strong><code>language</code></strong> - one of <code>python</code>, <code>r</code>, <code>sql</code>, <code>prompt</code>, <code>markdown</code>,
+  <code>widget</code>.</li>
 </ul>
 <h2 id="how-variables-flow-between-cells">How variables flow between cells<a class="headerlink" href="#how-variables-flow-between-cells" title="Permanent link">&para;</a></h2>
 <p>Each cell's top-level assignments are its <strong>defines</strong>; the free variables
@@ -2477,7 +2481,7 @@ stored.</p>
 <a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="n">mean</span> <span class="o">=</span> <span class="n">total</span> <span class="o">/</span> <span class="nb">len</span><span class="p">(</span><span class="n">numbers</span><span class="p">)</span>
 </code></pre></div>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a>$<span class="w"> </span>strata<span class="w"> </span>validate<span class="w"> </span>./handwritten<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>strata<span class="w"> </span>run<span class="w"> </span>./handwritten
-<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a>✓<span class="w"> </span>valid<span class="w"> </span>-<span class="w"> </span><span class="m">3</span><span class="w"> </span>cell<span class="o">(</span>s<span class="o">)</span>
+<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a>✓<span class="w"> </span>valid:<span class="w"> </span><span class="m">3</span><span class="w"> </span>cell<span class="o">(</span>s<span class="o">)</span>
 <a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a>...
 <a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a><span class="m">3</span><span class="w"> </span>ran<span class="w"> </span><span class="k">in</span><span class="w"> </span><span class="m">1</span>.2s
 </code></pre></div>

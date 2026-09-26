@@ -2496,12 +2496,14 @@ run</code> is the expensive step. See
 <a href="../agent-authoring/">Authoring Notebooks Programmatically</a>.</p>
 <h2 id="strata-new"><code>strata new</code><a class="headerlink" href="#strata-new" title="Permanent link">&para;</a></h2>
 <p>Scaffold a notebook directory without the server:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>strata<span class="w"> </span>new<span class="w"> </span><span class="s2">&quot;My Analysis&quot;</span><span class="w"> </span><span class="o">[</span>--parent<span class="w"> </span>DIR<span class="o">]</span><span class="w"> </span><span class="o">[</span>--python<span class="w"> </span><span class="m">3</span>.12<span class="o">]</span><span class="w"> </span><span class="o">[</span>--no-env<span class="o">]</span><span class="w"> </span><span class="o">[</span>--project-mount<span class="w"> </span><span class="o">[</span>NAME<span class="o">]]</span><span class="w"> </span><span class="o">[</span>--format<span class="w"> </span>human<span class="p">|</span>json<span class="o">]</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>strata<span class="w"> </span>new<span class="w"> </span><span class="s2">&quot;My Analysis&quot;</span><span class="w"> </span><span class="o">[</span>--parent<span class="w"> </span>DIR<span class="o">]</span><span class="w"> </span><span class="o">[</span>--python<span class="w"> </span><span class="m">3</span>.12<span class="o">]</span><span class="w"> </span><span class="o">[</span>--no-env<span class="o">]</span><span class="w"> </span><span class="o">[</span>--no-git<span class="o">]</span><span class="w"> </span><span class="o">[</span>--project-mount<span class="w"> </span><span class="o">[</span>NAME<span class="o">]]</span><span class="w"> </span><span class="o">[</span>--format<span class="w"> </span>human<span class="p">|</span>json<span class="o">]</span>
 </code></pre></div>
 <p>Creates <code>&lt;parent&gt;/my_analysis/</code> with <code>notebook.toml</code>, <code>pyproject.toml</code>
-(pre-seeded with the notebook runtime packages), and an empty <code>cells/</code>
-directory, then syncs the venv (skip with <code>--no-env</code>; <code>strata run</code> syncs it
-later). Idempotent on an existing notebook directory: the <code>notebook_id</code> and
+(pre-seeded with the notebook runtime packages), an empty <code>cells/</code>
+directory and a <code>.gitignore</code> that keeps <code>.strata/</code>, <code>.venv/</code> and
+<code>renv/library/</code> out of version control (skip it with <code>--no-git</code>; an existing
+<code>.gitignore</code> is never replaced), then syncs the venv (skip with <code>--no-env</code>;
+<code>strata run</code> syncs it later). Idempotent on an existing notebook directory: the <code>notebook_id</code> and
 any existing cells are preserved, so re-running it never orphans artifacts.</p>
 <p><code>--project-mount [NAME]</code> adds a notebook-level <strong>read-only mount of <code>--parent</code></strong>
 (the project directory) as a <code>Path</code> variable <code>NAME</code> (default <code>project</code>) in every
@@ -2580,7 +2582,7 @@ file by hand. Both <strong>sync the venv first</strong> (like <code>strata run</
 <p>Both also accept <code>--server &lt;url&gt; --session &lt;id&gt;</code> to run on a live session instead
 of a local directory (<code>strata cell run --server http://localhost:8765 --session
 $SID &lt;cell_id&gt; --rerun</code>). The server owns its venv, so the remote path never syncs
-- <code>--no-sync</code> is a local-only flag - and <code>--rerun</code> / <code>--force</code> map to the
+(<code>--no-sync</code> is a local-only flag), and <code>--rerun</code> / <code>--force</code> map to the
 server's run modes, so remote execution has the same three modes as local.</p>
 <p><code>--format json</code> (default) writes a single clean JSON object to <strong>stdout</strong> - the
 executor's logs go to stderr, so the stdout stream stays parseable:</p>
@@ -2623,6 +2625,9 @@ failure such as an unknown cell or a failed <code>uv</code> resolve, <code>2</co
 instead of a local directory - edits land in the running notebook a human is
 watching in the TUI. (<code>cell add</code> makes two calls: it mints the cell on the
 server, then sets its source.)</p>
+<p>Every cell records who wrote it. Pass <code>--author NAME</code> (your agent's name, say)
+so a person can tell agent edits from their own; a server that authenticates
+its callers ignores it and records the authenticated identity instead.</p>
 <p>Together with inspect (<code>cell list/show</code>, <code>dag</code>, <code>status</code>) and execution (<code>cell
 run/test</code>), this is the full agent surface - and <strong>all of it</strong> works either
 offline against a directory or <code>--server/--session</code> against a running server. An

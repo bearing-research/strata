@@ -2224,13 +2224,17 @@ time</strong> and you want re-runs to track those changes automatically:</p>
 </ul>
 <p>If your input is a fixed file, a plain mount (<code># @mount</code>) or a hard-coded path
 is simpler. <code>@table</code> earns its keep precisely when the snapshot can move.</p>
+<p>To query catalog tables in SQL rather than scan them from Python, a DuckDB
+<a href="../cells/#duckdb-over-the-lake">SQL cell over the lake</a> pins every table it
+reads the same way, with no <code>@table</code> line.</p>
 <h2 id="prerequisites">Prerequisites<a class="headerlink" href="#prerequisites" title="Permanent link">&para;</a></h2>
 <ul>
-<li>A running Strata server in <strong>personal mode</strong> (the embedded <code>scan@v1</code>
-  transform runs there): <code>uv run python -m strata</code> serves the notebook UI on
-  <code>http://localhost:8765</code>.</li>
-<li><code>pyiceberg</code> available in your notebook environment (it ships with the
-  <code>[notebook]</code> extra).</li>
+<li>A running Strata server: <code>uv run python -m strata</code> (personal mode, the
+  default) serves the notebook UI on <code>http://localhost:8765</code>.</li>
+<li><code>pyiceberg</code> for the two setup scripts below. It is a core Strata dependency,
+  so <code>uv run python</code> in the Strata project has it. The notebook's own
+  environment does not need it: the server resolves the snapshot and runs the
+  scan.</li>
 </ul>
 <h2 id="step-1-build-a-warehouse">Step 1 - Build a warehouse<a class="headerlink" href="#step-1-build-a-warehouse" title="Permanent link">&para;</a></h2>
 <p>Any Iceberg catalog works (local, S3, GCS, Azure). For this walkthrough, a
@@ -2266,29 +2270,28 @@ notebook:</p>
 </code></pre></div>
 <p>The <strong>table URI</strong> is <code>&lt;warehouse&gt;#&lt;namespace&gt;.&lt;table&gt;</code> - here
 <code>file:///tmp/strata-demo/warehouse#shop.orders</code>. This is the same URI format
-<code>client.materialize</code> accepts.</p>
+<code>client.materialize</code> accepts. A table in a catalog the server names under
+<code>STRATA_CATALOGS</code> is written <code>&lt;catalog&gt;:&lt;namespace&gt;.&lt;table&gt;</code> instead (see the
+<a href="../annotations/#table"><code>@table</code> reference</a>).</p>
 <h2 id="step-2-declare-a-lake-aware-cell">Step 2 - Declare a lake-aware cell<a class="headerlink" href="#step-2-declare-a-lake-aware-cell" title="Permanent link">&para;</a></h2>
-<p>In a notebook cell, declare the table and scan it. The <code>@table</code> annotation
-injects two variables: <code>orders</code> (the table URI) and <code>orders_snapshot</code> (the
-resolved snapshot id).</p>
+<p>In a notebook cell, declare the table and scan it with the cell's
+<a href="../cells/#the-ambient-strata-client">ambient <code>strata</code> client</a>, which is already
+bound to the server. The <code>@table</code> annotation injects two variables: <code>orders</code>
+(the table URI) and <code>orders_snapshot</code> (the resolved snapshot id).</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="c1"># @table orders file:///tmp/strata-demo/warehouse#shop.orders</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="kn">from</span><span class="w"> </span><span class="nn">strata_client</span><span class="w"> </span><span class="kn">import</span> <span class="n">StrataClient</span>
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>
-<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="n">client</span> <span class="o">=</span> <span class="n">StrataClient</span><span class="p">(</span><span class="n">base_url</span><span class="o">=</span><span class="s2">&quot;http://127.0.0.1:8765&quot;</span><span class="p">)</span>
-<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>
-<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="n">scan</span> <span class="o">=</span> <span class="n">client</span><span class="o">.</span><span class="n">materialize</span><span class="p">(</span>
-<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a>    <span class="n">inputs</span><span class="o">=</span><span class="p">[</span><span class="n">orders</span><span class="p">],</span>
-<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a>    <span class="n">transform</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;executor&quot;</span><span class="p">:</span> <span class="s2">&quot;scan@v1&quot;</span><span class="p">,</span> <span class="s2">&quot;params&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;snapshot_id&quot;</span><span class="p">:</span> <span class="n">orders_snapshot</span><span class="p">}},</span>
-<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a>    <span class="n">name</span><span class="o">=</span><span class="s2">&quot;shop/orders-raw&quot;</span><span class="p">,</span>
-<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a><span class="p">)</span>
-<a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a><span class="n">df</span> <span class="o">=</span> <span class="n">scan</span><span class="o">.</span><span class="n">to_pandas</span><span class="p">()</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="n">scan</span> <span class="o">=</span> <span class="n">strata</span><span class="o">.</span><span class="n">materialize</span><span class="p">(</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>    <span class="n">inputs</span><span class="o">=</span><span class="p">[</span><span class="n">orders</span><span class="p">],</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>    <span class="n">transform</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;executor&quot;</span><span class="p">:</span> <span class="s2">&quot;scan@v1&quot;</span><span class="p">,</span> <span class="s2">&quot;params&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;snapshot_id&quot;</span><span class="p">:</span> <span class="n">orders_snapshot</span><span class="p">}},</span>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>    <span class="n">name</span><span class="o">=</span><span class="s2">&quot;shop/orders-raw&quot;</span><span class="p">,</span>
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="p">)</span>
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="n">df</span> <span class="o">=</span> <span class="n">scan</span><span class="o">.</span><span class="n">to_pandas</span><span class="p">()</span>
+<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a>
+<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="c1"># Re-export the snapshot as a real variable so downstream cells can use it</span>
+<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a><span class="c1"># (injected @table vars live only in this cell - see &quot;Gotchas&quot; below).</span>
+<a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a><span class="n">orders_snapshot_value</span> <span class="o">=</span> <span class="n">orders_snapshot</span>
 <a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a>
-<a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a><span class="c1"># Re-export the snapshot as a real variable so downstream cells can use it</span>
-<a id="__codelineno-2-14" name="__codelineno-2-14" href="#__codelineno-2-14"></a><span class="c1"># (injected @table vars live only in this cell - see &quot;Gotchas&quot; below).</span>
-<a id="__codelineno-2-15" name="__codelineno-2-15" href="#__codelineno-2-15"></a><span class="n">orders_snapshot_value</span> <span class="o">=</span> <span class="n">orders_snapshot</span>
-<a id="__codelineno-2-16" name="__codelineno-2-16" href="#__codelineno-2-16"></a>
-<a id="__codelineno-2-17" name="__codelineno-2-17" href="#__codelineno-2-17"></a><span class="n">total</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">df</span><span class="p">[</span><span class="s2">&quot;amount&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">sum</span><span class="p">())</span>
-<a id="__codelineno-2-18" name="__codelineno-2-18" href="#__codelineno-2-18"></a><span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;scanned </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">df</span><span class="p">)</span><span class="si">}</span><span class="s2"> rows at snapshot </span><span class="si">{</span><span class="n">orders_snapshot</span><span class="si">}</span><span class="s2"> - total=</span><span class="si">{</span><span class="n">total</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+<a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a><span class="n">total</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">df</span><span class="p">[</span><span class="s2">&quot;amount&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">sum</span><span class="p">())</span>
+<a id="__codelineno-2-14" name="__codelineno-2-14" href="#__codelineno-2-14"></a><span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;scanned </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">df</span><span class="p">)</span><span class="si">}</span><span class="s2"> rows at snapshot </span><span class="si">{</span><span class="n">orders_snapshot</span><span class="si">}</span><span class="s2"> - total=</span><span class="si">{</span><span class="n">total</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
 </code></pre></div>
 <p>Run it (Shift+Enter). Passing <code>orders_snapshot</code> to the scan makes the cell
 <strong>deterministic</strong>: it reads exactly the snapshot its provenance recorded.</p>
@@ -2350,7 +2353,7 @@ inputs change; <code>@table</code> adds the lake snapshot to the mix.</p>
   the cell is treated as stale rather than crashing; if it's still unreachable
   at execution time, the run fails with a clear error.</li>
 <li><strong>The embedded scan runs in-process.</strong> <code>scan@v1</code> is handled by the server
-  itself in both modes -- it is resolved before any executor dispatch, so
+  itself in both modes: it is resolved before any executor dispatch, so
   scanning a table needs no registered executor and none is consulted.</li>
 <li><strong>Merge-on-read tables are refused.</strong> A table whose snapshot carries
   positional or equality delete files - what Spark or Flink <code>MERGE</code> / <code>DELETE</code>

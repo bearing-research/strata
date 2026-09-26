@@ -1410,10 +1410,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#whats-still-ahead" class="md-nav__link">
+  <a href="#warm-rscript-pool" class="md-nav__link">
     <span class="md-ellipsis">
       
-        What's still ahead
+        Warm Rscript pool
       
     </span>
   </a>
@@ -3201,10 +3201,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#whats-still-ahead" class="md-nav__link">
+  <a href="#warm-rscript-pool" class="md-nav__link">
     <span class="md-ellipsis">
       
-        What's still ahead
+        Warm Rscript pool
       
     </span>
   </a>
@@ -3339,11 +3339,11 @@
 </tr>
 </tbody>
 </table>
-<p>Compute cells participate in the DAG, cache by provenance hash, and can be routed to remote workers; widget and markdown cells are declarative (no subprocess). Pick the kind that matches the shape of the computation, this page walks through each.</p>
+<p>Compute cells participate in the DAG, cache by provenance hash, and can be routed to remote workers; widget and markdown cells are declarative (no subprocess). Pick the kind that matches the shape of the computation; this page walks through each.</p>
 <p>See <a href="../concepts/">Concepts</a> for the execution model; see <a href="../annotations/">Cell Annotations</a> for the full per-annotation reference.</p>
 <hr />
 <h2 id="python-cells">Python Cells<a class="headerlink" href="#python-cells" title="Permanent link">&para;</a></h2>
-<p>The default. A Python cell is just Python source, assignments at module scope become the cell's outputs, and free variables become inputs pulled from upstream cells.</p>
+<p>The default. A Python cell is just Python source: assignments at module scope become the cell's outputs, and free variables become inputs pulled from upstream cells.</p>
 <h3 id="writing-a-python-cell">Writing a Python cell<a class="headerlink" href="#writing-a-python-cell" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">pandas</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">pd</span>
 <a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>
@@ -3389,12 +3389,16 @@ does. It needs a team store configured (<code>STRATA_NOTEBOOK_REMOTE_STORE_URL</
 raises if there is none. Only <em>upstream</em> results can be promoted from inside a
 cell - a cell's own outputs are stored after it returns, so promoting one is a
 job for the strip's <strong>Promote to team…</strong> or <code>strata artifact promote</code> once it has run.</p>
-<p>When a cell publishes with a name - <code>strata.put(inputs=[], transform=…, data=…, name="taxi/tip-model")</code> - the artifact appears in the <a href="../../core/registry/#in-the-notebook-the-registry-dashboard">registry dashboard</a>: a promote strip under the cell, and the Registry tab in the bottom drawer (promote, approve, lineage - all in the UI).</p>
+<p>The ambient client points at this server, never at the team store, and it
+carries no team-store credential. When a cell publishes with a name
+(<code>strata.put(inputs=[], transform=…, data=…, name="taxi/tip-model")</code>), the
+artifact lands in the notebook's own store and reaches the team by promotion.
+It appears in the <a href="../../core/registry/#in-the-notebook-the-registry-dashboard">registry dashboard</a>: a promote strip under the cell, and the Registry tab in the bottom drawer (promote, approve, lineage - all in the UI).</p>
 <blockquote>
 <p>Calls through <code>strata</code> are <strong>side effects</strong>. On a cache hit the cell body doesn't re-run, so a <code>strata.set_alias(...)</code> won't re-fire - fine for idempotent calls (setting an alias to the version it already points at is a no-op). A cell that stores no variable is cached too, keyed on its own provenance, so a cell whose whole point is the side effect needs <code># @nocache</code> to re-fire.</p>
 </blockquote>
 <h3 id="library-cells-cross-cell-defs-and-classes">Library cells (cross-cell defs and classes)<a class="headerlink" href="#library-cells-cross-cell-defs-and-classes" title="Permanent link">&para;</a></h3>
-<p>Top-level <code>def</code> and <code>class</code> definitions are shared across cells via a synthetic Python module, write a helper once, call it anywhere.</p>
+<p>Top-level <code>def</code> and <code>class</code> definitions are shared across cells via a synthetic Python module: write a helper once, call it anywhere.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">math</span>
 <a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>
 <a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="n">CIRCLE_PRECISION</span> <span class="o">=</span> <span class="mi">4</span>
@@ -3424,7 +3428,7 @@ job for the strip's <strong>Promote to team…</strong> or <code>strata artifact
 </code></pre></div>
 <div class="highlight"><span class="filename">Output</span><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>loaded raw bounds: [-43.98, 100.53]
 </code></pre></div>
-<p>A downstream cell can call <code>clamp(raw_max)</code>, <code>clamp</code> and <code>CLAMP_MIN/MAX</code> come from the synthetic module, <code>raw_max</code> from the artifact path.</p>
+<p>A downstream cell can call <code>clamp(raw_max)</code>: <code>clamp</code> and <code>CLAMP_MIN/MAX</code> come from the synthetic module, <code>raw_max</code> from the artifact path.</p>
 <h4 id="when-the-slice-isnt-self-contained">When the slice isn't self-contained<a class="headerlink" href="#when-the-slice-isnt-self-contained" title="Permanent link">&para;</a></h4>
 <p>Every name a kept def or class references must be bound by something else in the slice (or a Python builtin). When it isn't, Strata blocks the export with a <code>module_export_blocked</code> diagnostic, surfaced pre-flight, not just at run time.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="n">runtime_threshold</span> <span class="o">=</span> <span class="n">math</span><span class="o">.</span><span class="n">sqrt</span><span class="p">(</span><span class="mi">9</span><span class="p">)</span>   <span class="c1"># dropped, non-literal RHS</span>
@@ -3439,16 +3443,17 @@ job for the strip's <strong>Promote to team…</strong> or <code>strata artifact
 <ul>
 <li><strong>Decorators / default values / base classes</strong> evaluated at module load: <code>@my_decorator</code> where <code>my_decorator</code> isn't imported in the same cell, or <code>class Child(Parent)</code> where <code>Parent</code> is computed at runtime.</li>
 <li><strong>Divergence</strong>: a name kept by the slice is also reassigned by dropped runtime code, so the synthetic module's value would differ from the cell's final state. <code>def f(): ...; f = wrap(f)</code> exports the unwrapped <code>f</code>.</li>
-<li><strong>Lambda assignments</strong>: <code>add = lambda x: x + 1</code>, even though <code>cloudpickle</code> could serialize the value, the synthetic-module path is reserved for source-backed library code.</li>
+<li><strong>Lambda assignments</strong>: <code>add = lambda x: x + 1</code>. Even though <code>cloudpickle</code> could serialize the value, the synthetic-module path is reserved for source-backed library code.</li>
 </ul>
 <p>The fix is usually one of: move the runtime line into its own cell, add the missing import to the same cell as the def, or take the dependency as a function argument.</p>
 <h4 id="single-cell-scope">Single-cell scope<a class="headerlink" href="#single-cell-scope" title="Permanent link">&para;</a></h4>
-<p>The synthetic module is built from one cell's source only, no transitive composition across cells. A def can't reach a name imported or defined in a different cell; each cell that hosts library code carries its own imports.</p>
+<p>The synthetic module is built from one cell's source only, with no transitive composition across cells. A def can't reach a name imported or defined in a different cell; each cell that hosts library code carries its own imports.</p>
 <p>One concession: annotations that reference names outside the slice would normally block, but adding <code>from __future__ import annotations</code> relaxes this. PEP 563 stringifies annotations and the free-variable check drops them, so cross-cell type hints "just work" with the future import.</p>
 <p>Walked through end-to-end in the <a href="../../examples/library_cells/"><code>library_cells</code></a> example notebook.</p>
 <h3 id="mutation-warnings">Mutation warnings<a class="headerlink" href="#mutation-warnings" title="Permanent link">&para;</a></h3>
-<p>If a cell mutates a value it received from an upstream cell (e.g. <code>df.drop(columns=[...], inplace=True)</code>), Strata raises a <strong>mutation warning</strong>: the upstream artifact was supposed to be immutable, and subsequent cells that reuse the cached artifact will see the mutated version.</p>
-<p>The fix is to copy before mutating:</p>
+<p>A cell that changes an upstream value in place, where the source shows it (<code>df["col"] = ...</code>, <code>obj.attr = ...</code>, <code>df.drop(columns=[...], inplace=True)</code>), is read as producing a new version of that variable: the cell becomes its producer for downstream cells, and the upstream artifact is untouched.</p>
+<p>Some mutations can't be seen in the source: an alias (<code>d = df; d.drop(..., inplace=True)</code>), a helper function that mutates its argument, a bare mutator like <code>rows.append(x)</code>. Strata compares each input before and after the cell runs and raises a <strong>mutation warning</strong> for those, because the change is not stored: a downstream cell run on its own reads the value from before.</p>
+<p>The fix is to copy, or rebind, before mutating:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="n">df</span> <span class="o">=</span> <span class="n">upstream_df</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>    <span class="c1"># make a private copy</span>
 <a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="n">df</span><span class="o">.</span><span class="n">drop</span><span class="p">(</span><span class="n">columns</span><span class="o">=</span><span class="p">[</span><span class="o">...</span><span class="p">],</span> <span class="n">inplace</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
 </code></pre></div>
@@ -3483,6 +3488,22 @@ job for the strip's <strong>Promote to team…</strong> or <code>strata artifact
 <td>Attach a filesystem mount (see <a href="../annotations/">Annotations</a>)</td>
 </tr>
 <tr>
+<td><code># @table …</code></td>
+<td>Declare an Iceberg table input; its snapshot joins the provenance</td>
+</tr>
+<tr>
+<td><code># @fetch …</code></td>
+<td>Download a URL as a recorded input; its digest joins the provenance</td>
+</tr>
+<tr>
+<td><code># @dataset …</code></td>
+<td>Bind a registry name as a recorded input; its version joins the provenance</td>
+</tr>
+<tr>
+<td><code># @nocache</code></td>
+<td>Always re-execute; never serve a cache hit</td>
+</tr>
+<tr>
 <td><code># @loop …</code></td>
 <td>Turn the cell into a <a href="#loop-cells">loop cell</a></td>
 </tr>
@@ -3491,8 +3512,8 @@ job for the strip's <strong>Promote to team…</strong> or <code>strata artifact
 <p>See <a href="../annotations/">Cell Annotations</a> for the full reference.</p>
 <hr />
 <h2 id="prompt-cells">Prompt Cells<a class="headerlink" href="#prompt-cells" title="Permanent link">&para;</a></h2>
-<p>A prompt cell is a text template that gets rendered with upstream variable values, sent to an AI model, and the response stored as an artifact. Prompt cells participate in the DAG and cache by provenance exactly like Python cells, same inputs + same template + same model config = cache hit, no API call.</p>
-<p>Create a prompt cell with the <strong>"Add Prompt Cell"</strong> button in the UI, the same toolbar that adds a Python cell. You never need to touch <code>notebook.toml</code> directly; editing the cell's source, wiring it into the DAG, and persisting the result all happen through the UI.</p>
+<p>A prompt cell is a text template that gets rendered with upstream variable values, sent to an AI model, and the response stored as an artifact. Prompt cells participate in the DAG and cache by provenance exactly like Python cells: same inputs + same template + same model config = cache hit, no API call.</p>
+<p>Create a prompt cell by picking <strong>Prompt</strong> from the <strong>+ Add cell</strong> menu. You never need to touch <code>notebook.toml</code> directly; editing the cell's source, wiring it into the DAG, and persisting the result all happen through the UI.</p>
 <h3 id="basic-syntax">Basic syntax<a class="headerlink" href="#basic-syntax" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a># @name summary
 <a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a>Summarize this dataset and return the top 3 findings as a numbered list:
@@ -3501,7 +3522,7 @@ job for the strip's <strong>Promote to team…</strong> or <code>strata artifact
 </code></pre></div>
 <div class="highlight"><span class="filename">Output (illustrative model response)</span><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a>1. Setosa is linearly separable from versicolor and virginica based on petal dimensions alone.
 <a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a>2. Versicolor and virginica overlap moderately on sepal width but separate well by petal length.
-<a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a>3. The dataset is balanced, 50 samples per species, no missing values.
+<a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a>3. The dataset is balanced (50 samples per species) with no missing values.
 </code></pre></div>
 <ul>
 <li><code>{{ df }}</code> is replaced with a text representation of the upstream variable <code>df</code> before sending to the model.</li>
@@ -3520,11 +3541,11 @@ job for the strip's <strong>Promote to team…</strong> or <code>strata artifact
 <tbody>
 <tr>
 <td>pandas DataFrame</td>
-<td>Markdown table (first 20 rows)</td>
+<td>Shape and column list, then every column, as many rows as fit</td>
 </tr>
 <tr>
 <td>pandas Series</td>
-<td>String representation (first 20 values)</td>
+<td>Name, length and dtype, then as many values as fit</td>
 </tr>
 <tr>
 <td>numpy ndarray</td>
@@ -3535,19 +3556,19 @@ job for the strip's <strong>Promote to team…</strong> or <code>strata artifact
 <td>JSON, indented</td>
 </tr>
 <tr>
-<td>str / int / float</td>
-<td>Direct string conversion</td>
+<td>anything else</td>
+<td><code>str(value)</code></td>
 </tr>
 </tbody>
 </table>
-<p>Each variable has a 2,000-token budget per template render. Oversized values are truncated with a <code>... (truncated)</code> marker.</p>
+<p>Each variable has a 2,000-token budget (about 8,000 characters) per template render. A frame or series drops rows past the budget and ends with <code>... (N more rows)</code>; other values are cut with a <code>... (truncated)</code> marker.</p>
 <p><strong>Attribute access</strong> is supported for safe read-only operations:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a>{{ df.describe() }}     # OK, pandas describe() is allow-listed
 <a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a>{{ df.head() }}         # OK
 <a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a>{{ obj.attr }}          # OK, attribute access (non-callable)
-<a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a>{{ obj.mutate() }}      # blocked, unknown method, left as-is in the template
+<a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a>{{ obj.mutate() }}      # blocked (unknown method); left as-is in the template
 </code></pre></div>
-<p>Only a small set of methods is permitted (<code>describe</code>, <code>head</code>, <code>tail</code> on pandas objects). Arbitrary method calls are blocked to keep template rendering side-effect-free.</p>
+<p>Only a small set of methods is permitted (<code>describe</code>, <code>head</code>, <code>tail</code> on pandas objects), called with no arguments. Arbitrary method calls are blocked to keep template rendering side-effect-free.</p>
 <h3 id="prompt-cell-annotations">Prompt-cell annotations<a class="headerlink" href="#prompt-cell-annotations" title="Permanent link">&para;</a></h3>
 <table>
 <thead>
@@ -3580,7 +3601,7 @@ job for the strip's <strong>Promote to team…</strong> or <code>strata artifact
 </tr>
 <tr>
 <td><code># @system &lt;text&gt;</code></td>
-<td>System prompt prepended to the request</td>
+<td>System prompt prepended to the request (one line; the last one wins)</td>
 <td>None</td>
 </tr>
 <tr>
@@ -3632,7 +3653,7 @@ job for the strip's <strong>Promote to team…</strong> or <code>strata artifact
 </tr>
 <tr>
 <td><strong>Gemini / Mistral / Ollama / vLLM</strong></td>
-<td>Fallback to <code>response_format: {type: "json_object"}</code>, valid JSON guaranteed, shape not enforced server-side. Client-side validation (see below) fills the gap.</td>
+<td>Fallback to <code>response_format: {type: "json_object"}</code>: valid JSON guaranteed, shape not enforced server-side. Client-side validation (see below) fills the gap.</td>
 </tr>
 <tr>
 <td><strong>Servers that reject the extensions</strong></td>
@@ -3644,7 +3665,7 @@ job for the strip's <strong>Promote to team…</strong> or <code>strata artifact
 <p>Validation is lenient about packaging: when a provider wraps otherwise-valid
 JSON in code fences or prose, Strata extracts the JSON document before
 validating instead of burning a retry on the wrapper.</p>
-<p>Example, triage each review into a structured record:</p>
+<p>Example: triage each review into a structured record.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a># @name triage
 <a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a># @output_schema {&quot;type&quot;:&quot;object&quot;,&quot;properties&quot;:{&quot;items&quot;:{&quot;type&quot;:&quot;array&quot;,&quot;items&quot;:{&quot;type&quot;:&quot;object&quot;,&quot;properties&quot;:{&quot;sentiment&quot;:{&quot;type&quot;:&quot;string&quot;,&quot;enum&quot;:[&quot;positive&quot;,&quot;negative&quot;,&quot;neutral&quot;]},&quot;priority&quot;:{&quot;type&quot;:&quot;string&quot;,&quot;enum&quot;:[&quot;low&quot;,&quot;medium&quot;,&quot;high&quot;]},&quot;tags&quot;:{&quot;type&quot;:&quot;array&quot;,&quot;items&quot;:{&quot;type&quot;:&quot;string&quot;}}},&quot;required&quot;:[&quot;sentiment&quot;,&quot;priority&quot;,&quot;tags&quot;]}}},&quot;required&quot;:[&quot;items&quot;]}
 <a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a>Triage these customer reviews:
@@ -3661,7 +3682,7 @@ validating instead of burning a retry on the wrapper.</p>
 <div class="admonition note">
 <p class="admonition-title">Long schemas don't have an escape hatch yet</p>
 <p><code># @output_schema</code> is parsed as a single JSON value from a single
-annotation line (<code>prompt_analyzer.py:143-154</code>). For real-world
+annotation line (see <code>prompt_analyzer.py</code>). For real-world
 schemas this gets long fast and the resulting cell source isn't
 pretty.</p>
 <p>Two pragmatic workarounds while a multi-line / file-reference
@@ -3694,27 +3715,29 @@ this is blocking you.</p>
 <li>On failure → append the bad response as an <code>assistant</code> turn, feed the validator's path-addressed errors back as a <code>user</code> turn, and retry.</li>
 <li>On retry exhaustion → surface a cell error with the last validator messages.</li>
 </ol>
-<p>The default is 3 total attempts (1 initial + 2 retries). Override with <code># @validate_retries N</code>. Cumulative input/output tokens across all attempts are recorded on the artifact so cost accounting is accurate. The retry count is surfaced on the cell result (<code>validation_retries</code>) the UI shows "validated after N retries" when non-zero.</p>
+<p>The default is 3 total attempts (1 initial + 2 retries). Override with <code># @validate_retries N</code>. Cumulative input/output tokens across all attempts are recorded on the artifact so cost accounting is accurate. The retry count is surfaced on the cell result (<code>validation_retries</code>), and the UI shows "validated after N retries" when non-zero.</p>
 <p>Retries are mostly invisible on OpenAI-strict and Anthropic-native paths because the provider enforces the schema at decode time. They earn their keep on the <code>json_object</code> fallback path (Gemini, Mistral, Ollama) where the provider only guarantees <em>syntactic</em> JSON.</p>
 <h3 id="caching">Caching<a class="headerlink" href="#caching" title="Permanent link">&para;</a></h3>
 <p>A prompt cell's provenance hash mixes together:</p>
 <ul>
 <li>The rendered template text (after <code>{{ var }}</code> injection)</li>
+<li>The provenance hash of each upstream variable the template reads (rendering truncates, so the text alone would miss an edit past the cut)</li>
 <li>Model name</li>
 <li>Temperature</li>
+<li><code>@max_tokens</code></li>
 <li>System prompt</li>
 <li>Output type (<code>json</code> / <code>text</code>)</li>
 <li>Output schema fingerprint (when set)</li>
 </ul>
-<p>Editing any of these invalidates the cache. In particular, tweaking <code>@output_schema</code> on a cached cell forces a fresh call, exactly what you want when iterating on the response shape.</p>
+<p>Editing any of these invalidates the cache. In particular, tweaking <code>@output_schema</code> on a cached cell forces a fresh call, which is what you want when iterating on the response shape.</p>
 <div class="admonition tip">
 <p class="admonition-title">Keep temperature at 0.0 for prompt cells</p>
 </div>
-<p>With <code>temperature=0.0</code> the model is deterministic: same inputs → same output, and cache behavior is intuitive. Bumping temperature makes the first response "sticky" in the cache, future runs return the stored stochastic sample rather than re-sampling.</p>
+<p>With <code>temperature=0.0</code> the model is deterministic: same inputs → same output, and cache behavior is intuitive. Bumping temperature makes the first response "sticky" in the cache: future runs return the stored stochastic sample rather than re-sampling.</p>
 <p>See <a href="../ai/">AI Integration</a> for provider configuration and the conversational AI assistant.</p>
 <hr />
 <h2 id="sql-cells">SQL Cells<a class="headerlink" href="#sql-cells" title="Permanent link">&para;</a></h2>
-<p>A SQL cell sends a query to a connected database via ADBC and stores the result as an Arrow Table artifact. Like Python and prompt cells, SQL cells participate in the DAG, cache by provenance hash, and surface their output to downstream cells.</p>
+<p>A SQL cell sends a query to a connected database via ADBC (DuckDB through its own driver) and stores the result as an Arrow Table artifact. Like Python and prompt cells, SQL cells participate in the DAG, cache by provenance hash, and surface their output to downstream cells.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a><span class="o">#</span><span class="w"> </span><span class="o">@</span><span class="k">sql</span><span class="w"> </span><span class="k">connection</span><span class="o">=</span><span class="n">warehouse</span>
 <a id="__codelineno-17-2" name="__codelineno-17-2" href="#__codelineno-17-2"></a><span class="k">SELECT</span><span class="w"> </span><span class="n">customer</span><span class="p">,</span><span class="w"> </span><span class="k">SUM</span><span class="p">(</span><span class="n">amount</span><span class="p">)</span><span class="w"> </span><span class="k">AS</span><span class="w"> </span><span class="n">total</span>
 <a id="__codelineno-17-3" name="__codelineno-17-3" href="#__codelineno-17-3"></a><span class="k">FROM</span><span class="w"> </span><span class="n">orders</span>
@@ -3763,9 +3786,9 @@ this is blocking you.</p>
 <a id="__codelineno-21-4" name="__codelineno-21-4" href="#__codelineno-21-4"></a><span class="k">GROUP</span><span class="w"> </span><span class="k">BY</span><span class="w"> </span><span class="n">t</span><span class="p">.</span><span class="k">zone</span>
 </code></pre></div>
 <p>Each mount is a view by its name over its Parquet, CSV or JSON files (<code>file</code> and <code>s3</code> mounts, read with the mount's storage options). Every catalog table the query reads is an input the way an <code>@table</code> declaration is: the cell's provenance folds its current snapshot, the query reads that snapshot, and a new snapshot makes the cell stale. Each mount's fingerprint is folded too, so a new file does the same. The catalog is attached read-only and the mounts are views; a <code>write</code> cell on the connection writes only its <code>path</code> database. The catalog's <code>s3.*</code> keys apply only under an <code>s3://</code> warehouse; otherwise its tables are read with the credentials the catalog vends.</p>
-<p>A read cell runs reads: <code>SELECT</code>, set operations, <code>VALUES</code>, <code>TABLE</code>, <code>SUMMARIZE</code>, <code>DESCRIBE</code>, <code>SHOW</code> and <code>EXPLAIN</code>. Anything else — DDL, DML, <code>COPY</code>, <code>ATTACH</code>, <code>USE</code>, <code>CALL</code>, <code>PRAGMA</code>, and <code>EXPLAIN ANALYZE</code>, which runs the statement it describes — is refused before the cell reaches the driver, naming the statement, because the read-only transaction the driver opens is one a <code>COMMIT</code> in the body can end. Use <code># @sql connection=&lt;name&gt; write=true</code> for a cell that changes a database.</p>
+<p>A read cell runs reads: <code>SELECT</code>, set operations, <code>VALUES</code>, <code>TABLE</code>, <code>SUMMARIZE</code>, <code>PIVOT</code>, <code>DESCRIBE</code>, <code>SHOW</code> and plain <code>EXPLAIN</code>. Anything else (DDL, DML, <code>COPY</code>, <code>ATTACH</code>, <code>USE</code>, <code>CALL</code>, <code>SET</code>, <code>PRAGMA</code>, and <code>EXPLAIN ANALYZE</code>, which runs the statement it describes) is refused before the cell reaches the driver, naming the statement, because the read-only transaction the driver opens is one a <code>COMMIT</code> in the body can end. This holds on every driver, not only DuckDB. Use <code># @sql connection=&lt;name&gt; write=true</code> for a cell that changes a database.</p>
 <h3 id="schema-discovery">Schema discovery<a class="headerlink" href="#schema-discovery" title="Permanent link">&para;</a></h3>
-<p>The <strong>Schema panel</strong> in the sidebar shows the tables and columns visible through each declared connection. Click a connection to lazy-load its schema; click a table to expand its columns. The <code>↻</code> button re-fetches when the underlying database has changed externally. No SQL cell needs to run for this, the panel talks directly to each driver's catalog query surface (<code>sqlite_master</code> for SQLite, <code>information_schema.tables JOIN columns</code> for PostgreSQL, and the driver-specific catalog queries for Snowflake and BigQuery).</p>
+<p>The <strong>Schema panel</strong> in the sidebar shows the tables and columns visible through each declared connection. Click a connection to lazy-load its schema; click a table to expand its columns. The <code>↻</code> button re-fetches when the underlying database has changed externally. No SQL cell needs to run for this: the panel talks directly to each driver's catalog query surface (<code>sqlite_master</code> for SQLite, <code>information_schema.tables JOIN columns</code> for PostgreSQL, and the driver-specific catalog queries for Snowflake and BigQuery).</p>
 <h3 id="bind-parameters">Bind parameters<a class="headerlink" href="#bind-parameters" title="Permanent link">&para;</a></h3>
 <p><code>:name</code> placeholders resolve against upstream cell variables. Strata coerces a strict allowlist of Python types (<code>int</code>, <code>float</code>, <code>str</code>, <code>bytes</code>, <code>bool</code>, <code>None</code>, <code>Decimal</code>, <code>UUID</code>, <code>datetime</code>/<code>date</code>/<code>time</code>) into ADBC bind values; anything else (a list, a numpy scalar, a custom object) is rejected with a clear error. <strong>No string substitution ever</strong>: values flow through ADBC's prepared-statement layer, so adversarial strings (<code>'; DROP TABLE …</code>) round-trip as data, not SQL.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-22-1" name="__codelineno-22-1" href="#__codelineno-22-1"></a><span class="c1"># upstream Python cell</span>
@@ -3779,7 +3802,7 @@ this is blocking you.</p>
 <a id="__codelineno-24-3" name="__codelineno-24-3" href="#__codelineno-24-3"></a>1      1093           14   180.50  2026-04-13
 <a id="__codelineno-24-4" name="__codelineno-24-4" href="#__codelineno-24-4"></a>2      1117            3   299.00  2026-04-14
 </code></pre></div>
-<p>The DAG links the SQL cell to the Python cell automatically, same edge logic Strata uses for Python free variables.</p>
+<p>The DAG links the SQL cell to the Python cell automatically, with the same edge logic Strata uses for Python free variables. The run records the values it bound, so the lineage behind a result names the value it ran at.</p>
 <h3 id="cache-policies">Cache policies<a class="headerlink" href="#cache-policies" title="Permanent link">&para;</a></h3>
 <p>A SQL cell's <strong>provenance hash</strong> folds together:</p>
 <ul>
@@ -3823,14 +3846,14 @@ this is blocking you.</p>
 </tr>
 <tr>
 <td><code>snapshot</code></td>
-<td>Probe MUST return a durable snapshot ID. Errors at execute time if the driver can't (SQLite/Postgres can't; Iceberg can).</td>
+<td>Pins the query to one point in time through the warehouse's time travel. Snowflake and BigQuery only; refused on other drivers before a connection opens. See <a href="../annotations/#cache"><code>@cache</code></a>.</td>
 <td>Reproducibility-critical reads.</td>
 </tr>
 </tbody>
 </table>
 <p><strong>On reopen.</strong> <code>fingerprint</code> and <code>snapshot</code> open idle. Both say, in the cell's
 own annotation, that the cached rows are good only while the source still
-agrees — and asking the source is a query, not something to do while opening a
+agrees, and asking the source is a query, not something to do while opening a
 notebook. <code>forever</code>, <code>session</code> and <code>ttl</code> can come back ready, because each has
 already said what it depends on and that is settled locally: a <code>session</code> cell
 matches only within the session that ran it, and a <code>ttl</code> cell only inside the
@@ -3863,9 +3886,15 @@ database's rows.</p>
 </tr>
 <tr>
 <td>SQLite</td>
-<td><code>PRAGMA data_version</code> + <code>PRAGMA schema_version</code></td>
+<td>The database file's size, mtime and header change counter, its <code>-wal</code> sidecar, plus <code>PRAGMA data_version</code> / <code>schema_version</code></td>
 <td><strong>DB-wide</strong></td>
-<td>DML cross-process needs the probe connection open across the write, <code>data_version</code> resets on a fresh connection. DDL (schema change) invalidates cleanly.</td>
+<td>Any commit to the file, from any process, changes the token, so a write to one table invalidates cells reading another. A <code>:memory:</code> database has only the pragmas.</td>
+</tr>
+<tr>
+<td>DuckDB</td>
+<td><code>PRAGMA database_size</code></td>
+<td><strong>DB-wide</strong></td>
+<td>Advances when DuckDB writes blocks; two row states between block-aligned flushes can share a token. Pin <code># @cache session</code> on a database that is being written to while you work.</td>
 </tr>
 <tr>
 <td>Snowflake</td>
@@ -3877,7 +3906,7 @@ database's rows.</p>
 <td>BigQuery</td>
 <td><code>__TABLES__.last_modified_time</code></td>
 <td>per-table</td>
-<td>Per-dataset scoping. <code>__TABLES__</code> is the legacy-but-stable view; <code>INFORMATION_SCHEMA.TABLES</code> doesn't expose <code>last_modified_time</code>. <strong>Streaming-buffer caveat</strong>: tables receiving streaming inserts have <code>last_modified_time</code> lag by minutes-to-90-min until the buffer flushes, pin <code># @cache session</code> on those queries. Permissions: <code>bigquery.tables.get</code>.</td>
+<td>Per-dataset scoping. <code>__TABLES__</code> is the legacy-but-stable view; <code>INFORMATION_SCHEMA.TABLES</code> doesn't expose <code>last_modified_time</code>. <strong>Streaming-buffer caveat</strong>: tables receiving streaming inserts have <code>last_modified_time</code> lag by minutes-to-90-min until the buffer flushes; pin <code># @cache session</code> on those queries. Permissions: <code>bigquery.tables.get</code>.</td>
 </tr>
 </tbody>
 </table>
@@ -3886,11 +3915,12 @@ database's rows.</p>
 <p>SQL cells are <strong>read-only by default</strong>, but the enforcement mechanism depends on the backend:</p>
 <ul>
 <li><strong>SQLite</strong>: <code>mode=ro</code> plus <code>PRAGMA query_only=ON</code></li>
+<li><strong>DuckDB</strong>: a file opens with <code>read_only=True</code>, and every read runs inside <code>BEGIN TRANSACTION READ ONLY</code> (which also covers <code>:memory:</code>)</li>
 <li><strong>PostgreSQL</strong>: <code>SET default_transaction_read_only = on</code></li>
 <li><strong>Snowflake</strong>: the configured <code>role</code> must be read-only</li>
 <li><strong>BigQuery</strong>: the configured <code>credentials_path</code> must point at a read-only service account</li>
 </ul>
-<p>For SQLite and PostgreSQL, Strata enforces read-only at the connection/session level. For Snowflake and BigQuery, Strata selects the read-scoped role or credentials, and the cloud platform's grants are the actual boundary. In all cases, the default path is “read unless you explicitly opt into <code>write=true</code>.”</p>
+<p>For SQLite, DuckDB and PostgreSQL, Strata enforces read-only at the connection/session level. For Snowflake and BigQuery, Strata selects the read-scoped role or credentials, and the cloud platform's grants are the actual boundary. In all cases, the default path is “read unless you explicitly opt into <code>write=true</code>,” and the statement check above refuses anything but a read before the driver sees it.</p>
 <h3 id="write-cells">Write cells<a class="headerlink" href="#write-cells" title="Permanent link">&para;</a></h3>
 <p>Setup, seeding, and migration scripts opt into writable execution per cell:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-26-1" name="__codelineno-26-1" href="#__codelineno-26-1"></a><span class="o">#</span><span class="w"> </span><span class="o">@</span><span class="k">sql</span><span class="w"> </span><span class="k">connection</span><span class="o">=</span><span class="n">warehouse</span><span class="w"> </span><span class="k">write</span><span class="o">=</span><span class="k">true</span>
@@ -3903,13 +3933,14 @@ database's rows.</p>
 <a id="__codelineno-26-8" name="__codelineno-26-8" href="#__codelineno-26-8"></a><span class="k">INSERT</span><span class="w"> </span><span class="k">INTO</span><span class="w"> </span><span class="n">orders</span><span class="w"> </span><span class="k">VALUES</span><span class="w"> </span><span class="p">(</span><span class="mi">1</span><span class="p">,</span><span class="w"> </span><span class="s1">&#39;alice&#39;</span><span class="p">,</span><span class="w"> </span><span class="mi">25</span><span class="p">.</span><span class="mi">50</span><span class="p">),</span><span class="w"> </span><span class="p">(</span><span class="mi">2</span><span class="p">,</span><span class="w"> </span><span class="s1">&#39;bob&#39;</span><span class="p">,</span><span class="w"> </span><span class="mi">199</span><span class="p">.</span><span class="mi">99</span><span class="p">);</span>
 </code></pre></div>
 <ul>
-<li>The body is split into individual statements via sqlglot (ADBC's cursor runs only the first statement otherwise).</li>
+<li>The body is split into individual statements on sqlglot's tokenizer (ADBC's cursor runs only the first statement otherwise). Each statement runs as written in the cell, and a trailing comment is not a statement.</li>
 <li><code>:name</code> bind placeholders work the same as in read cells.</li>
 <li>The default cache policy is <code>session</code> (one execution per session; same body in the same session is a cache hit).</li>
-<li><code># @cache fingerprint</code> and <code># @cache snapshot</code> error early on write cells, probe-based invalidation has no anchor when the cell mutates state.</li>
+<li><code># @cache fingerprint</code> and <code># @cache snapshot</code> error early on write cells: probe-based invalidation has no anchor when the cell mutates state.</li>
 <li>The cell still produces an Arrow artifact: a per-statement status table with <code>stmt</code>, <code>kind</code> (<code>CREATE TABLE</code>, <code>INSERT</code>, …), and <code>rows_affected</code> (nullable; <code>null</code> for DDL).</li>
-<li>Read cells using the same connection stay on the read path, the override is per-cell.</li>
+<li>Read cells using the same connection stay on the read path; the override is per-cell.</li>
 </ul>
+<p>A query runs off the server's event loop, so a cancel lands at once: the run is abandoned and publishes nothing. The query itself may keep running in the database, because ADBC drivers differ on whether they can cancel one.</p>
 <h3 id="name-and-downstream-consumption"><code># @name</code> and downstream consumption<a class="headerlink" href="#name-and-downstream-consumption" title="Permanent link">&para;</a></h3>
 <p>A SQL cell's output variable name defaults to <code>result</code>; override with <code># @name &lt;identifier&gt;</code>. Downstream cells access the result as a pandas DataFrame (Arrow IPC artifacts deserialize through the standard notebook serializer):</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-27-1" name="__codelineno-27-1" href="#__codelineno-27-1"></a><span class="o">#</span><span class="w"> </span><span class="o">@</span><span class="k">sql</span><span class="w"> </span><span class="k">connection</span><span class="o">=</span><span class="n">warehouse</span>
@@ -3931,9 +3962,9 @@ database's rows.</p>
 <a id="__codelineno-30-2" name="__codelineno-30-2" href="#__codelineno-30-2"></a><span class="o">#</span><span class="w"> </span><span class="o">@</span><span class="k">after</span><span class="w"> </span><span class="n">seed</span>
 <a id="__codelineno-30-3" name="__codelineno-30-3" href="#__codelineno-30-3"></a><span class="k">SELECT</span><span class="w"> </span><span class="n">category</span><span class="p">,</span><span class="w"> </span><span class="k">COUNT</span><span class="p">(</span><span class="o">*</span><span class="p">)</span><span class="w"> </span><span class="k">FROM</span><span class="w"> </span><span class="n">products</span><span class="w"> </span><span class="k">GROUP</span><span class="w"> </span><span class="k">BY</span><span class="w"> </span><span class="n">category</span>
 </code></pre></div>
-<p><code># @after seed</code> adds a DAG edge from the <code>seed</code> cell to this one even though no Python variable flows between them, the dependency is on a side effect (the SQLite file). This is what cascade execution and staleness recompute use to ensure the right ordering.</p>
+<p><code># @after seed</code> adds a DAG edge from the <code>seed</code> cell to this one even though no Python variable flows between them: the dependency is on a side effect (the SQLite file). This is what cascade execution and staleness recompute use to ensure the right ordering.</p>
 <h3 id="worked-example">Worked example<a class="headerlink" href="#worked-example" title="Permanent link">&para;</a></h3>
-<p>The <a href="../../examples/sql_orders_report/"><code>sql_orders_report</code></a> example notebook walks through all of this end-to-end: a SQL <code>seed</code> cell, a Python <code>threshold</code> cell, two parameterized SQL queries, and a Python report cell, five cells, two languages, with both <code>fingerprint</code> and <code>forever</code> cache policies side by side.</p>
+<p>The <a href="../../examples/sql_orders_report/"><code>sql_orders_report</code></a> example notebook walks through all of this end-to-end: a SQL <code>seed</code> cell, a Python <code>threshold</code> cell, two parameterized SQL queries, and a Python report cell: five cells, two languages, with both <code>fingerprint</code> and <code>forever</code> cache policies side by side.</p>
 <h3 id="sql-cell-annotations">SQL-cell annotations<a class="headerlink" href="#sql-cell-annotations" title="Permanent link">&para;</a></h3>
 <table>
 <thead>
@@ -4099,7 +4130,7 @@ allow any host. Accepts a comma-separated list or a JSON array.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-35-1" name="__codelineno-35-1" href="#__codelineno-35-1"></a>strata://artifact/&lt;artifact_id&gt;@v=&lt;version&gt;
 </code></pre></div>
 <p>For loop cells, each iteration gets a suffix:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-36-1" name="__codelineno-36-1" href="#__codelineno-36-1"></a>strata://artifact/&lt;artifact_id&gt;@v=&lt;version&gt;@iter=&lt;k&gt;
+<div class="highlight"><pre><span></span><code><a id="__codelineno-36-1" name="__codelineno-36-1" href="#__codelineno-36-1"></a>strata://artifact/&lt;artifact_id&gt;@iter=&lt;k&gt;@v=&lt;version&gt;
 </code></pre></div>
 <p>The <code>&lt;artifact_id&gt;</code> is content-addressed (derived from the provenance hash); same code + same inputs + same env = same artifact ID across machines and runs. The <code>@v=N</code> version increments only when the same name pointer is re-bound to a new content hash - see <a href="../../getting-started/core/">Library usage</a> for how named artifacts work in the Core SDK.</p>
 <p>Notebook cell outputs follow the pattern <code>nb_&lt;notebook_id&gt;_cell_&lt;cell_id&gt;_var_&lt;variable&gt;@v=N</code> for the variable-level artifacts a cell produces. You don't usually need to construct these by hand; the inspect panel surfaces them and <code># @loop start_from=&lt;cell-id&gt;@iter=k</code> references them by cell ID + iteration index, not the full URI.</p>
@@ -4137,7 +4168,7 @@ allow any host. Accepts a comma-separated list or a JSON array.</p>
 <tbody>
 <tr>
 <td><code># @loop max_iter=N</code></td>
-<td>Hard cap on iterations. Required, the safety bound on the loop.</td>
+<td>Hard cap on iterations. Required: it is the safety bound on the loop.</td>
 </tr>
 <tr>
 <td><code># @loop carry=VAR</code></td>
@@ -4161,17 +4192,17 @@ allow any host. Accepts a comma-separated list or a JSON array.</p>
 </tr>
 <tr>
 <td><code># @loop start_from=&lt;cell&gt;@iter=k</code></td>
-<td>Seed iteration 0 from a specific prior iteration's artifact, used for forking runs</td>
+<td>Seed iteration 0 from a specific prior iteration's artifact, for forking runs</td>
 </tr>
 </tbody>
 </table>
 <h3 id="per-iteration-artifacts">Per-iteration artifacts<a class="headerlink" href="#per-iteration-artifacts" title="Permanent link">&para;</a></h3>
 <p>Every iteration's carry value becomes its own artifact with an <code>@iter=k</code> suffix:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-39-1" name="__codelineno-39-1" href="#__codelineno-39-1"></a>strata://artifact/nb_..._cell_&lt;loop_id&gt;_var_state@v=1@iter=0
-<a id="__codelineno-39-2" name="__codelineno-39-2" href="#__codelineno-39-2"></a>strata://artifact/nb_..._cell_&lt;loop_id&gt;_var_state@v=1@iter=1
+<div class="highlight"><pre><span></span><code><a id="__codelineno-39-1" name="__codelineno-39-1" href="#__codelineno-39-1"></a>strata://artifact/nb_..._cell_&lt;loop_id&gt;_var_state@iter=0@v=1
+<a id="__codelineno-39-2" name="__codelineno-39-2" href="#__codelineno-39-2"></a>strata://artifact/nb_..._cell_&lt;loop_id&gt;_var_state@iter=1@v=1
 <a id="__codelineno-39-3" name="__codelineno-39-3" href="#__codelineno-39-3"></a>...
 </code></pre></div>
-<p>The inspect panel shows an iteration picker so you can scrub through the intermediate states. The <strong>final</strong> iteration's artifact is also the cell's canonical output (no <code>@iter</code> suffix) downstream cells read it via the normal DAG path.</p>
+<p>The inspect panel shows an iteration picker so you can scrub through the intermediate states. The <strong>final</strong> iteration's artifact is also the cell's canonical output (no <code>@iter</code> suffix); downstream cells read it via the normal DAG path.</p>
 <h3 id="forking-a-loop">Forking a loop<a class="headerlink" href="#forking-a-loop" title="Permanent link">&para;</a></h3>
 <p>Intermediate iterations are first-class artifacts, so you can branch a new
 run from any step of an old one without re-running the expensive prefix.</p>
@@ -4182,7 +4213,7 @@ happens if you push harder from that exact state with a different step size.</p>
 <ol>
 <li>Open the loop cell's <strong>Inspect</strong> panel, scrub to iteration 17, copy its
    artifact URI. It'll look like
-   <code>strata://artifact/nb_..._cell_hill_climb_var_state@v=1@iter=17</code>.</li>
+   <code>strata://artifact/nb_..._cell_hill_climb_var_state@iter=17@v=1</code>.</li>
 <li>Add a new loop cell below. Reference the original cell's ID (not the full
    URI) in <code>start_from</code>:</li>
 </ol>
@@ -4194,19 +4225,20 @@ happens if you push harder from that exact state with a different step size.</p>
 <ol>
 <li>Run the new cell. It reads iteration 17's carry value as its seed, runs up
    to 20 more iterations under the modified strategy, and stores those
-   iterations as its own artifact chain, the original run stays untouched.</li>
+   iterations as its own artifact chain. The original run stays untouched.</li>
 </ol>
 <p>You now have two parallel forks materialized in the artifact store. Either
 one can be forked further, and the inspect panel shows both chains.</p>
 <p>This is the escape hatch for "that intermediate state looked promising, let
-me explore from there", the thing that's hard to do in a plain for-loop
+me explore from there": the thing that's hard to do in a plain for-loop
 once you've thrown away the intermediates.</p>
 <h3 id="when-not-to-use-a-loop-cell">When not to use a loop cell<a class="headerlink" href="#when-not-to-use-a-loop-cell" title="Permanent link">&para;</a></h3>
 <ul>
-<li>Tight <code>for</code> loops over short collections, a regular Python cell with a <code>for</code> loop is simpler and the extra per-iteration artifact overhead isn't worth it.</li>
-<li>Loops where intermediate state is genuinely disposable, store only the final answer in a regular Python cell.</li>
-<li>Anything that needs to branch out into multiple parallel runs, loop cells are sequential by design. Use separate cells, or model the fan-out in Python.</li>
+<li>Tight <code>for</code> loops over short collections: a regular Python cell with a <code>for</code> loop is simpler and the extra per-iteration artifact overhead isn't worth it.</li>
+<li>Loops where intermediate state is genuinely disposable: store only the final answer in a regular Python cell.</li>
+<li>Anything that needs to branch out into multiple parallel runs: loop cells are sequential by design. Use separate cells, or model the fan-out in Python.</li>
 </ul>
+<p>A loop cell checks the cache like any other cell, so running something downstream of a finished loop does not re-run it. A loop cell cannot declare <code>@fetch</code> or <code>@dataset</code>; read those in an upstream cell.</p>
 <p>Reach for loop cells when <strong>being able to inspect or fork from iteration k matters</strong>. That's the feature you're paying for.</p>
 <hr />
 <h2 id="r-cells-020">R Cells <em>(0.2.0)</em><a class="headerlink" href="#r-cells-020" title="Permanent link">&para;</a></h2>
@@ -4222,7 +4254,7 @@ once you've thrown away the intermediates.</p>
 <p><code>renv.lock</code> is committed config (like <code>uv.lock</code>); the built <code>renv/library/</code> is gitignored.</p>
 <h3 id="plots">Plots<a class="headerlink" href="#plots" title="Permanent link">&para;</a></h3>
 <p>R cells display plots inline, like a Python cell's matplotlib figure. Base graphics (<code>plot()</code>, <code>hist()</code>, …) and grid-based plots (ggplot2, lattice) are captured to PNG and rendered in the cell output. A bare trailing plot object auto-renders - a last-line <code>p</code> where <code>p &lt;- ggplot(...)</code> shows the plot without an explicit <code>print(p)</code>, mirroring the R console. A cell that draws several plots produces an ordered list of image outputs.</p>
-<h3 id="whats-still-ahead">What's still ahead<a class="headerlink" href="#whats-still-ahead" title="Permanent link">&para;</a></h3>
+<h3 id="warm-rscript-pool">Warm Rscript pool<a class="headerlink" href="#warm-rscript-pool" title="Permanent link">&para;</a></h3>
 <p><strong>Warm Rscript pool.</strong> Notebooks containing R cells keep a small pool of
 pre-spawned R workers (R startup, <code>.Rprofile</code>/renv activation, and
 <code>jsonlite</code>/<code>arrow</code> loads already paid), so an R cell run skips the ~1–2s
@@ -4265,6 +4297,14 @@ never start one.</p>
 <td>Per-cell execution timeout in seconds.</td>
 </tr>
 <tr>
+<td><code># @fetch data &lt;url&gt;</code></td>
+<td>Downloads a URL as a recorded input; <code>data</code> is the file's path as a string.</td>
+</tr>
+<tr>
+<td><code># @nocache</code></td>
+<td>Always re-execute.</td>
+</tr>
+<tr>
 <td><code># @worker gpu-box</code></td>
 <td>Runs the cell on an executor worker with R (see below).</td>
 </tr>
@@ -4276,9 +4316,10 @@ this version or later), under the worker's
 (<code>docker build -f worker.Dockerfile --build-arg WITH_R=true</code>). Its outputs come
 back the way a local run's do, so it is a cache hit here afterwards, a
 downstream Python cell reads its data frame, and an R-only value returns as RDS.
-The worker does not restore the notebook's <code>renv.lock</code>; an <code>@fetch</code> on an R cell
-is read on this machine, so such a cell runs locally.</p>
-<p>Loop annotations (<code>@loop</code>, <code>@loop_until</code>) and prompt-cell annotations (<code>@output_schema</code> etc.) do not apply to R cells.</p>
+The worker does not restore the notebook's <code>renv.lock</code>. An <code>@fetch</code> on an R cell
+is read on this machine, so an R cell with both <code>@fetch</code> and <code>@worker</code> fails;
+run it locally, or fetch in an upstream Python cell.</p>
+<p>Loop annotations (<code>@loop</code>, <code>@loop_until</code>) and prompt-cell annotations (<code>@output_schema</code> etc.) do not apply to R cells, and an R cell that declares <code>@dataset</code> fails; read the dataset in an upstream Python cell.</p>
 <h3 id="what-if-rscript-isnt-installed">What if Rscript isn't installed?<a class="headerlink" href="#what-if-rscript-isnt-installed" title="Permanent link">&para;</a></h3>
 <p>An R cell whose harness can't find <code>Rscript</code> on <code>PATH</code> returns a clean cell-level failure with the message <code>Rscript not found on PATH. Install R (https://cran.r-project.org/) and reopen the notebook.</code> No server crash, no other cells affected.</p>
 <hr />
@@ -4313,8 +4354,8 @@ is read on this machine, so such a cell runs locally.</p>
 </tr>
 </tbody>
 </table>
-<p>Mixing is encouraged, a typical pipeline might be a SQL cell for extraction → Python cells for transformation → an R cell for the linear model → a prompt cell for narrative summarisation.</p>
-<p>Any kind of cell can also live inside a <a href="../annotations/#variant-cells">variant group</a> a tabbed slot where multiple cells share one place in the DAG and you switch between them without forking the notebook.</p>
+<p>Mixing is encouraged: a typical pipeline might be a SQL cell for extraction → Python cells for transformation → an R cell for the linear model → a prompt cell for narrative summarisation.</p>
+<p>Any kind of cell can also live inside a <a href="../annotations/#variant-cells">variant group</a>: a tabbed slot where multiple cells share one place in the DAG and you switch between them without forking the notebook.</p>
 
 
 

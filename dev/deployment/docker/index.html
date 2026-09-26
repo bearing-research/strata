@@ -2213,6 +2213,11 @@
 <td><code>/tmp/strata-notebooks</code></td>
 <td>Notebook directories</td>
 </tr>
+<tr>
+<td><code>./demo-warehouse</code> (bind, read-only)</td>
+<td><code>/data/warehouse</code></td>
+<td>A local Iceberg warehouse to scan, if you have one; Docker creates the host directory empty otherwise</td>
+</tr>
 </tbody>
 </table>
 <p>Data persists across <code>docker compose down/up</code> cycles. To reset completely:</p>
@@ -2272,7 +2277,10 @@ mental model.</p>
 <ol>
 <li><strong>Frontend builder</strong> (Node 26) builds the Vue.js UI</li>
 <li><strong>Backend builder</strong> (Python + Rust) builds the wheel with native extension</li>
-<li><strong>Runtime</strong>: minimal image with the wheel and frontend dist</li>
+<li><strong>Runtime</strong>: minimal image with the wheel, the frontend dist, and
+   the <code>otel</code> and <code>postgres</code> extras, so OTLP tracing and a Postgres
+   artifact store (<code>STRATA_ARTIFACT_METADATA_DSN</code>) work without building
+   your own image</li>
 </ol>
 
 

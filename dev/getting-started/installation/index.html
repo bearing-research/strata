@@ -2350,7 +2350,7 @@ and CLI binary are both named <code>strata</code>.</p>
 </tr>
 <tr>
 <td><code>uv run strata cell &lt;action&gt;</code>, <code>strata dag</code>, <code>strata status</code>, <code>strata dep &lt;action&gt;</code></td>
-<td>Agent-facing notebook tooling: inspect (<code>cell list/show</code>, <code>dag</code>, <code>status</code>), execute (<code>cell run/test</code>), and author (<code>cell add/edit/rm/mv</code>, <code>dep add/rm</code>) - offline against a directory or <code>--server/--session</code> against a running server. See <a href="../../notebook/cli/#inspecting-a-notebook-cell-dag-status">Notebook CLI</a>.</td>
+<td>Agent-facing notebook tooling: inspect (<code>cell list/show</code>, <code>dag</code>, <code>status</code>), save a display output such as a plot to a file (<code>cell output</code>), execute (<code>cell run/test</code>), and author (<code>cell add/edit/rm/mv/annotate</code>, <code>dep add/rm</code>) - offline against a directory or <code>--server/--session</code> against a running server. See <a href="../../notebook/cli/#inspecting-a-notebook-cell-dag-status">Notebook CLI</a>.</td>
 </tr>
 <tr>
 <td><code>uv run strata worker &lt;action&gt;</code></td>
@@ -2374,7 +2374,7 @@ and CLI binary are both named <code>strata</code>.</p>
 </tr>
 <tr>
 <td><code>uv run strata migrate --to-dsn &lt;dsn&gt;</code></td>
-<td>Copy artifact-store metadata from SQLite to Postgres. Setting <code>STRATA_ARTIFACT_METADATA_DSN</code> alone starts an empty store; this carries an existing one across. Metadata only — blobs are configured separately.</td>
+<td>Copy artifact-store metadata from SQLite to Postgres. Setting <code>STRATA_ARTIFACT_METADATA_DSN</code> alone starts an empty store; this carries an existing one across. Metadata only: blobs are configured separately.</td>
 </tr>
 <tr>
 <td><code>uv run strata apikey &lt;cmd&gt;</code></td>
@@ -2415,24 +2415,25 @@ inside the uv-managed venv. If you've activated the venv
 <a id="__codelineno-6-10" name="__codelineno-6-10" href="#__codelineno-6-10"></a><span class="c1"># Format and lint</span>
 <a id="__codelineno-6-11" name="__codelineno-6-11" href="#__codelineno-6-11"></a>uv<span class="w"> </span>run<span class="w"> </span>pre-commit<span class="w"> </span>run<span class="w"> </span>--all-files
 <a id="__codelineno-6-12" name="__codelineno-6-12" href="#__codelineno-6-12"></a>
-<a id="__codelineno-6-13" name="__codelineno-6-13" href="#__codelineno-6-13"></a><span class="c1"># Type check</span>
-<a id="__codelineno-6-14" name="__codelineno-6-14" href="#__codelineno-6-14"></a>uv<span class="w"> </span>run<span class="w"> </span>ty<span class="w"> </span>check<span class="w"> </span>src/
+<a id="__codelineno-6-13" name="__codelineno-6-13" href="#__codelineno-6-13"></a><span class="c1"># Type check (scope is set in pyproject.toml, as in CI)</span>
+<a id="__codelineno-6-14" name="__codelineno-6-14" href="#__codelineno-6-14"></a>uv<span class="w"> </span>run<span class="w"> </span>ty<span class="w"> </span>check
 <a id="__codelineno-6-15" name="__codelineno-6-15" href="#__codelineno-6-15"></a>
 <a id="__codelineno-6-16" name="__codelineno-6-16" href="#__codelineno-6-16"></a><span class="c1"># Start frontend dev server (hot reload, proxies to backend)</span>
 <a id="__codelineno-6-17" name="__codelineno-6-17" href="#__codelineno-6-17"></a><span class="nb">cd</span><span class="w"> </span>frontend<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>npm<span class="w"> </span>run<span class="w"> </span>dev
 </code></pre></div>
 <h3 id="integration-test-dependencies">Integration test dependencies<a class="headerlink" href="#integration-test-dependencies" title="Permanent link">&para;</a></h3>
-<p>A subset of integration tests needs a real PostgreSQL instance (the
-Iceberg SQL catalog tests). A throwaway Postgres container is shipped
+<p>The end-to-end integration script needs a real PostgreSQL instance for
+its Iceberg SQL catalog. A throwaway Postgres container is shipped
 as <code>docker-compose.test.yml</code>:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="c1"># Start the test Postgres (port 5432)</span>
 <a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>docker<span class="w"> </span>compose<span class="w"> </span>-f<span class="w"> </span>docker-compose.test.yml<span class="w"> </span>up<span class="w"> </span>-d
 <a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a>
-<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="c1"># Run the integration suite</span>
-<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a>uv<span class="w"> </span>run<span class="w"> </span>pytest<span class="w"> </span>tests/test_*_integration.py
-<a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a>
-<a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a><span class="c1"># Tear it down</span>
-<a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a>docker<span class="w"> </span>compose<span class="w"> </span>-f<span class="w"> </span>docker-compose.test.yml<span class="w"> </span>down
+<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="c1"># Run the integration script against it (starts its own server)</span>
+<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="nv">STRATA_CATALOG_URI</span><span class="o">=</span>postgresql://strata:strata@localhost:5432/iceberg_catalog<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a><span class="w">  </span>uv<span class="w"> </span>run<span class="w"> </span>python<span class="w"> </span>scripts/integration_test.py<span class="w"> </span>--start-server
+<a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a>
+<a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a><span class="c1"># Tear it down</span>
+<a id="__codelineno-7-9" name="__codelineno-7-9" href="#__codelineno-7-9"></a>docker<span class="w"> </span>compose<span class="w"> </span>-f<span class="w"> </span>docker-compose.test.yml<span class="w"> </span>down
 </code></pre></div>
 <p>The compose file is dev-only: it has no health-bound dependency on
 the main <code>docker-compose.yml</code>, and the credentials are intentionally

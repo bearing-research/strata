@@ -2210,13 +2210,13 @@ between three shapes.</p>
 <td><strong>Auth</strong></td>
 <td>None</td>
 <td>Identity from <code>STRATA_PERSONAL_MODE_USER_HEADER</code> (proxy injects)</td>
-<td><code>X-Strata-Principal</code> + <code>X-Strata-Proxy-Token</code> from a trusted proxy</td>
+<td><code>X-Strata-Principal</code> + <code>X-Strata-Proxy-Token</code> from a trusted proxy, or an API key</td>
 </tr>
 <tr>
 <td><strong>Identity scoping</strong></td>
 <td>No scoping (single user)</td>
 <td>Per-user filter on <code>discover</code> / <code>delete</code>; shared artifact store</td>
-<td>Per-tenant cache keys, storage dirs, QoS pools</td>
+<td>Per-tenant cache keys, cache dirs, QoS pools; artifacts filtered by tenant</td>
 </tr>
 <tr>
 <td><strong>Multi-tenancy</strong></td>
@@ -2234,7 +2234,7 @@ between three shapes.</p>
 <td><strong>Default artifact dir</strong></td>
 <td><code>~/.strata/artifacts</code></td>
 <td><code>~/.strata/artifacts</code></td>
-<td>Must be set explicitly (or blob backend)</td>
+<td>None; set <code>STRATA_ARTIFACT_DIR</code> explicitly (required with a blob backend too)</td>
 </tr>
 <tr>
 <td><strong>Network binding</strong></td>
@@ -2245,14 +2245,14 @@ between three shapes.</p>
 <tr>
 <td><strong>Used by Strata's hosted preview</strong></td>
 <td>–</td>
-<td>✓ (Fly.io + Cloudflare Access)</td>
+<td>Yes (Fly.io + Cloudflare Access)</td>
 <td>–</td>
 </tr>
 <tr>
 <td><strong>Use in production for sharing?</strong></td>
-<td>❌ Anyone on the network can write</td>
-<td>⚠️ Only behind a real auth proxy, small trusted group</td>
-<td>✓</td>
+<td>No: anyone on the network can write</td>
+<td>Only behind a real auth proxy, small trusted group</td>
+<td>Yes</td>
 </tr>
 </tbody>
 </table>
@@ -2306,7 +2306,7 @@ addresses unless you opt in:</p>
 <a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="w">  </span>uv<span class="w"> </span>run<span class="w"> </span>strata-notebook
 </code></pre></div>
 <p>Opt in only if you have separate protection (firewall, VPN, private
-network) personal mode exposes write endpoints with no authentication.</p>
+network): personal mode exposes write endpoints with no authentication.</p>
 <p>Artifacts persist to <code>~/.strata/artifacts</code> unless <code>STRATA_ARTIFACT_DIR</code>
 is set. Notebook deletion and session discovery/reconnect APIs are
 personal-mode-only.</p>
@@ -2319,7 +2319,9 @@ personal-mode-only.</p>
 <p>Short version: an upstream proxy authenticates the caller, injects
 identity headers (<code>X-Strata-Principal</code>, tenant header,
 <code>X-Strata-Scopes</code>, <code>X-Strata-Proxy-Token</code>), and is the only ingress
-path. Strata trusts the proxy and refuses to do its own auth.</p>
+path. Strata trusts the proxy rather than authenticating users itself;
+machine callers outside the proxy can use an API key instead
+(<code>STRATA_AUTH_MODE=api_key</code>).</p>
 <p>See <a href="../service-mode/">Service Mode</a> for the full story:</p>
 <ul>
 <li>The trusted-proxy header contract.</li>
@@ -2342,7 +2344,7 @@ directory, so they land inside that root too.</p>
 <a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="nv">STRATA_PERSONAL_MODE_USER_HEADER</span><span class="o">=</span>Cf-Access-Authenticated-User-Email
 </code></pre></div>
 <p>The header value is whatever your proxy injects after authenticating the
-caller. Strata treats the value as opaque, email, GitHub login, internal
+caller. Strata treats the value as opaque: email, GitHub login, internal
 ID, anything stable.</p>
 <p>What changes when the header is set:</p>
 <ul>
@@ -2391,19 +2393,48 @@ raise <code>ValueError</code> during config load:</p>
 <td>Same reason, no tenant dimension in personal mode</td>
 </tr>
 <tr>
+<td><code>deployment_mode=personal</code> + <code>auth_mode=api_key</code></td>
+<td>Personal mode is single-user on loopback; authenticating yourself to your own machine buys nothing</td>
+</tr>
+<tr>
+<td><code>deployment_mode=personal</code> + <code>mcp_enabled</code> + <code>personal_mode_user_header</code></td>
+<td>The MCP endpoint has no per-request identity and does not filter by owner, so it would expose every user's sessions</td>
+</tr>
+<tr>
 <td><code>deployment_mode=service</code> + <code>personal_mode_user_header</code></td>
 <td>Service mode uses <code>X-Strata-Principal</code> via trusted-proxy auth; the personal-mode shim is for proxy-fronted personal deployments only</td>
 </tr>
+<tr>
+<td><code>deployment_mode=service</code> + <code>multi_tenant_enabled</code> or <code>acl_config</code> rules or <code>mcp_enabled</code>, without <code>trusted_proxy</code> / <code>api_key</code> auth</td>
+<td>The tenant header would be spoofable, ACL rules are only evaluated for an authenticated caller, and MCP would have no caller to check</td>
+</tr>
+<tr>
+<td><code>deployment_mode=service</code> + <code>auth_mode=trusted_proxy</code> without <code>proxy_token</code></td>
+<td>Every request would be accepted and the identity headers could be spoofed</td>
+</tr>
+<tr>
+<td><code>deployment_mode=service</code> + <code>service_writes_enabled</code> without <code>auth_mode=trusted_proxy</code></td>
+<td>Writes are stamped with the caller's principal and tenant</td>
+</tr>
+<tr>
+<td><code>deployment_mode=service</code> + <code>artifact_metadata_dsn</code> with <code>artifact_blob_backend=local</code></td>
+<td>Another node would resolve an artifact from the shared database and then find no bytes</td>
+</tr>
+<tr>
+<td><code>deployment_mode=service</code> + an artifact store without <code>artifact_dir</code> (<code>artifact_metadata_dsn</code>, a non-local blob backend, <code>service_writes_enabled</code>, <code>auth_mode=api_key</code>, or transforms enabled)</td>
+<td>The store is only created when <code>artifact_dir</code> is set, so every artifact route would fail</td>
+</tr>
 </tbody>
 </table>
-<p>If you see one of these errors, you almost certainly pulled flags from a
-service-mode config into a personal-mode deployment. Remove the
-service-specific flags or switch to <code>deployment_mode=service</code>.</p>
+<p>If you see one of the personal-mode errors, you almost certainly pulled
+flags from a service-mode config into a personal-mode deployment. Remove
+the service-specific flags or switch to <code>deployment_mode=service</code>. The
+service-mode errors name the setting to add.</p>
 <h2 id="mode-independent-settings">Mode-independent settings<a class="headerlink" href="#mode-independent-settings" title="Permanent link">&para;</a></h2>
 <p>These apply identically in either mode and can be tuned freely:</p>
 <ul>
 <li><code>rate_limit_*</code>, token-bucket rate limiting</li>
-<li><code>acl_config</code>, deny/allow rules (only effective when <code>auth_mode</code> is set)</li>
+<li><code>acl_config</code>, deny/allow rules (only evaluated under <code>trusted_proxy</code> or <code>api_key</code> auth, which only service mode allows)</li>
 <li><code>artifact_blob_backend</code>, local / s3 / gcs / azure</li>
 <li>Tracing, logging, S3 / GCS / Azure credentials</li>
 <li>Cache size, cache directory, metadata DB path</li>

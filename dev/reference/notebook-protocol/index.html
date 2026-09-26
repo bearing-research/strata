@@ -2441,10 +2441,12 @@ stores the session id from the open response.</p>
 enforcement is symmetric across REST and WS, with no opt-outs.</p>
 <h3 id="service-mode">Service mode<a class="headerlink" href="#service-mode" title="Permanent link">&para;</a></h3>
 <ul>
-<li><code>auth_mode = "trusted_proxy"</code> is the deployment shape.</li>
-<li>Every <code>/v1/*</code> request needs <code>X-Strata-Principal</code>, <code>X-Strata-Proxy-Token</code>,
-  and <code>X-Tenant-ID</code> (if multi-tenant). The WS upgrade carries the same
-  headers; missing or invalid token closes with <code>1008</code>.</li>
+<li><code>auth_mode = "trusted_proxy"</code> is the usual deployment shape; <code>api_key</code>
+  is the other authenticated mode.</li>
+<li>Under <code>trusted_proxy</code>, every <code>/v1/*</code> request needs <code>X-Strata-Principal</code>,
+  <code>X-Strata-Proxy-Token</code>, and <code>X-Tenant-ID</code> (if multi-tenant); under
+  <code>api_key</code>, <code>Authorization: Bearer &lt;key&gt;</code>. The WS upgrade carries the same
+  credentials; a missing or invalid one closes with <code>1008</code>.</li>
 <li><code>/open</code>, <code>/create</code> and <code>/discover</code> work in service mode. What is
   personal-mode-only is narrower: the two path-keyed deletes and the two
   <code>/sessions</code> routes, which return <code>403 Forbidden</code> elsewhere.</li>
@@ -2482,7 +2484,7 @@ further calls are required before showing a useful UI. The shape is
 </tr>
 <tr>
 <td>Runtime config</td>
-<td><code>default_parent_path</code>, configured Python versions, deployment mode, user-header status.</td>
+<td><code>deployment_mode</code>, <code>default_parent_path</code>, <code>available_python_versions</code>, <code>default_python_version</code>, <code>python_selection_fixed</code>, <code>registry_enabled</code>, <code>team_store_configured</code>.</td>
 </tr>
 <tr>
 <td><code>id</code>, <code>name</code>, <code>owner</code>, <code>worker</code>, <code>timeout</code>, <code>env</code>, <code>ai</code></td>
@@ -2507,6 +2509,10 @@ further calls are required before showing a useful UI. The shape is
 <tr>
 <td><code>environment_job</code> / <code>environment_job_history</code></td>
 <td>Currently-running env mutation + recent past jobs.</td>
+</tr>
+<tr>
+<td><code>r_environment</code></td>
+<td>The notebook's <code>renv</code> state, for R cells.</td>
 </tr>
 </tbody>
 </table>
@@ -2539,7 +2545,7 @@ corresponding panel:</p>
 <td>Refreshes after a mutation; snapshot has the version current at open.</td>
 </tr>
 <tr>
-<td><code>GET /{sid}/llm/models</code>, <code>GET /{sid}/llm/status</code></td>
+<td><code>GET /{sid}/ai/models</code>, <code>GET /{sid}/ai/status</code></td>
 <td>LLM picker / panel open</td>
 <td>Provider API call.</td>
 </tr>
@@ -2549,7 +2555,7 @@ corresponding panel:</p>
 <td>Adapter call per connection.</td>
 </tr>
 <tr>
-<td><code>GET /{sid}/profiling-summary</code></td>
+<td>WS <code>profiling_request</code> (answered with <code>profiling_summary</code>)</td>
 <td>Profiling panel open</td>
 <td>Computed on demand.</td>
 </tr>

@@ -2618,7 +2618,8 @@
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>ws://localhost:8765/v1/notebooks/ws/{session_id}
 </code></pre></div>
 <p>The <code>{session_id}</code> is the one returned by <code>POST /v1/notebooks/open</code> or <code>/create</code>. A session is single-process. On a personal server, opening the same notebook again returns the session already open on that path, so a second tab, the terminal viewer and an agent all drive one execution context and see each other's runs. In service mode each open creates its own session.</p>
-<p>In service mode (proxy auth), the same headers required for REST endpoints - <code>X-Strata-Principal</code>, <code>X-Strata-Proxy-Token</code>, and <code>X-Tenant-ID</code> if multi-tenant - must be present on the WebSocket upgrade. A missing or invalid token closes the connection with <code>1008 Policy Violation</code>.</p>
+<p>Under principal auth, the upgrade carries the same credentials as a REST call: <code>X-Strata-Principal</code>, <code>X-Strata-Proxy-Token</code>, and <code>X-Tenant-ID</code> if multi-tenant under <code>trusted_proxy</code>, or <code>Authorization: Bearer &lt;key&gt;</code> under <code>api_key</code>. A missing or invalid credential closes the connection with <code>1008 Policy Violation</code>. Each client → server frame is then checked against the notebook scope it needs (<code>notebook:read</code>, <code>notebook:write</code> or <code>notebook:execute</code>); a frame the principal's scopes do not cover is answered with an <code>error</code> frame, <code>code: "insufficient_scope"</code>.</p>
+<p>A read-only app view connects with <code>?role=viewer</code>. Such a connection may send only <code>widget_update</code> and <code>notebook_sync</code>; anything else is answered with <code>code: "read_only"</code>.</p>
 <h2 id="envelope">Envelope<a class="headerlink" href="#envelope" title="Permanent link">&para;</a></h2>
 <p>All messages are JSON with this shape:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="p">{</span>
@@ -2689,12 +2690,12 @@
 <tbody>
 <tr>
 <td><code>cell_source_update</code></td>
-<td><code>{ "cell_id": "...", "source": "...", "force": false }</code></td>
-<td>Source changed. Refused with <code>cell_locked</code> when someone else changed the cell moments ago, unless <code>force</code> is true</td>
+<td><code>{ "cell_id": "...", "source": "...", "force": false, "author": "..." }</code></td>
+<td>Source changed. Refused with <code>cell_locked</code> when someone else changed the cell moments ago, unless <code>force</code> is true. <code>author</code> is optional and used only without principal auth</td>
 </tr>
 <tr>
 <td><code>cell_focus</code></td>
-<td><code>{ "cell_id": "..." }</code></td>
+<td><code>{ "cell_id": "...", "author": "..." }</code></td>
 <td>The cell this client is on, or <code>null</code>. Updates <code>presence</code> for everyone</td>
 </tr>
 </tbody>
@@ -2836,8 +2837,8 @@
 </tr>
 <tr>
 <td><code>agent_confirm_response</code></td>
-<td><code>{ "job_id": "...", "approved": true, ... }</code></td>
-<td>Reply to an <code>agent_confirm_request</code> from the server</td>
+<td><code>{ "request_id": "...", "approved": true }</code></td>
+<td>Reply to an <code>agent_confirm_request</code> from the server, echoing its <code>request_id</code></td>
 </tr>
 </tbody>
 </table>
@@ -2865,7 +2866,7 @@
 <tr>
 <td><code>cell_output_delta</code></td>
 <td><code>{ "cell_id": "...", "attempt": 1, "kind": "delta", "text": "..." }</code></td>
-<td>Streamed partial output while the cell runs (today: prompt cells). <code>kind: "delta"</code> appends <code>text</code> to a per-cell buffer; <code>kind: "retry"</code> means schema validation failed - clear the buffer, <code>attempt</code> is the new attempt number, <code>text</code> is the first validator error. Ephemeral: never persisted or replayed; the final <code>cell_output</code> is canonical. Cache hits emit no deltas.</td>
+<td>Streamed partial output while the cell runs (today: prompt cells). <code>kind: "delta"</code> appends <code>text</code> to a per-cell buffer; <code>kind: "retry"</code> means schema validation failed - clear the buffer, <code>attempt</code> is the new attempt number, <code>text</code> is the first validator error. <code>kind: "notice"</code> is a provider-degradation message to show beside the stream, not part of its content. Ephemeral: never persisted or replayed; the final <code>cell_output</code> is canonical. Cache hits emit no deltas.</td>
 </tr>
 <tr>
 <td><code>cell_console</code></td>
@@ -2879,8 +2880,8 @@
 </tr>
 <tr>
 <td><code>cell_iteration_progress</code></td>
-<td><code>{ "cell_id": "...", "iteration": 3, "max_iter": 50, "artifact_uri": "...", "content_type": "...", "duration_ms": 128 }</code></td>
-<td>Per-iteration update from a <code>@loop</code> cell</td>
+<td><code>{ "cell_id": "...", "iteration": 3, "max_iter": 50, "artifact_uri": "...", "content_type": "...", "until_reached": false, "duration_ms": 128 }</code></td>
+<td>Per-iteration update from a <code>@loop</code> cell. <code>until_reached</code> is true on the iteration where <code>@loop_until</code> held</td>
 </tr>
 <tr>
 <td><code>cell_variant_progress</code></td>
@@ -2933,8 +2934,8 @@
 <tbody>
 <tr>
 <td><code>dag_update</code></td>
-<td><code>{ "edges": [...], "roots": [...], "leaves": [...] }</code></td>
-<td>DAG changed after cell edit</td>
+<td><code>{ "edges": [...], "roots": [...], "leaves": [...], "topological_order": [...], "cells": [...], "variant_groups": [...] }</code></td>
+<td>DAG changed after cell edit. <code>cells</code> carries each cell's defines, references, upstream and downstream ids</td>
 </tr>
 </tbody>
 </table>
@@ -3031,8 +3032,8 @@
 </tr>
 <tr>
 <td><code>agent_confirm_request</code></td>
-<td><code>{ "job_id": "...", "tool": "...", "args": {...}, ... }</code></td>
-<td>Agent is asking the client to approve a destructive tool use</td>
+<td><code>{ "job_id": "...", "request_id": "...", "tool": "...", "arguments": {...}, "summary": "..." }</code></td>
+<td>Agent is asking the client to approve a gated tool call; answer with <code>agent_confirm_response</code></td>
 </tr>
 <tr>
 <td><code>agent_progress</code></td>
@@ -3080,8 +3081,8 @@
 <tbody>
 <tr>
 <td><code>error</code></td>
-<td><code>{ "error": "..." }</code></td>
-<td>Protocol error</td>
+<td><code>{ "error": "...", "code": "...", "cell_id": "...", "held_by": "..." }</code></td>
+<td>A request could not be served. Only <code>error</code> is always present; see <a href="../notebook-protocol/#the-error-frame">the <code>error</code> frame</a> for the codes</td>
 </tr>
 </tbody>
 </table>
@@ -3127,7 +3128,11 @@ was going to cost; what it no longer costs is the notebook.</p>
 </tr>
 <tr>
 <td><code>1008</code></td>
-<td>Policy violation - session not found, ownership mismatch in per-user personal mode, or service-mode auth failure on the upgrade</td>
+<td>Policy violation - session not found, ownership mismatch in per-user personal mode, or an auth failure on the upgrade</td>
+</tr>
+<tr>
+<td><code>1011</code></td>
+<td>Internal error while handling a frame</td>
 </tr>
 </tbody>
 </table>

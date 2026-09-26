@@ -2131,7 +2131,10 @@ edits them.</p>
 <h2 id="enable-it">Enable it<a class="headerlink" href="#enable-it" title="Permanent link">&para;</a></h2>
 <p>The endpoint is <strong>off by default</strong>. On a personal server there is one user and
 nothing to check, so a caller has full control of the session. Keep it behind
-loopback.</p>
+loopback. For the same reason a personal server refuses to start with the flag
+set alongside <code>STRATA_PERSONAL_MODE_USER_HEADER</code>: the endpoint has no
+per-request identity to filter sessions by owner, so it would hand every user's
+notebooks to any caller.</p>
 <p>On a <strong>service-mode</strong> server it needs principal auth (<code>auth_mode</code> of
 <code>trusted_proxy</code> or <code>api_key</code>). Service mode without principal auth is rejected
 at startup when the flag is set. Each tool call then runs as the caller its HTTP
@@ -2321,7 +2324,7 @@ The typical loop:</p>
 </tr>
 </tbody>
 </table>
-<p>Pass the same <code>author</code> on every authoring call — your own name or id. It is
+<p>Pass the same <code>author</code> on every authoring call: your own name or id. It is
 recorded on the cell as <code>created_by</code> / <code>updated_by</code> and shown in the cell view,
 so a person opening the notebook can tell which cells an agent wrote. On a
 server that authenticates its callers the authenticated identity is used

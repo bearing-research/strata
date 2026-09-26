@@ -2260,8 +2260,8 @@ the registry with full audit + lineage - without leaving the notebook.</p>
 <p>Open <strong>http://localhost:8765</strong> and open (or create) a notebook.</p>
 <h2 id="2-publish-a-model-from-a-cell">2. Publish a model from a cell<a class="headerlink" href="#2-publish-a-model-from-a-cell" title="Permanent link">&para;</a></h2>
 <p>The dashboard surfaces what your <strong>cells publish</strong> to the registry. Inside any
-Python cell, use the <a href="../cells/#the-ambient-strata-client">ambient <code>strata</code> client</a>
-- it's already in the namespace, no import or setup:</p>
+Python cell, use the <a href="../cells/#the-ambient-strata-client">ambient <code>strata</code> client</a>.
+It's already in the namespace, no import or setup:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="c1"># ... you&#39;ve trained `model` in this or an upstream cell ...</span>
 <a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="n">art</span> <span class="o">=</span> <span class="n">strata</span><span class="o">.</span><span class="n">put</span><span class="p">(</span>
 <a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>    <span class="n">inputs</span><span class="o">=</span><span class="p">[],</span>
@@ -2299,7 +2299,7 @@ button." src="../../assets/registry-promote-strip-light.png#only-light" />
 taxi/tip-model v1 chip, a champion alias chip, the Promote menu and the lineage
 button." src="../../assets/registry-promote-strip-dark.png#only-dark" /></p>
 <h2 id="4-promote-to-champion">4. Promote to champion<a class="headerlink" href="#4-promote-to-champion" title="Permanent link">&para;</a></h2>
-<p>Click <strong><code>[Promote ▾]</code></strong> and choose <strong>champion</strong> (or <strong>candidate</strong>). A toast
+<p>Click <strong><code>[Promote ▾]</code></strong> and choose <strong>Set as champion</strong> (or <strong>Set as candidate</strong>). A toast
 confirms the result:</p>
 <ul>
 <li><strong><code>✓ taxi/tip-model → champion</code></strong> - applied immediately (the normal case).</li>
@@ -2316,8 +2316,8 @@ top to bottom:</p>
 <li><strong>Pending-approval banner</strong> - appears only when a protected-alias move is
    queued, with <strong>Approve / Reject</strong> buttons (the human gate, in the UI).</li>
 <li><strong>Names table</strong> - every registry name, each row showing its <strong>alias chips</strong>
-   (<code>★champ</code>, <code>cand</code>), latest version, <strong>tags</strong>, a <strong><code>[Promote ▾]</code></strong> menu, and a
-   <strong><code>⎘</code></strong> lineage button. This is the same data on the per-cell strip, but for
+   (<code>★champion=v1</code>, <code>candidate=v2</code>), latest version, <strong>tags</strong>, a
+   <strong><code>[Promote ▾]</code></strong> menu, and a <strong><code>⎘</code></strong> lineage button. This is the same data on the per-cell strip, but for
    <em>all</em> names - not just what the current notebook published.</li>
 <li><strong>Audit timeline</strong> (collapsible) - every name / alias / tag mutation, newest
    first, with who and from → to.</li>
@@ -2344,10 +2344,8 @@ Unprotected aliases (<code>candidate</code>) still apply immediately.</p>
 view</strong> renders the provenance chain:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>model ← features ← scan ← table @ snapshot
 </code></pre></div>
-<ul>
-<li>the same chain <code>strata artifact lineage</code> prints on the CLI, as an interactive
-view. It answers "which snapshot trained this model?" in one click.</li>
-</ul>
+<p>This is the same chain <code>strata artifact lineage</code> prints on the CLI, as an interactive
+view. It answers "which snapshot trained this model?" in one click.</p>
 <p><img alt="The lineage view for taxi/tip-model: the training transform above the feature
 set, the scan below it, and the Iceberg table at the
 root." src="../../assets/registry-lineage-light.png#only-light" />
@@ -2386,7 +2384,7 @@ root." src="../../assets/registry-lineage-dark.png#only-dark" /></p>
 </tr>
 <tr>
 <td><strong>Promote did nothing</strong></td>
-<td>Setting an alias to the version it already points at is an idempotent <strong>no-op</strong> (the toast says <code>unchanged</code>).</td>
+<td>Setting an alias to the version it already points at is an idempotent <strong>no-op</strong> (the toast ends in <code>(no change)</code>).</td>
 </tr>
 </tbody>
 </table>
