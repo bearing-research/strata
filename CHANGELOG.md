@@ -247,6 +247,12 @@ environment pinned below them has to move before it can install 0.8.0.
 
 ### Fixed
 
+- **An agent's edit honours the soft lock.** Edits through MCP and through the
+  built-in assistant skipped the check REST and the WebSocket make, so an agent
+  could overwrite a cell someone changed moments ago, and its own change held
+  nothing against them. Both now wait out someone else's recent change and
+  hold the cell in turn. The assistant counts as the person using it, so it
+  never locks its own user out of a cell it just edited.
 - **A cell on a remote worker shows every display it made.** Only the last
   one travelled back, because it is also the variable `_`, so a remote cell
   that drew three figures showed one.

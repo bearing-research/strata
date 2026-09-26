@@ -730,12 +730,25 @@ class LocalNotebookOps:
         return self.get_cell(cell_id)
 
     def edit_cell(self, cell_id: str, source: str) -> CellView:
-        """Replace a cell's source (see :meth:`NotebookOps.edit_cell`)."""
+        """Replace a cell's source (see :meth:`NotebookOps.edit_cell`).
+
+        Held to the same soft lock as an edit over REST or the WebSocket: on a
+        live session (the MCP server's) someone else's change of this cell
+        moments ago refuses the edit, and this edit holds the cell in turn.
+        An offline session has no one else in it, so the check never refuses.
+        """
+        from strata.notebook.presence import lock_window_seconds
         from strata.notebook.writer import write_cell
 
         if self._session.notebook_state.get_cell(cell_id) is None:
             raise NotebookOpsError(f"no cell with id {cell_id!r}")
+        held_by = self._session.presence.holder(cell_id, self.author, lock_window_seconds())
+        if held_by is not None:
+            raise NotebookOpsError(
+                f"{held_by} changed cell {cell_id!r} moments ago; retry in a few seconds"
+            )
         write_cell(self.notebook_dir, cell_id, source, author=self.author)
+        self._session.presence.record_edit(cell_id, self.author)
         self._reload()
         return self.get_cell(cell_id)
 
