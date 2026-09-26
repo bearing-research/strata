@@ -249,6 +249,14 @@ environment pinned below them has to move before it can install 0.8.0.
 
 ### Fixed
 
+- **`strata artifact` opens the store the server serves.** Every artifact
+  command opened a SQLite file in the artifact directory and ignored
+  `STRATA_ARTIFACT_DIR`, the metadata DSN and the blob backend, so against a
+  service store on Postgres and S3 it saw an empty store: `strata artifact
+  archive --token` answered "No such publication". It now reads the same
+  `STRATA_*` settings as the server.
+- **An import without `created_at` is a 400.** It reached the database's NOT
+  NULL constraint and came back as a 500.
 - **`strata new` on an existing notebook leaves it as it is.** It kept the
   notebook's id and cells but rewrote `notebook.toml` without its env,
   workers, mounts, connections, AI settings or variant groups, and

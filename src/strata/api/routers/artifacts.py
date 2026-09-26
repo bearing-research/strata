@@ -493,6 +493,16 @@ async def _import_artifact(
     provenance_hash = str(metadata.get("provenance_hash") or "").strip()
     if not provenance_hash:
         raise HTTPException(status_code=400, detail="Metadata is missing 'provenance_hash'")
+    # The row keeps the source's creation time (see import_artifact), and the
+    # column is NOT NULL: a record without it reached the database and came
+    # back as a 500 from the constraint.
+    try:
+        created_at = float(metadata["created_at"])
+    except (KeyError, TypeError, ValueError):
+        raise HTTPException(
+            status_code=400,
+            detail="Metadata 'created_at' must be the source's creation time, in epoch seconds",
+        )
 
     declared_digest = str(metadata.get("content_sha256") or "").strip()
     if staged:
@@ -528,7 +538,7 @@ async def _import_artifact(
         schema_json=metadata.get("schema_json"),
         row_count=metadata.get("row_count"),
         byte_size=metadata.get("byte_size"),
-        created_at=metadata.get("created_at"),
+        created_at=created_at,
         transform_spec=metadata.get("transform_spec"),
         input_versions=metadata.get("input_versions"),
         tenant=tenant_id,

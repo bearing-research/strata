@@ -35,13 +35,32 @@ from strata.artifact_transfer import (
 
 
 def _open_store(artifact_dir_arg: str | None) -> ArtifactStore | None:
+    """Open the artifact store the server would, from the same settings.
+
+    ``--artifact-dir``, else ``STRATA_ARTIFACT_DIR``, else
+    ``~/.strata/artifacts``; and a metadata DSN or object-store blob backend
+    configured through ``STRATA_*`` is used as the server uses it. Opening only
+    a SQLite file in the directory meant that, with a service store's settings,
+    every command looked at an empty store beside the real one.
+    """
+    from strata.config import StrataConfig
+
+    try:
+        config = StrataConfig()
+    except ValueError as exc:
+        print(f"invalid configuration: {exc}", file=sys.stderr)
+        return None
     artifact_dir = (
-        Path(artifact_dir_arg) if artifact_dir_arg else Path.home() / ".strata" / "artifacts"
+        Path(artifact_dir_arg)
+        if artifact_dir_arg
+        else config.artifact_dir or Path.home() / ".strata" / "artifacts"
     )
-    if not artifact_dir.exists():
+    dialect = config.create_metadata_dialect()
+    if dialect is None and not artifact_dir.exists():
         print(f"artifact directory not found: {artifact_dir}", file=sys.stderr)
         return None
-    return ArtifactStore(artifact_dir)
+    blob_store = config.create_blob_store() if config.artifact_blob_backend != "local" else None
+    return ArtifactStore(artifact_dir, blob_store=blob_store, dialect=dialect)
 
 
 class AmbiguousRefError(ValueError):

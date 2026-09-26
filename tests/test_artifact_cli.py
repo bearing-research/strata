@@ -178,6 +178,16 @@ class TestPull:
         assert rc == 1
 
 
+class TestTheStoreItOpens:
+    def test_it_finds_the_store_through_strata_artifact_dir(self, chain_store, monkeypatch, capsys):
+        """Without --artifact-dir it looked only at ~/.strata/artifacts, so a
+        server's STRATA_ARTIFACT_DIR pointed every command somewhere else."""
+        monkeypatch.setenv("STRATA_ARTIFACT_DIR", chain_store["dir"])
+
+        assert cmd_show(_args(ref="demo/model", artifact_dir=None)) == 0
+        assert "model-1@v=1" in capsys.readouterr().out
+
+
 class TestTenantAgnosticResolution:
     def test_legacy_default_tenant_name_resolves(self, tmp_path, capsys):
         """A name written under legacy '_default' is still findable by the CLI."""

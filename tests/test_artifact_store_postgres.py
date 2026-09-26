@@ -646,6 +646,60 @@ class TestTheAttemptLedgerOnPostgres:
             dialect.close()
 
 
+class TestTheCliOnAPostgresStore:
+    """The artifact CLI opened only a SQLite file in the artifact directory, so
+    with a service store's settings every command looked at an empty store:
+    `strata artifact archive --token` answered "No such publication"."""
+
+    def test_archive_by_token_writes_the_zip_the_route_serves(
+        self, postgres_dsn, tmp_path, monkeypatch
+    ):
+        import argparse
+
+        from strata.api.publication_bundle import bundle_zip
+        from strata.artifact_cli import cmd_archive
+
+        dialect = PostgresDialect(postgres_dsn)
+        try:
+            conn = dialect.connect()
+            conn.executescript(
+                "DROP TABLE IF EXISTS artifact_builds, artifact_versions, artifact_names, "
+                "artifact_aliases, artifact_tags, artifact_publications, artifact_pins, "
+                "registry_audit, registry_pending CASCADE;"
+            )
+            conn.commit()
+            conn.close()
+
+            artifact_dir = tmp_path / "store"
+            store = ArtifactStore(artifact_dir, dialect=dialect)
+            version = store.create_artifact("fig", "prov-fig", _spec())
+            with store.open_blob_writer("fig", version) as writer:
+                writer.write(b"figure bytes")
+            store.finalize_artifact("fig", version, schema_json="", row_count=1, byte_size=12)
+            publication = store.publish_artifact("fig", version, title="Figure")
+
+            monkeypatch.setenv("STRATA_ARTIFACT_METADATA_DSN", postgres_dsn)
+            monkeypatch.setenv("STRATA_ARTIFACT_DIR", str(artifact_dir))
+            out = tmp_path / "deposit.zip"
+            args = argparse.Namespace(
+                ref=None,
+                token=publication.token,
+                artifact_dir=None,
+                to=str(out),
+                force=False,
+                title=None,
+                author=None,
+                tenant=None,
+                max_depth=10,
+            )
+            assert cmd_archive(args) == 0
+
+            artifact = store.get_artifact("fig", version)
+            assert out.read_bytes() == bundle_zip(store, artifact, publication=publication)
+        finally:
+            dialect.close()
+
+
 class TestTimestampPrecision:
     """The REAL-vs-DOUBLE PRECISION trap, checked against a live server."""
 
