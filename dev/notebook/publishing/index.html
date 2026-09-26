@@ -1122,39 +1122,6 @@
   
 </li>
       
-        <li class="md-nav__item">
-  <a href="#crediting-an-author" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Crediting an author
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#citing-it-dois-and-other-identifiers" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Citing it: DOIs and other identifiers
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#http" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        HTTP
-      
-    </span>
-  </a>
-  
-</li>
-      
     </ul>
   
 </nav>
@@ -2196,39 +2163,6 @@
   
 </li>
       
-        <li class="md-nav__item">
-  <a href="#crediting-an-author" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Crediting an author
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#citing-it-dois-and-other-identifiers" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Citing it: DOIs and other identifiers
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#http" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        HTTP
-      
-    </span>
-  </a>
-  
-</li>
-      
     </ul>
   
 </nav>
@@ -2432,46 +2366,63 @@ retention promise then stands behind the link instead of yours.</p>
 <p>A published artifact serves the same bundle as a zip:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>curl<span class="w"> </span>-O<span class="w"> </span>-J<span class="w"> </span>https://your-server/p/&lt;token&gt;/archive.zip
 </code></pre></div>
-<p>Same files, same code — the route and the command build the bundle from one
+<p>Same files, same code: the route and the command build the bundle from one
 implementation, because two implementations of a set of files that describe
 each other would drift and neither would stop producing a bundle. The response
-carries a <code>Content-Digest</code> of the zip. A withdrawn publication refuses here as
-it does for the bytes: the page still resolves and says "withdrawn", since a
-reader chasing a footnote deserves that answer, but handing over the archive
-anyway would undo the withdrawal.</p>
-<p>It needs no credentials, like the page, and contains nothing the page does not
-already show — the artifact's own bytes and the chain as rendered. Upstream
-bytes stay where they are.</p>
-<p>The page is the same document as the hosted one, with one difference: it points
-at the file beside it rather than at routes, and it tells the reader how to
-check the bytes themselves:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a>sha256sum artifact.png
-<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a># 6803c74b80937b56ed0eb28f86995fbbe9559167ac6ce089525a1615afb0c6ca
+carries a <code>Content-Digest</code> of the zip, and the zip is the same bytes on every
+request, so a digest you record at deposit time can be checked against a later
+fetch.</p>
+<p>To build that zip from the store directly, name the publication rather than the
+artifact. The bundle then carries the publication's own record, with the
+authors and identifiers the hosted page shows, and a <code>--to</code> ending in <code>.zip</code>
+writes the file the route serves, byte for byte:</p>
+<p><div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a>strata<span class="w"> </span>artifact<span class="w"> </span>archive<span class="w"> </span>--token<span class="w"> </span>&lt;token&gt;<span class="w"> </span>--to<span class="w"> </span>./figure3.zip
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="sb">```</span><span class="w"> </span>A<span class="w"> </span>withdrawn<span class="w"> </span>publication<span class="w"> </span>refuses<span class="w"> </span>here<span class="w"> </span>as
+<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a>it<span class="w"> </span>does<span class="w"> </span><span class="k">for</span><span class="w"> </span>the<span class="w"> </span>bytes:<span class="w"> </span>the<span class="w"> </span>page<span class="w"> </span>still<span class="w"> </span>resolves<span class="w"> </span>and<span class="w"> </span>says<span class="w"> </span><span class="s2">&quot;withdrawn&quot;</span>,<span class="w"> </span>since<span class="w"> </span>a
+<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a>reader<span class="w"> </span>chasing<span class="w"> </span>a<span class="w"> </span>footnote<span class="w"> </span>deserves<span class="w"> </span>that<span class="w"> </span>answer,<span class="w"> </span>but<span class="w"> </span>handing<span class="w"> </span>over<span class="w"> </span>the<span class="w"> </span>archive
+<a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a>anyway<span class="w"> </span>would<span class="w"> </span>undo<span class="w"> </span>the<span class="w"> </span>withdrawal.
+<a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a>
+<a id="__codelineno-10-7" name="__codelineno-10-7" href="#__codelineno-10-7"></a>It<span class="w"> </span>needs<span class="w"> </span>no<span class="w"> </span>credentials,<span class="w"> </span>like<span class="w"> </span>the<span class="w"> </span>page,<span class="w"> </span>and<span class="w"> </span>contains<span class="w"> </span>nothing<span class="w"> </span>the<span class="w"> </span>page<span class="w"> </span>does<span class="w"> </span>not
+<a id="__codelineno-10-8" name="__codelineno-10-8" href="#__codelineno-10-8"></a>already<span class="w"> </span>show<span class="w"> </span>—<span class="w"> </span>the<span class="w"> </span>artifact<span class="err">&#39;</span>s<span class="w"> </span>own<span class="w"> </span>bytes<span class="w"> </span>and<span class="w"> </span>the<span class="w"> </span>chain<span class="w"> </span>as<span class="w"> </span>rendered.<span class="w"> </span>Upstream
+<a id="__codelineno-10-9" name="__codelineno-10-9" href="#__codelineno-10-9"></a>bytes<span class="w"> </span>stay<span class="w"> </span>where<span class="w"> </span>they<span class="w"> </span>are.
+<a id="__codelineno-10-10" name="__codelineno-10-10" href="#__codelineno-10-10"></a>
+<a id="__codelineno-10-11" name="__codelineno-10-11" href="#__codelineno-10-11"></a>The<span class="w"> </span>page<span class="w"> </span>is<span class="w"> </span>the<span class="w"> </span>same<span class="w"> </span>document<span class="w"> </span>as<span class="w"> </span>the<span class="w"> </span>hosted<span class="w"> </span>one,<span class="w"> </span>with<span class="w"> </span>one<span class="w"> </span>difference:<span class="w"> </span>it<span class="w"> </span>points
+<a id="__codelineno-10-12" name="__codelineno-10-12" href="#__codelineno-10-12"></a>at<span class="w"> </span>the<span class="w"> </span>file<span class="w"> </span>beside<span class="w"> </span>it<span class="w"> </span>rather<span class="w"> </span>than<span class="w"> </span>at<span class="w"> </span>routes,<span class="w"> </span>and<span class="w"> </span>it<span class="w"> </span>tells<span class="w"> </span>the<span class="w"> </span>reader<span class="w"> </span>how<span class="w"> </span>to
+<a id="__codelineno-10-13" name="__codelineno-10-13" href="#__codelineno-10-13"></a>check<span class="w"> </span>the<span class="w"> </span>bytes<span class="w"> </span>themselves:
 </code></pre></div>
-<p>Archiving is not publishing. It grants nobody access to a running server and
-mints no link — it writes files you choose who to hand to.</p>
-<h2 id="crediting-an-author">Crediting an author<a class="headerlink" href="#crediting-an-author" title="Permanent link">&para;</a></h2>
-<p>The page carries two different facts, and they come from different places.</p>
-<p><strong>Who published or archived it</strong> is the byline under the title. <code>--author</code> sets
-it on either command; in service mode a publish through the API uses the
-authenticated principal instead. Omit it and there is simply no byline.</p>
-<p><strong>Who computed it</strong> is the <em>Computed by</em> row, and it comes from the artifact
-itself — recorded when the cell ran, not when you published. A local run has no
-authenticated identity to record, so that row usually reads "not recorded".
-<code>--author</code> does not change it: crediting yourself for publishing a result is
-not the same as the store attesting who produced it, and the page keeps them
-apart deliberately.</p>
-<p><strong>Who wrote the work</strong> is a third thing, and a list rather than a string:
-authors have an order, an affiliation, and an ORCID that distinguishes one
-researcher from another. Pass them when publishing over HTTP:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="err">POST</span><span class="w"> </span><span class="err">/v</span><span class="mi">1</span><span class="err">/ar</span><span class="kc">t</span><span class="err">i</span><span class="kc">fa</span><span class="err">c</span><span class="kc">ts</span><span class="err">/</span><span class="kc">f</span><span class="err">ig/v/</span><span class="mi">1</span><span class="err">/publish</span>
-<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="p">{</span>
-<a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a><span class="w">  </span><span class="nt">&quot;title&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Figure 3&quot;</span><span class="p">,</span>
-<a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a><span class="w">  </span><span class="nt">&quot;authors&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
-<a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a><span class="w">    </span><span class="p">{</span><span class="nt">&quot;name&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;F. Li&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;orcid&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;0000-0002-1825-0097&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;affiliation&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Somewhere&quot;</span><span class="p">},</span>
-<a id="__codelineno-11-6" name="__codelineno-11-6" href="#__codelineno-11-6"></a><span class="w">    </span><span class="p">{</span><span class="nt">&quot;name&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;B. Second&quot;</span><span class="p">}</span>
-<a id="__codelineno-11-7" name="__codelineno-11-7" href="#__codelineno-11-7"></a><span class="w">  </span><span class="p">]</span>
-<a id="__codelineno-11-8" name="__codelineno-11-8" href="#__codelineno-11-8"></a><span class="p">}</span>
+sha256sum artifact.png</p>
+<h1 id="6803c74b80937b56ed0eb28f86995fbbe9559167ac6ce089525a1615afb0c6ca">6803c74b80937b56ed0eb28f86995fbbe9559167ac6ce089525a1615afb0c6ca<a class="headerlink" href="#6803c74b80937b56ed0eb28f86995fbbe9559167ac6ce089525a1615afb0c6ca" title="Permanent link">&para;</a></h1>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a>Archiving is not publishing. It grants nobody access to a running server and
+<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a>mints no link — it writes files you choose who to hand to.
+<a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a>
+<a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a>## Crediting an author
+<a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a>
+<a id="__codelineno-11-6" name="__codelineno-11-6" href="#__codelineno-11-6"></a>The page carries two different facts, and they come from different places.
+<a id="__codelineno-11-7" name="__codelineno-11-7" href="#__codelineno-11-7"></a>
+<a id="__codelineno-11-8" name="__codelineno-11-8" href="#__codelineno-11-8"></a>**Who published or archived it** is the byline under the title. `--author` sets
+<a id="__codelineno-11-9" name="__codelineno-11-9" href="#__codelineno-11-9"></a>it on either command; in service mode a publish through the API uses the
+<a id="__codelineno-11-10" name="__codelineno-11-10" href="#__codelineno-11-10"></a>authenticated principal instead. Omit it and there is simply no byline.
+<a id="__codelineno-11-11" name="__codelineno-11-11" href="#__codelineno-11-11"></a>
+<a id="__codelineno-11-12" name="__codelineno-11-12" href="#__codelineno-11-12"></a>**Who computed it** is the *Computed by* row, and it comes from the artifact
+<a id="__codelineno-11-13" name="__codelineno-11-13" href="#__codelineno-11-13"></a>itself — recorded when the cell ran, not when you published. A local run has no
+<a id="__codelineno-11-14" name="__codelineno-11-14" href="#__codelineno-11-14"></a>authenticated identity to record, so that row usually reads &quot;not recorded&quot;.
+<a id="__codelineno-11-15" name="__codelineno-11-15" href="#__codelineno-11-15"></a>`--author` does not change it: crediting yourself for publishing a result is
+<a id="__codelineno-11-16" name="__codelineno-11-16" href="#__codelineno-11-16"></a>not the same as the store attesting who produced it, and the page keeps them
+<a id="__codelineno-11-17" name="__codelineno-11-17" href="#__codelineno-11-17"></a>apart deliberately.
+<a id="__codelineno-11-18" name="__codelineno-11-18" href="#__codelineno-11-18"></a>
+<a id="__codelineno-11-19" name="__codelineno-11-19" href="#__codelineno-11-19"></a>**Who wrote the work** is a third thing, and a list rather than a string:
+<a id="__codelineno-11-20" name="__codelineno-11-20" href="#__codelineno-11-20"></a>authors have an order, an affiliation, and an ORCID that distinguishes one
+<a id="__codelineno-11-21" name="__codelineno-11-21" href="#__codelineno-11-21"></a>researcher from another. Pass them when publishing over HTTP:
+<a id="__codelineno-11-22" name="__codelineno-11-22" href="#__codelineno-11-22"></a>
+<a id="__codelineno-11-23" name="__codelineno-11-23" href="#__codelineno-11-23"></a>```json
+<a id="__codelineno-11-24" name="__codelineno-11-24" href="#__codelineno-11-24"></a>POST /v1/artifacts/fig/v/1/publish
+<a id="__codelineno-11-25" name="__codelineno-11-25" href="#__codelineno-11-25"></a>{
+<a id="__codelineno-11-26" name="__codelineno-11-26" href="#__codelineno-11-26"></a>  &quot;title&quot;: &quot;Figure 3&quot;,
+<a id="__codelineno-11-27" name="__codelineno-11-27" href="#__codelineno-11-27"></a>  &quot;authors&quot;: [
+<a id="__codelineno-11-28" name="__codelineno-11-28" href="#__codelineno-11-28"></a>    {&quot;name&quot;: &quot;F. Li&quot;, &quot;orcid&quot;: &quot;0000-0002-1825-0097&quot;, &quot;affiliation&quot;: &quot;Somewhere&quot;},
+<a id="__codelineno-11-29" name="__codelineno-11-29" href="#__codelineno-11-29"></a>    {&quot;name&quot;: &quot;B. Second&quot;}
+<a id="__codelineno-11-30" name="__codelineno-11-30" href="#__codelineno-11-30"></a>  ]
+<a id="__codelineno-11-31" name="__codelineno-11-31" href="#__codelineno-11-31"></a>}
 </code></pre></div>
 <p>The byline then lists them in the order given, each ORCID as a link. Publishing
 without authors leaves <code>published_by</code> as the byline, so nothing published
