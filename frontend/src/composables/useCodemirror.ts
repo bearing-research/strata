@@ -2,12 +2,11 @@ import { onMounted, onBeforeUnmount, ref, watch, type Ref } from 'vue'
 import { Compartment, EditorState } from '@codemirror/state'
 import {
   EditorView,
-  keymap,
   lineNumbers,
   highlightActiveLine,
   highlightActiveLineGutter,
 } from '@codemirror/view'
-import { defaultKeymap, history, historyKeymap } from '@codemirror/commands'
+import { history } from '@codemirror/commands'
 import { python } from '@codemirror/lang-python'
 import { oneDark } from '@codemirror/theme-one-dark'
 import {
@@ -23,6 +22,7 @@ import {
 import { r as rLegacyMode } from '@codemirror/legacy-modes/mode/r'
 import { closeBrackets } from '@codemirror/autocomplete'
 import type { CellLanguage } from '../types/notebook'
+import { editorKeymaps } from './editorKeymaps'
 import { useTheme } from './useTheme'
 
 // ---------------------------------------------------------------------------
@@ -106,23 +106,6 @@ export function useCodemirror(
             ? StreamLanguage.define(rLegacyMode)
             : python()
 
-    const runKeymap = keymap.of([
-      {
-        key: 'Shift-Enter',
-        run: () => {
-          opts.onRun?.()
-          return true
-        },
-      },
-      {
-        key: 'Mod-Shift-Enter',
-        run: () => {
-          opts.onRerun?.()
-          return true
-        },
-      },
-    ])
-
     const updateListener = EditorView.updateListener.of((update) => {
       if (update.docChanged && !suppressNextUpdate) {
         opts.onUpdate?.(update.state.doc.toString())
@@ -141,8 +124,7 @@ export function useCodemirror(
         syntaxHighlighting(defaultHighlightStyle),
         langCompartment.of(langExt),
         themeCompartment.of(themeFor(resolved.value)),
-        keymap.of([...defaultKeymap, ...historyKeymap]),
-        runKeymap,
+        ...editorKeymaps(opts),
         updateListener,
         EditorView.theme({
           '&': { fontSize: '13px' },

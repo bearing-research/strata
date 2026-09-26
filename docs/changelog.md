@@ -201,6 +201,11 @@ a case of the server reporting more confidence than it had:
 
 ### Fixed
 
+- **Shift+Enter runs the cell.** In the cell editor it inserted a newline:
+  CodeMirror's default keymap binds Enter with a Shift variant, and it was
+  listed ahead of the run binding at the same precedence, so it always won.
+  Cmd/Ctrl+Shift+Enter (rerun) was unaffected. The button's tooltip and the
+  docs said Shift+Enter all along.
 - **A worker that answers has answered.** A worker predating the health
   document replies 404, which says it is older than every feature it would
   list — so the cell runs in the worker's own environment, as documented,

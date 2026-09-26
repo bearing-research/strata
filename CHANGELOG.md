@@ -244,6 +244,11 @@ environment pinned below them has to move before it can install 0.8.0.
 
 ### Fixed
 
+- **Shift+Enter runs the cell.** In the cell editor it inserted a newline:
+  CodeMirror's default keymap binds Enter with a Shift variant, and it was
+  listed ahead of the run binding at the same precedence, so it always won.
+  Cmd/Ctrl+Shift+Enter (rerun) was unaffected. The button's tooltip and the
+  docs said Shift+Enter all along.
 - **A chain is walked past a step that was rerun.** Rerunning a cell
   supersedes its earlier version, which a result computed from it still names
   and still reads. The lineage walk treated a superseded step as unknown and
