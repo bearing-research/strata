@@ -17,7 +17,7 @@ from pyiceberg.table import Table
 from pyiceberg.table.snapshots import Operation
 
 from strata.config import StrataConfig
-from strata.types import TableIdentity
+from strata.types import ACL_STORE_NAMES, TableIdentity
 
 logger = logging.getLogger(__name__)
 
@@ -65,6 +65,27 @@ def table_identity_for(table_uri: str, config: StrataConfig) -> TableIdentity:
     warehouse_path, table_id = PyIcebergCatalog.parse_table_uri(table_uri)
     catalog = config.catalog_name if warehouse_path is None else "strata"
     return TableIdentity.from_table_id(table_id, catalog=catalog)
+
+
+def shared_catalog_stores(table_uri: str, config: StrataConfig) -> tuple[str, ...]:
+    """Every store name an ACL rule can give the table *table_uri* reads.
+
+    With ``catalog_properties["uri"]`` set, every warehouse URI builds
+    ``SqlCatalog("strata")`` over that one database, whatever path or scheme
+    comes before ``#``, so ``s3:``, ``gs:``, ``az:`` and ``file:`` all name
+    the same table. A bare ``namespace.table`` reads the default catalog, which
+    is that same one when it is also named ``strata``. Otherwise the address
+    picks the catalog, and ``()`` says the table has only the name it was
+    requested under.
+    """
+    if "uri" not in config.catalog_properties:
+        return ()
+    if named_catalog(table_uri, config)[0] is not None:
+        return ()
+    warehouse_path, _ = PyIcebergCatalog.parse_table_uri(table_uri)
+    if warehouse_path is None and config.catalog_name != "strata":
+        return ()
+    return ACL_STORE_NAMES
 
 
 def _is_connection_io_error(exc: BaseException) -> bool:

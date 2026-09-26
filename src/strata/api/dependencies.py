@@ -322,7 +322,7 @@ def authorize_table_access(table_uri: str, table_identity) -> None:
         ``hide_forbidden_as_not_found``) if the ACL denies the table.
     """
     from strata.auth import AclEvaluator, get_principal
-    from strata.iceberg import named_catalog
+    from strata.iceberg import named_catalog, shared_catalog_stores
     from strata.server import get_state
     from strata.types import TableRef
 
@@ -338,7 +338,14 @@ def authorize_table_access(table_uri: str, table_identity) -> None:
     table_ref = TableRef.from_table_identity(
         table_identity, table_uri=table_uri, named_catalog_name=named
     )
-    if not AclEvaluator(state.config.acl_config).authorize(principal, table_ref):
+    # The names the same table has under the other address forms, which a
+    # deny rule written for any one of them must also refuse.
+    aliases = tuple(
+        TableRef(catalog=store, namespace=table_ref.namespace, table=table_ref.table)
+        for store in shared_catalog_stores(table_uri, state.config)
+        if store != table_ref.catalog
+    )
+    if not AclEvaluator(state.config.acl_config).authorize(principal, table_ref, aliases):
         if state.config.hide_forbidden_as_not_found:
             raise HTTPException(status_code=404, detail="Table not found")
         raise HTTPException(status_code=403, detail="Access denied")

@@ -291,7 +291,12 @@ class AclEvaluator:
 
         return False
 
-    def authorize(self, principal: Principal, table_ref: TableRef) -> bool:
+    def authorize(
+        self,
+        principal: Principal,
+        table_ref: TableRef,
+        aliases: tuple[TableRef, ...] = (),
+    ) -> bool:
         """Check if principal is authorized to access table.
 
         Evaluation order:
@@ -302,13 +307,17 @@ class AclEvaluator:
         Args:
             principal: Authenticated principal making the request
             table_ref: Canonical table reference being accessed
+            aliases: Other names the same table answers to. A deny rule for
+                any of them refuses the table, so asking for it under another
+                address cannot step around the rule. Allow rules still match
+                only ``table_ref``, so an alias never grants anything.
 
         Returns:
             True if access is allowed, False if denied
         """
         # Check deny rules first (deny takes precedence)
         for rule in self.config.deny_rules:
-            if self._matches_rule(rule, principal, table_ref):
+            if any(self._matches_rule(rule, principal, ref) for ref in (table_ref, *aliases)):
                 return False
 
         # Check allow rules

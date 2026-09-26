@@ -101,7 +101,7 @@ column points at the regression test that replaced the replay.
 | 9 | Evicted limiter lets a tenant exceed its quota | `tests/test_multitenancy.py::TestEvictionSparesBusyTenants` | Evict only idle limiters ✓ | **Fixed** |
 | 10 | Shutdown drain misses evicted limiters' streams | Same as 9 | Same as 9 ✓ | **Fixed** |
 | 11 | Mid-run upstream edit leaves the downstream READY | `tests/notebook/test_e2e_staleness.py::TestAnEditDuringARun` | Keep the walk's verdict; leave running cells alone ✓ | **Fixed** |
-| 12 | Deny rule sidestepped by another address form | `test_acl_counterexamples.py` | Name tables by serving catalog | Docs done (`*:ns.*` deny patterns); code fix open |
+| 12 | Deny rule sidestepped by another address form | `tests/test_auth.py::TestADenyOnOneAddressCoversTheTable` | Deny rules checked against every alias of the table | **Fixed** |
 
 Suggested fix order, cheapest and safest first: 6, 8, 3, 12 (docs), 1,
 9/10, 11, 2, 4, then 5/7.
@@ -158,8 +158,9 @@ suspicion from reading code that hasn't been confirmed.
    test. For each catalog shape (local warehouse, `catalog_properties`
    SQL catalog, named catalog, S3 warehouse), every URI form that
    `PyIcebergCatalog.load_table` resolves to the same `metadata_location`
-   must get the same `TableRef`. It will fail today. It is the acceptance
-   test for the fix.
+   must be refused by a deny written for any one of those forms. The
+   finding 12 fix covers the SQL-catalog shape by construction; this
+   would check the others.
 5. **Iceberg manifest pruning.** `test_pruning_properties.py` covers
    Parquet row groups only. File-level skipping uses Iceberg manifest
    bounds, which have their own NaN counts and string truncation. Build

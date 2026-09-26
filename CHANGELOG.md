@@ -220,12 +220,15 @@ environment pinned below them has to move before it can install 0.8.0.
   publication is kept out of the garbage collector's sweep.
 - **A manifest may only point at named hosts**, and a worker's job URL is
   checked against the manifest's own origin.
-- **A deny rule can cover every address of a table.** A table pattern names the
+- **A deny rule covers every address of a table.** A table pattern names the
   address a table was requested under. With a SQL catalog configured, one S3
   table is `s3:` under its S3 URI and `file:` as a bare name or behind any other
   path, so a deny on `s3:finance.*` left the other two readable under
-  `default = "allow"`. The configuration reference now says what each prefix
-  names and recommends deny patterns of the form `*:finance.*`.
+  `default = "allow"`. With a SQL catalog, a deny is now checked against every
+  name the table answers to. Allow rules still match only the name requested.
+  The configuration reference says what each prefix names and still recommends
+  `*:finance.*` deny patterns, which also cover a named catalog holding the
+  same data.
 
 ### Fixed
 
