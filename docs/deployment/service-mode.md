@@ -28,7 +28,7 @@ artifact configuration:
 STRATA_DEPLOYMENT_MODE=service
 STRATA_AUTH_MODE=trusted_proxy
 STRATA_PROXY_TOKEN=<shared-secret>
-STRATA_ARTIFACT_DIR=/path/to/persistent/dir   # or a blob backend
+STRATA_ARTIFACT_DIR=/path/to/dir   # required with any artifact store, blob backend or not
 ```
 
 A [startup coherence check](https://github.com/bearing-research/strata/blob/main/src/strata/config.py) fires clear `ValueError`s on boot if anything's missing, a sloppy service-mode deploy refuses to start rather than silently exposing write endpoints.
@@ -161,7 +161,7 @@ across.
 STRATA_DEPLOYMENT_MODE=service
 STRATA_AUTH_MODE=trusted_proxy
 STRATA_PROXY_TOKEN=<shared-secret-with-proxy>
-STRATA_ARTIFACT_DIR=/path/to/persistent/dir  # or use STRATA_ARTIFACT_BLOB_BACKEND
+STRATA_ARTIFACT_DIR=/path/to/dir  # required with any artifact store, blob backend or not
 
 # Multi-tenancy (optional but recommended for >1 team)
 STRATA_MULTI_TENANT_ENABLED=true
@@ -181,10 +181,14 @@ uv run strata-notebook
 
 Compared to personal mode:
 
-- **No default artifact dir.** You must set `STRATA_ARTIFACT_DIR`
-  explicitly (or configure a blob backend via
-  `STRATA_ARTIFACT_BLOB_BACKEND=s3` etc.). Service mode refuses to
-  start without a persistent target.
+- **No default artifact dir.** The artifact store exists only when
+  `STRATA_ARTIFACT_DIR` is set, including when
+  `STRATA_ARTIFACT_METADATA_DSN` and a blob backend such as
+  `STRATA_ARTIFACT_BLOB_BACKEND=s3` hold everything durable; the
+  directory then keeps nothing that needs a backup. Service mode refuses
+  to start with a DSN, a non-local blob backend or
+  `STRATA_SERVICE_WRITES_ENABLED` and no `STRATA_ARTIFACT_DIR`. Without
+  any of those it runs scan-only, with no artifact store.
 - **Reads work; direct writes are off by default.** Clients can read
   results - scan/stream a table, fetch an artifact's data
   (`GET /v1/artifacts/{id}/v/{n}/data`), and resolve a dataset by name
@@ -311,7 +315,7 @@ directly - `put`, `set_name`, `set_alias`, tags - under a strict contract:
 STRATA_DEPLOYMENT_MODE=service
 STRATA_AUTH_MODE=trusted_proxy
 STRATA_PROXY_TOKEN=<shared-secret-with-proxy>
-STRATA_ARTIFACT_DIR=/path/to/persistent/dir   # or a blob backend
+STRATA_ARTIFACT_DIR=/path/to/dir   # required with any artifact store, blob backend or not
 STRATA_MULTI_TENANT_ENABLED=true              # team = tenant
 STRATA_SERVICE_WRITES_ENABLED=true            # the opt-in
 ```

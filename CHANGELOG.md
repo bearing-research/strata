@@ -143,6 +143,12 @@ back, and an artifact store can be swept, pinned, and reported on per tenant.
 Upgrading changes some behaviour that was previously silent. Each of these was
 a case of the server reporting more confidence than it had:
 
+- **Service mode refuses an artifact store without `STRATA_ARTIFACT_DIR`.** The
+  store is created only when that directory is set, even when
+  `STRATA_ARTIFACT_METADATA_DSN` and an object-store blob backend hold
+  everything. A deployment with a DSN, a non-local blob backend or service
+  writes and no directory used to boot and then fail every artifact route with
+  a 404 or a 500; it now stops at startup and says so.
 - **A read SQL cell may only read.** `SET`, `PRAGMA`, `ATTACH`, `CALL`,
   `COPY … TO` and `EXPLAIN ANALYZE` are refused, naming the statement, because
   a read cell's connection is a transaction its body could end. Use
