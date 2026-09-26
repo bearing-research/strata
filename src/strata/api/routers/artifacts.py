@@ -52,6 +52,7 @@ from strata.types import (
     ArtifactInfoResponse,
     ArtifactLineageResponse,
     ArtifactProvenanceMatchResponse,
+    Principal,
     PutArtifactResponse,
     UploadFinalizeRequest,
     UploadFinalizeResponse,
@@ -341,6 +342,57 @@ async def get_artifact_info(
     )
 
 
+@router.put("/v1/artifacts/import/blobs/{content_sha256}", status_code=201)
+async def stage_import_blob_route(
+    request: Request,
+    store: WriteStore,
+    principal: CurrentPrincipal,
+    content_sha256: str = FastPath(pattern="^[0-9a-f]{64}$"),
+):
+    """Upload the bytes of an artifact about to be imported, ahead of its record.
+
+    The first of the import's two steps: the bytes here, then ``POST
+    /v1/artifacts/import`` with the record, whose ``content_sha256`` names
+    them. The body is streamed to disk and checked against the digest in the
+    path before anything is kept, so a 201 means these are exactly the bytes
+    that digest describes. Only the caller's tenant can import them.
+    """
+    tenant_id = principal.tenant if principal else None
+    with tempfile.TemporaryDirectory(prefix="strata_import_") as workdir:
+        staged = Path(workdir) / "blob"
+        hasher = hashlib.sha256()
+        byte_size = 0
+        with open(staged, "wb") as out:
+            async for chunk in request.stream():
+                hasher.update(chunk)
+                byte_size += len(chunk)
+                out.write(chunk)
+        received = hasher.hexdigest()
+        if received != content_sha256:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Uploaded bytes do not match the digest in the path "
+                    f"(path {content_sha256[:12]}…, received {received[:12]}…)"
+                ),
+            )
+        await asyncio.to_thread(
+            store.stage_import_blob, tenant_id, content_sha256, staged, byte_size
+        )
+    return {"content_sha256": content_sha256, "byte_size": byte_size}
+
+
+def _copy_staged_blob(store: ArtifactStore, tenant: str | None, digest: str, dest: Path) -> bool:
+    """Copy bytes the caller staged under *digest* to *dest*; False if none."""
+    reader_cm = store.open_staged_import(tenant, digest)
+    if reader_cm is None:
+        return False
+    with reader_cm as reader, open(dest, "wb") as out:
+        while chunk := reader.read(BLOB_STREAM_CHUNK_BYTES):
+            out.write(chunk)
+    return True
+
+
 @router.post("/v1/artifacts/import")
 async def import_artifact_route(
     request: Request,
@@ -375,23 +427,53 @@ async def import_artifact_route(
 
     The caller's tenant is stamped on the row whatever the record says, so an
     import cannot place an artifact in someone else's namespace.
+
+    Two forms. A JSON body is the record alone, and its bytes are the ones the
+    caller uploaded with ``PUT /v1/artifacts/import/blobs/{content_sha256}``,
+    which is how a large artifact travels without being held in memory. A
+    multipart body carries a ``metadata`` file and the bytes as ``data``.
     """
+    with tempfile.TemporaryDirectory(prefix="strata_import_") as workdir:
+        return await _import_artifact(request, store, principal, remap, Path(workdir))
+
+
+async def _import_artifact(
+    request: Request,
+    store: ArtifactStore,
+    principal: Principal | None,
+    remap: bool,
+    workdir: Path,
+) -> dict:
+    """The import route's body, with a directory to stage a copied blob in."""
     import json as json_module
 
     from strata.artifact_store import ArtifactVersion
 
-    form = await request.form()
-    metadata_file = form.get("metadata")
-    data_file = form.get("data")
-    if metadata_file is None or isinstance(metadata_file, str):
-        raise HTTPException(status_code=400, detail="Missing 'metadata' file field")
+    tenant_id = principal.tenant if principal else None
+    staged = request.headers.get("content-type", "").startswith("application/json")
+    blob: bytes | Path | None = None
+    if staged:
+        try:
+            metadata = await request.json()
+        except (json_module.JSONDecodeError, UnicodeDecodeError) as exc:
+            raise HTTPException(status_code=400, detail=f"Invalid JSON body: {exc}")
+        if not isinstance(metadata, dict):
+            raise HTTPException(status_code=400, detail="The body must be a JSON object")
+    else:
+        form = await request.form()
+        metadata_file = form.get("metadata")
+        data_file = form.get("data")
+        if metadata_file is None or isinstance(metadata_file, str):
+            raise HTTPException(status_code=400, detail="Missing 'metadata' file field")
 
-    try:
-        metadata = json_module.loads(await metadata_file.read())
-    except json_module.JSONDecodeError as exc:
-        raise HTTPException(status_code=400, detail=f"Invalid metadata JSON: {exc}")
-    if not isinstance(metadata, dict):
-        raise HTTPException(status_code=400, detail="Metadata must be a JSON object")
+        try:
+            metadata = json_module.loads(await metadata_file.read())
+        except json_module.JSONDecodeError as exc:
+            raise HTTPException(status_code=400, detail=f"Invalid metadata JSON: {exc}")
+        if not isinstance(metadata, dict):
+            raise HTTPException(status_code=400, detail="Metadata must be a JSON object")
+        if data_file is not None and not isinstance(data_file, str):
+            blob = await data_file.read()
 
     artifact_id = str(metadata.get("id") or "").strip()
     if not artifact_id:
@@ -405,16 +487,25 @@ async def import_artifact_route(
         version = int(metadata.get("version"))
     except (TypeError, ValueError):
         raise HTTPException(status_code=400, detail="Metadata 'version' must be an integer")
+    if version < 1:
+        # Versions start at 1, and staged uploads wait under version 0.
+        raise HTTPException(status_code=400, detail="Metadata 'version' must be 1 or more")
     provenance_hash = str(metadata.get("provenance_hash") or "").strip()
     if not provenance_hash:
         raise HTTPException(status_code=400, detail="Metadata is missing 'provenance_hash'")
 
-    blob: bytes | None = None
-    if data_file is not None and not isinstance(data_file, str):
-        blob = await data_file.read()
-
     declared_digest = str(metadata.get("content_sha256") or "").strip()
-    if declared_digest and blob is not None:
+    if staged:
+        if not re.fullmatch(r"[0-9a-f]{64}", declared_digest):
+            raise HTTPException(
+                status_code=400,
+                detail="A JSON import names its bytes by 'content_sha256' (64 hex digits)",
+            )
+        copied = workdir / "blob"
+        if await asyncio.to_thread(_copy_staged_blob, store, tenant_id, declared_digest, copied):
+            # Checked against this digest when it was uploaded.
+            blob = copied
+    elif declared_digest and isinstance(blob, bytes):
         # Verified before anything is written. The digest is the caller's claim
         # about its own bytes, and an import that stored bytes contradicting it
         # would publish a page whose verify step fails against a record this
@@ -429,7 +520,6 @@ async def import_artifact_route(
                 ),
             )
 
-    tenant_id = principal.tenant if principal else None
     record = ArtifactVersion(
         id=artifact_id,
         version=version,
@@ -469,7 +559,24 @@ async def import_artifact_route(
             )
         record = replace(record, id=f"{artifact_id}@import={uuid.uuid4().hex[:8]}")
 
+    if staged and blob is None:
+        # Nothing uploaded, which is right only for a record this store already
+        # holds with its bytes: a retry after an import that went through.
+        already = store.get_artifact(record.id, record.version)
+        same = store.find_by_provenance(record.provenance_hash, tenant_id)
+        complete = already is not None and store.blob_exists(already.id, already.version)
+        if not complete and same is None:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"No bytes uploaded for content_sha256 {declared_digest[:12]}…; "
+                    f"PUT them to /v1/artifacts/import/blobs/{declared_digest} first"
+                ),
+            )
+
     landed = store.import_artifact(record, blob)
+    if isinstance(blob, Path):
+        await asyncio.to_thread(store.release_staged_import, tenant_id, declared_digest)
     return {
         "artifact_uri": f"strata://artifact/{landed.ref}",
         "id": landed.id,

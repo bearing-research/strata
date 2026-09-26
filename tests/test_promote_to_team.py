@@ -78,6 +78,70 @@ def _promote(chain, url, **overrides):
     return cmd_promote(argparse.Namespace(**args))
 
 
+class TestIntoACentralStore:
+    """Promotion into a service-mode store behind a trusted proxy: the shape
+    of a personal server promoting to an organization's central store through
+    a listener that injects the organization's tenant and the member's
+    identity."""
+
+    PROXY_TOKEN = "listener-token"
+
+    @pytest.fixture
+    def central(self, tmp_path):
+        from tests.conftest import run_server_with_context
+
+        artifact_dir = tmp_path / "central"
+        with run_server_with_context(
+            tmp_path / "central-cache",
+            artifact_dir,
+            "service",
+            auth_mode="trusted_proxy",
+            proxy_token=self.PROXY_TOKEN,
+            multi_tenant_enabled=True,
+            service_writes_enabled=True,
+            hide_forbidden_as_not_found=True,
+        ) as ctx:
+            yield ctx.base_url, artifact_dir
+
+    def _listener(self, tenant: str, scopes: str = "artifacts:write") -> list[str]:
+        return [
+            f"X-Strata-Proxy-Token: {self.PROXY_TOKEN}",
+            f"X-Tenant-ID: {tenant}",
+            "X-Strata-Principal: alice",
+            f"X-Strata-Scopes: {scopes}",
+        ]
+
+    def test_the_chain_lands_under_the_organizations_tenant(self, central, chain):
+        base, artifact_dir = central
+
+        assert _promote(chain, base, header=self._listener("org1")) == 0
+
+        store = ArtifactStore(artifact_dir)
+        for key in ("upstream", "figure"):
+            landed = store.get_artifact(chain[key].id, chain[key].version)
+            assert landed is not None, key
+            assert landed.tenant == "org1", key
+
+        mine = httpx.get(
+            f"{base}/v1/names/taxi/model",
+            headers=dict(h.split(": ", 1) for h in self._listener("org1")),
+            timeout=10,
+        )
+        theirs = httpx.get(
+            f"{base}/v1/names/taxi/model",
+            headers=dict(h.split(": ", 1) for h in self._listener("org2")),
+            timeout=10,
+        )
+        assert mine.status_code == 200
+        assert theirs.status_code == 404
+
+    def test_a_member_without_the_write_scope_promotes_nothing(self, central, chain):
+        base, artifact_dir = central
+
+        assert _promote(chain, base, header=self._listener("org1", "artifacts:read")) != 0
+        assert ArtifactStore(artifact_dir).get_artifact(chain["figure"].id, 1) is None
+
+
 class TestPromote:
     def test_the_artifact_arrives_under_its_name(self, team_store, team_dir, chain):
         assert _promote(chain, team_store) == 0

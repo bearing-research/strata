@@ -40,6 +40,12 @@ back, and an artifact store can be swept, pinned, and reported on per tenant.
 
 ### Added
 
+- **An import can upload its bytes first.** `PUT
+  /v1/artifacts/import/blobs/{sha256}` streams a version's bytes to the store
+  and checks them against the digest, and `POST /v1/artifacts/import` with a
+  JSON record imports the version whose `content_sha256` names them, so a large
+  artifact is never held in memory. Uploads are per tenant, and one nothing
+  imports is dropped a day later. The multipart form the CLI sends still works.
 - **An agent can look at the plot it made.** A plotting cell's output used to
   reach an agent as `image/png` with no preview, which says something was drawn
   and nothing about what. `strata cell output <nb> <cell> --out plot.png`

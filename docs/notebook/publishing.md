@@ -314,6 +314,30 @@ The patch cannot repoint the token. `artifact_id` and `version` are not fields
 of the request, because a citation whose target could change under the reader
 would be worthless.
 
+## Copying a chain into another store
+
+A link resolves from the store its server serves, and a chain lives in the
+store its cells wrote to. When those are different machines, the chain is
+imported into the serving store first, ancestors before descendants, keeping
+each version's id and number so its lineage edges still resolve.
+`strata artifact publish --to <url>` does this for you. A service doing it
+over HTTP uploads each version's bytes, then its record:
+
+```
+PUT  /v1/artifacts/import/blobs/{sha256}     the bytes, checked against the digest; 201
+POST /v1/artifacts/import                    {"id": ..., "version": ..., "provenance_hash": ...,
+                                              "content_sha256": ..., "input_versions": ..., ...}
+```
+
+The record's `content_sha256` names the bytes uploaded before it, and only the
+same tenant's upload counts: a digest is printed on every publication's page,
+so knowing one proves nothing. An upload nothing imports is dropped a day later.
+The import stamps the caller's tenant on the row, answers 409 for a version
+another tenant or another computation holds unless `?remap=true` is set, and is
+idempotent: repeating a finished import writes nothing and needs no new upload.
+The same route also takes a multipart body with the record as `metadata` and
+the bytes as `data`, which is what the CLI sends.
+
 ## HTTP
 
 | Route | Auth | Purpose |
@@ -322,6 +346,8 @@ would be worthless.
 | `DELETE /v1/publications/{token}` | yes (`artifacts:publish`) | Withdraw. |
 | `PATCH /v1/publications/{token}` | yes (`artifacts:publish`) | Set authors and external identifiers. Cannot change what the token points at. |
 | `GET /v1/publications` | yes | List this tenant's live links. |
+| `PUT /v1/artifacts/import/blobs/{sha256}` | yes (`artifacts:write`) | Upload a version's bytes ahead of its record. |
+| `POST /v1/artifacts/import` | yes (`artifacts:write`) | Import a version, keeping its id and number. |
 | `GET /p/{token}` | **no** | The page. |
 | `GET /p/{token}/data` | **no** | The published bytes. |
 | `GET /p/{token}/verify` | **no** | Re-read and compare against the recorded digest. |

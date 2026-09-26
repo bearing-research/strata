@@ -94,6 +94,22 @@ def attempt_blob_id(artifact_id: str, attempt: str) -> str:
     return f"{artifact_id}~{attempt}"
 
 
+# How long bytes uploaded ahead of an import wait for it. An import follows its
+# upload within seconds; a day covers a caller retrying through an outage.
+IMPORT_STAGING_TTL_SECONDS = 86_400.0
+
+
+def staged_import_key(tenant: str | None, content_sha256: str) -> tuple[str, int]:
+    """The blob key bytes uploaded ahead of an import wait under.
+
+    Version 0, which no artifact has (versions start at 1 and an import
+    refuses anything lower), so a staged upload can never share a key with an
+    artifact, whatever id that artifact was imported under.
+    """
+    tenant_key = hashlib.sha256((tenant or "").encode()).hexdigest()[:16]
+    return f"import-staging-{tenant_key}-{content_sha256}", 0
+
+
 class BuildLeaseLost(RuntimeError):
     """A build attempt tried to publish after its lease moved to another."""
 
@@ -553,11 +569,29 @@ def _add_blob_attempt(conn: StoreConnection, dialect: SqlDialect) -> None:
         conn.execute("ALTER TABLE artifact_versions ADD COLUMN blob_attempt TEXT")
 
 
+def _add_import_staging(conn: StoreConnection, dialect: SqlDialect) -> None:
+    """Give an import somewhere to find bytes uploaded ahead of its record."""
+    conn.execute(
+        dialect.adapt_ddl(
+            """
+            CREATE TABLE IF NOT EXISTS import_staging (
+                tenant TEXT NOT NULL DEFAULT '',
+                content_sha256 TEXT NOT NULL,
+                byte_size INTEGER NOT NULL,
+                staged_at REAL NOT NULL,
+                PRIMARY KEY (tenant, content_sha256)
+            )
+            """
+        )
+    )
+
+
 _MIGRATIONS: list[_Migration] = [
     _Migration(1, "artifact_versions.content_sha256", _add_content_sha256),
     _Migration(2, "artifact_publications.authors + external_ids", _add_publication_credits),
     _Migration(3, "artifact_pins", _add_pins),
     _Migration(4, "artifact_versions.blob_attempt", _add_blob_attempt),
+    _Migration(5, "import_staging", _add_import_staging),
 ]
 
 _LATEST_SCHEMA_VERSION = max((m.version for m in _MIGRATIONS), default=_BASELINE_SCHEMA_VERSION)
@@ -722,6 +756,19 @@ CREATE TABLE IF NOT EXISTS artifact_pins (
     PRIMARY KEY (artifact_id, version, reason)
 );
 CREATE INDEX IF NOT EXISTS idx_pins_tenant ON artifact_pins(tenant);
+
+-- Bytes uploaded ahead of the import that names them (PUT
+-- /v1/artifacts/import/blobs/{sha256}). Per tenant: a digest is no proof of
+-- holding the bytes, since a publication's page prints it, so one tenant's
+-- upload must never satisfy another's import. The blob stores cannot list
+-- keys, so this is also how an upload that is never imported is found again.
+CREATE TABLE IF NOT EXISTS import_staging (
+    tenant TEXT NOT NULL DEFAULT '',
+    content_sha256 TEXT NOT NULL,
+    byte_size INTEGER NOT NULL,
+    staged_at REAL NOT NULL,
+    PRIMARY KEY (tenant, content_sha256)
+);
 """
 
 # Migration SQL to add tenant columns to existing tables
@@ -1217,7 +1264,7 @@ class ArtifactStore:
         self,
         landed: ImportedArtifact,
         record: ArtifactVersion,
-        blob: bytes | None,
+        blob: bytes | Path | None,
     ) -> None:
         """Fill in what an earlier, less complete write of this row left out.
 
@@ -1243,8 +1290,7 @@ class ArtifactStore:
         completed by a path that had information the first writer never had.
         """
         if blob is not None and not self.blob_exists(landed.id, landed.version):
-            with self.open_blob_writer(landed.id, landed.version) as writer:
-                writer.write(blob)
+            self._write_imported_blob(landed.id, landed.version, blob)
 
         if not record.input_versions:
             return
@@ -1268,7 +1314,94 @@ class ArtifactStore:
         finally:
             conn.close()
 
-    def import_artifact(self, record: ArtifactVersion, blob: bytes | None) -> ImportedArtifact:
+    def _write_imported_blob(self, artifact_id: str, version: int, blob: bytes | Path) -> None:
+        """Write an import's bytes, from memory or from a file on this machine.
+
+        A file is published rather than read, so an import staged by upload
+        never holds the whole artifact in memory.
+        """
+        if isinstance(blob, Path):
+            self.publish_blob_from_path(artifact_id, version, blob)
+            return
+        with self.open_blob_writer(artifact_id, version) as writer:
+            writer.write(blob)
+
+    def stage_import_blob(
+        self,
+        tenant: str | None,
+        content_sha256: str,
+        source_path: Path,
+        byte_size: int,
+        *,
+        now: float | None = None,
+    ) -> None:
+        """Hold bytes, already checked against *content_sha256*, for an import.
+
+        Staging again under the same digest refreshes the hold. Each call also
+        drops what this tenant staged more than ``IMPORT_STAGING_TTL_SECONDS``
+        ago and never imported, since nothing else would ever find it.
+        """
+        now = time.time() if now is None else now
+        blob_id, version = staged_import_key(tenant, content_sha256)
+        self.blob_store.publish_blob_from_path(blob_id, version, source_path)
+
+        effective_tenant = tenant or ""
+        conn = self._get_connection()
+        try:
+            conn.execute(
+                """
+                INSERT INTO import_staging (tenant, content_sha256, byte_size, staged_at)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(tenant, content_sha256) DO UPDATE SET
+                    byte_size = excluded.byte_size, staged_at = excluded.staged_at
+                """,
+                (effective_tenant, content_sha256, byte_size, now),
+            )
+            stale = conn.execute(
+                "SELECT content_sha256 FROM import_staging WHERE tenant = ? AND staged_at < ?",
+                (effective_tenant, now - IMPORT_STAGING_TTL_SECONDS),
+            ).fetchall()
+            conn.commit()
+        finally:
+            conn.close()
+        for row in stale:
+            self.release_staged_import(tenant, row["content_sha256"])
+
+    def open_staged_import(self, tenant: str | None, content_sha256: str):
+        """A reader for bytes *tenant* staged under *content_sha256*, or ``None``.
+
+        Only the tenant that uploaded them can import them.
+        """
+        conn = self._get_connection()
+        try:
+            row = conn.execute(
+                "SELECT 1 FROM import_staging WHERE tenant = ? AND content_sha256 = ?",
+                (tenant or "", content_sha256),
+            ).fetchone()
+        finally:
+            conn.close()
+        if row is None:
+            return None
+        blob_id, version = staged_import_key(tenant, content_sha256)
+        return self.blob_store.open_blob_reader(blob_id, version)
+
+    def release_staged_import(self, tenant: str | None, content_sha256: str) -> None:
+        """Drop staged bytes, once an import has used them or never will."""
+        blob_id, version = staged_import_key(tenant, content_sha256)
+        self.blob_store.delete_blob(blob_id, version)
+        conn = self._get_connection()
+        try:
+            conn.execute(
+                "DELETE FROM import_staging WHERE tenant = ? AND content_sha256 = ?",
+                (tenant or "", content_sha256),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+    def import_artifact(
+        self, record: ArtifactVersion, blob: bytes | Path | None
+    ) -> ImportedArtifact:
         """Copy an artifact from another store, keeping its id *and* version.
 
         Returns where the record landed and whether anything was written, so a
@@ -1330,8 +1463,7 @@ class ArtifactStore:
             return no_op
 
         if blob is not None:
-            with self.open_blob_writer(record.id, record.version) as writer:
-                writer.write(blob)
+            self._write_imported_blob(record.id, record.version, blob)
 
         conn = self._get_connection()
         try:
@@ -1367,7 +1499,7 @@ class ArtifactStore:
                     # copy that recomputed it locally would agree by
                     # construction and prove nothing.
                     record.content_sha256
-                    or (hashlib.sha256(blob).hexdigest() if blob is not None else None),
+                    or (hashlib.sha256(blob).hexdigest() if isinstance(blob, bytes) else None),
                 ),
             )
             conn.commit()
