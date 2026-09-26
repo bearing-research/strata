@@ -42,7 +42,9 @@ _AUTOINCREMENT_COLUMNS: dict[str, str] = {"registry_audit": "seq"}
 # PRAGMA foreign_keys) but Postgres does, so the order is load-bearing now.
 #
 # stream_owners is deliberately absent: it describes live streams on live
-# nodes, and none of those survive the migration.
+# nodes, and none of those survive the migration. So is import_staging: an
+# upload waits seconds for the import that names it, and a caller retrying
+# after the move uploads again.
 #
 # Each entry pairs a table with its primary key, which is what makes the copy
 # idempotent -- a row already present in the target is skipped, not rewritten.
