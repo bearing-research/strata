@@ -971,10 +971,10 @@ class CellExecutor:
         target over a diamond (a ``# @nocache`` producer read through two
         branches that the target joins) executed the producer once per
         branch, and the target joined two different reads of it. Every
-        single-cell path (WebSocket, REST, MCP, the CLI, the in-app agent)
-        comes through here, so none of them has to remember to open one; the
-        scope closes when the request returns, so the next independent
-        request still refreshes the producer.
+        single-cell path (WebSocket, REST, MCP, the CLI) comes through here,
+        so none of them has to remember to open one; the scope closes when
+        the request returns, so the next independent request still refreshes
+        the producer.
         """
         if self._run_scope is None:
             with self.one_run():

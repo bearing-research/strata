@@ -50,8 +50,8 @@ Under `trusted_proxy`, **every** `/v1/*` endpoint requires `X-Strata-Principal` 
 | Endpoint | Required scope |
 | --- | --- |
 | Every `GET` and `HEAD`, plus the two `environment/*/preview` posts | `notebook:read` |
-| Content and configuration changes that run nothing: `/open`, `/create`, `/import`, `/import-snapshot`, notebook delete, cell add/edit/reorder/delete, a cell's test source, mounts, connections, workers (except provisioning an SSH worker), env, secret manager, name, timeout, variants, AI model, agent reset, quiesce/release, promote | `notebook:write` |
-| Anything that runs code - execute, running tests, dependency and Python-version changes (uv runs build scripts), provisioning an SSH worker, the assistant - **and any route nobody has classified** | `notebook:execute` |
+| Content and configuration changes that run nothing: `/open`, `/create`, `/import`, `/import-snapshot`, notebook delete, cell add/edit/reorder/delete, a cell's test source, mounts, connections, workers (except provisioning an SSH worker), env, secret manager, name, timeout, variants, quiesce/release, promote | `notebook:write` |
+| Anything that runs code - execute, running tests, dependency and Python-version changes (uv runs build scripts), provisioning an SSH worker - **and any route nobody has classified** | `notebook:execute` |
 | `POST /v1/cache/clear` | `admin:cache` |
 | Artifact and registry writes | `artifacts:write` |
 
@@ -819,60 +819,6 @@ serves at the next run, so a preflight can flag them from this list.
 
 The same bundle offline: `strata export <path> --to snapshot --out snap.zip
 --include all`.
-
-## AI
-
-### Get AI Status
-
-```
-GET /v1/notebooks/{session_id}/ai/status
-```
-
-### List Provider Models
-
-```
-GET /v1/notebooks/{session_id}/ai/models
-```
-
-### Update Notebook AI Model
-
-```
-PUT /v1/notebooks/{session_id}/ai/model
-```
-
-```json
-{
-  "model": "gpt-5.4"
-}
-```
-
-### Chat Completion
-
-```
-POST /v1/notebooks/{session_id}/ai/complete
-```
-
-### Streaming Chat
-
-```
-POST /v1/notebooks/{session_id}/ai/stream
-```
-
-Server-Sent Events stream with `delta`, `done`, and `error` events.
-
-### Agent Run
-
-```
-POST /v1/notebooks/{session_id}/ai/agent
-```
-
-### Reset Agent Session
-
-```
-POST /v1/notebooks/{session_id}/ai/agent/reset
-```
-
-Clears the assistant's in-memory conversation / tool session for that notebook.
 
 ## Runtime
 

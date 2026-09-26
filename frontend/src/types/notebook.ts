@@ -223,9 +223,8 @@ export interface Cell {
   order: number
   /**
    * Who added the cell and who last edited it: an authenticated principal,
-   * `local` for the browser, `assistant` / `assistant:<principal>` for the
-   * built-in assistant, or an external agent's own name. Absent for cells
-   * written before authorship was recorded.
+   * `local` for the browser, or an external agent's own name. Absent for
+   * cells written before authorship was recorded.
    */
   createdBy?: string | null
   updatedBy?: string | null
@@ -789,8 +788,6 @@ export type WsClientMessageType =
   | 'profiling_request' // Request profiling summary (v1.1)
   | 'dependency_add' // Add a package dependency
   | 'dependency_remove' // Remove a package dependency
-  | 'agent_cancel' // Cancel a running agent loop
-  | 'agent_confirm_response' // User approved/declined a destructive tool call
   | 'variant_set_active' // Switch the active variant in a group
   | 'variant_add' // Add a new sibling variant to a group (clones active)
   | 'widget_update' // Set widget control value(s) (debounced on slider drag)
@@ -821,10 +818,6 @@ export type WsServerMessageType =
   | 'environment_job_progress' // Background env job emitted logs or phase changes
   | 'environment_job_finished' // Background env job completed or failed
   | 'error' // Protocol-level error (auth, not found, etc.)
-  | 'agent_progress' // Agent loop progress event
-  | 'agent_text_delta' // Streaming chunk of the agent's intermediate narrative
-  | 'agent_confirm_request' // Agent wants to run a destructive tool — needs approval
-  | 'agent_done' // Agent loop completed (success, error, or cancel)
 
 export type WsMessageType = WsClientMessageType | WsServerMessageType
 

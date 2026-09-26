@@ -22,7 +22,6 @@ const RegistryPanel = defineAsyncComponent(() => import('../components/RegistryP
 const LineageModal = defineAsyncComponent(() => import('../components/LineageModal.vue'))
 const WorkersPanel = defineAsyncComponent(() => import('../components/WorkersPanel.vue'))
 const ProfilingPanel = defineAsyncComponent(() => import('../components/ProfilingPanel.vue'))
-const LlmPanel = defineAsyncComponent(() => import('../components/LlmPanel.vue'))
 const ImpactPreview = defineAsyncComponent(() => import('../components/ImpactPreview.vue'))
 const InspectSwapConfirm = defineAsyncComponent(
   () => import('../components/InspectSwapConfirm.vue'),
@@ -774,7 +773,6 @@ function goHome() {
           <WorkersPanel />
           <RuntimePanel />
           <EnvironmentPanel />
-          <LlmPanel />
         </aside>
       </div>
 

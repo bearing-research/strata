@@ -282,7 +282,7 @@ auth (`admin:*` satisfies any of them):
 | `artifacts:write` | Publishing in service mode (`put` / `set_name` / `set_alias` / tags) when `service_writes_enabled=true`. See [below](#authenticated-write-back-the-shared-research-store). |
 | `notebook:read` | Every notebook `GET` over REST, and observing a notebook over its WebSocket (sync, previews, profiling) |
 | `notebook:write` | Changing a notebook without running anything: creating, editing, reordering and deleting cells, and setting mounts, connections, workers, env, timeout, name and variants. REST and WebSocket alike. |
-| `notebook:execute` | Running code or changing its environment: executing a cell or its tests, run-all, dependency changes and environment sync, requirements imports, the Python version, SSH workers, the inspect REPL, widget updates and the assistant. REST and WebSocket alike. |
+| `notebook:execute` | Running code or changing its environment: executing a cell or its tests, run-all, dependency changes and environment sync, requirements imports, the Python version, SSH workers, the inspect REPL and widget updates. REST and WebSocket alike. |
 
 The notebook scopes are checked against one table for both transports
 (`strata.notebook.scopes`), so a viewer holding only `notebook:read` can't run a

@@ -1,22 +1,18 @@
-"""Tests for LLM assistant integration."""
+"""Tests for the LLM provider integration prompt cells use."""
 
 from __future__ import annotations
 
 import json
 import os
 from types import SimpleNamespace
-from typing import Any, cast
 from unittest.mock import patch
 
 import pytest
 
 from strata.notebook.llm import (
     build_anthropic_tool_use_body,
-    build_messages,
-    build_notebook_context,
     chat_completion,
     estimate_tokens,
-    execute_tool,
     infer_provider_name,
     parse_anthropic_tool_use_response,
     render_prompt_template,
@@ -32,10 +28,8 @@ class _FakeServerConfig:
         self.ai_api_key = kwargs.get("ai_api_key")
         self.ai_base_url = kwargs.get("ai_base_url")
         self.ai_model = kwargs.get("ai_model")
-        self.ai_max_context_tokens = kwargs.get("ai_max_context_tokens")
         self.ai_max_output_tokens = kwargs.get("ai_max_output_tokens")
         self.ai_timeout_seconds = kwargs.get("ai_timeout_seconds")
-        self.ai_approval_timeout_seconds = kwargs.get("ai_approval_timeout_seconds")
 
 
 class TestResolveLlmConfig:
@@ -126,7 +120,6 @@ class TestResolveLlmConfig:
                     ai_api_key="sk-server",
                     ai_base_url="https://custom.api.com/v1",
                     ai_model="custom-model",
-                    ai_max_context_tokens=50_000,
                     ai_max_output_tokens=2048,
                     ai_timeout_seconds=30.0,
                 )
@@ -136,35 +129,6 @@ class TestResolveLlmConfig:
             assert config.base_url == "https://custom.api.com/v1"
             assert config.model == "custom-model"
             assert config.max_output_tokens == 2048
-
-    def test_approval_timeout_defaults_to_120(self):
-        with patch.dict(os.environ, {}, clear=True):
-            config = resolve_llm_config(notebook_env={"OPENAI_API_KEY": "sk-test"})
-            assert config is not None
-            assert config.approval_timeout_seconds == 120.0
-
-    def test_approval_timeout_server_layer(self):
-        with patch.dict(os.environ, {}, clear=True):
-            config = resolve_llm_config(
-                server_config=_FakeServerConfig(
-                    ai_api_key="sk-server",
-                    ai_approval_timeout_seconds=300.0,
-                )
-            )
-            assert config is not None
-            assert config.approval_timeout_seconds == 300.0
-
-    def test_approval_timeout_notebook_toml_overrides_server(self):
-        with patch.dict(os.environ, {}, clear=True):
-            config = resolve_llm_config(
-                notebook_config={"approval_timeout_seconds": "45"},
-                server_config=_FakeServerConfig(
-                    ai_api_key="sk-server",
-                    ai_approval_timeout_seconds=300.0,
-                ),
-            )
-            assert config is not None
-            assert config.approval_timeout_seconds == 45.0
 
 
 class TestInferProviderName:
@@ -305,51 +269,6 @@ class TestEstimateTokens:
         assert long > short
 
 
-class TestBuildMessages:
-    """Tests for message building."""
-
-    def test_basic_chat(self):
-        messages = build_messages("What is pandas?", "ctx")
-        assert len(messages) == 2
-        assert messages[0]["role"] == "system"
-        assert "ctx" in messages[0]["content"]
-        assert messages[1]["role"] == "user"
-        assert messages[1]["content"] == "What is pandas?"
-
-    def test_with_cell_source(self):
-        messages = build_messages(
-            "Why does this fail?",
-            "ctx",
-            cell_source="x = 1/0",
-        )
-        assert len(messages) == 2
-        assert "x = 1/0" in messages[1]["content"]
-        assert "Why does this fail?" in messages[1]["content"]
-
-    def test_with_history(self):
-        history = [
-            {"role": "user", "content": "What is pandas?"},
-            {"role": "assistant", "content": "A data analysis library."},
-        ]
-        messages = build_messages("Give an example.", "ctx", history=history)
-        assert len(messages) == 4
-        assert messages[0]["role"] == "system"
-        assert messages[1]["content"] == "What is pandas?"
-        assert messages[2]["content"] == "A data analysis library."
-        assert messages[3]["content"] == "Give an example."
-
-    def test_history_filters_invalid_roles(self):
-        history = [
-            {"role": "user", "content": "ok"},
-            {"role": "system", "content": "should be dropped"},
-            {"role": "assistant", "content": ""},
-        ]
-        messages = build_messages("hi", "ctx", history=history)
-        # system (index 0) + 1 valid history turn + current user = 3
-        assert len(messages) == 3
-        assert messages[1]["content"] == "ok"
-
-
 class TestRenderPromptTemplate:
     """Tests for safe prompt template rendering."""
 
@@ -375,132 +294,6 @@ class TestRenderPromptTemplate:
 
         assert rendered == "Unsafe: {{ obj.mutate() }}"
         assert value.called is False
-
-
-class TestExecuteTool:
-    """Tests for agent tool execution helpers."""
-
-    @staticmethod
-    def _make_fake_session() -> SimpleNamespace:
-        history: list[dict[str, object]] = []
-
-        async def submit_environment_job(*, action: str, package: str | None = None, **_kwargs):
-            history[:] = [
-                {
-                    "id": "job-123",
-                    "action": action,
-                    "package": package,
-                    "status": "completed",
-                    "error": None,
-                }
-            ]
-            return SimpleNamespace(id="job-123")
-
-        async def wait_for_environment_job() -> None:
-            return None
-
-        return SimpleNamespace(
-            submit_environment_job=submit_environment_job,
-            wait_for_environment_job=wait_for_environment_job,
-            serialize_environment_job_history=lambda: list(history),
-            mutate_dependency=lambda *_args, **_kwargs: (_ for _ in ()).throw(
-                AssertionError("mutate_dependency should not be called")
-            ),
-        )
-
-    @pytest.mark.asyncio
-    async def test_add_package_uses_environment_jobs(self):
-        session = cast(Any, self._make_fake_session())
-
-        result = await execute_tool(
-            session,
-            "add_package",
-            {"package_spec": "pandas"},
-        )
-
-        assert result == "Installed pandas successfully."
-
-
-class TestTheAssistantAndSoftLocks:
-    """The assistant's edit_cell wrote a cell without looking at the soft lock
-    every other editing surface honours."""
-
-    @staticmethod
-    def _session(tmp_path):
-        from strata.notebook.parser import parse_notebook
-        from strata.notebook.session import NotebookSession
-        from strata.notebook.writer import add_cell_to_notebook, create_notebook, write_cell
-
-        nb_dir = create_notebook(tmp_path, "locks")
-        add_cell_to_notebook(nb_dir, "c1")
-        write_cell(nb_dir, "c1", "x = 1")
-        return NotebookSession(parse_notebook(nb_dir), nb_dir), nb_dir
-
-    @pytest.mark.asyncio
-    async def test_it_waits_for_someone_elses_recent_change(self, tmp_path):
-        session, nb_dir = self._session(tmp_path)
-        session.presence.record_edit("c1", "alice")
-
-        result = await execute_tool(
-            session, "edit_cell", {"variable_name": "x", "new_source": "x = 2"}
-        )
-
-        assert result.startswith("Error: alice changed cell c1")
-        assert (nb_dir / "cells" / "c1.py").read_text().strip() == "x = 1"
-
-    @pytest.mark.asyncio
-    async def test_it_does_not_lock_its_own_user_out(self, tmp_path):
-        """It edits for the person who asked, so that person's own recent
-        change does not stop it, and its edit does not stop them."""
-        from strata.notebook.authorship import resolve_author
-
-        session, nb_dir = self._session(tmp_path)
-        person = resolve_author()
-        session.presence.record_edit("c1", person)
-
-        result = await execute_tool(
-            session, "edit_cell", {"variable_name": "x", "new_source": "x = 2"}
-        )
-
-        assert result.startswith("Edited cell c1")
-        assert session.presence.holder("c1", person, 60.0) is None
-        assert session.presence.holder("c1", "alice", 60.0) == person
-
-
-class TestBuildNotebookContext:
-    """Tests for notebook context building."""
-
-    def test_builds_context_from_session(self, tmp_path):
-        from strata.notebook.parser import parse_notebook
-        from strata.notebook.session import NotebookSession
-        from strata.notebook.writer import add_cell_to_notebook, create_notebook, write_cell
-
-        nb_dir = create_notebook(tmp_path, "ctx_test")
-        add_cell_to_notebook(nb_dir, "c1")
-        write_cell(nb_dir, "c1", "x = 1")
-        add_cell_to_notebook(nb_dir, "c2", "c1")
-        write_cell(nb_dir, "c2", "y = x + 1")
-
-        session = NotebookSession(parse_notebook(nb_dir), nb_dir)
-        context = build_notebook_context(session)
-
-        assert "x = 1" in context
-        assert "y = x + 1" in context
-
-    def test_truncates_long_context(self, tmp_path):
-        from strata.notebook.parser import parse_notebook
-        from strata.notebook.session import NotebookSession
-        from strata.notebook.writer import add_cell_to_notebook, create_notebook, write_cell
-
-        nb_dir = create_notebook(tmp_path, "trunc_test")
-        add_cell_to_notebook(nb_dir, "c1")
-        write_cell(nb_dir, "c1", "x = 1\n" * 10000)
-
-        session = NotebookSession(parse_notebook(nb_dir), nb_dir)
-        context = build_notebook_context(session, max_tokens=100)
-
-        assert len(context) < 500
-        assert "truncated" in context
 
 
 _SIMPLE_SCHEMA = {

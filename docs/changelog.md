@@ -213,6 +213,19 @@ Dependencies now require higher minimum versions: `websockets>=17.1` and
 the `[azure]` extra. These match the versions the test suite runs against; an
 environment pinned below them has to move before it can install 0.8.0.
 
+### Removed
+
+- **The built-in AI assistant.** The notebook's chat and agent panel, the
+  `/v1/notebooks/{id}/ai/*` routes, the assistant's WebSocket frames
+  (`agent_progress`, `agent_text_delta`, `agent_confirm_request`, `agent_done`,
+  `agent_cancel` and `agent_confirm_response`) and `[ai] approval_tools` are
+  gone, along with the settings only the assistant read:
+  `STRATA_AI_APPROVAL_TOOLS`, `STRATA_AI_GATES_LOCKED`,
+  `STRATA_AI_APPROVAL_TIMEOUT_SECONDS`, `STRATA_AI_MAX_CONTEXT_TOKENS`,
+  `[ai] approval_timeout_seconds` and `[ai] max_context_tokens`. Prompt cells
+  and their `[ai]` model settings are unchanged. Drive a notebook with an
+  external agent through MCP or the CLI instead.
+
 ### Security
 
 - **A cell cannot read the server's secrets.** The worker takes its token and
@@ -268,12 +281,10 @@ environment pinned below them has to move before it can install 0.8.0.
   `pyproject.toml` without its dependencies. A `notebook.toml` it could not
   parse was replaced outright, under a new id. It now adds only missing
   scaffolding.
-- **An agent's edit honours the soft lock.** Edits through MCP and through the
-  built-in assistant skipped the check REST and the WebSocket make, so an agent
-  could overwrite a cell someone changed moments ago, and its own change held
-  nothing against them. Both now wait out someone else's recent change and
-  hold the cell in turn. The assistant counts as the person using it, so it
-  never locks its own user out of a cell it just edited.
+- **An agent's edit honours the soft lock.** Edits through MCP skipped the
+  check REST and the WebSocket make, so an agent could overwrite a cell someone
+  changed moments ago, and its own change held nothing against them. It now
+  waits out someone else's recent change and holds the cell in turn.
 - **A cell on a remote worker shows every display it made.** Only the last
   one travelled back, because it is also the variable `_`, so a remote cell
   that drew three figures showed one.

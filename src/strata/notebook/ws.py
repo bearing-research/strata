@@ -827,8 +827,6 @@ async def notebook_websocket(websocket: WebSocket, notebook_id: str):
     - dependency_remove         Remove a Python dep via writer
     - variant_set_active        Switch active variant in a group
     - variant_add               Add a new variant cell
-    - agent_cancel              Cancel a running agent task
-    - agent_confirm_response    Reply to an agent's pending confirmation
 
     Sends messages (S→C):
     - cell_status               Status changed (idle/running/ready/error/stale)
@@ -1646,23 +1644,6 @@ async def _handle_cell_cancel(
     cell = session.notebook_state.get_cell(cell_id)
     if cell is not None and cell.status in {CellStatus.IDLE, CellStatus.RUNNING}:
         await _set_cell_idle(session, notebook_id, next_notebook_sequence(notebook_id), cell_id)
-
-
-async def _handle_agent_cancel(notebook_id: str) -> None:
-    """Handle agent_cancel message — abort the active agent run for this notebook."""
-    from strata.notebook.routes import cancel_agent
-
-    cancel_agent(notebook_id)
-
-
-async def _handle_agent_confirm_response(payload: dict[str, Any]) -> None:
-    """Handle agent_confirm_response message — relay an approval decision to the LLM gate."""
-    from strata.notebook.llm import resolve_approval
-
-    request_id = payload.get("request_id")
-    approved = bool(payload.get("approved", False))
-    if isinstance(request_id, str):
-        resolve_approval(request_id, approved)
 
 
 async def _handle_cell_source_update(
@@ -3230,99 +3211,11 @@ async def _handle_dependency_remove(
         )
 
 
-async def execute_cell_for_agent(
-    notebook_id: str,
-    session: Any,
-    cell_id: str,
-    source: str,
-) -> Any:
-    """Execute a cell on behalf of the agent, respecting WS execution state.
-
-    Acquires the control lock, sets running_cell, broadcasts status,
-    executes, broadcasts result, and cleans up — same as user-initiated
-    execution but without a WebSocket sender.
-    """
-
-    execution_state = _notebook_execution_state.get(notebook_id)
-    if execution_state is None:
-        # No WS clients — execute directly without state tracking
-        executor = _make_executor_with_progress(session, notebook_id)
-        return await executor.execute_cell(cell_id, source)
-
-    async with execution_state.control_lock:
-        task = execution_state.active_task()
-        if task is not None:
-            raise RuntimeError("Another cell is currently executing. Wait and retry.")
-
-    # Broadcast running status
-    await _broadcast_message(
-        notebook_id,
-        _make_message(
-            MessageType.CELL_STATUS,
-            next_notebook_sequence(notebook_id),
-            _running_payload(session, cell_id, source),
-        ),
-    )
-
-    cell = session.notebook_state.get_cell(cell_id)
-    session.mark_cell_running(cell_id)
-
-    try:
-        executor = _make_executor_with_progress(session, notebook_id)
-        result = await executor.execute_cell(cell_id, source)
-
-        # Update cell status
-        status = CellStatus.READY if result.success else CellStatus.ERROR
-        if cell:
-            cell.status = status
-
-        # Broadcast result
-        if result.success and result.outputs:
-            await _broadcast_message(
-                notebook_id,
-                _make_message(
-                    MessageType.CELL_OUTPUT,
-                    next_notebook_sequence(notebook_id),
-                    {
-                        "cell_id": cell_id,
-                        "outputs": result.outputs,
-                        "cache_hit": result.cache_hit,
-                        "duration_ms": int(result.duration_ms),
-                        "execution_method": result.execution_method,
-                    },
-                ),
-            )
-
-        await _broadcast_message(
-            notebook_id,
-            _make_message(
-                MessageType.CELL_STATUS,
-                next_notebook_sequence(notebook_id),
-                cell_status_payload(cell_id, status),
-            ),
-        )
-        await _broadcast_upstream_results(notebook_id, executor)
-
-        return result
-    except Exception:
-        downstream_stale = session.mark_cell_error(cell_id)
-        await _broadcast_message(
-            notebook_id,
-            _make_message(
-                MessageType.CELL_STATUS,
-                next_notebook_sequence(notebook_id),
-                cell_status_payload(cell_id, "error"),
-            ),
-        )
-        await _broadcast_downstream_stale(notebook_id, downstream_stale)
-        raise
-
-
 async def broadcast_notebook_sync(notebook_id: str, session: Any) -> None:
     """Broadcast full notebook state to all WS clients.
 
-    Used by the agent loop to push intermediate state changes so
-    frontends stay in sync during multi-tool operations.
+    Used by the REST CRUD routes and the MCP server to push state changes
+    made outside a WebSocket so attached frontends stay in sync.
     """
     dag_edges = session.dag.serialize_edges() if session.dag else []
 
@@ -3385,9 +3278,9 @@ def _execution_result_payload(cell_id: str, result: CellExecutionResult) -> dict
     """Build the payload for ``cell_output`` (success) or ``cell_error`` (failure).
 
     Single source of truth for the post-execution payload shape —
-    previously inlined four times (``execute_cell_and_broadcast``,
-    ``_execute_cascade``, ``_execute_run_all``, ``execute_cell_for_agent``)
-    with ~30 lines of ``**({"key": value} if value else {})`` spreads.
+    previously inlined at each execution site (``execute_cell_and_broadcast``,
+    ``_execute_cascade``, ``_execute_run_all``) with ~30 lines of
+    ``**({"key": value} if value else {})`` spreads.
     Adding a field to ``CellExecutionResult`` used to require touching
     every site; now it's one place.
 
@@ -3474,9 +3367,8 @@ async def _broadcast_execution_result(
     states, and a client deduping on the number kept the console and dropped
     the result.
 
-    All four execution-driving handlers (``execute_cell_and_broadcast``,
-    ``_execute_cascade``, ``_execute_run_all``,
-    ``execute_cell_for_agent``) used to inline this block. The cascade
+    The execution-driving handlers (``execute_cell_and_broadcast``,
+    ``_execute_cascade``, ``_execute_run_all``) used to inline this block. The cascade
     path was already drifting — it skipped the stderr broadcast.
     """
     ts = datetime.now(tz=UTC).isoformat().replace("+00:00", "Z")
@@ -3812,10 +3704,10 @@ async def _handle_widget_update(
         await _release_execution_request(execution_state, cell_id)
 
 
-# ``_handle_agent_cancel`` takes ``(notebook_id)``, ``_handle_notebook_sync``
-# takes ``(websocket, session, notebook_id)``. The dispatch loop introspects
-# the handler signature at registration time (cached) and passes a kwargs
-# dict containing only the requested fields. This is the same technique
+# ``_handle_cell_focus`` takes ``(websocket, session, payload, notebook_id)``,
+# ``_handle_notebook_sync`` takes ``(websocket, session, notebook_id)``. The
+# dispatch loop introspects the handler signature at registration time (cached)
+# and passes a kwargs dict containing only the requested fields. This is the same technique
 # FastAPI's HTTP routes and Slack Bolt's listeners use; the alternative
 # (uniform signature with ``del`` for unused args) made handler signatures
 # lie about what they consume.
@@ -3854,8 +3746,6 @@ _C2S_HANDLERS: dict[str, _C2SHandler] = {
     MessageType.VARIANT_SET_ACTIVE: _handle_variant_set_active,
     MessageType.VARIANT_ADD: _handle_variant_add,
     MessageType.WIDGET_UPDATE: _handle_widget_update,
-    MessageType.AGENT_CANCEL: _handle_agent_cancel,
-    MessageType.AGENT_CONFIRM_RESPONSE: _handle_agent_confirm_response,
 }
 
 

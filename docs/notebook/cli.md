@@ -101,7 +101,6 @@ the expected artifacts.
 - **No WebSocket broadcasts.** Progress is written to stdout only.
 - **No interactive prompts.** A cascade that would pop a confirmation in the
   UI just runs, the CLI treats every cell as "confirmed."
-- **No AI assistant.** `strata run` only executes declarative cells.
 
 ## Environment & Secrets
 

@@ -1,8 +1,9 @@
 """Model tokens this server used, by tenant, principal and model. Item 34.
 
 A fake OpenAI-compatible provider answers with known token counts, so the
-counts come through the real response parsing of the assistant's streaming
-loop and of a plain completion, and out of the real Prometheus route.
+counts come through the real response parsing of a streamed completion (the
+path a prompt cell takes) and of a plain completion, and out of the real
+Prometheus route.
 """
 
 from __future__ import annotations
@@ -77,26 +78,21 @@ def _clean_usage():
 async def test_usage_is_counted_per_tenant_and_principal_and_exported(tmp_path, provider):
     import strata.server as server_module
     from strata.config import StrataConfig
-    from strata.notebook.llm.agent import run_agent_loop
-    from strata.notebook.llm.client import chat_completion
-    from strata.notebook.parser import parse_notebook
-    from strata.notebook.session import NotebookSession
-    from strata.notebook.writer import create_notebook
+    from strata.notebook.llm.client import chat_completion, chat_completion_stream
     from strata.server import ServerState, app
 
-    notebook_dir = create_notebook(tmp_path / "nb", "Metered", initialize_environment=False)
-    session = NotebookSession(parse_notebook(notebook_dir), notebook_dir)
-
     set_principal(Principal(id="ana", tenant="acme"))
-    run = await run_agent_loop(provider, session, "tidy up")
-    run_again = await run_agent_loop(provider, session, "and again")
+    done = []
+    for message in ("tidy up", "and again"):
+        async for event in chat_completion_stream(provider, [{"role": "user", "content": message}]):
+            if event["type"] == "done":
+                done.append(event)
     set_principal(Principal(id="ben", tenant="globex"))
     await chat_completion(provider, [{"role": "user", "content": "hi"}])
     set_principal(None)
 
-    # The run reports its own total, which is what the agent's done frame sends.
-    assert (run.total_input_tokens, run.total_output_tokens) == (7, 3)
-    assert run_again.total_input_tokens == 7
+    # Each stream reports its own total in its done event.
+    assert [(e["input_tokens"], e["output_tokens"]) for e in done] == [(7, 3), (7, 3)]
 
     server_module._state = ServerState(StrataConfig(cache_dir=tmp_path / "cache"))
     text = TestClient(app).get("/metrics/prometheus").text

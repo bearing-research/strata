@@ -91,13 +91,6 @@ All messages are JSON with this shape:
 | `variant_add`        | `{ "group": "..." }`                 | Add a new variant cell, cloning the active |
 | `widget_update`      | `{ "cell_id": "...", "values": { "<name>": <value> } }` | Set widget control value(s); re-materializes + stales downstream |
 
-### AI Agent (client → server)
-
-| Type                      | Payload                                                | Description                                       |
-| ------------------------- | ------------------------------------------------------ | ------------------------------------------------- |
-| `agent_cancel`            | `{}`                                                   | Cancel a running AI agent                         |
-| `agent_confirm_response`  | `{ "request_id": "...", "approved": true }`            | Reply to an `agent_confirm_request` from the server, echoing its `request_id` |
-
 ## Server → Client Messages
 
 ### Cell Status
@@ -150,15 +143,11 @@ All messages are JSON with this shape:
 | `environment_job_finished` | `{ "environment_job": {...}, "environment": {...}, ... }` | Background environment job completed or failed   |
 | `dependency_changed`       | `{ "package": "...", "action": "add", "success": true }`  | Legacy compatibility event after add/remove jobs |
 
-### AI Agent
+### Agent
 
-| Type                    | Payload                                                          | Description                                                  |
-| ----------------------- | ---------------------------------------------------------------- | ------------------------------------------------------------ |
-| `agent_text_delta`      | `{ "job_id": "...", "text": "..." }`                             | Streaming token delta from the agent's assistant message     |
-| `agent_confirm_request` | `{ "job_id": "...", "request_id": "...", "tool": "...", "arguments": {...}, "summary": "..." }` | Agent is asking the client to approve a gated tool call; answer with `agent_confirm_response` |
-| `agent_progress`        | `{ "job_id": "...", "event": "...", "detail": "...", ... }`      | Incremental agent-loop status (tool start/end, iteration)    |
-| `agent_done`            | `{ "job_id": "...", "content": "...", "model": "...", ... }`     | Agent finished, failed, or was cancelled                     |
-| `agent_note`            | `{ "source": "mcp" \| "agent", "text": "..." }`                  | An outside agent driving this notebook over MCP narrating what it did (`mcp`) or a note it pushed itself (`agent`). No `job_id`: the agent is not the built-in one, and nothing here is part of an agent job |
+| Type         | Payload                                         | Description |
+| ------------ | ----------------------------------------------- | ----------- |
+| `agent_note` | `{ "source": "mcp" \| "agent", "text": "..." }` | An outside agent driving this notebook over MCP narrating what it did (`mcp`) or a note it pushed itself (`agent`) |
 
 ### Presence
 

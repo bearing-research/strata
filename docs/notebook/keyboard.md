@@ -32,8 +32,6 @@ and ++alt+arrow-up++ / ++alt+arrow-down++ move the current line.
 |----------|-------|--------|
 | ++enter++ | Inspect panel input | Evaluate the expression |
 | ++ctrl+enter++ | Tests panel | Run the cell's tests |
-| ++enter++ | AI assistant input | Send as chat |
-| ++shift+enter++ | AI assistant input | Send in agent mode |
 
 ## Cell Actions (Buttons)
 

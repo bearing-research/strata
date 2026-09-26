@@ -152,10 +152,10 @@ instances; the plain name on the member cell for a sweep group).
 
 ## Watching the agent
 
-The built-in AI panel streams its own reasoning into the **Agent panel**. An
-external agent's reasoning lives in its own client, so instead its **tool
-actions are narrated there automatically** - "ran cell abc → ok", "added python
-cell def", "added dependency polars" - as it works. It can also call the `note`
+An external agent's reasoning lives in its own client, so instead its **tool
+actions are narrated automatically** into the terminal viewer's **Agent** tab -
+"ran cell abc → ok", "added python cell def", "added dependency polars" - as it
+works. It can also call the `note`
 tool to post an explicit line of narration ("about to refactor featurize into
 two cells"). Open the notebook in the browser or the
 [terminal viewer](tui.md) and you can follow along in real time.

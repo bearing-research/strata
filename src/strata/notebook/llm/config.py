@@ -8,13 +8,10 @@ that started the server doesn't leak into every notebook.
 
 from __future__ import annotations
 
-import logging
 from dataclasses import dataclass
 from typing import Any, Literal
 
 import httpx
-
-logger = logging.getLogger(__name__)
 
 _PROVIDER_DEFAULTS: dict[str, tuple[str, str]] = {
     "ANTHROPIC_API_KEY": ("https://api.anthropic.com/v1", "claude-sonnet-4-6"),
@@ -28,16 +25,6 @@ _PROVIDER_DEFAULTS: dict[str, tuple[str, str]] = {
 
 ActionType = Literal["chat"]
 
-# The built-in assistant's tools, so a gate naming one that does not exist can
-# be refused rather than silently gating nothing.
-AGENT_TOOL_NAMES: frozenset[str] = frozenset(
-    {"get_notebook_state", "create_cell", "edit_cell", "delete_cell", "run_cell", "add_package"}
-)
-
-# Gated unless the server says otherwise: the two that destroy or change what a
-# notebook runs on in ways an edit does not.
-DEFAULT_APPROVAL_TOOLS: frozenset[str] = frozenset({"delete_cell", "add_package"})
-
 
 @dataclass(frozen=True)
 class LlmConfig:
@@ -46,14 +33,8 @@ class LlmConfig:
     base_url: str
     api_key: str
     model: str
-    max_context_tokens: int = 100_000
     max_output_tokens: int = 4096
     timeout_seconds: float = 60.0
-    approval_timeout_seconds: float = 120.0
-    # Tools that ask the user before running, and the subset Auto-approve
-    # cannot skip. Locked tools are always in ``approval_tools``.
-    approval_tools: frozenset[str] = DEFAULT_APPROVAL_TOOLS
-    locked_tools: frozenset[str] = frozenset()
 
 
 @dataclass
@@ -94,12 +75,8 @@ def resolve_llm_config(
     base_url: str | None = None
     api_key: str | None = None
     model: str | None = None
-    max_context_tokens = 100_000
     max_output_tokens = 4096
     timeout_seconds = 60.0
-    approval_timeout_seconds = 120.0
-    approval_tools = DEFAULT_APPROVAL_TOOLS
-    locked_tools: frozenset[str] = frozenset()
 
     # Layer 1 (lowest): server config (explicit STRATA_AI_* at startup)
     if server_config is not None:
@@ -109,21 +86,10 @@ def resolve_llm_config(
             base_url = server_config.ai_base_url
         if getattr(server_config, "ai_model", None):
             model = server_config.ai_model
-        if getattr(server_config, "ai_max_context_tokens", None):
-            max_context_tokens = server_config.ai_max_context_tokens
         if getattr(server_config, "ai_max_output_tokens", None):
             max_output_tokens = server_config.ai_max_output_tokens
         if getattr(server_config, "ai_timeout_seconds", None):
             timeout_seconds = server_config.ai_timeout_seconds
-        if getattr(server_config, "ai_approval_timeout_seconds", None):
-            approval_timeout_seconds = server_config.ai_approval_timeout_seconds
-        # Gates are the one setting where the server outranks the notebook: a
-        # notebook can add a gate but not remove one the server set, or anyone
-        # who can edit notebook.toml could turn off the operator's.
-        server_gates = getattr(server_config, "ai_approval_tools", None)
-        if server_gates is not None:
-            approval_tools = frozenset(server_gates)
-        locked_tools = frozenset(getattr(server_config, "ai_gates_locked", None) or ())
 
     # Layer 2: notebook-level env vars (from Runtime panel).
     # Setting a provider-specific key here picks up that provider's
@@ -148,22 +114,10 @@ def resolve_llm_config(
             base_url = notebook_config["base_url"]
         if notebook_config.get("model"):
             model = notebook_config["model"]
-        if notebook_config.get("max_context_tokens"):
-            max_context_tokens = int(notebook_config["max_context_tokens"])
         if notebook_config.get("max_output_tokens"):
             max_output_tokens = int(notebook_config["max_output_tokens"])
         if notebook_config.get("timeout_seconds"):
             timeout_seconds = float(notebook_config["timeout_seconds"])
-        if notebook_config.get("approval_timeout_seconds"):
-            approval_timeout_seconds = float(notebook_config["approval_timeout_seconds"])
-        added = notebook_config.get("approval_tools") or []
-        unknown = sorted(str(name) for name in added if name not in AGENT_TOOL_NAMES)
-        if unknown:
-            logger.warning(
-                "notebook [ai] approval_tools names unknown tools %s; they gate nothing",
-                ", ".join(unknown),
-            )
-        approval_tools = approval_tools | {str(name) for name in added}
 
     if not api_key:
         return None
@@ -172,12 +126,8 @@ def resolve_llm_config(
         base_url=base_url or "https://api.openai.com/v1",
         api_key=api_key,
         model=model or "gpt-5.4",
-        max_context_tokens=max_context_tokens,
         max_output_tokens=max_output_tokens,
         timeout_seconds=timeout_seconds,
-        approval_timeout_seconds=approval_timeout_seconds,
-        approval_tools=approval_tools | locked_tools,
-        locked_tools=locked_tools,
     )
 
 

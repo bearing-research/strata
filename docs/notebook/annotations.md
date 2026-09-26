@@ -848,7 +848,7 @@ Notebook-wide environment variables are set via the **Runtime panel** in the sid
 
 Common use cases:
 
-- **API keys**: `OPENAI_API_KEY`, `ANTHROPIC_API_KEY` (for prompt cells and AI assistant)
+- **API keys**: `OPENAI_API_KEY`, `ANTHROPIC_API_KEY` (for prompt cells)
 - **Database URLs**: `DATABASE_URL`, `REDIS_URL`
 - **Feature flags**: `DEBUG=true`, `LOG_LEVEL=info`
 

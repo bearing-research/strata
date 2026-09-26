@@ -539,19 +539,15 @@ These are read by `strata-worker`, not the main server. They have no effect on a
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | `None`   | OTLP collector endpoint |
 | `OTEL_SERVICE_NAME`           | `strata` | Service name for traces |
 
-## AI Assistant
+## AI (prompt cells)
 
 | Variable                       | Default  | Description                                                  |
 | ------------------------------ | -------- | ------------------------------------------------------------ |
 | `STRATA_AI_BASE_URL`           | `None`   | OpenAI-compatible API base URL                               |
 | `STRATA_AI_MODEL`              | `None`   | Model identifier (e.g. `claude-sonnet-4-6`, `gpt-5.4`)       |
 | `STRATA_AI_API_KEY`            | `None`   | API key (generic, works with any provider)                   |
-| `STRATA_AI_MAX_CONTEXT_TOKENS` | `100000` | Max context tokens sent to the model                         |
 | `STRATA_AI_MAX_OUTPUT_TOKENS`  | `4096`   | Max output tokens requested                                  |
 | `STRATA_AI_TIMEOUT_SECONDS`    | `60.0`   | AI request timeout                                           |
-| `STRATA_AI_APPROVAL_TIMEOUT_SECONDS` | `120.0` | Agent confirm-prompt timeout; expiry counts as a decline |
-| `STRATA_AI_APPROVAL_TOOLS` | unset (`delete_cell,add_package`) | Which built-in assistant tools ask before running. A list replaces the default; a notebook's `[ai] approval_tools` can add to it but not remove from it. A shared server typically sets `delete_cell,add_package,run_cell`. Unknown tool names fail at startup. |
-| `STRATA_AI_GATES_LOCKED` | `[]` | Tools whose gate the Auto-approve toggle cannot skip. Always gated (added to the approval set), and declined when there is no one to ask. |
 | `ANTHROPIC_API_KEY`            | `None`   | Anthropic API key (auto-sets base URL + model)               |
 | `OPENAI_API_KEY`               | `None`   | OpenAI API key (auto-sets base URL + model)                  |
 | `GEMINI_API_KEY`               | `None`   | Google Gemini API key (auto-sets base URL + model)           |
@@ -566,10 +562,8 @@ config in `notebook.toml` overrides both.
 api_key = ""              # prefer the Runtime panel; writing here commits the key
 base_url = "http://localhost:11434/v1"
 model = "llama3"
-max_context_tokens = 100000
 max_output_tokens = 4096
 timeout_seconds = 60.0
-approval_timeout_seconds = 120.0
 ```
 
 All fields are optional, set only the ones you want to override.

@@ -385,12 +385,11 @@ async def _broadcast_notebook(session_id: str, session: Any) -> None:
 async def _agent_note(session_id: str, source: str, text: str) -> None:
     """Surface a one-line note in the Agent panel of any attached viewer (#393).
 
-    The built-in agent streams its reasoning as ``agent_text_delta``. An external
-    agent driving via MCP has no such channel — its reasoning stays in its own
-    client — so we narrate its tool actions (``source="mcp"``) and any explicit
-    notes it pushes via the ``note`` tool (``source="agent"``) as discrete
-    ``agent_note`` frames, which the TUI folds into the same Agent feed. A no-op
-    when nothing is attached (``_broadcast_message`` returns early).
+    An external agent driving via MCP keeps its reasoning in its own client, so
+    we narrate its tool actions (``source="mcp"``) and any explicit notes it
+    pushes via the ``note`` tool (``source="agent"``) as discrete ``agent_note``
+    frames, which the TUI folds into its Agent feed. A no-op when nothing is
+    attached (``_broadcast_message`` returns early).
     """
     from strata.notebook.protocol import MessageType
     from strata.notebook.ws import _broadcast_message, _make_message, next_notebook_sequence

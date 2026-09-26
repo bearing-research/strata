@@ -1513,23 +1513,6 @@ def update_notebook_secret_manager(notebook_dir: Path, config: dict[str, Any]) -
 
 
 @refuses_while_held
-def update_notebook_ai_model(notebook_dir: Path, model: str) -> None:
-    """Update the notebook's default LLM model in [ai] section."""
-
-    def mutate(toml_data: dict[str, Any]) -> bool:
-        ai = toml_data.get("ai", {})
-        if not isinstance(ai, dict):
-            ai = {}
-        if ai.get("model") == model:
-            return False
-        ai["model"] = model
-        toml_data["ai"] = ai
-        return True
-
-    _apply_notebook_toml_update(notebook_dir, mutate)
-
-
-@refuses_while_held
 def update_cell_console_output(
     notebook_dir: Path,
     cell_id: str,

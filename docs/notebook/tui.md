@@ -82,7 +82,7 @@ in real time.
 ## Watching an agent
 
 The viewer's headline use case is following an agent as it drives a notebook
-somewhere else. There are two shapes of that, depending on which agent.
+somewhere else.
 
 ### A coding agent in another terminal
 
@@ -105,18 +105,12 @@ what makes it live: given a notebook path the same commands edit files on disk
 and the viewer sees nothing, which is [the distinction the CLI page
 draws](cli.md#working-against-a-live-session-server-session).
 
-### The in-app assistant
+### The Agent tab
 
-The [AI agent](ai.md) built into the web UI streams into the viewer too:
-
-1. Start the server and open the notebook in the web UI.
-2. Kick off the agent there.
-3. In a terminal, run `strata-notebook-tui` and open the **Agent** tab.
-
-The agent's reasoning streams into the Agent tab while cells flip status, the
-selection follows the running cell, and results render live. Agent
-confirmation prompts are shown as *"awaiting driver confirmation"* - the viewer
-is read-only, so the web UI (the driver) answers them.
+An agent driving the notebook over [MCP](mcp.md) narrates its tool actions
+("ran cell abc → ok", "added dependency polars") and any note it posts with the
+`note` tool into the **Agent** tab, so you can follow why it is doing something
+as well as what it changed.
 
 ## Layout and keys
 

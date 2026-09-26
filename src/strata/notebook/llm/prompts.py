@@ -1,7 +1,7 @@
 """Variable-to-text rendering and ``{{ var }}`` template expansion.
 
-Used by prompt cells (``prompt_executor``) and the agent context builder
-to surface Python values to the model. The template language is
+Used by prompt cells (``prompt_executor``) to surface Python values to
+the model. The template language is
 deliberately tiny — only attribute access plus a handful of zero-arg
 methods — so we can evaluate it via AST without ``eval``.
 """

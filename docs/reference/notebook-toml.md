@@ -42,7 +42,7 @@ ANTHROPIC_API_KEY = ""              # blanked: keys matching KEY/SECRET/TOKEN/PA
 
 **Whole-block elision.** If every entry is either empty or a blanked sensitive key, the writer omits the `[env]` block entirely on save. Typing an API key into the Runtime panel doesn't churn the committed file.
 
-## `[ai]` - AI assistant configuration
+## `[ai]` - LLM configuration for prompt cells
 
 ```toml
 [ai]
@@ -51,11 +51,9 @@ model = "claude-sonnet-4-6"
 
 | Key | Type | Description |
 | --- | --- | --- |
-| `model` | string | Notebook-level default LLM model. Overridden by `# @model <id>` in prompt cells. Cleared by the AI panel when the user picks "use server default". |
-| `approval_timeout_seconds` | float | How long an agent destructive-tool confirm prompt waits before being treated as a decline. Default 120. |
-| `approval_tools` | list of strings | Built-in assistant tools that ask before running, added to the server's `STRATA_AI_APPROVAL_TOOLS`. It can add a gate but not remove one; an unknown tool name is logged and gates nothing. |
+| `model` | string | Notebook-level default LLM model. Overridden by `# @model <id>` in prompt cells. |
 
-Advanced provider fields (`base_url`, `timeout_seconds`, token ceilings, …) are documented in [AI Integration](../notebook/ai.md#custom-provider-configuration).
+Advanced provider fields (`base_url`, `timeout_seconds`, `max_output_tokens`, …) are documented in [Provider configuration](../notebook/cells.md#provider-configuration).
 
 The API key and base URL come from the runtime environment (`ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / `GEMINI_API_KEY` / `STRATA_AI_API_KEY` / `STRATA_AI_BASE_URL`) - they never live in this file.
 

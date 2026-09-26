@@ -492,7 +492,6 @@ def test_update_notebook_writers_are_no_op_when_value_unchanged():
     """
     from strata.notebook.writer import (
         rename_notebook,
-        update_notebook_ai_model,
         update_notebook_mounts,
         update_notebook_timeout,
         update_notebook_worker,
@@ -507,7 +506,6 @@ def test_update_notebook_writers_are_no_op_when_value_unchanged():
         # actually exercise the equality path.
         update_notebook_worker(notebook_dir, "gpu-a100")
         update_notebook_timeout(notebook_dir, 30.0)
-        update_notebook_ai_model(notebook_dir, "gpt-4o")
         rename_notebook(notebook_dir, "Write Once Renamed")
         update_notebook_mounts(
             notebook_dir,
@@ -523,7 +521,6 @@ def test_update_notebook_writers_are_no_op_when_value_unchanged():
         # Second call with the exact same value is a no-op.
         update_notebook_worker(notebook_dir, "gpu-a100")
         update_notebook_timeout(notebook_dir, 30.0)
-        update_notebook_ai_model(notebook_dir, "gpt-4o")
         rename_notebook(notebook_dir, "Write Once Renamed")
         update_notebook_mounts(
             notebook_dir,

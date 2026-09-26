@@ -15,8 +15,8 @@ The notebook backend is a FastAPI service that exposes:
 
 | Surface | Purpose |
 | --- | --- |
-| `POST /v1/notebooks/...` (REST) | Lifecycle (open / create / import / delete), discovery, and every structural edit (cells, mounts, env, deps, workers, AI config) |
-| `WS /v1/notebooks/ws/{session_id}` | Live execution: cell status, output streams, DAG updates, cascade prompts, inspect REPL, agent loop |
+| `POST /v1/notebooks/...` (REST) | Lifecycle (open / create / import / delete), discovery, and every structural edit (cells, mounts, env, deps, workers) |
+| `WS /v1/notebooks/ws/{session_id}` | Live execution: cell status, output streams, DAG updates, cascade prompts, inspect REPL, agent notes |
 
 The Vue frontend is a thin consumer of both. Anything Vue can do, a second
 client can do - there's no internal API.
@@ -44,7 +44,7 @@ The minimum sequence to render a notebook view:
    open response. This is your sole resync primitive on reconnects - there's
    no `resume_after_seq`.
 4. **Listen.** Execution events (cell status, output, console, errors,
-   cascade prompts, DAG updates, environment-job lifecycle, agent loop) all
+   cascade prompts, DAG updates, environment-job lifecycle, agent notes) all
    arrive over the WS. Subsequent structural edits - adding / removing /
    reordering cells, updating env / mounts / workers, dependency mutations
    - go via REST; the backend re-broadcasts the affected state through the
@@ -142,7 +142,6 @@ corresponding panel:
 | `GET /{sid}/workers` | NotebookPage `onMounted` (worker badge in header) | Auto-detected backends (Docker, local) are runtime state, change between requests. Vue auto-fetches once on mount; a TUI can skip it until the user opens a worker panel. |
 | `GET /{sid}/dependencies` | Environment panel open | Resolved deps from `uv.lock`; expensive on large lockfiles. The snapshot already has `environment.resolved_package_count`. |
 | `GET /{sid}/environment` | Environment panel re-fetch | Refreshes after a mutation; snapshot has the version current at open. |
-| `GET /{sid}/ai/models`, `GET /{sid}/ai/status` | LLM picker / panel open | Provider API call. |
 | `GET /{sid}/connections/{name}/schema` | Connection detail open | Adapter call per connection. |
 | WS `profiling_request` (answered with `profiling_summary`) | Profiling panel open | Computed on demand. |
 
