@@ -2442,6 +2442,25 @@ ingesting repository indexes on.</p>
 <p>The patch cannot repoint the token. <code>artifact_id</code> and <code>version</code> are not fields
 of the request, because a citation whose target could change under the reader
 would be worthless.</p>
+<h2 id="copying-a-chain-into-another-store">Copying a chain into another store<a class="headerlink" href="#copying-a-chain-into-another-store" title="Permanent link">&para;</a></h2>
+<p>A link resolves from the store its server serves, and a chain lives in the
+store its cells wrote to. When those are different machines, the chain is
+imported into the serving store first, ancestors before descendants, keeping
+each version's id and number so its lineage edges still resolve.
+<code>strata artifact publish --to &lt;url&gt;</code> does this for you. A service doing it
+over HTTP uploads each version's bytes, then its record:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a>PUT  /v1/artifacts/import/blobs/{sha256}     the bytes, checked against the digest; 201
+<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a>POST /v1/artifacts/import                    {&quot;id&quot;: ..., &quot;version&quot;: ..., &quot;provenance_hash&quot;: ...,
+<a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a>                                              &quot;content_sha256&quot;: ..., &quot;input_versions&quot;: ..., ...}
+</code></pre></div>
+<p>The record's <code>content_sha256</code> names the bytes uploaded before it, and only the
+same tenant's upload counts: a digest is printed on every publication's page,
+so knowing one proves nothing. An upload nothing imports is dropped a day later.
+The import stamps the caller's tenant on the row, answers 409 for a version
+another tenant or another computation holds unless <code>?remap=true</code> is set, and is
+idempotent: repeating a finished import writes nothing and needs no new upload.
+The same route also takes a multipart body with the record as <code>metadata</code> and
+the bytes as <code>data</code>, which is what the CLI sends.</p>
 <h2 id="http">HTTP<a class="headerlink" href="#http" title="Permanent link">&para;</a></h2>
 <table>
 <thead>
@@ -2471,6 +2490,16 @@ would be worthless.</p>
 <td><code>GET /v1/publications</code></td>
 <td>yes</td>
 <td>List this tenant's live links.</td>
+</tr>
+<tr>
+<td><code>PUT /v1/artifacts/import/blobs/{sha256}</code></td>
+<td>yes (<code>artifacts:write</code>)</td>
+<td>Upload a version's bytes ahead of its record.</td>
+</tr>
+<tr>
+<td><code>POST /v1/artifacts/import</code></td>
+<td>yes (<code>artifacts:write</code>)</td>
+<td>Import a version, keeping its id and number.</td>
 </tr>
 <tr>
 <td><code>GET /p/{token}</code></td>
