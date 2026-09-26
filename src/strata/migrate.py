@@ -54,6 +54,7 @@ MIGRATED_TABLES: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("registry_audit", ("seq",)),
     ("registry_pending", ("tenant", "name", "alias")),
     ("artifact_builds", ("build_id",)),
+    ("build_attempts", ("build_id", "attempt")),
     ("api_keys", ("key_id",)),
 )
 
@@ -86,10 +87,11 @@ class MigrationPlan:
         """Missing target tables that actually have rows waiting for them.
 
         Not every table in ``MIGRATED_TABLES`` exists in every deployment:
-        ``api_keys`` is created only under ``auth_mode='api_key'`` and
-        ``artifact_builds`` only when the build store is constructed. A target
-        booted the documented way legitimately lacks both, and refusing on
-        that made the documented flow exit non-zero every time.
+        ``api_keys`` is created only under ``auth_mode='api_key'``, and
+        ``artifact_builds`` and ``build_attempts`` only when the build store is
+        constructed. A target booted the documented way legitimately lacks
+        them, and refusing on that made the documented flow exit non-zero every
+        time.
 
         A table missing from the target only matters when the source has rows
         that need somewhere to go.

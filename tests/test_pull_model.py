@@ -1402,6 +1402,61 @@ class TestARetiredManifestCannotWriteTheOutput:
         assert client.post(forged, content=_ipc_values([9])).status_code == 403
 
 
+class TestAnUploadThatIsNeverFinalizedIsSwept:
+    """An executor that uploads under its manifest's attempt key and never
+    finalizes left bytes nothing would read or delete: the blob stores cannot
+    list keys, and a version records only the attempt it was promoted from.
+    Every attempt is now recorded when its manifest is issued, and swept once
+    its build is over and its upload URL can no longer write."""
+
+    def _uploaded_and_abandoned(self, client, build_store, artifact_store, artifact_id):
+        version = create_test_artifact(artifact_store, artifact_id, finalize=False)
+        build_store.create_build(
+            build_id=f"build-{artifact_id}",
+            artifact_id=artifact_id,
+            version=version,
+            executor_ref="duckdb_sql@v1",
+            input_uris=[],
+            params={},
+        )
+        manifest = client.get(f"/v1/builds/build-{artifact_id}/manifest").json()
+        _upload(client, manifest, _ipc_values([1]))
+        attempt = parse_qs(urlparse(manifest["output"]["url"]).query)["attempt"][0]
+        assert artifact_store.blob_exists(artifact_id, version, attempt)
+        return version, attempt
+
+    def test_the_abandoned_upload_is_deleted_once_its_url_has_expired(
+        self, client, build_store, artifact_store, monkeypatch
+    ):
+        from strata.transforms.runner import sweep_settled_attempts
+
+        version, attempt = self._uploaded_and_abandoned(
+            client, build_store, artifact_store, "out-abandoned"
+        )
+        assert build_store.fail_build("build-out-abandoned", "executor gave up")
+
+        # The URL is still signed: an upload could still land, so wait.
+        sweep_settled_attempts(build_store, artifact_store)
+        assert artifact_store.blob_exists("out-abandoned", version, attempt)
+
+        monkeypatch.setattr(build_store, "_clock", lambda: time.time() + 86_400)
+        sweep_settled_attempts(build_store, artifact_store)
+        assert not artifact_store.blob_exists("out-abandoned", version, attempt)
+        assert build_store.settled_attempts() == []
+
+    def test_a_build_still_running_keeps_its_upload(
+        self, client, build_store, artifact_store, monkeypatch
+    ):
+        from strata.transforms.runner import sweep_settled_attempts
+
+        version, attempt = self._uploaded_and_abandoned(
+            client, build_store, artifact_store, "out-running"
+        )
+        monkeypatch.setattr(build_store, "_clock", lambda: time.time() + 86_400)
+        sweep_settled_attempts(build_store, artifact_store)
+        assert artifact_store.blob_exists("out-running", version, attempt)
+
+
 def _ipc_values(values):
     sink = pa.BufferOutputStream()
     table = pa.table({"x": values})

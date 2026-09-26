@@ -70,6 +70,22 @@ CREATE INDEX IF NOT EXISTS idx_build_artifact ON artifact_builds(artifact_id, ve
 CREATE INDEX IF NOT EXISTS idx_build_lease_expires ON artifact_builds(state, lease_expires_at);
 """
 
+# Every blob key a build attempt may write. The blob stores cannot list keys,
+# so this is the only way to find the bytes of an attempt that is never
+# promoted: one that lost its lease, or whose executor uploaded and never
+# finalized. Created apart from artifact_builds so an existing database gains
+# it too.
+_ATTEMPT_SCHEMA_SQL = """
+CREATE TABLE IF NOT EXISTS build_attempts (
+    build_id TEXT NOT NULL,
+    artifact_id TEXT NOT NULL,
+    version INTEGER NOT NULL,
+    attempt TEXT NOT NULL,
+    writable_until REAL NOT NULL,  -- Nothing can write the attempt's key after this
+    PRIMARY KEY (build_id, attempt)
+);
+"""
+
 
 @dataclass
 class BuildState:
@@ -266,6 +282,10 @@ class BuildStore:
                     self._dialect.begin_write(conn, "__build_schema__")
                     conn.executescript(self._dialect.adapt_ddl(_BUILD_SCHEMA_SQL))
                     conn.commit()
+                if not self._dialect.schema_exists(conn, "build_attempts"):
+                    self._dialect.begin_write(conn, "__build_schema__")
+                    conn.executescript(self._dialect.adapt_ddl(_ATTEMPT_SCHEMA_SQL))
+                    conn.commit()
                 return
 
             # Check if table exists and needs migration
@@ -304,6 +324,9 @@ class BuildStore:
                 # Fresh database: create schema
                 conn.executescript(_BUILD_SCHEMA_SQL)
                 conn.commit()
+
+            conn.executescript(_ATTEMPT_SCHEMA_SQL)
+            conn.commit()
         finally:
             conn.close()
 
@@ -710,6 +733,82 @@ class BuildStore:
             sql += " AND lease_expires_at = ?"
             params.append(lease_expires_at)
         return conn.execute(sql, params).rowcount > 0
+
+    def record_attempt(
+        self,
+        build_id: str,
+        artifact_id: str,
+        version: int,
+        attempt: str,
+        *,
+        writable_until: float,
+    ) -> None:
+        """Note a blob key a build attempt may write, before anything can write it.
+
+        ``writable_until`` is when the last capability to write the key runs
+        out: a signed upload URL's expiry, or now for a runner, which writes
+        its own key itself. Recording an attempt again keeps the later time.
+        """
+        conn = self._get_connection()
+        try:
+            conn.execute(
+                """
+                INSERT INTO build_attempts (build_id, artifact_id, version, attempt, writable_until)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(build_id, attempt) DO UPDATE SET writable_until = CASE
+                    WHEN excluded.writable_until > build_attempts.writable_until
+                    THEN excluded.writable_until
+                    ELSE build_attempts.writable_until
+                END
+                """,
+                (build_id, artifact_id, version, attempt, writable_until),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+    def settled_attempts(self, limit: int = 100) -> list[tuple[str, str, int, str, bool]]:
+        """Recorded attempts that nothing will write, publish or read as new again.
+
+        An attempt is settled once its build is over (ready, failed, or gone
+        with its artifact) and no capability to write its key is left. Each
+        comes back as ``(build_id, artifact_id, version, attempt, promoted)``:
+        a promoted attempt's bytes are the version's and stay, and every other
+        attempt's bytes can go.
+        """
+        conn = self._get_connection()
+        try:
+            rows = conn.execute(
+                """
+                SELECT a.build_id, a.artifact_id, a.version, a.attempt,
+                       CASE WHEN v.blob_attempt = a.attempt THEN 1 ELSE 0 END AS promoted
+                FROM build_attempts a
+                LEFT JOIN artifact_builds b ON b.build_id = a.build_id
+                LEFT JOIN artifact_versions v ON v.id = a.artifact_id AND v.version = a.version
+                WHERE a.writable_until < ?
+                  AND (b.build_id IS NULL OR b.state NOT IN ('pending', 'building'))
+                LIMIT ?
+                """,
+                (self._clock(), limit),
+            ).fetchall()
+        finally:
+            conn.close()
+        return [
+            (r["build_id"], r["artifact_id"], r["version"], r["attempt"], bool(r["promoted"]))
+            for r in rows
+        ]
+
+    def forget_attempt(self, build_id: str, attempt: str) -> None:
+        """Drop an attempt from the ledger once its bytes are dealt with."""
+        conn = self._get_connection()
+        try:
+            conn.execute(
+                "DELETE FROM build_attempts WHERE build_id = ? AND attempt = ?",
+                (build_id, attempt),
+            )
+            conn.commit()
+        finally:
+            conn.close()
 
     def fail_build(
         self,

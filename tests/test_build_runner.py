@@ -285,6 +285,53 @@ def artifact_dir_blobs(artifact_store):
     return list(artifact_store.blob_store.blobs_dir.iterdir())
 
 
+class TestAnUnpublishedAttemptIsSwept:
+    """A runner writes its output under its own attempt key before it
+    finalizes. When finalize then fails, or the process dies in between, the
+    bytes sit under a key no version records, and the blob stores cannot list
+    keys to find them. The runner records each attempt before writing, and
+    its loop sweeps every attempt whose build is over, except the published
+    one."""
+
+    async def test_a_failed_finalize_leaves_nothing_after_the_sweep(
+        self, two_runners, artifact_store, build_store, tmp_path, monkeypatch
+    ):
+        from strata.transforms.runner import sweep_settled_attempts
+
+        a, _ = two_runners
+        artifact_id, version, build_id = create_test_artifact(artifact_store, build_store)
+        a._call_executor = fake_executor(tmp_path, "a", [1])
+
+        def finalize_fails(*_args, **_kwargs):
+            raise RuntimeError("database went away")
+
+        monkeypatch.setattr(artifact_store, "finalize_artifact", finalize_fails)
+        await a._execute_build(build_store.get_build(build_id))
+
+        assert build_store.get_build(build_id).state == "failed"
+        assert [p for p in artifact_dir_blobs(artifact_store) if "~" in p.name]
+
+        sweep_settled_attempts(build_store, artifact_store)
+        assert not [p for p in artifact_dir_blobs(artifact_store) if "~" in p.name]
+        assert build_store.settled_attempts() == []
+
+    async def test_the_published_attempt_stays(
+        self, two_runners, artifact_store, build_store, tmp_path
+    ):
+        from strata.transforms.runner import sweep_settled_attempts
+
+        a, _ = two_runners
+        artifact_id, version, build_id = create_test_artifact(artifact_store, build_store)
+        a._call_executor = fake_executor(tmp_path, "a", [7])
+        await a._execute_build(build_store.get_build(build_id))
+        assert build_store.get_build(build_id).state == "ready"
+
+        sweep_settled_attempts(build_store, artifact_store)
+        data = artifact_store.read_blob(artifact_id, version)
+        assert pa.ipc.open_stream(data).read_all().column("x").to_pylist() == [7]
+        assert build_store.settled_attempts() == []
+
+
 class TestALeaseDecidesWhoMayFail:
     """Found by formal verification (BuildLease.tla, OnlyLeaseHolderFails).
 

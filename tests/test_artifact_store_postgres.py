@@ -595,6 +595,57 @@ class TestBuildStoreSharesTheBackend:
             dialect.close()
 
 
+class TestTheAttemptLedgerOnPostgres:
+    """``build_attempts`` is created apart from ``artifact_builds``, so a
+    database that already has builds gains it, and its deadlines keep their
+    sub-second part (a REAL column would round them to minutes)."""
+
+    def test_an_existing_database_gains_the_ledger(self, postgres_dsn, tmp_path):
+        from strata.transforms.build_store import BuildStore
+
+        dialect = PostgresDialect(postgres_dsn)
+        try:
+            conn = dialect.connect()
+            conn.executescript(
+                "DROP TABLE IF EXISTS build_attempts, artifact_builds, artifact_versions, "
+                "artifact_names, artifact_aliases, artifact_tags, "
+                "registry_audit, registry_pending CASCADE;"
+            )
+            conn.commit()
+            conn.close()
+
+            artifacts = ArtifactStore(tmp_path / "w", dialect=dialect)
+            version = artifacts.create_artifact("att", "prov-att", _spec())
+            BuildStore(tmp_path / "x.sqlite", dialect=dialect)
+
+            # A database from before the ledger: builds, but no attempts.
+            conn = dialect.connect()
+            conn.executescript("DROP TABLE build_attempts;")
+            conn.commit()
+            conn.close()
+
+            store = BuildStore(tmp_path / "x.sqlite", dialect=dialect)
+            store.create_build(
+                build_id="b-att", artifact_id="att", version=version, executor_ref="x"
+            )
+            deadline = time.time() - 0.25
+            store.record_attempt("b-att", "att", version, "ab" * 16, writable_until=deadline)
+            store.record_attempt("b-att", "att", version, "ab" * 16, writable_until=deadline - 60)
+            store.start_build("b-att")
+            assert store.fail_build("b-att", "gave up")
+
+            assert store.settled_attempts() == [("b-att", "att", version, "ab" * 16, False)]
+            conn = dialect.connect()
+            kept = conn.execute("SELECT writable_until FROM build_attempts").fetchone()
+            conn.close()
+            assert kept["writable_until"] == pytest.approx(deadline, abs=1e-3)
+
+            store.forget_attempt("b-att", "ab" * 16)
+            assert store.settled_attempts() == []
+        finally:
+            dialect.close()
+
+
 class TestTimestampPrecision:
     """The REAL-vs-DOUBLE PRECISION trap, checked against a live server."""
 

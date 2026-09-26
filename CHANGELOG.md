@@ -478,7 +478,9 @@ environment pinned below them has to move before it can install 0.8.0.
   no longer matched its digest. Likewise, a pull executor still holding an
   earlier manifest could upload into the slot the current holder then
   finalized. Each attempt now writes under its own key, and publishing the
-  artifact and completing the build commit together or not at all.
+  artifact and completing the build commit together or not at all. The build
+  runner removes what an attempt wrote once its build is over and nothing can
+  still write to it, unless that attempt was the one published.
 
 ## 0.7.0 - 2026-09-06
 

@@ -47,6 +47,7 @@ import json
 import logging
 import os
 import tempfile
+import time
 import traceback
 import uuid
 from dataclasses import dataclass, field
@@ -101,6 +102,27 @@ class RunnerConfig:
     runner_id: str | None = None  # Auto-generated if not provided
 
 
+# How often the runner's loop sweeps settled build attempts.
+_SWEEP_INTERVAL_SECONDS = 60.0
+_SWEEP_BATCH = 100
+
+
+def sweep_settled_attempts(build_store: BuildStore, artifact_store: ArtifactStore) -> None:
+    """Delete what settled build attempts wrote, except the one published.
+
+    Blob deletes are network I/O against S3 / GCS / Azure, so the runner's
+    loop calls this off the event loop.
+    """
+    while True:
+        batch = build_store.settled_attempts(limit=_SWEEP_BATCH)
+        for build_id, artifact_id, version, attempt, promoted in batch:
+            if not promoted:
+                artifact_store.delete_attempt_blob(artifact_id, version, attempt)
+            build_store.forget_attempt(build_id, attempt)
+        if len(batch) < _SWEEP_BATCH:
+            return
+
+
 @dataclass
 class BuildRunner:
     """Background runner for server-mode builds.
@@ -141,6 +163,7 @@ class BuildRunner:
     _running_builds: set[str] = field(default_factory=set, init=False)
     _build_tasks: dict[str, asyncio.Task] = field(default_factory=dict, init=False)
     _runner_id: str = field(init=False)
+    _next_sweep_at: float = field(default=0.0, init=False)
 
     def __post_init__(self):
         self._global_sem = asyncio.Semaphore(self.config.max_concurrent_builds)
@@ -231,6 +254,14 @@ class BuildRunner:
 
                     # Submit build for execution
                     self._submit_build(build)
+
+                # Remove the bytes of attempts that will never be published.
+                # Nothing waits on that space, so once a minute is enough.
+                if time.monotonic() >= self._next_sweep_at:
+                    self._next_sweep_at = time.monotonic() + _SWEEP_INTERVAL_SECONDS
+                    await asyncio.to_thread(
+                        sweep_settled_attempts, self.build_store, self.artifact_store
+                    )
 
                 # Recover orphaned builds (expired leases from crashed runners)
                 expired = self.build_store.list_expired_leases(limit=10)
@@ -497,6 +528,15 @@ class BuildRunner:
                 # heartbeat loop), so it gets this far too, and writing the
                 # shared key let it replace bytes already published as ready.
                 attempt = uuid.uuid4().hex
+                # Recorded first, so a crash between the write and the finalize
+                # below leaves bytes the sweep can still find.
+                self.build_store.record_attempt(
+                    build_id,
+                    build.artifact_id,
+                    build.version,
+                    attempt,
+                    writable_until=time.time(),
+                )
                 self.artifact_store.publish_blob_from_path(
                     build.artifact_id, build.version, output_path, attempt=attempt
                 )

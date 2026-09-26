@@ -20,6 +20,7 @@ from __future__ import annotations
 import asyncio
 import os
 import tempfile
+import time
 from hmac import compare_digest
 from pathlib import Path
 from typing import Any
@@ -287,7 +288,7 @@ async def get_build_manifest(build_id: str, request: Request, build_store: Build
     leased = build_store.get_build(build_id) or build
 
     try:
-        return build_service.assemble_manifest(
+        manifest = build_service.assemble_manifest(
             store,
             signer=state.url_signer,
             build=build,
@@ -300,6 +301,21 @@ async def get_build_manifest(build_id: str, request: Request, build_store: Build
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+    # The manifest's upload URL writes under this claim's own attempt key, and
+    # a presigned one reaches the object store without passing through here
+    # again. Record the key before the URL leaves, with the latest moment it
+    # can still be written, so an upload that is never finalized is found.
+    attempt = lease_attempt(lease_token(leased.lease_owner, leased.lease_expires_at))
+    if attempt is not None:
+        build_store.record_attempt(
+            build_id,
+            build.artifact_id,
+            build.version,
+            attempt,
+            writable_until=time.time() + state.config.signed_url_expiry_seconds,
+        )
+    return manifest
 
 
 @router.get("/v1/artifacts/download")
