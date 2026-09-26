@@ -15,6 +15,7 @@ Commands:
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import sys
@@ -674,30 +675,74 @@ def cmd_archive(args: argparse.Namespace) -> int:
     here is the parts a command line has and a route does not: which store to
     open, and whether writing into an occupied directory is a mistake.
     """
-    from strata.api.publication_bundle import write_bundle
+    from strata.api.publication_bundle import bundle_zip, write_bundle
     from strata.artifact_store import Publication
+
+    token = getattr(args, "token", None)
+    if (token is None) == (args.ref is None):
+        print("Give either <ref> or --token, not both.")
+        return 1
+    if token is not None and (args.title is not None or getattr(args, "author", None)):
+        print("--title and --author describe a new record; a publication has its own.")
+        return 1
 
     store = _open_store(args.artifact_dir)
     if store is None:
         return 2
-    artifact = _resolve_for_cmd(store, args)
-    if artifact is None:
-        return 1
 
-    # Not inserted in the store: archiving grants nobody access to a running
-    # server, so it is not a publication and must not create one. The record
-    # shape is reused because the page and manifest are the same documents.
-    publication = Publication(
-        token="",
-        artifact_id=artifact.id,
-        version=artifact.version,
-        title=args.title,
-        published_at=time.time(),
-        published_by=getattr(args, "author", None),
-        content_sha256=store.content_digest(artifact.id, artifact.version),
-    )
+    if token is not None:
+        # The stored record, so the bundle carries the authors and identifiers
+        # the hosted page shows, and matches GET /p/{token}/archive.zip.
+        publication = store.get_publication(token)
+        if publication is None:
+            print(f"No such publication: {token}")
+            return 1
+        if not publication.is_active:
+            print(f"Publication {token} was withdrawn; its archive is not served.")
+            return 1
+        artifact = store.get_artifact(publication.artifact_id, publication.version)
+        if artifact is None:
+            print(f"The artifact {token} publishes is gone.")
+            return 1
+    else:
+        artifact = _resolve_for_cmd(store, args)
+        if artifact is None:
+            return 1
+        # Not inserted in the store: archiving grants nobody access to a
+        # running server, so it is not a publication and must not create one.
+        # The record shape is reused because the page and manifest are the same
+        # documents.
+        publication = Publication(
+            token="",
+            artifact_id=artifact.id,
+            version=artifact.version,
+            title=args.title,
+            published_at=time.time(),
+            published_by=getattr(args, "author", None),
+            content_sha256=store.content_digest(artifact.id, artifact.version),
+        )
 
     dest = Path(args.to)
+    if dest.suffix == ".zip":
+        if dest.exists() and not getattr(args, "force", False):
+            print(f"{dest} exists. Use --force to replace it.")
+            return 1
+        try:
+            payload = bundle_zip(
+                store,
+                artifact,
+                publication=publication,
+                max_depth=args.max_depth,
+                tenant=getattr(args, "tenant", None),
+            )
+        except ValueError as exc:
+            print(f"Cannot archive: {exc}")
+            return 1
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_bytes(payload)
+        print(f"Wrote {dest} (sha256 {hashlib.sha256(payload).hexdigest()})")
+        return 0
+
     # A bundle is a set of files that describe each other — index.html and
     # README.md both name one payload and one digest. Writing into an occupied
     # directory leaves the previous run's payload sitting beside the new one,

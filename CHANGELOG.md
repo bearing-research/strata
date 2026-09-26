@@ -232,6 +232,12 @@ environment pinned below them has to move before it can install 0.8.0.
 
 ### Fixed
 
+- **A publication's archive is the same zip every time.** Each member of
+  `/p/{token}/archive.zip` carried the modification time of a file written
+  moments before, so two fetches of one publication differed in bytes and in
+  `Content-Digest` though no file inside did. `strata artifact archive --token`
+  builds that zip from the store, with the publication's authors and
+  identifiers, and a `--to` ending in `.zip` writes it byte for byte.
 - **A displayed value is a cached result like any other.** A leaf cell's
   display output was resolved before the cache decision and returned
   regardless of it, so every way of asking for a fresh run came back with the

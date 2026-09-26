@@ -120,6 +120,96 @@ class TestTheBundle:
             assert bundle.namelist()[0] == "index.html"
 
 
+def _archive(artifact_dir, to, **overrides):
+    """Run ``strata artifact archive`` in-process."""
+    from strata.artifact_cli import cmd_archive
+
+    args = dict(
+        ref=None,
+        token=None,
+        artifact_dir=str(artifact_dir),
+        to=str(to),
+        force=False,
+        title=None,
+        author=None,
+        tenant=None,
+        max_depth=10,
+    )
+    args.update(overrides)
+    return cmd_archive(argparse.Namespace(**args))
+
+
+class TestTheSameBytesEachTime:
+    """A depositor records the digest of the zip they received and checks it
+    after the upload. Each member used to carry the modification time of a
+    file written moments before into a fresh directory, so two archives of one
+    publication differed in bytes, and in digest, while no file inside did."""
+
+    def test_every_member_carries_a_fixed_time_and_mode(self, served):
+        base_url, publication, _ = served
+
+        with zipfile.ZipFile(io.BytesIO(_fetch(base_url, publication.token).content)) as bundle:
+            for info in bundle.infolist():
+                assert info.date_time == (1980, 1, 1, 0, 0, 0), info.filename
+                assert info.external_attr == 0o644 << 16, info.filename
+
+    def test_two_fetches_are_one_file(self, served):
+        base_url, publication, _ = served
+
+        first = _fetch(base_url, publication.token)
+        second = _fetch(base_url, publication.token)
+        assert first.content == second.content
+        assert first.headers["Content-Digest"] == second.headers["Content-Digest"]
+
+    def test_the_cli_writes_the_zip_the_route_serves(self, served, tmp_path):
+        """What an archiver without HTTP access to the store produces is the
+        same deposit, authors and DOI included, since both read the stored
+        record."""
+        base_url, publication, artifact_dir = served
+        ArtifactStore(artifact_dir).update_publication_credits(
+            publication.token,
+            authors=[{"name": "F. Li", "orcid": "0000-0002-1825-0097"}],
+            external_ids=[{"scheme": "doi", "value": "10.5555/figure-1"}],
+        )
+
+        served_zip = _fetch(base_url, publication.token)
+        by_cli = tmp_path / "deposit.zip"
+        assert _archive(artifact_dir, by_cli, token=publication.token) == 0
+
+        assert by_cli.read_bytes() == served_zip.content
+        expected = b64encode(hashlib.sha256(by_cli.read_bytes()).digest()).decode()
+        assert served_zip.headers["Content-Digest"] == f"sha-256=:{expected}:"
+        with zipfile.ZipFile(by_cli) as bundle:
+            manifest = bundle.read("manifest.json").decode()
+        assert "10.5555/figure-1" in manifest
+        assert "0000-0002-1825-0097" in manifest
+
+
+class TestTheCliByToken:
+    def test_a_withdrawn_publication_is_not_archived(self, served, tmp_path):
+        _, publication, artifact_dir = served
+        ArtifactStore(artifact_dir).revoke_publication(publication.token)
+
+        assert _archive(artifact_dir, tmp_path / "out.zip", token=publication.token) == 1
+        assert not (tmp_path / "out.zip").exists()
+
+    def test_an_unknown_token_is_refused(self, served, tmp_path):
+        _, _, artifact_dir = served
+
+        assert _archive(artifact_dir, tmp_path / "out.zip", token="not-a-token") == 1
+
+    @pytest.mark.parametrize("which", [{}, {"ref": "fig", "token": "t"}])
+    def test_it_takes_a_ref_or_a_token(self, served, tmp_path, which):
+        _, _, artifact_dir = served
+
+        assert _archive(artifact_dir, tmp_path / "out.zip", **which) == 1
+
+    def test_a_token_brings_its_own_title(self, served, tmp_path):
+        _, publication, artifact_dir = served
+
+        assert _archive(artifact_dir, tmp_path / "out.zip", token=publication.token, title="x") == 1
+
+
 class TestHeaders:
     def test_the_digest_covers_the_zip_that_was_sent(self, served):
         base_url, publication, _ = served

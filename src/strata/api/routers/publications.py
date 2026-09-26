@@ -413,33 +413,18 @@ async def publication_archive(token: str, store: ReadStore):
     footnote deserves that answer; handing them the archive anyway would
     undo the withdrawal.
     """
-    import io
-    import tempfile
-    import zipfile
     from base64 import b64encode
     from hashlib import sha256
-    from pathlib import Path
 
-    from strata.api.publication_bundle import write_bundle
+    from strata.api.publication_bundle import bundle_zip
 
     publication, artifact = _load_published(store, token, require_active=True)
 
-    with tempfile.TemporaryDirectory() as workdir:
-        dest = Path(workdir)
-        try:
-            written = write_bundle(store, artifact, dest, publication=publication)
-        except ValueError as exc:
-            raise HTTPException(status_code=404, detail=str(exc))
+    try:
+        payload = bundle_zip(store, artifact, publication=publication)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
 
-        buffer = io.BytesIO()
-        # Deterministic member order, so two archives of one publication differ
-        # only where their contents do. Reading order rather than alphabetical:
-        # a person who unzips this should meet index.html first.
-        with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as bundle:
-            for name in written:
-                bundle.write(dest / name, arcname=name)
-
-    payload = buffer.getvalue()
     digest = b64encode(sha256(payload).digest()).decode()
     return Response(
         content=payload,

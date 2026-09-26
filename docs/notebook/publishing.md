@@ -224,10 +224,21 @@ A published artifact serves the same bundle as a zip:
 curl -O -J https://your-server/p/<token>/archive.zip
 ```
 
-Same files, same code — the route and the command build the bundle from one
+Same files, same code: the route and the command build the bundle from one
 implementation, because two implementations of a set of files that describe
 each other would drift and neither would stop producing a bundle. The response
-carries a `Content-Digest` of the zip. A withdrawn publication refuses here as
+carries a `Content-Digest` of the zip, and the zip is the same bytes on every
+request, so a digest you record at deposit time can be checked against a later
+fetch.
+
+To build that zip from the store directly, name the publication rather than the
+artifact. The bundle then carries the publication's own record, with the
+authors and identifiers the hosted page shows, and a `--to` ending in `.zip`
+writes the file the route serves, byte for byte:
+
+```bash
+strata artifact archive --token <token> --to ./figure3.zip
+``` A withdrawn publication refuses here as
 it does for the bytes: the page still resolves and says "withdrawn", since a
 reader chasing a footnote deserves that answer, but handing over the archive
 anyway would undo the withdrawal.
