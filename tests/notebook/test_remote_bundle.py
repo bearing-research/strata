@@ -153,3 +153,49 @@ def test_a_bundle_from_a_worker_that_reports_no_platform_is_still_valid(tmp_path
     unpacked_dir = tmp_path / "unpacked"
     unpacked_dir.mkdir()
     assert unpack_notebook_output_bundle(bundle_path, unpacked_dir)["build_env"] == ""
+
+
+def test_every_display_survives_the_round_trip(tmp_path):
+    """A cell that draws three figures on a remote worker came back showing
+    one: only the last display travelled, because it is also the variable
+    ``_``. Each display, file-backed or inline, now arrives in order."""
+    output_dir = tmp_path / "output"
+    output_dir.mkdir()
+    for i in range(3):
+        (output_dir / f"display_{i}.png").write_bytes(f"png-{i}".encode())
+    displays = [
+        {"content_type": "image/png", "file": "display_0.png"},
+        {"content_type": "text/markdown", "inline": "# heading"},
+        {"content_type": "image/png", "file": "display_1.png"},
+        {"error": "could not serialize", "type": "Widget"},
+        {"content_type": "image/png", "file": "display_2.png"},
+    ]
+    result = {
+        "success": True,
+        "variables": {"_": dict(displays[-1])},
+        "displays": displays,
+        "stdout": "",
+        "stderr": "",
+        "mutation_warnings": [],
+    }
+
+    bundle_path = tmp_path / "bundle.tar"
+    pack_notebook_output_bundle(bundle_path, result, output_dir)
+    unpacked_dir = tmp_path / "unpacked"
+    unpacked = unpack_notebook_output_bundle(bundle_path, unpacked_dir)
+
+    assert unpacked["displays"] == displays
+    for i in range(3):
+        assert (unpacked_dir / f"display_{i}.png").read_bytes() == f"png-{i}".encode()
+
+
+def test_a_bundle_from_an_older_worker_has_no_displays(tmp_path):
+    """An older worker sends no display list; the executor then falls back to
+    ``_``, as it always did."""
+    output_dir = tmp_path / "output"
+    output_dir.mkdir()
+    result = {"success": True, "variables": {}, "stdout": "", "stderr": ""}
+    bundle_path = tmp_path / "bundle.tar"
+    pack_notebook_output_bundle(bundle_path, result, output_dir)
+
+    assert unpack_notebook_output_bundle(bundle_path, tmp_path / "u")["displays"] == []

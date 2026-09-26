@@ -249,6 +249,9 @@ environment pinned below them has to move before it can install 0.8.0.
 
 ### Fixed
 
+- **A cell on a remote worker shows every display it made.** Only the last
+  one travelled back, because it is also the variable `_`, so a remote cell
+  that drew three figures showed one.
 - **Shift+Enter runs the cell.** In the cell editor it inserted a newline:
   CodeMirror's default keymap binds Enter with a Shift variant, and it was
   listed ahead of the run binding at the same precedence, so it always won.
