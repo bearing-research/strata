@@ -14,7 +14,9 @@ ws://localhost:8765/v1/notebooks/ws/{session_id}
 
 The `{session_id}` is the one returned by `POST /v1/notebooks/open` or `/create`. A session is single-process. On a personal server, opening the same notebook again returns the session already open on that path, so a second tab, the terminal viewer and an agent all drive one execution context and see each other's runs. In service mode each open creates its own session.
 
-In service mode (proxy auth), the same headers required for REST endpoints - `X-Strata-Principal`, `X-Strata-Proxy-Token`, and `X-Tenant-ID` if multi-tenant - must be present on the WebSocket upgrade. A missing or invalid token closes the connection with `1008 Policy Violation`.
+Under principal auth, the upgrade carries the same credentials as a REST call: `X-Strata-Principal`, `X-Strata-Proxy-Token`, and `X-Tenant-ID` if multi-tenant under `trusted_proxy`, or `Authorization: Bearer <key>` under `api_key`. A missing or invalid credential closes the connection with `1008 Policy Violation`. Each client → server frame is then checked against the notebook scope it needs (`notebook:read`, `notebook:write` or `notebook:execute`); a frame the principal's scopes do not cover is answered with an `error` frame, `code: "insufficient_scope"`.
+
+A read-only app view connects with `?role=viewer`. Such a connection may send only `widget_update` and `notebook_sync`; anything else is answered with `code: "read_only"`.
 
 ## Envelope
 
@@ -49,8 +51,8 @@ All messages are JSON with this shape:
 
 | Type                 | Payload                                                  | Description    |
 | -------------------- | -------------------------------------------------------- | -------------- |
-| `cell_source_update` | `{ "cell_id": "...", "source": "...", "force": false }` | Source changed. Refused with `cell_locked` when someone else changed the cell moments ago, unless `force` is true |
-| `cell_focus`         | `{ "cell_id": "..." }`                                  | The cell this client is on, or `null`. Updates `presence` for everyone |
+| `cell_source_update` | `{ "cell_id": "...", "source": "...", "force": false, "author": "..." }` | Source changed. Refused with `cell_locked` when someone else changed the cell moments ago, unless `force` is true. `author` is optional and used only without principal auth |
+| `cell_focus`         | `{ "cell_id": "...", "author": "..." }`                 | The cell this client is on, or `null`. Updates `presence` for everyone |
 
 ### Cell Tests
 
@@ -94,7 +96,7 @@ All messages are JSON with this shape:
 | Type                      | Payload                                                | Description                                       |
 | ------------------------- | ------------------------------------------------------ | ------------------------------------------------- |
 | `agent_cancel`            | `{}`                                                   | Cancel a running AI agent                         |
-| `agent_confirm_response`  | `{ "job_id": "...", "approved": true, ... }`           | Reply to an `agent_confirm_request` from the server |
+| `agent_confirm_response`  | `{ "request_id": "...", "approved": true }`            | Reply to an `agent_confirm_request` from the server, echoing its `request_id` |
 
 ## Server → Client Messages
 
@@ -104,10 +106,10 @@ All messages are JSON with this shape:
 | ------------------------- | ------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------ |
 | `cell_status`             | `{ "cell_id": "...", "status": "running" }`                                                                              | Status changed                                   |
 | `cell_output`             | `{ "cell_id": "...", "outputs": {...}, "display": {...}, "displays": [...], "cache_hit": false }`                        | Execution result, including rich visible outputs |
-| `cell_output_delta`       | `{ "cell_id": "...", "attempt": 1, "kind": "delta", "text": "..." }`                                                     | Streamed partial output while the cell runs (today: prompt cells). `kind: "delta"` appends `text` to a per-cell buffer; `kind: "retry"` means schema validation failed - clear the buffer, `attempt` is the new attempt number, `text` is the first validator error. Ephemeral: never persisted or replayed; the final `cell_output` is canonical. Cache hits emit no deltas. |
+| `cell_output_delta`       | `{ "cell_id": "...", "attempt": 1, "kind": "delta", "text": "..." }`                                                     | Streamed partial output while the cell runs (today: prompt cells). `kind: "delta"` appends `text` to a per-cell buffer; `kind: "retry"` means schema validation failed - clear the buffer, `attempt` is the new attempt number, `text` is the first validator error. `kind: "notice"` is a provider-degradation message to show beside the stream, not part of its content. Ephemeral: never persisted or replayed; the final `cell_output` is canonical. Cache hits emit no deltas. |
 | `cell_console`            | `{ "cell_id": "...", "stream": "stdout", "text": "..." }`                                                                | Incremental output                               |
 | `cell_error`              | `{ "cell_id": "...", "error": "..." }`                                                                                   | Execution error                                  |
-| `cell_iteration_progress` | `{ "cell_id": "...", "iteration": 3, "max_iter": 50, "artifact_uri": "...", "content_type": "...", "duration_ms": 128 }` | Per-iteration update from a `@loop` cell         |
+| `cell_iteration_progress` | `{ "cell_id": "...", "iteration": 3, "max_iter": 50, "artifact_uri": "...", "content_type": "...", "until_reached": false, "duration_ms": 128 }` | Per-iteration update from a `@loop` cell. `until_reached` is true on the iteration where `@loop_until` held |
 | `cell_variant_progress`   | `{ "cell_id": "...", "variant": "rf", "index": 1, "total": 3, "success": true, "duration_ms": 128, "error": null }`        | Per-variant update from a `# @per_variant` fan-out cell |
 | `cell_test_status`        | `{ "cell_id": "...", "status": "running" }`                                                                              | Test run lifecycle: `running` → `ready` / `error` (mirrors `cell_status`) |
 | `cell_test_results`       | `{ "cell_id": "...", "passed": 2, "failed": 1, "errored": 0, "skipped": 0, "tests": [{ "name": "...", "nodeid": "...", "outcome": "passed", "message": "..." }], "stale": false, "pytest_unavailable": false, "ran_at": 1718000000000 }` | Per-test outcomes + totals from a `cell_run_tests`. `outcome` ∈ `passed`/`failed`/`error`/`skipped`; `message` carries the rewritten-assert diff for failures. `stale` flags the result against a since-changed cell/test/input. |
@@ -123,7 +125,7 @@ All messages are JSON with this shape:
 
 | Type         | Payload                                               | Description                 |
 | ------------ | ----------------------------------------------------- | --------------------------- |
-| `dag_update` | `{ "edges": [...], "roots": [...], "leaves": [...] }` | DAG changed after cell edit |
+| `dag_update` | `{ "edges": [...], "roots": [...], "leaves": [...], "topological_order": [...], "cells": [...], "variant_groups": [...] }` | DAG changed after cell edit. `cells` carries each cell's defines, references, upstream and downstream ids |
 
 ### State
 
@@ -153,7 +155,7 @@ All messages are JSON with this shape:
 | Type                    | Payload                                                          | Description                                                  |
 | ----------------------- | ---------------------------------------------------------------- | ------------------------------------------------------------ |
 | `agent_text_delta`      | `{ "job_id": "...", "text": "..." }`                             | Streaming token delta from the agent's assistant message     |
-| `agent_confirm_request` | `{ "job_id": "...", "tool": "...", "args": {...}, ... }`         | Agent is asking the client to approve a destructive tool use |
+| `agent_confirm_request` | `{ "job_id": "...", "request_id": "...", "tool": "...", "arguments": {...}, "summary": "..." }` | Agent is asking the client to approve a gated tool call; answer with `agent_confirm_response` |
 | `agent_progress`        | `{ "job_id": "...", "event": "...", "detail": "...", ... }`      | Incremental agent-loop status (tool start/end, iteration)    |
 | `agent_done`            | `{ "job_id": "...", "content": "...", "model": "...", ... }`     | Agent finished, failed, or was cancelled                     |
 | `agent_note`            | `{ "source": "mcp" \| "agent", "text": "..." }`                  | An outside agent driving this notebook over MCP narrating what it did (`mcp`) or a note it pushed itself (`agent`). No `job_id`: the agent is not the built-in one, and nothing here is part of an agent job |
@@ -168,7 +170,7 @@ All messages are JSON with this shape:
 
 | Type    | Payload              | Description    |
 | ------- | -------------------- | -------------- |
-| `error` | `{ "error": "..." }` | Protocol error |
+| `error` | `{ "error": "...", "code": "...", "cell_id": "...", "held_by": "..." }` | A request could not be served. Only `error` is always present; see [the `error` frame](notebook-protocol.md#the-error-frame) for the codes |
 
 ## Sequence numbers
 
@@ -211,7 +213,8 @@ This is the trade-off Vue's close-tab-to-cancel semantics make with TUI-style tr
 | Code | Meaning |
 | --- | --- |
 | `1000` | Normal closure (client or server initiated) |
-| `1008` | Policy violation - session not found, ownership mismatch in per-user personal mode, or service-mode auth failure on the upgrade |
+| `1008` | Policy violation - session not found, ownership mismatch in per-user personal mode, or an auth failure on the upgrade |
+| `1011` | Internal error while handling a frame |
 
 If the session has been closed server-side (notebook deleted, server restart), the WebSocket upgrade is refused with `1008`. The client should call `POST /v1/notebooks/open` to start a new session.
 

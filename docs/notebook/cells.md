@@ -12,7 +12,7 @@ Strata Notebook has seven cell kinds:
 | **Markdown** | Prose between cells, rendered as markdown        | Pick **Markdown** from the **+ Add cell** menu                |
 | **Loop**     | A Python cell executed N times in a row          | Add a Python cell, then put a `# @loop` annotation at the top |
 
-Compute cells participate in the DAG, cache by provenance hash, and can be routed to remote workers; widget and markdown cells are declarative (no subprocess). Pick the kind that matches the shape of the computation, this page walks through each.
+Compute cells participate in the DAG, cache by provenance hash, and can be routed to remote workers; widget and markdown cells are declarative (no subprocess). Pick the kind that matches the shape of the computation; this page walks through each.
 
 See [Concepts](concepts.md) for the execution model; see [Cell Annotations](annotations.md) for the full per-annotation reference.
 
@@ -20,7 +20,7 @@ See [Concepts](concepts.md) for the execution model; see [Cell Annotations](anno
 
 ## Python Cells
 
-The default. A Python cell is just Python source, assignments at module scope become the cell's outputs, and free variables become inputs pulled from upstream cells.
+The default. A Python cell is just Python source: assignments at module scope become the cell's outputs, and free variables become inputs pulled from upstream cells.
 
 ### Writing a Python cell
 
@@ -88,13 +88,17 @@ raises if there is none. Only *upstream* results can be promoted from inside a
 cell - a cell's own outputs are stored after it returns, so promoting one is a
 job for the strip's **Promote to team…** or `strata artifact promote` once it has run.
 
-When a cell publishes with a name - `strata.put(inputs=[], transform=…, data=…, name="taxi/tip-model")` - the artifact appears in the [registry dashboard](../core/registry.md#in-the-notebook-the-registry-dashboard): a promote strip under the cell, and the Registry tab in the bottom drawer (promote, approve, lineage - all in the UI).
+The ambient client points at this server, never at the team store, and it
+carries no team-store credential. When a cell publishes with a name
+(`strata.put(inputs=[], transform=…, data=…, name="taxi/tip-model")`), the
+artifact lands in the notebook's own store and reaches the team by promotion.
+It appears in the [registry dashboard](../core/registry.md#in-the-notebook-the-registry-dashboard): a promote strip under the cell, and the Registry tab in the bottom drawer (promote, approve, lineage - all in the UI).
 
 > Calls through `strata` are **side effects**. On a cache hit the cell body doesn't re-run, so a `strata.set_alias(...)` won't re-fire - fine for idempotent calls (setting an alias to the version it already points at is a no-op). A cell that stores no variable is cached too, keyed on its own provenance, so a cell whose whole point is the side effect needs `# @nocache` to re-fire.
 
 ### Library cells (cross-cell defs and classes)
 
-Top-level `def` and `class` definitions are shared across cells via a synthetic Python module, write a helper once, call it anywhere.
+Top-level `def` and `class` definitions are shared across cells via a synthetic Python module: write a helper once, call it anywhere.
 
 ```python
 import math
@@ -136,7 +140,7 @@ def clamp(value):
 loaded raw bounds: [-43.98, 100.53]
 ```
 
-A downstream cell can call `clamp(raw_max)`, `clamp` and `CLAMP_MIN/MAX` come from the synthetic module, `raw_max` from the artifact path.
+A downstream cell can call `clamp(raw_max)`: `clamp` and `CLAMP_MIN/MAX` come from the synthetic module, `raw_max` from the artifact path.
 
 #### When the slice isn't self-contained
 
@@ -155,13 +159,13 @@ Other shapes that block on the same principle:
 
 - **Decorators / default values / base classes** evaluated at module load: `@my_decorator` where `my_decorator` isn't imported in the same cell, or `class Child(Parent)` where `Parent` is computed at runtime.
 - **Divergence**: a name kept by the slice is also reassigned by dropped runtime code, so the synthetic module's value would differ from the cell's final state. `def f(): ...; f = wrap(f)` exports the unwrapped `f`.
-- **Lambda assignments**: `add = lambda x: x + 1`, even though `cloudpickle` could serialize the value, the synthetic-module path is reserved for source-backed library code.
+- **Lambda assignments**: `add = lambda x: x + 1`. Even though `cloudpickle` could serialize the value, the synthetic-module path is reserved for source-backed library code.
 
 The fix is usually one of: move the runtime line into its own cell, add the missing import to the same cell as the def, or take the dependency as a function argument.
 
 #### Single-cell scope
 
-The synthetic module is built from one cell's source only, no transitive composition across cells. A def can't reach a name imported or defined in a different cell; each cell that hosts library code carries its own imports.
+The synthetic module is built from one cell's source only, with no transitive composition across cells. A def can't reach a name imported or defined in a different cell; each cell that hosts library code carries its own imports.
 
 One concession: annotations that reference names outside the slice would normally block, but adding `from __future__ import annotations` relaxes this. PEP 563 stringifies annotations and the free-variable check drops them, so cross-cell type hints "just work" with the future import.
 
@@ -169,9 +173,11 @@ Walked through end-to-end in the [`library_cells`](../examples/library_cells.md)
 
 ### Mutation warnings
 
-If a cell mutates a value it received from an upstream cell (e.g. `df.drop(columns=[...], inplace=True)`), Strata raises a **mutation warning**: the upstream artifact was supposed to be immutable, and subsequent cells that reuse the cached artifact will see the mutated version.
+A cell that changes an upstream value in place, where the source shows it (`df["col"] = ...`, `obj.attr = ...`, `df.drop(columns=[...], inplace=True)`), is read as producing a new version of that variable: the cell becomes its producer for downstream cells, and the upstream artifact is untouched.
 
-The fix is to copy before mutating:
+Some mutations can't be seen in the source: an alias (`d = df; d.drop(..., inplace=True)`), a helper function that mutates its argument, a bare mutator like `rows.append(x)`. Strata compares each input before and after the cell runs and raises a **mutation warning** for those, because the change is not stored: a downstream cell run on its own reads the value from before.
+
+The fix is to copy, or rebind, before mutating:
 
 ```python
 df = upstream_df.copy()    # make a private copy
@@ -189,6 +195,10 @@ Warnings surface as a pill on the cell and a structured entry in the execution l
 | `# @timeout 60`    | Override execution timeout (seconds, default 300) |
 | `# @env KEY=value` | Set an env var for this cell only - non-sensitive values only; literal lands in committed source. For secrets use `notebook.toml [env]` or the Runtime panel. |
 | `# @mount …`       | Attach a filesystem mount (see [Annotations][a]) |
+| `# @table …`       | Declare an Iceberg table input; its snapshot joins the provenance |
+| `# @fetch …`       | Download a URL as a recorded input; its digest joins the provenance |
+| `# @dataset …`     | Bind a registry name as a recorded input; its version joins the provenance |
+| `# @nocache`       | Always re-execute; never serve a cache hit       |
 | `# @loop …`        | Turn the cell into a [loop cell](#loop-cells)    |
 
 See [Cell Annotations][a] for the full reference.
@@ -199,9 +209,9 @@ See [Cell Annotations][a] for the full reference.
 
 ## Prompt Cells
 
-A prompt cell is a text template that gets rendered with upstream variable values, sent to an AI model, and the response stored as an artifact. Prompt cells participate in the DAG and cache by provenance exactly like Python cells, same inputs + same template + same model config = cache hit, no API call.
+A prompt cell is a text template that gets rendered with upstream variable values, sent to an AI model, and the response stored as an artifact. Prompt cells participate in the DAG and cache by provenance exactly like Python cells: same inputs + same template + same model config = cache hit, no API call.
 
-Create a prompt cell with the **"Add Prompt Cell"** button in the UI, the same toolbar that adds a Python cell. You never need to touch `notebook.toml` directly; editing the cell's source, wiring it into the DAG, and persisting the result all happen through the UI.
+Create a prompt cell by picking **Prompt** from the **+ Add cell** menu. You never need to touch `notebook.toml` directly; editing the cell's source, wiring it into the DAG, and persisting the result all happen through the UI.
 
 ### Basic syntax
 
@@ -215,7 +225,7 @@ Summarize this dataset and return the top 3 findings as a numbered list:
 ```text title="Output (illustrative model response)"
 1. Setosa is linearly separable from versicolor and virginica based on petal dimensions alone.
 2. Versicolor and virginica overlap moderately on sepal width but separate well by petal length.
-3. The dataset is balanced, 50 samples per species, no missing values.
+3. The dataset is balanced (50 samples per species) with no missing values.
 ```
 
 - `{{ df }}` is replaced with a text representation of the upstream variable `df` before sending to the model.
@@ -226,15 +236,15 @@ Summarize this dataset and return the top 3 findings as a numbered list:
 
 Variables are injected with `{{ expression }}`. The expression is resolved against upstream cell outputs and converted to text using type-specific rules:
 
-| Upstream type     | Text representation                     |
-| ----------------- | --------------------------------------- |
-| pandas DataFrame  | Markdown table (first 20 rows)          |
-| pandas Series     | String representation (first 20 values) |
-| numpy ndarray     | Shape + dtype + first 10 elements       |
-| dict / list       | JSON, indented                          |
-| str / int / float | Direct string conversion                |
+| Upstream type     | Text representation                                        |
+| ----------------- | ---------------------------------------------------------- |
+| pandas DataFrame  | Shape and column list, then every column, as many rows as fit |
+| pandas Series     | Name, length and dtype, then as many values as fit         |
+| numpy ndarray     | Shape + dtype + first 10 elements                          |
+| dict / list       | JSON, indented                                             |
+| anything else     | `str(value)`                                               |
 
-Each variable has a 2,000-token budget per template render. Oversized values are truncated with a `... (truncated)` marker.
+Each variable has a 2,000-token budget (about 8,000 characters) per template render. A frame or series drops rows past the budget and ends with `... (N more rows)`; other values are cut with a `... (truncated)` marker.
 
 **Attribute access** is supported for safe read-only operations:
 
@@ -242,10 +252,10 @@ Each variable has a 2,000-token budget per template render. Oversized values are
 {{ df.describe() }}     # OK, pandas describe() is allow-listed
 {{ df.head() }}         # OK
 {{ obj.attr }}          # OK, attribute access (non-callable)
-{{ obj.mutate() }}      # blocked, unknown method, left as-is in the template
+{{ obj.mutate() }}      # blocked (unknown method); left as-is in the template
 ```
 
-Only a small set of methods is permitted (`describe`, `head`, `tail` on pandas objects). Arbitrary method calls are blocked to keep template rendering side-effect-free.
+Only a small set of methods is permitted (`describe`, `head`, `tail` on pandas objects), called with no arguments. Arbitrary method calls are blocked to keep template rendering side-effect-free.
 
 ### Prompt-cell annotations
 
@@ -255,7 +265,7 @@ Only a small set of methods is permitted (`describe`, `head`, `tail` on pandas o
 | `# @model <model_id>`    | Override the notebook-level AI model                                      | From provider config |
 | `# @temperature <float>` | Sampling temperature (0.0 = deterministic; see [Caching](#caching) below) | `0.0`                |
 | `# @max_tokens <int>`    | Response token ceiling                                                    | `4096`               |
-| `# @system <text>`       | System prompt prepended to the request                                    | None                 |
+| `# @system <text>`       | System prompt prepended to the request (one line; the last one wins)      | None                 |
 | `# @output json\|text`   | Coerce the response to JSON (or keep as free-form text)                   | `text`               |
 | `# @output_schema {…}`   | Inline JSON Schema pinning the response shape                             | None                 |
 | `# @validate_retries N`  | Total attempts for the validate-and-retry loop (1 initial + N−1 retries)  | `3`                  |
@@ -283,7 +293,7 @@ Return a JSON object mapping paper ID to topic.
 | ------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **OpenAI**                           | Native `response_format: {type: "json_schema"}`. `additionalProperties: false` is auto-injected at every `object` node; strict mode is used when the user's `required` list covers every property (otherwise relaxed to `strict: false`). |
 | **Anthropic**                        | Native `/v1/messages` with tool-use: the schema is sent as a tool's `input_schema` and `tool_choice` is forced to that tool. The returned `tool_use.input` is extracted verbatim.                                                         |
-| **Gemini / Mistral / Ollama / vLLM** | Fallback to `response_format: {type: "json_object"}`, valid JSON guaranteed, shape not enforced server-side. Client-side validation (see below) fills the gap.                                                                           |
+| **Gemini / Mistral / Ollama / vLLM** | Fallback to `response_format: {type: "json_object"}`: valid JSON guaranteed, shape not enforced server-side. Client-side validation (see below) fills the gap.                                                                           |
 | **Servers that reject the extensions** | Some OpenAI-compatible servers 400 on `response_format` or `stream_options` outright. Strata retries once without them, appending a schema-guidance system turn; the result is marked degraded and the validate-and-retry loop carries full enforcement. |
 
 Setting `@output_schema` implies `@output json`; you don't need both.
@@ -292,7 +302,7 @@ Validation is lenient about packaging: when a provider wraps otherwise-valid
 JSON in code fences or prose, Strata extracts the JSON document before
 validating instead of burning a retry on the wrapper.
 
-Example, triage each review into a structured record:
+Example: triage each review into a structured record.
 
 ```
 # @name triage
@@ -314,7 +324,7 @@ print(df["priority"].value_counts())
 
 !!! note "Long schemas don't have an escape hatch yet"
     `# @output_schema` is parsed as a single JSON value from a single
-    annotation line (`prompt_analyzer.py:143-154`). For real-world
+    annotation line (see `prompt_analyzer.py`). For real-world
     schemas this gets long fast and the resulting cell source isn't
     pretty.
 
@@ -351,7 +361,7 @@ When `@output_schema` is set, Strata runs a **validate-and-retry loop** after ev
 3. On failure → append the bad response as an `assistant` turn, feed the validator's path-addressed errors back as a `user` turn, and retry.
 4. On retry exhaustion → surface a cell error with the last validator messages.
 
-The default is 3 total attempts (1 initial + 2 retries). Override with `# @validate_retries N`. Cumulative input/output tokens across all attempts are recorded on the artifact so cost accounting is accurate. The retry count is surfaced on the cell result (`validation_retries`) the UI shows "validated after N retries" when non-zero.
+The default is 3 total attempts (1 initial + 2 retries). Override with `# @validate_retries N`. Cumulative input/output tokens across all attempts are recorded on the artifact so cost accounting is accurate. The retry count is surfaced on the cell result (`validation_retries`), and the UI shows "validated after N retries" when non-zero.
 
 Retries are mostly invisible on OpenAI-strict and Anthropic-native paths because the provider enforces the schema at decode time. They earn their keep on the `json_object` fallback path (Gemini, Mistral, Ollama) where the provider only guarantees _syntactic_ JSON.
 
@@ -360,16 +370,18 @@ Retries are mostly invisible on OpenAI-strict and Anthropic-native paths because
 A prompt cell's provenance hash mixes together:
 
 - The rendered template text (after `{{ var }}` injection)
+- The provenance hash of each upstream variable the template reads (rendering truncates, so the text alone would miss an edit past the cut)
 - Model name
 - Temperature
+- `@max_tokens`
 - System prompt
 - Output type (`json` / `text`)
 - Output schema fingerprint (when set)
 
-Editing any of these invalidates the cache. In particular, tweaking `@output_schema` on a cached cell forces a fresh call, exactly what you want when iterating on the response shape.
+Editing any of these invalidates the cache. In particular, tweaking `@output_schema` on a cached cell forces a fresh call, which is what you want when iterating on the response shape.
 
 !!! tip "Keep temperature at 0.0 for prompt cells"
-With `temperature=0.0` the model is deterministic: same inputs → same output, and cache behavior is intuitive. Bumping temperature makes the first response "sticky" in the cache, future runs return the stored stochastic sample rather than re-sampling.
+With `temperature=0.0` the model is deterministic: same inputs → same output, and cache behavior is intuitive. Bumping temperature makes the first response "sticky" in the cache: future runs return the stored stochastic sample rather than re-sampling.
 
 See [AI Integration](ai.md) for provider configuration and the conversational AI assistant.
 
@@ -377,7 +389,7 @@ See [AI Integration](ai.md) for provider configuration and the conversational AI
 
 ## SQL Cells
 
-A SQL cell sends a query to a connected database via ADBC and stores the result as an Arrow Table artifact. Like Python and prompt cells, SQL cells participate in the DAG, cache by provenance hash, and surface their output to downstream cells.
+A SQL cell sends a query to a connected database via ADBC (DuckDB through its own driver) and stores the result as an Arrow Table artifact. Like Python and prompt cells, SQL cells participate in the DAG, cache by provenance hash, and surface their output to downstream cells.
 
 ```sql
 # @sql connection=warehouse
@@ -443,11 +455,11 @@ GROUP BY t.zone
 
 Each mount is a view by its name over its Parquet, CSV or JSON files (`file` and `s3` mounts, read with the mount's storage options). Every catalog table the query reads is an input the way an `@table` declaration is: the cell's provenance folds its current snapshot, the query reads that snapshot, and a new snapshot makes the cell stale. Each mount's fingerprint is folded too, so a new file does the same. The catalog is attached read-only and the mounts are views; a `write` cell on the connection writes only its `path` database. The catalog's `s3.*` keys apply only under an `s3://` warehouse; otherwise its tables are read with the credentials the catalog vends.
 
-A read cell runs reads: `SELECT`, set operations, `VALUES`, `TABLE`, `SUMMARIZE`, `DESCRIBE`, `SHOW` and `EXPLAIN`. Anything else — DDL, DML, `COPY`, `ATTACH`, `USE`, `CALL`, `PRAGMA`, and `EXPLAIN ANALYZE`, which runs the statement it describes — is refused before the cell reaches the driver, naming the statement, because the read-only transaction the driver opens is one a `COMMIT` in the body can end. Use `# @sql connection=<name> write=true` for a cell that changes a database.
+A read cell runs reads: `SELECT`, set operations, `VALUES`, `TABLE`, `SUMMARIZE`, `PIVOT`, `DESCRIBE`, `SHOW` and plain `EXPLAIN`. Anything else (DDL, DML, `COPY`, `ATTACH`, `USE`, `CALL`, `SET`, `PRAGMA`, and `EXPLAIN ANALYZE`, which runs the statement it describes) is refused before the cell reaches the driver, naming the statement, because the read-only transaction the driver opens is one a `COMMIT` in the body can end. This holds on every driver, not only DuckDB. Use `# @sql connection=<name> write=true` for a cell that changes a database.
 
 ### Schema discovery
 
-The **Schema panel** in the sidebar shows the tables and columns visible through each declared connection. Click a connection to lazy-load its schema; click a table to expand its columns. The `↻` button re-fetches when the underlying database has changed externally. No SQL cell needs to run for this, the panel talks directly to each driver's catalog query surface (`sqlite_master` for SQLite, `information_schema.tables JOIN columns` for PostgreSQL, and the driver-specific catalog queries for Snowflake and BigQuery).
+The **Schema panel** in the sidebar shows the tables and columns visible through each declared connection. Click a connection to lazy-load its schema; click a table to expand its columns. The `↻` button re-fetches when the underlying database has changed externally. No SQL cell needs to run for this: the panel talks directly to each driver's catalog query surface (`sqlite_master` for SQLite, `information_schema.tables JOIN columns` for PostgreSQL, and the driver-specific catalog queries for Snowflake and BigQuery).
 
 ### Bind parameters
 
@@ -470,7 +482,7 @@ SELECT * FROM orders WHERE amount > :min_amount
 2      1117            3   299.00  2026-04-14
 ```
 
-The DAG links the SQL cell to the Python cell automatically, same edge logic Strata uses for Python free variables.
+The DAG links the SQL cell to the Python cell automatically, with the same edge logic Strata uses for Python free variables. The run records the values it bound, so the lineage behind a result names the value it ran at.
 
 ### Cache policies
 
@@ -492,11 +504,11 @@ A SQL cell's **provenance hash** folds together:
 | `forever`       | Static salt; never invalidates from DB-side state.                                                                        | True reference data. User asserts. |
 | `session`       | Session-unique salt; invalidates across sessions.                                                                         | Always-fresh queries / dashboards. |
 | `ttl=<seconds>` | `floor(now / ttl)` in the salt; bucketed time-based invalidation.                                                         | Stale-tolerant aggregations.       |
-| `snapshot`      | Probe MUST return a durable snapshot ID. Errors at execute time if the driver can't (SQLite/Postgres can't; Iceberg can). | Reproducibility-critical reads.    |
+| `snapshot`      | Pins the query to one point in time through the warehouse's time travel. Snowflake and BigQuery only; refused on other drivers before a connection opens. See [`@cache`](annotations.md#cache). | Reproducibility-critical reads.    |
 
 **On reopen.** `fingerprint` and `snapshot` open idle. Both say, in the cell's
 own annotation, that the cached rows are good only while the source still
-agrees — and asking the source is a query, not something to do while opening a
+agrees, and asking the source is a query, not something to do while opening a
 notebook. `forever`, `session` and `ttl` can come back ready, because each has
 already said what it depends on and that is settled locally: a `session` cell
 matches only within the session that ran it, and a `ttl` cell only inside the
@@ -520,9 +532,10 @@ SELECT * FROM dim_country
 | Driver     | Probe                                           | Granularity | Notes                                                                                                                                                                                                                                                                                                                                                        |
 | ---------- | ----------------------------------------------- | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | PostgreSQL | `pg_stat_user_tables` + `pg_class.relfilenode`  | per-table   | Up to ~500 ms stats-collector lag.                                                                                                                                                                                                                                                                                                                           |
-| SQLite     | `PRAGMA data_version` + `PRAGMA schema_version` | **DB-wide** | DML cross-process needs the probe connection open across the write, `data_version` resets on a fresh connection. DDL (schema change) invalidates cleanly.                                                                                                                                                                                                   |
+| SQLite     | The database file's size, mtime and header change counter, its `-wal` sidecar, plus `PRAGMA data_version` / `schema_version` | **DB-wide** | Any commit to the file, from any process, changes the token, so a write to one table invalidates cells reading another. A `:memory:` database has only the pragmas.                                                                                                                                                                              |
+| DuckDB     | `PRAGMA database_size`                          | **DB-wide** | Advances when DuckDB writes blocks; two row states between block-aligned flushes can share a token. Pin `# @cache session` on a database that is being written to while you work.                                                                                                                                                                         |
 | Snowflake  | `INFORMATION_SCHEMA.TABLES.LAST_ALTERED`        | per-table   | Per-database scoping (one query per touched database). Bills cloud-services credits but each query is small. `LAST_ALTERED` updates even on 0-row DML, safe direction (over-invalidates, never under).                                                                                                                                                      |
-| BigQuery   | `__TABLES__.last_modified_time`                 | per-table   | Per-dataset scoping. `__TABLES__` is the legacy-but-stable view; `INFORMATION_SCHEMA.TABLES` doesn't expose `last_modified_time`. **Streaming-buffer caveat**: tables receiving streaming inserts have `last_modified_time` lag by minutes-to-90-min until the buffer flushes, pin `# @cache session` on those queries. Permissions: `bigquery.tables.get`. |
+| BigQuery   | `__TABLES__.last_modified_time`                 | per-table   | Per-dataset scoping. `__TABLES__` is the legacy-but-stable view; `INFORMATION_SCHEMA.TABLES` doesn't expose `last_modified_time`. **Streaming-buffer caveat**: tables receiving streaming inserts have `last_modified_time` lag by minutes-to-90-min until the buffer flushes; pin `# @cache session` on those queries. Permissions: `bigquery.tables.get`. |
 
 The schema fingerprint catches metadata-only changes (`ADD COLUMN`, type changes, nullability flips) that the freshness token would miss.
 
@@ -531,11 +544,12 @@ The schema fingerprint catches metadata-only changes (`ADD COLUMN`, type changes
 SQL cells are **read-only by default**, but the enforcement mechanism depends on the backend:
 
 - **SQLite**: `mode=ro` plus `PRAGMA query_only=ON`
+- **DuckDB**: a file opens with `read_only=True`, and every read runs inside `BEGIN TRANSACTION READ ONLY` (which also covers `:memory:`)
 - **PostgreSQL**: `SET default_transaction_read_only = on`
 - **Snowflake**: the configured `role` must be read-only
 - **BigQuery**: the configured `credentials_path` must point at a read-only service account
 
-For SQLite and PostgreSQL, Strata enforces read-only at the connection/session level. For Snowflake and BigQuery, Strata selects the read-scoped role or credentials, and the cloud platform's grants are the actual boundary. In all cases, the default path is “read unless you explicitly opt into `write=true`.”
+For SQLite, DuckDB and PostgreSQL, Strata enforces read-only at the connection/session level. For Snowflake and BigQuery, Strata selects the read-scoped role or credentials, and the cloud platform's grants are the actual boundary. In all cases, the default path is “read unless you explicitly opt into `write=true`,” and the statement check above refuses anything but a read before the driver sees it.
 
 ### Write cells
 
@@ -552,12 +566,14 @@ CREATE TABLE orders (
 INSERT INTO orders VALUES (1, 'alice', 25.50), (2, 'bob', 199.99);
 ```
 
-- The body is split into individual statements via sqlglot (ADBC's cursor runs only the first statement otherwise).
+- The body is split into individual statements on sqlglot's tokenizer (ADBC's cursor runs only the first statement otherwise). Each statement runs as written in the cell, and a trailing comment is not a statement.
 - `:name` bind placeholders work the same as in read cells.
 - The default cache policy is `session` (one execution per session; same body in the same session is a cache hit).
-- `# @cache fingerprint` and `# @cache snapshot` error early on write cells, probe-based invalidation has no anchor when the cell mutates state.
+- `# @cache fingerprint` and `# @cache snapshot` error early on write cells: probe-based invalidation has no anchor when the cell mutates state.
 - The cell still produces an Arrow artifact: a per-statement status table with `stmt`, `kind` (`CREATE TABLE`, `INSERT`, …), and `rows_affected` (nullable; `null` for DDL).
-- Read cells using the same connection stay on the read path, the override is per-cell.
+- Read cells using the same connection stay on the read path; the override is per-cell.
+
+A query runs off the server's event loop, so a cancel lands at once: the run is abandoned and publishes nothing. The query itself may keep running in the database, because ADBC drivers differ on whether they can cancel one.
 
 ### `# @name` and downstream consumption
 
@@ -592,11 +608,11 @@ INSERT INTO products VALUES ('A', 'widgets'), ('B', 'gadgets');
 SELECT category, COUNT(*) FROM products GROUP BY category
 ```
 
-`# @after seed` adds a DAG edge from the `seed` cell to this one even though no Python variable flows between them, the dependency is on a side effect (the SQLite file). This is what cascade execution and staleness recompute use to ensure the right ordering.
+`# @after seed` adds a DAG edge from the `seed` cell to this one even though no Python variable flows between them: the dependency is on a side effect (the SQLite file). This is what cascade execution and staleness recompute use to ensure the right ordering.
 
 ### Worked example
 
-The [`sql_orders_report`](../examples/sql_orders_report.md) example notebook walks through all of this end-to-end: a SQL `seed` cell, a Python `threshold` cell, two parameterized SQL queries, and a Python report cell, five cells, two languages, with both `fingerprint` and `forever` cache policies side by side.
+The [`sql_orders_report`](../examples/sql_orders_report.md) example notebook walks through all of this end-to-end: a SQL `seed` cell, a Python `threshold` cell, two parameterized SQL queries, and a Python report cell: five cells, two languages, with both `fingerprint` and `forever` cache policies side by side.
 
 ### SQL-cell annotations
 
@@ -755,7 +771,7 @@ strata://artifact/<artifact_id>@v=<version>
 For loop cells, each iteration gets a suffix:
 
 ```
-strata://artifact/<artifact_id>@v=<version>@iter=<k>
+strata://artifact/<artifact_id>@iter=<k>@v=<version>
 ```
 
 The `<artifact_id>` is content-addressed (derived from the provenance hash); same code + same inputs + same env = same artifact ID across machines and runs. The `@v=N` version increments only when the same name pointer is re-bound to a new content hash - see [Library usage](../getting-started/core.md) for how named artifacts work in the Core SDK.
@@ -800,7 +816,7 @@ After execution, `state` holds the final iteration's value and every intermediat
 
 | Directive            | What it does                                                                                                                                         |
 | -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `# @loop max_iter=N` | Hard cap on iterations. Required, the safety bound on the loop.                                                                                     |
+| `# @loop max_iter=N` | Hard cap on iterations. Required: it is the safety bound on the loop.                                                                               |
 | `# @loop carry=VAR`  | The variable threaded between iterations. Required. Must be re-bound by the cell body each iteration, and seeded by an upstream cell on iteration 0. |
 
 These can be on the same line: `# @loop max_iter=40 carry=state`.
@@ -810,19 +826,19 @@ These can be on the same line: `# @loop max_iter=40 carry=state`.
 | Directive                          | What it does                                                                        |
 | ---------------------------------- | ----------------------------------------------------------------------------------- |
 | `# @loop_until <expr>`             | Early termination when `<expr>` is truthy (evaluated against the current `state`)   |
-| `# @loop start_from=<cell>@iter=k` | Seed iteration 0 from a specific prior iteration's artifact, used for forking runs |
+| `# @loop start_from=<cell>@iter=k` | Seed iteration 0 from a specific prior iteration's artifact, for forking runs |
 
 ### Per-iteration artifacts
 
 Every iteration's carry value becomes its own artifact with an `@iter=k` suffix:
 
 ```
-strata://artifact/nb_..._cell_<loop_id>_var_state@v=1@iter=0
-strata://artifact/nb_..._cell_<loop_id>_var_state@v=1@iter=1
+strata://artifact/nb_..._cell_<loop_id>_var_state@iter=0@v=1
+strata://artifact/nb_..._cell_<loop_id>_var_state@iter=1@v=1
 ...
 ```
 
-The inspect panel shows an iteration picker so you can scrub through the intermediate states. The **final** iteration's artifact is also the cell's canonical output (no `@iter` suffix) downstream cells read it via the normal DAG path.
+The inspect panel shows an iteration picker so you can scrub through the intermediate states. The **final** iteration's artifact is also the cell's canonical output (no `@iter` suffix); downstream cells read it via the normal DAG path.
 
 ### Forking a loop
 
@@ -836,7 +852,7 @@ happens if you push harder from that exact state with a different step size.
 
 1. Open the loop cell's **Inspect** panel, scrub to iteration 17, copy its
    artifact URI. It'll look like
-   `strata://artifact/nb_..._cell_hill_climb_var_state@v=1@iter=17`.
+   `strata://artifact/nb_..._cell_hill_climb_var_state@iter=17@v=1`.
 2. Add a new loop cell below. Reference the original cell's ID (not the full
    URI) in `start_from`:
 
@@ -849,20 +865,22 @@ happens if you push harder from that exact state with a different step size.
 
 3. Run the new cell. It reads iteration 17's carry value as its seed, runs up
    to 20 more iterations under the modified strategy, and stores those
-   iterations as its own artifact chain, the original run stays untouched.
+   iterations as its own artifact chain. The original run stays untouched.
 
 You now have two parallel forks materialized in the artifact store. Either
 one can be forked further, and the inspect panel shows both chains.
 
 This is the escape hatch for "that intermediate state looked promising, let
-me explore from there", the thing that's hard to do in a plain for-loop
+me explore from there": the thing that's hard to do in a plain for-loop
 once you've thrown away the intermediates.
 
 ### When not to use a loop cell
 
-- Tight `for` loops over short collections, a regular Python cell with a `for` loop is simpler and the extra per-iteration artifact overhead isn't worth it.
-- Loops where intermediate state is genuinely disposable, store only the final answer in a regular Python cell.
-- Anything that needs to branch out into multiple parallel runs, loop cells are sequential by design. Use separate cells, or model the fan-out in Python.
+- Tight `for` loops over short collections: a regular Python cell with a `for` loop is simpler and the extra per-iteration artifact overhead isn't worth it.
+- Loops where intermediate state is genuinely disposable: store only the final answer in a regular Python cell.
+- Anything that needs to branch out into multiple parallel runs: loop cells are sequential by design. Use separate cells, or model the fan-out in Python.
+
+A loop cell checks the cache like any other cell, so running something downstream of a finished loop does not re-run it. A loop cell cannot declare `@fetch` or `@dataset`; read those in an upstream cell.
 
 Reach for loop cells when **being able to inspect or fork from iteration k matters**. That's the feature you're paying for.
 
@@ -887,7 +905,7 @@ R environments are managed from the **Environment** panel, at parity with Python
 
 R cells display plots inline, like a Python cell's matplotlib figure. Base graphics (`plot()`, `hist()`, …) and grid-based plots (ggplot2, lattice) are captured to PNG and rendered in the cell output. A bare trailing plot object auto-renders - a last-line `p` where `p <- ggplot(...)` shows the plot without an explicit `print(p)`, mirroring the R console. A cell that draws several plots produces an ordered list of image outputs.
 
-### What's still ahead
+### Warm Rscript pool
 
 **Warm Rscript pool.** Notebooks containing R cells keep a small pool of
 pre-spawned R workers (R startup, `.Rprofile`/renv activation, and
@@ -918,6 +936,8 @@ The same annotation parser handles both Python and R cells (`#`-prefixed comment
 | `# @env KEY=value`         | Sets `Sys.getenv("KEY")` for the cell's process.                        |
 | `# @mount data file:///x`  | Binds `data` inside the R cell to the mount's local path (a character string - R has no `pathlib.Path`).  |
 | `# @timeout 60`            | Per-cell execution timeout in seconds.                                  |
+| `# @fetch data <url>`      | Downloads a URL as a recorded input; `data` is the file's path as a string. |
+| `# @nocache`               | Always re-execute.                                                      |
 | `# @worker gpu-box`        | Runs the cell on an executor worker with R (see below).                 |
 
 An R cell with a worker runs `harness.R` on that worker (a `strata-worker` of
@@ -926,10 +946,11 @@ this version or later), under the worker's
 (`docker build -f worker.Dockerfile --build-arg WITH_R=true`). Its outputs come
 back the way a local run's do, so it is a cache hit here afterwards, a
 downstream Python cell reads its data frame, and an R-only value returns as RDS.
-The worker does not restore the notebook's `renv.lock`; an `@fetch` on an R cell
-is read on this machine, so such a cell runs locally.
+The worker does not restore the notebook's `renv.lock`. An `@fetch` on an R cell
+is read on this machine, so an R cell with both `@fetch` and `@worker` fails;
+run it locally, or fetch in an upstream Python cell.
 
-Loop annotations (`@loop`, `@loop_until`) and prompt-cell annotations (`@output_schema` etc.) do not apply to R cells.
+Loop annotations (`@loop`, `@loop_until`) and prompt-cell annotations (`@output_schema` etc.) do not apply to R cells, and an R cell that declares `@dataset` fails; read the dataset in an upstream Python cell.
 
 ### What if Rscript isn't installed?
 
@@ -947,6 +968,6 @@ An R cell whose harness can't find `Rscript` on `PATH` returns a clean cell-leve
 | Loop cell    | Iterative refinement where pausing or forking from an intermediate state matters.                      |
 | R cell       | A computation where R's stats / formula syntax / domain packages are the right tool, while keeping the rest of the pipeline in Python. |
 
-Mixing is encouraged, a typical pipeline might be a SQL cell for extraction → Python cells for transformation → an R cell for the linear model → a prompt cell for narrative summarisation.
+Mixing is encouraged: a typical pipeline might be a SQL cell for extraction → Python cells for transformation → an R cell for the linear model → a prompt cell for narrative summarisation.
 
-Any kind of cell can also live inside a [variant group](annotations.md#variant-cells) a tabbed slot where multiple cells share one place in the DAG and you switch between them without forking the notebook.
+Any kind of cell can also live inside a [variant group](annotations.md#variant-cells): a tabbed slot where multiple cells share one place in the DAG and you switch between them without forking the notebook.

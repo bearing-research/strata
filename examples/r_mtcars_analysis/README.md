@@ -52,7 +52,7 @@ of every edge happen to be R.
 From the project root:
 
 ```bash
-uv run strata-notebook --host 127.0.0.1 --port 8765
+uv run strata-notebook
 ```
 
 Open `examples/r_mtcars_analysis` from the Strata home page and run the

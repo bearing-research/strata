@@ -1,7 +1,7 @@
 # Publishing an artifact
 
-A figure in a paper can carry a URL. Someone who opens it — a referee, a
-replicator, you in eighteen months — sees the result, the code that produced
+A figure in a paper can carry a URL. Someone who opens it (a referee, a
+replicator, you in eighteen months) sees the result, the code that produced
 it, and the code and environment of every step behind it. No account, no
 install, no notebook.
 
@@ -11,6 +11,8 @@ strata artifact publish nb_paper_cell_c2_var___display__0 --title "Figure 3"
 
 ```
 nb_paper_cell_c2_var___display__0@v=1 is public at /p/ocxQj-toxGttZYyRl-Zf9...
+Published into ~/.strata/artifacts (the store your server serves).
+Copied 2 artifacts across so the link resolves.
 
 Anyone with that link can read the artifact, its source, and the
 source and environment of every step behind it. That is the point,
@@ -21,7 +23,7 @@ and it is worth knowing before sending the link:
 Withdraw it with: strata artifact unpublish ocxQj-toxGttZYyRl-Zf9...
 ```
 
-Every cell output is already an artifact, and a plot is no exception — it is
+Every cell output is already an artifact, and a plot is no exception: it is
 stored under its own id with a provenance hash binding it to its inputs, its
 source, and the environment it ran in. Publishing does not create any of that.
 It grants read access to one version of it.
@@ -30,12 +32,12 @@ It grants read access to one version of it.
 
 A notebook writes its cell outputs to its own `.strata/artifacts`; the server
 serves whatever `artifact_dir` it was started with, `~/.strata/artifacts` by
-default. Publishing therefore copies the artifact — and every step behind it,
-since the page shows their code — into the store the server serves, and mints
+default. Publishing therefore copies the artifact, and every step behind it
+since the page shows their code, into the store the server serves, and mints
 the token there. The command says how many it moved:
 
 ```
-Copied 4 artifacts into the server's store so the link resolves.
+Copied 4 artifacts across so the link resolves.
 ```
 
 The copies keep their original ids, versions, provenance hashes, authors and
@@ -50,6 +52,7 @@ questions:
 | --- | --- |
 | `--artifact-dir` | the store to read the artifact from, as in every other subcommand |
 | `--into DIR` | the store to publish into |
+| `--to URL` | a Strata server to publish to over HTTP (see [below](#copying-a-chain-into-another-store)) |
 | `--here` | publish into the store named by `--artifact-dir` |
 
 `--into` defaults to the store your server serves, which is what makes a link
@@ -78,13 +81,13 @@ This matters more here than in most features, because the reader is being
 asked to trust what they see.
 
 **Transparency.** The page shows the code, the inputs, the environment and the
-author as recorded *when the bytes were produced* — not as they look now. A
+author as recorded *when the bytes were produced*, not as they look now. A
 cell edited after the run does not change what its artifact reports.
 
 **Integrity.** A digest of the bytes is recorded at publication, and
 `/p/<token>/verify` re-reads them and compares. That proves the bytes have not
 changed since they were published. It does not prove they were honestly
-produced in the first place — nothing a server can compute about its own
+produced in the first place: nothing a server can compute about its own
 storage could establish that.
 
 **Reproduction is not claimed.** Re-running the computation and getting the
@@ -94,7 +97,7 @@ and unavailable input data each break it on their own. So there is no green
 check anywhere on the page: in a research context a checkmark is read as
 "someone reproduced this", and a badge that can be wrong is worse than no
 badge. The page says what it checked, in words. Re-running is left to the
-reader — the source and environment shown are what it takes.
+reader; the source and environment shown are what it takes.
 
 ## Publishing exposes the chain
 
@@ -104,7 +107,7 @@ upstream step, because a plot whose ancestry is hidden answers nothing.
 
 Upstream cell source can name private dataset paths, internal table names, or
 credential *names*. So publishing is explicit, one artifact version at a time,
-never a switch on a whole notebook — and the CLI prints the full list of steps
+never a switch on a whole notebook, and the CLI prints the full list of steps
 the link will expose before you use it.
 
 Upstream **data** is never served. The page describes the steps; only the
@@ -116,7 +119,7 @@ published artifact's own bytes are downloadable, at `/p/<token>/data`.
 strata artifact unpublish <token>
 ```
 
-The link then reports that it was withdrawn, rather than 404ing — a reader
+The link then reports that it was withdrawn, rather than 404ing. A reader
 chasing a footnote deserves that answer rather than one that reads like a typo.
 The token is never reissued for other content, so a URL already in print fails
 closed instead of quietly starting to resolve to something else.
@@ -127,7 +130,7 @@ closed instead of quietly starting to resolve to something else.
 [![provenance](https://your-strata/p/<token>/badge.svg)](https://your-strata/p/<token>)
 ```
 
-It reports the size of the recorded chain — `provenance · 4 steps` — and links
+It reports the size of the recorded chain (`provenance · 4 steps`) and links
 to the page. It says nothing about whether the result is right, and it is
 deliberately not green: in badge convention green means "passing", and
 borrowing that would smuggle back the claim the rest of this is careful to
@@ -156,7 +159,7 @@ which repositories and provenance tooling read directly:
 
 The graph maps each step to a `CreateAction` whose `instrument` is the cell
 source as `SoftwareSourceCode`, its `object` the inputs and its `result` the
-output — the shape PROV-O and RO-Crate both expect for "this code, on these
+output: the shape PROV-O and RO-Crate both expect for "this code, on these
 inputs, made this".
 
 Upstream steps are `CreativeWork` entities, **not** files, and they are not
@@ -183,11 +186,11 @@ directly:
 
 The card is deliberately not a smaller copy of the page. An embed sits in a
 post where the surrounding text is doing the explaining, so it carries the
-result and an honest one-line summary, then links out — abbreviating the
+result and an honest one-line summary, then links out. Abbreviating the
 caveats into a card would produce exactly the badge this feature avoids.
 
 The card is framable from any origin, because being embeddable is the whole
-point of it. That applies to `/p/{token}/embed` and nothing else — the full
+point of it. That applies to `/p/{token}/embed` and nothing else: the full
 page keeps the default `frame-ancestors 'self'`, and `embed_frame_ancestors`
 still governs the notebook app view.
 
@@ -209,11 +212,17 @@ strata artifact archive nb_paper_cell_c2_var___display__0 \
 
 ```
 figure3-bundle/
-├── index.html      the page — opens in a browser, no server, no external requests
-├── artifact.png    the bytes
-├── manifest.json   the same record, machine-readable
-└── README.md       what it is and how to check it
+├── index.html              the page: opens in a browser, no server, no external requests
+├── artifact.png            the bytes
+├── manifest.json           the same record, machine-readable
+├── ro-crate-metadata.json  the chain as RO-Crate
+└── README.md               what it is and how to check it
 ```
+
+A tabular artifact's bytes are Arrow IPC (`artifact.arrow`), and the bundle
+also carries `artifact.parquet`, the same rows in a format a data repository
+indexes. The manifest's digest covers the Arrow file; the Parquet file carries
+its own.
 
 Deposit the directory with Zenodo or OSF and cite the DOI. The archive's
 retention promise then stands behind the link instead of yours.
@@ -238,13 +247,14 @@ writes the file the route serves, byte for byte:
 
 ```bash
 strata artifact archive --token <token> --to ./figure3.zip
-``` A withdrawn publication refuses here as
-it does for the bytes: the page still resolves and says "withdrawn", since a
+```
+
+A withdrawn publication refuses here as it does for the bytes: the page still resolves and says "withdrawn", since a
 reader chasing a footnote deserves that answer, but handing over the archive
 anyway would undo the withdrawal.
 
 It needs no credentials, like the page, and contains nothing the page does not
-already show — the artifact's own bytes and the chain as rendered. Upstream
+already show: the artifact's own bytes and the chain as rendered. Upstream
 bytes stay where they are.
 
 The page is the same document as the hosted one, with one difference: it points
@@ -257,7 +267,7 @@ sha256sum artifact.png
 ```
 
 Archiving is not publishing. It grants nobody access to a running server and
-mints no link — it writes files you choose who to hand to.
+mints no link. It writes files you choose who to hand to.
 
 ## Crediting an author
 
@@ -268,7 +278,7 @@ it on either command; in service mode a publish through the API uses the
 authenticated principal instead. Omit it and there is simply no byline.
 
 **Who computed it** is the *Computed by* row, and it comes from the artifact
-itself — recorded when the cell ran, not when you published. A local run has no
+itself, recorded when the cell ran, not when you published. A local run has no
 authenticated identity to record, so that row usually reads "not recorded".
 `--author` does not change it: crediting yourself for publishing a result is
 not the same as the store attesting who produced it, and the page keeps them
@@ -307,7 +317,7 @@ Schemes are `doi`, `zenodo`, `arxiv` and `url`; anything else is refused, since
 a record that accepted arbitrary scheme names would produce citation lines
 nobody can follow. The page grows a "Cite as" line of resolvable links, the
 JSON record and the archive `manifest.json` carry the entries, and the
-RO-Crate's root dataset gets the DOI as its `identifier` — which is what an
+RO-Crate's root dataset gets the DOI as its `identifier`, which is what an
 ingesting repository indexes on.
 
 The patch cannot repoint the token. `artifact_id` and `version` are not fields
@@ -324,7 +334,7 @@ each version's id and number so its lineage edges still resolve.
 over HTTP uploads each version's bytes, then its record:
 
 ```
-PUT  /v1/artifacts/import/blobs/{sha256}     the bytes, checked against the digest; 201
+PUT  /v1/artifacts/import/blobs/{content_sha256}     the bytes, checked against the digest; 201
 POST /v1/artifacts/import                    {"id": ..., "version": ..., "provenance_hash": ...,
                                               "content_sha256": ..., "input_versions": ..., ...}
 ```
@@ -342,14 +352,15 @@ the bytes as `data`, which is what the CLI sends.
 
 | Route | Auth | Purpose |
 | --- | --- | --- |
-| `POST /v1/artifacts/{id}/v/{n}/publish` | yes (`artifacts:publish`) | Mint a link. Idempotent — republishing returns the existing token. |
+| `POST /v1/artifacts/{id}/v/{n}/publish` | yes (`artifacts:publish`) | Mint a link. Idempotent: republishing returns the existing token. |
 | `DELETE /v1/publications/{token}` | yes (`artifacts:publish`) | Withdraw. |
 | `PATCH /v1/publications/{token}` | yes (`artifacts:publish`) | Set authors and external identifiers. Cannot change what the token points at. |
-| `GET /v1/publications` | yes | List this tenant's live links. |
-| `PUT /v1/artifacts/import/blobs/{sha256}` | yes (`artifacts:write`) | Upload a version's bytes ahead of its record. |
+| `GET /v1/publications` | yes | List this tenant's live links (`?include_revoked=true` adds withdrawn ones). |
+| `PUT /v1/artifacts/import/blobs/{content_sha256}` | yes (`artifacts:write`) | Upload a version's bytes ahead of its record. |
 | `POST /v1/artifacts/import` | yes (`artifacts:write`) | Import a version, keeping its id and number. |
 | `GET /p/{token}` | **no** | The page. |
 | `GET /p/{token}/data` | **no** | The published bytes. |
+| `GET /p/{token}/archive.zip` | **no** | The archived bundle as a zip, with a `Content-Digest` header. |
 | `GET /p/{token}/verify` | **no** | Re-read and compare against the recorded digest. |
 | `GET /p/{token}/embed` | **no** | The card, for an `<iframe>`. Framable from any origin. |
 | `GET /oembed?url=…` | **no** | oEmbed provider, so a pasted link unfurls. |
@@ -360,4 +371,4 @@ the bytes as `data`, which is what the CLI sends.
 The unauthenticated routes are exempt from the auth and tenant middleware by
 path, and only for `GET`. The token is the credential: it exists only because
 someone with authority over that artifact minted it for one version. Minting,
-withdrawing and listing all stay behind the gate.
+withdrawing, editing credits and listing all stay behind the gate.

@@ -648,9 +648,9 @@ def validate_main(args: argparse.Namespace) -> int:
         total_errors = len(notebook_errors) + error_count
         if valid:
             suffix = f", {warning_count} warning(s)" if warning_count else ""
-            print(f"{_green('✓')} valid — {len(cells_payload)} cell(s){suffix}")
+            print(f"{_green('✓')} valid: {len(cells_payload)} cell(s){suffix}")
         else:
-            print(f"{_red('✗')} invalid — {total_errors} error(s), {warning_count} warning(s)")
+            print(f"{_red('✗')} invalid: {total_errors} error(s), {warning_count} warning(s)")
 
     return 0 if valid else 1
 

@@ -28,7 +28,7 @@ import pandas as pd
 papers = pd.read_parquet("https://...")
 ```
 
-For **Python cells**, any non-empty string is accepted, spaces, parentheses, and special characters are fine.
+For **Python cells**, any non-empty string is accepted: spaces, parentheses, and special characters are fine.
 
 For **prompt cells**, `@name` also sets the output variable name and must be a valid Python identifier:
 
@@ -79,9 +79,9 @@ cells = [
 SELECT category, COUNT(*) FROM products GROUP BY category
 ```
 
-The `@after seed` resolves to the cell with `id = "seed"`. If you'd
-rather not hand-edit, opening the notebook in the UI also lets you
-rename cell IDs via the cell's metadata panel.
+The `@after seed` resolves to the cell with `id = "seed"`. There is no
+UI for renaming a cell ID; a friendly ID is set by editing
+`notebook.toml`.
 
 `@name` and `id` are independent: a cell can have `id = "seed"` and
 `@name "Seed database"` simultaneously. The DAG view shows the
@@ -98,7 +98,7 @@ Route the cell's execution to a named worker instead of the local machine.
 category_stats = ctx.sql("SELECT topic, COUNT(*) FROM papers GROUP BY topic").to_pandas()
 ```
 
-Workers are HTTP endpoints that implement the Strata executor protocol. Register them via the **Workers panel** in the sidebar, the persisted result lands in `notebook.toml` as:
+Workers are HTTP endpoints that implement the Strata executor protocol. Register them via the **Workers panel** in the sidebar; the persisted result lands in `notebook.toml` as:
 
 ```toml
 [[workers]]
@@ -126,7 +126,7 @@ If no `@worker` is set, the cell runs locally in the notebook's Python environme
 ## @timeout
 
 Override the execution timeout for a single cell, in seconds. The default
-is 300 seconds (5 minutes); the value must satisfy `0 < t ≤ 86400` (one day max).
+is 300 seconds (5 minutes); the value must be a positive number.
 
 ```python
 # @timeout 300
@@ -183,13 +183,13 @@ Format: `# @env KEY=value`. Multiple `@env` lines are supported. The variable is
 
 ## @mount
 
-Attach a filesystem mount to the cell. Mounts provide read or read-write access to external storage (S3, local paths) during execution.
+Attach a filesystem mount to the cell. Mounts provide read or read-write access to external storage (local paths, S3, GCS, Azure) during execution.
 
 ```python
 # @mount raw_data s3://my-bucket/dataset ro
 # @mount scratch file:///tmp/work rw
 df = pd.read_parquet(raw_data / "events.parquet")
-scratch / "summary.txt"  # → Path("/tmp/strata/mounts/.../summary.txt")
+scratch / "summary.txt"  # → Path("/tmp/work/summary.txt")
 ```
 
 **The mount name becomes a `pathlib.Path` variable in the cell's namespace.** No
@@ -239,11 +239,13 @@ run read as one of its inputs. That record is how a
 "External inputs". A snapshot export lists every fetch with whether it is
 pinned, so an unpinned one can be flagged before the snapshot is shared.
 
-Only `http` and `https` are fetched, and every redirect hop passes the same
-guard as a worker's URLs: no private, loopback or link-local address unless the
-host is listed in `STRATA_NOTEBOOK_FETCH_ALLOWED_HOSTS`. A URL that cannot be
-checked shows the cell as stale, and running it fails with the reason. A cell
-with `@fetch` runs on its own in Run All rather than in a batch.
+Only `http` and `https` are fetched. In service mode every redirect hop passes
+the same guard as a worker's URLs: no private, loopback or link-local address
+unless the host is listed in `STRATA_NOTEBOOK_FETCH_ALLOWED_HOSTS`. Personal
+mode allows those addresses, so `http://localhost:8000/data.csv` works on your
+own machine. A URL that cannot be checked shows the cell as stale, and running
+it fails with the reason. A cell with `@fetch` runs on its own in Run All rather
+than in a batch.
 
 On a remote worker the server does the fetching: the bytes travel with the
 cell's other inputs, uploaded on the direct transport and staged behind a
@@ -273,10 +275,9 @@ Format: `# @dataset <name> <registry-name>[@<alias>|@v=<n>]`.
 - **`taxi/model@v=3`** pins version 3 of the artifact the name points at. A
   pinned dataset never makes the cell stale, as `snapshot=` does for `@table`.
 
-The name resolves in the registry the cell's `strata` client uses: the
-server's own store, or the team store when `STRATA_NOTEBOOK_REMOTE_STORE_URL`
-is set. The version is copied into the notebook's own store, keeping its id and
-version, and `<name>` is bound to its value like an upstream variable: a
+The server resolves the name in its own registry, or in the team store when
+`STRATA_NOTEBOOK_REMOTE_STORE_URL` is set. The version is copied into the
+notebook's own store, keeping its id and version, and `<name>` is bound to its value like an upstream variable: a
 table as a DataFrame, a JSON value or a pickled object as itself. Artifacts
 written outside a notebook (a core transform, `strata.put`) are Arrow tables.
 Anything else, such as an image, arrives as a `pathlib.Path` to its bytes.
@@ -302,7 +303,7 @@ retrain on new data, pin a snapshot), see
 
 ```python
 # @table trips file:///data/warehouse#nyc.trips
-art = client.materialize(
+art = strata.materialize(
     inputs=[trips],
     transform={"executor": "scan@v1", "params": {"snapshot_id": trips_snapshot}},
 )
@@ -372,6 +373,13 @@ override a default you set elsewhere). It applies to every language and sits
 alongside the read-write-`@mount` rule, which already forces re-execution for
 the same reason.
 
+A cell that reads a `@nocache` (or read-write-mount) cell's value is keyed on
+the bytes that value stored rather than on the producer's provenance, which is
+the same on every run. A new value re-runs the consumer; a run that produces the
+same bytes is still a cache hit for it. Within one run (a cascade, Run All,
+headless `strata run`) each cell executes once, so two consumers of a
+`@nocache` cell see the same value.
+
 ---
 
 ## Prompt Cell Annotations
@@ -412,7 +420,7 @@ System prompt prepended to the conversation.
 # @system You are a terse data analyst. Answer in bullet points.
 ```
 
-Multiple `@system` lines are concatenated with newlines.
+Only one `@system` line counts: when there are several, the last one wins.
 
 ### `@output`
 
@@ -433,14 +441,14 @@ Inline JSON Schema pinning the response shape. When provided, Strata
 dispatches to provider-native structured output (OpenAI's `json_schema` with
 strict mode; Anthropic's native tool-use) so the response comes back as
 validated JSON rather than free-form text. Providers without schema support
-fall back to `json_object`, valid JSON, shape not enforced, and the
+fall back to `json_object` (valid JSON, shape not enforced), and the
 `@validate_retries` loop catches shape violations.
 
 ```
 # @output_schema {"type": "object", "properties": {"themes": {"type": "array", "items": {"type": "string"}}}, "required": ["themes"]}
 ```
 
-Editing the schema invalidates the cell's cache, the schema is part of the
+Editing the schema invalidates the cell's cache: the schema is part of the
 provenance hash.
 
 ### `@validate_retries`
@@ -466,9 +474,11 @@ iteration and the `carry` variable threads state between them.
 ```python
 # @loop max_iter=50 carry=state
 # @loop_until state["converged"]
-state = state if "state" in dir() else initial
 state = step(state)
 ```
+
+Iteration 0 reads `state` from the upstream cell that defines it (or from
+`start_from=`, below); the body must rebind it every iteration.
 
 Key/value parameters:
 
@@ -518,9 +528,9 @@ Key/value parameters:
   directly.
 - `write=true`, opt the cell into writable execution. Without this flag the
   cell may only read: `SELECT`, set operations, `VALUES`, `TABLE`,
-  `SUMMARIZE`, `DESCRIBE`, `SHOW` and plain `EXPLAIN`. Anything else — DDL,
-  DML, `COPY`, `ATTACH`, `USE`, `CALL`, `SET`, `PRAGMA`, and `EXPLAIN
-  ANALYZE`, which runs the statement it describes — is refused before the
+  `SUMMARIZE`, `PIVOT`, `DESCRIBE`, `SHOW` and plain `EXPLAIN`. Anything else
+  (DDL, DML, `COPY`, `ATTACH`, `USE`, `CALL`, `SET`, `PRAGMA`, and `EXPLAIN
+  ANALYZE`, which runs the statement it describes) is refused before the
   statement reaches the driver, naming it. The connection is still opened
   read-only, but that is a second line rather than the boundary: the
   read-only transaction a driver opens is one a `COMMIT` in the cell body
@@ -547,7 +557,7 @@ Override the default `fingerprint` cache policy on a SQL cell.
 
 | Policy            | Behavior                                                     |
 | ----------------- | ------------------------------------------------------------ |
-| `fingerprint`     | Default. Probe-derived freshness token + schema fingerprint folded into the hash. |
+| `fingerprint`     | Default. Probe-derived freshness token + schema fingerprint folded into the hash. The cell opens idle, because trusting the cache means asking the source. |
 | `forever`         | Static salt; never invalidates from DB-side state.           |
 | `session`         | Session-unique salt; invalidates across sessions.            |
 | `ttl=<seconds>`   | `floor(now / ttl)` bucketed time-based salt.                 |
@@ -632,7 +642,7 @@ Both cells declare `# @variant <group> <name>` with the same group
 (`classifier`) and different names (`logreg`, `rf`). At any given time
 exactly one variant is **active**; only the active variant participates
 in the DAG, so downstream cells see one producer for `model`. In the UI
-the group renders as a tab strip, clicking a tab switches the active
+the group renders as a tab strip: clicking a tab switches the active
 variant, and the cell editor shows that variant's source.
 
 ### Switching variants
@@ -742,12 +752,12 @@ supported. The validator flags the mistakes: `per_variant_no_sweep_source`
 
 All variants in a group must produce the same set of top-level
 bindings. The validator compares each variant's `defines` against its
-siblings and flags `variant_contract_mismatch` on any outlier, if
+siblings and flags `variant_contract_mismatch` on any outlier. If
 `logreg` exposes only `model` and `rf` exposes `model + feature_importance`,
 downstream cells that depend on the missing name would break under one
 selection but not the other.
 
-Imports don't count toward the contract, they're scaffolding, not
+Imports don't count toward the contract: they're scaffolding, not
 interface. The variants above each bring in a different sklearn class,
 which is fine; only the *values* the cells produce need to match.
 
@@ -800,8 +810,9 @@ SELECT category, COUNT(*) FROM products GROUP BY category
 
 Multiple `@after` lines stack; each cell ID adds one edge. Whitespace-
 separated IDs on a single line work too: `# @after seed migrate`. Self-
-references and unknown cell IDs are silently dropped at the DAG layer
-(annotation_validation surfaces them as a diagnostic for the user).
+references and unknown cell IDs are silently dropped at the DAG layer, and
+no diagnostic reports them, so a misspelled ID leaves the cell without the
+edge.
 
 `<cell-id>` is the `id` field in `notebook.toml`, **not** the cell's
 `@name`. See [Cell IDs](#cell-ids) for how to set friendly IDs like
@@ -823,9 +834,9 @@ When the same setting is configured at multiple levels, the most specific wins:
 | **Timeout** | `# @timeout N` | `cell.timeout` field | 300 seconds |
 | **Env vars** | `# @env K=V` | `cell.env` overrides | `notebook.env` defaults |
 | **Mounts** | `# @mount ...` | `cell.mounts` overrides | `notebook.mounts` defaults |
-| **SQL connection** | `# @sql connection=X` |, | none, required for SQL cells |
-| **Cache policy** | `# @cache <policy>` |, | `fingerprint` (read), `session` (write) |
-| **Cache opt-out** | `# @nocache` |, | cache on (serve provenance hits) |
+| **SQL connection** | `# @sql connection=X` | (annotation only) | none; required for SQL cells |
+| **Cache policy** | `# @cache <policy>` | (annotation only) | `fingerprint` (read), `session` (write) |
+| **Cache opt-out** | `# @nocache` | (annotation only) | cache on (serve provenance hits) |
 
 Annotations always take priority. This lets you override per-cell behavior without editing `notebook.toml`.
 

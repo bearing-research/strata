@@ -23,8 +23,6 @@ Read this before you decide to import a particular notebook.
 - **`%env`, `%set_env`** - translated to `# @env KEY=VAL` cell
   annotations.
 - **`%run script.py`** - translated to `exec(Path(...).read_text())`.
-- **`%%bash`, `%%sh`, `%%script`** - bodies wrapped in
-  `subprocess.run(..., shell=True)`.
 - **`%%writefile`** - translated to `Path(...).write_text(...)`.
 - **`%timeit`, `%time` (line form)** - the magic prefix is dropped;
   the body keeps running.
@@ -42,8 +40,9 @@ Read this before you decide to import a particular notebook.
 - **`%matplotlib inline` / `notebook`.** Dropped. Strata captures
   figures via the display protocol automatically.
 - **Raw cells.** Skipped entirely (counted in the import report).
-- **`!shell` commands** other than `pip install`. Dropped with a
-  marker comment; assignment-form (`var = !cmd`) drops the command
+- **`!shell` commands** other than `pip install`, and **`%%bash`,
+  `%%sh`, `%%script` cells**. Dropped with a marker comment (a shell
+  cell keeps its body as comments below the marker); assignment-form (`var = !cmd`) drops the command
   and stubs `var = []` so downstream code still parses. Restore
   manually with `subprocess.run(...)` if the escape was load-bearing.
 - **Non-Python `%%` cell magics** (`%%R`, `%%ruby`, `%%javascript`,
@@ -53,9 +52,9 @@ Read this before you decide to import a particular notebook.
 - **REPL-inspection magics** (`%who`, `%whos`, `%lsmagic`, `%history`,
   `%alias`, etc.). Dropped; no Strata equivalent.
 
-Everything that's "dropped" is reported in the import report
-(`<notebook_dir>/import_report.md`) with the exact line number and
-the marker comment placed in the cell source - there's no silent
+Everything that's "dropped" is listed in the import report
+(`<notebook_dir>/import_report.md`), and the cell source carries a
+`# strata: ...` marker comment where it was, so there's no silent
 data loss.
 
 ## When to use it
@@ -85,7 +84,7 @@ strata import <path/to/notebook.ipynb> [options]
 
 | Flag         | Description                                                                                       |
 | ------------ | ------------------------------------------------------------------------------------------------- |
-| `--out <dir>` | Target notebook directory. Defaults to a sibling directory named after the `.ipynb` stem. |
+| `--out <dir>` | Target notebook directory. Defaults to a sibling directory named after the file's stem. |
 | `--check-deps` | After capturing dependencies, run `uv lock` to verify they resolve into a lockfile. |
 
 ### Examples
@@ -119,7 +118,8 @@ Returns the same notebook state shape as `POST /v1/notebooks/create`
 plus an `import_report` field with the conversion details. On
 malformed input, invalid JSON, non-nbformat structure, path
 traversal in `name`, collision with an existing notebook, returns a
-clean `400` or `409` with `detail` set.
+clean `400` or `409` with `detail` set. An upload over the cap is a
+`413`.
 
 ## What the converter does
 
@@ -160,7 +160,7 @@ extends support; rows can be:
 | `%pip install <pkgs>`, `!pip install <pkgs>`, `%conda install <pkgs>` | Packages captured into `pyproject.toml`. |
 | `%env KEY=VAL`, `%set_env KEY=VAL` | Translated to a `# @env KEY=VAL` cell annotation. |
 | `%run script.py` | Translated to an `exec(Path("script.py").read_text())` (with a self-contained `Path` import). |
-| `%%bash`, `%%sh`, `%%script` | Body wrapped in `subprocess.run(..., shell=True)`. |
+| `%%bash`, `%%sh`, `%%script` | Dropped; the body is kept as comments under a marker, so re-enabling it is a deliberate edit. |
 | `%%writefile <path>`, `%%file <path>` | Translated to `Path(<path>).write_text(<body>)`. |
 | `%%timeit`, `%%time`, `%%capture` | Recurse on body as plain code. |
 | `%%javascript`, `%%js`, `%%html`, `%%latex`, `%%svg`, `%%markdown` | Dropped. Strata has no equivalent renderer. |
@@ -180,6 +180,8 @@ the converter is conservative:
   manually with `subprocess.run(...)` if the shell escape matters.
 - **Other `!cmd`**: dropped with a marker comment. Surfaces in the
   import report's *Shell commands dropped* section.
+- **`%%bash`, `%%sh`, `%%script` cells**: dropped the same way, with
+  the body kept as comments under the marker.
 
 ### Dependencies
 
@@ -229,7 +231,7 @@ Sections that surface when applicable:
 - **Magics dropped**: magics with no Strata equivalent; the source
   carries a marker comment where each one used to live.
 - **Shell commands dropped**: `!cmd` lines (except `!pip install`)
-  that the converter removed.
+  and shell cell magics that the converter removed.
 - **Dependencies captured**: what landed in `pyproject.toml`,
   ready for `uv sync` to resolve.
 - **Warnings**: anything noteworthy; e.g. pip-only specs skipped
@@ -244,8 +246,9 @@ Sections that surface when applicable:
   is built to validate. Pre-loaded author outputs would mask
   execution incompatibilities.
 - **No widgets.** `application/vnd.jupyter.widget-view+json`
-  outputs and `%%javascript` cells are dropped with a warning.
-  Strata's display protocol doesn't model interactive widgets.
+  outputs go with every other output, and `%%javascript` cells are
+  dropped like any renderer magic. Strata's display protocol doesn't
+  model Jupyter's interactive widgets.
 - **No round-trip back to `.ipynb`.** Tracked as a follow-up; out
   of scope for the import path itself.
 - **Kaggle hard-coded paths.** Notebooks that reference
@@ -297,8 +300,7 @@ verify the entry clears the bar you set, commit the manifest line.
 
 Out of scope today. Tracked as a follow-up because preserving the
 import-lossy parts (Jupyter outputs, widget metadata, original
-magic text) would compromise the import itself. See
-`docs/internal/design-jupyter-import.md` if you're picking this up.
+magic text) would compromise the import itself.
 
 ## Importing a snapshot
 
@@ -311,6 +313,10 @@ same verb reads it back, told apart by the file:
 strata import analysis.ipynb        # Jupyter
 strata import demo.snapshot.zip     # a snapshot → ./demo/
 ```
+
+Over REST the same bundle is a multipart upload to
+`POST /v1/notebooks/import-snapshot`, with the `file`, `name` and
+`parent_path` fields of the Jupyter route and a 2 GiB cap.
 
 What you get:
 
@@ -326,5 +332,10 @@ What you get:
   publish to a shared store. A copy living outside the storage root can't be
   seen, so it can't be detected.
 
-The import is built beside the destination and moved into place only once it's
-complete. A failure partway leaves nothing behind, and a retry works.
+The destination must be absent or empty. The import is built beside it and
+moved into place only once it's complete. A failure partway leaves nothing
+behind, and a retry works.
+
+A bundle is a file somebody sent you, so its member names, cell ids and
+artifact ids are checked before anything is written. One that names a path
+outside the notebook is refused rather than unpacked.

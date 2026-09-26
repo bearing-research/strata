@@ -1,5 +1,7 @@
 """Worker pool for dispatching Strata jobs to ephemeral machines."""
 
+from importlib import metadata as _metadata
+
 from strata_pool.backend import Backend, ProvisionedWorker
 from strata_pool.backends import DockerBackend, FlyBackend, RunPodBackend
 from strata_pool.pool import Pool
@@ -31,4 +33,6 @@ __all__ = [
     "WorkerState",
 ]
 
-__version__ = "0.1.0"
+# From the installed distribution, so it cannot fall behind pyproject.toml the
+# way a literal did (it said 0.1.0 through 0.8.0).
+__version__ = _metadata.version("strata-pool")

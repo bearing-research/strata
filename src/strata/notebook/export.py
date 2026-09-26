@@ -291,7 +291,7 @@ def _render_cell(
 
     # Prompt cells: source template only — never the response.
     if cell.language == CellLanguage.PROMPT:
-        blocks.append(NoteBlock("Prompt cell — response intentionally excluded from export."))
+        blocks.append(NoteBlock("Prompt cell: response intentionally excluded from export."))
         blocks.append(CodeBlock(language="text", body=cell.source))
         return blocks
 
@@ -471,7 +471,7 @@ def _render_display_output(
             kb = len(data_url) // 1024
             return [
                 NoteBlock(
-                    f"Image output ({kb} KB) — too large to inline at the "
+                    f"Image output ({kb} KB), too large to inline at the "
                     f"current size cap. Re-export with "
                     f"`--max-output-bytes {len(data_url) + 1024}` to include it."
                 )
@@ -508,8 +508,8 @@ def _render_display_output(
         # opaque blob the cell produced.
         hint = output.preview if isinstance(output.preview, str) else None
         if hint:
-            return [NoteBlock(f"Pickled output ({hint}) — not rendered in export.")]
-        return [NoteBlock("Pickled output — not rendered in export.")]
+            return [NoteBlock(f"Pickled output ({hint}), not rendered in export.")]
+        return [NoteBlock("Pickled output, not rendered in export.")]
 
     # Fallback: render the preview as text. Covers scalars (json content
     # type with a scalar preview, plain int/str values, etc.) and any

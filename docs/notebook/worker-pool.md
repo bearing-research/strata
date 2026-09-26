@@ -5,7 +5,7 @@
     It is included verbatim from `packages/strata-pool/README.md`, which is
     also the package's PyPI landing page. One source, so the two cannot drift.
 
-    The pool is a **separate package** — `pip install strata-pool`.
+    The pool is a **separate package**: `pip install strata-pool`.
 
     It sits at a **different layer** from the workers a notebook dispatches to:
     nothing in `strata` imports it, and `# @worker` cannot name a pool machine.

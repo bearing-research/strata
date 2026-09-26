@@ -30,7 +30,7 @@ strata export <notebook_dir> [options]
 
 | Flag                            | Description                                                                                          |
 | ------------------------------- | ---------------------------------------------------------------------------------------------------- |
-| `--to {markdown,html,snapshot}` | Output format. Default `markdown`. `snapshot` writes a portable zip — see [Snapshots](#snapshots).   |
+| `--to {markdown,html,snapshot}` | Output format. Default `markdown`. `snapshot` writes a portable zip; see [Snapshots](#snapshots).    |
 | `--force`                       | Snapshot only. Overwrite `--out` when it already holds something.                                    |
 | `--include {all,selected,none}` | Snapshot only. Whose artifact bytes travel. Default `selected`.                                      |
 | `--cells <ids>`                 | Snapshot only. Comma-separated cell ids whose artifacts to carry, with `--include selected`.         |
@@ -86,7 +86,8 @@ alongside Markdown and HTML.
 For each cell, the exporter emits in order:
 
 1. **Banner**: the cell's `# @name` (if set) or its ID, plus small
-   chips for `# @worker`, `# @variant`, `# @loop`, `# @mount`.
+   chips for the cell's language, `# @worker`, `# @variant`, `# @loop`
+   and `# @mount`.
 2. **Source**: fenced code block in the cell's language. The fence
    length auto-grows to cover embedded triple-backticks safely.
 3. **Cached display outputs**: per content type:
@@ -126,8 +127,8 @@ manually, that signals "yes I want this published."
 
 ### Variant cells, active member by default
 
-A variant group renders only its **active** variant by default, plus
-a small banner note ("Variant `<name>` of group `<group>`"). Pass
+A variant group renders only its **active** variant by default, with
+a `variant` chip reading `<name> of <group>`. Pass
 `--include-inactive-variants` to render all members stacked.
 
 ### Loop cells, final iteration only
@@ -158,8 +159,8 @@ format.
 per-cell runtime state (including each cell's last failure and the source it
 was about, and what a widget's controls were set to), and as many artifact
 bytes as you ask for. `strata
-import <file>.zip` unpacks one back into a notebook directory — see
-[Importing a snapshot](import.md#importing-a-snapshot).
+import <file>.zip` unpacks one back into a notebook directory (see
+[Importing a snapshot](import.md#importing-a-snapshot)).
 
 What travels is `--include`:
 
@@ -167,7 +168,7 @@ What travels is `--include`:
 | ---------- | -------------------------------------------------------------------------- |
 | `all`      | Every artifact. Use it to move a project between machines.                  |
 | `selected` | Only the cells named by `--cells`; the rest are described by reference. The default. |
-| `none`     | No artifact bytes — the notebook and its provenance, nothing to replay from. |
+| `none`     | No artifact bytes: the notebook and its provenance, nothing to replay from. |
 
 ```bash
 # The whole thing, to carry to another machine
@@ -177,8 +178,8 @@ strata export ./my_analysis --to snapshot --include all --out my_analysis.zip
 strata export ./my_analysis --to snapshot --cells a1b2c3d4 --out review.zip
 ```
 
-`--out` is required for a snapshot — it is a zip, not text — and it refuses to
-overwrite a path that already holds something unless you pass `--force`.
+`--out` is required for a snapshot, since it is a zip rather than text, and it
+refuses to overwrite a path that already holds something unless you pass `--force`.
 
 ## Integration: mkdocs hook
 

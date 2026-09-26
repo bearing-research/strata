@@ -66,8 +66,9 @@ def apply_secrets_to_notebook_state(state: NotebookState) -> SecretFetchResult |
     """Fetch + merge secrets into ``state.env`` in-place.
 
     Merge policy: fetched secrets populate env where the key isn't
-    already present, OR where the existing value is an empty / blanked
-    placeholder (sensitive-key blanking writes ``""`` on disk).
+    already present, where the existing value is an empty / blanked
+    placeholder (sensitive-key blanking writes ``""`` on disk), OR where the
+    provider filled it last time, so a refresh picks up a rotated secret.
     Non-empty values already in ``state.env`` — the ones the user
     actively set via the Runtime panel this session — override the
     provider. This keeps "override for a single session" working.
@@ -77,6 +78,12 @@ def apply_secrets_to_notebook_state(state: NotebookState) -> SecretFetchResult |
     """
     result = fetch_configured_secrets(state)
 
+    # Keys the provider filled last time. Their values are the provider's, not
+    # the user's, so a refresh replaces them: without this, a rotated secret
+    # was kept at its old value as though someone had set it by hand.
+    fetched_before = {
+        key for key, source in (state.env_sources or {}).items() if source != MANUAL_SOURCE
+    }
     state.env_sources = {key: MANUAL_SOURCE for key in state.env}
 
     if result is None:
@@ -89,7 +96,7 @@ def apply_secrets_to_notebook_state(state: NotebookState) -> SecretFetchResult |
 
     for key, value in result.secrets.items():
         existing = state.env.get(key)
-        if existing is None or existing == "":
+        if existing is None or existing == "" or key in fetched_before:
             state.env[key] = value
             state.env_sources[key] = result.source
         # else: manual override wins; keep state.env_sources[key] = MANUAL

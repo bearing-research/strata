@@ -48,7 +48,7 @@ collection failure.
 
 ## Writing and running tests
 
-Open the **Tests** panel on any Python cell - the `🧪` toggle next to Inspect -
+Open the **Tests** panel on any Python cell (the flask toggle next to Inspect)
 and write your tests. They're saved as a committed sibling file,
 `cells/<cell-id>.test.py`, so they version and review alongside the cell source.
 A cell with no tests carries no `.test.py` file.
@@ -70,7 +70,7 @@ badge.](../assets/cell-tests-dark.png#only-dark)
 
 ### The health badge
 
-The `🧪` toggle doubles as a status badge, so a cell's test health is visible
+The flask toggle doubles as a status badge, so a cell's test health is visible
 without opening the panel:
 
 | Badge        | Meaning                                              |
@@ -120,7 +120,11 @@ def test_predicate_holds_for_every_row(cell):
 ## Limitations
 
 - **Python cells only** (not prompt, SQL, R, or markdown cells).
-- `pytest` must be in the notebook environment.
+- `pytest` must be installable into the notebook environment (it is added to
+  the dev dependencies on the first run if missing).
+- Tests run the cell's source, so they run as the same OS user a cell does. A
+  service host with no `STRATA_NOTEBOOK_HARNESS_USER` refuses them, and the
+  run reports one errored test saying why.
 - Tests run against a **re-executed copy** of the cell with injected inputs -
   they don't share live state with an interactive run, so they're deterministic
   but won't see, e.g., a variable you only set in the REPL.

@@ -267,6 +267,32 @@ class TestApplySecretsToNotebookState:
         assert state.env["OPENAI_API_KEY"] == "session-override"
         assert state.env_sources["OPENAI_API_KEY"] == MANUAL_SOURCE
 
+    def test_a_refresh_picks_up_a_rotated_secret(self, monkeypatch) -> None:
+        """The first fetch leaves the old value in env, and the merge read any
+        value already there as a manual override, so a rotation never took."""
+        state = _state(secret_manager_config={"provider": "infisical", "project_id": "p"})
+        _install_fake_provider(monkeypatch, secrets={"OPENAI_API_KEY": "sk-old"})
+        apply_secrets_to_notebook_state(state)
+
+        _install_fake_provider(monkeypatch, secrets={"OPENAI_API_KEY": "sk-rotated"})
+        apply_secrets_to_notebook_state(state)
+
+        assert state.env["OPENAI_API_KEY"] == "sk-rotated"
+        assert state.env_sources["OPENAI_API_KEY"] == "infisical"
+
+    def test_a_manual_edit_of_a_fetched_key_survives_a_refresh(self, monkeypatch) -> None:
+        state = _state(secret_manager_config={"provider": "infisical", "project_id": "p"})
+        _install_fake_provider(monkeypatch, secrets={"OPENAI_API_KEY": "sk-old"})
+        apply_secrets_to_notebook_state(state)
+        # What the Runtime panel's env edit does.
+        state.env["OPENAI_API_KEY"] = "session-override"
+        state.env_sources["OPENAI_API_KEY"] = MANUAL_SOURCE
+
+        _install_fake_provider(monkeypatch, secrets={"OPENAI_API_KEY": "sk-rotated"})
+        apply_secrets_to_notebook_state(state)
+
+        assert state.env["OPENAI_API_KEY"] == "session-override"
+
     def test_fetch_error_surfaces_on_state(self, monkeypatch) -> None:
         state = _state(
             env={"DEBUG": "true"},

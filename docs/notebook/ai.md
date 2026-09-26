@@ -16,7 +16,7 @@ Set an API key in the **Runtime panel** under Environment Variables. The key det
 | `OPENAI_API_KEY`     | OpenAI                          | gpt-5.4              |
 | `GEMINI_API_KEY`     | Google                          | gemini-3-flash       |
 | `MISTRAL_API_KEY`    | Mistral                         | mistral-large-latest |
-| `STRATA_AI_API_KEY`  | Custom (requires `[ai]` config) |, |
+| `STRATA_AI_API_KEY`  | Custom (requires `[ai]` config) | set in `[ai]`        |
 
 **Resolution order** (highest priority wins):
 
@@ -27,7 +27,7 @@ Set an API key in the **Runtime panel** under Environment Variables. The key det
 For standard providers you only need step 2: drop your API key into the Runtime panel and Strata auto-picks the matching default base URL and model. The AI panel's model picker lets you switch models without leaving the UI (it persists the choice to `[ai].model`).
 
 !!! note "Process environment is not consulted"
-A shell-exported `OPENAI_API_KEY` does **not** leak into notebooks. This is intentional, each notebook must explicitly opt in to an AI provider. See the [Annotations](annotations.md) page for how env vars flow.
+    A shell-exported `OPENAI_API_KEY` does **not** leak into notebooks. This is intentional, each notebook must explicitly opt in to an AI provider. See the [Annotations](annotations.md) page for how env vars flow.
 
 ### Custom Provider Configuration
 
@@ -48,6 +48,7 @@ This is the intended escape hatch for advanced config. Fields the `[ai]` section
 - `max_output_tokens`
 - `timeout_seconds`
 - `approval_timeout_seconds`, how long an agent confirm prompt waits before being treated as a decline (default 120)
+- `approval_tools`, extra agent tools that need confirmation (adds to the server's list; see [Safety surface](#safety-surface))
 
 ### Supported Providers
 
@@ -86,7 +87,7 @@ Type an instruction and press Shift+Enter. The agent autonomously takes actions 
 | Tool                 | Description                                     |
 | -------------------- | ----------------------------------------------- |
 | `get_notebook_state` | Read all cells, variables, and execution status |
-| `create_cell`        | Add a new Python or prompt cell                 |
+| `create_cell`        | Add a new Python, prompt or markdown cell       |
 | `edit_cell`          | Modify an existing cell's source                |
 | `delete_cell`        | Remove a cell                                   |
 | `run_cell`           | Execute a cell and observe the result           |
@@ -151,9 +152,10 @@ What was used is reported, even though it isn't capped. Each run's `agent_done` 
 
 ### Package install scoping
 
-`add_package` calls `uv add <package>` against the **per-notebook**
-`pyproject.toml` (`dependencies.py:688`). The package gets resolved
-into the notebook's local `.venv/`, the local `uv.lock` is updated,
+`add_package` runs `uv add <package>` as the notebook's environment job,
+against the **per-notebook** `pyproject.toml`. The package gets resolved
+into the notebook's `.venv/` (with the shared environment backend, a link to
+the environment for the new lockfile), the local `uv.lock` is updated,
 and `pyproject.toml` records the new entry on disk. Three
 consequences:
 
@@ -178,16 +180,19 @@ If the user has a cell open in the editor while the agent calls
 
 - The agent writes the new source to `cells/<id>.py` and calls
   `session.reload()`, then broadcasts a fresh `notebook_state` over
-  WebSocket via `broadcast_notebook_sync` (`agent.py:450`).
-- Every connected frontend tab - including the user's - replaces its
-  cached state with the broadcast. The editor view re-renders with
-  the agent's new source.
-- **The user's unflushed keystrokes are lost.** Source edits are
+  WebSocket via `broadcast_notebook_sync` (in `ws.py`).
+- Every connected frontend tab, including the user's, replaces its
+  cached state with the broadcast. A cell nobody is typing in
+  re-renders with the agent's new source.
+- **A cell with unflushed keystrokes keeps them.** Source edits are
   buffered locally in the frontend and flush via debounced
-  `cell_source_update` after 2 s idle / on blur / before run. If
-  the agent's broadcast arrives while a buffer is pending, the
-  buffer is overwritten by the broadcast on the next render. There
-  is no merge-conflict prompt.
+  `cell_source_update` after 2 s idle / on blur / before run. While a
+  buffer is pending, the tab does not adopt the broadcast source, so
+  the editor keeps your text; when it flushes, your text replaces the
+  agent's edit. There is no merge-conflict prompt. The exception is a
+  broadcast that adds or removes a cell (`create_cell`, `delete_cell`):
+  the tab then replaces its whole cell list, and unflushed keystrokes in
+  any cell are lost.
 - For `delete_cell`, the cell disappears from the user's view
   entirely; the editor focus moves to the next cell.
 - For `run_cell`, the user's tab sees the cell transition through

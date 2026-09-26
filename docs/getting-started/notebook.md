@@ -325,7 +325,7 @@ the end, no `display()` needed: the harness auto-displays it.
 
 ## 9. Try an example
 
-The repo ships ~12 example notebooks covering every cell type. To
+The repo ships 18 example notebooks covering every cell type. To
 browse them in the UI, stop the running server first (Ctrl+C), then
 point the storage root at `examples/`:
 
@@ -364,7 +364,7 @@ grouped by feature.
 - [Cell Annotations](../notebook/annotations.md) for `@worker`, `@mount`, `@loop`, and friends
 - [Distributed Workers](../notebook/workers.md) for `# @worker gpu-fly` and dispatching to remote compute
 - [Import from Jupyter](../notebook/import.md) for `strata import nb.ipynb`
-- [Export](../notebook/export.md) for sharing a notebook as a single self-contained markdown or HTML file
+- [Export](../notebook/export.md) for sharing a notebook as a single self-contained markdown or HTML file, or as a snapshot bundle (state and artifacts) that imports back
 - [Environment Management](../notebook/environment.md) for package management and Python versions
 - [AI Integration](../notebook/ai.md) for prompt cells + the assistant in depth
 - [Comparison with Jupyter, Marimo, Pluto](../notebook/comparison.md)

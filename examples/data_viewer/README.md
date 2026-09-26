@@ -31,7 +31,7 @@ Tensors and scalars keep their existing display.
 From the project root:
 
 ```bash
-uv run strata-notebook --host 127.0.0.1 --port 8765
+uv run strata-notebook
 ```
 
 Then open `examples/data_viewer` from the Strata home page and run both

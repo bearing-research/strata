@@ -14,8 +14,8 @@ def materialize(inputs, transform):
 ## Fenced code without a language
 
 ```
-$ strata-notebook --port 8765
-Listening on http://0.0.0.0:8765
+$ STRATA_PORT=8765 strata-notebook
+Listening on http://127.0.0.1:8765
 ```
 
 ## Inline + fenced together

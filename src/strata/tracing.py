@@ -96,11 +96,13 @@ def init_tracing(
         from opentelemetry.sdk.trace import TracerProvider
         from opentelemetry.sdk.trace.export import BatchSpanProcessor
 
+        from strata.health import _package_version
+
         # Create resource with service name
         resource = Resource.create(
             {
                 "service.name": os.environ.get("OTEL_SERVICE_NAME", service_name),
-                "service.version": "0.2.0",
+                "service.version": _package_version(),
             }
         )
 
@@ -114,7 +116,7 @@ def init_tracing(
 
         # Set as global tracer provider
         trace.set_tracer_provider(provider)
-        _tracer = trace.get_tracer("strata", "0.2.0")
+        _tracer = trace.get_tracer("strata", _package_version())
 
         return True
 

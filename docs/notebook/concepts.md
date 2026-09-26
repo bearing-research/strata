@@ -50,9 +50,9 @@ three, only the TUI is deliberately read-only.
 
 The guarantees fall out of two design choices:
 
-1. **Provenance is identity.** An artifact's ID is a hash of the cell's source
-   (AST-normalized), its resolved inputs, and the environment fingerprint.
-   Identical computations produce identical IDs, so the cache hit check is
+1. **Provenance is identity.** An artifact is keyed by a hash of the cell's
+   source (AST-normalized), its resolved inputs, and the environment
+   fingerprint. Identical computations produce identical hashes, so the cache hit check is
    "have we computed this exact hash before?", not "do two things look
    similar?"
 2. **Artifacts are immutable.** Once stored, a version never mutates. A
@@ -79,8 +79,9 @@ break here - both silently, because the run still goes green:
 1. **In-place mutation that isn't exported.** A cell that trains a model with
    `optimizer.step()` (a method call, no `model = …` reassignment) mutates
    `model` *in place*. Strata's data-flow only treats a variable as a cell's
-   output if it's assigned/subscripted/attr-set - so the trained `model` is
-   never re-exported, and downstream cells read the **pre-training** version.
+   output if it's assigned, subscripted, attr-set or passed `inplace=True`, so
+   the trained `model` is never re-exported, and downstream cells read the
+   **pre-training** version.
 
 2. **Shared mutable references split across cells.** `optimizer = Adam(model.parameters())`
    makes the optimizer hold references to the *same tensors* as the model.
@@ -139,7 +140,7 @@ my_notebook/
         └── blobs/             # Serialized cell outputs
 ```
 
-`notebook.toml` holds stable config you'd commit to git; `.strata/` holds runtime state that changes on every execution (display outputs, console snapshots, the last `uv sync` timestamp, per-cell provenance hashes). `notebook.toml`'s `updated_at` tracks only structural edits, adding/removing cells, changing workers or mounts, so example notebooks don't churn under version control.
+`notebook.toml` holds stable config you'd commit to git; `.strata/` holds runtime state that changes on every execution (display outputs, console snapshots, the last `uv sync` timestamp, per-cell provenance hashes). `notebook.toml`'s `updated_at` tracks only structural edits (adding/removing cells, changing workers or mounts), so example notebooks don't churn under version control.
 
 `notebook.toml` defines the notebook identity and cell ordering:
 
@@ -170,7 +171,7 @@ re-run, a Strata notebook is just a directory of plain text:
 - **Cells are `.py` files.** Normal `git diff`, `git blame`, code review
   on a pull request, syntax highlighting in every IDE. Reordering a cell
   edits one number in `notebook.toml`, not a giant JSON re-serialize.
-- **`notebook.toml` is the manifest.** Stable config only, cell list,
+- **`notebook.toml` is the manifest.** Stable config only: cell list,
   workers, mounts, env, AI defaults, and the active variant per group
   (see [Variant Cells](annotations.md#variant-cells)). Reviewers see
   exactly what changed about the notebook's *shape*, not its execution
@@ -188,7 +189,7 @@ re-run, a Strata notebook is just a directory of plain text:
   Runtime panel still knows the slot exists), the value doesn't.
 - **uv lockfile in committed config.** `pyproject.toml` + `uv.lock` pin
   the Python environment exactly the same way the rest of your repo
-  does, collaborators get a reproducible environment from a fresh clone.
+  does; collaborators get a reproducible environment from a fresh clone.
 
 Put together: a Strata notebook commit shows *what changed about the
 work*, not *what happened during the last run*.
@@ -216,9 +217,12 @@ When you run a cell, this happens:
 2. **Cache check**: Look up the hash in the artifact store → return immediately on hit
 3. **Resolve inputs**: Load upstream variable artifacts into a temp directory
 4. **Execute**: Spawn a subprocess running the cell harness in the notebook's
-   venv - or, for a cell annotated with a [`# @worker`](workers.md), POST the
+   venv, or, for a cell annotated with a [`# @worker`](workers.md), POST the
    work to that worker over HTTP instead. Everything either side of this step
-   is identical; only where the Python runs changes.
+   is identical; only where the Python runs changes. In service mode a cell
+   on the server's own host runs as a separate OS user
+   (`STRATA_NOTEBOOK_HARNESS_USER`) or not at all; see
+   [What a cell can read](../deployment/service-mode.md#what-a-cell-can-read).
 5. **Harness**: Deserializes inputs → `exec(source, namespace)` → serializes new variables
 6. **Store outputs**: Each consumed variable becomes an artifact
 7. **Broadcast**: WebSocket sends status, output, and console messages to the UI
@@ -232,7 +236,9 @@ The provenance hash determines cache identity. It includes:
 | Source code | Yes | Different code = different result |
 | Upstream artifact hashes | Yes | Different inputs = different result |
 | Environment lockfile hash | Yes | Different packages = different result |
-| Mount fingerprints | Yes | Different mounted data = different result |
+| Env vars the cell declares (`@env`) or reads by name | Yes | A different setting can change the result |
+| Mount fingerprints (URI and contents) | Yes | Different mounted data = different result |
+| `@table` snapshot, `@fetch` digest, `@dataset` version | Yes | New data at the source = different result |
 | Cell ID | No | Same code in a different cell = same result |
 | Execution time | No | Same inputs should produce same output |
 
@@ -260,7 +266,7 @@ Cell outputs are serialized based on their Python type:
 
 | Type | Format | File extension |
 |------|--------|---------------|
-| PyArrow tables, pandas and polars frames, numpy arrays, torch and jax tensors | Arrow IPC | `.arrow` |
+| PyArrow tables, pandas and polars frames and series, numpy arrays and scalars, torch and jax tensors, `datetime` / `Decimal` / `UUID` / `bytes` / `complex` values | Arrow IPC | `.arrow` |
 | Any other type exporting `__arrow_c_stream__` or `__dlpack__` | Arrow IPC | `.arrow` |
 | Dicts, lists, scalars (int, float, str, bool, None) | JSON | `.json` |
 | Everything else | Pickle | `.pickle` |
@@ -280,7 +286,7 @@ the dtype it raises rather than returning something plausible and wrong.
 
 That switch is process-wide, and jax offers no per-array alternative. The warm
 pool and Run All reuse one process across cells, so once it is on, later cells
-in that worker get 64-bit defaults too — and no cell's provenance records which
+in that worker get 64-bit defaults too, and no cell's provenance records which
 width it got, so a cached result can depend on what ran before it. When this
 happens the cell's console says so.
 
@@ -292,8 +298,8 @@ import jax.numpy as jnp
 ```
 
 jax reads that at import, every execution path applies the environment before
-deserializing anything, and it becomes part of the cell's env hash — so the
-width is the same on every path and is recorded in what the result is keyed on.
+deserializing anything, and it becomes part of the cell's env hash. The
+width is then the same on every path and is recorded in what the result is keyed on.
 
 The second row is what keeps a library Strata has never heard of out of the
 pickle path. DuckDB relations, cuDF frames, Ibis tables and anything else
@@ -332,27 +338,36 @@ When a cell's upstream dependencies aren't ready, the **cascade planner** genera
 2. Returns cells in topological order with reasons (stale, missing, or target)
 3. The frontend auto-accepts the cascade and executes cells sequentially
 
-This means you can edit an early cell and run a downstream cell, Strata will automatically re-execute the full pipeline.
+This means you can edit an early cell and run a downstream cell, and Strata will re-execute the pipeline up to it. Within one run each cell executes at most once, even when two branches of the DAG both need it.
+
+## Run All
+
+Run All runs every cell in notebook order. Consecutive plain Python cells that run locally share one harness process (a batch); a cell with a worker, a timeout, a read-write mount, `@loop`, `@fetch` or `@dataset`, a sweep variant or a consumer of one, and every non-Python cell runs on its own.
+
+When a cell fails, Run All carries on, but not through the failure: every cell that reads from a failed cell, directly or further down, is skipped and marked stale with the reason that an upstream failed. Cells the failure does not reach run as normal. Rerun All does the same while bypassing the cache.
 
 ## Staleness
 
-A cell is **stale** when its cached artifact no longer matches its current provenance. This happens when:
+A cell is out of date when no stored result matches its current provenance. This happens when:
 
 - Its source code changed
 - An upstream cell's output changed
-- The environment (uv.lock) changed
+- The environment (`uv.lock`, or an `@env` it declares) changed
+- A declared outside input moved: a mounted file, an `@table` snapshot, an `@fetch` URL's bytes, an `@dataset` alias
+
+A cell that still has a result and whose upstream moved reads **stale · upstream changed**. A cell whose own source or environment changed has nothing that matches, so it reads **idle** until it runs. The `@fetch` and `@dataset` checks run at most once a minute while you edit, and always right before the cell runs; these lookups and the `@table` catalog read happen outside the lock that serializes the staleness walk, so one slow host does not stall the server.
 
 The **causality chain** explains why a cell is stale, tracing the change back to its root cause (e.g., "upstream cell X changed its source").
 
 ## Cell Status Lifecycle
 
 ```
-idle → running → ready
-                ↗
-idle → running → error
+idle ──→ running ──→ ready ──→ stale
+              └───→ error
 ```
 
-- **idle**: never executed, or stale (needs re-execution)
-- **running**: currently executing
-- **ready**: last execution succeeded, artifact is current
-- **error**: last execution failed
+- **idle**: no current result: never executed, or its own source or environment changed since it ran
+- **running**: currently executing. If an upstream cell is edited while it runs, it stays running and finishes **stale**, since it read the old value.
+- **ready**: last execution succeeded (or was a cache hit), artifact is current
+- **stale**: it has a result, but something upstream has moved, or Run All skipped it because a cell it reads from failed
+- **error**: last execution failed. The traceback and the console output before it are kept against the source that failed, so `strata cell show`, the MCP view, a reopen, a snapshot and an export all still report them. The error stands until the cell is edited or runs successfully (a cache hit counts).

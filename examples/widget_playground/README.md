@@ -1,7 +1,7 @@
 # Widget Playground: interactive controls driving the DAG
 
 A two-cell notebook: a **widget cell** (a control panel) feeding a Python cell
-that renders a DataFrame. Drag a control, and the downstream cell goes stale , 
+that renders a DataFrame. Drag a control and the downstream cell goes stale;
 run it and the grid updates.
 
 ## What it shows
@@ -28,7 +28,7 @@ run it and the grid updates.
 From the project root:
 
 ```bash
-uv run strata-notebook --host 127.0.0.1 --port 8765
+uv run strata-notebook
 ```
 
 Open `examples/widget_playground` from the Strata home page.

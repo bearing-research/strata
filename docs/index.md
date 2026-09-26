@@ -28,7 +28,7 @@ so a commit is a readable diff rather than a wall of JSON.
 
 ## Strata Notebook
 
-The interactive notebook surface: Python, prompt, SQL, and loop cells, each
+The interactive notebook surface: Python, R, SQL, prompt, widget and loop cells, each
 producing artifacts that flow through an auto-built DAG.
 
 **Highlights:**

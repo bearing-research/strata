@@ -11,14 +11,14 @@ between three shapes.
 | --- | --- | --- | --- |
 | **Best for** | One developer, laptop, single notebook open | 5–20 trusted users behind Cloudflare Access / Pomerium / etc. | Multi-tenant team or customer-facing |
 | **Writes** | Enabled | Enabled (per-user filter on discover/delete) | Off by default (server-side transforms); opt-in client write-back via `service_writes_enabled` |
-| **Auth** | None | Identity from `STRATA_PERSONAL_MODE_USER_HEADER` (proxy injects) | `X-Strata-Principal` + `X-Strata-Proxy-Token` from a trusted proxy |
-| **Identity scoping** | No scoping (single user) | Per-user filter on `discover` / `delete`; shared artifact store | Per-tenant cache keys, storage dirs, QoS pools |
+| **Auth** | None | Identity from `STRATA_PERSONAL_MODE_USER_HEADER` (proxy injects) | `X-Strata-Principal` + `X-Strata-Proxy-Token` from a trusted proxy, or an API key |
+| **Identity scoping** | No scoping (single user) | Per-user filter on `discover` / `delete`; shared artifact store | Per-tenant cache keys, cache dirs, QoS pools; artifacts filtered by tenant |
 | **Multi-tenancy** | n/a | n/a | Optional (`multi_tenant_enabled=true`) |
 | **ACLs** | Not evaluated | Not evaluated | Deny-first (`acl_config`) |
-| **Default artifact dir** | `~/.strata/artifacts` | `~/.strata/artifacts` | Must be set explicitly (or blob backend) |
+| **Default artifact dir** | `~/.strata/artifacts` | `~/.strata/artifacts` | None; set `STRATA_ARTIFACT_DIR` explicitly (required with a blob backend too) |
 | **Network binding** | Loopback only | Non-loopback with `allow_remote_clients_in_personal=true` | Unrestricted |
-| **Used by Strata's hosted preview** | – | ✓ (Fly.io + Cloudflare Access) | – |
-| **Use in production for sharing?** | ❌ Anyone on the network can write | ⚠️ Only behind a real auth proxy, small trusted group | ✓ |
+| **Used by Strata's hosted preview** | – | Yes (Fly.io + Cloudflare Access) | – |
+| **Use in production for sharing?** | No: anyone on the network can write | Only behind a real auth proxy, small trusted group | Yes |
 
 The rows that drive the choice are typically **Writes** (does anyone
 who reaches the URL get to mutate?), **Auth** (who decides who's
@@ -85,7 +85,7 @@ STRATA_DEPLOYMENT_MODE=personal \
 ```
 
 Opt in only if you have separate protection (firewall, VPN, private
-network) personal mode exposes write endpoints with no authentication.
+network): personal mode exposes write endpoints with no authentication.
 
 Artifacts persist to `~/.strata/artifacts` unless `STRATA_ARTIFACT_DIR`
 is set. Notebook deletion and session discovery/reconnect APIs are
@@ -103,7 +103,9 @@ STRATA_DEPLOYMENT_MODE=service \
 Short version: an upstream proxy authenticates the caller, injects
 identity headers (`X-Strata-Principal`, tenant header,
 `X-Strata-Scopes`, `X-Strata-Proxy-Token`), and is the only ingress
-path. Strata trusts the proxy and refuses to do its own auth.
+path. Strata trusts the proxy rather than authenticating users itself;
+machine callers outside the proxy can use an API key instead
+(`STRATA_AUTH_MODE=api_key`).
 
 See [Service Mode](service-mode.md) for the full story:
 
@@ -132,7 +134,7 @@ STRATA_PERSONAL_MODE_USER_HEADER=Cf-Access-Authenticated-User-Email
 ```
 
 The header value is whatever your proxy injects after authenticating the
-caller. Strata treats the value as opaque, email, GitHub login, internal
+caller. Strata treats the value as opaque: email, GitHub login, internal
 ID, anything stable.
 
 What changes when the header is set:
@@ -170,18 +172,26 @@ raise `ValueError` during config load:
 | `deployment_mode=personal` + `auth_mode=trusted_proxy` | Personal mode has no upstream proxy; identity headers would come from the loopback client |
 | `deployment_mode=personal` + `multi_tenant_enabled=True` | Personal mode is single-user; there are no tenants to isolate |
 | `deployment_mode=personal` + `require_tenant_header=True` | Same reason, no tenant dimension in personal mode |
+| `deployment_mode=personal` + `auth_mode=api_key` | Personal mode is single-user on loopback; authenticating yourself to your own machine buys nothing |
+| `deployment_mode=personal` + `mcp_enabled` + `personal_mode_user_header` | The MCP endpoint has no per-request identity and does not filter by owner, so it would expose every user's sessions |
 | `deployment_mode=service` + `personal_mode_user_header` | Service mode uses `X-Strata-Principal` via trusted-proxy auth; the personal-mode shim is for proxy-fronted personal deployments only |
+| `deployment_mode=service` + `multi_tenant_enabled` or `acl_config` rules or `mcp_enabled`, without `trusted_proxy` / `api_key` auth | The tenant header would be spoofable, ACL rules are only evaluated for an authenticated caller, and MCP would have no caller to check |
+| `deployment_mode=service` + `auth_mode=trusted_proxy` without `proxy_token` | Every request would be accepted and the identity headers could be spoofed |
+| `deployment_mode=service` + `service_writes_enabled` without `auth_mode=trusted_proxy` | Writes are stamped with the caller's principal and tenant |
+| `deployment_mode=service` + `artifact_metadata_dsn` with `artifact_blob_backend=local` | Another node would resolve an artifact from the shared database and then find no bytes |
+| `deployment_mode=service` + an artifact store without `artifact_dir` (`artifact_metadata_dsn`, a non-local blob backend, `service_writes_enabled`, `auth_mode=api_key`, or transforms enabled) | The store is only created when `artifact_dir` is set, so every artifact route would fail |
 
-If you see one of these errors, you almost certainly pulled flags from a
-service-mode config into a personal-mode deployment. Remove the
-service-specific flags or switch to `deployment_mode=service`.
+If you see one of the personal-mode errors, you almost certainly pulled
+flags from a service-mode config into a personal-mode deployment. Remove
+the service-specific flags or switch to `deployment_mode=service`. The
+service-mode errors name the setting to add.
 
 ## Mode-independent settings
 
 These apply identically in either mode and can be tuned freely:
 
 - `rate_limit_*`, token-bucket rate limiting
-- `acl_config`, deny/allow rules (only effective when `auth_mode` is set)
+- `acl_config`, deny/allow rules (only evaluated under `trusted_proxy` or `api_key` auth, which only service mode allows)
 - `artifact_blob_backend`, local / s3 / gcs / azure
 - Tracing, logging, S3 / GCS / Azure credentials
 - Cache size, cache directory, metadata DB path

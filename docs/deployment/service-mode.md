@@ -15,7 +15,7 @@ through a network. It's the right mode when:
 
 For a single developer running on a laptop, use
 [personal mode](modes.md#personal-mode). Personal-mode-behind-a-proxy
-also covers small-team sharing (~5–20 trusted users) see
+also covers small-team sharing (~5–20 trusted users); see
 [Sharing personal mode with a small group](modes.md#sharing-personal-mode-with-a-small-group).
 
 ## Switching from the default
@@ -49,8 +49,8 @@ proxy that:
    | `X-Strata-Scopes` | Space-separated capability set (e.g. `notebook:read notebook:write artifacts:write admin:cache`) | For scope-gated endpoints |
    | `X-Strata-Proxy-Token` | Shared secret matching `STRATA_PROXY_TOKEN` | Yes, proves the request came from the proxy, not a direct connection |
 
-Machine callers that do not sit behind the proxy — a CI job, an ETL
-service — authenticate with an API key instead: `strata apikey create`
+Machine callers that do not sit behind the proxy (a CI job, an ETL
+service) authenticate with an API key instead: `strata apikey create`
 issues one, and the key carries its own principal, tenant and scopes.
 See [Configuration → API keys](../reference/configuration.md#api-key-authentication).
 
@@ -80,7 +80,7 @@ synthesized callers:
 | URL | What nginx injects | Use for |
 |---|---|---|
 | `http://localhost:8865` | `Principal: demo-user`, scopes: `notebook:read notebook:write notebook:execute` | Normal-user view |
-| `http://localhost:8866` | `Principal: demo-admin`, scopes: `admin:* notebook:*` | Admin-only operations |
+| `http://localhost:8866` | `Principal: demo-admin`, scopes: `admin:* notebook:read notebook:write notebook:execute` | Admin-only operations |
 
 Both URLs route to the same Strata instance. Tenant header
 (`X-Tenant-ID: demo-team`) is injected on both. Open either in a
@@ -146,7 +146,7 @@ Strata host itself unless you set `STRATA_NOTEBOOK_HARNESS_USER` (see
 you can run a second replica.** Blobs go to S3, GCS or Azure rather
 than a local volume, so they survive container churn. Metadata is a
 SQLite file under `STRATA_ARTIFACT_DIR` by default, which is local to
-one machine — set `STRATA_ARTIFACT_METADATA_DSN` to put it on Postgres
+one machine; set `STRATA_ARTIFACT_METADATA_DSN` to put it on Postgres
 instead. A DSN with `STRATA_ARTIFACT_BLOB_BACKEND=local` is rejected at
 startup for the same reason: shared metadata pointing at blobs only one
 node can read is worse than either alone. See
@@ -200,10 +200,14 @@ Compared to personal mode:
   directly - the shared-research-store pattern - opt in with
   `service_writes_enabled` (see
   [below](#authenticated-write-back-the-shared-research-store)).
-- **ACLs apply.** `acl_config` deny / allow rules gate
-  `POST /v1/materialize`, `GET /v1/streams/{id}`, and admin endpoints
-  like `POST /v1/cache/clear`. Deny rules cannot be bypassed by
-  allow rules, deny-first evaluation.
+- **ACLs apply.** `acl_config` deny / allow rules gate every table a
+  request reads or writes: a scan through `POST /v1/materialize`, an
+  artifact built from a table, cache warming, and writing an artifact
+  into a table (`POST /v1/artifacts/{id}/v/{n}/export`). Deny rules
+  cannot be bypassed by allow rules, deny-first evaluation. A stream
+  (`GET /v1/streams/{id}`) is readable only by the principal that
+  started it, and admin endpoints such as `POST /v1/cache/clear` need
+  their [scope](#scope-gated-endpoints).
 - **Per-tenant resources** when multi-tenancy is on. Each tenant
   gets its own QoS limiter pool, its own metric labels, and its own
   cache keying, bulk queries from tenant A can't starve tenant B's
@@ -218,13 +222,14 @@ alphanumeric / `_` / `-` characters and hashed into:
 
 - **Cache keys**: tenant A and tenant B can scan the same Iceberg
   table and never see each other's row-group cache entries.
-- **Storage directories**: per-tenant subdirs under the artifact
-  store.
+- **Cache directories**: per-tenant subdirs under the row-group
+  cache dir. Artifacts are not split by directory; each row records
+  its tenant, and reads are filtered by it.
 - **QoS limiters**: interactive + bulk semaphores per tenant.
 - **Metric labels**: Prometheus output carries a `tenant` label so
   you can dashboard per-tenant usage.
 
-A tenant registry tracks active tenants (LRU-bounded). [Implementation details are in the source tree](https://github.com/bearing-research/strata/tree/main/src/strata) if you need to extend the tenant-scoping behavior.
+A tenant registry tracks active tenants (LRU-bounded; only a tenant with nothing in flight is evicted). [Implementation details are in the source tree](https://github.com/bearing-research/strata/tree/main/src/strata) if you need to extend the tenant-scoping behavior.
 
 ## ACLs
 
@@ -252,7 +257,9 @@ A rule matches when the principal matches (`*` matches any, and is the
 default), the tenant matches if the rule names one, and **at least one** table
 pattern matches. `tables` is required: a rule with no patterns can never match
 anything, so the server refuses to start rather than loading a rule that does
-nothing.
+nothing. A key Strata does not recognize (`tenants` for `tenant`, say) is
+refused at startup too, rather than dropped from a rule that is then
+wider than it reads.
 
 Evaluation: deny rules → allow rules → default. [Wildcard and principal
 matching semantics are documented in source](https://github.com/bearing-research/strata/tree/main/src/strata)
@@ -260,13 +267,18 @@ for anyone extending the ACL engine.
 
 ### Scope-gated endpoints
 
-A few operations require a specific scope under trusted-proxy auth
-(`admin:*` satisfies any of them):
+A few operations require a specific scope under trusted-proxy or API-key
+auth (`admin:*` satisfies any of them):
 
 | Scope | Gates |
 |---|---|
-| `admin:cache` | `POST /v1/cache/clear` |
+| `admin:cache` | `POST /v1/cache/clear`, `GET /v1/cache/entries`, `GET /v1/debug/cache/inspect` |
+| `admin:tenants` | `GET /v1/admin/tenants` and `GET /v1/admin/tenants/{tenant_id}` |
+| `admin:notebooks` | Quiescing a notebook or project (`POST /v1/notebooks/{id}/quiesce`, `POST /v1/projects/{path}/quiesce`) |
+| `admin:*` | Garbage collection (`POST /v1/artifacts/gc`, still limited to the caller's tenant), and reading another tenant's `GET /v1/artifacts/usage` / `stats` |
 | `admin:registry` | `POST /v1/registry/pending/approve` and `.../reject` - deciding protected-alias changes |
+| `artifacts:pin` | Pinning and unpinning a version against garbage collection (`POST` / `DELETE /v1/artifacts/{id}/v/{n}/pin`) |
+| `artifacts:publish` | Minting, editing and withdrawing a publication (`POST /v1/artifacts/{id}/v/{n}/publish`, `PATCH` / `DELETE /v1/publications/{token}`) |
 | `artifacts:write` | Publishing in service mode (`put` / `set_name` / `set_alias` / tags) when `service_writes_enabled=true`. See [below](#authenticated-write-back-the-shared-research-store). |
 | `notebook:read` | Every notebook `GET` over REST, and observing a notebook over its WebSocket (sync, previews, profiling) |
 | `notebook:write` | Changing a notebook without running anything: creating, editing, reordering and deleting cells, and setting mounts, connections, workers, env, timeout, name and variants. REST and WebSocket alike. |
@@ -488,7 +500,7 @@ rather than moving, and the command says so.
 
 The Registry tab and the per-cell strip describe that store too. They read the
 local one until a team store is configured, then forward to it with the server's
-remote-store headers — the notebook names things there, so describing the local
+remote-store headers: the notebook names things there, so describing the local
 store would show an empty registry. Every registry route forwards the same way
 (names, aliases, tags, lineage and approvals), so a promotion from the tab lands
 where the tab reads, and a protected alias filed from one person's server gets
@@ -522,7 +534,8 @@ forms `@table` reads: `<warehouse>#namespace.table`, or `namespace.table` in the
 store's configured catalog.
 
 - The first promotion creates the table and appends. Later promotions overwrite
-  it, so the current snapshot is always one version. A notebook's `@table` on
+  it, so the current snapshot is always one version. A table Strata did not
+  write is refused rather than replaced. A notebook's `@table` on
   it goes stale when the next version is written, as for any other table.
 - Each snapshot's summary names what it holds: `strata.artifact_id`,
   `strata.version`, `strata.provenance_hash`, and `strata.promoted_by` when the
@@ -629,7 +642,8 @@ If you've been running personal mode and want to grow into service:
 2. **Pick an artifact backend.** Local-disk artifacts don't survive
    container restarts cleanly in multi-replica setups. Configure
    one of `STRATA_ARTIFACT_BLOB_BACKEND=s3|gcs|azure` and the
-   matching credentials. See
+   matching credentials, and keep `STRATA_ARTIFACT_DIR` set: service
+   mode refuses a non-local blob backend without it. See
    [Artifact Storage](../reference/configuration.md#artifact-storage).
 
 3. **Flip the mode** in env or `pyproject.toml`:
@@ -652,5 +666,5 @@ If you've been running personal mode and want to grow into service:
    behalf. The notebook executor in the demo stack is one example.
 
 The demo compose stack is a working starting point you can fork:
-swap `nginx.conf` for your real auth proxy config, point the
-artifact dir at S3, and you have most of what production needs.
+swap `nginx.conf` for your real auth proxy config, move the
+artifact blobs to S3, and you have most of what production needs.

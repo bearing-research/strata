@@ -20,7 +20,7 @@ Strata Notebook can dispatch individual cells to remote machines via the **execu
 4. The worker runs the cell in a subprocess and returns outputs as a gzipped bundle.
 5. Strata stores the outputs as artifacts; cache hits work identically to local cells.
 
-Cells run in **the notebook's locked environment** on a `strata-worker` of this version or later: Strata sends the notebook's `uv.lock` with the cell, and the worker builds that environment once per lock (with `uv`, which the image needs) and reuses it for every later cell with the same lock. A worker that does not advertise this in `/health` (an older `strata-worker`, or a custom worker) runs cells in its own Python environment, so install your workload dependencies (torch, datafusion, sentence-transformers, etc.) into that image before launching it. Either way the worker process does **not** require a uv-managed env - it can be pip-installed into a plain Docker image. See [the `environment` block](../reference/executor-protocol.md#the-environment-block) for `STRATA_WORKER_ENV_ROOT` and a prebuilt-environment registry.
+Cells run in **the notebook's locked environment** on a `strata-worker` of this version or later: Strata sends the notebook's `uv.lock` with the cell, and the worker builds that environment once per lock (with `uv`, which the image needs) and reuses it for every later cell with the same lock. The worker advertises this as `locked_environments` in `/health`, and says `false` when `uv` is not on its `PATH`. A worker that answers without it (an older `strata-worker`, one without `uv`, or a custom worker; a `404` on `/health` counts as an answer) runs cells in its own Python environment, so install your workload dependencies (torch, datafusion, sentence-transformers, etc.) into that image before launching it. A worker that cannot be asked at all (unreachable, timed out, or a `5xx` on `/health`) is refused for a notebook that has a `uv.lock`, rather than running the cell in an environment its provenance would not describe. Either way the worker process does **not** require a uv-managed env - it can be pip-installed into a plain Docker image. See [the `environment` block](../reference/executor-protocol.md#the-environment-block) for `STRATA_WORKER_ENV_ROOT` and a prebuilt-environment registry.
 
 For the wire-level contract - request envelopes, response bundle format, error codes, the pull-model with signed URLs - see the [Executor Protocol](../reference/executor-protocol.md) reference. This page covers deployment and registration; that one covers the bytes on the wire and is what you'd implement against to write a custom worker that doesn't use `strata-worker`.
 
@@ -47,7 +47,7 @@ INFO:     Uvicorn running on http://0.0.0.0:9000
 curl http://localhost:9000/health
 ```
 
-Expected response:
+Expected response (`locked_environments` is `false` if `uv` is not on the worker's `PATH`, `languages` adds `"r"` when `Rscript` is installed, and `hardware` lists what the machine reports):
 
 ```json
 {
@@ -57,11 +57,20 @@ Expected response:
     "transform_refs": ["notebook_cell@v1"],
     "features": {
       "notebook_protocol_version": "notebook-cell-v1",
-      "output_format": "notebook-output-bundle@v1"
+      "output_format": "notebook-output-bundle@v1",
+      "pull_model": true,
+      "cancel": true,
+      "locked_environments": true,
+      "languages": ["python"]
     }
   },
+  "version": "1.0.0",
   "uptime_seconds": 5.2,
-  "active_executions": 0
+  "active_executions": 0,
+  "max_concurrent": null,
+  "gpu_slots": null,
+  "free_gpu_slots": null,
+  "hardware": {"cpus": 10, "memory_mb": 32768}
 }
 ```
 
@@ -140,7 +149,7 @@ strata worker rm-ssh gpu-box --server http://localhost:8765 --session <session-i
 - **Key-based SSH only.** Strata runs `ssh` in batch mode and never handles passwords, so the target must authenticate non-interactively (an agent/key that works when you run `ssh user@gpu-box` yourself). A `user@host`, a bare `host`, or an `~/.ssh/config` alias all work.
 - **The first connect can take a minute** while it installs `strata-worker` on the box (via `uv tool install`); reconnects adopt the already-running worker.
 - **Security.** The worker binds the box's `127.0.0.1` (never a public port) and is reachable only through the authenticated SSH tunnel. A per-worker bearer token is generated for defense-in-depth; it's held in the notebook server's memory and **never written to `notebook.toml`**.
-- **A remote cell runs on the box's filesystem.** Its `file://` mounts and absolute paths resolve there, not on your machine, and cloud mounts use the box's own credentials. Results are cached under the remote environment's identity, so they don't collide with local runs.
+- **A remote cell runs on the box's filesystem.** Absolute paths in the cell resolve there, not on your machine, and a `file://` mount is refused on any remote worker, and cloud mounts use the box's own credentials. Results are cached under the remote environment's identity, so they don't collide with local runs.
 
 ## Deploy to the cloud
 
@@ -182,7 +191,7 @@ my-strata-worker/
 └── .dockerignore
 ```
 
-**`Dockerfile`** - installs `strata-notebook` and your workload deps from a uv-managed venv. Unlike `strata-notebook`, the worker entry (`strata-worker`) is not gated by Strata's runtime guard, so a plain `pip install` would also work - but the uv-python base image keeps tooling consistent across server + worker and drops a few hundred MB of build stage versus a source install.
+**`Dockerfile`** - installs `strata-notebook` with its `notebook` extra (the harness needs `orjson` and `cloudpickle` to hand back what a cell produces) and your workload deps into a uv-managed venv. Unlike `strata-notebook`, the worker entry (`strata-worker`) is not gated by Strata's runtime guard, so a plain `pip install` would also work - but the uv-python base image puts `uv` on `PATH`, which the worker needs to run cells in the notebook's locked environment, and keeps tooling consistent across server + worker.
 
 ```dockerfile
 FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim
@@ -196,7 +205,7 @@ ENV PATH="$VIRTUAL_ENV/bin:$PATH"
 # protocol version.
 RUN uv venv $VIRTUAL_ENV && \
     uv pip install \
-      strata-notebook \
+      "strata-notebook[notebook]" \
       "datafusion>=42" \
       "pandas>=2" \
       "pyarrow>=18"
@@ -280,7 +289,8 @@ import modal
 # Modal's pip_install pulls wheels from PyPI. strata-notebook ships
 # pre-built abi3-py312 wheels so no Rust toolchain is needed, and the
 # worker entry isn't gated by the runtime guard (only strata-notebook is)
-# so Modal's standard image stack works without going through uv.
+# so Modal's standard image stack works. uv is installed alongside so the
+# worker can run cells in the notebook's locked environment.
 gpu_image = (
     modal.Image.debian_slim(python_version="3.12")
     .pip_install(
@@ -290,7 +300,8 @@ gpu_image = (
         "sentence-transformers>=3.0",
         # Pin to an exact version in production so the worker
         # protocol can't drift relative to the notebook server.
-        "strata-notebook",
+        "strata-notebook[notebook]",
+        "uv",
     )
 )
 
@@ -516,7 +527,7 @@ token_env = "STRATA_FLY_WORKER_TOKEN"
 
 `token_env` is preferred over `token` because the literal-token form gets committed to your notebook repo. Use `token = "..."` only for one-off local experiments.
 
-A worker with `STRATA_WORKER_TOKEN` set rejects unauthenticated requests with `401 Unauthorized`. `/health` stays open so platform health probes work without the secret.
+A worker with `STRATA_WORKER_TOKEN` set rejects unauthenticated requests with `401 Unauthorized`. `/health` stays open so platform health probes work without the secret. `strata-worker` takes the token out of its process environment at startup and holds it in memory, so a cell it runs cannot read it from `os.environ` or from `/proc/<ppid>/environ`.
 
 ## Using workers in cells
 
@@ -529,7 +540,7 @@ Annotate any cell with `# @worker <name>`:
 embeddings = model.encode(abstracts, batch_size=256)
 ```
 
-The worker annotation is the **only** change needed; the cell code itself is identical to local execution. If the worker has the right packages installed, it just works.
+The worker annotation is the **only** change needed; the cell code itself is identical to local execution. On a worker that runs locked environments the cell gets the notebook's own packages; on one that does not, the worker's image needs them installed.
 
 ### Precedence
 
@@ -604,7 +615,7 @@ The `/health` endpoint is **not** gated by `STRATA_WORKER_TOKEN` - platform heal
 `config.url` doesn't match where the worker is actually listening. From the strata-notebook host, run `curl <config.url base>/health` - it should respond. For Fly, `fly status` shows the public hostname; for Modal, `modal app list` shows deployed URLs.
 
 **Worker `/health` works but cells fail with `ModuleNotFoundError: <package>`.**
-The worker image is missing the dependency the cell needs. Add it to the Dockerfile's `pip install` (Fly) or the `.pip_install(...)` chain (Modal) and redeploy. The worker uses **its own** Python env; nothing from the notebook server's env transfers.
+The cell ran in the worker's own Python env, which is missing the dependency. That happens when the worker does not report `locked_environments: true` in `/health` (usually because `uv` is not on its `PATH`), or when the notebook has no `uv.lock`. Install `uv` in the image so the notebook's lock is used, or add the package to the Dockerfile's `pip install` (Fly) or the `.pip_install(...)` chain (Modal) and redeploy.
 
 **Cells dispatched to a Modal worker hang for 30+ seconds before output.**
 Cold start. Modal scales the function to zero after `scaledown_window` seconds idle; the first request after a scale-down has to provision a fresh container. Either bump `scaledown_window`, set `min_containers=1` on the `@app.function`, or just expect the latency on the first cell after idle.
@@ -620,4 +631,4 @@ You changed `.pip_install(...)` - Modal is rebuilding the image layer. With torc
 
 ## Live status
 
-When a cell dispatches to a remote worker, the UI shows a pulsing **"dispatching → <name>"** badge during execution. After completion, the worker name and transport type appear in the cell metadata.
+When a cell dispatches to a remote worker, the UI shows a pulsing **"dispatching → <name>"** badge during execution, and the cell's console output streams back from the worker as it is produced. After completion, the worker name and transport type appear in the cell metadata.

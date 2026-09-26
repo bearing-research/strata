@@ -4,8 +4,8 @@ Every materialized result in Strata is an immutable, versioned **artifact**
 with content-addressed provenance. The registry layer adds the pointers and
 history that turn the artifact store into a lightweight model registry:
 **names**, **aliases**, **tags**, an append-only **audit**, and optional
-**approval gates** - all in the same SQLite metadata store, no extra
-services.
+**approval gates** - all in the artifact store's own metadata database
+(SQLite, or Postgres with `STRATA_ARTIFACT_METADATA_DSN`), no extra services.
 
 ## Names
 
@@ -120,8 +120,8 @@ If a pending change's target artifact disappears before approval, the
 approve fails cleanly and the pending entry stays for an explicit reject.
 Unprotected aliases apply immediately; the default is no gating.
 
-**Authorization (service mode).** When exposed under trusted-proxy auth,
-approve and reject require the `admin:registry` scope, and approval
+**Authorization (service mode).** Under principal auth (trusted proxy or API
+keys), approve and reject require the `admin:registry` scope, and approval
 enforces separation of duty - the requester cannot self-approve their own
 move unless they hold the `admin:*` break-glass scope. The audit log is
 tenant-scoped: a principal reads only its own tenant's history (`admin:*`
@@ -199,7 +199,7 @@ where you trained the model, without leaving the cell.
 
 - a **pending-approval** banner with **Approve / Reject** - the human gate, in
   the UI (a protected-alias move queues here);
-- a **names table** - each name with its alias chips (`★champ`, `cand`),
+- a **names table** - each name with its alias chips (`★champion=v1`, `candidate=v2`),
   latest version, tags, and `[Promote▾]`;
 - a collapsible **audit** timeline.
 
@@ -217,7 +217,10 @@ clicks in the notebook, backed by the identical audited routes.
 
 ## Storage & durability
 
-Registry state lives in the same `artifacts.sqlite` as artifact metadata
-(WAL mode, transaction-per-mutation). Everything commits before the API
-responds; the audit is in-transaction with its mutation; server restarts
-are non-events. The CLI reads the store directly - server up or down.
+Registry state lives in the same database as artifact metadata:
+`artifacts.sqlite` under the artifact directory (WAL mode), or the Postgres
+database named by `STRATA_ARTIFACT_METADATA_DSN`, with `strata migrate` to
+carry an existing SQLite store across. Each mutation is one transaction.
+Everything commits before the API responds; the audit is in-transaction with
+its mutation; server restarts are non-events. The `strata artifact` CLI reads
+a SQLite store directly (`--artifact-dir`), server up or down.

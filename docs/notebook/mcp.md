@@ -16,7 +16,10 @@ edits them.
 
 The endpoint is **off by default**. On a personal server there is one user and
 nothing to check, so a caller has full control of the session. Keep it behind
-loopback.
+loopback. For the same reason a personal server refuses to start with the flag
+set alongside `STRATA_PERSONAL_MODE_USER_HEADER`: the endpoint has no
+per-request identity to filter sessions by owner, so it would hand every user's
+notebooks to any caller.
 
 On a **service-mode** server it needs principal auth (`auth_mode` of
 `trusted_proxy` or `api_key`). Service mode without principal auth is rejected
@@ -103,7 +106,7 @@ The typical loop:
 | `publish_preflight(session_id, cell_id, variable)` | What publishing would expose - the whole chain, step by step. Read this to the user before `publish`. |
 | `publish(session_id, cell_id, variable, title?)` | Mint a URL that needs no credentials. Copies the chain into the store the link resolves from first. |
 
-Pass the same `author` on every authoring call — your own name or id. It is
+Pass the same `author` on every authoring call: your own name or id. It is
 recorded on the cell as `created_by` / `updated_by` and shown in the cell view,
 so a person opening the notebook can tell which cells an agent wrote. On a
 server that authenticates its callers the authenticated identity is used

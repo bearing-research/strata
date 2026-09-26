@@ -10,14 +10,16 @@ When you create a notebook, Strata:
 2. Runs `uv sync` to create a `.venv/` and `uv.lock`
 3. All cell execution uses this notebook-local venv
 
-The environment lockfile hash (`sha256(uv.lock)`) participates in provenance. Changing the environment invalidates all cached cell outputs.
+A hash of the lockfiles (`uv.lock`, plus `renv.lock` when the notebook has one) participates in provenance, so changing the environment invalidates all cached cell outputs. When `uv.lock` has a dev group, only the runtime dependency closure is hashed, so adding a dev tool such as `pytest` leaves the cache alone.
+
+A cell sent to a [remote worker](workers.md) runs in this same locked environment when the worker supports it, so the lock describes what the cell ran against there too.
 
 ## Python Version
 
-At notebook creation time, you can select a Python version from the versions configured on the server. The default is the server's own Python version.
+At notebook creation time, you can select a Python version from the versions configured on the server. The first one listed is the default.
 
 !!! note
-    The available versions depend on the server's `STRATA_NOTEBOOK_PYTHON_VERSIONS` configuration. On the hosted preview, both 3.12 and 3.13 are available.
+    The available versions come from the server's `STRATA_NOTEBOOK_PYTHON_VERSIONS`. Unset, they are the Python versions `uv` reports as installed on the server that Strata supports, with the server's own version included.
 
 ## Installing Packages
 

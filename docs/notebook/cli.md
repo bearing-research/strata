@@ -147,13 +147,15 @@ run` is the expensive step. See
 Scaffold a notebook directory without the server:
 
 ```bash
-strata new "My Analysis" [--parent DIR] [--python 3.12] [--no-env] [--project-mount [NAME]] [--format human|json]
+strata new "My Analysis" [--parent DIR] [--python 3.12] [--no-env] [--no-git] [--project-mount [NAME]] [--format human|json]
 ```
 
 Creates `<parent>/my_analysis/` with `notebook.toml`, `pyproject.toml`
-(pre-seeded with the notebook runtime packages), and an empty `cells/`
-directory, then syncs the venv (skip with `--no-env`; `strata run` syncs it
-later). Idempotent on an existing notebook directory: the `notebook_id` and
+(pre-seeded with the notebook runtime packages), an empty `cells/`
+directory and a `.gitignore` that keeps `.strata/`, `.venv/` and
+`renv/library/` out of version control (skip it with `--no-git`; an existing
+`.gitignore` is never replaced), then syncs the venv (skip with `--no-env`;
+`strata run` syncs it later). Idempotent on an existing notebook directory: the `notebook_id` and
 any existing cells are preserved, so re-running it never orphans artifacts.
 
 `--project-mount [NAME]` adds a notebook-level **read-only mount of `--parent`**
@@ -257,7 +259,7 @@ file by hand. Both **sync the venv first** (like `strata run`) unless you pass
 Both also accept `--server <url> --session <id>` to run on a live session instead
 of a local directory (`strata cell run --server http://localhost:8765 --session
 $SID <cell_id> --rerun`). The server owns its venv, so the remote path never syncs
-- `--no-sync` is a local-only flag - and `--rerun` / `--force` map to the
+(`--no-sync` is a local-only flag), and `--rerun` / `--force` map to the
 server's run modes, so remote execution has the same three modes as local.
 
 `--format json` (default) writes a single clean JSON object to **stdout** - the
@@ -312,6 +314,10 @@ These also accept `--server <url> --session <id>` to author into a live session
 instead of a local directory - edits land in the running notebook a human is
 watching in the TUI. (`cell add` makes two calls: it mints the cell on the
 server, then sets its source.)
+
+Every cell records who wrote it. Pass `--author NAME` (your agent's name, say)
+so a person can tell agent edits from their own; a server that authenticates
+its callers ignores it and records the authenticated identity instead.
 
 Together with inspect (`cell list/show`, `dag`, `status`) and execution (`cell
 run/test`), this is the full agent surface - and **all of it** works either
