@@ -336,7 +336,8 @@ over HTTP uploads each version's bytes, then its record:
 ```
 PUT  /v1/artifacts/import/blobs/{content_sha256}     the bytes, checked against the digest; 201
 POST /v1/artifacts/import                    {"id": ..., "version": ..., "provenance_hash": ...,
-                                              "content_sha256": ..., "input_versions": ..., ...}
+                                              "created_at": ..., "content_sha256": ...,
+                                              "input_versions": ..., ...}
 ```
 
 The record's `content_sha256` names the bytes uploaded before it, and only the

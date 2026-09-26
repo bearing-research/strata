@@ -103,6 +103,16 @@ class TestRefusals:
         assert f"/v1/artifacts/import/blobs/{DIGEST}" in response.json()["detail"]
         assert ArtifactStore(artifact_dir).get_artifact("fig", 1) is None
 
+    def test_a_record_without_its_creation_time_is_a_400(self, served):
+        """The column is NOT NULL, so the database refused it as a 500."""
+        base, artifact_dir = served
+        _stage(base)
+        record = _record()
+        del record["created_at"]
+
+        assert _import(base, record).status_code == 400
+        assert ArtifactStore(artifact_dir).get_artifact("fig", 1) is None
+
     def test_a_json_import_names_its_bytes(self, served):
         base, _ = served
         record = _record()
