@@ -393,17 +393,18 @@ async def _agent_note(session_id: str, source: str, text: str) -> None:
     when nothing is attached (``_broadcast_message`` returns early).
     """
     from strata.notebook.protocol import MessageType
-    from strata.notebook.ws import _broadcast_message, next_notebook_sequence
+    from strata.notebook.ws import _broadcast_message, _make_message, next_notebook_sequence
 
     await _broadcast_message(
         session_id,
-        {
-            "type": MessageType.AGENT_NOTE,
-            # Its own sequence, like every other outbound frame. A hard-coded 0
-            # reads as a gap to a client watching for one.
-            "seq": next_notebook_sequence(session_id),
-            "payload": {"source": source, "text": text},
-        },
+        # Its own sequence, like every other outbound frame (a hard-coded 0
+        # reads as a gap to a client watching for one), and the envelope's
+        # timestamp, which this frame alone went without.
+        _make_message(
+            MessageType.AGENT_NOTE,
+            next_notebook_sequence(session_id),
+            {"source": source, "text": text},
+        ),
     )
 
 

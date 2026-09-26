@@ -168,6 +168,11 @@ async def test_run_cell_broadcasts_and_maps(sm_with_session, monkeypatch):
         and "ran cell a" in m["payload"]["text"]
         for m in notes
     )
+    # With the envelope every server frame carries: its own sequence and a
+    # timestamp, which this frame alone went without.
+    note = next(m for m in notes if m["type"] == "agent_note")
+    assert note["seq"] > 0
+    assert note["ts"].endswith("Z")
 
 
 @pytest.mark.asyncio
