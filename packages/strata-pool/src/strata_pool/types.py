@@ -89,8 +89,8 @@ class MachineType:
     image: str
     max_workers: int = 10
     """Cap on machines of this type *per tenant*, since a machine belongs to
-    one tenant for its life. There is no global cap yet; a hosted deployment
-    will want one."""
+    one tenant for its life. ``Pool(max_workers_total=...)`` caps the whole
+    fleet on top of this."""
 
     boot_timeout_seconds: float = 120.0
     job_timeout_seconds: float = 300.0

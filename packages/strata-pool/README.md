@@ -2,9 +2,9 @@
 
 <!-- --8<-- [start:body] -->
 Worker pool for dispatching Strata jobs to ephemeral machines. This is the
-bring-your-own-hardware path: it manages machines *you* own. It is complete and
-tested rather than growing — if you want a provider to autoscale for you,
-register a serverless executor as a Strata worker instead.
+bring-your-own-hardware path: it manages machines *you* own. If you want a
+provider to autoscale for you, register a serverless executor as a Strata
+worker instead.
 
 ```bash
 pip install strata-pool            # library
@@ -15,8 +15,8 @@ Jobs arrive with a machine type. The pool hands each one to a warm worker of
 that type, starts a machine when there is none, forwards the payload over
 HTTP, records the result, and meters the execution. A backend provides start /
 stop / health and nothing else, so the pool does not know which it is talking
-to. Three ship: local Docker, RunPod, and Fly Machines. Anything satisfying the `Backend`
-protocol works.
+to. Three ship: local Docker, RunPod, and Fly Machines. Anything satisfying
+the `Backend` protocol works.
 
 ```python
 from strata_pool import DockerBackend, MachineType, Pool, PoolStore
@@ -46,7 +46,7 @@ it may take the whole host. Both are enforced by the daemon, asserted against
 a real one in `test_docker_live.py`.
 
 What that buys is process-level isolation, which is **not** a boundary for
-untrusted code — a shared kernel is one CVE away from a cross-tenant escape.
+untrusted code: a shared kernel is one CVE away from a cross-tenant escape.
 A deployment running untrusted work wants a VM-backed runtime (Kata, gVisor)
 or a backend whose machines are already microVMs. The `Backend` protocol is
 where that choice lives.
@@ -88,10 +88,10 @@ process holds a **lease** on the jobs and machines it is acting on (a machine
 starting, running a job or stopping; a job dispatched or running) and renews it
 while it works. When a process dies, the scaler in another one fails its jobs
 and stops its machines once the lease runs out (`lease_seconds`, default 30),
-through that process's own backend. A process restarted under its old
+through the surviving process's own backend. A process restarted under its old
 `instance_id` takes its own rows back at once, as a single process does today.
 A pool given no `instance_id` generates one per process, so two processes over
-one SQLite file are never one name — under a shared name each would read the
+one SQLite file are never one name. Under a shared name each would read the
 other's leases as its own and stop machines running the other's cells. The
 trade is that a generated name is new on every start, so a process restarted
 within `lease_seconds` waits its old leases out instead of reclaiming them at
@@ -106,7 +106,7 @@ catalogue, and the others pick it up when they restart.
 
 **It is not a cache.** The pool has no idea Strata deduplicates work.
 Submitting a job whose result already exists boots a machine and recomputes
-it — so the caller checks `find_by_provenance` *before* submitting. Getting
+it, so the caller checks `find_by_provenance` *before* submitting. Getting
 that order wrong bills customers for cache hits.
 
 **It is not the metering layer.** The pool records one `UsageEvent` per
@@ -115,8 +115,10 @@ and at what price, is decided above it.
 
 **It does not keep machines warm on purpose.** `start_scaler()` stops
 machines idle past their type's `cool_down_seconds`, and nothing else in the
-pool ever ends a machine that finished its work — a deployment that forgets
-that call bills for every machine it ever started. A warm floor is
+pool ever ends a machine that finished its work: a deployment that forgets
+that call bills for every machine it ever started. A machine whose stop fails
+keeps its row, still counted against the fleet cap, and the next pass tries
+the stop again. A warm floor is
 deliberately absent: per tenant it means paying for everyone who ever showed
 up, per machine type it means choosing whose latency to subsidise, and
 pre-warming belongs with the layer that knows a user just opened a
@@ -129,20 +131,24 @@ and retiring on that trades a cold start for every hiccup; three is a machine
 that is gone. Probes run concurrently, so a provider black-holing packets
 cannot stall the reaper behind one timeout per machine. And a pass in which
 *every* machine fails is treated as this process's own network rather than as
-the fleet dying at once — retiring everything for a local DNS blip would hand
-every user a cold start for a fault that was never on the machines. Without this a dead warm machine is discovered by the next job
-being sent to it, and that job fails — for reasons that have nothing to do
-with the code in the cell.
+the fleet dying at once, since retiring everything for a local DNS blip would
+hand every user a cold start for a fault that was never on the machines.
+Without this a dead warm machine is discovered by the next job being sent to
+it, and that job fails for reasons that have nothing to do with the code in
+the cell. A machine running a job is neither probed nor reaped.
 
 ## Layout
 
 | Module | What lives there |
 |---|---|
 | `types.py` | `Worker`, `Job`, `MachineType`, `UsageEvent` and their states |
-| `backend.py` | The `Backend` protocol — start / stop / health |
+| `backend.py` | The `Backend` protocol: start / stop / health |
 | `backends/docker.py` | Containers on the local Docker daemon |
+| `backends/runpod.py` | RunPod pods, reached through RunPod's proxy |
+| `backends/fly.py` | Fly Machines, reached on the organization's private network |
 | `store.py` | SQLite and Postgres persistence, with the claims and leases that let several processes share it; the pool process keeps no authoritative state |
-| `pool.py` | Submission, dispatch, boot, execution, metering, restart recovery |
+| `pool.py` | Submission, dispatch, boot, execution, metering, restart recovery, the scaler |
+| `api.py` | The HTTP service (the `server` extra) |
 
 ## Running it as a service
 
@@ -166,7 +172,7 @@ deployment cannot forget the call that stops it paying for idle machines.
 | `POST /v1/jobs/sync` | Queue and block. 200 with the result bytes, or 202 and an id if `wait_seconds` runs out |
 | `GET /v1/jobs/{id}` | Status, without the payload or result |
 | `GET /v1/jobs/{id}/result` | The raw result bytes; 409 while the job is not finished |
-| `GET /v1/machine-types` | What a caller may ask for — the catalogue an annotation resolves against |
+| `GET /v1/machine-types` | What a caller may ask for: the catalogue an annotation resolves against |
 | `PUT /v1/machine-types` | Replace the catalogue without a restart; persisted, so a restart serves it |
 | `GET /v1/workers` | The fleet, without machine credentials |
 | `GET /v1/usage` | The billing feed, filterable by tenant |
@@ -187,7 +193,7 @@ time on the machine. The machine's work then sits under that span, which sits
 under the caller's.
 
 A job that fails **on the worker** comes back as 502, and one that times out
-as 504 — the caller has to be able to tell "your code raised" from "we could
+as 504. The caller has to be able to tell "your code raised" from "we could
 not run it".
 
 Every route but `/health` requires `Authorization: Bearer <api_token>`, and
@@ -198,8 +204,8 @@ anywhere but the proxy.
 
 ## The RunPod backend
 
-Rents real hardware. `MachineType.gpu_type` is the provider's own string —
-`"NVIDIA H100 80GB PCIe"` — deliberately not a normalised label, because one
+Rents real hardware. `MachineType.gpu_type` is the provider's own string
+(`"NVIDIA H100 80GB PCIe"`), deliberately not a normalised label, because one
 that maps cleanly across providers does not exist and inventing it would put a
 lossy translation between a user and the hardware they asked for.
 
@@ -223,7 +229,8 @@ booted, answered, and terminated with nothing left running.
 **Two things that run stayed silent on**, because a CPU pod does not exercise
 them: `gpuTypeIds` + `gpuCount`, and reading a region from `machine`. Every pod
 in the account listing carried `machine: {}` with no `dataCenterId`, so `region`
-is probably always `None` today — harmless, being metadata, but do not trust it.
+is probably always `None` today. That is harmless, being metadata, but do not
+trust it.
 
 RunPod has moved its API surface before. Every field lives in `_create_body`
 and is asserted by a test, so a wrong one is a one-line fix; `provider_options`
@@ -238,7 +245,7 @@ STRATA_POOL_RUNPOD_LIVE=1 pytest packages/strata-pool/tests/test_runpod_live.py 
 
 That **starts a billed pod**, which is why it is opt-in and never runs in CI.
 It terminates what it starts, but a crashed interpreter can still leave a pod
-running — check the console. Pods are named `strata-{machine_type}-{id}` so an
+running, so check the console. Pods are named `strata-{machine_type}-{id}` so an
 orphan is findable.
 
 A pod's port is published on the public internet through RunPod's proxy. The
@@ -264,9 +271,9 @@ MachineType(
 )
 ```
 
-`start` creates the machine with the worker token and the machine type's
-`STRATA_WORKER_*` settings in its environment, with `restart: no` and
-`auto_destroy: false` so its lifetime stays the pool's. `stop` destroys it by
+`start` creates the machine with the worker token and the machine type's `env`
+in its environment, with restart policy `no` and `auto_destroy: false` so its
+lifetime stays the pool's. `stop` destroys it by
 force (a second destroy is a no-op). `health` needs Fly to report the machine
 `started` before it probes the worker's `/health`, because a stopped machine's
 private address can be reused.
@@ -292,53 +299,56 @@ can reach every other.
 ## The worker contract
 
 `strata-worker`, shipped in `strata-notebook`, satisfies this contract as of
-0.7.0 — build it with the Dockerfile in the Strata repo and the pool can drive
+0.7.0. Build it with the Dockerfile in the Strata repo and the pool can drive
 it unmodified:
 
 ```bash
 docker build -f worker.Dockerfile -t strata-worker:latest .
 ```
 
-The image installs `strata-notebook` from PyPI and needs **0.7.0 or newer** —
-`POST /execute`, the path the pool dispatches to, ships in that release. It
-also means building inside a checkout does not pick up local worker changes;
-build a wheel for that.
+The image installs a pinned `strata-notebook` from PyPI (the `STRATA_VERSION`
+build arg) and needs **0.7.0 or newer**: `POST /execute`, the path the pool
+dispatches to, ships in that release. Installing from PyPI also means building
+inside a checkout does not pick up local worker changes; build a wheel for
+that.
 
 Layer your cells' dependencies on top (`FROM strata-worker:latest`). The image
 binds 8080 because that is `DockerBackend`'s default `worker_port`; the
 worker's own default is 9000, so the two are made to agree explicitly rather
 than by luck. The pool does not pull, so build on the host that will run it.
 It runs as a non-root user and **refuses to start without
-`STRATA_WORKER_TOKEN`** — the pool mints one per machine, so this only bites
+`STRATA_WORKER_TOKEN`**. The pool mints one per machine, so this only bites
 when running it by hand.
 
-**Local Docker needs the SSRF guard relaxed.** The worker rejects manifest
-URLs that resolve to loopback or private addresses — a real defense, since a
-buggy or compromised orchestrator could otherwise point it at internal
-services. With `DockerBackend` on a local daemon the Strata server *is* at a
-private address, so the first job fails with `resolves to non-routable
-address` until the worker starts with `STRATA_WORKER_ALLOW_LOCAL_HOSTS=1`.
-That is a local-development setting: leave it unset anywhere the server is
-reachable at a routable address, which is every real deployment.
+**A server on a private address has to be named.** The worker rejects manifest
+URLs that resolve to loopback or private addresses. That is a real defense,
+since a buggy or compromised orchestrator could otherwise point it at internal
+services. With `DockerBackend` on a local daemon, or workers on Fly's private
+network, the Strata server *is* at a private address, so the first job fails
+with `resolves to non-routable address`. In a deployment, list the server's
+host in the machine type's `env` as `STRATA_WORKER_ALLOWED_HOSTS`
+(comma-separated; a leading dot is a suffix, e.g. `.internal`).
+`STRATA_WORKER_ALLOW_LOCAL_HOSTS=1` relaxes the check for every host and is a
+local-development setting only.
 
-The payload the pool forwards is a **build manifest** — the same JSON document
+The payload the pool forwards is a **build manifest**: the same JSON document
 `/v1/execute-manifest` takes, carrying signed URLs for the inputs, the output,
 and finalization. The worker fetches its own inputs and uploads its own result,
 so the bytes never flow through the pool. That is also why the payload has to
 be self-describing: the pool forwards it verbatim and sets no content type.
 
-The pool remains image-agnostic — anything holding up these four points works:
+The pool remains image-agnostic. Anything holding up these four points works:
 
 | | |
 |---|---|
 | Listen on the worker port | 8080 by default; the backend publishes it |
-| `GET /health` → 200 when ready | No auth. It is polled before the machine is trusted with anything, and it reveals nothing |
+| `GET /health` → 200 when ready | No auth. It is polled before the machine is trusted with anything, and it reveals nothing secret (`strata-worker` reports its capabilities and hardware) |
 | `POST /execute` → 200 with the result body | The request body is the job payload, opaque to the pool |
 | Require `Authorization: Bearer $STRATA_WORKER_TOKEN` on `/execute` | Reject anything else with 401 |
 
 The token is minted per machine before it boots and passed in its
 environment. Without that check, `/execute` is an unauthenticated
-remote-code-execution endpoint — survivable only while the machine is bound to
+remote-code-execution endpoint, survivable only while the machine is bound to
 loopback, which stops being true the moment a backend hands out a routable
 address.
 
@@ -362,7 +372,7 @@ The tests in `test_docker_live.py` run the whole path against real containers
 and skip when no daemon is reachable. Set `STRATA_POOL_DOCKER_SOCKET` if yours
 is not at `/var/run/docker.sock` (Docker Desktop on macOS puts it in
 `~/.docker/run/docker.sock`), and `STRATA_POOL_REQUIRE_DOCKER=1` to make a
-missing daemon an error instead of a skip — CI sets that, so a runner whose
+missing daemon an error instead of a skip. CI sets that, so a runner whose
 socket moved fails loudly rather than reporting coverage it never ran.
 
 CI additionally installs the package into a venv with only its own

@@ -53,6 +53,7 @@ model = "claude-sonnet-4-6"
 | --- | --- | --- |
 | `model` | string | Notebook-level default LLM model. Overridden by `# @model <id>` in prompt cells. Cleared by the AI panel when the user picks "use server default". |
 | `approval_timeout_seconds` | float | How long an agent destructive-tool confirm prompt waits before being treated as a decline. Default 120. |
+| `approval_tools` | list of strings | Built-in assistant tools that ask before running, added to the server's `STRATA_AI_APPROVAL_TOOLS`. It can add a gate but not remove one; an unknown tool name is logged and gates nothing. |
 
 Advanced provider fields (`base_url`, `timeout_seconds`, token ceilings, …) are documented in [AI Integration](../notebook/ai.md#custom-provider-configuration).
 
@@ -152,7 +153,7 @@ token_env = "STRATA_FLY_WORKER_TOKEN"
 | `name` | string (required) | Worker name referenced in `# @worker <name>` annotations. Must match `[a-zA-Z0-9][a-zA-Z0-9._-]*`. |
 | `backend` | `"local"` \| `"executor"` | Default `"local"`. `"executor"` for HTTP workers; `"local"` for in-process. |
 | `runtime_id` | string \| absent | Stable fingerprint hashed into cell provenance. Bump to invalidate the cache for cells using this worker. |
-| `config` | table | Backend-specific. For `"executor"`: `url`, `transport` (`"direct"` push, the default, or `"signed"` pull-model), `token` (literal - dev only), `token_env` (env var name - preferred). See [Distributed Workers](../notebook/workers.md). |
+| `config` | table | Backend-specific. For `"executor"`: `url`, `transport` (`"direct"` push, the default, or `"signed"` pull-model), `token` (literal - dev only), `token_env` (env var name - preferred), and for `"signed"` an optional `strata_url`, the server address the worker uses for the manifest's URLs (default: the server's own URL). See [Distributed Workers](../notebook/workers.md). |
 
 ## `[connections.<name>]` - Named database connections
 
@@ -192,6 +193,7 @@ SQL cells reference these by name via `# @sql connection=<name>`.
 [[variant_group]]
 group = "model_choice"
 active = "logistic"
+mode = "sweep"                # optional; absent means "switch"
 ```
 
 Cells declare group membership via `# @variant <group> <name>` in their source. This block records which member is currently active - only the active cell participates in the DAG.
@@ -199,20 +201,21 @@ Cells declare group membership via `# @variant <group> <name>` in their source. 
 | Key | Type | Description |
 | --- | --- | --- |
 | `group` | string (required) | Variant group identifier. Must match the group name used in `# @variant`. |
-| `active` | string (required) | Currently active variant name within the group. |
+| `active` | string (required) | Currently active variant name within the group. Empty means the first variant in source order. Ignored in sweep mode. |
+| `mode` | `"switch"` \| `"sweep"` \| absent | `switch` (the default, written by leaving the key out) runs only the active variant; `sweep` runs every variant and hands downstream cells a `{variant: value}` dict. Any other value is treated as `switch` and flagged by annotation validation. |
 
 ## `[[cells]]` - Cell registry
 
 ```toml
 [[cells]]
 id = "a1b2c3d4"
-file = "a1b2c3d4_load_data.py"
+file = "a1b2c3d4.py"
 language = "python"
 order = 100
 
 [[cells]]
 id = "e5f6g7h8"
-file = "e5f6g7h8_train.py"
+file = "e5f6g7h8.py"
 language = "python"
 order = 200
 worker = "fly-cpu"            # cell-level override of notebook default
@@ -230,7 +233,7 @@ timeout = 600                 # cell-level override
 | Key | Type | Description |
 | --- | --- | --- |
 | `id` | string (required) | Stable cell identifier. Backend generates an 8-character UUID prefix when cells are created via UI / REST; hand-edits can use any unique string (e.g. `seed`, `top-orders`). This is what `@after` and `@loop start_from=` resolve against - **not** `@name`. See [Cell IDs](../notebook/annotations.md#cell-ids). |
-| `file` | string (required) | Path to the cell source under `cells/`. |
+| `file` | string (required) | Path to the cell source under `cells/`. The backend names it `<id>.py`, or `<id>.md`, `<id>.r` and `<id>.widget` for markdown, R and widget cells. |
 | `language` | `"python"` \| `"prompt"` \| `"sql"` \| `"markdown"` \| `"r"` \| `"widget"` | Default `"python"`. |
 | `order` | float | Display order. Float so cells can be inserted between existing ones without renumbering. Default `0`. |
 | `worker` | string \| absent | Cell-level worker override. Beaten by `# @worker` in the cell source. |
@@ -279,9 +282,9 @@ The committed set is:
 - everything under `cells/`, including cell tests
 - the `.gitignore` itself
 
-The rules live in `strata.notebook.layout` — `committed_paths()` returns the
+The rules live in `strata.notebook.layout`: `committed_paths()` returns the
 set for a given directory and `IGNORED_PATTERNS` is what the `.gitignore`
-contains — so this list is a rendering of the code rather than a second source
+contains, so this list is a rendering of the code rather than a second source
 that drifts from it.
 
 ## Round-trip safety

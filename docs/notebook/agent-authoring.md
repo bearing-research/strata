@@ -48,6 +48,7 @@ is the file-format contract underneath both.
 
 ```
 my_analysis/
+├── .gitignore             # written by `strata new`: keeps .strata/ and .venv/ out of git
 ├── notebook.toml          # committed config: cells, env, workers, mounts
 ├── pyproject.toml         # uv-managed dependencies
 ├── uv.lock                # written by uv; do not hand-edit
@@ -60,7 +61,8 @@ my_analysis/
 
 **`.strata/` is hands-off.** Display outputs, provenance hashes, console
 snapshots, and the artifact store live there; the server and CLI manage
-it entirely. It's gitignored. If you are generating a notebook from
+it entirely, and the `.gitignore` that `strata new` writes keeps it out of
+git. If you are generating a notebook from
 scratch, don't create it.
 
 ## notebook.toml - the minimum that works
@@ -94,11 +96,13 @@ when writing it by hand:
   API routes. The server generates 8-char UUID prefixes; hand-written
   short names (`load`, `stats`) are fine. Don't reuse an ID after
   deleting a cell.
-- **`file`** - relative to `cells/`. Conventional extensions: `.py`
-  (python, prompt), `.R` (r), `.sql` (sql), `.md` (markdown).
+- **`file`** - relative to `cells/`. The extension is never read (the
+  language comes from `language`); the server writes `.py` for python,
+  prompt and sql, `.r` for r, `.md` for markdown and `.widget` for widget.
 - **`order`** - display order *and* reference-resolution order (see
   below). Keep it consistent with the list order.
-- **`language`** - one of `python`, `r`, `sql`, `prompt`, `markdown`.
+- **`language`** - one of `python`, `r`, `sql`, `prompt`, `markdown`,
+  `widget`.
 
 ## How variables flow between cells
 
@@ -258,7 +262,7 @@ mean = total / len(numbers)
 
 ```bash
 $ strata validate ./handwritten && strata run ./handwritten
-✓ valid - 3 cell(s)
+✓ valid: 3 cell(s)
 ...
 3 ran in 1.2s
 ```

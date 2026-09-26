@@ -103,8 +103,9 @@ def _build_parser() -> argparse.ArgumentParser:
             "Parse a Jupyter notebook and produce an equivalent Strata "
             "notebook directory. Cells are converted in source order; "
             "Jupyter's trailing-';' display-suppression convention is "
-            "preserved. Magics, shell commands, and dependency capture "
-            "are not yet implemented."
+            "preserved. Magics and shell commands are converted or dropped "
+            "with a note in the cell, and dependencies are read from a "
+            "requirements.txt or pyproject.toml beside the .ipynb."
         ),
     )
     add_import_arguments(import_parser)

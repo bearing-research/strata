@@ -43,8 +43,8 @@ Open **http://localhost:8765** and open (or create) a notebook.
 ## 2. Publish a model from a cell
 
 The dashboard surfaces what your **cells publish** to the registry. Inside any
-Python cell, use the [ambient `strata` client](cells.md#the-ambient-strata-client)
-- it's already in the namespace, no import or setup:
+Python cell, use the [ambient `strata` client](cells.md#the-ambient-strata-client).
+It's already in the namespace, no import or setup:
 
 ```python
 # ... you've trained `model` in this or an upstream cell ...
@@ -94,7 +94,7 @@ button.](../assets/registry-promote-strip-dark.png#only-dark)
 
 ## 4. Promote to champion
 
-Click **`[Promote ▾]`** and choose **champion** (or **candidate**). A toast
+Click **`[Promote ▾]`** and choose **Set as champion** (or **Set as candidate**). A toast
 confirms the result:
 
 - **`✓ taxi/tip-model → champion`** - applied immediately (the normal case).
@@ -113,8 +113,8 @@ top to bottom:
 1. **Pending-approval banner** - appears only when a protected-alias move is
    queued, with **Approve / Reject** buttons (the human gate, in the UI).
 2. **Names table** - every registry name, each row showing its **alias chips**
-   (`★champ`, `cand`), latest version, **tags**, a **`[Promote ▾]`** menu, and a
-   **`⎘`** lineage button. This is the same data on the per-cell strip, but for
+   (`★champion=v1`, `candidate=v2`), latest version, **tags**, a
+   **`[Promote ▾]`** menu, and a **`⎘`** lineage button. This is the same data on the per-cell strip, but for
    *all* names - not just what the current notebook published.
 3. **Audit timeline** (collapsible) - every name / alias / tag mutation, newest
    first, with who and from → to.
@@ -152,7 +152,7 @@ view** renders the provenance chain:
 model ← features ← scan ← table @ snapshot
 ```
 
-- the same chain `strata artifact lineage` prints on the CLI, as an interactive
+This is the same chain `strata artifact lineage` prints on the CLI, as an interactive
 view. It answers "which snapshot trained this model?" in one click.
 
 ![The lineage view for taxi/tip-model: the training transform above the feature
@@ -173,7 +173,7 @@ root.](../assets/registry-lineage-dark.png#only-dark)
 | **Registry tab is empty** | Nothing's been published with a name yet. Run a cell with `strata.put(inputs=[], transform=…, data=…, name="…")`. |
 | **A cell ran but no per-cell strip** | The strip only shows artifacts a cell published via the ambient `strata` client (a *named* `put` / `materialize`). Artifacts created another way still appear in the **names table**, just not as a per-cell strip. |
 | **Promote said "pending" unexpectedly** | That alias is in `STRATA_REGISTRY_PROTECTED_ALIASES` - approve it from the pending banner. |
-| **Promote did nothing** | Setting an alias to the version it already points at is an idempotent **no-op** (the toast says `unchanged`). |
+| **Promote did nothing** | Setting an alias to the version it already points at is an idempotent **no-op** (the toast ends in `(no change)`). |
 
 ## See also
 

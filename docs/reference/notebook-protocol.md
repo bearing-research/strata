@@ -94,10 +94,12 @@ enforcement is symmetric across REST and WS, with no opt-outs.
 
 ### Service mode
 
-- `auth_mode = "trusted_proxy"` is the deployment shape.
-- Every `/v1/*` request needs `X-Strata-Principal`, `X-Strata-Proxy-Token`,
-  and `X-Tenant-ID` (if multi-tenant). The WS upgrade carries the same
-  headers; missing or invalid token closes with `1008`.
+- `auth_mode = "trusted_proxy"` is the usual deployment shape; `api_key`
+  is the other authenticated mode.
+- Under `trusted_proxy`, every `/v1/*` request needs `X-Strata-Principal`,
+  `X-Strata-Proxy-Token`, and `X-Tenant-ID` (if multi-tenant); under
+  `api_key`, `Authorization: Bearer <key>`. The WS upgrade carries the same
+  credentials; a missing or invalid one closes with `1008`.
 - `/open`, `/create` and `/discover` work in service mode. What is
   personal-mode-only is narrower: the two path-keyed deletes and the two
   `/sessions` routes, which return `403 Forbidden` elsewhere.
@@ -120,13 +122,14 @@ further calls are required before showing a useful UI. The shape is
 | `session_id` | The route parameter for every subsequent call. |
 | `path` | Absolute notebook directory path. |
 | `dag` | Formatted upstream/downstream/staleness map. |
-| Runtime config | `default_parent_path`, configured Python versions, deployment mode, user-header status. |
+| Runtime config | `deployment_mode`, `default_parent_path`, `available_python_versions`, `default_python_version`, `python_selection_fixed`, `registry_enabled`, `team_store_configured`. |
 | `id`, `name`, `owner`, `worker`, `timeout`, `env`, `ai` | `notebook.toml` |
 | `env_sources`, `env_fetch_error`, `env_fetched_at` | Secret-manager fetch status |
 | `workers`, `mounts`, `connections`, `malformed_connections`, `secret_manager_config`, `variant_groups` | `notebook.toml` |
 | `cells` (full) | Source, status, display outputs, console stdout/stderr, provenance hashes, causality chains, DAG shadow warnings, per-cell overrides. |
 | `environment` | Live: Python version, lockfile hash, package counts, last-synced timestamp, sync status. |
 | `environment_job` / `environment_job_history` | Currently-running env mutation + recent past jobs. |
+| `r_environment` | The notebook's `renv` state, for R cells. |
 
 ### What is *not* in the cold-start payload
 
@@ -139,9 +142,9 @@ corresponding panel:
 | `GET /{sid}/workers` | NotebookPage `onMounted` (worker badge in header) | Auto-detected backends (Docker, local) are runtime state, change between requests. Vue auto-fetches once on mount; a TUI can skip it until the user opens a worker panel. |
 | `GET /{sid}/dependencies` | Environment panel open | Resolved deps from `uv.lock`; expensive on large lockfiles. The snapshot already has `environment.resolved_package_count`. |
 | `GET /{sid}/environment` | Environment panel re-fetch | Refreshes after a mutation; snapshot has the version current at open. |
-| `GET /{sid}/llm/models`, `GET /{sid}/llm/status` | LLM picker / panel open | Provider API call. |
+| `GET /{sid}/ai/models`, `GET /{sid}/ai/status` | LLM picker / panel open | Provider API call. |
 | `GET /{sid}/connections/{name}/schema` | Connection detail open | Adapter call per connection. |
-| `GET /{sid}/profiling-summary` | Profiling panel open | Computed on demand. |
+| WS `profiling_request` (answered with `profiling_summary`) | Profiling panel open | Computed on demand. |
 
 ## Reconnection and the cancel-on-disconnect grace window
 

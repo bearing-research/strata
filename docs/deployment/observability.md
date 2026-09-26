@@ -49,10 +49,13 @@ families include:
 - **Cache**: hit rate, eviction count, byte-size occupancy
 - **Scans**: active count, completion rate, throughput in
   bytes/second
-- **QoS**: interactive vs bulk semaphore usage, per-tenant
-  breakdowns when multi-tenant is on
+- **QoS**: interactive vs bulk slot usage, queue wait and rejections
 - **Rate limiter**: request acceptance / rejection counts
-- **Server**: uptime, health-check status
+- **Server**: draining flag, HTTP connections and requests, thread
+  pools, Arrow memory, GC pauses
+- **Per tenant**: `strata_tenant_scans_total`,
+  `strata_tenant_cache_hit_rate` and `strata_tenant_bytes_total`, labelled
+  by `tenant`, once a tenant has made a request
 - **AI**: `strata_ai_calls_total`, `strata_ai_input_tokens_total` and
   `strata_ai_output_tokens_total`, labelled by `tenant`, `principal` and
   `model`. Counted from each provider response: the assistant's agent loop,
@@ -60,17 +63,16 @@ families include:
   ran as, and are empty in personal mode. The series appear after the first
   model call.
 
-For multi-tenant deployments the labels carry a `tenant` dimension
-so dashboards can split per-tenant usage.
-
 ### Traces, OpenTelemetry OTLP
 
-When `STRATA_TRACING_ENABLED=true` is set, Strata emits OTel spans
-over OTLP-gRPC to `OTEL_EXPORTER_OTLP_ENDPOINT` (default
-`http://jaeger:4317` in the compose stack). One span per request
-plus child spans for the planner, cache lookup, Parquet read,
-serialize-to-Arrow IPC, and stream write. The `service.name`
-attribute is set via `OTEL_SERVICE_NAME=strata`.
+Tracing is on whenever the `otel` extra is installed (the published
+image has it) and `OTEL_EXPORTER_OTLP_ENDPOINT` names a collector
+(`http://jaeger:4317` in the compose stack). Spans go over OTLP-gRPC.
+`STRATA_TRACING_ENABLED=false` turns it off. One span per HTTP request,
+plus child spans for planning (`plan_identity_materialize`,
+`resolve_manifests`) and for each row group fetched on a cache miss
+(`fetch_row_group`). The `service.name` attribute comes from
+`OTEL_SERVICE_NAME` (default `strata`).
 
 A cell sent to a remote worker is one trace across processes. The
 server opens `notebook.dispatch` with `worker`, `build_id`,
@@ -92,9 +94,11 @@ In Jaeger:
 
 ### Logs
 
-Structured JSON logging via `STRATA_LOG_FORMAT=json`. One line per
-log record with `level`, `logger`, `message`, `timestamp`, and
-context fields (request ID, tenant, principal where applicable).
+Logs are structured JSON by default (`STRATA_LOG_FORMAT=json`;
+`text` for a human-readable line). One line per log record with
+`level`, `logger`, `message`, `timestamp` (Unix seconds), and the
+request's context fields: `request_id`, `method`, `path`, `tenant_id`,
+and `trace_id` / `span_id` when tracing is on.
 Pipe `docker compose logs strata` through `jq` for readable
 output.
 
@@ -104,12 +108,16 @@ The notebook UI ships two operator views, reachable from any notebook's header
 (**Logs** / **Artifacts**) and via a **← Back** button that returns to the
 notebook:
 
-- **Logs** (`/logs`) - the server-log stream with level / logger / search
+- **Logs** (`/logs`) - the server-log stream with level / notebook id / regex
   filters and a **live tail**. Backed by an in-memory ring buffer:
   `GET /v1/logs` (snapshot) and `GET /v1/logs/stream` (Server-Sent Events).
 - **Artifacts** (`/artifacts`) - a sortable, filterable list of stored
   artifacts with summary stats. Backed by `GET /v1/artifacts` (with `since` /
   sort / order filters) and `GET /v1/artifacts/stats`.
+
+In service mode `GET /v1/artifacts/stats` and `GET /v1/artifacts/usage`
+report the caller's own tenant (an `admin:*` caller sees the whole store, or
+one tenant named with `?tenant=`), which is the figure to meter storage on.
 
 These are convenience surfaces over the same data; use the Prometheus metrics
 and OTLP traces above for production monitoring and alerting.
@@ -159,8 +167,7 @@ typically have an existing OTel collector, Prometheus instance, and
 log aggregator. Point Strata at yours via env vars:
 
 ```bash
-# Tracing
-STRATA_TRACING_ENABLED=true
+# Tracing (needs the otel extra, which the published image includes)
 OTEL_EXPORTER_OTLP_ENDPOINT=https://your-collector:4317
 OTEL_EXPORTER_OTLP_HEADERS=authorization=Bearer <token>
 OTEL_SERVICE_NAME=strata-prod
@@ -203,15 +210,15 @@ After it runs:
 
 ## Health endpoints
 
-Two simple endpoints intentionally outside the metrics path so
-they're cheap to hit from k8s liveness/readiness probes or
-Fly health checks:
+Cheap endpoints for k8s liveness/readiness probes or Fly health
+checks:
 
 | Endpoint | Purpose |
 |---|---|
-| `GET /health` | Returns `{"status":"ok"}` if the server is running. Used by Docker / Fly / k8s. |
+| `GET /health` | Liveness. Returns `{"status":"ok"}` if the server is running. Used by Docker / Fly / k8s. |
+| `GET /health/ready` | Readiness. `503` while draining, when both QoS tiers have been saturated for over 30s, when scans are stuck, or when the metadata store is unreachable. |
+| `GET /health/dependencies` | Per-check report (disk cache, metadata store, Arrow memory, thread pools, rate limiter, eviction pressure); `503` if any check is unhealthy. |
 | `GET /metrics/prometheus` | Scrape target. Returns Prometheus textfile. |
 
-`/health` is intentionally minimal, it doesn't probe downstream
-dependencies. Use the scrape metrics for richer health signals
-(catalog reachability, blob backend latency, etc.).
+`/health` is intentionally minimal and doesn't probe anything. Point
+a readiness probe at `/health/ready`.

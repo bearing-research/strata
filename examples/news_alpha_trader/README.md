@@ -67,7 +67,7 @@ uv sync
 
 Re-run tomorrow, `fetch_news` only pulls new articles, `place_orders` is idempotent by `signal_id`. The DB grows over time; so does the history you can analyze.
 
-## ⚠️ Disclaimers
+## Disclaimers
 
 - **This is not financial advice.** The strategy is a demo. It may lose money. Backtest thoroughly before live trading.
 - LLM outputs are non-deterministic even with `temperature=0.0`. A prompt injection in a news headline could theoretically shift a signal, the ticker whitelist is the hard backstop.

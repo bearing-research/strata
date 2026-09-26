@@ -21,6 +21,7 @@ import pytest
 
 from strata.config import StrataConfig
 from strata.notebook.remote_executor import _WORKER_SECRETS
+from strata.notebook.worker_env import ENV_ROOT_VAR, REGISTRY_VAR
 
 _REPO = Path(__file__).resolve().parent.parent
 _DOC = _REPO / "docs" / "reference" / "configuration.md"
@@ -30,7 +31,7 @@ _SRC = _REPO / "src"
 # (logging and tracing initialize before config exists; the worker vars are
 # read by ``strata-worker``, a separate process with no StrataConfig at all).
 _ENV_LOOKUP = re.compile(
-    r"""(?:os\.environ(?:\.get)?[(\[]|os\.getenv\()\s*["'](STRATA_[A-Z0-9_]+)["']"""
+    r"""(?:os\.environ(?:\.get)?[(\[]|os\.getenv\(|_positive_int_env\()\s*["'](STRATA_[A-Z0-9_]+)["']"""
 )
 _DOCUMENTED = re.compile(r"`(STRATA_[A-Z0-9_]+)`")
 
@@ -65,6 +66,9 @@ def _from_environ_lookups() -> set[str]:
     # them from memory afterwards, so the only ``os.environ`` call naming them
     # takes the name as a variable. They are set by an operator like any other.
     found |= set(_WORKER_SECRETS)
+    # The locked-environment settings are named once, as constants, and read
+    # through them.
+    found |= {ENV_ROOT_VAR, REGISTRY_VAR}
     return found
 
 

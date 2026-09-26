@@ -51,7 +51,7 @@ viz, with the artifact store gluing everything together.
 From the project root:
 
 ```bash
-uv run strata-notebook --host 127.0.0.1 --port 8765
+uv run strata-notebook
 ```
 
 Then open `examples/r_lm_vs_sklearn` from the Strata home page and

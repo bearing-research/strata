@@ -376,3 +376,12 @@ class TestReportedVersionIsTheInstalledOne:
         report = HealthReport(status=HealthStatus.HEALTHY, checks=[], timestamp=time.time())
         assert report.version != "0.2.0"
         assert report.to_dict()["version"] == report.version
+
+
+def test_the_app_and_its_traces_report_the_installed_version():
+    """The OpenAPI document and the trace resource were hardcoded to "0.2.0"
+    after /health stopped being."""
+    from strata.health import _package_version
+    from strata.server import app
+
+    assert app.version == _package_version()

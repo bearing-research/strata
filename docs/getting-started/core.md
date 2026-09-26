@@ -32,9 +32,9 @@ uv run python examples/hello_world.py
 This creates a local Iceberg table with 100K rows and times three reads against it:
 
 ```
-Cold run     (no cache)             ~500ms  , read Parquet, cache as Arrow IPC
-Warm run     (in-memory cache hit)  ~50ms   , serve from process memory
-Restart run  (disk cache hit)       ~60ms   , serve from on-disk Arrow IPC
+Cold run     (no cache)             ~500ms   read Parquet, cache as Arrow IPC
+Warm run     (in-memory cache hit)  ~50ms    serve from process memory
+Restart run  (disk cache hit)       ~60ms    serve from on-disk Arrow IPC
 ```
 
 Same inputs, same transform, three different cache states, and the third is still ~10× faster than the first because the disk cache survives restarts.
@@ -70,7 +70,7 @@ print(f"Cache hit: {artifact.cache_hit}")
 ```
 
 ```text title="Output"
-URI: strata://artifact/scan_a7b3c9d1e5f2@v=1
+URI: strata://artifact/3f6c1a2e-8b4d-4e7a-9c15-2d0b7e4f8a61@v=1
 Cache hit: False
 ```
 
@@ -141,6 +141,6 @@ print(df.head())
 
 ## What's next
 
-- [Configuration](../reference/configuration.md) all environment variables (cache, fetcher, S3 / GCS / Azure, auth, timeouts)
-- [Deployment Modes](../deployment/modes.md) `personal` vs `service` mode and the auth boundary
-- [REST API](../reference/rest-api.md) notebook protocol surface (separate from the `/v1/materialize` endpoint this page calls into)
+- [Configuration](../reference/configuration.md): all environment variables (cache, fetcher, S3 / GCS / Azure, auth, timeouts)
+- [Deployment Modes](../deployment/modes.md): `personal` vs `service` mode and the auth boundary
+- [REST API](../reference/rest-api.md): notebook protocol surface (separate from the `/v1/materialize` endpoint this page calls into)

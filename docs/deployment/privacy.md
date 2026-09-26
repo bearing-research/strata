@@ -1,11 +1,12 @@
 # Privacy & Sharing Model
 
-Strata's sharing model is **URL-based**, similar to Google Docs:
-notebook IDs are unguessable, and anyone with the ID can open and
-execute the notebook. Some endpoints (delete, rename) are owner-
-gated; the rest are not. This page lays out the model honestly so
-you can pick the deployment shape that matches your trust
-boundary.
+Strata's notebook sharing model is **URL-based**, similar to Google
+Docs: notebook IDs are unguessable, and without per-user scoping
+anyone who can reach the server and has the ID can open and execute
+the notebook. Personal mode's per-user header gates every notebook
+route on the owner; service mode gates them by scope, not by owner.
+This page lays out the model honestly so you can pick the deployment
+shape that matches your trust boundary.
 
 ## What's shared, what isn't
 
@@ -26,12 +27,17 @@ from another.
 
 ### Notebook artifacts, not actually shared
 
-Per-cell variable outputs are stored as
-`nb_{notebook_id}_cell_{cell_id}_var_{name}.arrow`. Two users with
+Per-cell variable outputs are stored in each notebook's own
+`.strata/artifacts/` store as
+`nb_{notebook_id}_cell_{cell_id}_var_{name}`. Two users with
 identical notebook code but different notebooks each produce their
 own artifacts under different `notebook_id`s, they don't dedupe
 across notebooks. So sharing a Strata instance with a teammate
-does **not** mean your cell outputs cross-pollinate.
+does **not** mean your cell outputs cross-pollinate. The exception
+is opt-in: the [team cache](service-mode.md#the-team-cache-sharing-results-nobody-named)
+(`STRATA_NOTEBOOK_TEAM_CACHE_ENABLED`) offers results to a shared
+store by provenance, so identical cells in different notebooks hit
+each other there.
 
 ### Notebook access, URL-based
 
@@ -75,19 +81,19 @@ mode for a genuinely shared deployment.
 
 ## How notebook ownership gets stamped
 
-The `owner` field on `notebook.toml` is set when:
+The `owner` field on `notebook.toml` is set only in
+personal-mode-with-proxy (`STRATA_PERSONAL_MODE_USER_HEADER` set):
+`POST /create`, `POST /import` and `POST /import-snapshot` stamp the
+caller's identity from the configured header (typically
+`Cf-Access-Authenticated-User-Email`, `X-Forwarded-Email`, etc.).
 
-- **Personal-mode-with-proxy** (`STRATA_PERSONAL_MODE_USER_HEADER`
-  set) `POST /create` and `POST /import` stamp the caller's
-  identity from the configured header (typically
-  `Cf-Access-Authenticated-User-Email`, `X-Forwarded-Email`, etc.).
-- **Service mode**: `_caller_identity(request)` resolves from
-  `X-Strata-Principal` and stamps the same way.
+Service mode stamps no owner: it refuses `personal_mode_user_header`,
+and `X-Strata-Principal` is not used for notebook ownership. There,
+notebook scopes decide what a principal can do.
 
-When `personal_mode_user_header` is unset and the caller has no
-identity, `owner` stays `None`, all notebooks are unowned and the
-single-user pattern applies. This is the default for a developer
-running on localhost.
+When `personal_mode_user_header` is unset, `owner` stays `None`, all
+notebooks are unowned and the single-user pattern applies. This is
+the default for a developer running on localhost.
 
 Unowned notebooks (`owner is None`) remain accessible to any
 caller. Migrating an unowned notebook to ownership requires
@@ -108,31 +114,35 @@ Use this shape unless something else applies.
 `STRATA_PERSONAL_MODE_USER_HEADER=Cf-Access-Authenticated-User-Email`
 (or whatever your proxy injects).
 
-Every notebook is stamped with its creator's identity. `discover`
-filters to your notebooks. Direct URL access still works for
-collaboration. Delete / rename are owner-only.
+Every notebook is stamped with its creator's identity and lives
+under that user's own storage root. `discover` filters to your
+notebooks, and every notebook route answers `404` to anyone else, so
+a link to an owned notebook works only for its owner. Unowned
+notebooks stay open to everyone.
 
-**This is the right shape for most teams.** Trust the URL boundary,
-share by sending the link, accept that anyone with the link can
-look at the notebook. If you wouldn't put it in a shared Google Doc,
-don't put it in a shared Strata notebook.
+**This is the right shape for most teams.** Share results by
+[publishing](../notebook/publishing.md) them rather than by sending a
+notebook link.
 
 ### Multi-tenant or hard-isolation requirements
 
 `STRATA_DEPLOYMENT_MODE=service` + multi-tenancy. Each tenant gets
 its own QoS pools, cache namespacing, and metric labels. Notebook routes
-are scope gated, so what a principal can reach depends on the scopes the
-proxy asserts for it.
+are scope gated (`notebook:read`, `notebook:write`, `notebook:execute`),
+so what a principal can reach depends on the scopes the proxy asserts
+for it.
 
 Notes:
 
-- **The URL-access property still holds within a tenant.** Multi-
-  tenancy isolates one tenant from another; it does NOT add per-
-  notebook ACLs within a tenant. If Alice and Bob are on the same
-  tenant and Alice's notebook ID leaks to Bob, he can open it.
-- **Cross-tenant isolation is hard.** Tenant A and tenant B can't
-  see each other's cache, artifacts, or notebooks, the tenant
-  dimension is hashed into every key.
+- **Notebooks are not tenant-scoped.** Tenancy isolates the scan
+  cache and the server's artifact store: the tenant is hashed into
+  cache keys, and artifact and name reads are filtered by tenant.
+  Notebook sessions and the notebook storage root are shared by the
+  whole server, and there are no per-notebook ACLs. If Alice's
+  notebook ID leaks to Bob and Bob holds `notebook:read`, he can open
+  it, whatever tenant either of them is in.
+- **Notebook deletion is personal-mode only.** Service mode refuses
+  `DELETE /v1/notebooks/{id}` and `delete-by-path`.
 
 ### Per-user isolation (every user truly private)
 

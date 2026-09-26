@@ -37,11 +37,14 @@ within those scopes.
 Around the edges: a result travels to the team by promotion rather than by
 copying a directory, a notebook's whole state exports as one bundle and imports
 back, and an artifact store can be swept, pinned, and reported on per tenant.
+A publication carries its authors and a DOI, every version carries a content
+digest, and a chain can be copied into a central store over HTTP and archived
+from it as a zip that is the same bytes on every fetch.
 
 ### Added
 
 - **An import can upload its bytes first.** `PUT
-  /v1/artifacts/import/blobs/{sha256}` streams a version's bytes to the store
+  /v1/artifacts/import/blobs/{content_sha256}` streams a version's bytes to the store
   and checks them against the digest, and `POST /v1/artifacts/import` with a
   JSON record imports the version whose `content_sha256` names them, so a large
   artifact is never held in memory. Uploads are per tenant, and one nothing
@@ -125,8 +128,8 @@ back, and an artifact store can be swept, pinned, and reported on per tenant.
   through its parent process. A service host without such a user refuses to run
   cells rather than running them as the server.
 - **Presence, cell focus and soft locks.** Two people in one notebook can see
-  where each other is working, and every cell records who wrote it — in the
-  notebook, and on every surface that writes one.
+  where each other is working, and every cell records who wrote it, in the
+  notebook and on every surface that writes one.
 - **Notebook scopes on the REST routes**, read from the same table the WebSocket
   uses, and MCP tool calls that run as their caller within those scopes. An
   agent can read lineage, promote and publish through MCP.
@@ -135,8 +138,8 @@ back, and an artifact store can be swept, pinned, and reported on per tenant.
   principal and model.
 - **Quiesce a notebook or project** so it can be copied consistently while the
   server is running.
-- **A shared environment backend, one environment per lockfile** — and one
-  `renv` library per `renv.lock` — so notebooks that declare the same
+- **A shared environment backend, one environment per lockfile** (and one
+  `renv` library per `renv.lock`), so notebooks that declare the same
   dependencies stop each building their own.
 - **Trace context is carried** from the server through the pool to the worker,
   and a signed build manifest says who and what it is for. Build manifests can
@@ -185,7 +188,7 @@ a case of the server reporting more confidence than it had:
   Set `STRATA_NOTEBOOK_HARNESS_USER` to a second OS account (the server must be
   able to become it) or send the work to remote workers. A service deployment
   upgrading from 0.7.0 that ran cells on the server host runs none until one of
-  those is true — the alternative was continuing to run notebook code as the
+  those is true. The alternative was continuing to run notebook code as the
   server user, which is what the rest of this release is about not doing.
 - **Every notebook REST route is scope gated under principal auth.** A
   principal that holds only `notebook:read` can no longer reach the routes that
@@ -193,12 +196,12 @@ a case of the server reporting more confidence than it had:
   `notebook:write` and `notebook:execute` where a client needs them; a route
   nobody has classified requires `notebook:execute`.
 - **An ACL rule refuses a key it does not recognise.** A rule dropped anything
-  misspelled, so `tenants = "acme"` — the plural — left `tenant` unset and the
+  misspelled, so `tenants = "acme"` (the plural) left `tenant` unset and the
   rule applied to every tenant while still reading correctly in the file. A
   deployment whose ACL carries a key Strata never understood will now fail to
   start, naming it, rather than enforcing something narrower than it looks.
 - **A mount's fingerprint covers its uri**, so every `@mount` cell is stale once
-  after upgrade and re-runs. Nothing cached is wrong — the key changed, not the
+  after upgrade and re-runs. Nothing cached is wrong: the key changed, not the
   data. One consequence to know: a mounted cell's provenance now carries an
   absolute path, so the same notebook on two machines no longer shares those
   cache entries.
@@ -215,9 +218,9 @@ environment pinned below them has to move before it can install 0.8.0.
   memory, so a cell cannot recover them from `/proc/<ppid>/environ`; the
   harness runs as its own OS user; and the cell's manifest no longer carries the
   team store's proxy token, which would have let a cell assert any principal.
-- **A read SQL cell cannot write files.** `COPY … TO` inside a read cell — and
-  the `EXPLAIN ANALYZE` and `EXPLAIN /*comment*/ ANALYZE` forms that run the
-  statement they describe — are refused before anything reaches the driver.
+- **A read SQL cell cannot write files.** `COPY … TO` inside a read cell is
+  refused before anything reaches the driver, and so are the `EXPLAIN ANALYZE`
+  and `EXPLAIN /*comment*/ ANALYZE` forms that run the statement they describe.
 - **A bundle writes only inside the notebook it imports.** Member names, cell
   ids and artifact ids from an uploaded snapshot are all checked before
   anything is written; an artifact id becomes a blob key, so one naming a path
@@ -249,6 +252,13 @@ environment pinned below them has to move before it can install 0.8.0.
   listed ahead of the run binding at the same precedence, so it always won.
   Cmd/Ctrl+Shift+Enter (rerun) was unaffected. The button's tooltip and the
   docs said Shift+Enter all along.
+- **A refreshed secret replaces the one it rotated.** The first fetch from a
+  secret manager left each value in the notebook's environment, and a refresh
+  treated any value already there as one set by hand, so a rotated secret kept
+  its old value until the notebook was reopened. A value you set yourself in
+  the Runtime panel still wins over the provider.
+- **Traces and the OpenAPI document report the installed version.** Both still
+  said `0.2.0`, as `/health` did until it was fixed.
 - **A chain is walked past a step that was rerun.** Rerunning a cell
   supersedes its earlier version, which a result computed from it still names
   and still reads. The lineage walk treated a superseded step as unknown and
@@ -396,18 +406,18 @@ environment pinned below them has to move before it can install 0.8.0.
   at rather than stopping at the query.
 - **A worker that answers has answered.** A worker predating the health
   document replies 404, which says it is older than every feature it would
-  list — so the cell runs in the worker's own environment, as documented,
+  list, so the cell runs in the worker's own environment, as documented,
   instead of being refused. Only a transport failure or a 5xx leaves the
   question open. The probe also waits longer than the `/health` it asks:
   reporting a machine's hardware shells out to `nvidia-smi`, so the first cell
   on a freshly started GPU worker used to time out and be refused.
 - **Run All takes part in the team cache.** It neither offered what it computed
-  nor looked before computing, so a team running notebooks the ordinary way —
-  top to bottom — shared nothing and reused nothing, while the same notebook
+  nor looked before computing, so a team running notebooks the ordinary way,
+  top to bottom, shared nothing and reused nothing, while the same notebook
   run cell by cell did both.
 - **`strata status`, `strata cell ls` and `strata cell show` report what they
   found.** Offline they answered `idle`, with no staleness reasons and no
-  outputs, for every cell of every notebook — the state a session starts in,
+  outputs, for every cell of every notebook: the state a session starts in,
   not one about the notebook. This is the surface agents read.
 - **`@fetch` may reach your own machine.** `http://localhost:8000/data.csv` was
   refused in personal mode by a guard meant for a shared server. Service mode
@@ -432,14 +442,14 @@ environment pinned below them has to move before it can install 0.8.0.
   cache; and a mount naming a credential failed to resolve.
 - **Deciding whether a cell is stale cannot stall the server.** The check reads
   an `@fetch` URL, an `@table` catalog and a `@dataset` registry, and it now
-  does that before taking the lock that serializes it — held across those, one
+  does that before taking the lock that serializes it. Held across those, one
   slow host blocked every socket in the process.
 - **A cell's in-place mutations and its `@table` inputs reach a worker.** Both
   were dropped on the way to an HTTP worker while the provenance hash claimed
   otherwise, so a cell that changed a value without rebinding it stored nothing
   and downstream cells read the value from before, from cache, indefinitely.
 - **The reference worker image can do what it says.** `/health` answered that
-  it builds locked environments whether or not `uv` was installed — and the
+  it builds locked environments whether or not `uv` was installed, and the
   image shipped without it, so every Python cell failed. It probes now, and the
   image ships `uv`.
 - **An edit made while Run All is working is not mistaken for what ran.** The
@@ -451,7 +461,7 @@ environment pinned below them has to move before it can install 0.8.0.
   downstream of a loop re-ran the whole loop.
 - **A reopened cell says ready only about what it checked.** A SQL, prompt or
   widget cell was restored on a hash that never covered its connection, its
-  cache policy or its model — so a notebook repointed at another database
+  cache policy or its model, so a notebook repointed at another database
   reopened green, showing the first database's rows.
 - **A cell's console leaves the process while the cell runs.** The harness
   captured the cell's output for the result manifest and nothing wrote it
@@ -461,7 +471,7 @@ environment pinned below them has to move before it can install 0.8.0.
   empty directories, or two paths that do not exist yet, hashed alike.
 - **A SQLite cell sees writes** made outside it, through the file's size, mtime,
   header change counter and `-wal` sidecar.
-- **A catalog table is pinned however it is written** — qualified, unqualified,
+- **A catalog table is pinned however it is written**: qualified, unqualified,
   quoted or in a different case.
 - **Two pool processes over one store are two processes**, each with its own
   instance id, so a restart waits out the old leases rather than adopting them.

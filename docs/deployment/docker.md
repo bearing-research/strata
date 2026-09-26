@@ -38,6 +38,7 @@ The `docker-compose.yml` runs Strata in **personal mode** with:
 |--------|------------|---------|
 | `strata-state` | `/home/strata/.strata` | Cache, metadata DB, artifacts |
 | `strata-notebooks` | `/tmp/strata-notebooks` | Notebook directories |
+| `./demo-warehouse` (bind, read-only) | `/data/warehouse` | A local Iceberg warehouse to scan, if you have one; Docker creates the host directory empty otherwise |
 
 Data persists across `docker compose down/up` cycles. To reset completely:
 
@@ -120,4 +121,7 @@ The multi-stage Dockerfile:
 
 1. **Frontend builder** (Node 26) builds the Vue.js UI
 2. **Backend builder** (Python + Rust) builds the wheel with native extension
-3. **Runtime**: minimal image with the wheel and frontend dist
+3. **Runtime**: minimal image with the wheel, the frontend dist, and
+   the `otel` and `postgres` extras, so OTLP tracing and a Postgres
+   artifact store (`STRATA_ARTIFACT_METADATA_DSN`) work without building
+   your own image

@@ -11,8 +11,8 @@ A Strata deployment has three persistent locations:
 | Location | Default | Contents | When to back up |
 | --- | --- | --- | --- |
 | **Notebook storage** | `~/.strata/notebooks/` | One subdirectory per notebook: `notebook.toml`, `cells/*.py`, `pyproject.toml`, `uv.lock`, `.strata/` (per-notebook runtime), `.venv/` (per-notebook venv) | Always - this is your work |
-| **Iceberg row-group cache** | `~/.strata/cache/` | Arrow-IPC files keyed by Parquet row-group, plus `meta.sqlite` (or `STRATA_METADATA_DB` if set) | Optional - purely a perf cache, safe to delete |
-| **Server-side artifact store** | `~/.strata/artifacts/` (or `STRATA_ARTIFACT_DIR`) | The Core SDK's artifact blobs + metadata SQLite. **Distinct from the per-notebook `.strata/artifacts/`** below. | Only if you use `StrataClient.materialize` or named artifact pointers you care about |
+| **Iceberg row-group cache** | `~/.strata/cache/` | Arrow-IPC files keyed by Parquet row-group. The Parquet/Iceberg metadata cache sits beside it at `~/.strata/meta.sqlite` (or `STRATA_METADATA_DB` if set) | Optional - purely a perf cache, safe to delete |
+| **Server-side artifact store** | `~/.strata/artifacts/` (or `STRATA_ARTIFACT_DIR`) | The Core SDK's artifact blobs + metadata SQLite (the metadata moves to Postgres with `STRATA_ARTIFACT_METADATA_DSN`, and `strata migrate` copies an existing SQLite store across). **Distinct from the per-notebook `.strata/artifacts/`** below. | If you use `StrataClient.materialize`, named artifact pointers, publications or pins you care about, or API keys (they live in the same database) |
 
 Inside each notebook directory:
 
@@ -44,6 +44,16 @@ The excluded directories are runtime state (regenerable) and a host-specific ven
 
 If you'd rather not exclude `.strata/`, you can include it for a "warm restore" - cached cell outputs survive the trip and downstream cells stay green on the destination. Just expect the archive to be larger.
 
+Copying `.strata/` while a cell is finishing can capture the new `runtime.json` with the old artifacts. To copy a notebook the server has open, hold it still first:
+
+```bash
+curl -X POST 'http://localhost:8765/v1/notebooks/<session_id>/quiesce'
+# ...copy the directory...
+curl -X POST 'http://localhost:8765/v1/notebooks/<session_id>/release'
+```
+
+Quiesce waits for running cells (cancelling any still running after `timeout_seconds`, default 30), then refuses runs and edits with a 409 until release or `max_hold_seconds` (default 600). `POST /v1/projects/{path}/quiesce` and `.../release` do the same for every notebook under a directory, open or not. Under principal auth both need the `admin:notebooks` scope.
+
 ## Moving between machines
 
 Same idea: copy the notebook directory minus `.venv/`. Optionally minus `.strata/` if you want a clean cache.
@@ -61,6 +71,8 @@ uv sync       # rebuilds .venv from pyproject.toml + uv.lock
 
 The `uv.lock` ensures the rebuilt venv pins identical versions to the source machine. The Rust toolchain on the destination needs to match Strata's source requirements only if you're upgrading Strata at the same time; for an existing wheel install it's not needed.
 
+`strata export <dir> --to snapshot --include all --out <file>.zip` packs the committed files, runtime state and every artifact into one zip, and `strata import <file>.zip` unpacks it on the other side. See [Snapshots](../notebook/export.md#snapshots).
+
 **What doesn't transfer.** Mounted external storage (`s3://`, `gs://`) is referenced by URI, so cells that use mounts work on any machine with the right credentials. Mounts with `file://` URIs pointing at machine-local paths don't.
 
 ## Deleting a notebook
@@ -70,7 +82,7 @@ Three options, depending on the surface:
 | From | How | Effect |
 | --- | --- | --- |
 | **UI** | "Delete notebook" in the notebook menu | Removes the directory and closes the open session. Confirm prompt. |
-| **REST** | `DELETE /v1/notebooks/{session_id}` for an open session, or `POST /v1/notebooks/delete-by-path` for a path-based delete (personal mode only) | Same as the UI |
+| **REST** | `DELETE /v1/notebooks/{session_id}` for an open session, or `POST /v1/notebooks/delete-by-path` for a path-based delete. Both are personal mode only. | Same as the UI |
 | **Filesystem** | `rm -rf ~/.strata/notebooks/mynotebook` while the server isn't running | Same outcome, no graceful session close |
 
 Deleting a notebook also deletes its `.strata/artifacts/` - there's no shared artifact store across notebooks, so nothing leaks.
@@ -89,13 +101,13 @@ Or from Python:
 from strata_client import StrataClient
 client = StrataClient(base_url="http://localhost:8765")
 client.garbage_collect(max_age_days=7.0)
-# {"deleted": 14, "bytes_freed": 8429283, ...}
+# {"deleted_count": 14, "deleted_bytes": 8429283, "cutoff_timestamp": ...}
 ```
 
 The GC pass deletes a version only when all of these hold:
 
 - it is older than `max_age_days`;
-- no name or alias points at it, and it is not the latest version of its id;
+- no name or alias points at it, and it is not the latest version of its id (pass `collect_latest=true` to reclaim those too);
 - it is `ready`, `superseded` or `failed` (in-flight artifacts are safe);
 - it is not published or pinned, and nothing published or pinned depends on it.
 
@@ -103,7 +115,7 @@ A publication (withdrawn ones included) or a pin protects its whole lineage, not
 only the version. A page or a snapshot needs every step behind the result.
 
 It returns counts and bytes freed. In service mode the route needs a principal
-holding `admin:*`.
+holding `admin:*`, and collects within the caller's tenant.
 
 ### Pins
 
@@ -152,7 +164,8 @@ Practical guidance:
 - Set `STRATA_ARTIFACT_GC_INTERVAL_SECONDS` (for example `604800`, weekly), or run `POST /v1/artifacts/gc` on a cron, if you use the Core SDK.
 - The Iceberg cache is self-managing under its byte cap - leave it.
 - If a single notebook's `.strata/artifacts/` gets uncomfortably large, the cleanest reset is to delete the notebook's `.strata/` directory while the server isn't running. Cell source survives; provenance cache resets.
-- For `.venv/` sprawl: `du -sh ~/.strata/notebooks/*/.venv` is the quickest audit. Old notebooks you don't open anymore can have their `.venv/` deleted - `uv sync` will recreate it next time.
+- For `.venv/` sprawl: `du -sh ~/.strata/notebooks/*/.venv` is the quickest audit. Old notebooks you don't open anymore can have their `.venv/` deleted - `uv sync` will recreate it next time. With `STRATA_NOTEBOOK_ENV_BACKEND=shared`, notebooks with the same lockfile share one environment instead; the server removes shared environments nothing links to after `STRATA_NOTEBOOK_SHARED_ENV_TTL_DAYS` (default 7), and `strata env gc` does it on demand. See [Shared environments](../notebook/environment.md#shared-environments).
+- `GET /v1/artifacts/usage` reports the Core store's version counts and bytes. In service mode it reports the caller's tenant (`admin:*` can name one with `?tenant=`).
 
 ## Notebook storage location
 

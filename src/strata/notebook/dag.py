@@ -318,9 +318,8 @@ class NotebookDag:
             for upstream_id in cell.after:
                 if upstream_id == cell.id or upstream_id not in cell_id_set:
                     # Self-references and dangling IDs are silently dropped
-                    # here; annotation_validation surfaces them as
-                    # diagnostics so the user sees the issue without the
-                    # DAG build crashing.
+                    # here, so a typo'd id cannot crash the DAG build. No
+                    # diagnostic reports them yet.
                     continue
                 dag.edges.append(DagEdge(from_cell_id=upstream_id, to_cell_id=cell.id, variable=""))
                 if upstream_id not in dag.cell_upstream[cell.id]:

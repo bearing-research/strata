@@ -20,8 +20,9 @@ so in those words rather than implying more.
 Publishing exposes the whole ancestry, by design: upstream cell sources,
 environments, table names and authors. That is the transparency being asked
 for, and it is also why publishing is explicit and per-version, never a
-one-click on a notebook. ``GET /v1/publications/{token}/preview`` returns
-exactly what would become public, before it does.
+one-click on a notebook. The version's lineage
+(``GET /v1/artifacts/{id}/v/{n}/lineage``) is exactly what would become
+public, and can be read before publishing.
 """
 
 from __future__ import annotations

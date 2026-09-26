@@ -88,7 +88,7 @@ Each env row in the Runtime panel shows a green source badge (`INFISICAL`) next 
 
 ## Rotation
 
-Rotate the secret in Infisical, then hit the **Refresh** button. Cells that run after the refresh see the new value immediately (the executor reads the cell's `env` each run). Cells with cached artifacts under the *old* value stay cached, rotating a secret doesn't invalidate history. If you need to re-execute with the new value, edit or force-run the downstream cell.
+Rotate the secret in Infisical, then hit the **Refresh** button. Cells that run after the refresh see the new value immediately (the executor reads the cell's `env` each run). A cell whose source reads the variable by name (`os.environ["KEY"]`, `os.environ.get("KEY")`, `os.getenv("KEY")`) or declares it with `# @env` has its value folded into its provenance, so it goes stale after a rotation and re-runs. A cell that reaches the secret indirectly (a client library reading it for you) does not, and its cached artifacts stay cached; rerun it (`↻`) to execute with the new value.
 
 ## Fetch errors
 
@@ -108,6 +108,7 @@ Fix the cause (rotate the credential, check `project_id` / `environment` / `path
 - Secret values are **not written to disk**. `[env]` blocks on disk blank sensitive keys (`KEY`, `SECRET`, `TOKEN`, `PASSWORD`, `CREDENTIAL` name patterns) before persisting; secrets fetched at open time are in-memory only.
 - If a cell **prints** an env var, its value is captured in the cell's console output and persisted in `.strata/console/` alongside stdout/stderr. Don't `print(os.environ)` in production notebooks.
 - Authenticating credentials (`INFISICAL_CLIENT_ID` / `INFISICAL_CLIENT_SECRET` or `INFISICAL_TOKEN`) live in the process environment, set by whoever launches the server. Distribute them the same way you'd distribute any deploy secret (systemd unit, k8s secret, `.envrc` with direnv-allow, etc.) **not** in a committed file.
+- By default a cell subprocess inherits the server's whole environment, so a cell can read those credentials too. On a server other people run cells on, set `STRATA_NOTEBOOK_HARNESS_ENV_ALLOWLIST` and `STRATA_NOTEBOOK_HARNESS_USER`; see [Service Mode: What a cell can read](../deployment/service-mode.md#what-a-cell-can-read). The notebook's own `[env]`, including fetched secrets, still reaches its cells.
 
 ## Limits
 

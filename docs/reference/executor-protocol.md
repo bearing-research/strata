@@ -12,7 +12,7 @@ This page is the canonical specification. The [Distributed Workers](../notebook/
 | Notebook-cell protocol | `notebook-cell-v1` | `NOTEBOOK_EXECUTOR_PROTOCOL_VERSION` |
 | Notebook-cell transform ref | `notebook_cell@v1` | `NOTEBOOK_EXECUTOR_TRANSFORM_REF` |
 | Manifest format | `notebook-build-manifest@v1` | `NOTEBOOK_EXECUTOR_MANIFEST_VERSION` |
-| Output bundle | `notebook-output-bundle@v1` | (response header) |
+| Output bundle | `notebook-output-bundle@v1` | `schema_version` in the bundle's `manifest.json` |
 
 Workers reject mismatched protocol versions with `400 Bad Request`.
 
@@ -71,7 +71,7 @@ Liveness + capabilities probe. No auth.
 
 `locked_environments: true` says the worker runs a cell in the notebook's own locked environment when the request carries one (below). Strata sends that block only to a worker that advertises it; any other gets requests exactly as before. Answer it honestly: building that environment is a `uv sync --frozen`, so the reference worker reports it by probing for `uv` on its own `PATH` rather than claiming it unconditionally. A worker that claims it without `uv` is sent work it will refuse, and every notebook has a lockfile.
 
-A cell runs with the worker's environment minus the worker's own secrets: `strata-worker` takes its token and credentials out of the process environment at startup and holds them in memory, so a cell cannot read them from its own environment or through `/proc`. `STRATA_NOTEBOOK_HARNESS_ENV_ALLOWLIST` narrows the rest, as [the server's allowlist](../notebook/workers.md) narrows a cell there. A cell gets what its manifest carries.
+A cell runs with the worker's environment minus the worker's own secrets: `strata-worker` takes its token and credentials out of the process environment at startup and holds them in memory, so a cell cannot read them from its own environment or through `/proc`. `STRATA_NOTEBOOK_HARNESS_ENV_ALLOWLIST` narrows the rest, as [the server's allowlist](../deployment/service-mode.md#what-a-cell-can-read) narrows a cell there. A cell gets what its manifest carries.
 
 `languages` lists the cell languages the worker can run: `r` when `Rscript` is on its `PATH`. An R cell's request says `"language": "r"`, in `transform.params.language` on `POST /v1/execute`, `language` in `POST /v1/notebook-execute` metadata, and `params.language` in a manifest; a Python cell's request carries no `language`. The worker runs `harness.R` under `Rscript` with the same manifest a Python cell's harness gets, and answers an R cell with `500` and `Rscript is not installed on this worker` when it has no R, or `400` for a language it does not know. An R cell carries no `environment` block.
 
@@ -93,8 +93,6 @@ The worker runs the cell's harness with the interpreter of that environment:
 - It keeps one environment per `key` and interpreter build under `STRATA_WORKER_ENV_ROOT` (default `~/.strata/worker-envs`). An environment already there is reused, so a second cell with the same lock installs nothing.
 - A missing one is fetched from `STRATA_WORKER_ENV_REGISTRY_URL/<key>` as a `.tar.gz` of the environment directory when that is set, and otherwise built with `uv sync --frozen` from the lock. The worker needs `uv` on its `PATH` for that.
 - A lock that does not hash to `key`, or that cannot be installed, fails the cell with the reason (`500`).
-
-The output bundle's result then carries `environment: {"key", "installed"}`, where `key` names the environment directory and `installed` whether this request built or fetched it.
 
 **`503 Service Unavailable`** from any execution route means the worker is full: `max_concurrent` executions are in flight, or every GPU slot is taken. It carries `Retry-After` in seconds and is refused before any input is downloaded, so retrying costs the worker nothing.
 
@@ -149,7 +147,7 @@ The standard executor v1 envelope. Cells and inputs are pushed inline; the worke
 | `transform.params.timeout_seconds` | float | Execution timeout (default 30). |
 | `transform.params.mounts` | array of MountSpec | Filesystem mounts injected as `Path` variables (see [notebook.toml schema](notebook-toml.md#mounts-filesystem-mounts)). |
 | `transform.params.env` | object | Env vars set in the cell subprocess. |
-| `transform.params.mutation_defines` | array of string | Present only when non-empty. Variables the cell changes in place without rebinding. The harness re-serializes exactly these: without the list it sees an unchanged `id()` and stores nothing, and the downstream cell reads the value from before — under a provenance hash that says otherwise. |
+| `transform.params.mutation_defines` | array of string | Present only when non-empty. Variables the cell changes in place without rebinding. The harness re-serializes exactly these: without the list it sees an unchanged `id()` and stores nothing, and the downstream cell reads the value from before, under a provenance hash that says otherwise. |
 | `transform.params.tables` | object | Present only when non-empty. `{name: {uri, snapshot_id}}` for each `@table` the cell declares. Injected as `<name>` and `<name>_snapshot`; no catalog access is needed at the worker to read them. |
 | `inputs` | array of `{name, format}` | Each entry references a multipart field with the same `name`. `format` is the content type - `arrow/ipc`, `pickle/object`, `json/object`, `module/import`, `module/cell`, `module/cell-instance`, or `file/path` for an `@fetch`'s bytes, which the harness injects as a `pathlib.Path` to the written file instead of loading. |
 
@@ -158,20 +156,25 @@ The standard executor v1 envelope. Cells and inputs are pushed inline; the worke
 ```http
 HTTP/1.1 200 OK
 Content-Type: application/x-tar
-X-Strata-Output-Format: notebook-output-bundle@v1
+X-Strata-Executor-Protocol: v1
+X-Strata-Notebook-Executor-Protocol: notebook-cell-v1
 
-<gzipped tar bundle - see "Output bundle" below>
+<tar bundle - see "Output bundle" below>
 ```
+
+A cell that raises still answers `200`: the bundle's manifest says `"success": false` and carries the error. The server refuses a response whose protocol headers name a version other than these.
 
 **Errors:**
 
 | Status | When |
 | --- | --- |
-| `400` | Missing/invalid `metadata`, unsupported `protocol_version`, unsupported `transform.ref`, malformed input descriptor |
+| `400` | Missing/invalid `metadata`, unsupported `protocol_version`, unsupported `transform.ref`, malformed input descriptor, unknown cell `language` |
 | `401` | Token gate failed |
+| `408` | Cell execution exceeded `timeout_seconds` |
 | `413` | Input exceeds `STRATA_WORKER_MAX_INPUT_BYTES` (default 2 GiB) |
-| `502` | Internal subprocess crash or timeout fetching from an upstream URL |
-| `504` | Cell execution exceeded `timeout_seconds` |
+| `500` | The harness could not run: the locked environment failed to build, `Rscript` is missing for an R cell, or the subprocess crashed |
+| `502` | Pull model only: downloading an input, uploading the bundle, or finalizing failed |
+| `503` | The worker is full (see above) |
 
 ## `POST /v1/notebook-execute` (notebook-specific envelope)
 
@@ -205,6 +208,9 @@ For workloads where streaming inputs through Strata is a bandwidth bottleneck (l
 {
   "build_id": "01HZJV...",
   "metadata": {
+    "build_id": "01HZJV...",
+    "artifact_id": "nb_remote_9c7e22e3-8ed7-452c-885c-49574d7aa02f_01HZJV...",
+    "version": 1,
     "executor_ref": "notebook_cell@v1",
     "params": {
       "source": "result = big_df.summarize()",
@@ -226,15 +232,27 @@ For workloads where streaming inputs through Strata is a bandwidth bottleneck (l
     {
       "artifact_id": "abc123",
       "version": 4,
-      "url": "https://s3.amazonaws.com/strata-artifacts/abc123-v4.arrow?X-Amz-Signature=..."
+      "url": "https://strata.example.com/v1/artifacts/download?...&signature=...",
+      "expires_at": 1789455608.2
     }
   ],
   "output": {
-    "url": "https://s3.amazonaws.com/strata-artifacts/build-01HZJV.tar?X-Amz-Signature=..."
+    "url": "https://strata.example.com/v1/artifacts/upload?...&signature=...",
+    "max_bytes": 1073741824,
+    "expires_at": 1789455608.2
   },
-  "finalize_url": "https://strata.example.com/v1/builds/01HZJV/finalize"
+  "finalize_url": "https://strata.example.com/v1/builds/01HZJV/finalize?...",
+  "log_url": "https://strata.example.com/v1/builds/01HZJV/log?..."
 }
 ```
+
+Each URL is a signed capability that expires at `expires_at`; `output.max_bytes`
+caps the upload. Fetching a build's manifest again (`GET
+/v1/builds/{build_id}/manifest`) renews its lease and retires the upload and
+finalize URLs of every earlier manifest, so an executor still holding an old
+one can no longer publish. Each manifest's upload lands under its own key, and
+bytes that are never finalized are removed by the server's build runner once
+the build is over and the upload URL has expired.
 
 With `STRATA_ARTIFACT_PRESIGNED_URLS` on and an S3 blob store the server can sign
 for, the input URLs and `output.url` point straight at the object store: SigV4
@@ -267,7 +285,7 @@ carries the context in the request headers only.
 **Worker behavior:**
 
 1. For each entry in `metadata.params.input_specs`, look up its `uri` in `inputs[]` and stream-download from the signed URL to the input file, so an input is bounded by the worker's disk rather than its memory. Inputs that exceed `STRATA_WORKER_MAX_INPUT_BYTES` (declared via `Content-Length` or measured during stream) are rejected with `413`.
-2. Run the cell in a subprocess (same as `/v1/execute`).
+2. Run the cell in a subprocess (same as `/v1/execute`). While it runs, `POST` each chunk of console output as the raw body to `log_url` with `&stream=stdout` or `&stream=stderr` appended, so the notebook shows it live. `log_url` is optional: a worker that ignores it still delivers the console in the bundle.
 3. Upload the resulting output bundle to `output.url`. Without `output.fields`, `POST` the bundle as the raw body with `Content-Type: application/x-tar` (a Strata route). With `output.fields`, it is a presigned object-store upload: `POST` a multipart form containing each field plus the bundle as the `file` part (S3 answers `204`).
 4. `POST {"output_format": "notebook-output-bundle@v1"}` to `finalize_url`.
 5. Return the `finalize` response body to the caller.
@@ -291,7 +309,7 @@ one, may instead answer `202 Accepted` right away:
 {"job_url": "/v1/jobs/01HZJV"}
 ```
 
-`job_url` may be relative to the manifest URL, and must resolve to the same host and port the manifest went to — the server refuses one pointing anywhere else rather than poll a host of the worker's choosing with the worker's token. The server then polls
+`job_url` may be relative to the manifest URL, and must resolve to the same host and port the manifest went to: the server refuses one pointing anywhere else rather than poll a host of the worker's choosing with the worker's token. The server then polls
 `GET {job_url}`, with the same `Authorization` header, for:
 
 ```json
@@ -318,69 +336,78 @@ change.
 - **Scheme allowlist**: only `http://` and `https://`. Blocks `file://`, `data:`, `javascript:`, etc.
 - **IP blocklist**: the URL's hostname is resolved (via `getaddrinfo`); every returned address must be public. Loopback / link-local (incl. cloud metadata `169.254.169.254` / `fd00:ec2::254`) / private / multicast / reserved / unspecified addresses are rejected with `400`. IPv4-mapped IPv6 is unmapped before checking.
 
-Set `STRATA_WORKER_ALLOW_LOCAL_HOSTS=1` to bypass the IP check (tests and local-dev with 127.0.0.1 servers only).
+`STRATA_WORKER_ALLOWED_HOSTS` names hosts that pass the IP check anyway (comma-separated; a leading dot is a suffix), for a server on a private address. Set `STRATA_WORKER_ALLOW_LOCAL_HOSTS=1` to bypass the IP check for every host (tests and local-dev with 127.0.0.1 servers only).
+
+## `POST /v1/executions/{build_id}/cancel`
+
+Stops the harness running `build_id`, and every process it started, if it is still running. Answers `{"build_id": "...", "cancelled": true}`, or `"cancelled": false` when nothing by that id is running, which is a normal answer rather than an error: the cell may have finished before the cancel arrived. The server calls it when a remote cell is cancelled or times out.
+
+## `POST /execute` (worker-pool alias)
+
+The same handler as `/v1/execute-manifest`, at the path `strata-pool` dispatches to. The pool forwards the job body verbatim with no content type, and a build manifest is self-describing, so a manifest that arrives through the pool and one pushed directly are validated identically.
 
 ## Output bundle (`notebook-output-bundle@v1`)
 
-A gzipped tar archive containing:
+An uncompressed tar archive containing:
 
 ```
-manifest.json           - execution metadata + index of files below
-outputs/                - each defined variable as one file
-  result.arrow          - content_type "arrow/ipc"
-  log.json              - content_type "json/object"
-  model.pickle          - content_type "pickle/object"
-display/                - display-only outputs (figures, markdown blobs)
-  cell_default.png      - content_type "image/png"
-console.json            - { "stdout": "...", "stderr": "..." }
-error.json              - present only on failure
+manifest.json           - execution result + index of the files below
+stdout.txt              - the cell's stdout
+stderr.txt              - the cell's stderr
+files/                  - one file per serialized variable
+  result.arrow
+  log.json
+  __display__0.png      - the cell's last display, as variable "_"
 ```
 
 **`manifest.json`:**
 
 ```json
 {
-  "protocol_version": "notebook-output-bundle@v1",
-  "executor_ref": "notebook_cell@v1",
-  "duration_ms": 4280,
-  "outputs": [
-    {"name": "result", "content_type": "arrow/ipc", "file": "outputs/result.arrow", "bytes": 32812},
-    {"name": "log", "content_type": "json/object", "file": "outputs/log.json", "bytes": 412}
-  ],
-  "display": [
-    {"file": "display/cell_default.png", "content_type": "image/png", "bytes": 18234}
-  ],
-  "console": "console.json",
-  "hardware": {"cpus": 32, "memory_mb": 257000, "accelerators": ["…"], "cuda": "12.2"},
-  "error": null
+  "schema_version": "notebook-output-bundle@v1",
+  "success": true,
+  "variables": {
+    "result": {"content_type": "arrow/ipc", "file": "files/result.arrow", "...": "..."},
+    "log": {"content_type": "json/object", "file": "files/log.json", "...": "..."},
+    "_": {"content_type": "image/png", "file": "files/__display__0.png", "...": "..."}
+  },
+  "stdout_file": "stdout.txt",
+  "stderr_file": "stderr.txt",
+  "mutation_warnings": [],
+  "error": null,
+  "traceback": null,
+  "build_env": "cpython-3.13-linux-x86_64",
+  "hardware": {"cpus": 32, "memory_mb": 257000, "accelerators": ["..."], "cuda": "12.2"}
 }
 ```
+
+Each entry in `variables` is the serializer's metadata for that value, with
+`file` pointing inside the bundle. A variable that could not be serialized has
+`{"error", "type"}` and no file.
 
 `hardware` is the same object `/health` returns, echoed from the worker that ran the job. The notebook records it on each stored artifact's transform spec, beside `build_env`, and does not hash it: the machine type a cell asked for is part of its identity, while the exact accelerator and driver are kept for the record. That way identical machines of one class still share a cache.
 
-On cell errors, `error.json` is populated and `outputs` may be empty:
-
-```json
-{
-  "type": "RuntimeError",
-  "message": "model not loaded",
-  "traceback": "Traceback (most recent call last):\n  ...",
-  "exit_code": 1
-}
-```
+When the cell raises, the bundle is still returned with `"success": false`,
+`error` and `traceback` set, and `variables` usually empty.
 
 ## Error envelope
 
-All `4xx` and `5xx` responses use FastAPI's default JSON shape:
+Protocol and transport failures (`400`, `401`, `413`, `502`, `503`) use FastAPI's JSON shape:
 
 ```json
 {"detail": "<human-readable error message>"}
+```
+
+A failure to run the cell at all (`408`, `500`, and `400` for an unknown language) answers:
+
+```json
+{"success": false, "error": "<human-readable error message>"}
 ```
 
 Workers do not return structured error codes - the HTTP status is the machine-readable signal. Production deployments behind an authenticating proxy should not surface worker error messages to end users verbatim, since they may include path fragments or internal hostnames.
 
 ## Implementing a custom worker
 
-The minimum surface is `POST /v1/execute` + `GET /health`. The reference Python implementation is `create_notebook_executor_app()` in `src/strata/notebook/remote_executor.py` (~750 LOC) and is the canonical specification when in doubt.
+The minimum surface is `POST /v1/execute` + `GET /health`. The reference Python implementation is `create_notebook_executor_app()` in `src/strata/notebook/remote_executor.py` and is the canonical specification when in doubt.
 
 A custom worker doesn't have to run Python - it just has to accept the `notebook_cell@v1` envelope, execute the source somehow, and return the bundle. In practice almost all workers wrap a Python interpreter (since cells are Python) and the `strata-worker` script is the path of least resistance.

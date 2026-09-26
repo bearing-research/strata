@@ -15,7 +15,7 @@ as first-class cell behaviors rather than escape hatches.
 | Automatic DAG from variable references | Yes | Yes | Yes | No |
 | Persistent cell-output cache | **Automatic**, content-addressed per cell, survives restarts | **Opt-in** via `mo.cache` / `mo.lru_cache` / `mo.persistent_cache` decorators (or context managers) | None, Pluto guarantees the program state is described by the visible code, no hidden cache between sessions | None |
 | Distributed / remote execution | `# @worker gpu-fly` annotation dispatches a single cell to a registered worker | Via external orchestration (e.g. SkyPilot recipe); no per-cell remote annotation | Single-process | Single-process per kernel |
-| First-class AI/LLM cells | Prompt cells participate in the DAG and cache by template + inputs + model config | Marimo bills itself as an "AI-native editor": cell-level code generation, inline autocompletion, and a `marimo pair` agent skill for collaborative coding (added in v0.22.5). All editor-side; an LLM call inside a cell is just a regular Python expression. | No | No |
+| First-class AI/LLM cells | Prompt cells participate in the DAG and cache by template + inputs + model config | Marimo bills itself as an "AI-native editor": cell-level code generation, inline autocompletion, and a `marimo pair` agent skill for collaborative coding (added in v0.22.5). All editor-side; an LLM call inside a cell is a regular Python expression. | No | No |
 | Built-in SQL cells | Yes (named connections, schema discovery, snapshot-aware caching) | Yes (built-in SQL engine) | Community library | Community extensions |
 | Loop / iteration cells | Yes (`# @loop max_iter=N carry=var`), checkpointed per iteration | No | No | No |
 | Variant cells (tabbed alternatives sharing a DAG slot) | Yes | No | No | No |
@@ -35,8 +35,8 @@ of zero work. Re-running a notebook nobody's touched costs milliseconds.
 **Remote compute is a one-line annotation.** Marimo can be run on a remote
 host (SkyPilot integration, SSH port-forwarding), but the granularity is
 the whole notebook process. Strata's `# @worker gpu-fly` annotation routes
-a single cell, fitting one classifier on a GPU, fingerprinting one file
-on a high-memory box, without rewriting the rest of the pipeline.
+a single cell (fitting one classifier on a GPU, fingerprinting one file
+on a high-memory box) without rewriting the rest of the pipeline.
 
 **AI calls are first-class DAG nodes.** Marimo's "AI-native editor"
 framing - including the `marimo pair` agent skill they shipped in
@@ -61,7 +61,7 @@ the downstream cells that read them) per variant.
 as one `.py` file per cell, `notebook.toml` as the manifest, and all
 runtime state (display outputs, console snapshots, the artifact store) in
 a gitignored `.strata/` directory. `notebook.toml`'s `updated_at` only
-bumps on structural edits, adding/removing cells, changing workers:
+bumps on structural edits (adding or removing cells, changing workers),
 so re-running a cell never touches the tracked tree. Jupyter `.ipynb`
 files JSON-encode source, outputs (base64 images and all), and execution
 counts in the same blob; Marimo and Pluto avoid the JSON issue with one
@@ -135,6 +135,6 @@ Strata is the right fit when your notebook is:
   other artifact, with schema-constrained output and retry-on-validation.
 
 For light interactive exploration where the work is a few seconds per
-cell, you're not really paying for what Strata gives you, Jupyter and
+cell, you're not really paying for what Strata gives you; Jupyter and
 Marimo are fine. The value lands when your work is too expensive to
 re-run on every refresh.

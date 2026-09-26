@@ -52,6 +52,7 @@ from strata.fast_io import (
     IncrementalIpcMerger,
 )
 from strata.gc_tracker import install_gc_tracker
+from strata.health import _package_version
 from strata.json_types import JsonValue
 from strata.logging import (
     configure_logging,
@@ -1174,7 +1175,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Strata",
     description="Snapshot-aware serving layer for Iceberg tables",
-    version="0.2.0",
+    version=_package_version(),
     lifespan=lifespan,
 )
 

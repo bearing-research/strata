@@ -91,13 +91,13 @@ and CLI binary are both named `strata`.
 | `uv run strata run <notebook-dir>` | Headless notebook execution for CI / scheduled runs. See [Headless Runner](../notebook/cli.md). |
 | `uv run strata validate <notebook-dir>` | Static checks (schema, annotations, DAG) without executing. See [Headless Runner](../notebook/cli.md#strata-validate). |
 | `uv run strata new <name>` | Scaffold a notebook directory. See [Headless Runner](../notebook/cli.md#strata-new). |
-| `uv run strata cell <action>`, `strata dag`, `strata status`, `strata dep <action>` | Agent-facing notebook tooling: inspect (`cell list/show`, `dag`, `status`), execute (`cell run/test`), and author (`cell add/edit/rm/mv`, `dep add/rm`) - offline against a directory or `--server/--session` against a running server. See [Notebook CLI](../notebook/cli.md#inspecting-a-notebook-cell-dag-status). |
+| `uv run strata cell <action>`, `strata dag`, `strata status`, `strata dep <action>` | Agent-facing notebook tooling: inspect (`cell list/show`, `dag`, `status`), save a display output such as a plot to a file (`cell output`), execute (`cell run/test`), and author (`cell add/edit/rm/mv/annotate`, `dep add/rm`) - offline against a directory or `--server/--session` against a running server. See [Notebook CLI](../notebook/cli.md#inspecting-a-notebook-cell-dag-status). |
 | `uv run strata worker <action>` | Manage a notebook's workers: `ls`, `add`/`rm`/`default` (local, edits `notebook.toml`), and `add-ssh`/`rm-ssh` (provision + tunnel a worker over SSH, against a running server). See [Distributed Workers](../notebook/workers.md#run-cells-on-a-machine-you-can-ssh-to). |
 | `uv run strata agent <notebook-dir>` | One-command on-ramp for driving a notebook with a coding agent: create-or-open the notebook, start (or reuse) a server with the MCP endpoint enabled, open a session, write the `.mcp.json` + `CLAUDE.md` the agent needs, and attach the TUI (skip it with `--no-tui` and watch in the web UI instead). Then run `claude` in the notebook directory to drive it live. Needs the `[mcp]` extra, plus `[tui]` unless you pass `--no-tui`. See [Driving a notebook with a coding agent](../notebook/agent.md). |
 | `uv run strata export <notebook-dir>` | Render a notebook to markdown or HTML (add `--app-view` for a frozen dashboard snapshot), or write a portable snapshot zip with `--to snapshot`. See [Export](../notebook/export.md). |
 | `uv run strata import <file>` | Convert a Jupyter `.ipynb` into a Strata notebook directory, or unpack a snapshot zip back into one. See [Import](../notebook/import.md). |
 | `uv run strata artifact <cmd> [dir]` | Inspect a local artifact store without a server: `list`, `show <ref>`, `lineage <ref>` (renders model ← features ← scan ← table @ snapshot), `pull <ref> --to FILE`, `audit [name]` (registry history), `pending` (approval queue), `verify`. Also publishes and moves results: `publish` / `unpublish` (a link anyone can open), `promote` (copy an artifact and its chain to the team store and name it there), `export` (write a tabular artifact into an Iceberg table), `archive` (a self-contained bundle: page, bytes, manifest, README). `<ref>` is a name, `id@v=N`, or bare id. |
-| `uv run strata migrate --to-dsn <dsn>` | Copy artifact-store metadata from SQLite to Postgres. Setting `STRATA_ARTIFACT_METADATA_DSN` alone starts an empty store; this carries an existing one across. Metadata only — blobs are configured separately. |
+| `uv run strata migrate --to-dsn <dsn>` | Copy artifact-store metadata from SQLite to Postgres. Setting `STRATA_ARTIFACT_METADATA_DSN` alone starts an empty store; this carries an existing one across. Metadata only: blobs are configured separately. |
 | `uv run strata apikey <cmd>` | Mint, list and revoke API keys for a server running with `auth_mode="api_key"`: `create`, `list` (never shows secrets), `revoke <id>`. |
 | `uv run strata env gc` | Remove shared environments no notebook links to. Only relevant with the shared environment backend. See [Environments](../notebook/environment.md). |
 | `uv run strata watch [dir\|--session]` | Attach the read-only terminal viewer to a live notebook session without writing any config (unlike `strata agent`). Needs the `[tui]` extra. See [Terminal Viewer](../notebook/tui.md). |
@@ -124,8 +124,8 @@ uv run pytest
 # Format and lint
 uv run pre-commit run --all-files
 
-# Type check
-uv run ty check src/
+# Type check (scope is set in pyproject.toml, as in CI)
+uv run ty check
 
 # Start frontend dev server (hot reload, proxies to backend)
 cd frontend && npm run dev
@@ -133,16 +133,17 @@ cd frontend && npm run dev
 
 ### Integration test dependencies
 
-A subset of integration tests needs a real PostgreSQL instance (the
-Iceberg SQL catalog tests). A throwaway Postgres container is shipped
+The end-to-end integration script needs a real PostgreSQL instance for
+its Iceberg SQL catalog. A throwaway Postgres container is shipped
 as `docker-compose.test.yml`:
 
 ```bash
 # Start the test Postgres (port 5432)
 docker compose -f docker-compose.test.yml up -d
 
-# Run the integration suite
-uv run pytest tests/test_*_integration.py
+# Run the integration script against it (starts its own server)
+STRATA_CATALOG_URI=postgresql://strata:strata@localhost:5432/iceberg_catalog \
+  uv run python scripts/integration_test.py --start-server
 
 # Tear it down
 docker compose -f docker-compose.test.yml down

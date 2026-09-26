@@ -22,13 +22,18 @@ time** and you want re-runs to track those changes automatically:
 If your input is a fixed file, a plain mount (`# @mount`) or a hard-coded path
 is simpler. `@table` earns its keep precisely when the snapshot can move.
 
+To query catalog tables in SQL rather than scan them from Python, a DuckDB
+[SQL cell over the lake](cells.md#duckdb-over-the-lake) pins every table it
+reads the same way, with no `@table` line.
+
 ## Prerequisites
 
-- A running Strata server in **personal mode** (the embedded `scan@v1`
-  transform runs there): `uv run python -m strata` serves the notebook UI on
-  `http://localhost:8765`.
-- `pyiceberg` available in your notebook environment (it ships with the
-  `[notebook]` extra).
+- A running Strata server: `uv run python -m strata` (personal mode, the
+  default) serves the notebook UI on `http://localhost:8765`.
+- `pyiceberg` for the two setup scripts below. It is a core Strata dependency,
+  so `uv run python` in the Strata project has it. The notebook's own
+  environment does not need it: the server resolves the snapshot and runs the
+  scan.
 
 ## Step 1 - Build a warehouse
 
@@ -70,21 +75,20 @@ uv run python setup_warehouse.py
 
 The **table URI** is `<warehouse>#<namespace>.<table>` - here
 `file:///tmp/strata-demo/warehouse#shop.orders`. This is the same URI format
-`client.materialize` accepts.
+`client.materialize` accepts. A table in a catalog the server names under
+`STRATA_CATALOGS` is written `<catalog>:<namespace>.<table>` instead (see the
+[`@table` reference](annotations.md#table)).
 
 ## Step 2 - Declare a lake-aware cell
 
-In a notebook cell, declare the table and scan it. The `@table` annotation
-injects two variables: `orders` (the table URI) and `orders_snapshot` (the
-resolved snapshot id).
+In a notebook cell, declare the table and scan it with the cell's
+[ambient `strata` client](cells.md#the-ambient-strata-client), which is already
+bound to the server. The `@table` annotation injects two variables: `orders`
+(the table URI) and `orders_snapshot` (the resolved snapshot id).
 
 ```python
 # @table orders file:///tmp/strata-demo/warehouse#shop.orders
-from strata_client import StrataClient
-
-client = StrataClient(base_url="http://127.0.0.1:8765")
-
-scan = client.materialize(
+scan = strata.materialize(
     inputs=[orders],
     transform={"executor": "scan@v1", "params": {"snapshot_id": orders_snapshot}},
     name="shop/orders-raw",
@@ -181,7 +185,7 @@ inputs change; `@table` adds the lake snapshot to the mix.
   the cell is treated as stale rather than crashing; if it's still unreachable
   at execution time, the run fails with a clear error.
 - **The embedded scan runs in-process.** `scan@v1` is handled by the server
-  itself in both modes -- it is resolved before any executor dispatch, so
+  itself in both modes: it is resolved before any executor dispatch, so
   scanning a table needs no registered executor and none is consulted.
 - **Merge-on-read tables are refused.** A table whose snapshot carries
   positional or equality delete files - what Spark or Flink `MERGE` / `DELETE`

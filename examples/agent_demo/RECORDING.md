@@ -1,8 +1,9 @@
 # Recording the agent demo GIF
 
 The 20-second clip that shows a coding agent building this notebook live, and
-Strata reusing the cached model when only the evaluation changes. This is the
-GIF in the top-level README.
+Strata reusing the cached model when only the evaluation changes. It is not
+recorded yet; the export goes to `docs/assets/agent-demo.gif`, and until then
+the top-level README shows `tui-agent-live.gif`.
 
 ## Setup
 
@@ -26,7 +27,7 @@ strata agent .
 ```
 
 This starts a server with the MCP endpoint on, opens a session, writes
-`.mcp.json` + `CLAUDE.md`, and attaches the read-only TUI. Leave it running , 
+`.mcp.json` + `CLAUDE.md`, and attaches the read-only TUI. Leave it running:
 this is what the viewer watches light up.
 
 **Left pane, the agent:**

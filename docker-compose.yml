@@ -13,7 +13,7 @@ services:
     ports:
       - "8765:8765"
     volumes:
-      # Mount the demo warehouse (created by setup script)
+      # Mount the demo warehouse (create it with `uv run python examples/setup_demo.py`)
       - ./demo-warehouse:/data/warehouse:ro
       # Persist Strata state (cache + metadata + artifacts) between restarts
       - strata-state:/home/strata/.strata

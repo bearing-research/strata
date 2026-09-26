@@ -75,9 +75,16 @@ The `fly.toml` at the repo root configures:
 [env]
   STRATA_DEPLOYMENT_MODE = "personal"
   STRATA_ALLOW_REMOTE_CLIENTS_IN_PERSONAL = "true"
+  STRATA_PERSONAL_MODE_USER_HEADER = "Cf-Access-Authenticated-User-Email"
   STRATA_NOTEBOOK_PYTHON_VERSIONS = '["3.12","3.13"]'
   UV_PYTHON_DOWNLOADS = "automatic"
 ```
+
+`STRATA_PERSONAL_MODE_USER_HEADER` turns on per-user notebook scoping when
+Cloudflare Access (or another authenticating proxy) injects that header; see
+[Sharing personal mode with a small group](modes.md#sharing-personal-mode-with-a-small-group).
+Without a proxy in front, requests carry no such header and the instance
+behaves as single-user.
 
 `STRATA_ALLOW_REMOTE_CLIENTS_IN_PERSONAL` is what lets personal-mode
 bind to `0.0.0.0` instead of loopback only - without it, Strata
