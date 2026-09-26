@@ -1057,6 +1057,26 @@ class StrataConfig(BaseSettings):
                     "its bytes; set artifact_blob_backend to s3, gcs, or azure)"
                 )
 
+            # The artifact store is created only when artifact_dir is set, even
+            # when its metadata and its blobs both live elsewhere and nothing
+            # durable is kept under it. Configuring a shared database or an
+            # object store without it booted cleanly, and then every artifact
+            # route answered 404 or 500.
+            artifact_store_configured = (
+                self.artifact_metadata_dsn is not None
+                or self.artifact_blob_backend != "local"
+                or self.service_writes_enabled
+            )
+            if artifact_store_configured and self.artifact_dir is None:
+                conflicts.append(
+                    "an artifact store (artifact_metadata_dsn, a non-local "
+                    "artifact_blob_backend or service_writes_enabled) without "
+                    "artifact_dir (the store is only created when artifact_dir is "
+                    "set, so every artifact route would fail; set artifact_dir to "
+                    "a node-local directory, which holds nothing durable when the "
+                    "metadata and blobs are shared)"
+                )
+
             # ACL rules are only evaluated when a principal was authenticated.
             # Configured rules without auth would be silently ignored — an
             # operator who wrote a deny rule would believe they were protected.

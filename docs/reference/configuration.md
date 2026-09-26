@@ -185,7 +185,7 @@ credential.
 
 | Variable                          | Default     | Description                      |
 | --------------------------------- | ----------- | -------------------------------- |
-| `STRATA_ARTIFACT_DIR`             | `None`      | Artifact store directory         |
+| `STRATA_ARTIFACT_DIR`             | `None`      | Artifact store directory. In service mode the store exists only when this is set, even when the metadata DSN and a blob backend hold everything, and startup refuses a DSN, a non-local blob backend or service writes without it |
 | `STRATA_ARTIFACT_ZOMBIE_BUILD_TIMEOUT_SECONDS` | `3600.0` | Builds stuck in `building` longer than this are demoted to `failed` at startup |
 | `STRATA_ARTIFACT_GC_INTERVAL_SECONDS` | unset (off) | Run artifact garbage collection on this interval. Never collects anything named, latest, published or pinned, or anything those depend on. See [Lifecycle](../deployment/lifecycle.md#cleaning-up-the-core-artifact-store) |
 | `STRATA_ARTIFACT_GC_MAX_AGE_DAYS` | `7.0` | Minimum age of a version the scheduled sweep may collect |

@@ -87,6 +87,32 @@ class TestSharedMetadataRequiresSharedBlobs:
         )
         assert config.artifact_metadata_dsn is not None
 
+    @pytest.mark.parametrize(
+        "store",
+        [
+            {
+                "artifact_metadata_dsn": "postgresql://u:p@db/strata",
+                "artifact_blob_backend": "s3",
+                "artifact_s3_bucket": "strata-artifacts",
+            },
+            {"artifact_blob_backend": "s3", "artifact_s3_bucket": "strata-artifacts"},
+            {"service_writes_enabled": True},
+        ],
+    )
+    def test_a_configured_store_without_artifact_dir_is_rejected(self, store):
+        # The store is only created when artifact_dir is set, so this booted
+        # and then answered every artifact route with a 404 or a 500.
+        config = self._service(**store)
+        del config["artifact_dir"]
+        with pytest.raises(ValueError, match="without artifact_dir"):
+            StrataConfig(**config)
+
+    def test_service_mode_without_any_store_needs_no_artifact_dir(self):
+        # A scan-only service deployment keeps no artifacts at all.
+        config = self._service()
+        del config["artifact_dir"]
+        assert StrataConfig(**config).artifact_dir is None
+
     def test_local_blobs_alone_stay_fine(self):
         # The rule is about the *combination*; local blobs without a shared
         # database is the ordinary single-node deployment.

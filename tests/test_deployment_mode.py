@@ -437,6 +437,7 @@ class TestModeCoherence:
         """service_writes_enabled is coherent with trusted-proxy auth."""
         config = StrataConfig(
             cache_dir=tmp_path / "cache",
+            artifact_dir=tmp_path / "artifacts",
             deployment_mode="service",
             auth_mode="trusted_proxy",
             proxy_token="t",
