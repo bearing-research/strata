@@ -713,8 +713,8 @@ def new_main(args: argparse.Namespace) -> int:
 
     Scaffolds a notebook directory (notebook.toml + pyproject.toml +
     cells/) so external tools and coding agents don't hand-roll the
-    TOML (issue #114). Idempotent on an existing notebook directory:
-    the notebook ID and any existing cells are preserved.
+    TOML (issue #114). Idempotent on an existing notebook directory: the
+    notebook is left as it is, and only missing scaffolding is added.
     """
     from strata.notebook.writer import create_notebook
 

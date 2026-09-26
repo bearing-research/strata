@@ -247,6 +247,12 @@ environment pinned below them has to move before it can install 0.8.0.
 
 ### Fixed
 
+- **`strata new` on an existing notebook leaves it as it is.** It kept the
+  notebook's id and cells but rewrote `notebook.toml` without its env,
+  workers, mounts, connections, AI settings or variant groups, and
+  `pyproject.toml` without its dependencies. A `notebook.toml` it could not
+  parse was replaced outright, under a new id. It now adds only missing
+  scaffolding.
 - **An agent's edit honours the soft lock.** Edits through MCP and through the
   built-in assistant skipped the check REST and the WebSocket make, so an agent
   could overwrite a cell someone changed moments ago, and its own change held

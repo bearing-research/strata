@@ -24,7 +24,6 @@ from packaging.requirements import Requirement
 
 from strata.notebook.layout import write_gitignore
 from strata.notebook.models import (
-    CellMeta,
     ConnectionSpec,
     MalformedConnection,
     MountSpec,
@@ -535,6 +534,11 @@ def create_notebook(
 ) -> Path:
     """Create a new notebook directory with notebook.toml and pyproject.toml.
 
+    On a directory that already holds a notebook this changes nothing but
+    missing scaffolding (``cells/``, a ``.gitignore``): its configuration,
+    dependencies and environment are left as they are, and ``owner`` and
+    ``project_mount`` do not apply.
+
     Args:
         parent_dir: Parent directory for the notebook
         name: Notebook name (used for folder and notebook name)
@@ -575,48 +579,17 @@ def create_notebook(
     cells_dir = notebook_dir / "cells"
     cells_dir.mkdir(exist_ok=True)
 
-    # Preserve existing notebook ID if notebook.toml already exists.
-    # Overwriting the ID would orphan all artifacts keyed to the old ID.
-    existing_toml_path = notebook_dir / "notebook.toml"
-    existing_notebook_id = None
-    existing_created_at = None
-    existing_cells: list[CellMeta] = []
-    if existing_toml_path.exists():
-        try:
-            with open(existing_toml_path, "rb") as f:
-                raw = tomllib.load(f)
-            existing_notebook_id = raw.get("notebook_id")
-            raw_created = raw.get("created_at")
-            if isinstance(raw_created, datetime):
-                existing_created_at = raw_created
-            for c in raw.get("cells", []):
-                if isinstance(c, dict) and "id" in c and "file" in c:
-                    existing_cells.append(
-                        CellMeta(
-                            id=c["id"],
-                            file=c["file"],
-                            language=c.get("language", "python"),
-                            order=c.get("order", 0),
-                        )
-                    )
-        except Exception:
-            pass
+    # An existing notebook is left exactly as it is. Rewriting its
+    # notebook.toml from what this function knows kept the id, the owner and
+    # each cell's file, and dropped its workers, env, mounts, connections, ai
+    # settings, variant groups and every per-cell field; the pyproject.toml
+    # rewrite below dropped its dependencies. Only missing scaffolding is added.
+    if (notebook_dir / "notebook.toml").exists():
+        if write_gitignore_file:
+            write_gitignore(notebook_dir)
+        return notebook_dir
 
-    notebook_id = existing_notebook_id or str(uuid.uuid4())
-
-    # Preserve owner if the existing notebook.toml had one — only stamp the
-    # incoming owner on a genuinely new notebook so re-creating with a
-    # different identity doesn't silently take over someone else's work.
-    existing_owner: str | None = None
-    if existing_toml_path.exists():
-        try:
-            with open(existing_toml_path, "rb") as f:
-                raw_existing = tomllib.load(f)
-            raw_owner = raw_existing.get("owner")
-            if isinstance(raw_owner, str) and raw_owner:
-                existing_owner = raw_owner
-        except Exception:
-            pass
+    notebook_id = str(uuid.uuid4())
 
     # Optional project mount: a pinned read-only mount of the project dir, so
     # cells read project files as `open(<name> / "file")` without absolute paths.
@@ -633,10 +606,10 @@ def create_notebook(
     notebook_toml = NotebookToml(
         notebook_id=notebook_id,
         name=name,
-        owner=existing_owner if existing_owner is not None else owner,
-        created_at=existing_created_at or now,
+        owner=owner,
+        created_at=now,
         updated_at=now,
-        cells=existing_cells,
+        cells=[],
         mounts=mounts,
     )
     write_notebook_toml(notebook_dir, notebook_toml)
