@@ -2679,20 +2679,20 @@ alphanumeric / <code>_</code> / <code>-</code> characters and hashed into:</p>
 <h2 id="acls">ACLs<a class="headerlink" href="#acls" title="Permanent link">&para;</a></h2>
 <p><code>acl_config</code> is a <code>pyproject.toml</code> block:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="k">[tool.strata.acl_config]</span>
-<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="c1"># Action when no rule matches. Defaults to &quot;allow&quot; -- set it to &quot;deny&quot;</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="c1"># Action when no rule matches. Defaults to "allow" -- set it to "deny"</span>
 <a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="c1"># if you want an allowlist, or every table not named below stays readable.</span>
-<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="n">default</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;deny&quot;</span>
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="n">default</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"deny"</span>
 <a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a>
 <a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="c1"># Deny rules evaluate first; explicit denies cannot be bypassed.</span>
-<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a><span class="c1"># &quot;*:&quot; covers every address of a table (see the configuration reference).</span>
+<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a><span class="c1"># "*:" covers every address of a table (see the configuration reference).</span>
 <a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a><span class="k">[[tool.strata.acl_config.deny]]</span>
-<a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a><span class="n">principal</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;guest@example.com&quot;</span>
-<a id="__codelineno-5-10" name="__codelineno-5-10" href="#__codelineno-5-10"></a><span class="n">tables</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;*:internal.*&quot;</span><span class="p">]</span>
+<a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a><span class="n">principal</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"guest@example.com"</span>
+<a id="__codelineno-5-10" name="__codelineno-5-10" href="#__codelineno-5-10"></a><span class="n">tables</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s2">"*:internal.*"</span><span class="p">]</span>
 <a id="__codelineno-5-11" name="__codelineno-5-11" href="#__codelineno-5-11"></a>
 <a id="__codelineno-5-12" name="__codelineno-5-12" href="#__codelineno-5-12"></a><span class="k">[[tool.strata.acl_config.allow]]</span>
-<a id="__codelineno-5-13" name="__codelineno-5-13" href="#__codelineno-5-13"></a><span class="n">principal</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;analyst@example.com&quot;</span>
-<a id="__codelineno-5-14" name="__codelineno-5-14" href="#__codelineno-5-14"></a><span class="n">tenant</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;marketing&quot;</span><span class="w">          </span><span class="c1"># optional; omit to match any tenant</span>
-<a id="__codelineno-5-15" name="__codelineno-5-15" href="#__codelineno-5-15"></a><span class="n">tables</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;file:marketing.*&quot;</span><span class="p">,</span><span class="w"> </span><span class="s2">&quot;file:public.*&quot;</span><span class="p">]</span>
+<a id="__codelineno-5-13" name="__codelineno-5-13" href="#__codelineno-5-13"></a><span class="n">principal</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"analyst@example.com"</span>
+<a id="__codelineno-5-14" name="__codelineno-5-14" href="#__codelineno-5-14"></a><span class="n">tenant</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"marketing"</span><span class="w">          </span><span class="c1"># optional; omit to match any tenant</span>
+<a id="__codelineno-5-15" name="__codelineno-5-15" href="#__codelineno-5-15"></a><span class="n">tables</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s2">"file:marketing.*"</span><span class="p">,</span><span class="w"> </span><span class="s2">"file:public.*"</span><span class="p">]</span>
 </code></pre></div>
 <p>A rule matches when the principal matches (<code>*</code> matches any, and is the
 default), the tenant matches if the rule names one, and <strong>at least one</strong> table
@@ -2807,13 +2807,13 @@ directly - <code>put</code>, <code>set_name</code>, <code>set_alias</code>, tags
 <p>The proxy injects <code>X-Strata-Scopes: artifacts:write</code> for principals allowed to
 publish. The publish → consume loop then looks like:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="c1"># Researcher A (team-a, artifacts:write) publishes a processed dataset:</span>
-<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="n">strata</span><span class="o">.</span><span class="n">put</span><span class="p">(</span><span class="n">inputs</span><span class="o">=</span><span class="p">[],</span> <span class="n">transform</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;ref&quot;</span><span class="p">:</span> <span class="s2">&quot;clean@v1&quot;</span><span class="p">},</span> <span class="n">data</span><span class="o">=</span><span class="n">cleaned</span><span class="p">,</span>
-<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a>           <span class="n">name</span><span class="o">=</span><span class="s2">&quot;team/cleaned-events&quot;</span><span class="p">)</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="n">strata</span><span class="o">.</span><span class="n">put</span><span class="p">(</span><span class="n">inputs</span><span class="o">=</span><span class="p">[],</span> <span class="n">transform</span><span class="o">=</span><span class="p">{</span><span class="s2">"ref"</span><span class="p">:</span> <span class="s2">"clean@v1"</span><span class="p">},</span> <span class="n">data</span><span class="o">=</span><span class="n">cleaned</span><span class="p">,</span>
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a>           <span class="n">name</span><span class="o">=</span><span class="s2">"team/cleaned-events"</span><span class="p">)</span>
 <a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a>
 <a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="c1"># Any teammate (team-a) resolves the name to its current artifact and reads it:</span>
-<a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a><span class="n">info</span> <span class="o">=</span> <span class="n">strata</span><span class="o">.</span><span class="n">resolve_name</span><span class="p">(</span><span class="s2">&quot;team/cleaned-events&quot;</span><span class="p">)</span>   <span class="c1"># {artifact_uri, version, …}</span>
+<a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a><span class="n">info</span> <span class="o">=</span> <span class="n">strata</span><span class="o">.</span><span class="n">resolve_name</span><span class="p">(</span><span class="s2">"team/cleaned-events"</span><span class="p">)</span>   <span class="c1"># {artifact_uri, version, …}</span>
 <a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a>
-<a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a><span class="c1"># Other-team principals (team-b) cannot resolve team-a&#39;s name - tenant isolation.</span>
+<a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a><span class="c1"># Other-team principals (team-b) cannot resolve team-a's name - tenant isolation.</span>
 </code></pre></div>
 <h3 id="connecting-a-notebook-to-the-shared-store">Connecting a notebook to the shared store<a class="headerlink" href="#connecting-a-notebook-to-the-shared-store" title="Permanent link">&para;</a></h3>
 <p>Each researcher runs their own notebook, which <strong>computes locally</strong> but points
@@ -2821,10 +2821,10 @@ its ambient <code>strata</code> client at the central store via
 <code>STRATA_NOTEBOOK_REMOTE_STORE_URL</code>. The notebook's own cell outputs and
 provenance stay local; only what a cell explicitly publishes
 (<code>strata.put(name=…)</code>) goes to the shared store.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="c1"># On each researcher&#39;s notebook server:</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="c1"># On each researcher's notebook server:</span>
 <a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="nv">STRATA_NOTEBOOK_REMOTE_STORE_URL</span><span class="o">=</span>https://store.team.example
 <a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="c1"># Auth the remote store needs (set via env, not committed config):</span>
-<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="nv">STRATA_NOTEBOOK_REMOTE_STORE_HEADERS</span><span class="o">=</span><span class="s1">&#39;{&quot;X-Strata-Proxy-Token&quot;:&quot;…&quot;,&quot;X-Strata-Principal&quot;:&quot;alice@team&quot;,&quot;X-Tenant-ID&quot;:&quot;team-a&quot;,&quot;X-Strata-Scopes&quot;:&quot;artifacts:write&quot;}&#39;</span>
+<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="nv">STRATA_NOTEBOOK_REMOTE_STORE_HEADERS</span><span class="o">=</span><span class="s1">'{"X-Strata-Proxy-Token":"…","X-Strata-Principal":"alice@team","X-Tenant-ID":"team-a","X-Strata-Scopes":"artifacts:write"}'</span>
 </code></pre></div>
 <p>In a fully proxy-fronted setup the notebook's requests instead flow through the
 same auth proxy, which injects identity, and <code>notebook_remote_store_headers</code>
@@ -2849,7 +2849,7 @@ miss</strong> the notebook asks the shared store whether anyone has already run 
 exact computation, and on a hit it fetches the result instead of running the
 cell. After a cell does run, its outputs are offered back to the store so the
 next teammate hits.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="c1"># On each researcher&#39;s notebook server, alongside the two settings above:</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="c1"># On each researcher's notebook server, alongside the two settings above:</span>
 <a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="nv">STRATA_NOTEBOOK_TEAM_CACHE_ENABLED</span><span class="o">=</span><span class="nb">true</span>
 </code></pre></div>
 <p>It works because a cell's provenance key -
@@ -2973,7 +2973,7 @@ where the tab reads, and a protected alias filed from one person's server gets
 approved from another's.</p>
 <p>A cell can promote one of its own upstream results without leaving the
 notebook, naming it the way the cell reads it:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="n">strata</span><span class="o">.</span><span class="n">promote</span><span class="p">(</span><span class="s2">&quot;rows&quot;</span><span class="p">,</span> <span class="n">name</span><span class="o">=</span><span class="s2">&quot;taxi/rows&quot;</span><span class="p">,</span> <span class="n">alias</span><span class="o">=</span><span class="s2">&quot;champion&quot;</span><span class="p">)</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="n">strata</span><span class="o">.</span><span class="n">promote</span><span class="p">(</span><span class="s2">"rows"</span><span class="p">,</span> <span class="n">name</span><span class="o">=</span><span class="s2">"taxi/rows"</span><span class="p">,</span> <span class="n">alias</span><span class="o">=</span><span class="s2">"champion"</span><span class="p">)</span>
 </code></pre></div>
 <p><code>off</code> is the whole feature off without unsetting
 <code>STRATA_NOTEBOOK_REMOTE_STORE_URL</code>, which a cell's ambient <code>strata</code> client
@@ -2983,7 +2983,7 @@ still needs.</p>
 outside Strata read it as a table and a notebook reads it with <code>@table</code>:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a>strata<span class="w"> </span>artifact<span class="w"> </span>promote<span class="w"> </span>nb_taxi_cell_c1_var_features<span class="w"> </span><span class="se">\</span>
 <a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a><span class="w">  </span>--to<span class="w"> </span>https://store.example<span class="w"> </span>--name<span class="w"> </span>taxi/features<span class="w"> </span>--alias<span class="w"> </span>champion<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a><span class="w">  </span>--table<span class="w"> </span><span class="s2">&quot;s3://lake/warehouse#taxi.features&quot;</span>
+<a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a><span class="w">  </span>--table<span class="w"> </span><span class="s2">"s3://lake/warehouse#taxi.features"</span>
 </code></pre></div>
 <p>The team store does the writing, with its own catalog settings, since that is
 where the bytes and the warehouse credentials are. <code>--table</code> takes the same

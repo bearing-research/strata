@@ -2313,7 +2313,7 @@ terminal viewer; skip it if you plan to watch in a browser and pass <code>--no-t
 <div class="tabbed-set tabbed-alternate" data-tabs="1:2"><input checked="checked" id="__tabbed_1_1" name="__tabbed_1" type="radio" /><input id="__tabbed_1_2" name="__tabbed_1" type="radio" /><div class="tabbed-labels"><label for="__tabbed_1_1">From PyPI</label><label for="__tabbed_1_2">From source</label></div>
 <div class="tabbed-content">
 <div class="tabbed-block">
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>uv<span class="w"> </span>tool<span class="w"> </span>install<span class="w"> </span><span class="s2">&quot;strata-notebook[mcp,tui]&quot;</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>uv<span class="w"> </span>tool<span class="w"> </span>install<span class="w"> </span><span class="s2">"strata-notebook[mcp,tui]"</span>
 </code></pre></div>
 </div>
 <div class="tabbed-block">
@@ -2349,21 +2349,21 @@ interface. Everything below them is an ordinary HTTP server and a session
 id, so any agent can drive the same session two ways.</p>
 <p><code>strata agent</code> prints the session id when it starts. To find it again, or
 to attach to a server someone else started, ask the server:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>curl<span class="w"> </span>-s<span class="w"> </span>http://127.0.0.1:8765/v1/notebooks/sessions<span class="w"> </span><span class="p">|</span><span class="w"> </span>jq<span class="w"> </span>-r<span class="w"> </span><span class="s1">&#39;.sessions[] | &quot;\(.session_id)  \(.path)&quot;&#39;</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>curl<span class="w"> </span>-s<span class="w"> </span>http://127.0.0.1:8765/v1/notebooks/sessions<span class="w"> </span><span class="p">|</span><span class="w"> </span>jq<span class="w"> </span>-r<span class="w"> </span><span class="s1">'.sessions[] | "\(.session_id)  \(.path)"'</span>
 </code></pre></div>
 <p>If the notebook is not open yet, open it. This is the one step an agent
 cannot do through the MCP tools, which only see sessions that already
 exist:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="nv">SID</span><span class="o">=</span><span class="k">$(</span>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>http://127.0.0.1:8765/v1/notebooks/open<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="w">  </span>-H<span class="w"> </span><span class="s1">&#39;content-type: application/json&#39;</span><span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="w">  </span>-d<span class="w"> </span><span class="s1">&#39;{&quot;path&quot;: &quot;./my-notebook&quot;}&#39;</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>jq<span class="w"> </span>-r<span class="w"> </span>.session_id<span class="k">)</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="w">  </span>-H<span class="w"> </span><span class="s1">'content-type: application/json'</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="w">  </span>-d<span class="w"> </span><span class="s1">'{"path": "./my-notebook"}'</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>jq<span class="w"> </span>-r<span class="w"> </span>.session_id<span class="k">)</span>
 </code></pre></div>
 <p>Then either point the agent's MCP client at <code>http://127.0.0.1:8765/mcp</code>
 (streamable HTTP, the same endpoint <code>.mcp.json</code> names), or drive the
 session from the CLI with the selectors the
 <a href="../cli/#working-against-a-live-session-server-session">CLI guide</a> covers:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>strata<span class="w"> </span>status<span class="w">    </span>--server<span class="w"> </span>http://127.0.0.1:8765<span class="w"> </span>--session<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$SID</span><span class="s2">&quot;</span>
-<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>strata<span class="w"> </span>cell<span class="w"> </span>add<span class="w">  </span>--server<span class="w"> </span>http://127.0.0.1:8765<span class="w"> </span>--session<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$SID</span><span class="s2">&quot;</span><span class="w"> </span>-c<span class="w"> </span><span class="s1">&#39;print(1 + 1)&#39;</span><span class="w"> </span>--run
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>strata<span class="w"> </span>status<span class="w">    </span>--server<span class="w"> </span>http://127.0.0.1:8765<span class="w"> </span>--session<span class="w"> </span><span class="s2">"</span><span class="nv">$SID</span><span class="s2">"</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>strata<span class="w"> </span>cell<span class="w"> </span>add<span class="w">  </span>--server<span class="w"> </span>http://127.0.0.1:8765<span class="w"> </span>--session<span class="w"> </span><span class="s2">"</span><span class="nv">$SID</span><span class="s2">"</span><span class="w"> </span>-c<span class="w"> </span><span class="s1">'print(1 + 1)'</span><span class="w"> </span>--run
 </code></pre></div>
 <p>Both routes reach the session the human is watching. A path-based
 <code>strata … ./my-notebook</code> does not: it opens its own offline session on the

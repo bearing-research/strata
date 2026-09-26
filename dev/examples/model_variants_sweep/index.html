@@ -2042,7 +2042,7 @@ compare them all in one downstream cell.</p>
 <strong>sweep mode</strong> (<code>mode = "sweep"</code> in <code>notebook.toml</code>), all three run on every
 execution, and the downstream <code>compare</code> cell receives <code>preds</code> as a
 <code>{variant_name: predictions}</code> dict:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>accuracy by variant: {&#39;alternating&#39;: 0.5, &#39;always_one&#39;: 0.6, &#39;majority&#39;: 0.6}
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>accuracy by variant: {'alternating': 0.5, 'always_one': 0.6, 'majority': 0.6}
 </code></pre></div>
 <h2 id="fan-out-with-per_variant">Fan-out with <code>@per_variant</code><a class="headerlink" href="#fan-out-with-per_variant" title="Permanent link">&para;</a></h2>
 <p>The <code>compare</code> cell consumes the whole dict at once. The <code>score</code> cell shows the
@@ -2051,7 +2051,7 @@ other option, <strong>fan-out</strong>: <code># @per_variant</code> runs it once
 is scored independently (in a real workload, each could carry <code># @worker gpu</code>
 and run as its own job). A plain downstream cell, <code>best</code>, then collapses the
 per-variant <code>accuracy</code> back to a dict and picks the winner:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>accuracy by variant: {&#39;alternating&#39;: 0.5, &#39;always_one&#39;: 0.6, &#39;majority&#39;: 0.6}
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>accuracy by variant: {'alternating': 0.5, 'always_one': 0.6, 'majority': 0.6}
 <a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>best model: always_one
 </code></pre></div>
 <p>Same numbers as <code>compare</code>, produced by fanning the scoring out first. See
@@ -2075,7 +2075,7 @@ a shared downstream; switch is for <em>picking</em> one. See
 <h2 id="baseline">baseline<a class="headerlink" href="#baseline" title="Permanent link">&para;</a></h2>
 <p><sub><strong>kind</strong> python  ·  <strong>variant</strong> always_one of model</sub></p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="c1"># @variant model always_one</span>
-<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="c1"># A trivial baseline &quot;classifier&quot;: predict 1 for everything.</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="c1"># A trivial baseline "classifier": predict 1 for everything.</span>
 <a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="n">preds</span> <span class="o">=</span> <span class="p">[</span><span class="mi">1</span><span class="p">]</span> <span class="o">*</span> <span class="nb">len</span><span class="p">(</span><span class="n">y_true</span><span class="p">)</span>
 </code></pre></div>
 <h2 id="compare">compare<a class="headerlink" href="#compare" title="Permanent link">&para;</a></h2>
@@ -2086,12 +2086,12 @@ a shared downstream; switch is for <em>picking</em> one. See
 <a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a>    <span class="n">name</span><span class="p">:</span> <span class="nb">sum</span><span class="p">(</span><span class="n">p</span> <span class="o">==</span> <span class="n">t</span> <span class="k">for</span> <span class="n">p</span><span class="p">,</span> <span class="n">t</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="n">pred</span><span class="p">,</span> <span class="n">y_true</span><span class="p">))</span> <span class="o">/</span> <span class="nb">len</span><span class="p">(</span><span class="n">y_true</span><span class="p">)</span>
 <a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a>    <span class="k">for</span> <span class="n">name</span><span class="p">,</span> <span class="n">pred</span> <span class="ow">in</span> <span class="n">preds</span><span class="o">.</span><span class="n">items</span><span class="p">()</span>
 <a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="p">}</span>
-<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a><span class="nb">print</span><span class="p">(</span><span class="s2">&quot;accuracy by variant:&quot;</span><span class="p">,</span> <span class="n">accuracy</span><span class="p">)</span>
+<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a><span class="nb">print</span><span class="p">(</span><span class="s2">"accuracy by variant:"</span><span class="p">,</span> <span class="n">accuracy</span><span class="p">)</span>
 </code></pre></div>
 <h2 id="score">score<a class="headerlink" href="#score" title="Permanent link">&para;</a></h2>
 <p><sub><strong>kind</strong> python</sub></p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="c1"># @per_variant</span>
-<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="c1"># Fan-out: runs once per model variant. `preds` is bound to THAT variant&#39;s</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="c1"># Fan-out: runs once per model variant. `preds` is bound to THAT variant's</span>
 <a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="c1"># predictions (a scalar list), not the whole {variant: preds} dict — so this</span>
 <a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="c1"># cell computes a single accuracy. In a real workload each instance could carry</span>
 <a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a><span class="c1"># `# @worker gpu` and run as an independent job.</span>
@@ -2103,8 +2103,8 @@ a shared downstream; switch is for <em>picking</em> one. See
 <a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="c1"># back into a {variant: value} dict — the same shape the `compare` cell gets,</span>
 <a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="c1"># but produced by fanning the scoring out first. Pick the winner:</span>
 <a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="n">best_model</span> <span class="o">=</span> <span class="nb">max</span><span class="p">(</span><span class="n">accuracy</span><span class="p">,</span> <span class="n">key</span><span class="o">=</span><span class="n">accuracy</span><span class="o">.</span><span class="n">get</span><span class="p">)</span>
-<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="nb">print</span><span class="p">(</span><span class="s2">&quot;accuracy by variant:&quot;</span><span class="p">,</span> <span class="n">accuracy</span><span class="p">)</span>
-<a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a><span class="nb">print</span><span class="p">(</span><span class="s2">&quot;best model:&quot;</span><span class="p">,</span> <span class="n">best_model</span><span class="p">)</span>
+<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="nb">print</span><span class="p">(</span><span class="s2">"accuracy by variant:"</span><span class="p">,</span> <span class="n">accuracy</span><span class="p">)</span>
+<a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a><span class="nb">print</span><span class="p">(</span><span class="s2">"best model:"</span><span class="p">,</span> <span class="n">best_model</span><span class="p">)</span>
 </code></pre></div>
 
 

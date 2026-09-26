@@ -2285,8 +2285,8 @@
 <h3 id="custom-provider-configuration">Custom Provider Configuration<a class="headerlink" href="#custom-provider-configuration" title="Permanent link">&para;</a></h3>
 <p>For self-hosted models (Ollama, vLLM) or custom endpoints there's no UI for the <code>base_url</code> / timeout / token-ceiling fields, so you add an <code>[ai]</code> section to <code>notebook.toml</code> directly:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="k">[ai]</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="n">base_url</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;http://localhost:11434/v1&quot;</span>
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="n">model</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;llama3&quot;</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="n">base_url</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"http://localhost:11434/v1"</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="n">model</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"llama3"</span>
 </code></pre></div>
 <p>This is the intended escape hatch for advanced config. Fields the <code>[ai]</code> section accepts:</p>
 <ul>
@@ -2376,7 +2376,7 @@
 </code></pre></div>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="c1"># notebook.toml: this notebook also wants edits confirmed.</span>
 <a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="k">[ai]</span>
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="n">approval_tools</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;edit_cell&quot;</span><span class="p">]</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="n">approval_tools</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s2">"edit_cell"</span><span class="p">]</span>
 </code></pre></div>
 <p>A locked gate still prompts with Auto-approve on, and where there is no one to prompt it declines. The server-level lists refuse unknown tool names at startup, since a typo would leave the tool ungated; a notebook's unknown names are logged and ignored.</p>
 <p><strong>Non-gated mutating tools.</strong> Unless configured above, <code>create_cell</code>, <code>edit_cell</code>, and <code>run_cell</code> execute without prompting. <code>edit_cell</code> overwrites the cell source; <code>run_cell</code> executes whatever is currently in the cell. Neither has an undo. (Cell source is autosaved to <code>cells/*.py</code>, so git is the practical undo for <code>edit_cell</code> and <code>delete_cell</code>. Side effects of <code>run_cell</code> - files written, packages mutated, API calls made - are not reversible.)</p>

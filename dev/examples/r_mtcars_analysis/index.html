@@ -2169,8 +2169,8 @@ and restores the notebook's <code>renv.lock</code> on the way in:</p>
 <a id="__codelineno-2-20" name="__codelineno-2-20" href="#__codelineno-2-20"></a>)
 <a id="__codelineno-2-21" name="__codelineno-2-21" href="#__codelineno-2-21"></a>
 <a id="__codelineno-2-22" name="__codelineno-2-22" href="#__codelineno-2-22"></a>cat(sprintf(
-<a id="__codelineno-2-23" name="__codelineno-2-23" href="#__codelineno-2-23"></a>  &quot;Prepared %d cars across %d cylinder classes (%s)\n&quot;,
-<a id="__codelineno-2-24" name="__codelineno-2-24" href="#__codelineno-2-24"></a>  nrow(cars), nlevels(cars$cyl), paste(levels(cars$cyl), collapse = &quot;, &quot;)
+<a id="__codelineno-2-23" name="__codelineno-2-23" href="#__codelineno-2-23"></a>  "Prepared %d cars across %d cylinder classes (%s)\n",
+<a id="__codelineno-2-24" name="__codelineno-2-24" href="#__codelineno-2-24"></a>  nrow(cars), nlevels(cars$cyl), paste(levels(cars$cyl), collapse = ", ")
 <a id="__codelineno-2-25" name="__codelineno-2-25" href="#__codelineno-2-25"></a>))
 </code></pre></div>
 <h2 id="summarise-by-cylinder-count">Summarise by cylinder count<a class="headerlink" href="#summarise-by-cylinder-count" title="Permanent link">&para;</a></h2>
@@ -2189,7 +2189,7 @@ and restores the notebook's <code>renv.lock</code> on the way in:</p>
 <a id="__codelineno-3-12" name="__codelineno-3-12" href="#__codelineno-3-12"></a>  FUN = mean
 <a id="__codelineno-3-13" name="__codelineno-3-13" href="#__codelineno-3-13"></a>)
 <a id="__codelineno-3-14" name="__codelineno-3-14" href="#__codelineno-3-14"></a>by_cyl$n &lt;- as.integer(table(cars$cyl))
-<a id="__codelineno-3-15" name="__codelineno-3-15" href="#__codelineno-3-15"></a>names(by_cyl) &lt;- c(&quot;cyl&quot;, &quot;mean_mpg&quot;, &quot;mean_hp&quot;, &quot;mean_wt&quot;, &quot;n&quot;)
+<a id="__codelineno-3-15" name="__codelineno-3-15" href="#__codelineno-3-15"></a>names(by_cyl) &lt;- c("cyl", "mean_mpg", "mean_hp", "mean_wt", "n")
 <a id="__codelineno-3-16" name="__codelineno-3-16" href="#__codelineno-3-16"></a>
 <a id="__codelineno-3-17" name="__codelineno-3-17" href="#__codelineno-3-17"></a>print(by_cyl)
 </code></pre></div>
@@ -2197,7 +2197,7 @@ and restores the notebook's <code>renv.lock</code> on the way in:</p>
 <p><sub><strong>kind</strong> r</sub></p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a># @name Fit mpg ~ wt + hp + cyl
 <a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>#
-<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a># R&#39;s formula syntax in one line: predict mpg from weight, horsepower,
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a># R's formula syntax in one line: predict mpg from weight, horsepower,
 <a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a># and the cylinder factor (auto dummy-encoded, 4-cyl as the baseline
 <a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a># level). Three outputs leave this cell with three different fates in
 <a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a># the artifact store:
@@ -2206,7 +2206,7 @@ and restores the notebook's <code>renv.lock</code> on the way in:</p>
 <a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a>#                  stores it as RDS and tags it `r_only`. A downstream
 <a id="__codelineno-4-10" name="__codelineno-4-10" href="#__codelineno-4-10"></a>#                  *R* cell reads it straight back with readRDS (see the
 <a id="__codelineno-4-11" name="__codelineno-4-11" href="#__codelineno-4-11"></a>#                  diagnostics cell); a Python cell consuming it would
-<a id="__codelineno-4-12" name="__codelineno-4-12" href="#__codelineno-4-12"></a>#                  instead get a structured &quot;re-export as a data.frame&quot;
+<a id="__codelineno-4-12" name="__codelineno-4-12" href="#__codelineno-4-12"></a>#                  instead get a structured "re-export as a data.frame"
 <a id="__codelineno-4-13" name="__codelineno-4-13" href="#__codelineno-4-13"></a>#                  error rather than a confusing NameError.
 <a id="__codelineno-4-14" name="__codelineno-4-14" href="#__codelineno-4-14"></a>#   coefs        — tidy coefficient table (data.frame -&gt; Arrow IPC).
 <a id="__codelineno-4-15" name="__codelineno-4-15" href="#__codelineno-4-15"></a>#   model_stats  — one-row fit summary (data.frame -&gt; Arrow IPC).
@@ -2217,10 +2217,10 @@ and restores the notebook's <code>renv.lock</code> on the way in:</p>
 <a id="__codelineno-4-20" name="__codelineno-4-20" href="#__codelineno-4-20"></a>cm &lt;- s$coefficients
 <a id="__codelineno-4-21" name="__codelineno-4-21" href="#__codelineno-4-21"></a>coefs &lt;- data.frame(
 <a id="__codelineno-4-22" name="__codelineno-4-22" href="#__codelineno-4-22"></a>  term = rownames(cm),
-<a id="__codelineno-4-23" name="__codelineno-4-23" href="#__codelineno-4-23"></a>  estimate = cm[, &quot;Estimate&quot;],
-<a id="__codelineno-4-24" name="__codelineno-4-24" href="#__codelineno-4-24"></a>  std_error = cm[, &quot;Std. Error&quot;],
-<a id="__codelineno-4-25" name="__codelineno-4-25" href="#__codelineno-4-25"></a>  t_stat = cm[, &quot;t value&quot;],
-<a id="__codelineno-4-26" name="__codelineno-4-26" href="#__codelineno-4-26"></a>  p_value = cm[, &quot;Pr(&gt;|t|)&quot;],
+<a id="__codelineno-4-23" name="__codelineno-4-23" href="#__codelineno-4-23"></a>  estimate = cm[, "Estimate"],
+<a id="__codelineno-4-24" name="__codelineno-4-24" href="#__codelineno-4-24"></a>  std_error = cm[, "Std. Error"],
+<a id="__codelineno-4-25" name="__codelineno-4-25" href="#__codelineno-4-25"></a>  t_stat = cm[, "t value"],
+<a id="__codelineno-4-26" name="__codelineno-4-26" href="#__codelineno-4-26"></a>  p_value = cm[, "Pr(&gt;|t|)"],
 <a id="__codelineno-4-27" name="__codelineno-4-27" href="#__codelineno-4-27"></a>  row.names = NULL
 <a id="__codelineno-4-28" name="__codelineno-4-28" href="#__codelineno-4-28"></a>)
 <a id="__codelineno-4-29" name="__codelineno-4-29" href="#__codelineno-4-29"></a>
@@ -2232,7 +2232,7 @@ and restores the notebook's <code>renv.lock</code> on the way in:</p>
 <a id="__codelineno-4-35" name="__codelineno-4-35" href="#__codelineno-4-35"></a>)
 <a id="__codelineno-4-36" name="__codelineno-4-36" href="#__codelineno-4-36"></a>
 <a id="__codelineno-4-37" name="__codelineno-4-37" href="#__codelineno-4-37"></a>cat(sprintf(
-<a id="__codelineno-4-38" name="__codelineno-4-38" href="#__codelineno-4-38"></a>  &quot;Fitted mpg ~ wt + hp + cyl: R2=%.3f (adj %.3f), residual SE=%.2f mpg\n&quot;,
+<a id="__codelineno-4-38" name="__codelineno-4-38" href="#__codelineno-4-38"></a>  "Fitted mpg ~ wt + hp + cyl: R2=%.3f (adj %.3f), residual SE=%.2f mpg\n",
 <a id="__codelineno-4-39" name="__codelineno-4-39" href="#__codelineno-4-39"></a>  model_stats$r_squared, model_stats$adj_r_squared, model_stats$sigma
 <a id="__codelineno-4-40" name="__codelineno-4-40" href="#__codelineno-4-40"></a>))
 </code></pre></div>
@@ -2243,25 +2243,25 @@ and restores the notebook's <code>renv.lock</code> on the way in:</p>
 <a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a># The headline 0.2.0 R feature: plots render inline as PNG, exactly
 <a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a># like a Python matplotlib figure. A bare trailing ggplot object
 <a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a># auto-prints (REPL-style), so no explicit `print()` is needed — the
-<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a># plot is the cell&#39;s last expression and it just shows up.
+<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a># plot is the cell's last expression and it just shows up.
 <a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a>#
-<a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a># ggplot2 isn&#39;t part of the harness baseline (arrow + jsonlite); it
-<a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a># comes from this notebook&#39;s renv.lock, restored automatically when you
-<a id="__codelineno-5-10" name="__codelineno-5-10" href="#__codelineno-5-10"></a># open the notebook — or one click via the Environment panel&#39;s
-<a id="__codelineno-5-11" name="__codelineno-5-11" href="#__codelineno-5-11"></a># &quot;Initialize renv&quot;. If it&#39;s somehow missing you&#39;ll see a structured
-<a id="__codelineno-5-12" name="__codelineno-5-12" href="#__codelineno-5-12"></a># &quot;install ggplot2&quot; hint, not a crash.
+<a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a># ggplot2 isn't part of the harness baseline (arrow + jsonlite); it
+<a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a># comes from this notebook's renv.lock, restored automatically when you
+<a id="__codelineno-5-10" name="__codelineno-5-10" href="#__codelineno-5-10"></a># open the notebook — or one click via the Environment panel's
+<a id="__codelineno-5-11" name="__codelineno-5-11" href="#__codelineno-5-11"></a># "Initialize renv". If it's somehow missing you'll see a structured
+<a id="__codelineno-5-12" name="__codelineno-5-12" href="#__codelineno-5-12"></a># "install ggplot2" hint, not a crash.
 <a id="__codelineno-5-13" name="__codelineno-5-13" href="#__codelineno-5-13"></a>
 <a id="__codelineno-5-14" name="__codelineno-5-14" href="#__codelineno-5-14"></a>library(ggplot2)
 <a id="__codelineno-5-15" name="__codelineno-5-15" href="#__codelineno-5-15"></a>
 <a id="__codelineno-5-16" name="__codelineno-5-16" href="#__codelineno-5-16"></a>ggplot(cars, aes(x = wt, y = mpg, colour = cyl)) +
 <a id="__codelineno-5-17" name="__codelineno-5-17" href="#__codelineno-5-17"></a>  geom_point(size = 3, alpha = 0.85) +
-<a id="__codelineno-5-18" name="__codelineno-5-18" href="#__codelineno-5-18"></a>  geom_smooth(method = &quot;lm&quot;, formula = y ~ x, se = FALSE, linewidth = 0.7) +
+<a id="__codelineno-5-18" name="__codelineno-5-18" href="#__codelineno-5-18"></a>  geom_smooth(method = "lm", formula = y ~ x, se = FALSE, linewidth = 0.7) +
 <a id="__codelineno-5-19" name="__codelineno-5-19" href="#__codelineno-5-19"></a>  labs(
-<a id="__codelineno-5-20" name="__codelineno-5-20" href="#__codelineno-5-20"></a>    title = &quot;Fuel economy falls with weight&quot;,
-<a id="__codelineno-5-21" name="__codelineno-5-21" href="#__codelineno-5-21"></a>    subtitle = &quot;mtcars, coloured by cylinder count&quot;,
-<a id="__codelineno-5-22" name="__codelineno-5-22" href="#__codelineno-5-22"></a>    x = &quot;Weight (1000 lbs)&quot;,
-<a id="__codelineno-5-23" name="__codelineno-5-23" href="#__codelineno-5-23"></a>    y = &quot;Miles per gallon&quot;,
-<a id="__codelineno-5-24" name="__codelineno-5-24" href="#__codelineno-5-24"></a>    colour = &quot;Cylinders&quot;
+<a id="__codelineno-5-20" name="__codelineno-5-20" href="#__codelineno-5-20"></a>    title = "Fuel economy falls with weight",
+<a id="__codelineno-5-21" name="__codelineno-5-21" href="#__codelineno-5-21"></a>    subtitle = "mtcars, coloured by cylinder count",
+<a id="__codelineno-5-22" name="__codelineno-5-22" href="#__codelineno-5-22"></a>    x = "Weight (1000 lbs)",
+<a id="__codelineno-5-23" name="__codelineno-5-23" href="#__codelineno-5-23"></a>    y = "Miles per gallon",
+<a id="__codelineno-5-24" name="__codelineno-5-24" href="#__codelineno-5-24"></a>    colour = "Cylinders"
 <a id="__codelineno-5-25" name="__codelineno-5-25" href="#__codelineno-5-25"></a>  ) +
 <a id="__codelineno-5-26" name="__codelineno-5-26" href="#__codelineno-5-26"></a>  theme_minimal(base_size = 13)
 </code></pre></div>
@@ -2269,15 +2269,15 @@ and restores the notebook's <code>renv.lock</code> on the way in:</p>
 <p><sub><strong>kind</strong> r</sub></p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a># @name Residual diagnostics (base graphics)
 <a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>#
-<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a># `plot()` on an lm object draws R&#39;s canonical 2x2 diagnostic panel
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a># `plot()` on an lm object draws R's canonical 2x2 diagnostic panel
 <a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a># (residuals vs fitted, Q-Q, scale-location, residuals vs leverage).
-<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a># It&#39;s a base-graphics plot, and it&#39;s captured to PNG the same way the
+<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a># It's a base-graphics plot, and it's captured to PNG the same way the
 <a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a># ggplot is — no extra code, no device juggling. `par(mfrow)` tiles the
 <a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a># four panels onto one image.
 <a id="__codelineno-6-8" name="__codelineno-6-8" href="#__codelineno-6-8"></a>#
 <a id="__codelineno-6-9" name="__codelineno-6-9" href="#__codelineno-6-9"></a># `model` arrives by reading the RDS artifact the fit cell stored: an
 <a id="__codelineno-6-10" name="__codelineno-6-10" href="#__codelineno-6-10"></a># R-only object (an lm, S3 class and all) flowing from one R cell to
-<a id="__codelineno-6-11" name="__codelineno-6-11" href="#__codelineno-6-11"></a># another with full fidelity — something the tabular Arrow tier can&#39;t
+<a id="__codelineno-6-11" name="__codelineno-6-11" href="#__codelineno-6-11"></a># another with full fidelity — something the tabular Arrow tier can't
 <a id="__codelineno-6-12" name="__codelineno-6-12" href="#__codelineno-6-12"></a># carry. This is the R-to-R counterpart of the cross-language Arrow
 <a id="__codelineno-6-13" name="__codelineno-6-13" href="#__codelineno-6-13"></a># handoff.
 <a id="__codelineno-6-14" name="__codelineno-6-14" href="#__codelineno-6-14"></a>

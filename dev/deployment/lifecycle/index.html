@@ -2263,20 +2263,20 @@
 <h2 id="backup">Backup<a class="headerlink" href="#backup" title="Permanent link">&para;</a></h2>
 <p>A notebook is its committed files. To back one up, archive everything <strong>except</strong> <code>.strata/</code> and <code>.venv/</code>:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="nb">cd</span><span class="w"> </span>~/.strata/notebooks
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>tar<span class="w"> </span>--exclude<span class="o">=</span><span class="s1">&#39;.strata&#39;</span><span class="w"> </span>--exclude<span class="o">=</span><span class="s1">&#39;.venv&#39;</span><span class="w"> </span>-czf<span class="w"> </span>mynotebook.tar.gz<span class="w"> </span>mynotebook/
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>tar<span class="w"> </span>--exclude<span class="o">=</span><span class="s1">'.strata'</span><span class="w"> </span>--exclude<span class="o">=</span><span class="s1">'.venv'</span><span class="w"> </span>-czf<span class="w"> </span>mynotebook.tar.gz<span class="w"> </span>mynotebook/
 </code></pre></div>
 <p>The excluded directories are runtime state (regenerable) and a host-specific venv (rebuildable with <code>uv sync</code>). Skipping them keeps the backup small (typical: tens of KB instead of hundreds of MB).</p>
 <p>If you'd rather not exclude <code>.strata/</code>, you can include it for a "warm restore" - cached cell outputs survive the trip and downstream cells stay green on the destination. Just expect the archive to be larger.</p>
 <p>Copying <code>.strata/</code> while a cell is finishing can capture the new <code>runtime.json</code> with the old artifacts. To copy a notebook the server has open, hold it still first:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>curl<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span><span class="s1">&#39;http://localhost:8765/v1/notebooks/&lt;session_id&gt;/quiesce&#39;</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>curl<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span><span class="s1">'http://localhost:8765/v1/notebooks/&lt;session_id&gt;/quiesce'</span>
 <a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="c1"># ...copy the directory...</span>
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>curl<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span><span class="s1">&#39;http://localhost:8765/v1/notebooks/&lt;session_id&gt;/release&#39;</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>curl<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span><span class="s1">'http://localhost:8765/v1/notebooks/&lt;session_id&gt;/release'</span>
 </code></pre></div>
 <p>Quiesce waits for running cells (cancelling any still running after <code>timeout_seconds</code>, default 30), then refuses runs and edits with a 409 until release or <code>max_hold_seconds</code> (default 600). <code>POST /v1/projects/{path}/quiesce</code> and <code>.../release</code> do the same for every notebook under a directory, open or not. Under principal auth both need the <code>admin:notebooks</code> scope.</p>
 <h2 id="moving-between-machines">Moving between machines<a class="headerlink" href="#moving-between-machines" title="Permanent link">&para;</a></h2>
 <p>Same idea: copy the notebook directory minus <code>.venv/</code>. Optionally minus <code>.strata/</code> if you want a clean cache.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="c1"># On source</span>
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>tar<span class="w"> </span>--exclude<span class="o">=</span><span class="s1">&#39;.venv&#39;</span><span class="w"> </span>-czf<span class="w"> </span>mynotebook.tar.gz<span class="w"> </span>~/.strata/notebooks/mynotebook/
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>tar<span class="w"> </span>--exclude<span class="o">=</span><span class="s1">'.venv'</span><span class="w"> </span>-czf<span class="w"> </span>mynotebook.tar.gz<span class="w"> </span>~/.strata/notebooks/mynotebook/
 <a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>
 <a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="c1"># On destination</span>
 <a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>mkdir<span class="w"> </span>-p<span class="w"> </span>~/.strata/notebooks
@@ -2318,13 +2318,13 @@
 <p>Deleting a notebook also deletes its <code>.strata/artifacts/</code> - there's no shared artifact store across notebooks, so nothing leaks.</p>
 <h2 id="cleaning-up-the-core-artifact-store">Cleaning up the Core artifact store<a class="headerlink" href="#cleaning-up-the-core-artifact-store" title="Permanent link">&para;</a></h2>
 <p>The <strong>server-side</strong> artifact store (driven by <code>StrataClient.materialize</code>) accumulates blobs that may no longer be referenced by any name pointer. GC it on demand, or on a timer with <code>STRATA_ARTIFACT_GC_INTERVAL_SECONDS</code> (off by default) and <code>STRATA_ARTIFACT_GC_MAX_AGE_DAYS</code> (default 7):</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>curl<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span><span class="s1">&#39;http://localhost:8765/v1/artifacts/gc?max_age_days=7&#39;</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>curl<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span><span class="s1">'http://localhost:8765/v1/artifacts/gc?max_age_days=7'</span>
 </code></pre></div>
 <p>Or from Python:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">strata_client</span><span class="w"> </span><span class="kn">import</span> <span class="n">StrataClient</span>
-<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="n">client</span> <span class="o">=</span> <span class="n">StrataClient</span><span class="p">(</span><span class="n">base_url</span><span class="o">=</span><span class="s2">&quot;http://localhost:8765&quot;</span><span class="p">)</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="n">client</span> <span class="o">=</span> <span class="n">StrataClient</span><span class="p">(</span><span class="n">base_url</span><span class="o">=</span><span class="s2">"http://localhost:8765"</span><span class="p">)</span>
 <a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="n">client</span><span class="o">.</span><span class="n">garbage_collect</span><span class="p">(</span><span class="n">max_age_days</span><span class="o">=</span><span class="mf">7.0</span><span class="p">)</span>
-<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="c1"># {&quot;deleted_count&quot;: 14, &quot;deleted_bytes&quot;: 8429283, &quot;cutoff_timestamp&quot;: ...}</span>
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="c1"># {"deleted_count": 14, "deleted_bytes": 8429283, "cutoff_timestamp": ...}</span>
 </code></pre></div>
 <p>The GC pass deletes a version only when all of these hold:</p>
 <ul>
@@ -2341,9 +2341,9 @@ holding <code>admin:*</code>, and collects within the caller's tenant.</p>
 <p>A pin holds a version and its chain for a reason the store has no other way to
 know, such as a snapshot that must stay restorable or a review that's still
 open:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>curl<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span><span class="s1">&#39;http://localhost:8765/v1/artifacts/figure/v/3/pin&#39;</span><span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="w">  </span>-H<span class="w"> </span><span class="s1">&#39;Content-Type: application/json&#39;</span><span class="w"> </span>-d<span class="w"> </span><span class="s1">&#39;{&quot;reason&quot;: &quot;snapshot:s1&quot;}&#39;</span>
-<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>curl<span class="w"> </span>-X<span class="w"> </span>DELETE<span class="w"> </span><span class="s1">&#39;http://localhost:8765/v1/artifacts/figure/v/3/pin?reason=snapshot:s1&#39;</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>curl<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span><span class="s1">'http://localhost:8765/v1/artifacts/figure/v/3/pin'</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="w">  </span>-H<span class="w"> </span><span class="s1">'Content-Type: application/json'</span><span class="w"> </span>-d<span class="w"> </span><span class="s1">'{"reason": "snapshot:s1"}'</span>
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>curl<span class="w"> </span>-X<span class="w"> </span>DELETE<span class="w"> </span><span class="s1">'http://localhost:8765/v1/artifacts/figure/v/3/pin?reason=snapshot:s1'</span>
 </code></pre></div>
 <p>There is one pin per reason: two holders use two reasons and release them
 independently, and pinning again under the same reason only refreshes it. In
@@ -2351,7 +2351,7 @@ service mode pins need the <code>artifacts:pin</code> scope (or <code>admin:*</c
 the caller's tenant.</p>
 <p>GC the <strong>per-notebook</strong> artifact store by deleting the notebook (or by deleting <code>.strata/artifacts/</code> while the server isn't running). There's no per-notebook GC endpoint - cell-output artifacts are content-addressed and pruning them would defeat the cache.</p>
 <h2 id="cleaning-up-the-iceberg-row-group-cache">Cleaning up the Iceberg row-group cache<a class="headerlink" href="#cleaning-up-the-iceberg-row-group-cache" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>curl<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span><span class="s1">&#39;http://localhost:8765/v1/cache/clear&#39;</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>curl<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span><span class="s1">'http://localhost:8765/v1/cache/clear'</span>
 </code></pre></div>
 <p>Clears the in-memory + on-disk Iceberg cache. Personal mode is unrestricted; service mode requires the <code>admin:cache</code> scope. Safe to run at any time - the worst case is the next read repopulates from Parquet.</p>
 <h2 id="disk-usage-budgeting">Disk-usage budgeting<a class="headerlink" href="#disk-usage-budgeting" title="Permanent link">&para;</a></h2>

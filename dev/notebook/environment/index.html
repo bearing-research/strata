@@ -2369,7 +2369,7 @@
 </div>
 <h2 id="missing-package-detection">Missing Package Detection<a class="headerlink" href="#missing-package-detection" title="Permanent link">&para;</a></h2>
 <p>When a cell fails with <code>ModuleNotFoundError</code>, Strata detects the missing package and offers a one-click install button:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>ModuleNotFoundError: No module named &#39;pandas&#39;
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>ModuleNotFoundError: No module named 'pandas'
 <a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>→ [Install pandas]
 </code></pre></div>
 <h2 id="file-layout">File Layout<a class="headerlink" href="#file-layout" title="Permanent link">&para;</a></h2>
@@ -2413,7 +2413,7 @@ bytes and the exact R build, and its <code>renv/library</code> is a link there:<
 <div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>~/.strata/envs/
 <a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>├── r/
 <a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>│   ├── 8a41…/        # one library per renv.lock + R build
-<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a>│   ├── cache/        # renv&#39;s package cache (RENV_PATHS_CACHE)
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a>│   ├── cache/        # renv's package cache (RENV_PATHS_CACHE)
 <a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a>│   └── refs/8a41…/
 <a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a>my_notebook/
 <a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a>└── renv/library -&gt; ~/.strata/envs/r/8a41…

@@ -2311,9 +2311,9 @@ notebook - either you in the <a href="../../getting-started/notebook/">web UI</a
 <p>The viewer ships behind the <code>tui</code> extra (it pulls in <code>textual</code> and <code>grandalf</code>,
 plus <code>textual-image</code> and <code>Pillow</code> for inline image rendering; <code>httpx</code> and
 <code>websockets</code> are already core dependencies):</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>uv<span class="w"> </span>tool<span class="w"> </span>install<span class="w"> </span><span class="s2">&quot;strata-notebook[tui]&quot;</span><span class="w">      </span><span class="c1"># global: strata-notebook, strata-notebook-tui, strata, strata-worker</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>uv<span class="w"> </span>tool<span class="w"> </span>install<span class="w"> </span><span class="s2">"strata-notebook[tui]"</span><span class="w">      </span><span class="c1"># global: strata-notebook, strata-notebook-tui, strata, strata-worker</span>
 <a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="c1"># or, inside a project venv:</span>
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>uv<span class="w"> </span>pip<span class="w"> </span>install<span class="w"> </span><span class="s2">&quot;strata-notebook[tui]&quot;</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>uv<span class="w"> </span>pip<span class="w"> </span>install<span class="w"> </span><span class="s2">"strata-notebook[tui]"</span>
 </code></pre></div>
 <p>Plain <code>strata-notebook</code> (without <code>[tui]</code>) installs the server but not the
 viewer's dependencies, so <code>strata-notebook-tui</code> will fail to start.</p>

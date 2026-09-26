@@ -2282,11 +2282,11 @@ shared?). The flags that follow are the consequences.</p>
   See <a href="../service-mode/">Service Mode</a>.</li>
 </ul>
 <h2 id="setting-the-mode">Setting the mode<a class="headerlink" href="#setting-the-mode" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nb">export</span><span class="w"> </span><span class="nv">STRATA_DEPLOYMENT_MODE</span><span class="o">=</span>personal<span class="w">   </span><span class="c1"># or &quot;service&quot;</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nb">export</span><span class="w"> </span><span class="nv">STRATA_DEPLOYMENT_MODE</span><span class="o">=</span>personal<span class="w">   </span><span class="c1"># or "service"</span>
 </code></pre></div>
 <p>Or in <code>pyproject.toml</code>:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="k">[tool.strata]</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="n">deployment_mode</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;personal&quot;</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="n">deployment_mode</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"personal"</span>
 </code></pre></div>
 <p><strong>Default is <code>personal</code></strong>: the common case. A first-time
 <code>uv run strata-notebook</code> boots into a single-user, loopback-only
