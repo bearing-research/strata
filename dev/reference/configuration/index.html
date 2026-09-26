@@ -3324,16 +3324,21 @@ for everything else: a <code>file://</code> warehouse, any other path, and a bar
 <p>So one table can have several names. A table reachable as
 <code>s3://bucket/wh#finance.ledger</code> and as <code>lake:finance.ledger</code> is
 <code>s3:finance.ledger</code> under the first and <code>lake:finance.ledger</code> under the
-second. With a SQL catalog (<code>catalog_properties</code>), every warehouse URI reads
-that one catalog whatever comes before <code>#</code>, so the same S3 table is also
-<code>file:finance.ledger</code> when requested as <code>finance.ledger</code> or behind a path
-that doesn't exist. <strong>Write deny rules with a <code>*</code> prefix</strong> so they cover every
-name:</p>
+second. <strong>Write deny rules with a <code>*</code> prefix</strong> so they cover every name:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="n">deny</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span>
 <a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="w">  </span><span class="p">{</span><span class="w"> </span><span class="n">principal</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="s2">&quot;*&quot;</span><span class="p">,</span><span class="w"> </span><span class="n">tables</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;*:finance.*&quot;</span><span class="p">]</span><span class="w"> </span><span class="p">},</span>
 <a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="p">]</span>
 </code></pre></div>
-<p>An allow rule can name one prefix: an address it misses falls through to
+<p>With a SQL catalog (<code>catalog_properties</code> with a <code>uri</code>), Strata knows which
+names are one table and a deny rule covers all of them. Every warehouse URI
+reads that one catalog whatever comes before <code>#</code>, so the table behind
+<code>s3://bucket/wh#finance.ledger</code> is also the one behind a path that doesn't
+exist, and behind a bare <code>finance.ledger</code> when <code>catalog_name</code> is <code>strata</code>. A
+deny on <code>s3:finance.*</code> refuses it under <code>file:</code>, <code>gs:</code> and <code>az:</code> too. Strata
+cannot tell that a named catalog holds the same data as a warehouse, which is
+what the <code>*</code> prefix is for.</p>
+<p>An allow rule matches only the name it was written for, even where a
+deny would cover the others: an address it misses falls through to
 <code>default</code>. <strong>If you added a named catalog, or a GCS or Azure warehouse,
 check your deny rules</strong>: before this release every warehouse table matched
 <code>file:</code> whatever store held it, so a rule written then covers less than it
