@@ -2459,7 +2459,7 @@ artifact configuration:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nv">STRATA_DEPLOYMENT_MODE</span><span class="o">=</span>service
 <a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="nv">STRATA_AUTH_MODE</span><span class="o">=</span>trusted_proxy
 <a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="nv">STRATA_PROXY_TOKEN</span><span class="o">=</span>&lt;shared-secret&gt;
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="nv">STRATA_ARTIFACT_DIR</span><span class="o">=</span>/path/to/persistent/dir<span class="w">   </span><span class="c1"># or a blob backend</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="nv">STRATA_ARTIFACT_DIR</span><span class="o">=</span>/path/to/dir<span class="w">   </span><span class="c1"># required with any artifact store, blob backend or not</span>
 </code></pre></div>
 <p>A <a href="https://github.com/bearing-research/strata/blob/main/src/strata/config.py">startup coherence check</a> fires clear <code>ValueError</code>s on boot if anything's missing, a sloppy service-mode deploy refuses to start rather than silently exposing write endpoints.</p>
 <h2 id="the-trusted-proxy-contract">The trusted-proxy contract<a class="headerlink" href="#the-trusted-proxy-contract" title="Permanent link">&para;</a></h2>
@@ -2613,7 +2613,7 @@ across.</p>
 <a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="nv">STRATA_DEPLOYMENT_MODE</span><span class="o">=</span>service
 <a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="nv">STRATA_AUTH_MODE</span><span class="o">=</span>trusted_proxy
 <a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="nv">STRATA_PROXY_TOKEN</span><span class="o">=</span>&lt;shared-secret-with-proxy&gt;
-<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="nv">STRATA_ARTIFACT_DIR</span><span class="o">=</span>/path/to/persistent/dir<span class="w">  </span><span class="c1"># or use STRATA_ARTIFACT_BLOB_BACKEND</span>
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="nv">STRATA_ARTIFACT_DIR</span><span class="o">=</span>/path/to/dir<span class="w">  </span><span class="c1"># required with any artifact store, blob backend or not</span>
 <a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a>
 <a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="c1"># Multi-tenancy (optional but recommended for &gt;1 team)</span>
 <a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a><span class="nv">STRATA_MULTI_TENANT_ENABLED</span><span class="o">=</span><span class="nb">true</span>
@@ -2628,10 +2628,14 @@ across.</p>
 <h2 id="what-service-mode-changes">What service mode changes<a class="headerlink" href="#what-service-mode-changes" title="Permanent link">&para;</a></h2>
 <p>Compared to personal mode:</p>
 <ul>
-<li><strong>No default artifact dir.</strong> You must set <code>STRATA_ARTIFACT_DIR</code>
-  explicitly (or configure a blob backend via
-  <code>STRATA_ARTIFACT_BLOB_BACKEND=s3</code> etc.). Service mode refuses to
-  start without a persistent target.</li>
+<li><strong>No default artifact dir.</strong> The artifact store exists only when
+  <code>STRATA_ARTIFACT_DIR</code> is set, including when
+  <code>STRATA_ARTIFACT_METADATA_DSN</code> and a blob backend such as
+  <code>STRATA_ARTIFACT_BLOB_BACKEND=s3</code> hold everything durable; the
+  directory then keeps nothing that needs a backup. Service mode refuses
+  to start with a DSN, a non-local blob backend or
+  <code>STRATA_SERVICE_WRITES_ENABLED</code> and no <code>STRATA_ARTIFACT_DIR</code>. Without
+  any of those it runs scan-only, with no artifact store.</li>
 <li><strong>Reads work; direct writes are off by default.</strong> Clients can read
   results - scan/stream a table, fetch an artifact's data
   (<code>GET /v1/artifacts/{id}/v/{n}/data</code>), and resolve a dataset by name
@@ -2769,7 +2773,7 @@ directly - <code>put</code>, <code>set_name</code>, <code>set_alias</code>, tags
 <div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="nv">STRATA_DEPLOYMENT_MODE</span><span class="o">=</span>service
 <a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="nv">STRATA_AUTH_MODE</span><span class="o">=</span>trusted_proxy
 <a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="nv">STRATA_PROXY_TOKEN</span><span class="o">=</span>&lt;shared-secret-with-proxy&gt;
-<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="nv">STRATA_ARTIFACT_DIR</span><span class="o">=</span>/path/to/persistent/dir<span class="w">   </span><span class="c1"># or a blob backend</span>
+<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="nv">STRATA_ARTIFACT_DIR</span><span class="o">=</span>/path/to/dir<span class="w">   </span><span class="c1"># required with any artifact store, blob backend or not</span>
 <a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a><span class="nv">STRATA_MULTI_TENANT_ENABLED</span><span class="o">=</span><span class="nb">true</span><span class="w">              </span><span class="c1"># team = tenant</span>
 <a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a><span class="nv">STRATA_SERVICE_WRITES_ENABLED</span><span class="o">=</span><span class="nb">true</span><span class="w">            </span><span class="c1"># the opt-in</span>
 </code></pre></div>

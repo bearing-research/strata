@@ -3109,7 +3109,7 @@ credential.</p>
 <tr>
 <td><code>STRATA_ARTIFACT_DIR</code></td>
 <td><code>None</code></td>
-<td>Artifact store directory</td>
+<td>Artifact store directory. In service mode the store exists only when this is set, even when the metadata DSN and a blob backend hold everything, and startup refuses a DSN, a non-local blob backend or service writes without it</td>
 </tr>
 <tr>
 <td><code>STRATA_ARTIFACT_ZOMBIE_BUILD_TIMEOUT_SECONDS</code></td>
