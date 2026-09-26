@@ -15,7 +15,10 @@ drift, and the drift would be silent: both would keep producing a bundle.
 from __future__ import annotations
 
 import hashlib
+import io
 import json
+import tempfile
+import zipfile
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -147,6 +150,46 @@ def write_bundle(
         written.append(parquet_name)
     written += ["manifest.json", "ro-crate-metadata.json", "README.md"]
     return written
+
+
+# Every member of a zip bundle carries this timestamp and these permissions.
+# ``ZipFile.write`` stamps each file's mtime, and the bundle is written into a
+# fresh directory each time, so two archives of one publication differed in
+# bytes and in the digest a depositor records, though not in any file.
+_ZIP_DATE_TIME = (1980, 1, 1, 0, 0, 0)
+_ZIP_FILE_MODE = 0o644 << 16
+
+
+def bundle_zip(
+    store: ArtifactStore,
+    artifact: ArtifactVersion,
+    *,
+    publication: Publication,
+    max_depth: int = 10,
+    tenant: str | None = None,
+) -> bytes:
+    """The bundle as one zip, byte for byte the same each time it is built.
+
+    ``GET /p/{token}/archive.zip`` and ``strata artifact archive --token`` both
+    call this, so a depositor who fetched one and built the other holds two
+    copies of one file. Members are in :func:`write_bundle`'s reading order.
+
+    Raises:
+        ValueError: As :func:`write_bundle`.
+    """
+    with tempfile.TemporaryDirectory() as workdir:
+        dest = Path(workdir)
+        written = write_bundle(
+            store, artifact, dest, publication=publication, max_depth=max_depth, tenant=tenant
+        )
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as bundle:
+            for name in written:
+                info = zipfile.ZipInfo(name, date_time=_ZIP_DATE_TIME)
+                info.compress_type = zipfile.ZIP_DEFLATED
+                info.external_attr = _ZIP_FILE_MODE
+                bundle.writestr(info, (dest / name).read_bytes())
+    return buffer.getvalue()
 
 
 def _write_parquet_companion(

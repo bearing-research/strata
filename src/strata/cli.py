@@ -499,11 +499,18 @@ def _build_parser() -> argparse.ArgumentParser:
             "bytes, and a machine-readable manifest. A hosted link resolves "
             "for as long as the server does, and a URL printed in a paper "
             "outlives most servers; this is the copy for a Zenodo or OSF "
-            "deposit. <ref> as in `show`."
+            "deposit. <ref> as in `show`, or --token for a publication, whose "
+            "bundle then carries its authors and identifiers. A --to ending in "
+            ".zip writes the zip GET /p/{token}/archive.zip serves."
         ),
     )
-    archive_parser.add_argument("ref", help="Name, id@v=N, or artifact id")
-    archive_parser.add_argument("--to", required=True, help="Directory to write")
+    archive_parser.add_argument("ref", nargs="?", help="Name, id@v=N, or artifact id")
+    archive_parser.add_argument(
+        "--token", default=None, help="Archive this publication, as its record stands"
+    )
+    archive_parser.add_argument(
+        "--to", required=True, help="Directory to write, or a path ending in .zip"
+    )
     _add_artifact_dir_arg(archive_parser)
     archive_parser.add_argument("--title", default=None, help="Human label for the page")
     archive_parser.add_argument("--author", default=None, help="Who to credit on the page")
