@@ -244,6 +244,12 @@ environment pinned below them has to move before it can install 0.8.0.
 
 ### Fixed
 
+- **A chain is walked past a step that was rerun.** Rerunning a cell
+  supersedes its earlier version, which a result computed from it still names
+  and still reads. The lineage walk treated a superseded step as unknown and
+  stopped there, so a publication's page showed the chain ending at it, and
+  promoting or publishing to another store left everything upstream of it
+  behind.
 - **A publication's archive is the same zip every time.** Each member of
   `/p/{token}/archive.zip` carried the modification time of a file written
   moments before, so two fetches of one publication differed in bytes and in
