@@ -2503,8 +2503,10 @@ run</code> is the expensive step. See
 directory and a <code>.gitignore</code> that keeps <code>.strata/</code>, <code>.venv/</code> and
 <code>renv/library/</code> out of version control (skip it with <code>--no-git</code>; an existing
 <code>.gitignore</code> is never replaced), then syncs the venv (skip with <code>--no-env</code>;
-<code>strata run</code> syncs it later). Idempotent on an existing notebook directory: the <code>notebook_id</code> and
-any existing cells are preserved, so re-running it never orphans artifacts.</p>
+<code>strata run</code> syncs it later). Idempotent on an existing notebook directory:
+the notebook is left as it is (its id, cells, configuration and
+dependencies), and only missing scaffolding is added, so re-running it never
+orphans artifacts or loses settings.</p>
 <p><code>--project-mount [NAME]</code> adds a notebook-level <strong>read-only mount of <code>--parent</code></strong>
 (the project directory) as a <code>Path</code> variable <code>NAME</code> (default <code>project</code>) in every
 cell, so cells read project files as <code>open(project / "file")</code> without absolute
