@@ -198,9 +198,12 @@ class ArtifactService:
 
             # Get the artifact
             input_artifact = store.get_artifact(art_id, art_ver)
+            # A superseded version is still read by id and version, and a
+            # published chain keeps it, so it is a step of the chain like any
+            # other. Treating it as unknown cut the chain off at a rerun cell.
             if (
                 input_artifact is None
-                or input_artifact.state != "ready"
+                or input_artifact.state not in ("ready", "superseded")
                 or (
                     tenant_filter is not None
                     and input_artifact.tenant is not None

@@ -136,6 +136,36 @@ def test_lineage_marks_cross_tenant_input_as_unknown_stub():
     assert "strata://artifact/SECRET@v=1" not in by_uri
 
 
+def test_lineage_walks_through_a_superseded_step():
+    """Rerunning a cell supersedes its earlier version, which the published
+    chain still names and still reads. The walk stopped there and rendered the
+    step and everything upstream of it as unknown."""
+    root = _art("R", 1, inputs={"strata://artifact/A@v=1": "A@v=1"})
+    a = _art(
+        "A",
+        1,
+        state="superseded",
+        inputs={"strata://artifact/B@v=1": "B@v=1"},
+        content_sha256="a" * 64,
+    )
+    resp = _lineage(_FakeStore(root, a, _art("B", 1)), root)
+
+    by_uri = {n.uri: n for n in resp.nodes}
+    assert by_uri["strata://artifact/A@v=1"].content_sha256 == "a" * 64
+    assert by_uri["strata://artifact/A@v=1"].created_at == 100.0
+    assert "strata://artifact/B@v=1" in by_uri
+
+
+def test_lineage_still_stops_at_a_step_that_never_finished():
+    root = _art("R", 1, inputs={"strata://artifact/A@v=1": "A@v=1"})
+    a = _art("A", 1, state="failed", inputs={"strata://artifact/B@v=1": "B@v=1"})
+    resp = _lineage(_FakeStore(root, a, _art("B", 1)), root)
+
+    by_uri = {n.uri: n for n in resp.nodes}
+    assert by_uri["strata://artifact/A@v=1"].created_at is None
+    assert "strata://artifact/B@v=1" not in by_uri
+
+
 def test_dependents_maps_results_and_resolves_names():
     results = [
         (_art("D1", 3), "R@v=1"),

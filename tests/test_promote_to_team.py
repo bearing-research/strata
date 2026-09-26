@@ -79,6 +79,41 @@ def _promote(chain, url, **overrides):
 
 
 class TestPromote:
+    def test_the_chain_travels_past_a_superseded_step(self, team_store, team_dir, tmp_path):
+        """A rerun cell supersedes its earlier version, which a downstream
+        result still names. The lineage walk stopped at it, so everything
+        upstream of a rerun step stayed behind."""
+        manager = NotebookArtifactManager("nb", artifact_dir=tmp_path / "notebook")
+        refs = []
+        for i, source in enumerate(["a = 1", "b = a", "model = fit(b)"]):
+            inputs = {f"strata://artifact/{refs[-1]}": refs[-1]} if refs else {}
+            out = manager.store_cell_output(
+                cell_id=f"c{i}",
+                variable_name=f"v{i}",
+                blob_data=source.encode(),
+                content_type="json/object",
+                provenance_hash=f"{i}" * 64,
+                input_versions=inputs,
+                source=source,
+            )
+            refs.append(f"{out.id}@v={out.version}")
+        (first, middle, last) = [r.split("@v=") for r in refs]
+        local = ArtifactStore(tmp_path / "notebook")
+        conn = local._get_connection()
+        conn.execute(
+            "UPDATE artifact_versions SET state = 'superseded' WHERE id = ? AND version = ?",
+            (middle[0], int(middle[1])),
+        )
+        conn.commit()
+        conn.close()
+
+        chain = {"dir": tmp_path / "notebook", "figure": local.get_artifact(last[0], int(last[1]))}
+        assert _promote(chain, team_store) == 0
+
+        team = ArtifactStore(team_dir)
+        assert team.get_artifact(middle[0], int(middle[1])) is not None
+        assert team.get_artifact(first[0], int(first[1])) is not None
+
     def test_the_artifact_arrives_under_its_name(self, team_store, team_dir, chain):
         assert _promote(chain, team_store) == 0
 
