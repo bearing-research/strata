@@ -141,6 +141,9 @@ _ACL_STORES = (
     ("azure://", "az"),
 )
 
+# Every store name a warehouse table can be given, "file" included.
+ACL_STORE_NAMES = ("file", *dict.fromkeys(store for _, store in _ACL_STORES))
+
 
 @dataclass(frozen=True)
 class TableIdentity:

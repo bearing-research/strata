@@ -742,3 +742,137 @@ class TestADenyForEveryPrefixCoversEveryAddress:
                 assert refused.value.status_code in (403, 404), uri
         finally:
             set_principal(None)
+
+
+class TestADenyOnOneAddressCoversTheTable:
+    """Found by formal verification (finding 12).
+
+    With a SQL catalog configured, every warehouse URI reads that one catalog
+    whatever comes before ``#``, and a bare name reads it too when the default
+    catalog is the same one. A deny written for one address form, ``s3:`` for
+    data kept in S3, let the same table through as ``file:`` under a bare name
+    or a path that doesn't exist. A deny now refuses the table under every
+    name it answers to.
+    """
+
+    S3 = "s3://any-bucket/warehouse#test_db.events"
+    ALIASES = (
+        "test_db.events",
+        "/not/a/real/path#test_db.events",
+        "gs://other-bucket/wh#test_db.events",
+    )
+
+    def _check(self, monkeypatch, tmp_path, acl, **config_overrides):
+        from types import SimpleNamespace
+
+        from fastapi import HTTPException
+
+        import strata.server as server_module
+        from strata.api.dependencies import authorize_table_access
+        from strata.iceberg import table_identity_for
+
+        config = StrataConfig(
+            deployment_mode="service",
+            artifact_dir=tmp_path / "artifacts",
+            cache_dir=tmp_path / "cache",
+            auth_mode="trusted_proxy",
+            proxy_token="t",
+            acl_config=acl,
+            **config_overrides,
+        )
+        monkeypatch.setattr(server_module, "get_state", lambda: SimpleNamespace(config=config))
+        set_principal(Principal(id="alice"))
+
+        def allowed(uri):
+            try:
+                authorize_table_access(uri, table_identity_for(uri, config))
+            except HTTPException as refused:
+                assert refused.status_code in (403, 404), uri
+                return False
+            return True
+
+        return allowed
+
+    def _shared_catalog(self, temp_warehouse, catalog_name="strata"):
+        return {
+            "catalog_name": catalog_name,
+            "catalog_properties": {"uri": temp_warehouse["catalog"].properties["uri"]},
+        }
+
+    def test_a_deny_on_the_s3_name_refuses_every_address(
+        self, temp_warehouse, tmp_path, monkeypatch
+    ):
+        from strata.iceberg import PyIcebergCatalog
+
+        overrides = self._shared_catalog(temp_warehouse)
+        allowed = self._check(
+            monkeypatch,
+            tmp_path,
+            AclConfig(
+                default="allow", deny_rules=[AclRule(principal="*", tables=("s3:test_db.*",))]
+            ),
+            **overrides,
+        )
+        try:
+            for uri in (self.S3, *self.ALIASES):
+                assert not allowed(uri), uri
+        finally:
+            set_principal(None)
+
+        # One table behind every name the deny now covers.
+        catalogs = PyIcebergCatalog(StrataConfig(deployment_mode="service", **overrides))
+        uris = (self.S3, *self.ALIASES)
+        assert len({catalogs.load_table(uri).metadata_location for uri in uris}) == 1
+
+    def test_an_allow_still_names_only_the_address_it_was_written_for(
+        self, temp_warehouse, tmp_path, monkeypatch
+    ):
+        allowed = self._check(
+            monkeypatch,
+            tmp_path,
+            AclConfig(
+                default="deny", allow_rules=[AclRule(principal="*", tables=("s3:test_db.*",))]
+            ),
+            **self._shared_catalog(temp_warehouse),
+        )
+        try:
+            assert allowed(self.S3)
+            for uri in self.ALIASES:
+                assert not allowed(uri), uri
+        finally:
+            set_principal(None)
+
+    def test_a_bare_name_in_another_default_catalog_is_another_table(
+        self, temp_warehouse, tmp_path, monkeypatch
+    ):
+        """The default catalog named ``default`` keeps its own tables, apart
+        from the ``strata`` catalog every warehouse URI reads."""
+        allowed = self._check(
+            monkeypatch,
+            tmp_path,
+            AclConfig(
+                default="allow", deny_rules=[AclRule(principal="*", tables=("s3:test_db.*",))]
+            ),
+            **self._shared_catalog(temp_warehouse, catalog_name="default"),
+        )
+        try:
+            assert allowed("test_db.events")
+            assert not allowed("/not/a/real/path#test_db.events")
+        finally:
+            set_principal(None)
+
+    def test_without_a_shared_catalog_the_address_is_the_table(self, tmp_path, monkeypatch):
+        """Each local warehouse keeps its own catalog, so a deny on the S3
+        table says nothing about a local one of the same name."""
+        allowed = self._check(
+            monkeypatch,
+            tmp_path,
+            AclConfig(
+                default="allow", deny_rules=[AclRule(principal="*", tables=("s3:test_db.*",))]
+            ),
+        )
+        try:
+            assert not allowed(self.S3)
+            assert allowed(f"{tmp_path}/warehouse#test_db.events")
+        finally:
+            set_principal(None)

@@ -49,7 +49,6 @@ run everything, conventions, gotchas and the prioritized next steps.
 | `tla/Staleness.tla` | Model of cell status for a chain `a → b → c` under edits and runs, one run at a time |
 | `tla/Staleness_EditDuringRun.cfg` | An upstream is edited while a downstream runs. Finds finding 11 |
 | `tla/Staleness_Patched.cfg` | The proposed fix. **All invariants hold** (60,102 distinct states, exhaustive) |
-| `test_acl_counterexamples.py` | Finding 12 through the real `authorize_table_access` gate and catalog loader |
 | `test_pruning_properties.py` | Property test: a pruned row group holds no matching row (Hypothesis, real Parquet files) |
 | `test_staleness_properties.py` | Property test: random edit and run sequences on a real notebook match a fresh evaluation (Hypothesis) |
 
@@ -275,13 +274,16 @@ URI and the bare form resolve to the same catalog, so they should share
 one ACL name. Until then, the docs should recommend `*:finance.*` for
 deny rules. fnmatch lets `*` match any prefix, which covers every alias.
 
-**Mitigated in the docs; the code fix is open.** The configuration
-reference now says a pattern names the address form, not the table, and
-recommends `*:` deny patterns; its examples use them.
-`tests/test_auth.py::TestADenyForEveryPrefixCoversEveryAddress` checks
-that `*:test_db.*` refuses all three forms above through the real gate.
-The replay here still reproduces, because an `s3:`-only deny is still
-sidestepped.
+**Fixed**, with the names kept. Renaming every alias to one name would
+have turned a working `s3:finance.*` deny into a rule that matches nothing,
+so instead a deny is checked against every name the table answers to.
+`shared_catalog_stores` (in `iceberg.py`) lists them: with
+`catalog_properties["uri"]` set, every warehouse URI's `s3:`, `gs:`, `az:`
+and `file:` names, and the bare form's too when `catalog_name` is `strata`.
+Allow rules still match only the name requested, so an alias never grants
+anything. A named catalog pointing at the same data is not detected; the
+docs keep recommending `*:` deny patterns for that. Regression test:
+`tests/test_auth.py::TestADenyOnOneAddressCoversTheTable`.
 
 ## Model 2: build lease protocol
 
@@ -689,7 +691,7 @@ finding 12):
 | **Notebook staleness, wider** (`session._compute_staleness_locked`) | Extend `test_staleness_properties.py` | It covers plain Python cells only. The walk's special cases (leaves, `@nocache`, prompt and SQL cells, `@per_variant`, loops, errors, mounts) each need their own cell kinds in the generator, and concurrent steps would reach finding 11. |
 | **Manifest-level pruning** (Iceberg file skipping) | Extend `test_pruning_properties.py` to real Iceberg tables | The property test covers the Parquet row-group level only. File-level pruning uses Iceberg manifest bounds, which have their own NaN and truncation rules. |
 | **`transform_spec.to_json`** (core provenance) | Property test for canonical JSON | The other key encodings are covered above; this one wasn't checked. |
-| **Table naming for ACLs** (`TableRef`, `table_identity_for`, `named_catalog`) | Property test over URI forms | Finding 12 generalised: for every configured catalog shape, every URI form that loads a table should produce the same ACL name. |
+| **Table naming for ACLs** (`TableRef`, `table_identity_for`, `named_catalog`) | Property test over URI forms | Finding 12 generalised: for every configured catalog shape, a deny on any URI form that loads a table should refuse every other form that loads it. The fix covers the `catalog_properties` shape by construction; the property would check the rest. |
 
 Not worth it: the data plane's streaming and memory bounds (better
 covered by benchmarks and fuzzing) and the Rust IPC concat

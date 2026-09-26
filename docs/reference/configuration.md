@@ -318,11 +318,7 @@ for everything else: a `file://` warehouse, any other path, and a bare
 So one table can have several names. A table reachable as
 `s3://bucket/wh#finance.ledger` and as `lake:finance.ledger` is
 `s3:finance.ledger` under the first and `lake:finance.ledger` under the
-second. With a SQL catalog (`catalog_properties`), every warehouse URI reads
-that one catalog whatever comes before `#`, so the same S3 table is also
-`file:finance.ledger` when requested as `finance.ledger` or behind a path
-that doesn't exist. **Write deny rules with a `*` prefix** so they cover every
-name:
+second. **Write deny rules with a `*` prefix** so they cover every name:
 
 ```toml
 deny = [
@@ -330,7 +326,17 @@ deny = [
 ]
 ```
 
-An allow rule can name one prefix: an address it misses falls through to
+With a SQL catalog (`catalog_properties` with a `uri`), Strata knows which
+names are one table and a deny rule covers all of them. Every warehouse URI
+reads that one catalog whatever comes before `#`, so the table behind
+`s3://bucket/wh#finance.ledger` is also the one behind a path that doesn't
+exist, and behind a bare `finance.ledger` when `catalog_name` is `strata`. A
+deny on `s3:finance.*` refuses it under `file:`, `gs:` and `az:` too. Strata
+cannot tell that a named catalog holds the same data as a warehouse, which is
+what the `*` prefix is for.
+
+An allow rule matches only the name it was written for, even where a
+deny would cover the others: an address it misses falls through to
 `default`. **If you added a named catalog, or a GCS or Azure warehouse,
 check your deny rules**: before this release every warehouse table matched
 `file:` whatever store held it, so a rule written then covers less than it
