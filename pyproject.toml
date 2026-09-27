@@ -39,7 +39,7 @@ dependencies = [
     # 0.35.0 is the first release with the sans-io WebSocket implementation
     # (WebSocketsSansIOProtocol); server.main selects ws="websockets-sansio" to
     # avoid the deprecated legacy asyncio protocol that breaks on CPython 3.14+.
-    "uvicorn>=0.35.0",
+    "uvicorn>=0.53.0",
     "websockets>=17.1",
     "httpx>=0.28.0",
     "duckdb>=1.1.0",
