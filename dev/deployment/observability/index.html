@@ -993,34 +993,6 @@
   
   
     <li class="md-nav__item">
-      <a href="../../notebook/ai/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    AI Integration
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
       <a href="../../notebook/environment/" class="md-nav__link">
         
   
@@ -2304,9 +2276,8 @@ families include:</p>
   by <code>tenant</code>, once a tenant has made a request</li>
 <li><strong>AI</strong>: <code>strata_ai_calls_total</code>, <code>strata_ai_input_tokens_total</code> and
   <code>strata_ai_output_tokens_total</code>, labelled by <code>tenant</code>, <code>principal</code> and
-  <code>model</code>. Counted from each provider response: the assistant's agent loop,
-  prompt cells, and the other AI routes. The labels are the caller the request
-  ran as, and are empty in personal mode. The series appear after the first
+  <code>model</code>. Counted from each provider response a prompt cell receives. The
+  labels are the caller the request ran as, and are empty in personal mode. The series appear after the first
   model call.</li>
 </ul>
 <h3 id="traces-opentelemetry-otlp">Traces, OpenTelemetry OTLP<a class="headerlink" href="#traces-opentelemetry-otlp" title="Permanent link">&para;</a></h3>

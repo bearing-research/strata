@@ -995,34 +995,6 @@
   
   
     <li class="md-nav__item">
-      <a href="../../notebook/ai/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    AI Integration
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
       <a href="../../notebook/environment/" class="md-nav__link">
         
   
@@ -1654,17 +1626,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#ai-agent-client-server" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        AI Agent (client → server)
-      
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -1749,10 +1710,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#ai-agent" class="md-nav__link">
+  <a href="#agent" class="md-nav__link">
     <span class="md-ellipsis">
       
-        AI Agent
+        Agent
       
     </span>
   </a>
@@ -2397,17 +2358,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#ai-agent-client-server" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        AI Agent (client → server)
-      
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -2492,10 +2442,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#ai-agent" class="md-nav__link">
+  <a href="#agent" class="md-nav__link">
     <span class="md-ellipsis">
       
-        AI Agent
+        Agent
       
     </span>
   </a>
@@ -2820,28 +2770,6 @@
 </tr>
 </tbody>
 </table>
-<h3 id="ai-agent-client-server">AI Agent (client → server)<a class="headerlink" href="#ai-agent-client-server" title="Permanent link">&para;</a></h3>
-<table>
-<thead>
-<tr>
-<th>Type</th>
-<th>Payload</th>
-<th>Description</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>agent_cancel</code></td>
-<td><code>{}</code></td>
-<td>Cancel a running AI agent</td>
-</tr>
-<tr>
-<td><code>agent_confirm_response</code></td>
-<td><code>{ "request_id": "...", "approved": true }</code></td>
-<td>Reply to an <code>agent_confirm_request</code> from the server, echoing its <code>request_id</code></td>
-</tr>
-</tbody>
-</table>
 <h2 id="server-client-messages">Server → Client Messages<a class="headerlink" href="#server-client-messages" title="Permanent link">&para;</a></h2>
 <h3 id="cell-status">Cell Status<a class="headerlink" href="#cell-status" title="Permanent link">&para;</a></h3>
 <table>
@@ -3015,7 +2943,7 @@
 </tr>
 </tbody>
 </table>
-<h3 id="ai-agent">AI Agent<a class="headerlink" href="#ai-agent" title="Permanent link">&para;</a></h3>
+<h3 id="agent">Agent<a class="headerlink" href="#agent" title="Permanent link">&para;</a></h3>
 <table>
 <thead>
 <tr>
@@ -3026,29 +2954,9 @@
 </thead>
 <tbody>
 <tr>
-<td><code>agent_text_delta</code></td>
-<td><code>{ "job_id": "...", "text": "..." }</code></td>
-<td>Streaming token delta from the agent's assistant message</td>
-</tr>
-<tr>
-<td><code>agent_confirm_request</code></td>
-<td><code>{ "job_id": "...", "request_id": "...", "tool": "...", "arguments": {...}, "summary": "..." }</code></td>
-<td>Agent is asking the client to approve a gated tool call; answer with <code>agent_confirm_response</code></td>
-</tr>
-<tr>
-<td><code>agent_progress</code></td>
-<td><code>{ "job_id": "...", "event": "...", "detail": "...", ... }</code></td>
-<td>Incremental agent-loop status (tool start/end, iteration)</td>
-</tr>
-<tr>
-<td><code>agent_done</code></td>
-<td><code>{ "job_id": "...", "content": "...", "model": "...", ... }</code></td>
-<td>Agent finished, failed, or was cancelled</td>
-</tr>
-<tr>
 <td><code>agent_note</code></td>
 <td><code>{ "source": "mcp" \| "agent", "text": "..." }</code></td>
-<td>An outside agent driving this notebook over MCP narrating what it did (<code>mcp</code>) or a note it pushed itself (<code>agent</code>). No <code>job_id</code>: the agent is not the built-in one, and nothing here is part of an agent job</td>
+<td>An outside agent driving this notebook over MCP narrating what it did (<code>mcp</code>) or a note it pushed itself (<code>agent</code>)</td>
 </tr>
 </tbody>
 </table>

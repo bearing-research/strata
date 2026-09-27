@@ -995,34 +995,6 @@
   
   
     <li class="md-nav__item">
-      <a href="../../notebook/ai/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    AI Integration
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
       <a href="../../notebook/environment/" class="md-nav__link">
         
   
@@ -1622,10 +1594,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#ai-ai-assistant-configuration" class="md-nav__link">
+  <a href="#ai-llm-configuration-for-prompt-cells" class="md-nav__link">
     <span class="md-ellipsis">
       
-        [ai] - AI assistant configuration
+        [ai] - LLM configuration for prompt cells
       
     </span>
   </a>
@@ -2165,10 +2137,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#ai-ai-assistant-configuration" class="md-nav__link">
+  <a href="#ai-llm-configuration-for-prompt-cells" class="md-nav__link">
     <span class="md-ellipsis">
       
-        [ai] - AI assistant configuration
+        [ai] - LLM configuration for prompt cells
       
     </span>
   </a>
@@ -2390,7 +2362,7 @@
 </code></pre></div>
 <p><strong>What gets blanked.</strong> Values for keys whose name contains <code>KEY</code>, <code>SECRET</code>, <code>TOKEN</code>, <code>PASSWORD</code>, or <code>CREDENTIAL</code> are written as empty strings to disk. The actual secret is read from the runtime environment at execution time. The blanked entry is still committed so users can see which env vars a notebook <em>expects</em> without leaking the value into the repo.</p>
 <p><strong>Whole-block elision.</strong> If every entry is either empty or a blanked sensitive key, the writer omits the <code>[env]</code> block entirely on save. Typing an API key into the Runtime panel doesn't churn the committed file.</p>
-<h2 id="ai-ai-assistant-configuration"><code>[ai]</code> - AI assistant configuration<a class="headerlink" href="#ai-ai-assistant-configuration" title="Permanent link">&para;</a></h2>
+<h2 id="ai-llm-configuration-for-prompt-cells"><code>[ai]</code> - LLM configuration for prompt cells<a class="headerlink" href="#ai-llm-configuration-for-prompt-cells" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="k">[ai]</span>
 <a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="n">model</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"claude-sonnet-4-6"</span>
 </code></pre></div>
@@ -2406,21 +2378,11 @@
 <tr>
 <td><code>model</code></td>
 <td>string</td>
-<td>Notebook-level default LLM model. Overridden by <code># @model &lt;id&gt;</code> in prompt cells. Cleared by the AI panel when the user picks "use server default".</td>
-</tr>
-<tr>
-<td><code>approval_timeout_seconds</code></td>
-<td>float</td>
-<td>How long an agent destructive-tool confirm prompt waits before being treated as a decline. Default 120.</td>
-</tr>
-<tr>
-<td><code>approval_tools</code></td>
-<td>list of strings</td>
-<td>Built-in assistant tools that ask before running, added to the server's <code>STRATA_AI_APPROVAL_TOOLS</code>. It can add a gate but not remove one; an unknown tool name is logged and gates nothing.</td>
+<td>Notebook-level default LLM model. Overridden by <code># @model &lt;id&gt;</code> in prompt cells.</td>
 </tr>
 </tbody>
 </table>
-<p>Advanced provider fields (<code>base_url</code>, <code>timeout_seconds</code>, token ceilings, …) are documented in <a href="../../notebook/ai/#custom-provider-configuration">AI Integration</a>.</p>
+<p>Advanced provider fields (<code>base_url</code>, <code>timeout_seconds</code>, <code>max_output_tokens</code>, …) are documented in <a href="../../notebook/cells/#provider-configuration">Provider configuration</a>.</p>
 <p>The API key and base URL come from the runtime environment (<code>ANTHROPIC_API_KEY</code> / <code>OPENAI_API_KEY</code> / <code>GEMINI_API_KEY</code> / <code>STRATA_AI_API_KEY</code> / <code>STRATA_AI_BASE_URL</code>) - they never live in this file.</p>
 <h2 id="secret_manager-external-secret-manager-wiring"><code>[secret_manager]</code> - External secret-manager wiring<a class="headerlink" href="#secret_manager-external-secret-manager-wiring" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="k">[secret_manager]</span>

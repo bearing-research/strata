@@ -757,10 +757,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#7-ai-assistant" class="md-nav__link">
+  <a href="#7-other-display-types" class="md-nav__link">
     <span class="md-ellipsis">
       
-        7. AI Assistant
+        7. Other display types
       
     </span>
   </a>
@@ -768,21 +768,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#8-other-display-types" class="md-nav__link">
+  <a href="#8-try-an-example" class="md-nav__link">
     <span class="md-ellipsis">
       
-        8. Other display types
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#9-try-an-example" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        9. Try an example
+        8. Try an example
       
     </span>
   </a>
@@ -1207,34 +1196,6 @@
     
   
     Publishing an artifact
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../notebook/ai/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    AI Integration
   
 
     
@@ -2287,10 +2248,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#7-ai-assistant" class="md-nav__link">
+  <a href="#7-other-display-types" class="md-nav__link">
     <span class="md-ellipsis">
       
-        7. AI Assistant
+        7. Other display types
       
     </span>
   </a>
@@ -2298,21 +2259,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#8-other-display-types" class="md-nav__link">
+  <a href="#8-try-an-example" class="md-nav__link">
     <span class="md-ellipsis">
       
-        8. Other display types
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#9-try-an-example" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        9. Try an example
+        8. Try an example
       
     </span>
   </a>
@@ -2365,8 +2315,8 @@
 <p>Strata Notebook is an interactive notebook with content-addressed
 caching, automatic dependency tracking, and cascade execution. This
 quickstart walks through a real three-cell pipeline, then surfaces
-the distinctive features (prompt cells, AI assistant, cascade,
-cache hits) on top of it.</p>
+the distinctive features (prompt cells, cascade, cache hits) on top
+of it.</p>
 <p>This is the <strong>web UI</strong> quickstart - you drive the notebook in a
 browser. The same notebook can also be driven by a
 <a href="../../notebook/agent/">coding agent</a> or watched live from a
@@ -2622,25 +2572,11 @@ and the response is stored as an artifact keyed by <code>(template,
 inputs, model config)</code>. Running again with the same upstream
 <code>stats</code> and the same template is a cache hit, no second API call.</p>
 <p>Needs <code>ANTHROPIC_API_KEY</code> (or another provider's key) configured in
-the Runtime panel. See <a href="../../notebook/ai/">AI Integration</a> for
-provider setup and <a href="../../notebook/cells/#prompt-cells">Prompt cells</a>
+the Runtime panel. See <a href="../../notebook/cells/#provider-configuration">Provider configuration</a>
+for provider setup and <a href="../../notebook/cells/#prompt-cells">Prompt cells</a>
 for the full annotation surface (<code>@output_schema</code>, <code>@validate_retries</code>,
 multi-turn conversations).</p>
-<h2 id="7-ai-assistant">7. AI Assistant<a class="headerlink" href="#7-ai-assistant" title="Permanent link">&para;</a></h2>
-<p>The top-right <strong>AI Assistant</strong> panel is a conversational sidebar
-that can read your notebook, answer questions, and autonomously
-edit or run cells. It's separate from prompt cells: the assistant
-lives outside the DAG and doesn't create artifacts.</p>
-<ul>
-<li><strong>Chat mode</strong> (<span class="keys"><kbd class="key-enter">Enter</kbd></span>): stream a response with notebook
-  context included.</li>
-<li><strong>Agent mode</strong> (<span class="keys"><kbd class="key-shift">Shift</kbd><span>+</span><kbd class="key-enter">Enter</kbd></span>): the assistant takes actions
-  on the notebook (add/edit/run cells, install packages) with a
-  10-step limit and a Cancel button.</li>
-</ul>
-<p>Same provider key as prompt cells. See
-<a href="../../notebook/ai/">AI Integration</a> for full details.</p>
-<h2 id="8-other-display-types">8. Other display types<a class="headerlink" href="#8-other-display-types" title="Permanent link">&para;</a></h2>
+<h2 id="7-other-display-types">7. Other display types<a class="headerlink" href="#7-other-display-types" title="Permanent link">&para;</a></h2>
 <p>The cells above used trailing expressions for the DataFrame and
 the matplotlib <code>Figure</code>. Other shapes you can put at the end of a
 cell, or call from <code>display()</code>:</p>
@@ -2685,7 +2621,7 @@ cell, or call from <code>display()</code>:</p>
 <p>Use <code>display(x)</code> for <strong>multiple</strong> outputs in one cell (each call
 adds a new render below the cell). For one trailing expression at
 the end, no <code>display()</code> needed: the harness auto-displays it.</p>
-<h2 id="9-try-an-example">9. Try an example<a class="headerlink" href="#9-try-an-example" title="Permanent link">&para;</a></h2>
+<h2 id="8-try-an-example">8. Try an example<a class="headerlink" href="#8-try-an-example" title="Permanent link">&para;</a></h2>
 <p>The repo ships 18 example notebooks covering every cell type. To
 browse them in the UI, stop the running server first (Ctrl+C), then
 point the storage root at <code>examples/</code>:</p>
@@ -2749,7 +2685,6 @@ grouped by feature.</p>
 <li><a href="../../notebook/import/">Import from Jupyter</a> for <code>strata import nb.ipynb</code></li>
 <li><a href="../../notebook/export/">Export</a> for sharing a notebook as a single self-contained markdown or HTML file, or as a snapshot bundle (state and artifacts) that imports back</li>
 <li><a href="../../notebook/environment/">Environment Management</a> for package management and Python versions</li>
-<li><a href="../../notebook/ai/">AI Integration</a> for prompt cells + the assistant in depth</li>
 <li><a href="../../notebook/comparison/">Comparison with Jupyter, Marimo, Pluto</a></li>
 <li><a href="../../notebook/keyboard/">Keyboard Shortcuts</a></li>
 </ul>

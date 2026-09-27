@@ -995,34 +995,6 @@
   
   
     <li class="md-nav__item">
-      <a href="../../notebook/ai/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    AI Integration
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
       <a href="../../notebook/environment/" class="md-nav__link">
         
   
@@ -2366,11 +2338,11 @@ load-bearing rules that aren't obvious from either of those individually.</p>
 <tbody>
 <tr>
 <td><code>POST /v1/notebooks/...</code> (REST)</td>
-<td>Lifecycle (open / create / import / delete), discovery, and every structural edit (cells, mounts, env, deps, workers, AI config)</td>
+<td>Lifecycle (open / create / import / delete), discovery, and every structural edit (cells, mounts, env, deps, workers)</td>
 </tr>
 <tr>
 <td><code>WS /v1/notebooks/ws/{session_id}</code></td>
-<td>Live execution: cell status, output streams, DAG updates, cascade prompts, inspect REPL, agent loop</td>
+<td>Live execution: cell status, output streams, DAG updates, cascade prompts, inspect REPL, agent notes</td>
 </tr>
 </tbody>
 </table>
@@ -2398,7 +2370,7 @@ client can do - there's no internal API.</p>
    open response. This is your sole resync primitive on reconnects - there's
    no <code>resume_after_seq</code>.
 4. <strong>Listen.</strong> Execution events (cell status, output, console, errors,
-   cascade prompts, DAG updates, environment-job lifecycle, agent loop) all
+   cascade prompts, DAG updates, environment-job lifecycle, agent notes) all
    arrive over the WS. Subsequent structural edits - adding / removing /
    reordering cells, updating env / mounts / workers, dependency mutations
    - go via REST; the backend re-broadcasts the affected state through the
@@ -2543,11 +2515,6 @@ corresponding panel:</p>
 <td><code>GET /{sid}/environment</code></td>
 <td>Environment panel re-fetch</td>
 <td>Refreshes after a mutation; snapshot has the version current at open.</td>
-</tr>
-<tr>
-<td><code>GET /{sid}/ai/models</code>, <code>GET /{sid}/ai/status</code></td>
-<td>LLM picker / panel open</td>
-<td>Provider API call.</td>
 </tr>
 <tr>
 <td><code>GET /{sid}/connections/{name}/schema</code></td>

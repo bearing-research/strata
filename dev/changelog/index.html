@@ -526,6 +526,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#removed" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Removed
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#security" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1663,34 +1674,6 @@
   
   
     <li class="md-nav__item">
-      <a href="../notebook/ai/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    AI Integration
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
       <a href="../notebook/environment/" class="md-nav__link">
         
   
@@ -2635,6 +2618,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#removed" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Removed
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#security" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -3444,6 +3438,22 @@ a case of the server reporting more confidence than it had:</p>
 <code>pydantic-settings&gt;=2.15.0</code> for every install, and <code>azure-identity&gt;=1.25.3</code> for
 the <code>[azure]</code> extra. These match the versions the test suite runs against; an
 environment pinned below them has to move before it can install 0.8.0.</p>
+<h3 id="removed">Removed<a class="headerlink" href="#removed" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>The built-in AI assistant.</strong> The notebook's chat and agent panel, the
+  <code>/v1/notebooks/{id}/ai/*</code> routes, the assistant's WebSocket frames
+  (<code>agent_progress</code>, <code>agent_text_delta</code>, <code>agent_confirm_request</code>, <code>agent_done</code>,
+  <code>agent_cancel</code> and <code>agent_confirm_response</code>) and <code>[ai] approval_tools</code> are
+  gone, along with the settings only the assistant read:
+  <code>STRATA_AI_APPROVAL_TOOLS</code>, <code>STRATA_AI_GATES_LOCKED</code>,
+  <code>STRATA_AI_APPROVAL_TIMEOUT_SECONDS</code>, <code>STRATA_AI_MAX_CONTEXT_TOKENS</code>,
+  <code>[ai] approval_timeout_seconds</code> and <code>[ai] max_context_tokens</code>. Prompt cells
+  run as before, but the panel was also the only UI for their default model:
+  set it with <code>[ai] model</code> in <code>notebook.toml</code>, or per cell with <code># @model</code>. The
+  panel's conversation history, <code>.strata/agent_history.json</code>, is no longer
+  read; delete it, since it holds whatever was typed into the chat. Drive a
+  notebook with an external agent through MCP or the CLI instead.</li>
+</ul>
 <h3 id="security">Security<a class="headerlink" href="#security" title="Permanent link">&para;</a></h3>
 <ul>
 <li><strong>A cell cannot read the server's secrets.</strong> The worker takes its token and
@@ -3499,12 +3509,10 @@ environment pinned below them has to move before it can install 0.8.0.</p>
   <code>pyproject.toml</code> without its dependencies. A <code>notebook.toml</code> it could not
   parse was replaced outright, under a new id. It now adds only missing
   scaffolding.</li>
-<li><strong>An agent's edit honours the soft lock.</strong> Edits through MCP and through the
-  built-in assistant skipped the check REST and the WebSocket make, so an agent
-  could overwrite a cell someone changed moments ago, and its own change held
-  nothing against them. Both now wait out someone else's recent change and
-  hold the cell in turn. The assistant counts as the person using it, so it
-  never locks its own user out of a cell it just edited.</li>
+<li><strong>An agent's edit honours the soft lock.</strong> Edits through MCP skipped the
+  check REST and the WebSocket make, so an agent could overwrite a cell someone
+  changed moments ago, and its own change held nothing against them. It now
+  waits out someone else's recent change and holds the cell in turn.</li>
 <li><strong>A cell on a remote worker shows every display it made.</strong> Only the last
   one travelled back, because it is also the variable <code>_</code>, so a remote cell
   that drew three figures showed one.</li>

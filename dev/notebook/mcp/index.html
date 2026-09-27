@@ -1003,34 +1003,6 @@
   
   
     <li class="md-nav__item">
-      <a href="../ai/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    AI Integration
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
       <a href="../environment/" class="md-nav__link">
         
   
@@ -2280,7 +2252,7 @@ The typical loop:</p>
 </tr>
 <tr>
 <td><code>note(session_id, message)</code></td>
-<td>Post a line into the Agent panel for the human watching.</td>
+<td>Post a line into the terminal viewer's Agent tab for the human watching.</td>
 </tr>
 <tr>
 <td><code>list_workers(session_id)</code></td>
@@ -2363,13 +2335,13 @@ route is <code>PUT /v1/notebooks/{session_id}/variant-groups/{group}</code>.</p>
 <code>lineage</code> takes for it (<code>score@variant=triple</code> for a <code># @per_variant</code> cell's
 instances; the plain name on the member cell for a sweep group).</p>
 <h2 id="watching-the-agent">Watching the agent<a class="headerlink" href="#watching-the-agent" title="Permanent link">&para;</a></h2>
-<p>The built-in AI panel streams its own reasoning into the <strong>Agent panel</strong>. An
-external agent's reasoning lives in its own client, so instead its <strong>tool
-actions are narrated there automatically</strong> - "ran cell abc → ok", "added python
-cell def", "added dependency polars" - as it works. It can also call the <code>note</code>
+<p>An external agent's reasoning lives in its own client, so instead its <strong>tool
+actions are narrated automatically</strong> into the terminal viewer's <strong>Agent</strong> tab -
+"ran cell abc → ok", "added python cell def", "added dependency polars" - as it
+works. It can also call the <code>note</code>
 tool to post an explicit line of narration ("about to refactor featurize into
-two cells"). Open the notebook in the browser or the
-<a href="../tui/">terminal viewer</a> and you can follow along in real time.</p>
+two cells"). Open the notebook in the <a href="../tui/">terminal viewer</a> and you can
+follow along in real time; the browser UI does not show these notes.</p>
 <h2 id="relationship-to-the-cli">Relationship to the CLI<a class="headerlink" href="#relationship-to-the-cli" title="Permanent link">&para;</a></h2>
 <p>The MCP tools and the <code>strata</code> CLI share one operation contract
 (<a href="../agent-authoring/"><code>NotebookOps</code></a>) and return the same curated views. The CLI
