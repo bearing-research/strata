@@ -53,7 +53,7 @@ FROM python:3.14-slim
 # ``locked_environments: false`` and the server runs the cell in this image
 # instead, which works but ignores the notebook's own pins; with it, the
 # notebook's environment is what the cell gets.
-ARG STRATA_VERSION=0.7.0
+ARG STRATA_VERSION=0.8.0
 RUN pip install --no-cache-dir "strata-notebook[notebook]==${STRATA_VERSION}" uv
 
 # R cells, with --build-arg WITH_R=true:
