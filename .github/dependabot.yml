@@ -119,3 +119,59 @@ updates:
     commit-message:
       prefix: ci
       include: scope
+
+  # The images the compose stacks pull (Postgres, nginx, Prometheus, Grafana,
+  # Jaeger). The docker ecosystem reads Dockerfiles only, so these sat
+  # unbumped for two years.
+  - package-ecosystem: docker-compose
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: America/Los_Angeles
+    open-pull-requests-limit: 3
+    groups:
+      docker-compose:
+        patterns: ["*"]
+        update-types: [minor, patch]
+    ignore:
+      # 2.21 drops the query API Grafana's Jaeger datasource reads; see
+      # docker-compose.observability.yml.
+      - dependency-name: jaegertracing/jaeger
+        versions: [">=2.21.0"]
+    commit-message:
+      prefix: ci
+      include: scope
+
+  # Features in .devcontainer/devcontainer.json.
+  - package-ecosystem: devcontainers
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: America/Los_Angeles
+    open-pull-requests-limit: 3
+    groups:
+      devcontainers:
+        patterns: ["*"]
+    commit-message:
+      prefix: ci
+      include: scope
+
+  # Hook revisions in .pre-commit-config.yaml.
+  - package-ecosystem: pre-commit
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: America/Los_Angeles
+    open-pull-requests-limit: 3
+    groups:
+      pre-commit:
+        patterns: ["*"]
+    commit-message:
+      prefix: ci
+      include: scope

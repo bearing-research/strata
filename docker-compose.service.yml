@@ -23,6 +23,10 @@ services:
       - strata-service-state:/home/strata/.strata
       - strata-service-notebooks:/tmp/strata-notebooks
       - ./.docker/service-mode/pyproject.toml:/home/strata/pyproject.toml:ro
+    environment:
+      # The image defaults STRATA_DEPLOYMENT_MODE to personal, and the
+      # environment wins over the mounted [tool.strata] table.
+      - STRATA_DEPLOYMENT_MODE=service
     healthcheck:
       test:
         [
@@ -69,7 +73,7 @@ services:
       start_period: 10s
 
   proxy:
-    image: nginx:1.27-alpine
+    image: nginx:1.30-alpine
     depends_on:
       strata:
         condition: service_healthy

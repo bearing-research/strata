@@ -88,8 +88,16 @@ def _ws_send(ws, seq: int, msg_type: str, payload: dict) -> None:
     )
 
 
-def _receive_execution_terminal(ws, *, cell_id: str, timeout: float) -> dict:
+def _run_cell(ws, run_type: str, *, cell_id: str, timeout: float) -> dict:
+    """Send *run_type* for the cell and return its terminal frame.
+
+    A new notebook syncs its environment first, and a run sent during the
+    sync is refused with ENVIRONMENT_BUSY; send it again once the sync ends.
+    """
+    seq = 1
+    _ws_send(ws, seq, run_type, {"cell_id": cell_id})
     deadline = time.time() + timeout
+    waiting_for_environment = False
 
     while time.time() < deadline:
         remaining = max(0.1, deadline - time.time())
@@ -97,10 +105,21 @@ def _receive_execution_terminal(ws, *, cell_id: str, timeout: float) -> dict:
         msg_type = message.get("type")
         payload = message.get("payload", {})
 
+        if msg_type == "error" and payload.get("code") == "ENVIRONMENT_BUSY":
+            waiting_for_environment = True
+            continue
+
+        if msg_type == "environment_job_finished" and waiting_for_environment:
+            waiting_for_environment = False
+            seq += 1
+            _ws_send(ws, seq, run_type, {"cell_id": cell_id})
+            continue
+
         if msg_type == "cascade_prompt":
+            seq += 1
             _ws_send(
                 ws,
-                2,
+                seq,
                 "cell_execute_cascade",
                 {"cell_id": cell_id, "plan_id": payload["plan_id"]},
             )
@@ -176,8 +195,7 @@ def run_smoke(config: SmokeConfig) -> None:
         ws_url = _base_to_ws(config.user_base_url, f"/v1/notebooks/ws/{notebook_id}")
         print("Executing allowed worker over WebSocket...")
         with ws_connect(ws_url, open_timeout=config.timeout) as ws:
-            _ws_send(ws, 1, "cell_execute", {"cell_id": cell_id})
-            result = _receive_execution_terminal(ws, cell_id=cell_id, timeout=config.timeout)
+            result = _run_cell(ws, "cell_execute", cell_id=cell_id, timeout=config.timeout)
 
         if result["type"] != "cell_output":
             raise RuntimeError(f"Expected successful cell_output, got {result}")
@@ -197,8 +215,7 @@ def run_smoke(config: SmokeConfig) -> None:
 
         print("Verifying forced rerun is rejected by service-mode policy...")
         with ws_connect(ws_url, open_timeout=config.timeout) as ws:
-            _ws_send(ws, 1, "cell_execute_force", {"cell_id": cell_id})
-            blocked = _receive_execution_terminal(ws, cell_id=cell_id, timeout=config.timeout)
+            blocked = _run_cell(ws, "cell_execute_force", cell_id=cell_id, timeout=config.timeout)
 
         if blocked["type"] != "cell_error":
             raise RuntimeError(f"Expected blocked cell_error, got {blocked}")

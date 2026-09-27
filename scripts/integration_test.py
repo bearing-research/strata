@@ -6,7 +6,7 @@ Requires PostgreSQL to be running (via docker-compose.test.yml).
 
 Usage:
     # Start PostgreSQL first
-    docker-compose -f docker-compose.test.yml up -d
+    docker compose -f docker-compose.test.yml up -d
 
     # Run tests
     STRATA_CATALOG_URI=postgresql://strata:strata@localhost:5432/iceberg_catalog \

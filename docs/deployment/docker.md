@@ -96,7 +96,7 @@ mental model.
 
 ## Environment variables
 
-Override defaults in `docker-compose.yml` or via `.env` file:
+Override defaults in the `environment:` block of `docker-compose.yml`:
 
 ```yaml
 environment:

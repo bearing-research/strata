@@ -5,6 +5,8 @@ port = 8765
 cache_dir = "/home/strata/.strata/cache"
 metadata_db = "/home/strata/.strata/meta.sqlite"
 artifact_dir = "/home/strata/.strata/artifacts"
+# The compose file mounts the notebooks volume here.
+notebook_storage_dir = "/tmp/strata-notebooks"
 
 auth_mode = "trusted_proxy"
 proxy_token = "dev-service-token"

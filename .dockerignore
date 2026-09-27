@@ -2,13 +2,12 @@
 .git
 .gitignore
 
-# Python
-__pycache__
-*.pyc
-*.pyo
-*.pyd
+# Python. The ** patterns reach into src/: a bare *.so or __pycache__
+# matches only at the context root, and maturin packages what it finds there.
+**/__pycache__
+**/*.py[cod]
 .Python
-*.so
+**/*.so
 .venv
 venv
 env
@@ -36,9 +35,14 @@ tests/
 .coverage
 htmlcov
 
-# Frontend
+# Frontend. The image builds its own; a copy left in src/strata/_frontend
+# would be packaged into the wheel and served ahead of it.
 frontend/node_modules
 frontend/dist
+src/strata/_frontend
+
+# OS
+**/.DS_Store
 
 # Docs
 docs/
