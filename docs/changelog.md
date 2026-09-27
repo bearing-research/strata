@@ -271,11 +271,13 @@ environment pinned below them has to move before it can install 0.8.0.
   segfaults the server on it. The fetcher now caches each file's parsed footer
   instead, and every read opens its own handle with it and closes it after.
 - **`strata artifact` opens the store the server serves.** Every artifact
-  command opened a SQLite file in the artifact directory and ignored
-  `STRATA_ARTIFACT_DIR`, the metadata DSN and the blob backend, so against a
-  service store on Postgres and S3 it saw an empty store: `strata artifact
-  archive --token` answered "No such publication". It now reads the same
-  `STRATA_*` settings as the server.
+  command opened a SQLite file in the artifact directory and ignored the
+  server's settings, so against a service store on Postgres and S3 it saw an
+  empty store: `strata artifact archive --token` answered "No such
+  publication". Without `--artifact-dir` it now opens the configured store,
+  from `[tool.strata]` and `STRATA_*` like the server, metadata DSN and blob
+  backend included; with it, exactly that local store and nothing else. A
+  store that does not exist is reported, not created.
 - **An import without `created_at` is a 400.** It reached the database's NOT
   NULL constraint and came back as a 500.
 - **`strata new` on an existing notebook leaves it as it is.** It kept the

@@ -199,9 +199,9 @@ def _build_parser() -> argparse.ArgumentParser:
             dest="artifact_dir",
             default=None,
             help=(
-                "Artifact store directory (default: $STRATA_ARTIFACT_DIR, else "
-                "~/.strata/artifacts). A metadata DSN and blob backend set through "
-                "STRATA_* are used as the server uses them"
+                "Read this local store (its SQLite file and blobs) and nothing "
+                "else. Without it, the server's configured store: [tool.strata] "
+                "and STRATA_* settings, metadata DSN and blob backend included"
             ),
         )
         sub.add_argument(
@@ -263,9 +263,9 @@ def _build_parser() -> argparse.ArgumentParser:
             dest="artifact_dir",
             default=None,
             help=(
-                "Artifact store directory (default: $STRATA_ARTIFACT_DIR, else "
-                "~/.strata/artifacts). A metadata DSN and blob backend set through "
-                "STRATA_* are used as the server uses them"
+                "Read this local store (its SQLite file and blobs) and nothing "
+                "else. Without it, the server's configured store: [tool.strata] "
+                "and STRATA_* settings, metadata DSN and blob backend included"
             ),
         )
 

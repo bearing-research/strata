@@ -188,6 +188,65 @@ class TestTheStoreItOpens:
         assert "model-1@v=1" in capsys.readouterr().out
 
 
+class TestWhichStoreACommandReads:
+    def test_artifact_dir_names_one_local_store_whatever_the_environment_says(
+        self, chain_store, monkeypatch
+    ):
+        """With a server's settings in the shell, --artifact-dir on a notebook's
+        store was paired with the team's bucket, so its rows were read against
+        another store's bytes."""
+        from strata.artifact_cli import _open_store
+        from strata.blob_store import LocalBlobStore
+
+        monkeypatch.setenv("STRATA_ARTIFACT_BLOB_BACKEND", "s3")
+        monkeypatch.setenv("STRATA_ARTIFACT_S3_BUCKET", "team-bucket")
+        store = _open_store(chain_store["dir"])
+
+        assert store is not None
+        assert isinstance(store.blob_store, LocalBlobStore)
+        assert store.get_latest_version("model-1") is not None
+
+    def test_artifact_dir_opens_even_when_the_environment_is_incoherent(
+        self, chain_store, monkeypatch
+    ):
+        from strata.artifact_cli import _open_store
+
+        monkeypatch.setenv("STRATA_MULTI_TENANT_ENABLED", "true")  # personal mode refuses it
+
+        assert _open_store(chain_store["dir"]) is not None
+
+    def test_without_artifact_dir_it_reads_tool_strata_in_pyproject(
+        self, chain_store, tmp_path, monkeypatch
+    ):
+        """The server reads [tool.strata]; the CLI read only the environment."""
+        from strata.artifact_cli import _open_store
+
+        project = tmp_path / "project"
+        project.mkdir()
+        (project / "pyproject.toml").write_text(
+            f'[tool.strata]\nartifact_dir = "{chain_store["dir"]}"\n'
+        )
+        monkeypatch.chdir(project)
+        monkeypatch.delenv("STRATA_ARTIFACT_DIR", raising=False)
+
+        store = _open_store(None)
+        assert store is not None
+        assert str(store.db_path).startswith(chain_store["dir"])
+
+    def test_a_missing_store_is_reported_and_not_created(self, tmp_path, monkeypatch, capsys):
+        """Loading the config creates a personal-mode artifact_dir, so a typo in
+        STRATA_ARTIFACT_DIR used to leave an empty store at the typo."""
+        from strata.artifact_cli import _open_store
+
+        typo = tmp_path / "artifcats"
+        monkeypatch.setenv("STRATA_ARTIFACT_DIR", str(typo))
+        monkeypatch.chdir(tmp_path)
+
+        assert _open_store(None) is None
+        assert "no artifact store" in capsys.readouterr().err
+        assert not (typo / "artifacts.sqlite").exists()
+
+
 class TestTenantAgnosticResolution:
     def test_legacy_default_tenant_name_resolves(self, tmp_path, capsys):
         """A name written under legacy '_default' is still findable by the CLI."""
