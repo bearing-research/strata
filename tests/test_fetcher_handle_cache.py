@@ -1,18 +1,21 @@
-"""Concurrency tests for the Fetcher's ParquetFile handle cache.
+"""Concurrency tests for the Fetcher's per-file cache.
 
 One ``Fetcher`` is shared by the whole fetch thread pool
-(``max_fetch_workers``, 32 by default), so its LRU handle cache is mutated
-concurrently. It previously had no lock, and evicting a handle *closed* it —
-even while another thread was inside ``read_row_group`` with that same handle.
+(``max_fetch_workers``, 32 by default), which reads row groups of one file in
+parallel. It once cached open ParquetFile handles and handed one to every
+reader, which pyarrow does not support and pyarrow 25 segfaults on. It now
+caches each file's parsed footer and opens a handle per read.
 """
 
 from __future__ import annotations
 
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 
 import pyarrow as pa
 import pyarrow.parquet as pq
+import pytest
 
 from strata.fetcher import PyArrowFetcher
 from strata.types import Task
@@ -65,9 +68,8 @@ def test_handle_cache_stays_within_its_bound(tmp_path):
     assert len(fetcher._file_cache) <= 3
 
 
-def test_concurrent_opens_of_one_path_keep_a_single_handle(tmp_path):
-    """Two threads racing to open the same path must converge on one cached
-    handle rather than leaking the loser."""
+def test_concurrent_reads_of_one_path_keep_one_footer(tmp_path):
+    """Threads reading one path at once leave a single cached footer."""
     fetcher = PyArrowFetcher(max_file_cache_size=8)
     path = _write(tmp_path, "shared")
     barrier = threading.Barrier(6)
@@ -82,9 +84,96 @@ def test_concurrent_opens_of_one_path_keep_a_single_handle(tmp_path):
     assert list(fetcher._file_cache) == [path]
 
 
-def test_close_releases_handles(tmp_path):
+def test_close_forgets_the_footers(tmp_path):
     fetcher = PyArrowFetcher(max_file_cache_size=4)
     fetcher.fetch(_task(_write(tmp_path, "h0")))
     assert fetcher._file_cache
     fetcher.close()
     assert not fetcher._file_cache
+
+
+class _RecordingParquetFile:
+    """Stands in for a ParquetFile and records how it is used."""
+
+    created: list[_RecordingParquetFile] = []
+    fail_reads = False
+
+    def __init__(self, path, filesystem=None, metadata=None):
+        self.path = path
+        self.given_metadata = metadata
+        self.metadata = metadata or object()
+        self.closed = False
+        self.active = 0
+        self.max_active = 0
+        self._lock = threading.Lock()
+        _RecordingParquetFile.created.append(self)
+
+    def read_row_group(self, i, columns=None):
+        with self._lock:
+            self.active += 1
+            self.max_active = max(self.max_active, self.active)
+        try:
+            time.sleep(0.005)  # widen the window two readers would share
+            if _RecordingParquetFile.fail_reads:
+                raise OSError("connection reset")
+            return pa.table({"id": pa.array(range(3))})
+        finally:
+            with self._lock:
+                self.active -= 1
+
+    def close(self):
+        self.closed = True
+
+
+def _recording(monkeypatch, *, fail_reads=False):
+    _RecordingParquetFile.created = []
+    _RecordingParquetFile.fail_reads = fail_reads
+    monkeypatch.setattr(pq, "ParquetFile", _RecordingParquetFile)
+
+
+def test_no_two_threads_read_one_handle_at_once(tmp_path, monkeypatch):
+    """pyarrow does not promise a ParquetFile is safe to read from two threads
+    at once, and pyarrow 25 segfaults when it is."""
+    _recording(monkeypatch)
+    fetcher = PyArrowFetcher(max_file_cache_size=8)
+    path = str(tmp_path / "hot.parquet")
+    barrier = threading.Barrier(12)
+
+    def read(_i: int):
+        barrier.wait(timeout=10)
+        for _ in range(5):
+            fetcher.fetch(_task(path))
+
+    with ThreadPoolExecutor(max_workers=12) as pool:
+        list(pool.map(read, range(12)))
+
+    # The reads did overlap in time: twelve threads, sixty reads, one handle each.
+    assert len(_RecordingParquetFile.created) == 60
+    assert all(pf.max_active == 1 for pf in _RecordingParquetFile.created)
+    assert all(pf.closed for pf in _RecordingParquetFile.created)
+
+
+def test_the_footer_is_parsed_once_per_file(tmp_path, monkeypatch):
+    _recording(monkeypatch)
+    fetcher = PyArrowFetcher(max_file_cache_size=8)
+    path = str(tmp_path / "one.parquet")
+
+    for _ in range(3):
+        fetcher.fetch(_task(path))
+
+    assert len(_RecordingParquetFile.created) == 3  # a handle per read
+    first, *later = _RecordingParquetFile.created
+    assert first.given_metadata is None
+    assert all(pf.given_metadata is first.metadata for pf in later)
+
+
+def test_a_failed_read_still_closes_its_handle(tmp_path, monkeypatch):
+    """A handle whose read failed is in no state to hand to the next reader,
+    and none is: every read opens its own and closes it."""
+    _recording(monkeypatch, fail_reads=True)
+    fetcher = PyArrowFetcher(max_file_cache_size=8)
+
+    with pytest.raises(OSError):
+        fetcher.fetch(_task(str(tmp_path / "flaky.parquet")))
+
+    assert [pf.closed for pf in _RecordingParquetFile.created] == [True]

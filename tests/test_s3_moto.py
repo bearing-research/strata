@@ -264,76 +264,47 @@ class TestS3Fetcher:
         batch = fetcher.fetch(task)
         assert batch.num_rows == 5
 
-    def test_fetcher_evicts_without_closing_a_handle_still_in_use(self, monkeypatch):
-        """LRU eviction drops the reference but must NOT close the handle.
+    def test_fetcher_opens_s3_reads_with_the_cached_footer(self, monkeypatch):
+        """The first read of a file parses its footer; later reads reuse it
+        through ``metadata=``, and every read closes the handle it opened."""
+        import pyarrow as pa
 
-        The Fetcher is shared by the whole fetch thread pool, so an evicted
-        handle may be one another thread is currently inside
-        ``read_row_group`` with — closing it there raised "I/O operation on
-        closed file" mid-stream, after the 200 had already gone out. Dropping
-        the reference is enough: CPython closes the file once the last user
-        releases it, so the fd bound is honoured a moment later instead of a
-        moment too early. (This test deliberately holds a reference in
-        ``created``, standing in for that in-flight reader.)
-        """
         import strata.fetcher as fetcher_module
+        from strata.types import Task
 
         created = []
 
         class FakeParquetFile:
-            def __init__(self, path, filesystem=None):
+            def __init__(self, path, filesystem=None, metadata=None):
                 self.path = path
                 self.filesystem = filesystem
+                self.given_metadata = metadata
+                self.metadata = metadata or object()
                 self.closed = False
+                created.append(self)
+
+            def read_row_group(self, i, columns=None):
+                return pa.table({"id": [1]})
 
             def close(self):
                 self.closed = True
 
-        def fake_parquet_file(path, filesystem=None):
-            pf = FakeParquetFile(path, filesystem=filesystem)
-            created.append(pf)
-            return pf
+        monkeypatch.setattr(fetcher_module.pq, "ParquetFile", FakeParquetFile)
 
-        monkeypatch.setattr(fetcher_module.pq, "ParquetFile", fake_parquet_file)
+        fetcher = PyArrowFetcher(max_file_cache_size=4)
+        task = Task(file_path="/tmp/one.parquet", row_group_id=0, cache_key=None, num_rows=1)  # type: ignore[arg-type]
+        fetcher.fetch(task)
+        fetcher.fetch(task)
 
-        fetcher = PyArrowFetcher(max_file_cache_size=1)
-        fetcher._get_parquet_file("/tmp/one.parquet")
-        fetcher._get_parquet_file("/tmp/two.parquet")
+        assert created[0].given_metadata is None
+        assert created[1].given_metadata is created[0].metadata
+        assert all(pf.closed for pf in created)
 
-        # Evicted from the cache …
-        assert "/tmp/one.parquet" not in fetcher._file_cache
-        assert "/tmp/two.parquet" in fetcher._file_cache
-        # … but not closed out from under whoever still holds it.
-        assert created[0].closed is False
-        assert created[1].closed is False
-
-    def test_fetcher_close_closes_cached_file_handles(self, monkeypatch):
-        """Explicit fetcher shutdown should close all cached ParquetFiles."""
-        import strata.fetcher as fetcher_module
-
-        created = []
-
-        class FakeParquetFile:
-            def __init__(self, path, filesystem=None):
-                self.path = path
-                self.closed = False
-
-            def close(self):
-                self.closed = True
-
-        def fake_parquet_file(path, filesystem=None):
-            pf = FakeParquetFile(path, filesystem=filesystem)
-            created.append(pf)
-            return pf
-
-        monkeypatch.setattr(fetcher_module.pq, "ParquetFile", fake_parquet_file)
-
+    def test_fetcher_close_forgets_the_cached_footers(self):
         fetcher = PyArrowFetcher(max_file_cache_size=2)
-        fetcher._get_parquet_file("/tmp/one.parquet")
-        fetcher._get_parquet_file("/tmp/two.parquet")
+        fetcher._file_cache["/tmp/one.parquet"] = object()  # type: ignore[assignment]
         fetcher.close()
-
-        assert [pf.closed for pf in created] == [True, True]
+        assert not fetcher._file_cache
 
 
 class TestS3ConfigIntegration:
