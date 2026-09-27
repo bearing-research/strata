@@ -672,9 +672,10 @@ class CachedFetcher:
             in_flight.done.wait()
             if in_flight.batch is not None:
                 return self._serve_hit(task, in_flight.batch)
-            # The shared read failed. Read for ourselves rather than all
-            # failing on one transient error.
-            return self._fetch_from_storage(task)
+            # The shared read failed. Try again rather than every scan failing
+            # on one transient error, and still one read at a time: one waiter
+            # leads the retry and the rest wait on it.
+            return self.fetch(task)
 
         try:
             # A read of this key may have landed between our miss and taking
@@ -706,7 +707,7 @@ class CachedFetcher:
         )
         return result_batch
 
-    def _fetch_from_storage(self, task: Task, flight: _Flight | None = None) -> pa.RecordBatch:
+    def _fetch_from_storage(self, task: Task, flight: _Flight) -> pa.RecordBatch:
         """Read *task*'s row group from storage, cache it, and hand it to *flight*."""
         histogram = get_cache_histogram()
         cache_full_row_groups = self.config.cache_granularity == CacheGranularity.ROW_GROUP
@@ -740,8 +741,7 @@ class CachedFetcher:
 
         # Store in cache
         self.cache.put(task.cache_key, batch)
-        if flight is not None:
-            flight.batch = batch
+        flight.batch = batch
 
         result_batch = self._project_batch(batch, task.columns)
         task.bytes_read = result_batch.nbytes
