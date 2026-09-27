@@ -145,7 +145,7 @@ dev = [
     # dependency: the notebook must keep running with no pool in sight.
     # Installed so `ty` can resolve it and the combined suite can import it.
     "strata-pool",
-    "pre-commit>=3.7.0",
+    "pre-commit>=4.6.2",
     "pytest>=8.0.0",
     "pytest-asyncio>=0.24.0",
     "pytest-cov>=7.0.0",
