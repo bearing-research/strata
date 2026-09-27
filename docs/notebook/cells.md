@@ -383,7 +383,38 @@ Editing any of these invalidates the cache. In particular, tweaking `@output_sch
 !!! tip "Keep temperature at 0.0 for prompt cells"
 With `temperature=0.0` the model is deterministic: same inputs → same output, and cache behavior is intuitive. Bumping temperature makes the first response "sticky" in the cache: future runs return the stored stochastic sample rather than re-sampling.
 
-See [AI Integration](ai.md) for provider configuration and the conversational AI assistant.
+### Provider configuration
+
+Set an API key in the **Runtime panel** under Environment Variables. The key determines which provider is used:
+
+| Environment Variable | Provider                        | Default Model        |
+| -------------------- | ------------------------------- | -------------------- |
+| `ANTHROPIC_API_KEY`  | Anthropic                       | claude-sonnet-4-6    |
+| `OPENAI_API_KEY`     | OpenAI                          | gpt-5.4              |
+| `GEMINI_API_KEY`     | Google                          | gemini-3-flash       |
+| `MISTRAL_API_KEY`    | Mistral                         | mistral-large-latest |
+| `STRATA_AI_API_KEY`  | Custom (requires `[ai]` config) | set in `[ai]`        |
+
+**Resolution order** (highest priority wins):
+
+1. `notebook.toml` `[ai]` section, per-notebook advanced overrides (see below)
+2. Runtime panel env vars, set in the UI
+3. Server config (`STRATA_AI_*` env vars), the admin default
+
+For standard providers you only need step 2: drop your API key into the Runtime panel and Strata picks the matching default base URL and model.
+
+!!! note "Process environment is not consulted"
+    A shell-exported `OPENAI_API_KEY` does **not** leak into notebooks. This is intentional: each notebook must explicitly opt in to an AI provider.
+
+For self-hosted models (Ollama, vLLM) or custom endpoints, add an `[ai]` section to `notebook.toml` directly:
+
+```toml
+[ai]
+base_url = "http://localhost:11434/v1"
+model = "llama3"
+```
+
+The `[ai]` section accepts `api_key` (use sparingly: it persists in `notebook.toml`; prefer the Runtime panel), `base_url`, `model`, `max_output_tokens` and `timeout_seconds`. `model` is the notebook's default for every prompt cell, and there is no UI for it: set it here, or override it for one cell with `# @model`. Any service that implements the OpenAI `/v1/chat/completions` endpoint works, including OpenAI, Anthropic, Google and Mistral through their OpenAI-compatible endpoints, Ollama, and self-hosted vLLM, TGI or LiteLLM.
 
 ---
 

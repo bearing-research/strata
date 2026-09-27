@@ -1960,53 +1960,6 @@ function parseBackendTestResult(raw: any): CellTestResult {
   }
 }
 
-// LLM assistant state
-interface LlmMessage {
-  role: 'user' | 'assistant'
-  content: string
-  model?: string
-  tokens?: { input: number; output: number }
-  timestamp: number
-  streaming?: boolean
-  // Tracks which entry point produced the message. Chat is
-  // conversation-only; agent messages may surface insertable code blocks
-  // alongside the agent's own tool-driven cell edits.
-  source?: 'chat' | 'agent'
-}
-const llmAvailable = ref(false)
-const llmModel = ref<string | null>(null)
-const llmProvider = ref<string | null>(null)
-const llmLoading = ref(false)
-const llmError = ref<string | null>(null)
-const llmMessages = ref<LlmMessage[]>([])
-
-// How many prior turns to send back to the LLM. System prompt + notebook
-// context is already heavy; keep history cap modest.
-const LLM_HISTORY_LIMIT = 10
-
-// Agent state
-interface AgentProgressEvent {
-  event: string
-  detail: string
-  timestamp: number
-}
-
-// Pending approval prompts emitted by the backend when the agent wants
-// to run a destructive tool (delete_cell, add_package). The user must
-// resolve each one before the agent loop continues.
-interface AgentApprovalPrompt {
-  request_id: string
-  tool: string
-  arguments: Record<string, any>
-  summary: string
-}
-
-const agentRunning = ref(false)
-const agentProgress = ref<AgentProgressEvent[]>([])
-const agentError = ref<string | null>(null)
-const agentApprovalPrompts = ref<AgentApprovalPrompt[]>([])
-const agentAutoApprove = ref(false)
-
 let wsInstance: ReturnType<typeof useWebSocket> | null = null
 
 // App-view (read-only) mode: when true, the WS connects with `?role=viewer`
@@ -2612,56 +2565,6 @@ function initializeWebSocket() {
       const p = msg.payload as PresencePayload
       presence.value = p.principals
       presenceYou.value = p.you
-    })
-
-    wsInstance.onMessage('agent_progress', (msg: WsMessage) => {
-      const p = msg.payload as Record<string, any>
-      agentProgress.value.push({
-        event: String(p.event || ''),
-        detail: String(p.detail || ''),
-        timestamp: Date.now(),
-      })
-    })
-
-    // Live narrative chunks from the agent's intermediate turns. We
-    // append them onto a streaming assistant message so the user sees
-    // the agent "think out loud" instead of waiting for `agent_done`.
-    wsInstance.onMessage('agent_text_delta', (msg: WsMessage) => {
-      const p = msg.payload as Record<string, any>
-      const text = String(p.text || '')
-      if (!text) return
-      const last = llmMessages.value.at(-1)
-      if (last && last.role === 'assistant' && last.streaming && last.source === 'agent') {
-        last.content += text
-      } else {
-        llmMessages.value.push({
-          role: 'assistant',
-          content: text,
-          timestamp: Date.now(),
-          streaming: true,
-          source: 'agent',
-        })
-      }
-    })
-
-    // Approval prompt for a gated tool. The user must accept or decline
-    // before the agent loop continues. Auto-approve mode bypasses the gate on
-    // the backend, except for gates the server locked, so this can fire with
-    // the toggle on — and must be shown, never answered automatically.
-    wsInstance.onMessage('agent_confirm_request', (msg: WsMessage) => {
-      const p = msg.payload as Record<string, any>
-      if (typeof p.request_id !== 'string') return
-      agentApprovalPrompts.value.push({
-        request_id: p.request_id,
-        tool: String(p.tool || ''),
-        arguments: (p.arguments as Record<string, any>) ?? {},
-        summary: String(p.summary || ''),
-      })
-    })
-
-    wsInstance.onMessage('agent_done', (msg: WsMessage) => {
-      const p = msg.payload as Record<string, any>
-      _handleAgentDone(p)
     })
 
     wsInstance.connect()
@@ -3557,9 +3460,6 @@ async function updateNotebookEnvAction(env: Record<string, string>) {
   if (data.cells && Array.isArray(data.cells)) {
     syncCellsFromBackend(data.cells)
   }
-  // Re-check LLM availability — the user may have just added or
-  // removed an API key, which changes whether the AI panel is active.
-  void checkLlmStatus()
 }
 
 async function refreshSecretManagerAction() {
@@ -3574,7 +3474,6 @@ async function refreshSecretManagerAction() {
   if (data.cells && Array.isArray(data.cells)) {
     syncCellsFromBackend(data.cells)
   }
-  void checkLlmStatus()
   return data
 }
 
@@ -3592,7 +3491,6 @@ async function updateNotebookSecretManagerConfigAction(
   if (data.cells && Array.isArray(data.cells)) {
     syncCellsFromBackend(data.cells)
   }
-  void checkLlmStatus()
   return data
 }
 
@@ -3683,239 +3581,6 @@ function evalInspect(cellId: CellId, expr: string) {
 function closeInspect(cellId: CellId) {
   if (wsInstance && wsInstance.connected() && inspectOpenOrder.value.includes(cellId)) {
     wsInstance.inspectClose(cellId)
-  }
-}
-
-// --- LLM assistant ---------------------------------------------------------
-
-async function checkLlmStatus() {
-  const sid = sessionId()
-  if (!sid) return
-  const strata = useStrata()
-  try {
-    const status = await strata.getLlmStatus(sid)
-    llmAvailable.value = status.available
-    llmModel.value = status.model ?? null
-    llmProvider.value = status.provider ?? null
-  } catch {
-    llmAvailable.value = false
-  }
-}
-
-/**
- * Send a chat message and stream the assistant response.
- *
- * Sends the last LLM_HISTORY_LIMIT prior turns as conversation history so
- * the LLM has context across turns within this session. The assistant
- * message is appended immediately with streaming=true and deltas are
- * written into it until the stream ends.
- */
-async function llmChat(message: string, cellId?: string) {
-  const sid = sessionId()
-  if (!sid) return
-  const strata = useStrata()
-
-  // Snapshot history BEFORE appending the new user message — the new
-  // message will be sent separately via the `message` field.
-  const history = llmMessages.value
-    .filter((m) => !m.streaming && m.content)
-    .slice(-LLM_HISTORY_LIMIT)
-    .map((m) => ({ role: m.role, content: m.content }))
-
-  llmMessages.value.push({
-    role: 'user',
-    content: message,
-    timestamp: Date.now(),
-    source: 'chat',
-  })
-
-  const assistantMsg: LlmMessage = {
-    role: 'assistant',
-    content: '',
-    timestamp: Date.now(),
-    streaming: true,
-    source: 'chat',
-  }
-  llmMessages.value.push(assistantMsg)
-
-  llmLoading.value = true
-  llmError.value = null
-
-  try {
-    for await (const event of strata.llmChatStream(sid, message, history, cellId)) {
-      if (event.type === 'delta') {
-        assistantMsg.content += event.text
-      } else if (event.type === 'done') {
-        assistantMsg.model = event.model ?? undefined
-        assistantMsg.tokens = event.tokens
-        assistantMsg.streaming = false
-      } else if (event.type === 'error') {
-        llmError.value = event.message
-        assistantMsg.streaming = false
-        if (!assistantMsg.content) {
-          // Drop the empty placeholder so the error stands alone
-          llmMessages.value = llmMessages.value.filter((m) => m !== assistantMsg)
-        }
-        break
-      }
-    }
-  } catch (err: any) {
-    llmError.value = err?.message || 'LLM request failed'
-    assistantMsg.streaming = false
-    if (!assistantMsg.content) {
-      llmMessages.value = llmMessages.value.filter((m) => m !== assistantMsg)
-    }
-  } finally {
-    assistantMsg.streaming = false
-    llmLoading.value = false
-  }
-}
-
-function clearLlmHistory() {
-  llmMessages.value = []
-  llmError.value = null
-}
-
-async function runAgentAction(message: string) {
-  const sid = sessionId()
-  if (!sid) return
-  const strata = useStrata()
-
-  agentRunning.value = true
-  agentProgress.value = []
-  agentApprovalPrompts.value = []
-  agentError.value = null
-
-  llmMessages.value.push({
-    role: 'user',
-    content: message,
-    timestamp: Date.now(),
-    source: 'agent',
-  })
-
-  try {
-    const resp = await strata.agentRun(sid, message, {
-      autoApprove: agentAutoApprove.value,
-    })
-    // Agent now runs as a background task — resp just has { job_id, status }
-    // Completion arrives via WS agent_done message
-    if (resp.error) {
-      agentError.value = resp.error
-      agentRunning.value = false
-    }
-  } catch (err: any) {
-    agentError.value = err.message || 'Agent failed to start'
-    agentRunning.value = false
-  }
-}
-
-function _handleAgentDone(payload: Record<string, any>) {
-  agentRunning.value = false
-  agentApprovalPrompts.value = []
-
-  const content = payload.content || ''
-  const error = payload.error || null
-
-  // Finalize the streaming assistant message if one is in flight, or
-  // append the final content as a new message if streaming wasn't used.
-  const last = llmMessages.value.at(-1)
-  if (last && last.role === 'assistant' && last.streaming && last.source === 'agent') {
-    last.streaming = false
-    if (content && content !== last.content) {
-      // Backend may include richer final content than the streamed
-      // narrative — prefer it over the partial when they differ.
-      last.content = content
-    }
-    last.model = payload.model ?? last.model
-    if (payload.tokens) {
-      last.tokens = {
-        input: payload.tokens.input || 0,
-        output: payload.tokens.output || 0,
-      }
-    }
-  } else if (content) {
-    llmMessages.value.push({
-      role: 'assistant',
-      content,
-      model: payload.model,
-      tokens: payload.tokens
-        ? { input: payload.tokens.input || 0, output: payload.tokens.output || 0 }
-        : undefined,
-      timestamp: Date.now(),
-      source: 'agent',
-    })
-  }
-
-  if (error) {
-    agentError.value = error
-  }
-
-  // Refresh dependencies and environment in case agent installed packages
-  fetchDependencies()
-  fetchEnvironment()
-}
-
-function cancelAgent() {
-  if (wsInstance && wsInstance.connected()) {
-    wsInstance.send('agent_cancel', {})
-  }
-}
-
-function respondToApproval(request_id: string, approved: boolean) {
-  agentApprovalPrompts.value = agentApprovalPrompts.value.filter((p) => p.request_id !== request_id)
-  if (wsInstance && wsInstance.connected()) {
-    wsInstance.send('agent_confirm_response', { request_id, approved })
-  }
-}
-
-async function resetAgentMemory() {
-  const sid = sessionId()
-  if (!sid) return
-  const strata = useStrata()
-  try {
-    await strata.agentReset(sid)
-    // Drop any prior agent messages from the visible thread so the user
-    // sees the reset reflected immediately.
-    llmMessages.value = llmMessages.value.filter((m) => m.source !== 'agent')
-    agentProgress.value = []
-    agentApprovalPrompts.value = []
-    agentError.value = null
-  } catch (err: any) {
-    agentError.value = err.message || 'Reset failed'
-  }
-}
-
-async function insertLlmCodeAsCell(code: string, afterCellId?: string) {
-  await addCell(afterCellId)
-  const sorted = orderedCells.value
-  let newCell: Cell | undefined
-  if (afterCellId) {
-    const idx = sorted.findIndex((c) => c.id === afterCellId)
-    newCell = sorted[idx + 1]
-  } else {
-    newCell = sorted[sorted.length - 1]
-  }
-  if (newCell) {
-    await updateSource(newCell.id, code)
-  }
-}
-
-async function insertLlmCodeAsCells(codes: string[], afterCellId?: string) {
-  let insertAfter = afterCellId
-  for (const code of codes) {
-    await addCell(insertAfter)
-    const sorted = orderedCells.value
-    let newCell: Cell | undefined
-    if (insertAfter) {
-      const idx = sorted.findIndex((c) => c.id === insertAfter)
-      newCell = sorted[idx + 1]
-    } else {
-      newCell = sorted[sorted.length - 1]
-    }
-    if (newCell) {
-      await updateSource(newCell.id, code)
-      insertAfter = newCell.id
-    }
   }
 }
 
@@ -4076,27 +3741,5 @@ export function useNotebook() {
     updateNotebookMountsAction,
     updateNotebookConnectionsAction,
     getConnectionSchemaAction,
-    // LLM assistant
-    llmAvailable,
-    llmModel,
-    llmProvider,
-    llmLoading,
-    llmError,
-    llmMessages,
-    checkLlmStatus,
-    llmChat,
-    clearLlmHistory,
-    insertLlmCodeAsCell,
-    insertLlmCodeAsCells,
-    // Agent
-    agentRunning,
-    agentProgress,
-    agentError,
-    agentApprovalPrompts,
-    agentAutoApprove,
-    runAgentAction,
-    cancelAgent,
-    respondToApproval,
-    resetAgentMemory,
   }
 }

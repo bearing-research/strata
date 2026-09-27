@@ -94,7 +94,7 @@ The typical loop:
 | `move_cell(session_id, cell_id, index)` | Reorder a cell. |
 | `add_dependency(session_id, package)` | `uv add` a dependency. |
 | `remove_dependency(session_id, package)` | `uv remove` a dependency. |
-| `note(session_id, message)` | Post a line into the Agent panel for the human watching. |
+| `note(session_id, message)` | Post a line into the terminal viewer's Agent tab for the human watching. |
 | `list_workers(session_id)` | The notebook's registered workers and which is the default. |
 | `add_worker(session_id, name, url, transport?, token_env?, runtime_id?, set_default?)` | Register a remote executor worker so cells can run on it. |
 | `set_default_worker(session_id, name?)` | Set the notebook's default worker (`name` omitted/`local` clears it). |
@@ -152,13 +152,13 @@ instances; the plain name on the member cell for a sweep group).
 
 ## Watching the agent
 
-The built-in AI panel streams its own reasoning into the **Agent panel**. An
-external agent's reasoning lives in its own client, so instead its **tool
-actions are narrated there automatically** - "ran cell abc → ok", "added python
-cell def", "added dependency polars" - as it works. It can also call the `note`
+An external agent's reasoning lives in its own client, so instead its **tool
+actions are narrated automatically** into the terminal viewer's **Agent** tab -
+"ran cell abc → ok", "added python cell def", "added dependency polars" - as it
+works. It can also call the `note`
 tool to post an explicit line of narration ("about to refactor featurize into
-two cells"). Open the notebook in the browser or the
-[terminal viewer](tui.md) and you can follow along in real time.
+two cells"). Open the notebook in the [terminal viewer](tui.md) and you can
+follow along in real time; the browser UI does not show these notes.
 
 ## Relationship to the CLI
 

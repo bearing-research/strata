@@ -512,7 +512,7 @@ async def test_cell_test_results_show_badge_in_cell_label(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_agent_frames_render_in_agent_panel(monkeypatch):
-    """agent_* frames stream into the Agent panel + drive its title/header."""
+    """agent_note frames stream into the Agent panel + drive its title/header."""
 
     async def _noop(self) -> None:
         return None
@@ -535,14 +535,13 @@ async def test_agent_frames_render_in_agent_panel(monkeypatch):
         def _agent(msg_type, payload):
             app._dispatch(json.dumps({"type": msg_type, "seq": 0, "ts": "t", "payload": payload}))
 
-        _agent("agent_text_delta", {"text": "Analyzing "})
-        _agent("agent_text_delta", {"text": "the data."})
-        _agent("agent_progress", {"event": "tool_call", "detail": "edit cell a"})
+        _agent("agent_note", {"source": "mcp", "text": "edit cell a"})
+        _agent("agent_note", {"source": "agent", "text": "Analyzing the data."})
         await pilot.pause()
 
         agent_text = str(app.query_one("#agent", Static).render())
         assert "Analyzing the data." in agent_text
-        assert "tool_call: edit cell a" in agent_text
+        assert "edit cell a" in agent_text
         # Header banner reflects agent activity.
         assert "agent" in app.sub_title
 

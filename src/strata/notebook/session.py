@@ -549,8 +549,8 @@ class NotebookSession:
         # who *added* a cell, and whoever clicked "add variant" added this one
         # — inheriting the origin's author would write one principal's id as
         # another's action in the mode where the field is supposed to be a
-        # fact, and would report a hand-made variant of an assistant's cell as
-        # the assistant's, inverting the question the field exists to answer.
+        # fact, and would report a hand-made variant of an agent's cell as the
+        # agent's, inverting the question the field exists to answer.
         add_cell_to_notebook(
             self.path,
             new_cell_id,

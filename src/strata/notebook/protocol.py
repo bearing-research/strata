@@ -47,8 +47,6 @@ class MessageType(StrEnum):
     # to runtime.json, re-materializes the widget's value artifacts, and marks
     # downstream cells stale (Tier 0 — the user then runs them).
     WIDGET_UPDATE = "widget_update"
-    AGENT_CANCEL = "agent_cancel"
-    AGENT_CONFIRM_RESPONSE = "agent_confirm_response"
     # The cell this client is on, or null. Payload: ``{cell_id, author?}``.
     CELL_FOCUS = "cell_focus"
 
@@ -97,16 +95,11 @@ class MessageType(StrEnum):
     # actions so existing dependency_changed listeners keep working.
     DEPENDENCY_CHANGED = "dependency_changed"
 
-    # Server → Client (agent loop)
-    AGENT_TEXT_DELTA = "agent_text_delta"
-    AGENT_CONFIRM_REQUEST = "agent_confirm_request"
-    AGENT_PROGRESS = "agent_progress"
-    AGENT_DONE = "agent_done"
+    # Server → Client (external agent)
     # An external agent driving via MCP (or the CLI) narrating an action or a
-    # note into the Agent panel. The built-in loop streams its reasoning as
-    # agent_text_delta; an external agent's reasoning lives in its own client,
-    # so we surface its tool actions (source="mcp") and any explicit narration
-    # (source="agent") as discrete notes instead.
+    # note into the terminal viewer's Agent tab. Its reasoning lives in its own client, so we
+    # surface its tool actions (source="mcp") and any explicit narration
+    # (source="agent") as discrete notes.
     AGENT_NOTE = "agent_note"
 
 

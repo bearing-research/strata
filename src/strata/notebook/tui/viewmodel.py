@@ -66,14 +66,13 @@ class NotebookViewModel:
         # block (notebook_sync includes it) and refreshed by dag_update frames.
         self.edges: list[tuple[str, str]] = []
         # Notebook-level activity line (cascade / environment job / agent), shown
-        # in the header. Updated by cascade_* / environment_job_* / agent_* frames.
+        # in the header. Updated by cascade_* / environment_job_* / agent_note frames.
         self.banner: str = ""
-        # Agent activity feed (chronological): streamed reasoning interleaved with
-        # tool/step events, confirm prompts, and completion. The headline of the
-        # spectator — watch an agent drive the notebook.
+        # Agent activity feed (chronological): an external agent's narrated tool
+        # actions and explicit notes. The headline of the spectator: watch an
+        # agent drive the notebook.
         self.agent_feed: list[str] = []
         self.agent_status: str = ""
-        self._agent_streaming = False  # last feed entry is a growing text block
 
     # -- snapshot ------------------------------------------------------------
 
@@ -157,14 +156,8 @@ class NotebookViewModel:
         ):
             self.banner = _env_banner(payload)
             return set()
-        if msg_type in (
-            "agent_text_delta",
-            "agent_progress",
-            "agent_confirm_request",
-            "agent_done",
-            "agent_note",
-        ):
-            self._apply_agent_frame(msg_type, payload)
+        if msg_type == "agent_note":
+            self._apply_agent_note(payload)
             return set()
 
         cid = payload.get("cell_id")
@@ -213,48 +206,17 @@ class NotebookViewModel:
             return set()
         return {cid}
 
-    def _apply_agent_frame(self, msg_type: str, payload: dict[str, Any]) -> None:
-        """Fold an ``agent_*`` frame into the chronological agent feed + status.
-
-        Read-only: ``agent_confirm_request`` is shown as "awaiting driver" (the
-        driver/Vue answers; the spectator never sends ``agent_confirm_response``).
-        """
-        if msg_type == "agent_text_delta":
-            text = str(payload.get("text") or "")
-            if self._agent_streaming and self.agent_feed:
-                self.agent_feed[-1] += text  # extend the streaming reasoning block
-            else:
-                self.agent_feed.append(text)
-                self._agent_streaming = True
-            self.agent_status = "thinking"
-            self.banner = "🤖 agent: thinking"
-            return
-
-        self._agent_streaming = False
-        if msg_type == "agent_progress":
-            event = str(payload.get("event") or "step")
-            detail = str(payload.get("detail") or "")
-            self.agent_feed.append(f"• {event}: {detail}".rstrip(": "))
-            self.agent_status = "running"
-            self.banner = f"🤖 agent: {event}"
-        elif msg_type == "agent_confirm_request":
-            self.agent_feed.append(f"⚠ awaiting driver confirmation: {_confirm_desc(payload)}")
-            self.agent_status = "awaiting confirm"
-            self.banner = "🤖 agent: awaiting driver confirmation"
-        elif msg_type == "agent_done":
-            self.agent_feed.append(_agent_done_line(payload))
-            self.agent_status = "done"
-            self.banner = "🤖 agent: done"
-        elif msg_type == "agent_note":
-            # An external agent (driving via MCP/CLI) narrating an action
-            # (source="mcp") or an explicit note (source="agent"). "↹" marks an
-            # auto-narrated tool action; "✎" an explicit note (#393).
-            source = str(payload.get("source") or "agent")
-            text = str(payload.get("text") or "")
-            glyph = "✎" if source == "agent" else "↹"
-            self.agent_feed.append(f"{glyph} {text}")
-            self.agent_status = source
-            self.banner = f"🤖 {source}: {text}"
+    def _apply_agent_note(self, payload: dict[str, Any]) -> None:
+        """Fold an ``agent_note`` frame into the chronological agent feed + status."""
+        # An external agent (driving via MCP/CLI) narrating an action
+        # (source="mcp") or an explicit note (source="agent"). "↹" marks an
+        # auto-narrated tool action; "✎" an explicit note (#393).
+        source = str(payload.get("source") or "agent")
+        text = str(payload.get("text") or "")
+        glyph = "✎" if source == "agent" else "↹"
+        self.agent_feed.append(f"{glyph} {text}")
+        self.agent_status = source
+        self.banner = f"🤖 {source}: {text}"
 
 
 def _test_badge(payload: dict[str, Any]) -> str:
@@ -271,23 +233,6 @@ def _test_badge(payload: dict[str, Any]) -> str:
     glyph = "✓" if (_count("failed") == 0 and _count("errored") == 0) else "✗"
     badge = f"{glyph} {passed}/{total}"
     return f"{badge} ·stale" if payload.get("stale") else badge
-
-
-def _confirm_desc(payload: dict[str, Any]) -> str:
-    for key in ("description", "message", "summary", "tool", "tool_name", "action"):
-        value = payload.get(key)
-        if isinstance(value, str) and value:
-            return value
-    return "(action)"
-
-
-def _agent_done_line(payload: dict[str, Any]) -> str:
-    model = str(payload.get("model") or "")
-    tokens = payload.get("tokens")
-    tok = ""
-    if isinstance(tokens, dict):
-        tok = f", {tokens.get('input', 0)}+{tokens.get('output', 0)} tok"
-    return f"✓ agent done ({model}{tok})".replace("()", "").rstrip()
 
 
 def _cascade_banner(msg_type: str, payload: dict[str, Any]) -> str:

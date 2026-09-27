@@ -331,7 +331,7 @@ external compute.
 ```
 ┌─────────────────────────────────────────────┐
 │ Notebook UI (Vue.js + WebSocket)            │
-│ cells, DAG view, AI assistant, workers      │
+│ cells, DAG view, workers                    │
 └─────────────────────────────────────────────┘
                     │
                     ▼

@@ -3,8 +3,8 @@
 Strata Notebook is an interactive notebook with content-addressed
 caching, automatic dependency tracking, and cascade execution. This
 quickstart walks through a real three-cell pipeline, then surfaces
-the distinctive features (prompt cells, AI assistant, cascade,
-cache hits) on top of it.
+the distinctive features (prompt cells, cascade, cache hits) on top
+of it.
 
 This is the **web UI** quickstart - you drive the notebook in a
 browser. The same notebook can also be driven by a
@@ -282,28 +282,12 @@ inputs, model config)`. Running again with the same upstream
 `stats` and the same template is a cache hit, no second API call.
 
 Needs `ANTHROPIC_API_KEY` (or another provider's key) configured in
-the Runtime panel. See [AI Integration](../notebook/ai.md) for
-provider setup and [Prompt cells](../notebook/cells.md#prompt-cells)
+the Runtime panel. See [Provider configuration](../notebook/cells.md#provider-configuration)
+for provider setup and [Prompt cells](../notebook/cells.md#prompt-cells)
 for the full annotation surface (`@output_schema`, `@validate_retries`,
 multi-turn conversations).
 
-## 7. AI Assistant
-
-The top-right **AI Assistant** panel is a conversational sidebar
-that can read your notebook, answer questions, and autonomously
-edit or run cells. It's separate from prompt cells: the assistant
-lives outside the DAG and doesn't create artifacts.
-
-- **Chat mode** (++enter++): stream a response with notebook
-  context included.
-- **Agent mode** (++shift+enter++): the assistant takes actions
-  on the notebook (add/edit/run cells, install packages) with a
-  10-step limit and a Cancel button.
-
-Same provider key as prompt cells. See
-[AI Integration](../notebook/ai.md) for full details.
-
-## 8. Other display types
+## 7. Other display types
 
 The cells above used trailing expressions for the DataFrame and
 the matplotlib `Figure`. Other shapes you can put at the end of a
@@ -323,7 +307,7 @@ Use `display(x)` for **multiple** outputs in one cell (each call
 adds a new render below the cell). For one trailing expression at
 the end, no `display()` needed: the harness auto-displays it.
 
-## 9. Try an example
+## 8. Try an example
 
 The repo ships 18 example notebooks covering every cell type. To
 browse them in the UI, stop the running server first (Ctrl+C), then
@@ -366,6 +350,5 @@ grouped by feature.
 - [Import from Jupyter](../notebook/import.md) for `strata import nb.ipynb`
 - [Export](../notebook/export.md) for sharing a notebook as a single self-contained markdown or HTML file, or as a snapshot bundle (state and artifacts) that imports back
 - [Environment Management](../notebook/environment.md) for package management and Python versions
-- [AI Integration](../notebook/ai.md) for prompt cells + the assistant in depth
 - [Comparison with Jupyter, Marimo, Pluto](../notebook/comparison.md)
 - [Keyboard Shortcuts](../notebook/keyboard.md)

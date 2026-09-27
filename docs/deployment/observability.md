@@ -58,9 +58,8 @@ families include:
   by `tenant`, once a tenant has made a request
 - **AI**: `strata_ai_calls_total`, `strata_ai_input_tokens_total` and
   `strata_ai_output_tokens_total`, labelled by `tenant`, `principal` and
-  `model`. Counted from each provider response: the assistant's agent loop,
-  prompt cells, and the other AI routes. The labels are the caller the request
-  ran as, and are empty in personal mode. The series appear after the first
+  `model`. Counted from each provider response a prompt cell receives. The
+  labels are the caller the request ran as, and are empty in personal mode. The series appear after the first
   model call.
 
 ### Traces, OpenTelemetry OTLP

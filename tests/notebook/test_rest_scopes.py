@@ -106,7 +106,6 @@ class TestTheTable:
             ("POST", "/v1/notebooks/{notebook_id}/cells/{cell_id}/tests"),
             ("POST", "/v1/notebooks/{notebook_id}/dependencies"),
             ("PUT", "/v1/notebooks/{notebook_id}/python-version"),
-            ("POST", "/v1/notebooks/{notebook_id}/ai/agent"),
         ):
             assert required_scope_for_route(method, path) == "notebook:execute", path
 

@@ -111,7 +111,7 @@ def test_unknown_and_unaddressed_frames_are_noops():
     # Frame for an unknown cell → no-op (no crash).
     assert vm.apply_frame("cell_status", {"cell_id": "ghost", "status": "running"}) == set()
     # Frame with no cell_id → no-op.
-    assert vm.apply_frame("agent_progress", {"step": 1}) == set()
+    assert vm.apply_frame("cell_status", {"status": "running"}) == set()
 
 
 def test_resync_preserves_live_console_and_outputs():
@@ -287,46 +287,6 @@ def test_point_to_point_frames_stay_noops():
     assert vm.banner == ""  # nothing surfaced
 
 
-def test_agent_text_delta_streams_into_one_block():
-    vm = NotebookViewModel()
-    vm.apply_notebook_state(_state({"id": "a"}))
-    vm.apply_frame("agent_text_delta", {"job_id": "j", "text": "Let me "})
-    vm.apply_frame("agent_text_delta", {"job_id": "j", "text": "look at the data."})
-    assert vm.agent_feed == ["Let me look at the data."]  # merged into one entry
-    assert vm.agent_status == "thinking"
-    assert "agent" in vm.banner
-
-
-def test_agent_progress_then_text_are_separate_entries():
-    vm = NotebookViewModel()
-    vm.apply_notebook_state(_state({"id": "a"}))
-    vm.apply_frame("agent_text_delta", {"text": "thinking"})
-    vm.apply_frame("agent_progress", {"event": "tool_call", "detail": "edit cell a"})
-    vm.apply_frame("agent_text_delta", {"text": "done editing"})
-    assert vm.agent_feed == ["thinking", "• tool_call: edit cell a", "done editing"]
-
-
-def test_agent_confirm_request_shows_awaiting_driver():
-    vm = NotebookViewModel()
-    vm.apply_notebook_state(_state({"id": "a"}))
-    vm.apply_frame("agent_confirm_request", {"job_id": "j", "description": "delete cell b"})
-    assert vm.agent_status == "awaiting confirm"
-    assert "awaiting driver" in vm.agent_feed[-1]
-    assert "delete cell b" in vm.agent_feed[-1]
-
-
-def test_agent_done_summarizes():
-    vm = NotebookViewModel()
-    vm.apply_notebook_state(_state({"id": "a"}))
-    vm.apply_frame(
-        "agent_done",
-        {"job_id": "j", "model": "claude", "tokens": {"input": 100, "output": 50}},
-    )
-    assert vm.agent_status == "done"
-    assert "agent done" in vm.agent_feed[-1]
-    assert "claude" in vm.agent_feed[-1] and "100+50" in vm.agent_feed[-1]
-
-
 def test_agent_note_renders_mcp_action_and_explicit_note():
     vm = NotebookViewModel()
     vm.apply_notebook_state(_state({"id": "a"}))
@@ -343,7 +303,7 @@ def test_agent_frames_are_notebook_level():
     vm = NotebookViewModel()
     vm.apply_notebook_state(_state({"id": "a"}))
     # No cell id returned — agent activity isn't tied to one cell row.
-    assert vm.apply_frame("agent_text_delta", {"text": "hi"}) == set()
+    assert vm.apply_frame("agent_note", {"source": "agent", "text": "hi"}) == set()
 
 
 def test_malformed_dag_edges_ignored():

@@ -146,32 +146,6 @@ class TestItReachesTheView:
         assert _cells(nb)[view["id"]]["created_by"] == "agent:claude/sub"
 
 
-class TestTheBuiltInAssistant:
-    """The feature's stated purpose is telling agent cells from human ones, so
-    the assistant writing anonymously defeated it on the one surface a person
-    is most likely to be watching."""
-
-    def test_a_cell_it_creates_says_so(self, notebook, monkeypatch):
-        from strata.notebook.authorship import ASSISTANT_AUTHOR
-
-        add_cell_to_notebook(notebook, "c1", None, author=ASSISTANT_AUTHOR)
-
-        assert _cells(notebook)["c1"]["created_by"] == "assistant"
-
-    def test_it_takes_over_updated_by_when_it_edits_a_human_cell(self, notebook):
-        """Editing with no author leaves the previous one, so an assistant that
-        passed nothing would rewrite a person's cell and still name the person."""
-        from strata.notebook.authorship import ASSISTANT_AUTHOR
-
-        add_cell_to_notebook(notebook, "c1", None, author="local")
-
-        write_cell(notebook, "c1", "x = 1", author=ASSISTANT_AUTHOR)
-
-        cell = _cells(notebook)["c1"]
-        assert cell["created_by"] == "local"
-        assert cell["updated_by"] == "assistant"
-
-
 class TestRoundTrip:
     def test_write_notebook_toml_keeps_the_fields(self, notebook):
         """It rebuilds each cell entry field by field, so anything not listed
@@ -280,26 +254,6 @@ class TestConcurrentStructuralEdit:
         cells = _cells(notebook)
         assert set(cells) == {"c1", "c2"}
         assert cells["c1"]["updated_by"] == "local"
-
-
-class TestTheAssistantInAServiceDeployment:
-    def test_it_records_both_itself_and_the_session(self, monkeypatch):
-        """Recording only the principal would make every assistant cell read as
-        the person's own; recording only `assistant` loses whose session it
-        was. Both, in the scheme-prefixed shape agent ids already use."""
-        from types import SimpleNamespace
-
-        import strata.auth as auth_module
-        from strata.notebook.authorship import resolve_assistant_author
-
-        monkeypatch.setattr(auth_module, "get_principal", lambda: SimpleNamespace(id="alice"))
-
-        assert resolve_assistant_author() == "assistant:alice"
-
-    def test_personal_mode_stays_plain(self):
-        from strata.notebook.authorship import resolve_assistant_author
-
-        assert resolve_assistant_author() == "assistant"
 
 
 class TestUpdatedAtStaysStructural:

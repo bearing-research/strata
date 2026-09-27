@@ -138,14 +138,14 @@ def prompt_reopen_identity(cell: Any, session: Any) -> str | None:
 
     Never ``None``: everything here is settled by the cell and the notebook.
     """
-    from strata.notebook.routes import _read_notebook_ai_config
+    from strata.notebook.llm.config import read_notebook_ai_config
 
     analysis = analyze_prompt_cell(cell.source)
     # The notebook's own [ai] block rather than the fully resolved config: a
     # resolved one needs an API key to exist at all, so whether it resolves
     # depends on the caller's context, and an identity that changes with the
     # context it is computed in never matches the one it was compared to.
-    notebook_ai = _read_notebook_ai_config(session) or {}
+    notebook_ai = read_notebook_ai_config(session) or {}
     payload = {
         "model": analysis.model or notebook_ai.get("model"),
         "temperature": analysis.temperature if analysis.temperature is not None else 0.0,

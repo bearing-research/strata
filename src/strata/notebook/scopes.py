@@ -63,8 +63,6 @@ _EXECUTE_FRAMES = frozenset(
         MessageType.INSPECT_CLOSE,
         MessageType.DEPENDENCY_ADD,
         MessageType.DEPENDENCY_REMOVE,
-        MessageType.AGENT_CANCEL,
-        MessageType.AGENT_CONFIRM_RESPONSE,
     }
 )
 
@@ -85,9 +83,8 @@ def required_scope_for_frame(msg_type: str) -> str:
 # running anything. Every other route defaults to ``notebook:execute``, the same
 # fail-closed default as the frames: running a cell or its tests, syncing or
 # changing dependencies (uv runs build scripts), importing a requirements file,
-# changing the Python version, provisioning an SSH worker, the assistant (which
-# runs cells), and any route added later until someone classifies it. Keys are
-# (method, route path template).
+# changing the Python version, provisioning an SSH worker, and any route added
+# later until someone classifies it. Keys are (method, route path template).
 _READ_POST_ROUTES = frozenset(
     {
         ("POST", "/v1/notebooks/{notebook_id}/environment/requirements.txt/preview"),
@@ -124,8 +121,6 @@ _WRITE_ROUTES = frozenset(
         ("PUT", "/v1/notebooks/{notebook_id}/name"),
         ("POST", "/v1/notebooks/{notebook_id}/artifacts/{artifact_id}/v/{version}/promote"),
         ("PUT", "/v1/notebooks/{notebook_id}/cells/{cell_id}/tests"),
-        ("PUT", "/v1/notebooks/{notebook_id}/ai/model"),
-        ("POST", "/v1/notebooks/{notebook_id}/ai/agent/reset"),
         ("POST", "/v1/projects/{path:path}/quiesce"),
         ("POST", "/v1/projects/{path:path}/release"),
     }
