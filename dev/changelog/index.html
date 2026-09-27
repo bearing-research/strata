@@ -492,15 +492,15 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#080-2026-09-22" class="md-nav__link">
+  <a href="#080-2026-09-27" class="md-nav__link">
     <span class="md-ellipsis">
       
-        0.8.0 - 2026-09-22
+        0.8.0 - 2026-09-27
       
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="0.8.0 - 2026-09-22">
+    <nav class="md-nav" aria-label="0.8.0 - 2026-09-27">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
@@ -2584,15 +2584,15 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#080-2026-09-22" class="md-nav__link">
+  <a href="#080-2026-09-27" class="md-nav__link">
     <span class="md-ellipsis">
       
-        0.8.0 - 2026-09-22
+        0.8.0 - 2026-09-27
       
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="0.8.0 - 2026-09-22">
+    <nav class="md-nav" aria-label="0.8.0 - 2026-09-27">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
@@ -3240,7 +3240,7 @@
 <p>Entries focus on user-visible changes and release framing rather than
 exhaustive commit history.</p>
 <p>The authoritative copy of this file lives at <a href="https://github.com/bearing-research/strata/blob/main/CHANGELOG.md"><code>CHANGELOG.md</code></a> in the repo root; this docs page mirrors it. Maintainers: keep the two in sync when editing.</p>
-<h2 id="080-2026-09-22">0.8.0 - 2026-09-22<a class="headerlink" href="#080-2026-09-22" title="Permanent link">&para;</a></h2>
+<h2 id="080-2026-09-27">0.8.0 - 2026-09-27<a class="headerlink" href="#080-2026-09-27" title="Permanent link">&para;</a></h2>
 <p>A notebook stops being one person's machine. This release is about the three
 things that were in the way: the work runs somewhere else, it reads the
 organization's data, and several people share the server it runs on.</p>
@@ -3490,6 +3490,11 @@ environment pinned below them has to move before it can install 0.8.0.</p>
 </ul>
 <h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>The service-mode demo stack starts again.</strong> <code>docker-compose.service.yml</code>
+  exited at boot: the image defaults <code>STRATA_DEPLOYMENT_MODE</code> to personal, and
+  the environment beat the mounted <code>[tool.strata]</code>, so personal mode refused
+  its trusted-proxy settings. Its smoke script also hung on a new notebook's
+  environment sync. Both are fixed and the smoke passes end to end.</li>
 <li><strong>Concurrent scans read each row group from storage once.</strong> Scans that
   missed the cache on the same row group at the same time each read it from
   storage; 16 cold scans of a 37-row-group table read 127 row groups. Misses
