@@ -45,7 +45,11 @@ updates:
       prefix: ci
       include: scope
 
-  - package-ecosystem: pip
+  # uv, not pip: the pip updater edits pyproject.toml and never uv.lock, so
+  # every PR failed `uv lock --check`. increase-if-necessary moves a minimum
+  # only when the new release falls outside it; otherwise the PR is a lock
+  # bump, and users of the published package are not forced onto it.
+  - package-ecosystem: uv
     directory: /
     schedule:
       interval: weekly
@@ -53,6 +57,7 @@ updates:
       time: "09:00"
       timezone: America/Los_Angeles
     open-pull-requests-limit: 5
+    versioning-strategy: increase-if-necessary
     groups:
       python-runtime:
         dependency-type: production
