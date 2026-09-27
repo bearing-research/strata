@@ -164,7 +164,7 @@ class TestFileRouting:
         monkeypatch.setattr(
             lake_files.pq,
             "ParquetFile",
-            lambda path, filesystem=None: opened.append((path, filesystem)),
+            lambda path, filesystem=None, metadata=None: opened.append((path, filesystem)),
         )
         default = object()
 
@@ -196,7 +196,7 @@ class TestFileRouting:
         monkeypatch.setattr(
             lake_files.pq,
             "ParquetFile",
-            lambda path, filesystem=None: opened.append((path, filesystem)),
+            lambda path, filesystem=None, metadata=None: opened.append((path, filesystem)),
         )
         lake_files.configure(
             SimpleNamespace(

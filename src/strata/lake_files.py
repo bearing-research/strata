@@ -139,17 +139,27 @@ def azure_path(file_path: str) -> tuple[str, str]:
     return account, f"{container}{parsed.path}"
 
 
-def open_parquet(file_path: str, s3_filesystem: pafs.FileSystem | None = None) -> pq.ParquetFile:
-    """Open *file_path* for reading, on whichever store it names."""
+def open_parquet(
+    file_path: str,
+    s3_filesystem: pafs.FileSystem | None = None,
+    metadata: pq.FileMetaData | None = None,
+) -> pq.ParquetFile:
+    """Open *file_path* for reading, on whichever store it names.
+
+    *metadata*, the file's footer already parsed, skips reading and parsing it
+    again.
+    """
     if file_path.startswith("s3://"):
         filesystem = _vended_for(file_path) or s3_filesystem or pafs.S3FileSystem()
-        return pq.ParquetFile(file_path[len("s3://") :], filesystem=filesystem)
+        return pq.ParquetFile(file_path[len("s3://") :], filesystem=filesystem, metadata=metadata)
     if file_path.startswith("gs://"):
-        return pq.ParquetFile(file_path[len("gs://") :], filesystem=_gcs_filesystem())
+        return pq.ParquetFile(
+            file_path[len("gs://") :], filesystem=_gcs_filesystem(), metadata=metadata
+        )
     if file_path.startswith(_AZURE_SCHEMES):
         account, path = azure_path(file_path)
-        return pq.ParquetFile(path, filesystem=_azure_filesystem(account))
-    return pq.ParquetFile(file_path)
+        return pq.ParquetFile(path, filesystem=_azure_filesystem(account), metadata=metadata)
+    return pq.ParquetFile(file_path, metadata=metadata)
 
 
 def reset() -> None:

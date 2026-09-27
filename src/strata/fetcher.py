@@ -68,14 +68,15 @@ class PyArrowFetcher:
         self.metrics = metrics or MetricsCollector()
         self._max_file_cache_size = max_file_cache_size
         self._s3_filesystem = s3_filesystem
-        # OrderedDict for LRU eviction of file handles.
-        #
-        # One Fetcher instance is shared by the whole fetch thread pool
-        # (``max_fetch_workers``, 32 by default), so every mutation of this
-        # dict is concurrent and must hold the lock. Unsynchronized
-        # ``move_to_end`` / ``__setitem__`` / ``popitem`` on an OrderedDict can
-        # also lose or duplicate entries outright, leaking handles.
-        self._file_cache: OrderedDict[str, pq.ParquetFile] = OrderedDict()
+        # Each file's parsed footer, least recently used first. Footers are
+        # cached rather than open handles: one Fetcher serves the whole fetch
+        # thread pool (``max_fetch_workers``, 32 by default), which reads row
+        # groups of one file in parallel, and pyarrow does not promise that a
+        # ParquetFile is safe to read from two threads at once. pyarrow 25
+        # segfaults when it is. A FileMetaData is immutable, so it can be
+        # shared, and a read opens its own handle with it, skipping the footer
+        # read, and closes the handle when it is done.
+        self._file_cache: OrderedDict[str, pq.FileMetaData] = OrderedDict()
         self._file_cache_lock = threading.Lock()
 
     @staticmethod
@@ -85,53 +86,37 @@ class PyArrowFetcher:
         if callable(close):
             close()
 
-    def _get_parquet_file(self, file_path: str) -> pq.ParquetFile:
-        """Get a cached ParquetFile handle with LRU eviction."""
-        with self._file_cache_lock:
-            if file_path in self._file_cache:
-                # Move to end (most recently used)
-                self._file_cache.move_to_end(file_path)
-                return self._file_cache[file_path]
-
-        # Open outside the lock: opening an S3 file is a network round-trip and
-        # holding the lock across it would serialize the whole fetch pool. A
-        # concurrent open of the same path just means one redundant handle,
-        # which the insert below resolves.
-
-        # Open new file, on whichever store the path names
+    def _open(self, file_path: str) -> pq.ParquetFile:
+        """A handle on *file_path* for one read, opened with its cached footer."""
         from strata.lake_files import open_parquet
 
-        pf = open_parquet(file_path, self._s3_filesystem)
         with self._file_cache_lock:
-            existing = self._file_cache.get(file_path)
-            if existing is not None:
-                # Another thread opened it first; keep one handle and let ours
-                # be closed when this frame drops the last reference.
+            metadata = self._file_cache.get(file_path)
+            if metadata is not None:
                 self._file_cache.move_to_end(file_path)
-                return existing
-            self._file_cache[file_path] = pf
 
-            # Evict oldest if over limit.
-            #
-            # Deliberately does NOT close the evicted handle. Another thread may
-            # be inside ``pf.read_row_group(...)`` with it right now — closing
-            # it there raised "I/O operation on closed file" mid-stream, after
-            # the 200 had already been sent. Dropping the reference is enough:
-            # CPython closes the file once the last user releases it, so the fd
-            # bound is honoured a moment later instead of a moment too early.
-            while len(self._file_cache) > self._max_file_cache_size:
-                self._file_cache.popitem(last=False)
-
+        # Open outside the lock: opening an S3 file is a network round-trip,
+        # and holding the lock across it would serialize the whole fetch pool.
+        pf = open_parquet(file_path, self._s3_filesystem, metadata=metadata)
+        if metadata is None:
+            with self._file_cache_lock:
+                self._file_cache[file_path] = pf.metadata
+                self._file_cache.move_to_end(file_path)
+                while len(self._file_cache) > self._max_file_cache_size:
+                    self._file_cache.popitem(last=False)
         return pf
 
     def fetch(self, task: Task) -> pa.RecordBatch:
         """Fetch a single row group as a RecordBatch."""
         start_time = time.perf_counter()
 
-        pf = self._get_parquet_file(task.file_path)
-
-        # Read the specific row group with optional column projection
-        table = pf.read_row_group(task.row_group_id, columns=task.columns)
+        # Read the specific row group with optional column projection, on a
+        # handle no other thread holds.
+        pf = self._open(task.file_path)
+        try:
+            table = pf.read_row_group(task.row_group_id, columns=task.columns)
+        finally:
+            self._close_parquet_file(pf)
 
         # Convert to a single RecordBatch
         # combine_chunks() is more efficient than manual concat_arrays
@@ -165,16 +150,9 @@ class PyArrowFetcher:
         return pa.Table.from_batches(batches)
 
     def close(self) -> None:
-        """Close cached file handles.
-
-        Unlike eviction, this is a shutdown path: no fetch is in flight, so
-        closing eagerly is safe and releases the fds immediately.
-        """
+        """Forget the cached footers. No handle outlives the read that opened it."""
         with self._file_cache_lock:
-            handles = list(self._file_cache.values())
             self._file_cache.clear()
-        for parquet_file in handles:
-            self._close_parquet_file(parquet_file)
 
 
 def create_fetcher(

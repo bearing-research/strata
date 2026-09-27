@@ -247,6 +247,11 @@ environment pinned below them has to move before it can install 0.8.0.
 
 ### Fixed
 
+- **Parallel reads of one Parquet file no longer share a file handle.** The
+  fetch pool read row groups of one file from a single cached `ParquetFile` in
+  several threads at once, which pyarrow does not support; pyarrow 25
+  segfaults the server on it. The fetcher now caches each file's parsed footer
+  instead, and every read opens its own handle with it and closes it after.
 - **`strata artifact` opens the store the server serves.** Every artifact
   command opened a SQLite file in the artifact directory and ignored
   `STRATA_ARTIFACT_DIR`, the metadata DSN and the blob backend, so against a
