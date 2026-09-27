@@ -59,7 +59,7 @@ pytestmark = [pytest.mark.integration, pytest.mark.slow]
 
 @pytest.fixture(scope="module")
 def postgres_dsn():
-    with PostgresContainer("postgres:16-alpine") as container:
+    with PostgresContainer("postgres:18-alpine") as container:
         yield container.get_connection_url().replace("postgresql+psycopg2://", "postgresql://")
 
 
