@@ -7,7 +7,7 @@ exhaustive commit history.
 
 The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com/bearing-research/strata/blob/main/CHANGELOG.md) in the repo root; this docs page mirrors it. Maintainers: keep the two in sync when editing.
 
-## 0.8.0 - 2026-09-22
+## 0.8.0 - 2026-09-27
 
 A notebook stops being one person's machine. This release is about the three
 things that were in the way: the work runs somewhere else, it reads the
@@ -265,6 +265,11 @@ environment pinned below them has to move before it can install 0.8.0.
 
 ### Fixed
 
+- **The service-mode demo stack starts again.** `docker-compose.service.yml`
+  exited at boot: the image defaults `STRATA_DEPLOYMENT_MODE` to personal, and
+  the environment beat the mounted `[tool.strata]`, so personal mode refused
+  its trusted-proxy settings. Its smoke script also hung on a new notebook's
+  environment sync. Both are fixed and the smoke passes end to end.
 - **Concurrent scans read each row group from storage once.** Scans that
   missed the cache on the same row group at the same time each read it from
   storage; 16 cold scans of a 37-row-group table read 127 row groups. Misses
