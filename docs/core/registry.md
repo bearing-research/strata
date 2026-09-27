@@ -138,11 +138,12 @@ cell promotes through the registry:
 
 ```python
 # promote cell
-model_art = client.put(inputs=[features_uri], transform=..., data=model_bytes, name="taxi/tip-model")
+model_art = client.put(
+    inputs=[features_uri], transform=..., data=model_bytes, name="taxi/tip-model"
+)
 client.set_tag(model_art.artifact_id, model_art.version, "mae", f"{mae:.4f}")
-move = client.set_alias("taxi/tip-model", "champion",
-                        model_art.artifact_id, model_art.version)
-print(move.get("status", "applied"))   # "applied" | "pending" | "unchanged"
+move = client.set_alias("taxi/tip-model", "champion", model_art.artifact_id, model_art.version)
+print(move.get("status", "applied"))  # "applied" | "pending" | "unchanged"
 ```
 
 New data lands in the lake → the [`@table` annotation](../notebook/annotations.md#table)

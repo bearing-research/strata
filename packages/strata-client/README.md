@@ -15,7 +15,7 @@ pip install "strata-client[duckdb]"   # or pandas, polars, datafusion, all
 from strata_client import StrataClient
 
 with StrataClient() as client:  # resolves the server URL from STRATA_SERVER_URL,
-                                # STRATA_HOST / STRATA_PORT, or [tool.strata]
+    # STRATA_HOST / STRATA_PORT, or [tool.strata]
     art = client.materialize(
         inputs=["file:///warehouse#db.events"],
         transform={"executor": "scan@v1", "params": {}},
