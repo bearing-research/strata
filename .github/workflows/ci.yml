@@ -97,7 +97,7 @@ jobs:
     # The shared-store tests run against a real Postgres as well as SQLite.
     services:
       postgres:
-        image: postgres:16-alpine
+        image: postgres:18-alpine
         env:
           POSTGRES_USER: pool
           POSTGRES_PASSWORD: pool
