@@ -58,13 +58,31 @@ updates:
       timezone: America/Los_Angeles
     open-pull-requests-limit: 5
     versioning-strategy: increase-if-necessary
+    # A package whose update breaks the build stays out of the big groups, so
+    # it fails its own PR instead of holding back a dozen safe bumps. The first
+    # group that matches wins, so fsspec comes before the dependency-type ones.
     groups:
+      # fsspec and its filesystems release together and pin each other exactly.
+      fsspec:
+        patterns: [fsspec, s3fs, gcsfs, adlfs]
       python-runtime:
         dependency-type: production
         update-types: [minor, patch]
+        exclude-patterns: [sqlglot]
       python-dev:
         dependency-type: development
         update-types: [minor, patch]
+        # ty is pre-1.0 and each release adds diagnostics; sqlglot changes the
+        # SQL it rewrites (a snapshot pin's alias placement moved in 30.19).
+        exclude-patterns: [ty, sqlglot]
+    ignore:
+      # aiobotocore (through s3fs) pins botocore to a narrow range, so boto3
+      # cannot be updated alone; it moves when the fsspec group does.
+      - dependency-name: boto3
+      - dependency-name: botocore
+      # mcp 2 changed its server API; the migration is its own task.
+      - dependency-name: mcp
+        update-types: ["version-update:semver-major"]
     commit-message:
       prefix: deps
       include: scope

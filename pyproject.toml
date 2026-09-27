@@ -110,7 +110,7 @@ sql-bigquery = [
     "adbc-driver-bigquery>=1.0.0",
 ]
 sql-duckdb = [
-    "duckdb>=1.0.0",
+    "duckdb>=1.1.0",
 ]
 # Notebook TUI: a read-only Textual spectator that attaches to a running
 # notebook session over the WS protocol (httpx + websockets are already core

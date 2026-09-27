@@ -9,7 +9,7 @@ and its auth middleware.
 from __future__ import annotations
 
 import pytest
-from fastapi.routing import APIRoute
+from fastapi.routing import APIRoute, iter_route_contexts
 from fastapi.testclient import TestClient
 
 from strata.notebook.scopes import required_scope_for_route
@@ -121,12 +121,20 @@ class TestTheTable:
         from strata.notebook.routes import _require_notebook_scope
         from strata.server import app
 
+        # iter_route_contexts: since FastAPI 0.141 an included router is one
+        # entry in app.routes, so walking app.routes found no notebook route at
+        # all and this passed while checking nothing.
+        notebook_routes = [
+            route
+            for route in iter_route_contexts(app.routes)
+            if isinstance(route.original_route, APIRoute)
+            and route.path.startswith(("/v1/notebooks", "/v1/projects"))
+        ]
         ungated = [
             (sorted(route.methods), route.path)
-            for route in app.routes
-            if isinstance(route, APIRoute)
-            and route.path.startswith(("/v1/notebooks", "/v1/projects"))
-            and not any(d.dependency is _require_notebook_scope for d in route.dependencies)
+            for route in notebook_routes
+            if not any(d.dependency is _require_notebook_scope for d in route.dependencies)
         ]
 
+        assert len(notebook_routes) > 20
         assert ungated == []
