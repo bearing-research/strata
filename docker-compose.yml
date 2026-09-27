@@ -13,7 +13,9 @@ services:
     ports:
       - "8765:8765"
     volumes:
-      # Mount the demo warehouse (create it with `uv run python examples/setup_demo.py`)
+      # An Iceberg warehouse to scan. Its catalog must record paths under
+      # /data/warehouse: one built on the host by examples/setup_demo.py
+      # records host paths, which do not exist in the container.
       - ./demo-warehouse:/data/warehouse:ro
       # Persist Strata state (cache + metadata + artifacts) between restarts
       - strata-state:/home/strata/.strata

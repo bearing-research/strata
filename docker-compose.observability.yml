@@ -50,17 +50,17 @@ services:
 
   # Jaeger - Distributed tracing backend
   jaeger:
-    image: jaegertracing/all-in-one:1.54
+    # 2.21 drops the /api/services query API that Grafana's Jaeger
+    # datasource reads; hold here until Grafana moves to /api/v3.
+    image: jaegertracing/jaeger:2.20.0
     ports:
       - "16686:16686"  # Jaeger UI
       - "4317:4317"    # OTLP gRPC
       - "4318:4318"    # OTLP HTTP
-    environment:
-      - COLLECTOR_OTLP_ENABLED=true
 
   # Prometheus - Metrics collection
   prometheus:
-    image: prom/prometheus:v2.49.1
+    image: prom/prometheus:v3.15.0
     ports:
       - "9090:9090"
     volumes:
@@ -74,7 +74,7 @@ services:
 
   # Grafana - Dashboards and visualization
   grafana:
-    image: grafana/grafana:10.3.1
+    image: grafana/grafana:13.2.2
     ports:
       - "3000:3000"
     environment:

@@ -2,15 +2,13 @@
 
 ## Supported Versions
 
-Strata is at 0.1.0 — the first stable release. Security fixes are
-shipped against the latest minor only. Pin to a patch (e.g.
-`strata-notebook==0.1.0`) if you need stability; upgrade to the
-latest patch in your minor when a security release lands.
+Security fixes ship against the latest minor release only. Upgrade to
+its newest patch when a security release lands.
 
-| Version | Supported |
-| ------- | --------- |
-| 0.1.x   | Yes       |
-| < 0.1   | No (pre-release alphas, do not deploy) |
+| Version              | Supported |
+| -------------------- | --------- |
+| Latest minor release | Yes       |
+| Older releases       | No        |
 
 ## Reporting a Vulnerability
 
@@ -33,7 +31,7 @@ advisory and request a key if you need one).
 - A minimal reproduction or proof-of-concept
 - The threat model you're assuming (personal deployment, service
   deployment, multi-tenant, etc. — see
-  [deployment modes](https://github.com/bearing-research/strata/blob/main/CLAUDE.md#deployment-modes))
+  [deployment modes](https://github.com/bearing-research/strata/blob/main/docs/deployment/modes.md))
 - The Strata version (`strata-notebook --version` or `pip show
   strata-notebook`) and Python version
 
@@ -55,7 +53,8 @@ We will credit reporters in the release notes unless you ask us not to.
 In scope:
 
 - The published `strata-notebook` wheel on PyPI and its console
-  scripts (`strata-notebook`, `strata`, `strata-worker`).
+  scripts (`strata-notebook`, `strata`, `strata-notebook-tui`,
+  `strata-worker`).
 - The HTTP and WebSocket APIs documented in the repo.
 - The bundled frontend SPA.
 

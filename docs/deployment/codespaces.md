@@ -6,7 +6,7 @@ Click **"Open in Codespaces"** on the repo to get a ready-to-use Strata environm
 
 The `.devcontainer/` configuration provides:
 
-- Python 3.13 (devcontainer feature, on an Ubuntu 22.04 base)
+- Python 3.13 (devcontainer feature, on an Ubuntu 24.04 base)
 - VS Code extensions: Python, Ruff
 - Strata installed from the published PyPI wheel - no Rust or Node build
 
