@@ -784,37 +784,33 @@ class TestStreamEnforcementHooks:
         batches = list(reader)
         assert len(batches) == 1
 
-    def test_deadline_checked_per_segment(self):
-        """Test that deadline is checked at segment boundaries.
+    def test_deadline_checked_per_segment(self, monkeypatch):
+        """The deadline is checked at segment boundaries, after earlier output.
 
-        Note: Uses larger batches to ensure chunks are yielded before deadline.
+        A fake clock passes the deadline once the first segment is consumed, so
+        the first segment's output is out before the check that aborts.
         """
-        import time
+        from types import SimpleNamespace
 
-        # Create a slow segment iterator that yields segments with delays
-        def slow_segments():
-            for i in range(5):
-                # Use larger batches to exceed boundary threshold
-                batch = pa.RecordBatch.from_pydict({"id": list(range(10000))})
-                yield create_stream_bytes(batch)
-                # Simulate slow processing between segments
-                time.sleep(0.02)
+        now = [0.0]
+        monkeypatch.setattr(fast_io, "time", SimpleNamespace(monotonic=lambda: now[0]))
 
-        # Set a deadline that allows processing some but not all segments
-        short_deadline = time.monotonic() + 0.05  # 50ms
+        # Large enough to pass the chunk threshold at the segment boundary
+        batch = pa.RecordBatch.from_pydict({"id": list(range(10000))})
 
-        gen = fast_io.stream_concat_ipc_segments(
-            slow_segments(),
-            deadline=short_deadline,
-        )
+        def segments():
+            yield create_stream_bytes(batch)
+            now[0] = 101.0  # past the deadline before the next segment
+            yield create_stream_bytes(batch)
 
-        # Should get some chunks before deadline
+        gen = fast_io.stream_concat_ipc_segments(segments(), deadline=100.0)
+
         chunks = []
         with pytest.raises(fast_io.StreamDeadlineExceeded):
             for chunk in gen:
                 chunks.append(chunk)
 
-        # Should have gotten at least schema
+        # The first segment went out before the deadline hit
         assert len(chunks) >= 1
 
     def test_both_limits_can_be_set(self):

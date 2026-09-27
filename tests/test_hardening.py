@@ -845,7 +845,11 @@ class TestStreamingIntegration:
         server_thread.start()
         time.sleep(1)
 
+        # Three row groups, not two: the first can come from a prefetch that is
+        # already done, so the check before the second can land inside 1ms. The
+        # check before the third always follows a slow fetch.
         append_rows(temp_warehouse["table"], 1000, 25)
+        append_rows(temp_warehouse["table"], 1025, 25)
         table_uri = temp_warehouse["table_uri"]
 
         original_fetch = state.fetcher.fetch_as_stream_bytes
