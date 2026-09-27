@@ -112,6 +112,7 @@ print(df.head())
 
     ```python
     from strata_client.integration.pandas import fetch_to_pandas
+
     df = fetch_to_pandas("file:///warehouse#db.events")
     ```
 
@@ -119,6 +120,7 @@ print(df.head())
 
     ```python
     from strata_client.integration.polars import fetch_to_polars
+
     df = fetch_to_polars("file:///warehouse#db.events")
     ```
 
@@ -126,6 +128,7 @@ print(df.head())
 
     ```python
     from strata_client.integration.duckdb import StrataScanner
+
     with StrataScanner() as scanner:
         scanner.register("events", "file:///warehouse#db.events")
         result = scanner.query("SELECT category, COUNT(*) FROM events GROUP BY category")

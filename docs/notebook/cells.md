@@ -105,8 +105,10 @@ import math
 
 CIRCLE_PRECISION = 4
 
+
 def area(r):
     return round(math.pi * r * r, CIRCLE_PRECISION)
+
 
 def perimeter(r):
     return round(2 * math.pi * r, CIRCLE_PRECISION)
@@ -132,6 +134,7 @@ print(f"loaded raw bounds: [{raw_min}, {raw_max}]")
 CLAMP_MIN = 0.0
 CLAMP_MAX = 100.0
 
+
 def clamp(value):
     return max(CLAMP_MIN, min(CLAMP_MAX, value))
 ```
@@ -147,7 +150,8 @@ A downstream cell can call `clamp(raw_max)`: `clamp` and `CLAMP_MIN/MAX` come fr
 Every name a kept def or class references must be bound by something else in the slice (or a Python builtin). When it isn't, Strata blocks the export with a `module_export_blocked` diagnostic, surfaced pre-flight, not just at run time.
 
 ```python
-runtime_threshold = math.sqrt(9)   # dropped, non-literal RHS
+runtime_threshold = math.sqrt(9)  # dropped, non-literal RHS
+
 
 def is_outlier(value):
     return value > runtime_threshold
@@ -180,7 +184,7 @@ Some mutations can't be seen in the source: an alias (`d = df; d.drop(..., inpla
 The fix is to copy, or rebind, before mutating:
 
 ```python
-df = upstream_df.copy()    # make a private copy
+df = upstream_df.copy()  # make a private copy
 df.drop(columns=[...], inplace=True)
 ```
 
@@ -318,6 +322,7 @@ A downstream cell can then destructure without regex-wrangling:
 
 ```python
 import pandas as pd
+
 df = pd.DataFrame(triage["items"])
 print(df["priority"].value_counts())
 ```
@@ -619,8 +624,8 @@ FROM orders GROUP BY customer ORDER BY total DESC LIMIT 5
 
 ```python
 # downstream Python cell
-print(top_customers.shape)            # (5, 2)
-print(top_customers["total"].sum())   # ndarray sum, etc
+print(top_customers.shape)  # (5, 2)
+print(top_customers["total"].sum())  # ndarray sum, etc
 ```
 
 ### `# @after` for setup-then-query pipelines
@@ -834,7 +839,7 @@ import random
 
 # Each iteration: read `state`, compute the next step, rebind `state`.
 candidate = state["x"] + random.uniform(-0.1, 0.1)
-score = candidate ** 2   # some objective
+score = candidate**2  # some objective
 if score < state["best_score"]:
     state = {**state, "x": candidate, "best_score": score, "iter": state["iter"] + 1}
 else:

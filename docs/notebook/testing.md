@@ -35,6 +35,7 @@ whatever `X` is at the end of the cell:
 def test_row_count(cell):
     assert len(cell.sales) == 200
 
+
 def test_revenue_is_units_times_price(cell):
     expected = cell.sales["units"] * cell.sales["price"]
     assert (cell.sales["revenue"] == expected).all()

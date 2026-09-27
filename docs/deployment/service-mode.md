@@ -337,11 +337,10 @@ publish. The publish → consume loop then looks like:
 
 ```python
 # Researcher A (team-a, artifacts:write) publishes a processed dataset:
-strata.put(inputs=[], transform={"ref": "clean@v1"}, data=cleaned,
-           name="team/cleaned-events")
+strata.put(inputs=[], transform={"ref": "clean@v1"}, data=cleaned, name="team/cleaned-events")
 
 # Any teammate (team-a) resolves the name to its current artifact and reads it:
-info = strata.resolve_name("team/cleaned-events")   # {artifact_uri, version, …}
+info = strata.resolve_name("team/cleaned-events")  # {artifact_uri, version, …}
 
 # Other-team principals (team-b) cannot resolve team-a's name - tenant isolation.
 ```

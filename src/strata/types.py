@@ -6,7 +6,7 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from decimal import Decimal
-from enum import Enum
+from enum import Enum, StrEnum
 from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, Field
@@ -501,7 +501,7 @@ class WarmAsyncRequest(BaseModel):
     priority: int = 0  # Higher = more urgent (affects queue order)
 
 
-class WarmJobStatus(str, Enum):
+class WarmJobStatus(StrEnum):
     """Status of a background warming job."""
 
     PENDING = "pending"  # Queued, not started

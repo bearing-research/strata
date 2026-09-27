@@ -11,7 +11,7 @@ Provides comprehensive health checks for all server dependencies:
 import shutil
 import time
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import StrEnum
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as metadata_version
 from pathlib import Path
@@ -35,7 +35,7 @@ def _package_version() -> str:
         return "unknown"
 
 
-class HealthStatus(str, Enum):
+class HealthStatus(StrEnum):
     """Health status levels."""
 
     HEALTHY = "healthy"

@@ -351,7 +351,7 @@ class BigQueryAdapter:
 
             for (catalog, schema), group in sorted(
                 by_dataset.items(),
-                key=lambda kv: ((kv[0][0] or "") + "/" + (kv[0][1] or "")),
+                key=lambda kv: (kv[0][0] or "") + "/" + (kv[0][1] or ""),
             ):
                 effective_project = catalog or current_proj
                 effective_dataset = schema or current_ds
@@ -419,7 +419,7 @@ class BigQueryAdapter:
 
             for (catalog, schema), group in sorted(
                 by_dataset.items(),
-                key=lambda kv: ((kv[0][0] or "") + "/" + (kv[0][1] or "")),
+                key=lambda kv: (kv[0][0] or "") + "/" + (kv[0][1] or ""),
             ):
                 effective_project = catalog or current_proj
                 effective_dataset = schema or current_ds

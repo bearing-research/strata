@@ -25,6 +25,7 @@ Set a human-readable display name for the cell. Shown in the DAG view and as a b
 ```python
 # @name Load arXiv Papers
 import pandas as pd
+
 papers = pd.read_parquet("https://...")
 ```
 
@@ -160,6 +161,7 @@ Set an environment variable for this cell only, overriding the notebook-level va
 # @env CUDA_VISIBLE_DEVICES=0
 # @env OMP_NUM_THREADS=4
 import torch
+
 model = torch.nn.Linear(384, 10).cuda()
 ```
 
@@ -212,6 +214,7 @@ string being in the source hash and the bytes being in nothing.
 ```python
 # @fetch zones https://example.org/taxi_zones.csv
 import pandas as pd
+
 lookup = pd.read_csv(zones)
 ```
 
@@ -629,12 +632,14 @@ reference `model` without caring which variant produced it.
 ```python
 # @variant classifier logreg
 from sklearn.linear_model import LogisticRegression
+
 model = LogisticRegression(max_iter=1000).fit(X_train, y_train)
 ```
 
 ```python
 # @variant classifier rf
 from sklearn.ensemble import RandomForestClassifier
+
 model = RandomForestClassifier(n_estimators=200).fit(X_train, y_train)
 ```
 

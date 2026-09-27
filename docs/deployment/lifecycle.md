@@ -99,6 +99,7 @@ Or from Python:
 
 ```python
 from strata_client import StrataClient
+
 client = StrataClient(base_url="http://localhost:8765")
 client.garbage_collect(max_age_days=7.0)
 # {"deleted_count": 14, "deleted_bytes": 8429283, "cutoff_timestamp": ...}

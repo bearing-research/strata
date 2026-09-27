@@ -170,10 +170,12 @@ class TestTwoPrincipals:
 
         alice.send("cell_focus", {"cell_id": "root"})
         await _until(
-            lambda: {"principal": "alice", "focused_cell_id": "root"}.items()
-            <= next(
-                e for e in bob.last_presence()["principals"] if e["principal"] == "alice"
-            ).items()
+            lambda: (
+                {"principal": "alice", "focused_cell_id": "root"}.items()
+                <= next(
+                    e for e in bob.last_presence()["principals"] if e["principal"] == "alice"
+                ).items()
+            )
         )
 
         await _disconnect(bob, bob_task)
@@ -243,15 +245,17 @@ class TestPersonalMode:
             UpdateCellSourceRequest(source="x = 'agent'", author="agent:claude"),
         )
         await _until(
-            lambda: {"principal": "agent:claude", "focused_cell_id": "root"}.items()
-            <= next(
-                (
-                    e
-                    for e in browser.last_presence()["principals"]
-                    if e["principal"] == "agent:claude"
-                ),
-                {},
-            ).items()
+            lambda: (
+                {"principal": "agent:claude", "focused_cell_id": "root"}.items()
+                <= next(
+                    (
+                        e
+                        for e in browser.last_presence()["principals"]
+                        if e["principal"] == "agent:claude"
+                    ),
+                    {},
+                ).items()
+            )
         )
 
         browser.send("cell_source_update", {"cell_id": "root", "source": "x = 'me'"})

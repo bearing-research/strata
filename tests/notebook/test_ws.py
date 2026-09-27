@@ -1207,8 +1207,10 @@ async def test_ws_cancelled_signed_http_executor_marks_build_failed(
     # The finalize-failed marking happens on a background server thread; wait
     # for it to settle via the build store rather than asserting on timing.
     await _wait_until(
-        lambda: notebook_build_server["build_store"].get_stats()["building"] == 0
-        and notebook_build_server["build_store"].get_stats()["pending"] == 0
+        lambda: (
+            notebook_build_server["build_store"].get_stats()["building"] == 0
+            and notebook_build_server["build_store"].get_stats()["pending"] == 0
+        )
     )
     stats = notebook_build_server["build_store"].get_stats()
     assert stats["failed"] == 1

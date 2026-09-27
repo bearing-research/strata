@@ -26,8 +26,8 @@ pool = Pool(
     backend=DockerBackend(),
     machine_types=[MachineType(name="cpu-4x", image="strata-worker:latest")],
 )
-await pool.recover()          # reconcile after a restart
-pool.start_scaler()           # stop paying for machines that finished
+await pool.recover()  # reconcile after a restart
+pool.start_scaler()  # stop paying for machines that finished
 
 job = await pool.submit(tenant_id="acme", machine_type="cpu-4x", payload=bundle)
 done = await pool.wait(job.id)
@@ -76,7 +76,7 @@ pool = Pool(
     store=PostgresPoolStore("postgresql://pool@db/pool"),
     backend=RunPodBackend(os.environ["RUNPOD_API_KEY"]),
     machine_types=catalogue,
-    instance_id=os.environ["HOSTNAME"],   # required on a shared store
+    instance_id=os.environ["HOSTNAME"],  # required on a shared store
 )
 ```
 
@@ -215,8 +215,8 @@ MachineType(
     name="h100-80gb",
     image="strata-worker:latest",
     gpu_type="NVIDIA H100 80GB PCIe",
-    boot_timeout_seconds=600,   # pulling an image onto a fresh pod is minutes
-    cool_down_seconds=60,       # an idle H100 is the expensive mistake
+    boot_timeout_seconds=600,  # pulling an image onto a fresh pod is minutes
+    cool_down_seconds=60,  # an idle H100 is the expensive mistake
 )
 ```
 
@@ -266,7 +266,7 @@ MachineType(
     image="registry.fly.io/strata-worker:latest",
     cpus=8,
     memory_mb=65536,
-    gpu_type="a100-80gb",       # Fly's own gpu_kind string
+    gpu_type="a100-80gb",  # Fly's own gpu_kind string
     cool_down_seconds=120,
 )
 ```

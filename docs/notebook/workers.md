@@ -97,6 +97,7 @@ to, and the cell runs in-process while appearing to be configured.
 ```python
 # @worker local-dev
 import platform
+
 hostname = platform.node()
 ```
 
@@ -291,18 +292,17 @@ import modal
 # worker entry isn't gated by the runtime guard (only strata-notebook is)
 # so Modal's standard image stack works. uv is installed alongside so the
 # worker can run cells in the notebook's locked environment.
-gpu_image = (
-    modal.Image.debian_slim(python_version="3.12")
-    .pip_install(
-        "pyarrow>=18.0.0", "pandas>=2.0.0", "numpy>=1.26.0",
-        # Your workload dependencies:
-        "torch>=2.3",
-        "sentence-transformers>=3.0",
-        # Pin to an exact version in production so the worker
-        # protocol can't drift relative to the notebook server.
-        "strata-notebook[notebook]",
-        "uv",
-    )
+gpu_image = modal.Image.debian_slim(python_version="3.12").pip_install(
+    "pyarrow>=18.0.0",
+    "pandas>=2.0.0",
+    "numpy>=1.26.0",
+    # Your workload dependencies:
+    "torch>=2.3",
+    "sentence-transformers>=3.0",
+    # Pin to an exact version in production so the worker
+    # protocol can't drift relative to the notebook server.
+    "strata-notebook[notebook]",
+    "uv",
 )
 
 app = modal.App("my-gpu-worker", image=gpu_image)
@@ -312,6 +312,7 @@ app = modal.App("my-gpu-worker", image=gpu_image)
 @modal.asgi_app()
 def gpu_executor():
     from strata.notebook.remote_executor import create_notebook_executor_app
+
     return create_notebook_executor_app()
 ```
 
@@ -503,8 +504,7 @@ For Modal, attach a secret to the function:
     secrets=[modal.Secret.from_name("strata-worker-token")],
 )
 @modal.asgi_app()
-def gpu_executor():
-    ...
+def gpu_executor(): ...
 ```
 
 …then create the Modal secret once: `modal secret create strata-worker-token STRATA_WORKER_TOKEN=<paste-token-here>`.

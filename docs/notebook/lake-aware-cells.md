@@ -122,8 +122,11 @@ Run all cells - both go green. Now **land new data** in the lake:
 import pyarrow as pa
 from pyiceberg.catalog.sql import SqlCatalog
 
-catalog = SqlCatalog("demo", uri="sqlite:////tmp/strata-demo/warehouse/catalog.db",
-                     warehouse="/tmp/strata-demo/warehouse")
+catalog = SqlCatalog(
+    "demo",
+    uri="sqlite:////tmp/strata-demo/warehouse/catalog.db",
+    warehouse="/tmp/strata-demo/warehouse",
+)
 table = catalog.load_table("shop.orders")
 table.append(pa.table({"order_id": [4, 5], "amount": [40, 50]}))  # snapshot S2
 print("snapshot S2:", table.current_snapshot().snapshot_id)
