@@ -241,7 +241,7 @@ timeout = 600                 # cell-level override
 | `created_by` | string \| absent | Who added the cell. Written by the server, not meant to be hand-edited. |
 | `updated_by` | string \| absent | Who last changed it. |
 
-`created_by` and `updated_by` record who wrote a cell, so a reader can tell cells an agent wrote from cells a person did. The value is the authenticated principal where the server has one. Otherwise it is what the client declared: `local` for the browser, `assistant` for the built-in assistant (`assistant:<principal>` in service mode), or an external agent's own name sent through MCP or `--author`. In personal mode nothing checks that declaration, so treat it as a claim rather than an attestation. Both keys are absent on cells written before authorship was recorded.
+`created_by` and `updated_by` record who wrote a cell, so a reader can tell cells an agent wrote from cells a person did. The value is the authenticated principal where the server has one. Otherwise it is what the client declared: `local` for the browser, or an external agent's own name sent through MCP or `--author`. In personal mode nothing checks that declaration, so treat it as a claim rather than an attestation. Both keys are absent on cells written before authorship was recorded.
 
 They are the one exception to the structural-edits-only rule above. An edit to a cell's source rewrites `notebook.toml` when it changes who last edited it, and at no other time. So one person editing their own cell never touches the file, and the first edit by someone else touches it once. That rewrite leaves `updated_at` alone, because who edited a cell is not a structural change.
 

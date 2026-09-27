@@ -35,29 +35,39 @@ from strata.artifact_transfer import (
 
 
 def _open_store(artifact_dir_arg: str | None) -> ArtifactStore | None:
-    """Open the artifact store the server would, from the same settings.
+    """Open the store a command reads.
 
-    ``--artifact-dir``, else ``STRATA_ARTIFACT_DIR``, else
-    ``~/.strata/artifacts``; and a metadata DSN or object-store blob backend
-    configured through ``STRATA_*`` is used as the server uses it. Opening only
-    a SQLite file in the directory meant that, with a service store's settings,
-    every command looked at an empty store beside the real one.
+    ``--artifact-dir`` names one local store, the SQLite file and blobs in that
+    directory, and nothing else is consulted: a DSN or object-store backend in
+    the environment belongs to some other store, and pairing it with this
+    directory would read one store's rows against another's bytes.
+
+    Without it, the store is the one the server is configured with, from the
+    same settings (``[tool.strata]`` in pyproject.toml, then ``STRATA_*``):
+    its ``artifact_dir``, metadata DSN and blob backend. Opening only a SQLite
+    file there meant that, with a service store's settings, every command
+    looked at an empty store beside the real one.
     """
+    if artifact_dir_arg:
+        artifact_dir = Path(artifact_dir_arg)
+        if not (artifact_dir / "artifacts.sqlite").exists():
+            print(f"no artifact store in {artifact_dir}", file=sys.stderr)
+            return None
+        return ArtifactStore(artifact_dir)
+
     from strata.config import StrataConfig
 
     try:
-        config = StrataConfig()
+        config = StrataConfig.load()
     except ValueError as exc:
         print(f"invalid configuration: {exc}", file=sys.stderr)
         return None
-    artifact_dir = (
-        Path(artifact_dir_arg)
-        if artifact_dir_arg
-        else config.artifact_dir or Path.home() / ".strata" / "artifacts"
-    )
+    artifact_dir = config.artifact_dir or Path.home() / ".strata" / "artifacts"
     dialect = config.create_metadata_dialect()
-    if dialect is None and not artifact_dir.exists():
-        print(f"artifact directory not found: {artifact_dir}", file=sys.stderr)
+    # Loading the config creates a personal-mode artifact_dir, so an empty
+    # directory proves nothing: a store on SQLite is its database file.
+    if dialect is None and not (artifact_dir / "artifacts.sqlite").exists():
+        print(f"no artifact store in {artifact_dir}", file=sys.stderr)
         return None
     blob_store = config.create_blob_store() if config.artifact_blob_backend != "local" else None
     return ArtifactStore(artifact_dir, blob_store=blob_store, dialect=dialect)
