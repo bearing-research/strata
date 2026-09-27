@@ -224,7 +224,8 @@ class TestWhichStoreACommandReads:
         project = tmp_path / "project"
         project.mkdir()
         (project / "pyproject.toml").write_text(
-            f'[tool.strata]\nartifact_dir = "{chain_store["dir"]}"\n'
+            # A literal string: a Windows path's backslashes are not escapes.
+            f"[tool.strata]\nartifact_dir = '{chain_store['dir']}'\n"
         )
         monkeypatch.chdir(project)
         monkeypatch.delenv("STRATA_ARTIFACT_DIR", raising=False)
