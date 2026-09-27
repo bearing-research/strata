@@ -200,8 +200,8 @@ def read_notebook_ai_config(session: Any) -> dict | None:
         return None
 
 
-def llm_config_for_session(session: Any) -> LlmConfig:
-    """Resolve the LLM config a prompt cell in *session* runs with."""
+def llm_config_for_session(session: Any) -> LlmConfig | None:
+    """Resolve the LLM config a prompt cell in *session* runs with, if any is set."""
     server_config = None
     try:
         from strata.server import get_state

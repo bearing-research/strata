@@ -103,6 +103,9 @@ async function main() {
       failures.push(`expected no .app-header in embed mode, found ${headerCount}`)
 
     // 2. the widget control panel is live inside the frame
+    // The app view's container can appear before its cells do, so wait for
+    // the widget rather than counting once; a slow runner counted zero.
+    await frame.waitForSelector('.widget-cell', { timeout: TIMEOUT_MS }).catch(() => null)
     const widgetCount = await frame.locator('.widget-cell').count()
     if (widgetCount < 1) failures.push('widget control panel did not render inside the iframe')
 
