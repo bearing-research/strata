@@ -2231,7 +2231,7 @@ arbitrary as long as the env var and the volume mount agree - feel
 free to change both to <code>/data/notebooks</code> or whatever fits your
 mental model.</p>
 <h2 id="environment-variables">Environment variables<a class="headerlink" href="#environment-variables" title="Permanent link">&para;</a></h2>
-<p>Override defaults in <code>docker-compose.yml</code> or via <code>.env</code> file:</p>
+<p>Override defaults in the <code>environment:</code> block of <code>docker-compose.yml</code>:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="nt">environment</span><span class="p">:</span>
 <a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">STRATA_HOST=0.0.0.0</span>
 <a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">STRATA_PORT=8765</span>
