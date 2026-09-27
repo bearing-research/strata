@@ -383,7 +383,7 @@ async def _broadcast_notebook(session_id: str, session: Any) -> None:
 
 
 async def _agent_note(session_id: str, source: str, text: str) -> None:
-    """Surface a one-line note in the Agent panel of any attached viewer (#393).
+    """Surface a one-line note in the Agent tab of an attached terminal viewer (#393).
 
     An external agent driving via MCP keeps its reasoning in its own client, so
     we narrate its tool actions (``source="mcp"``) and any explicit notes it
@@ -535,7 +535,7 @@ async def _remove_dependency(
 
 
 async def _note(session_manager: SessionManager, session_id: str, message: str) -> dict[str, Any]:
-    """Push an explicit narration line into the session's Agent panel."""
+    """Push an explicit narration line into the terminal viewer's Agent tab."""
     _live_session(session_manager, session_id)  # validate the session exists
     await _agent_note(session_id, "agent", message)
     return {"ok": True}
@@ -1132,12 +1132,13 @@ def build_mcp_app(session_manager: SessionManager) -> Starlette | None:
 
     @mcp.tool()
     async def note(session_id: str, message: str) -> dict[str, Any]:
-        """Post a short note into the notebook's Agent panel for the human watching.
+        """Post a short note into the terminal viewer's Agent tab for the human watching.
 
         Your own actions (running / editing cells, etc.) already appear there
-        automatically. Use this to narrate your reasoning or plan — e.g. "About
-        to refactor featurize into two cells" — so the person watching the
-        notebook in the browser or terminal can follow what you're doing.
+        automatically. Use this to narrate your reasoning or plan, e.g. "About
+        to refactor featurize into two cells", so the person watching the
+        notebook in the terminal viewer (strata-notebook-tui) can follow what
+        you're doing.
         """
         return await _note(session_manager, session_id, message)
 

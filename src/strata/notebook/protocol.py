@@ -97,7 +97,7 @@ class MessageType(StrEnum):
 
     # Server → Client (external agent)
     # An external agent driving via MCP (or the CLI) narrating an action or a
-    # note into the Agent panel. Its reasoning lives in its own client, so we
+    # note into the terminal viewer's Agent tab. Its reasoning lives in its own client, so we
     # surface its tool actions (source="mcp") and any explicit narration
     # (source="agent") as discrete notes.
     AGENT_NOTE = "agent_note"

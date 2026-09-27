@@ -8,8 +8,9 @@ that started the server doesn't leak into every notebook.
 
 from __future__ import annotations
 
+import tomllib
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import Any
 
 import httpx
 
@@ -22,8 +23,6 @@ _PROVIDER_DEFAULTS: dict[str, tuple[str, str]] = {
     ),
     "MISTRAL_API_KEY": ("https://api.mistral.ai/v1", "mistral-large-latest"),
 }
-
-ActionType = Literal["chat"]
 
 
 @dataclass(frozen=True)
@@ -185,3 +184,33 @@ def infer_provider_name(base_url: str) -> str:
     if "localhost" in url or "127.0.0.1" in url:
         return "local"
     return "custom"
+
+
+def read_notebook_ai_config(session: Any) -> dict | None:
+    """The ``[ai]`` table of the session's notebook.toml, if it has one."""
+    notebook_toml = session.path / "notebook.toml"
+    if not notebook_toml.exists():
+        return None
+    try:
+        with open(notebook_toml, "rb") as f:
+            data = tomllib.load(f)
+        ai_section = data.get("ai")
+        return ai_section if isinstance(ai_section, dict) else None
+    except Exception:
+        return None
+
+
+def llm_config_for_session(session: Any) -> LlmConfig:
+    """Resolve the LLM config a prompt cell in *session* runs with."""
+    server_config = None
+    try:
+        from strata.server import get_state
+
+        server_config = get_state().config
+    except RuntimeError:
+        pass
+
+    # Notebook-level env vars (set via the Runtime panel)
+    notebook_env = getattr(session.notebook_state, "env", None) or {}
+
+    return resolve_llm_config(read_notebook_ai_config(session), server_config, notebook_env)

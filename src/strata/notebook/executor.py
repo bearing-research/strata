@@ -4126,15 +4126,15 @@ class CellExecutor:
         use_cache: bool,
     ) -> CellExecutionResult:
         """Execute a prompt cell via the LLM provider."""
+        from strata.notebook.llm.config import llm_config_for_session
         from strata.notebook.prompt_executor import execute_prompt_cell
-        from strata.notebook.routes import _get_llm_config
 
         if materialize_upstreams:
             failure = await self._materialize_upstreams_or_failure(cell_id, start_time, "prompt")
             if failure is not None:
                 return failure
 
-        llm_config = _get_llm_config(self.session)
+        llm_config = llm_config_for_session(self.session)
         if llm_config is None:
             return CellExecutionResult(
                 cell_id=cell_id,

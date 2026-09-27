@@ -221,8 +221,11 @@ environment pinned below them has to move before it can install 0.8.0.
   `STRATA_AI_APPROVAL_TOOLS`, `STRATA_AI_GATES_LOCKED`,
   `STRATA_AI_APPROVAL_TIMEOUT_SECONDS`, `STRATA_AI_MAX_CONTEXT_TOKENS`,
   `[ai] approval_timeout_seconds` and `[ai] max_context_tokens`. Prompt cells
-  and their `[ai]` model settings are unchanged. Drive a notebook with an
-  external agent through MCP or the CLI instead.
+  run as before, but the panel was also the only UI for their default model:
+  set it with `[ai] model` in `notebook.toml`, or per cell with `# @model`. The
+  panel's conversation history, `.strata/agent_history.json`, is no longer
+  read; delete it, since it holds whatever was typed into the chat. Drive a
+  notebook with an external agent through MCP or the CLI instead.
 
 ### Security
 

@@ -414,7 +414,7 @@ base_url = "http://localhost:11434/v1"
 model = "llama3"
 ```
 
-The `[ai]` section accepts `api_key` (use sparingly: it persists in `notebook.toml`; prefer the Runtime panel), `base_url`, `model`, `max_output_tokens` and `timeout_seconds`. Any service that implements the OpenAI `/v1/chat/completions` endpoint works, including OpenAI, Anthropic, Google and Mistral through their OpenAI-compatible endpoints, Ollama, and self-hosted vLLM, TGI or LiteLLM.
+The `[ai]` section accepts `api_key` (use sparingly: it persists in `notebook.toml`; prefer the Runtime panel), `base_url`, `model`, `max_output_tokens` and `timeout_seconds`. `model` is the notebook's default for every prompt cell, and there is no UI for it: set it here, or override it for one cell with `# @model`. Any service that implements the OpenAI `/v1/chat/completions` endpoint works, including OpenAI, Anthropic, Google and Mistral through their OpenAI-compatible endpoints, Ollama, and self-hosted vLLM, TGI or LiteLLM.
 
 ---
 

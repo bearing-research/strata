@@ -15,7 +15,6 @@ from strata.notebook.llm.client import (
     chat_completion_stream,
 )
 from strata.notebook.llm.config import (
-    ActionType,
     LlmCompletionResult,
     LlmConfig,
     infer_provider_name,
@@ -34,7 +33,6 @@ from strata.notebook.llm.structured import (
 
 __all__ = [
     # config
-    "ActionType",
     "LlmConfig",
     "LlmCompletionResult",
     "infer_provider_name",
