@@ -2,6 +2,7 @@
 
 import json
 import os
+import threading
 import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -569,6 +570,14 @@ class DiskCache:
             )
 
 
+class _Flight:
+    """One storage read of a row group, which concurrent misses on its key share."""
+
+    def __init__(self) -> None:
+        self.done = threading.Event()
+        self.batch: pa.RecordBatch | None = None
+
+
 class CachedFetcher:
     """A :class:`~strata.fetcher.Fetcher` wrapper that caches results.
 
@@ -609,6 +618,11 @@ class CachedFetcher:
             self.fetcher = fetcher
 
         self.cache = cache or DiskCache(config, self.metrics)
+        # Row groups being read from storage right now, by cache key. Scans that
+        # miss on the same row group at once used to read it once each: sixteen
+        # concurrent cold scans of one table fetched its 37 row groups 127 times.
+        self._flights: dict[CacheKey, _Flight] = {}
+        self._flights_lock = threading.Lock()
 
     @staticmethod
     def _project_batch(batch: pa.RecordBatch, columns: list[str] | None) -> pa.RecordBatch:
@@ -631,7 +645,8 @@ class CachedFetcher:
         """Fetch a row group, serving from cache when possible.
 
         On a miss, fetches from storage, caches the (full) row group, and
-        returns the requested projection.
+        returns the requested projection. Concurrent misses on one cache key
+        share a single storage read: the first fetches, the rest wait for it.
 
         Parameters
         ----------
@@ -643,27 +658,59 @@ class CachedFetcher:
         pyarrow.RecordBatch
             The (projected) row group.
         """
-        histogram = get_cache_histogram()
-        cache_full_row_groups = self.config.cache_granularity == CacheGranularity.ROW_GROUP
-
-        # Check cache first
         cached_batch = self.cache.get(task.cache_key)
         if cached_batch is not None:
-            result_batch = self._project_batch(cached_batch, task.columns)
-            task.cached = True
-            task.bytes_read = result_batch.nbytes
-            self.metrics.record_fetch(
-                bytes_read=result_batch.nbytes,
-                rows_read=result_batch.num_rows,
-                elapsed_ms=0.0,
-                from_cache=True,
-            )
-            # Record hit in histogram
-            histogram.record_hit(
-                bytes_accessed=result_batch.nbytes,
-                table_id=task.cache_key.table_id,
-            )
-            return result_batch
+            return self._serve_hit(task, cached_batch)
+
+        with self._flights_lock:
+            in_flight = self._flights.get(task.cache_key)
+            if in_flight is None:
+                flight = _Flight()
+                self._flights[task.cache_key] = flight
+
+        if in_flight is not None:
+            in_flight.done.wait()
+            if in_flight.batch is not None:
+                return self._serve_hit(task, in_flight.batch)
+            # The shared read failed. Try again rather than every scan failing
+            # on one transient error, and still one read at a time: one waiter
+            # leads the retry and the rest wait on it.
+            return self.fetch(task)
+
+        try:
+            # A read of this key may have landed between our miss and taking
+            # the lead; it is in the cache now.
+            cached_batch = self.cache.get(task.cache_key)
+            if cached_batch is not None:
+                flight.batch = cached_batch
+                return self._serve_hit(task, cached_batch)
+            return self._fetch_from_storage(task, flight)
+        finally:
+            with self._flights_lock:
+                del self._flights[task.cache_key]
+            flight.done.set()
+
+    def _serve_hit(self, task: Task, batch: pa.RecordBatch) -> pa.RecordBatch:
+        """Answer *task* from a row group already read, by the cache or a peer."""
+        result_batch = self._project_batch(batch, task.columns)
+        task.cached = True
+        task.bytes_read = result_batch.nbytes
+        self.metrics.record_fetch(
+            bytes_read=result_batch.nbytes,
+            rows_read=result_batch.num_rows,
+            elapsed_ms=0.0,
+            from_cache=True,
+        )
+        get_cache_histogram().record_hit(
+            bytes_accessed=result_batch.nbytes,
+            table_id=task.cache_key.table_id,
+        )
+        return result_batch
+
+    def _fetch_from_storage(self, task: Task, flight: _Flight) -> pa.RecordBatch:
+        """Read *task*'s row group from storage, cache it, and hand it to *flight*."""
+        histogram = get_cache_histogram()
+        cache_full_row_groups = self.config.cache_granularity == CacheGranularity.ROW_GROUP
 
         # Fetch from storage with tracing
         with trace_span(
@@ -694,6 +741,7 @@ class CachedFetcher:
 
         # Store in cache
         self.cache.put(task.cache_key, batch)
+        flight.batch = batch
 
         result_batch = self._project_batch(batch, task.columns)
         task.bytes_read = result_batch.nbytes

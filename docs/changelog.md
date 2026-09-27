@@ -265,6 +265,10 @@ environment pinned below them has to move before it can install 0.8.0.
 
 ### Fixed
 
+- **Concurrent scans read each row group from storage once.** Scans that
+  missed the cache on the same row group at the same time each read it from
+  storage; 16 cold scans of a 37-row-group table read 127 row groups. Misses
+  on one row group now share a single read, and the rest are served from it.
 - **Parallel reads of one Parquet file no longer share a file handle.** The
   fetch pool read row groups of one file from a single cached `ParquetFile` in
   several threads at once, which pyarrow does not support; pyarrow 25
