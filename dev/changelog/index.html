@@ -3357,6 +3357,13 @@ exhaustive commit history.</p>
 </ul>
 <h3 id="changed">Changed<a class="headerlink" href="#changed" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>Nothing 0.8.0 cached for a scan is reused.</strong> The row-group cache moves to
+  a new version directory, the metadata store is discarded and rebuilt, and a
+  scan's provenance now includes the schema, so scan artifacts are built
+  afresh. 0.8.0 could have cached rows a merge-on-read delete removed, or a
+  column's values under another column's name. The first scan of each table
+  after upgrading reads from storage. Delete the old <code>v3</code> directory under the
+  cache directory to reclaim its space.</li>
 <li><strong>pyiceberg 0.12 or newer is required.</strong> Before 0.12, pyiceberg misread a
   manifest whose entries leave their snapshot id to be inherited, which is how
   DuckDB writes them, and dropped the delete files those manifests listed.</li>
@@ -3398,19 +3405,15 @@ exhaustive commit history.</p>
 <li><strong>A scan no longer returns rows DuckDB deleted.</strong> 0.8.0 refused a
   merge-on-read table only when pyiceberg reported delete files, and
   pyiceberg before 0.12 lost the ones DuckDB writes, so the scan served the
-  deleted rows. If you scanned such a table with 0.8.0, its cached row groups
-  and scan artifacts still hold them: after upgrading, clear the row-group
-  cache (<code>POST /v1/cache/clear</code>), then run those scans once with
-  <code>refresh=True</code> (a notebook <code>@table</code> cell's <code>client.materialize</code> takes it
-  too). Snapshot resolutions the planner saved are redone on their own.</li>
+  deleted rows. Nothing 0.8.0 cached for a scan is reused (see Changed), so
+  those rows are not served again.</li>
 <li><strong>A scan no longer returns a dropped column's values under a new column's
   name.</strong> Strata read columns by name, so dropping a column and adding one of
   the same name, or renaming a column and reusing its old name, returned the
   old column's values where Iceberg has nulls. A renamed column came back
   under its old name, and a projection naming the new one failed partway
   through the stream. A schema change makes no snapshot, so the row-group
-  cache and a scan's provenance now also name the schema whenever it is not
-  the snapshot's own.</li>
+  cache and a scan's provenance now name the schema as well as the snapshot.</li>
 </ul>
 <h2 id="080-2026-09-27">0.8.0 - 2026-09-27<a class="headerlink" href="#080-2026-09-27" title="Permanent link">&para;</a></h2>
 <p>A notebook stops being one person's machine. This release is about the three
