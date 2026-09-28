@@ -42,6 +42,11 @@ class SqlAnalysis:
     dialect was supplied (the analyzer can't pick the right grammar
     without one).
 
+    ``unresolved_tables`` holds the table references named only when the
+    query runs, such as Snowflake's ``IDENTIFIER($var)`` or
+    ``IDENTIFIER(?)``, as their SQL text. They are not in ``tables``: a
+    freshness probe cannot ask about a table it cannot name.
+
     Two placeholder views, populated together:
 
     - ``references`` — deduplicated, source-order. The DAG layer
@@ -62,6 +67,7 @@ class SqlAnalysis:
     cache_policy: CachePolicy = field(default_factory=lambda: CachePolicy(kind="fingerprint"))
     sql_body: str = ""
     tables: list[QualifiedTable] = field(default_factory=list)
+    unresolved_tables: list[str] = field(default_factory=list)
     parse_error: str | None = None
 
 
@@ -97,10 +103,11 @@ def analyze_sql_cell(source: str, *, dialect: str | None = None) -> SqlAnalysis:
     connection = annotations.sql.connection if annotations.sql else None
 
     tables: list[QualifiedTable] = []
+    unresolved_tables: list[str] = []
     parse_error: str | None = None
     if dialect is not None and sql_body:
         try:
-            tables = _extract_tables(sql_body, dialect)
+            tables, unresolved_tables = _extract_tables(sql_body, dialect)
         except _SqlglotError as exc:
             # User-authored SQL syntax / token / optimize errors. Caller
             # surfaces this as a ``sql_parse_error`` diagnostic. Other
@@ -118,6 +125,7 @@ def analyze_sql_cell(source: str, *, dialect: str | None = None) -> SqlAnalysis:
         cache_policy=cache_policy,
         sql_body=sql_body,
         tables=tables,
+        unresolved_tables=unresolved_tables,
         parse_error=parse_error,
     )
 
@@ -439,7 +447,32 @@ def base_table_nodes(tree: Any, dialect: str) -> list[Any]:
     return nodes
 
 
-def _extract_tables(sql: str, dialect: str) -> list[QualifiedTable]:
+def _table_reference(table_node: Any, dialect: str) -> QualifiedTable | None:
+    """The table *table_node* names, or ``None`` when it is named only at run time.
+
+    Snowflake's ``IDENTIFIER(...)`` parses to a ``DynamicIdentifier``. A string
+    literal inside it is a static, possibly qualified name; a session variable
+    (``$var``) or a bind parameter (``:name``, ``?``) is resolved only when the
+    query runs.
+    """
+    from sqlglot import exp
+
+    if isinstance(table_node.this, exp.DynamicIdentifier):
+        inner = table_node.this.this
+        if not (isinstance(inner, exp.Literal) and inner.is_string):
+            return None
+        named = exp.to_table(inner.name, dialect=dialect)
+        return QualifiedTable(
+            catalog=named.catalog or None, schema=named.db or None, name=named.name
+        )
+    return QualifiedTable(
+        catalog=table_node.catalog or None,
+        schema=table_node.db or None,
+        name=table_node.name,
+    )
+
+
+def _extract_tables(sql: str, dialect: str) -> tuple[list[QualifiedTable], list[str]]:
     """Walk parsed SQL for base-table references, deduplicated and ordered.
 
     Uses ``sqlglot.optimizer.scope.traverse_scope`` to visit every
@@ -452,6 +485,9 @@ def _extract_tables(sql: str, dialect: str) -> list[QualifiedTable]:
     in the outer scope (where ``WITH foo AS (...) SELECT * FROM foo``
     binds ``foo`` to a Scope, not a Table) while still surfacing the
     base tables inside the CTE body.
+
+    Returns the tables and, separately, the SQL text of references named only
+    at run time (see ``_table_reference``).
     """
     import sqlglot
     from sqlglot import exp
@@ -460,6 +496,7 @@ def _extract_tables(sql: str, dialect: str) -> list[QualifiedTable]:
     parsed_list = sqlglot.parse(sql, dialect=dialect)
     seen: set[tuple[str | None, str | None, str]] = set()
     out: list[QualifiedTable] = []
+    unresolved: list[str] = []
     for parsed in parsed_list:
         if parsed is None:
             continue
@@ -470,14 +507,15 @@ def _extract_tables(sql: str, dialect: str) -> list[QualifiedTable]:
                     # Reference to a CTE / derived table, not a
                     # base table.
                     continue
-                qt = QualifiedTable(
-                    catalog=table_node.catalog or None,
-                    schema=table_node.db or None,
-                    name=table_node.name,
-                )
+                qt = _table_reference(table_node, dialect)
+                if qt is None:
+                    text = table_node.this.sql(dialect=dialect)
+                    if text not in unresolved:
+                        unresolved.append(text)
+                    continue
                 key = (qt.catalog, qt.schema, qt.name)
                 if key in seen:
                     continue
                 seen.add(key)
                 out.append(qt)
-    return out
+    return out, unresolved

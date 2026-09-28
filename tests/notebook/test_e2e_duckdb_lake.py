@@ -149,7 +149,19 @@ async def test_a_duckdb_cell_reads_the_catalog_and_goes_stale_on_a_new_snapshot(
     assert result.cache_hit is True
 
 
-def test_the_query_reads_the_snapshot_its_provenance_names(tmp_path, monkeypatch, rest_catalog):
+# Aliased too: sqlglot before 30.13 wrote the pin after the alias
+# (``trips AT (VERSION => n) AS t``), which DuckDB rejects as a syntax error.
+@pytest.mark.parametrize(
+    "query",
+    [
+        "SELECT id FROM lake.taxi.trips ORDER BY id",
+        "SELECT t.id FROM lake.taxi.trips t ORDER BY t.id",
+    ],
+    ids=["unaliased", "aliased"],
+)
+def test_the_query_reads_the_snapshot_its_provenance_names(
+    tmp_path, monkeypatch, rest_catalog, query
+):
     from strata.notebook.sql.analyzer import analyze_sql_cell
     from strata.notebook.sql.cell_executor import _execute_query
     from strata.notebook.sql.lake import resolve_lake
@@ -159,7 +171,7 @@ def test_the_query_reads_the_snapshot_its_provenance_names(tmp_path, monkeypatch
     _configure(
         monkeypatch, StrataConfig(cache_dir=tmp_path / "cache", catalogs={"lake": properties})
     )
-    source = "# @sql connection=lake\nSELECT id FROM lake.taxi.trips ORDER BY id\n"
+    source = f"# @sql connection=lake\n{query}\n"
     nb_dir = _notebook(tmp_path, source, 'driver = "duckdb"\npath = ":memory:"\ncatalog = "lake"')
     session = NotebookSession(parse_notebook(nb_dir), nb_dir)
     spec = session.notebook_state.connections[0]

@@ -28,6 +28,69 @@ def _seed_sqlite(path: Path) -> None:
         conn.commit()
 
 
+def _with_unresolved_table(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Make the executor's analysis report a table named only at run time,
+    as Snowflake's ``IDENTIFIER($tbl)`` does, on top of the real analysis."""
+    import dataclasses
+
+    from strata.notebook.sql import cell_executor
+
+    real = cell_executor.analyze_sql_cell
+
+    def analyze(source: str, **kwargs: Any) -> Any:
+        return dataclasses.replace(real(source, **kwargs), unresolved_tables=["IDENTIFIER($tbl)"])
+
+    monkeypatch.setattr(cell_executor, "analyze_sql_cell", analyze)
+
+
+@pytest.mark.asyncio
+async def test_a_table_named_at_run_time_is_never_served_from_cache(tmp_path, monkeypatch):
+    """Under the default fingerprint cache, a table the analyzer cannot name
+    is missing from the freshness token, so a cached result could outlive a
+    change to it: the cell runs the query every time."""
+    db_path = tmp_path / "events.db"
+    _seed_sqlite(db_path)
+    nb_dir = _build_notebook_with_sql_cell(
+        tmp_path, db_path=db_path, cell_source="# @sql connection=db\nSELECT * FROM events\n"
+    )
+    session = _make_session(nb_dir)
+    _with_unresolved_table(monkeypatch)
+
+    from strata.notebook.sql.cell_executor import execute_sql_cell
+
+    src = _read_cell(nb_dir, "c1")
+    first = await execute_sql_cell(session, "c1", src)
+    second = await execute_sql_cell(session, "c1", src)
+
+    assert first["success"] and second["success"]
+    assert first["cache_hit"] is False
+    assert second["cache_hit"] is False
+
+
+@pytest.mark.asyncio
+async def test_a_declared_cache_policy_still_reuses_a_run_time_table(tmp_path, monkeypatch):
+    """``# @cache session`` says what the rows depend on without a probe, so
+    a table named at run time does not stop the cell from reusing them."""
+    db_path = tmp_path / "events.db"
+    _seed_sqlite(db_path)
+    nb_dir = _build_notebook_with_sql_cell(
+        tmp_path,
+        db_path=db_path,
+        cell_source="# @sql connection=db\n# @cache session\nSELECT * FROM events\n",
+    )
+    session = _make_session(nb_dir)
+    _with_unresolved_table(monkeypatch)
+
+    from strata.notebook.sql.cell_executor import execute_sql_cell
+
+    src = _read_cell(nb_dir, "c1")
+    first = await execute_sql_cell(session, "c1", src)
+    second = await execute_sql_cell(session, "c1", src)
+
+    assert first["cache_hit"] is False
+    assert second["cache_hit"] is True
+
+
 def _build_notebook_with_sql_cell(
     tmp_path: Path,
     *,

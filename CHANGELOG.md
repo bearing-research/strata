@@ -9,10 +9,25 @@ exhaustive commit history.
 
 ### Changed
 
+- **sqlglot 30.13 or newer is required**, the first release that writes
+  DuckDB's snapshot clause after a table's alias.
 - **DuckDB 1.5 or newer is required** (`strata-notebook`, its `sql-duckdb`
   extra, and `strata-client`'s `duckdb` and `all` extras). DuckDB 1.5
   deprecates `fetch_arrow_table()` for `to_arrow_table()`, which a connection
   only has from 1.5, so Strata now calls the new name.
+
+### Fixed
+
+- **A SQL cell reading a catalog table under an alias runs again.** Pinning
+  `lake.taxi.trips t` to its snapshot wrote `AT (VERSION => n) AS t`, which
+  DuckDB rejects as a syntax error; the pin now comes after the alias. Any read
+  of an aliased catalog table failed.
+- **A Snowflake cell reading `IDENTIFIER($var)` or `IDENTIFIER(?)` no longer
+  serves a stale result.** Its table is named only when the query runs, so the
+  default cache could not see it change and kept returning the first result;
+  unparseable SQL had the same gap. Such a cell now runs its query every time,
+  and its header says why; `# @cache session` or `ttl` opts back into reuse.
+  `IDENTIFIER('db.schema.table')` with a literal is now tracked like any table.
 
 ## 0.8.0 - 2026-09-27
 

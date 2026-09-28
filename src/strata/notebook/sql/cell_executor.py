@@ -152,6 +152,14 @@ async def execute_sql_cell(
     except CachePolicyError as exc:
         return _error_result(str(exc), start_time)
 
+    # The fingerprint is the freshness of the tables the analyzer could name.
+    # A table named only at run time (Snowflake's IDENTIFIER($var)), or SQL
+    # sqlglot cannot parse at all, is missing from it, so a cached result
+    # could outlive a change to that table: run the query instead. A cell that
+    # declares session, ttl or forever has said what its rows depend on.
+    if policy.kind == "fingerprint" and (analysis.unresolved_tables or analysis.parse_error):
+        use_cache = False
+
     # The on-disk spec keeps relative paths verbatim (so notebook.toml
     # round-trips byte-for-byte); resolve them just before the
     # adapter sees them so the in-process call site stays
