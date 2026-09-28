@@ -67,6 +67,7 @@ jobs:
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v10.2.0
         with:
           version: "latest"
+          save-cache: false
 
       - name: Create an isolated venv with ONLY the client
         run: |
@@ -116,6 +117,7 @@ jobs:
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v10.2.0
         with:
           version: "latest"
+          save-cache: false
 
       - name: Create an isolated venv with ONLY the pool
         run: |
@@ -182,6 +184,7 @@ jobs:
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v10.2.0
         with:
           version: "latest"
+          save-cache: false
 
       - name: Install dependencies and build Rust extension
         run: uv sync --python 3.12 --all-extras
@@ -251,6 +254,12 @@ jobs:
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v10.2.0
         with:
           version: "latest"
+          # The uv cache key hashes the dependency files and the OS, so every
+          # job in every workflow on one OS computes the same key, and every
+          # one that saved after the first warned "Unable to reserve cache".
+          # One saver per OS: this job on 3.13, which installs --all-extras, a
+          # superset of what the others need. Every other setup-uv restores only.
+          save-cache: ${{ matrix.python-version == '3.13' }}
 
       - name: Install dependencies and build Rust extension
         shell: bash
@@ -346,6 +355,7 @@ jobs:
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v10.2.0
         with:
           version: "latest"
+          save-cache: false
 
       - name: Install dependencies and build Rust extension
         run: uv sync --python 3.12 --all-extras
@@ -417,6 +427,7 @@ jobs:
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v10.2.0
         with:
           version: "latest"
+          save-cache: false
 
       - name: Install dependencies and build Rust extension
         run: uv sync --python 3.12 --all-extras
@@ -505,6 +516,7 @@ jobs:
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v10.2.0
         with:
           version: "latest"
+          save-cache: false
 
       - name: Install backend dependencies and build Rust extension
         run: uv sync --python 3.12 --all-extras

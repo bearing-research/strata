@@ -26,6 +26,9 @@ jobs:
           node-version: "26"
 
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v10.2.0
+        with:
+          # Restore only; ci.yml's unit-tests saves this cache (see there).
+          save-cache: false
 
       # What pre-commit/action did, inlined: its latest release (v3.0.1) still
       # caches with actions/cache@v4, which targets the deprecated Node 20. And
