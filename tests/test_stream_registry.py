@@ -138,3 +138,24 @@ def test_shutdown_cleanups_is_safe_with_no_tasks():
 
 if __name__ == "__main__":  # pragma: no cover
     pytest.main([__file__, "-v"])
+
+
+def test_a_cleanup_whose_loop_closed_under_it_closes_without_raising():
+    """A bare ``TestClient(app)`` runs each request on its own event loop and
+    closes it after, stranding the TTL task mid-sleep. When its coroutine is
+    later closed outside any loop, the cleanup bookkeeping must not run: it
+    called ``asyncio.current_task()`` there, which raised."""
+    reg = StreamRegistry(ttl_seconds=60)
+    reg.register(_stream())
+
+    async def schedule() -> None:
+        reg.schedule_cleanup("s1", scan_id="scan-s1")
+        await asyncio.sleep(0)  # the task starts and parks in its sleep
+
+    loop = asyncio.new_event_loop()
+    loop.run_until_complete(schedule())
+    loop.close()
+
+    task = reg._cleanup_tasks["s1"]
+    task._log_destroy_pending = False  # stranded on purpose; asyncio would log it
+    task.get_coro().close()
