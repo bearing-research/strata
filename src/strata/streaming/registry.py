@@ -135,10 +135,12 @@ class StreamRegistry:
             try:
                 await asyncio.sleep(self._ttl_seconds)
             except asyncio.CancelledError:
+                # cancel_cleanup and shutdown_cleanups drop the entry themselves.
                 return
-            finally:
-                if self._cleanup_tasks.get(stream_id) is asyncio.current_task():
-                    self._cleanup_tasks.pop(stream_id, None)
+            # Not in a ``finally``: a task stranded by a closed loop is closed
+            # outside any loop, where current_task() raises.
+            if self._cleanup_tasks.get(stream_id) is asyncio.current_task():
+                self._cleanup_tasks.pop(stream_id, None)
 
             if scan_id is not None and self._on_expire is not None:
                 self._on_expire(scan_id)
