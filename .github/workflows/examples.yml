@@ -84,6 +84,9 @@ jobs:
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v10.2.0
         with:
           version: 'latest'
+          # Every job here computes the same cache key, and nine saving it at
+          # once warned "Unable to reserve cache"; one job saves, all restore.
+          save-cache: ${{ matrix.example == 'agent_demo' }}
 
       - name: Build Strata (and the Rust extension)
         run: uv sync --python 3.13 --all-extras
@@ -142,6 +145,8 @@ jobs:
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v10.2.0
         with:
           version: 'latest'
+          # Same cache key as the examples job, whose agent_demo saves it.
+          save-cache: false
 
       # use-public-rspm pulls binary packages on Ubuntu, turning a
       # ~10-min source compile of arrow into a ~30s download.
