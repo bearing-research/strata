@@ -1882,7 +1882,10 @@ async def _prepare_env_for_ops(ops: object, args: argparse.Namespace) -> int:
     Mirrors ``strata run``: sync by default, or (``--no-sync``) require an
     existing ``.venv``. Setup failures print to stderr and map to exit 2.
     """
-    from strata.notebook.ops import NotebookOpsError
+    from strata.notebook.ops import LocalNotebookOps, NotebookOpsError
+
+    # Every caller skips this for a remote server, which syncs its own venv.
+    assert isinstance(ops, LocalNotebookOps)
 
     if args.no_sync:
         venv_dir = Path(args.notebook_dir).expanduser().resolve() / ".venv"
@@ -1897,7 +1900,7 @@ async def _prepare_env_for_ops(ops: object, args: argparse.Namespace) -> int:
     if args.format == "human":
         print(_dim("syncing environment…"))
     try:
-        await ops.sync_environment()  # type: ignore[attr-defined]
+        await ops.sync_environment()
     except NotebookOpsError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2

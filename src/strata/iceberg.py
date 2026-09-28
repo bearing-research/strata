@@ -420,7 +420,7 @@ class TableWrite:
     created: bool
 
 
-def _strata_has_written(table: object) -> bool:
+def _strata_has_written(table: Table) -> bool:
     """Whether any snapshot of *table* was written by an export.
 
     A first write appends and a later one replaces the contents, which is the
@@ -431,7 +431,7 @@ def _strata_has_written(table: object) -> bool:
     """
     return any(
         snapshot.summary is not None and snapshot.summary.get(SUMMARY_ARTIFACT_ID)
-        for snapshot in table.snapshots()  # type: ignore[attr-defined]
+        for snapshot in table.snapshots()
     )
 
 

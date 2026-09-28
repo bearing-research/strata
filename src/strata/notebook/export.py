@@ -26,9 +26,13 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from strata.notebook.models import CellLanguage, CellOutput, CellState, NotebookState
 from strata.notebook.parser import parse_notebook
+
+if TYPE_CHECKING:
+    import re
 
 _DEFAULT_MAX_OUTPUT_BYTES = 1_048_576  # 1 MB per individual rendered output
 
@@ -317,7 +321,10 @@ def _render_cell(
 
 
 _ANSI_ESCAPE_RE = None  # lazy-compiled in _strip_ansi
-_SANITIZE_RES: tuple[object, ...] | None = None  # lazy-compiled in _sanitize_markdown_body
+# lazy-compiled in _sanitize_markdown_body: block, void, on*=, link
+_SANITIZE_RES: tuple[re.Pattern[str], re.Pattern[str], re.Pattern[str], re.Pattern[str]] | None = (
+    None
+)
 
 
 def _sanitize_markdown_body(body: str) -> str:
@@ -362,10 +369,10 @@ def _sanitize_markdown_body(body: str) -> str:
     from html import escape
 
     block_re, void_re, on_re, link_re = _SANITIZE_RES
-    body = block_re.sub(lambda m: escape(m.group(0)), body)  # type: ignore[union-attr]
-    body = void_re.sub(lambda m: escape(m.group(0)), body)  # type: ignore[union-attr]
-    body = on_re.sub(lambda m: escape(m.group(0)), body)  # type: ignore[union-attr]
-    body = link_re.sub("](#)", body)  # type: ignore[union-attr]
+    body = block_re.sub(lambda m: escape(m.group(0)), body)
+    body = void_re.sub(lambda m: escape(m.group(0)), body)
+    body = on_re.sub(lambda m: escape(m.group(0)), body)
+    body = link_re.sub("](#)", body)
     return body
 
 

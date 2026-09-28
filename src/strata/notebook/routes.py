@@ -13,7 +13,7 @@ import tomllib
 import uuid
 import zipfile
 from pathlib import Path
-from typing import TYPE_CHECKING, Annotated, Any, Literal, cast
+from typing import TYPE_CHECKING, Annotated, Any
 
 import httpx
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
@@ -3721,7 +3721,7 @@ async def execute_cell(
             session,
             cell_id,
             notebook_id,
-            mode=cast(Literal["normal", "force", "rerun"], mode),  # validated above
+            mode=mode,  # narrowed by the validation above
         )
     except NotebookBusyError as exc:
         raise HTTPException(status_code=409, detail=str(exc))
@@ -3943,7 +3943,6 @@ async def export_notebook(
             # per-cell provenance and timings from .strata/runtime.json, the
             # artifact index, and whichever bytes the caller asked for.
             from strata.notebook.snapshot import (
-                IncludeMode,
                 unknown_selection,
                 write_snapshot,
             )
@@ -3957,10 +3956,10 @@ async def export_notebook(
             write_snapshot(
                 session,
                 zf,
-                # Checked against the same three values above, where the
-                # refusal can say which they are; a Literal query parameter
+                # Narrowed by the check against the three values above, where
+                # the refusal can say which they are; a Literal query parameter
                 # would answer 422 with pydantic's phrasing instead.
-                include=cast(IncludeMode, include),
+                include=include,
                 selected_cells=selected_cells,
             )
 

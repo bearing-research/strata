@@ -10,7 +10,7 @@ leaf. ``/v1/config/timeouts`` and ``/v1/metadata/*`` are intentionally left in
 
 from __future__ import annotations
 
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import APIRouter, HTTPException, Query
 
@@ -211,7 +211,7 @@ async def inspect_cache_v1(
     if not isinstance(cache, DiskCache):
         raise HTTPException(status_code=501, detail="Operation requires DiskCache")
 
-    results = []
+    results: list[dict[str, Any]] = []
     versioned_dir = cache.cache_dir / f"v{CACHE_VERSION}"
 
     if not versioned_dir.exists():

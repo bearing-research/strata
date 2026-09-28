@@ -20,7 +20,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
 from threading import Lock
-from typing import TYPE_CHECKING, overload
+from typing import TYPE_CHECKING, NamedTuple, Protocol, overload
 
 import pyarrow as pa
 
@@ -203,6 +203,28 @@ class RowGroupMeta:
         return ColumnChunkMeta(is_stats_set=False, statistics=None)
 
 
+class _ColumnPath(Protocol):
+    @property
+    def name(self) -> str: ...
+
+    @property
+    def path(self) -> str: ...
+
+
+class _SchemaColumns(Protocol):
+    """What callers read off a Parquet schema: pyarrow's ``ParquetSchema``, or
+    the ``ParquetSchema`` below that is rebuilt from the persisted cache."""
+
+    def __len__(self) -> int: ...
+
+    def column(self, i: int, /) -> _ColumnPath: ...
+
+
+class _Column(NamedTuple):
+    name: str
+    path: str
+
+
 @dataclass
 class ParquetSchema:
     """Minimal schema for column lookups."""
@@ -212,7 +234,7 @@ class ParquetSchema:
     def __len__(self) -> int:
         return len(self._column_names)
 
-    def column(self, idx: int):
+    def column(self, idx: int) -> _Column:
         """Get column info by index.
 
         ``_column_names`` holds dotted **paths** (``user.id``); ``name`` is the
@@ -221,7 +243,7 @@ class ParquetSchema:
         columns when building its column-index map.
         """
         path = self._column_names[idx]
-        return type("Col", (), {"name": path.rsplit(".", 1)[-1], "path": path})()
+        return _Column(name=path.rsplit(".", 1)[-1], path=path)
 
 
 @dataclass
@@ -237,7 +259,7 @@ class ParquetMetadata:
     arrow_schema: pa.Schema
     num_row_groups: int
     row_group_metadata: list  # List of RowGroupMeta or pq.RowGroupMetaData objects
-    parquet_schema: object  # ParquetSchema or pq.ParquetSchema for column lookups
+    parquet_schema: _SchemaColumns  # ParquetSchema or pq.ParquetSchema for column lookups
 
 
 @dataclass
@@ -263,8 +285,9 @@ class ManifestResolution:
 
 def _json_safe_stat_value(value: object) -> object:
     """Convert a statistics value to a JSON-serializable representation."""
-    if hasattr(value, "as_py"):
-        value = value.as_py()  # type: ignore[union-attr]
+    as_py = getattr(value, "as_py", None)
+    if callable(as_py):
+        value = as_py()
     try:
         json.dumps(value)
         return value
@@ -287,8 +310,7 @@ def _persisted_parquet_meta_from_loaded(metadata: ParquetMetadata) -> "Persisted
     # pruning compared a filter against the WRONG column's min/max and dropped
     # matching rows.
     column_names = [
-        metadata.parquet_schema.column(i).path  # type: ignore[union-attr]
-        for i in range(len(metadata.parquet_schema))  # type: ignore[arg-type]
+        metadata.parquet_schema.column(i).path for i in range(len(metadata.parquet_schema))
     ]
     row_groups = []
     for row_group in metadata.row_group_metadata:
