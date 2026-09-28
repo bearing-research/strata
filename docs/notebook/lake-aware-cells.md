@@ -197,6 +197,14 @@ inputs change; `@table` adds the lake snapshot to the mix.
   which Flink writes for upserts, are not supported: the scan fails rather than
   return rows it should not. Compact such a table (`rewrite_data_files`), or
   pin a snapshot taken before the deletes.
+- **Schema changes are read the way Iceberg defines them.** Columns are
+  matched by field id, not by name, so an older data file reads as the table's
+  schema: an added column is null in it, a renamed column comes back under its
+  new name, a column dropped and added again is null rather than the old
+  values, and a widened type (int to long, float to double, a wider decimal)
+  comes back wide. A scan of the current table reads the current schema; one
+  that names a snapshot reads that snapshot's. A change inside a struct, list
+  or map column is not reconciled yet: the scan fails rather than guess.
 
 ## See also
 

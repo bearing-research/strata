@@ -14,6 +14,12 @@ exhaustive commit history.
   be refused. The scan now drops the rows its positional delete files (format
   v2) and deletion vectors (format v3) name, and caches each row group without
   them under the snapshot's key. Equality deletes are still refused.
+- **Scans read Iceberg tables whose schema changed.** Columns are matched by
+  field id, so a table with an added column, which used to be refused, reads
+  its older files with the column null, and a widened type comes back wide. A
+  scan of the current table reads the current schema; one that names a
+  snapshot reads that snapshot's. A change inside a nested column is still
+  refused.
 
 ### Changed
 
@@ -63,6 +69,14 @@ exhaustive commit history.
   cache (`POST /v1/cache/clear`), then run those scans once with
   `refresh=True` (a notebook `@table` cell's `client.materialize` takes it
   too). Snapshot resolutions the planner saved are redone on their own.
+- **A scan no longer returns a dropped column's values under a new column's
+  name.** Strata read columns by name, so dropping a column and adding one of
+  the same name, or renaming a column and reusing its old name, returned the
+  old column's values where Iceberg has nulls. A renamed column came back
+  under its old name, and a projection naming the new one failed partway
+  through the stream. A schema change makes no snapshot, so the row-group
+  cache and a scan's provenance now also name the schema whenever it is not
+  the snapshot's own.
 
 ## 0.8.0 - 2026-09-27
 

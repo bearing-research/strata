@@ -2453,6 +2453,7 @@ async def _handle_identity_materialize(
         snapshot_id=plan.snapshot_id,
         columns=identity_params.columns,
         filters=filters,
+        schema_id=plan.schema_id,
     )
     # Get artifact store (allow writes for personal mode)
     store = get_artifact_store(state.config.artifact_dir)
