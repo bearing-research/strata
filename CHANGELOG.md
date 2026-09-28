@@ -39,6 +39,11 @@ exhaustive commit history.
   about two minutes per bucket in every process that opened the mount. Such
   mounts now use gcsfs's standard filesystem; Google's endpoints keep its
   default.
+- **A cell's timeout in Run All counts only its own run.** While Strata
+  looked up a cell's cache entry the harness waited, and that time counted
+  toward the cell's per-cell timeout, so a slow store (or a busy machine) could
+  time out a cell whose code had not started. The parent's work is now off the
+  cell's clock.
 
 ## 0.8.0 - 2026-09-27
 

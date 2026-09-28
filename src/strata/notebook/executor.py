@@ -6244,6 +6244,21 @@ class CellExecutor:
             if on_cell_event is not None:
                 await on_cell_event(result)
 
+        async def _serviced[T](request: Awaitable[T]) -> T:
+            """Await the parent's answer to a harness request off the cell's clock.
+
+            The harness is blocked on the answer, so the time is the parent's
+            (a cache lookup, a store write), not the cell's: move the window's
+            start forward by it. Under load a slow cache check used to time out
+            a cell whose own code had not started.
+            """
+            began = time.time()
+            try:
+                return await request
+            finally:
+                if watchdog_state is not None and watchdog_state.get("active_started_at"):
+                    watchdog_state["active_started_at"] += time.time() - began
+
         async def _abort_oversized_frame() -> None:
             # readline() raised ValueError: one frame exceeded even the
             # raised SUBPROCESS_LINE_LIMIT. Fail the batch cleanly —
@@ -6316,11 +6331,13 @@ class CellExecutor:
                     watchdog_state["active_cell_id"] = active_cell_id
                     watchdog_state["active_started_at"] = time.time()
             elif ftype == "cache_check":
-                response = await self._batch_service_cache_check(
-                    payload.get("cell_id", ""),
-                    batch_tmpdir,
-                    executed_sources=executed_sources,
-                    use_cache=use_cache,
+                response = await _serviced(
+                    self._batch_service_cache_check(
+                        payload.get("cell_id", ""),
+                        batch_tmpdir,
+                        executed_sources=executed_sources,
+                        use_cache=use_cache,
+                    )
                 )
                 # Answered here rather than at each of the cache check's
                 # several returns: it is the same map either way, and the
@@ -6329,8 +6346,10 @@ class CellExecutor:
                 response["input_uris"] = self._upstream_artifact_uris(payload.get("cell_id", ""))
                 send_response(response)
             elif ftype == "persist":
-                response = await self._batch_service_persist(
-                    payload, batch_tmpdir, executed_sources=executed_sources
+                response = await _serviced(
+                    self._batch_service_persist(
+                        payload, batch_tmpdir, executed_sources=executed_sources
+                    )
                 )
                 cell_id_pl = payload["cell_id"]
                 if response.get("ok"):
