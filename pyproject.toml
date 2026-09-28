@@ -128,11 +128,11 @@ tui = [
     "pillow>=10.0.0",
 ]
 # MCP server: exposes the live notebook session to an external coding agent
-# (Claude Code, etc.) over streamable HTTP at `/mcp`. FastMCP ships in the
+# (Claude Code, etc.) over streamable HTTP at `/mcp`. MCPServer ships in the
 # official `mcp` package. Gated import — the server runs without this extra;
 # install it (and run in personal mode) to turn the endpoint on.
 mcp = [
-    "mcp>=1.9.0",
+    "mcp>=2.2.0",
 ]
 
 [dependency-groups]

@@ -75,7 +75,7 @@ def _mcp_mounted(server_url: str) -> bool:
     """True if the MCP endpoint is actually mounted (i.e. MCP is enabled).
 
     Probe ``/mcp/`` — the real endpoint (trailing slash; ``/mcp`` without it
-    falls through to the SPA). A mounted FastMCP app answers a bare GET with a
+    falls through to the SPA). A mounted MCP server app answers a bare GET with a
     JSON 4xx (e.g. 406 Not Acceptable). When MCP is *not* mounted — the
     ``[mcp]`` extra is missing, or the server is in service mode — the path hits
     the SPA catch-all, which returns ``200 text/html``. Status alone can't tell

@@ -88,7 +88,7 @@ def served(tmp_path, monkeypatch):
 async def _call(url: str, headers: dict[str, str], tool: str, arguments: dict):
     async with (
         httpx.AsyncClient(headers=headers, timeout=30, follow_redirects=True) as http,
-        streamable_http_client(url, http_client=http) as (read, write, _),
+        streamable_http_client(url, http_client=http) as (read, write),
         ClientSession(read, write) as client,
     ):
         await client.initialize()
@@ -106,9 +106,9 @@ async def test_a_viewer_reads_but_cannot_run_a_cell(served):
     listed = await _call(url, viewer, "list_notebooks", {})
     refused = await _call(url, viewer, "run_cell", {"session_id": session.id, "cell_id": "a"})
 
-    assert not listed.isError
+    assert not listed.is_error
     assert session.id in _text(listed)
-    assert refused.isError
+    assert refused.is_error
     assert "notebook:execute" in _text(refused)
 
 
@@ -122,7 +122,7 @@ async def test_a_writer_authors_as_themselves(served):
         url, writer, "add_cell", {"session_id": session.id, "source": "y = 2", "author": "someone"}
     )
 
-    assert not added.isError, _text(added)
+    assert not added.is_error, _text(added)
     assert json.loads(_text(added))["created_by"] == "wes"
 
 
@@ -151,7 +151,7 @@ async def test_a_call_without_valid_credentials_is_refused(served):
 
     forged = await _call(url, _headers("mallory", "admin:*", token="wrong"), "list_notebooks", {})
 
-    assert forged.isError
+    assert forged.is_error
     assert "notebook:read" in _text(forged)
 
 
@@ -165,7 +165,7 @@ def test_every_tool_is_classified():
     from strata.notebook.session import SessionManager
 
     app = build_mcp_app(SessionManager())
-    names = {tool.name for tool in asyncio.run(app.state.fastmcp.list_tools())}
+    names = {tool.name for tool in asyncio.run(app.state.mcp_server.list_tools())}
 
     assert len(names) > 20
     assert names - CLASSIFIED_TOOLS == set()

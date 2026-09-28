@@ -21,6 +21,7 @@ on the same surface.
 
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING, Any
 
 from strata.auth import get_principal, principal_context
@@ -32,6 +33,9 @@ if TYPE_CHECKING:
 
     from strata.notebook.session import SessionManager
     from strata.types import Principal
+
+
+logger = logging.getLogger(__name__)
 
 
 def _resolve_ops(session_manager: SessionManager, session_id: str) -> LocalNotebookOps:
@@ -853,7 +857,14 @@ def _caller(context: Any) -> Principal | None:
     config = _server_config()
     if not getattr(config, "principal_auth_enabled", False):
         return None
-    request = getattr(getattr(context, "request_context", None), "request", None)
+    if context is None:
+        return None
+    try:
+        request = context.request_context.request
+    except ValueError:
+        # mcp 2 raises this for a context outside a request (a tool called
+        # in-process), which has no HTTP caller to read.
+        return None
     if request is None:
         return None
     headers = dict(request.headers)
@@ -884,13 +895,24 @@ def build_mcp_app(session_manager: SessionManager) -> Starlette | None:
         The server's live session registry; tools resolve warm sessions from it.
     """
     try:
-        from mcp.server.fastmcp import FastMCP
-    except ModuleNotFoundError:
+        from mcp.server.mcpserver import MCPServer
+    except ModuleNotFoundError as exc:
+        if exc.name != "mcp":
+            # mcp is installed, but not mcp 2, where FastMCP became MCPServer.
+            # Another tool in the environment may need it, so say why the
+            # endpoint is off rather than refusing to start.
+            from importlib.metadata import version
+
+            logger.warning(
+                "mcp %s is installed, but the notebook's /mcp endpoint needs mcp>=2 "
+                "(install strata-notebook[mcp]); /mcp is off",
+                version("mcp"),
+            )
         return None
 
-    from mcp.server.fastmcp.exceptions import ToolError
+    from mcp.server.mcpserver.exceptions import ToolError
 
-    class AuthorizingFastMCP(FastMCP):
+    class AuthorizingMCPServer(MCPServer):
         """Every tool call runs as the caller that made it, within its scopes.
 
         On a server with principal auth the caller is read from the tool
@@ -903,19 +925,19 @@ def build_mcp_app(session_manager: SessionManager) -> Starlette | None:
         frames use.
         """
 
-        async def call_tool(self, name: str, arguments: dict[str, Any]):
-            principal = _caller(self.get_context())
+        async def call_tool(
+            self, name: str, arguments: dict[str, Any], context: Any | None = None
+        ) -> Any:
+            principal = _caller(context)
             required = required_scope_for_tool(name)
             if getattr(_server_config(), "principal_auth_enabled", False) and (
                 principal is None or not principal.has_scope(required)
             ):
                 raise ToolError(f"'{name}' requires the {required} scope")
             with principal_context(principal):
-                return await super().call_tool(name, arguments)
+                return await super().call_tool(name, arguments, context)
 
-    # streamable_http_path="/" so mounting the app at "/mcp" yields the endpoint
-    # at exactly "/mcp" (the default "/mcp" would nest it at "/mcp/mcp").
-    mcp = AuthorizingFastMCP("strata-notebook", streamable_http_path="/")
+    mcp = AuthorizingMCPServer("strata-notebook")
 
     @mcp.tool()
     def list_notebooks() -> list[dict[str, Any]]:
@@ -1295,8 +1317,10 @@ def build_mcp_app(session_manager: SessionManager) -> Starlette | None:
         """
         return _publish(session_manager, session_id, cell_id, variable, title)
 
-    app = mcp.streamable_http_app()
+    # streamable_http_path="/" so mounting the app at "/mcp" yields the endpoint
+    # at exactly "/mcp" (the default "/mcp" would nest it at "/mcp/mcp").
+    app = mcp.streamable_http_app(streamable_http_path="/")
     # So the tool list can be read without an MCP client, e.g. to hold it to
     # the scope table.
-    app.state.fastmcp = mcp
+    app.state.mcp_server = mcp
     return app
