@@ -276,8 +276,6 @@ class MountResolver:
         local_dir: Path,
     ) -> ResolvedMount:
         """Resolve a read-only remote mount recursively."""
-        import fsspec
-
         protocol = _scheme_to_fsspec_protocol(scheme)
         storage_options = self.storage_options(mount)
         fingerprint = await MountFingerprinter.fingerprint_mount(
@@ -285,7 +283,7 @@ class MountResolver:
         )
         assert fingerprint is not None
 
-        fs = fsspec.filesystem(protocol, **storage_options)
+        fs = _mount_filesystem(protocol, storage_options)
         snapshot_dir = local_dir / fingerprint[:12]
         local_mirror = snapshot_dir / "data"
         complete_marker = snapshot_dir / ".complete"
@@ -340,9 +338,7 @@ class MountResolver:
         storage_options = self.storage_options(mount)
 
         try:
-            import fsspec
-
-            fs = fsspec.filesystem(protocol, **storage_options)
+            fs = _mount_filesystem(protocol, storage_options)
             staging_root = staging.resolve()
             remote_uri = f"{protocol}://{remote_path}"
             if fs.exists(remote_uri):
@@ -398,13 +394,11 @@ class MountResolver:
             if not self._check_fsspec():
                 raise ImportError(f"Cannot sync-back RW mount '{name}': fsspec not available")
 
-            import fsspec
-
             protocol = _scheme_to_fsspec_protocol(scheme)
             storage_options = self.storage_options(rm.spec)
 
             try:
-                fs = fsspec.filesystem(protocol, **storage_options)
+                fs = _mount_filesystem(protocol, storage_options)
                 remote_uri = f"{protocol}://{remote_path}"
                 fs.put(str(rm.staging_dir), remote_uri, recursive=True)
                 logger.info(
@@ -479,10 +473,8 @@ class MountFingerprinter:
         Uses ETags/sizes/mtimes from the remote listing — no data download.
         """
         try:
-            import fsspec
-
             protocol = _scheme_to_fsspec_protocol(scheme)
-            fs = fsspec.filesystem(protocol, **(storage_options or {}))
+            fs = _mount_filesystem(protocol, storage_options or {})
             listing = _list_remote_file_info(fs, protocol, remote_path)
             parts: list[str] = []
             for info in listing.values():
@@ -589,6 +581,31 @@ def _scheme_to_fsspec_protocol(scheme: str) -> str:
         "gs": "gcs",
         "az": "abfs",
     }.get(scheme, scheme)
+
+
+def _mount_filesystem(protocol: str, storage_options: dict[str, Any]) -> Any:
+    """``fsspec.filesystem(protocol, **storage_options)``, but not gcsfs's gRPC probe.
+
+    Since 2026.6, gcsfs defaults to a filesystem that asks Google's Storage
+    Control API, over gRPC, what kind of bucket it is before the first
+    operation on one. An endpoint that is not Google's (the fake-gcs-server
+    emulator, a GCS-compatible service) cannot answer: the TLS handshake fails
+    and gcsfs retries for about two minutes per bucket before falling back.
+    Such an endpoint gets gcsfs's standard filesystem; Google's own endpoints,
+    ``*.googleapis.com`` included, keep the default.
+    """
+    import fsspec
+
+    if protocol in ("gcs", "gs"):
+        endpoint = str(
+            storage_options.get("endpoint_url") or os.environ.get("STORAGE_EMULATOR_HOST") or ""
+        )
+        host = urlparse(endpoint if "://" in endpoint else f"//{endpoint}").hostname or ""
+        if endpoint and not (host == "googleapis.com" or host.endswith(".googleapis.com")):
+            from gcsfs.core import GCSFileSystem
+
+            return GCSFileSystem(**storage_options)
+    return fsspec.filesystem(protocol, **storage_options)
 
 
 def _assert_within(candidate: Path, root: Path, mount_name: str, remote_name: str) -> None:

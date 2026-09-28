@@ -28,6 +28,13 @@ exhaustive commit history.
   unparseable SQL had the same gap. Such a cell now runs its query every time,
   and its header says why; `# @cache session` or `ttl` opts back into reuse.
   `IDENTIFIER('db.schema.table')` with a literal is now tracked like any table.
+- **A GCS mount on its own endpoint no longer stalls for two minutes.** Since
+  2026.6, gcsfs asks Google's Storage Control API over gRPC what kind of
+  bucket it is, and an endpoint that is not Google's (the fake-gcs-server
+  emulator, a GCS-compatible service) cannot answer, so gcsfs retried for
+  about two minutes per bucket in every process that opened the mount. Such
+  mounts now use gcsfs's standard filesystem; Google's endpoints keep its
+  default.
 
 ## 0.8.0 - 2026-09-27
 
