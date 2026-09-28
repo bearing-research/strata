@@ -614,3 +614,38 @@ class TestWidgetCellValidation:
         # worker_unknown check — widget cells take the widget validation path.
         cell = self._widget("# @worker gpu\nalpha = slider(0, 1)")
         assert "worker_unknown" not in _codes(cell, _nb())
+
+
+class TestSqlTablesTheCacheCannotTrack:
+    """A SQL cell whose tables the analyzer cannot all name re-runs every time
+    under the default cache, and the header says so."""
+
+    @staticmethod
+    def _messages(source: str) -> dict[str, str]:
+        from strata.notebook.models import ConnectionSpec
+
+        cell = _cell(source, language="sql")
+        nb = _nb()
+        nb.connections = [ConnectionSpec(name="db", driver="snowflake")]
+        nb.cells = [cell]
+        return {d.code: d.message for d in validate_cell_annotations(cell, nb)}
+
+    def test_a_table_named_at_run_time_is_flagged(self):
+        messages = self._messages("# @sql connection=db\nSELECT * FROM IDENTIFIER($tbl)")
+        assert "IDENTIFIER($tbl)" in messages["sql_dynamic_table"]
+        assert "re-runs every time" in messages["sql_dynamic_table"]
+
+    def test_a_declared_policy_is_not_flagged(self):
+        messages = self._messages(
+            "# @sql connection=db\n# @cache session\nSELECT * FROM IDENTIFIER($tbl)"
+        )
+        assert "sql_dynamic_table" not in messages
+
+    def test_a_literal_identifier_is_not_flagged(self):
+        messages = self._messages("# @sql connection=db\nSELECT * FROM IDENTIFIER('events')")
+        assert "sql_dynamic_table" not in messages
+
+    def test_a_parse_error_says_the_cell_reruns(self):
+        messages = self._messages("# @sql connection=db\nSELECT * FROM (")
+        assert "re-runs every time" in messages["sql_parse_error"]
+        assert "session-only" not in messages["sql_parse_error"]

@@ -585,6 +585,9 @@ def _validate_sql_cell_annotations(
             connection = valid_by_name[sql.connection]
             adapter = get_adapter(connection.driver)
             sql_analysis = analyze_sql_cell(cell.source, dialect=adapter.sqlglot_dialect)
+            # Under the default fingerprint cache, a table the analyzer cannot
+            # name makes the executor re-run the query every time.
+            reruns = sql_analysis.cache_policy.kind == "fingerprint"
             if sql_analysis.parse_error:
                 diagnostics.append(
                     AnnotationDiagnostic(
@@ -592,10 +595,30 @@ def _validate_sql_cell_annotations(
                         code="sql_parse_error",
                         message=(
                             f"sqlglot couldn't parse this SQL cell: "
-                            f"{sql_analysis.parse_error}. The cell may "
-                            "still execute, but cache invalidation by "
-                            "touched-table fingerprint will fall back to "
-                            "session-only."
+                            f"{sql_analysis.parse_error}. The cell may still "
+                            "execute, but its tables can't be fingerprinted"
+                            + (
+                                ", so it re-runs every time instead of using its "
+                                "cache. Add `# @cache session` or `# @cache ttl=...` "
+                                "to reuse results."
+                                if reruns
+                                else "."
+                            )
+                        ),
+                        line=None,
+                    )
+                )
+            elif sql_analysis.unresolved_tables and reruns:
+                named = ", ".join(sql_analysis.unresolved_tables)
+                diagnostics.append(
+                    AnnotationDiagnostic(
+                        severity=DiagnosticSeverity.WARN,
+                        code="sql_dynamic_table",
+                        message=(
+                            f"{named} names its table only when the query runs, "
+                            "so the cache can't tell when that table changes: "
+                            "this cell re-runs every time. Add `# @cache session` "
+                            "or `# @cache ttl=...` to reuse results."
                         ),
                         line=None,
                     )

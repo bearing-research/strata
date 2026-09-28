@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from strata.notebook.annotations import strip_leading_annotations as _strip_leading_annotations
 from strata.notebook.sql.adapter import QualifiedTable
 from strata.notebook.sql.analyzer import (
@@ -260,16 +262,28 @@ def test_analyze_with_dialect_dedupes_table_references():
     assert names.count("events") == 1
 
 
-def test_analyze_dynamic_sql_does_not_resolve():
-    """``IDENTIFIER('events')`` is Snowflake's dynamic-name form. A
-    static parser can't resolve it, so the analyzer surfaces no
-    table — the executor's freshness probe will fall back to
-    session-only for queries it can't fingerprint."""
+def test_identifier_with_a_literal_names_its_table():
+    """Snowflake's ``IDENTIFIER('...')`` with a string is a static name,
+    qualified or not, so the analyzer can fingerprint the table."""
     src = "# @sql connection=db\nSELECT * FROM IDENTIFIER('events')"
     result = analyze_sql_cell(src, dialect="snowflake")
-    # The IDENTIFIER call doesn't surface as an exp.Table reference,
-    # so tables stays empty.
-    assert all(t.name != "events" for t in result.tables)
+    assert result.tables == [QualifiedTable(catalog=None, schema=None, name="events")]
+    assert result.unresolved_tables == []
+
+    src = "# @sql connection=db\nSELECT * FROM IDENTIFIER('db.sch.events')"
+    result = analyze_sql_cell(src, dialect="snowflake")
+    assert result.tables == [QualifiedTable(catalog="db", schema="sch", name="events")]
+
+
+@pytest.mark.parametrize("reference", ["IDENTIFIER($tbl)", "IDENTIFIER(:tbl)", "IDENTIFIER(?)"])
+def test_identifier_named_at_run_time_is_reported_not_guessed(reference):
+    """A session variable or a bind parameter names the table only when the
+    query runs. sqlglot 30.13+ reads ``$tbl`` as a table called ``tbl``;
+    fingerprinting that would track a table the query never reads."""
+    src = f"# @sql connection=db\nSELECT * FROM {reference} JOIN orders USING (id)"
+    result = analyze_sql_cell(src, dialect="snowflake")
+    assert result.tables == [QualifiedTable(catalog=None, schema=None, name="orders")]
+    assert result.unresolved_tables == [reference]
 
 
 # --- result type ----------------------------------------------------------

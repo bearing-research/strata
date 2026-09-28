@@ -68,13 +68,11 @@ updates:
       python-runtime:
         dependency-type: production
         update-types: [minor, patch]
-        exclude-patterns: [sqlglot]
       python-dev:
         dependency-type: development
         update-types: [minor, patch]
-        # ty is pre-1.0 and each release adds diagnostics; sqlglot changes the
-        # SQL it rewrites (a snapshot pin's alias placement moved in 30.19).
-        exclude-patterns: [ty, sqlglot]
+        # ty is pre-1.0 and each release adds diagnostics.
+        exclude-patterns: [ty]
     ignore:
       # aiobotocore (through s3fs) pins botocore to a narrow range, so boto3
       # cannot be updated alone; it moves when the fsspec group does.

@@ -94,7 +94,7 @@ notebook = [
 # packages live in their own extras so users only install what they
 # actually connect to.
 sql = [
-    "sqlglot>=25.0.0",
+    "sqlglot>=30.13.0",
     "adbc-driver-manager>=1.0.0",
 ]
 sql-postgres = [
@@ -168,7 +168,7 @@ dev = [
     "s3fs>=2026.3.0",
     "adlfs>=2026.0.0",
     "gcsfs>=2026.0.0",
-    "sqlglot>=25.0.0",
+    "sqlglot>=30.13.0",
     "adbc-driver-manager>=1.0.0",
     "adbc-driver-postgresql>=1.0.0",
     "adbc-driver-sqlite>=1.0.0",

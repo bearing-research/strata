@@ -165,11 +165,39 @@ def test_only_the_catalog_tables_a_query_reads_are_pinned():
     )
     pinned = pin_snapshots(sql, "lake", {("taxi", "trips"): 11, ("taxi", "zones"): 22})
 
-    assert "lake.taxi.trips AT (VERSION => 11)" in pinned
-    assert "lake.taxi.zones AT (VERSION => 22)" in pinned
+    assert "lake.taxi.trips AS t AT (VERSION => 11)" in pinned
+    assert "lake.taxi.zones AS z AT (VERSION => 22)" in pinned
     assert "warehouse.taxi.trips AS w" in pinned
     assert "JOIN trips USING" in pinned
     assert pinned.endswith("> ?")
+    # DuckDB's parser is the judge: an alias after AT (what sqlglot before
+    # 30.13 wrote) is a syntax error, and a pin must bind to its own table.
+    assert _pinned_versions(pinned) == {("trips", "t"): 11, ("zones", "z"): 22}
+
+
+def _pinned_versions(sql: str) -> dict[tuple[str, str], int]:
+    """Each table's AT (VERSION => n), as DuckDB parses *sql*."""
+    import json
+
+    import duckdb
+
+    tree = json.loads(duckdb.connect().execute("SELECT json_serialize_sql(?)", [sql]).fetchone()[0])
+    assert not tree.get("error"), tree.get("error_message")
+    versions: dict[tuple[str, str], int] = {}
+
+    def walk(node: Any) -> None:
+        if isinstance(node, dict):
+            at = node.get("at_clause")
+            if node.get("type") == "BASE_TABLE" and at:
+                versions[(node["table_name"], node["alias"])] = at["expr"]["value"]["value"]
+            for value in node.values():
+                walk(value)
+        elif isinstance(node, list):
+            for value in node:
+                walk(value)
+
+    walk(tree)
+    return versions
 
 
 def test_lake_tables_are_the_catalog_tables_a_read_cell_reads(tmp_path):
