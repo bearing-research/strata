@@ -6,6 +6,7 @@ against a real notebook venv and verify the end-to-end batch flow.
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 
 import pytest
@@ -294,6 +295,29 @@ async def test_batch_cached_displays_round_trip(tmp_path: Path):
 
 
 @pytest.mark.asyncio
+async def test_the_parents_own_work_is_not_charged_to_a_cell(tmp_path: Path, monkeypatch):
+    """A cell's timeout is for its own code. While the parent answers the
+    harness's cache check the harness is blocked, so that time is not the
+    cell's: a slow cache check must not time out a fast cell."""
+    session = _make_session_with_cells(tmp_path, [("c1", "x = 1\n")])
+    specs = _populate_consumed_vars([_cell_spec("c1", "x = 1\n")], session)
+
+    executor = CellExecutor(session)
+    real_cache_check = executor._batch_service_cache_check
+
+    async def slow_cache_check(*args, **kwargs):
+        await asyncio.sleep(3.0)  # past the 2s cell timeout below
+        return await real_cache_check(*args, **kwargs)
+
+    monkeypatch.setattr(executor, "_batch_service_cache_check", slow_cache_check)
+
+    result = await executor.execute_batch(specs, cell_timeout_seconds=2.0)
+
+    assert result.completed, (result.end_reason, result.failed_cell_id)
+    assert {r.cell_id: r.status for r in result.cell_results} == {"c1": "ok"}
+
+
+@pytest.mark.asyncio
 async def test_per_cell_watchdog_kills_hung_cell(tmp_path: Path):
     """A cell that hangs inside the batch is killed at its per-cell timeout
     instead of consuming the whole batch_timeout_seconds budget.
@@ -317,11 +341,11 @@ async def test_per_cell_watchdog_kills_hung_cell(tmp_path: Path):
     )
 
     executor = CellExecutor(session)
-    # A cell's window runs from the harness's cell_start until the parent has
-    # persisted it, so c1's clock includes the parent's cache lookup and store
-    # write. At 2s, a loaded full-suite run let those overrun and blamed c1.
-    # 10s leaves room for that and still sits far below c_hang's 60s sleep and
-    # the 600s batch_timeout_seconds, so a pass still means the per-cell kill.
+    # The parent's own work no longer counts against a cell (see the test
+    # above), but c1's harness-side work still does, and a loaded full-suite
+    # run once took c1 past 2s. 10s leaves room for that and still sits far
+    # below c_hang's 60s sleep and the 600s batch_timeout_seconds, so a pass
+    # still means the per-cell kill.
     result = await executor.execute_batch(specs, cell_timeout_seconds=10.0)
 
     assert not result.completed
