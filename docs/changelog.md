@@ -20,8 +20,8 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   field id, so a table with an added column, which used to be refused, reads
   its older files with the column null, and a widened type comes back wide. A
   scan of the current table reads the current schema; one that names a
-  snapshot reads that snapshot's. A change inside a nested column is still
-  refused.
+  snapshot reads that snapshot's. The same goes for the fields inside a
+  struct, list or map column.
 
 ### Changed
 

@@ -5,20 +5,26 @@ rewrites no data files. So an older file may lack a column the table added
 since (it reads as nulls), hold a column the table renamed under its old name,
 hold a dropped column whose name a new column reuses (that is not the new
 column, which also reads as nulls), or store a narrower type than the one the
-table promoted it to (int to long, float to double, a wider decimal). Iceberg's
-Parquet files record each column's field id, which is what matches a file's
-columns to the snapshot's; a file without them is matched through the table's
-name mapping, or by name when it has none.
+table promoted it to (int to long, float to double, a wider decimal). The same
+holds for the fields inside a struct, list or map column. Iceberg's Parquet
+files record the field id of every column and nested field, which is what
+matches a file's columns to the snapshot's; a file without them is matched
+through the table's name mapping, or by name when it has none.
 """
 
-from typing import NamedTuple
+from typing import Any, NamedTuple, cast
 
 import pyarrow as pa
+import pyarrow.compute as _pc
 from pyiceberg.exceptions import ResolveError
 from pyiceberg.io.pyarrow import pyarrow_to_schema, schema_to_pyarrow
 from pyiceberg.schema import Schema, promote
 from pyiceberg.table.name_mapping import NameMapping, create_mapping_from_schema
 from pyiceberg.types import IcebergType, ListType, MapType, NestedField, PrimitiveType, StructType
+
+# pyarrow.compute registers its kernels at import time, so ty does not know
+# members like ``subtract``. Cast through Any.
+pc = cast(Any, _pc)
 
 
 class UnsupportedTableFormatError(RuntimeError):
@@ -31,6 +37,9 @@ class Column(NamedTuple):
     name: str  # in the snapshot's schema
     source: str | None  # the file's column holding it; None when the file predates it
     field: pa.Field  # what the scan returns
+    # (file type, table type) of a struct, list or map column whose nested
+    # fields changed since the file was written; None otherwise.
+    reshape: tuple[IcebergType, IcebergType] | None = None
 
 
 def _small(data_type: pa.DataType) -> pa.DataType:
@@ -77,6 +86,80 @@ def _same_type(file_type: IcebergType, table_type: IcebergType) -> bool:
     )
 
 
+def _unreadable(file_type: IcebergType, table_type: IcebergType) -> str | None:
+    """Why a file's *file_type* cannot be read as *table_type*, or None when it can.
+
+    Nested fields are matched by id: one the file lacks reads as nulls, and
+    each one it has must be readable in turn.
+    """
+    if isinstance(file_type, PrimitiveType) and isinstance(table_type, PrimitiveType):
+        if file_type == table_type:
+            return None
+        try:
+            promote(file_type, table_type)
+        except ResolveError:
+            return f"{file_type} cannot be read as {table_type}"
+        return None
+    if type(file_type) is not type(table_type):
+        return f"{file_type} cannot be read as {table_type}"
+    stored = {child.field_id: child for child in _children(file_type)}
+    for child in _children(table_type):
+        held = stored.get(child.field_id)
+        if held is not None and (why := _unreadable(held.field_type, child.field_type)):
+            return why
+    return None
+
+
+def _reshape(
+    array: pa.Array, file_type: IcebergType, table_type: IcebergType, target: pa.DataType
+) -> pa.Array:
+    """*array*, stored as *file_type*, rebuilt as *table_type* (in Arrow, *target*)."""
+    if isinstance(table_type, PrimitiveType):
+        return array.cast(target)
+    mask = array.is_null()
+    if isinstance(table_type, StructType):
+        assert isinstance(file_type, StructType)
+        stored = {child.field_id: i for i, child in enumerate(file_type.fields)}
+        children = []
+        for child, field in zip(table_type.fields, target, strict=True):
+            i = stored.get(child.field_id)
+            children.append(
+                pa.nulls(len(array), field.type)
+                if i is None
+                else _reshape(
+                    array.field(i), file_type.fields[i].field_type, child.field_type, field.type
+                )
+            )
+        return pa.StructArray.from_arrays(children, fields=list(target), mask=mask)
+    # A sliced list's offsets point into its whole child array, and pyarrow
+    # takes no null mask with sliced offsets: rebase them to this slice.
+    start, end = array.offsets[0].as_py(), array.offsets[-1].as_py()
+    offsets = pc.subtract(array.offsets, start)
+    if isinstance(table_type, ListType):
+        assert isinstance(file_type, ListType)
+        values = _reshape(
+            array.values.slice(start, end - start),
+            file_type.element_type,
+            table_type.element_type,
+            target.value_type,
+        )
+        return pa.ListArray.from_arrays(offsets, values, type=target, mask=mask)
+    assert isinstance(file_type, MapType) and isinstance(table_type, MapType)
+    keys = _reshape(
+        array.keys.slice(start, end - start),
+        file_type.key_type,
+        table_type.key_type,
+        target.key_type,
+    )
+    items = _reshape(
+        array.items.slice(start, end - start),
+        file_type.value_type,
+        table_type.value_type,
+        target.item_type,
+    )
+    return pa.MapArray.from_arrays(offsets, keys, items, type=target, mask=mask)
+
+
 def snapshot_arrow_field(field: NestedField) -> pa.Field:
     """The Arrow field a column the file lacks reads as: nulls of the table's type."""
     data_type = _small(schema_to_pyarrow(field.field_type, include_field_ids=False))
@@ -105,9 +188,8 @@ def file_columns(
 ) -> tuple[Column, ...] | None:
     """How a file with *file_schema* reads as *snapshot_schema*, or None when it already does.
 
-    Raises ``UnsupportedTableFormatError`` for a change that needs more than
-    renaming, filling or widening a top-level column: a nested field added,
-    dropped or renamed, or a type change Iceberg does not allow.
+    Raises ``UnsupportedTableFormatError`` for a type change Iceberg does not
+    allow, at any depth.
     """
     mapping = name_mapping or create_mapping_from_schema(snapshot_schema)
     stored = {field.field_id: field for field in pyarrow_to_schema(file_schema, mapping).fields}
@@ -121,32 +203,29 @@ def file_columns(
         if _same_type(held.field_type, field.field_type):
             columns.append(Column(field.name, held.name, physical.with_name(field.name)))
             continue
-        if isinstance(held.field_type, PrimitiveType) and isinstance(
-            field.field_type, PrimitiveType
-        ):
-            try:
-                promote(held.field_type, field.field_type)
-            except ResolveError as e:
-                raise UnsupportedTableFormatError(
-                    f"Table {table_identity}: {file_path} stores column {field.name!r} as "
-                    f"{held.field_type}, which Iceberg cannot read as {field.field_type}."
-                ) from e
-            widened = _small(schema_to_pyarrow(field.field_type, include_field_ids=False))
-            columns.append(
-                Column(field.name, held.name, physical.with_name(field.name).with_type(widened))
+        why = _unreadable(held.field_type, field.field_type)
+        if why is not None:
+            raise UnsupportedTableFormatError(
+                f"Table {table_identity}: {file_path} stores column {field.name!r} in a "
+                f"way Iceberg cannot read as the table's schema ({why})."
             )
-            continue
-        raise UnsupportedTableFormatError(
-            f"Table {table_identity}: {file_path} predates a change inside nested column "
-            f"{field.name!r} ({held.field_type} in the file, {field.field_type} in the table). "
-            "Strata reconciles top-level columns only; compact the table "
-            "(rewrite_data_files) or scan a snapshot from before the change."
+        target = _small(schema_to_pyarrow(field.field_type, include_field_ids=False))
+        # A promoted primitive is cast by read_as_snapshot's schema; a nested
+        # column is rebuilt field by field.
+        reshape = (
+            None
+            if isinstance(field.field_type, PrimitiveType)
+            else (held.field_type, field.field_type)
+        )
+        columns.append(
+            Column(field.name, held.name, physical.with_name(field.name).with_type(target), reshape)
         )
 
-    # Compare sources, not just fields: Arrow's field equality ignores the
-    # field id, so a re-added column of the old one's name and type looks the same.
-    as_stored = [(field.name, field.name, field) for field in file_schema]
-    if as_stored == [(column.name, column.source, column.field) for column in columns]:
+    # Compare sources and reshapes, not just fields: Arrow's type equality
+    # ignores field ids, so a re-added column or nested field of the old one's
+    # name and type looks the same.
+    as_stored = [(field.name, field.name, field, None) for field in file_schema]
+    if as_stored == [(c.name, c.source, c.field, c.reshape) for c in columns]:
         return None
     return tuple(columns)
 
@@ -163,6 +242,14 @@ def read_as_snapshot(
     for column in wanted:
         if column.source is None:
             arrays.append(pa.nulls(table.num_rows, column.field.type))
+        elif column.reshape is not None:
+            chunks = table.column(column.source).chunks
+            arrays.append(
+                pa.chunked_array(
+                    [_reshape(chunk, *column.reshape, column.field.type) for chunk in chunks],
+                    type=column.field.type,
+                )
+            )
         else:
             arrays.append(table.column(column.source))
     # Built to the fields' schema, which casts a promoted column to its new width.

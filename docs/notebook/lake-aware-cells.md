@@ -202,9 +202,9 @@ inputs change; `@table` adds the lake snapshot to the mix.
   schema: an added column is null in it, a renamed column comes back under its
   new name, a column dropped and added again is null rather than the old
   values, and a widened type (int to long, float to double, a wider decimal)
-  comes back wide. A scan of the current table reads the current schema; one
-  that names a snapshot reads that snapshot's. A change inside a struct, list
-  or map column is not reconciled yet: the scan fails rather than guess.
+  comes back wide, including for the fields inside a struct, list or map
+  column. A scan of the current table reads the current schema; one that names
+  a snapshot reads that snapshot's.
 
 ## See also
 
