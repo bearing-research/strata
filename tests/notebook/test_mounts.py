@@ -480,3 +480,45 @@ async def test_remote_rw_mount_rejects_traversal_name_before_any_fetch(
     with pytest.raises(RuntimeError, match="path-traversal|outside the mount root"):
         await resolver.prepare_mounts([mount])
     assert fetched == []  # rejected before a single byte was written
+
+
+class TestGcsMountFilesystem:
+    """gcsfs 2026.6+ asks Google's Storage Control API, over gRPC, what kind of
+    bucket it is; an endpoint that is not Google's cannot answer, and gcsfs
+    retried for about two minutes per bucket. Such an endpoint gets gcsfs's
+    standard filesystem, and Google's endpoints keep the default."""
+
+    @staticmethod
+    def _class(options: dict, monkeypatch: pytest.MonkeyPatch, emulator: str | None = None):
+        from strata.notebook.mounts import _mount_filesystem
+
+        monkeypatch.delenv("STORAGE_EMULATOR_HOST", raising=False)
+        if emulator:
+            monkeypatch.setenv("STORAGE_EMULATOR_HOST", emulator)
+        return type(_mount_filesystem("gcs", {"token": "anon", **options}))
+
+    def test_an_emulator_endpoint_skips_the_grpc_probe(self, monkeypatch):
+        from gcsfs.core import GCSFileSystem
+
+        cls = self._class({"endpoint_url": "http://localhost:4443"}, monkeypatch)
+        assert cls is GCSFileSystem
+
+    def test_the_emulator_environment_variable_counts_too(self, monkeypatch):
+        from gcsfs.core import GCSFileSystem
+
+        assert self._class({}, monkeypatch, emulator="localhost:4443") is GCSFileSystem
+
+    @pytest.mark.parametrize(
+        "options",
+        [
+            {},
+            {"endpoint_url": "https://storage.googleapis.com"},
+            {"endpoint_url": "https://storage-psc.p.googleapis.com"},
+        ],
+        ids=["default", "google", "private-google"],
+    )
+    def test_google_endpoints_keep_gcsfs_default(self, options, monkeypatch):
+        import fsspec
+
+        expected = type(fsspec.filesystem("gcs", token="anon", **options))
+        assert self._class(options, monkeypatch) is expected
