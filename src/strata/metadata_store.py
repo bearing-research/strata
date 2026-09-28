@@ -75,6 +75,13 @@ def _stat_identity(file_path: str) -> tuple[float | None, int | None]:
     return stat.st_mtime, stat.st_size
 
 
+# Bump when a table's layout or a stored value's meaning changes; a store in
+# another version is discarded.
+#   1: manifest entries record each data file's delete files (0.8.0 wrote
+#      rows without them, and pyiceberg < 0.12 could lose a table's deletes)
+METADATA_STORE_VERSION = 1
+
+
 class MetadataStore:
     """SQLite-backed persistent metadata store.
 
@@ -120,22 +127,16 @@ class MetadataStore:
         return conn
 
     def _init_db(self) -> None:
-        """Initialize database schema, migrating if needed."""
-        with self._get_conn() as conn:
-            # Check if we need to migrate manifest_cache (add catalog_name)
-            cursor = conn.execute("PRAGMA table_info(manifest_cache)")
-            columns = {row[1] for row in cursor.fetchall()}
-            if columns and "catalog_name" not in columns:
-                # Old schema without catalog_name - drop and recreate
-                conn.execute("DROP TABLE IF EXISTS manifest_cache")
-                conn.execute("DROP INDEX IF EXISTS idx_manifest_snapshot")
+        """Initialize the database, discarding one written in another format.
 
-            # Check if we need to migrate parquet_meta (add file_size)
-            cursor = conn.execute("PRAGMA table_info(parquet_meta)")
-            columns = {row[1] for row in cursor.fetchall()}
-            if columns and "file_size" not in columns:
-                # Old schema without file_size - drop and recreate
+        Both tables are caches of immutable data, so a store from another
+        version is dropped rather than migrated.
+        """
+        with self._get_conn() as conn:
+            if conn.execute("PRAGMA user_version").fetchone()[0] != METADATA_STORE_VERSION:
+                conn.execute("DROP TABLE IF EXISTS manifest_cache")
                 conn.execute("DROP TABLE IF EXISTS parquet_meta")
+                conn.execute(f"PRAGMA user_version = {METADATA_STORE_VERSION}")
 
             conn.executescript("""
                 CREATE TABLE IF NOT EXISTS manifest_cache (

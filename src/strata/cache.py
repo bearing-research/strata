@@ -30,7 +30,9 @@ CACHE_META_EXTENSION = ".meta.json"
 #   1: Initial version (Arrow IPC stream format, SHA-256 keyed)
 #   2: Multi-tenancy support (tenant_id in cache key, tenant-prefixed directories)
 #   3: created_at / stats timestamps are epoch floats (were ISO-8601 strings)
-CACHE_VERSION = 3
+#   4: keys name the Iceberg schema read; rows deleted merge-on-read are
+#      dropped (0.8.0 could cache a DuckDB-deleted table's rows)
+CACHE_VERSION = 4
 
 # Every Arrow IPC stream opens with a continuation marker and, once its writer
 # is closed (``put`` always closes), ends with an end-of-stream marker. Both are

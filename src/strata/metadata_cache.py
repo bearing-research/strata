@@ -771,10 +771,7 @@ class ManifestCache:
 
         if self._store is not None:
             persisted = self._store.get_manifest(catalog_name, table_identity, snapshot_id)
-            # A row without delete files was written before they were recorded,
-            # by a Strata on pyiceberg < 0.12, which could miss a table's
-            # deletes entirely. It proves nothing, so resolve the snapshot again.
-            if persisted is not None and all("delete_files" in entry for entry in persisted):
+            if persisted is not None:
                 resolution = ManifestResolution(
                     data_files=[
                         ManifestEntry(

@@ -25,6 +25,13 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
 
 ### Changed
 
+- **Nothing 0.8.0 cached for a scan is reused.** The row-group cache moves to
+  a new version directory, the metadata store is discarded and rebuilt, and a
+  scan's provenance now includes the schema, so scan artifacts are built
+  afresh. 0.8.0 could have cached rows a merge-on-read delete removed, or a
+  column's values under another column's name. The first scan of each table
+  after upgrading reads from storage. Delete the old `v3` directory under the
+  cache directory to reclaim its space.
 - **pyiceberg 0.12 or newer is required.** Before 0.12, pyiceberg misread a
   manifest whose entries leave their snapshot id to be inherited, which is how
   DuckDB writes them, and dropped the delete files those manifests listed.
@@ -66,19 +73,15 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
 - **A scan no longer returns rows DuckDB deleted.** 0.8.0 refused a
   merge-on-read table only when pyiceberg reported delete files, and
   pyiceberg before 0.12 lost the ones DuckDB writes, so the scan served the
-  deleted rows. If you scanned such a table with 0.8.0, its cached row groups
-  and scan artifacts still hold them: after upgrading, clear the row-group
-  cache (`POST /v1/cache/clear`), then run those scans once with
-  `refresh=True` (a notebook `@table` cell's `client.materialize` takes it
-  too). Snapshot resolutions the planner saved are redone on their own.
+  deleted rows. Nothing 0.8.0 cached for a scan is reused (see Changed), so
+  those rows are not served again.
 - **A scan no longer returns a dropped column's values under a new column's
   name.** Strata read columns by name, so dropping a column and adding one of
   the same name, or renaming a column and reusing its old name, returned the
   old column's values where Iceberg has nulls. A renamed column came back
   under its old name, and a projection naming the new one failed partway
   through the stream. A schema change makes no snapshot, so the row-group
-  cache and a scan's provenance now also name the schema whenever it is not
-  the snapshot's own.
+  cache and a scan's provenance now name the schema as well as the snapshot.
 
 ## 0.8.0 - 2026-09-27
 
