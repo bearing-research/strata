@@ -514,6 +514,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#fixed" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fixed
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -576,7 +587,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#fixed" class="md-nav__link">
+  <a href="#fixed_1" class="md-nav__link">
     <span class="md-ellipsis">
       
         Fixed
@@ -626,7 +637,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#fixed_1" class="md-nav__link">
+  <a href="#fixed_2" class="md-nav__link">
     <span class="md-ellipsis">
       
         Fixed
@@ -676,7 +687,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#fixed_2" class="md-nav__link">
+  <a href="#fixed_3" class="md-nav__link">
     <span class="md-ellipsis">
       
         Fixed
@@ -715,7 +726,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#fixed_3" class="md-nav__link">
+  <a href="#fixed_4" class="md-nav__link">
     <span class="md-ellipsis">
       
         Fixed
@@ -765,7 +776,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#fixed_4" class="md-nav__link">
+  <a href="#fixed_5" class="md-nav__link">
     <span class="md-ellipsis">
       
         Fixed
@@ -837,7 +848,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#fixed_5" class="md-nav__link">
+  <a href="#fixed_6" class="md-nav__link">
     <span class="md-ellipsis">
       
         Fixed
@@ -959,7 +970,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#fixed_6" class="md-nav__link">
+  <a href="#fixed_7" class="md-nav__link">
     <span class="md-ellipsis">
       
         Fixed
@@ -1092,7 +1103,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#fixed_7" class="md-nav__link">
+  <a href="#fixed_8" class="md-nav__link">
     <span class="md-ellipsis">
       
         Fixed
@@ -2634,6 +2645,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#fixed" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fixed
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -2696,7 +2718,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#fixed" class="md-nav__link">
+  <a href="#fixed_1" class="md-nav__link">
     <span class="md-ellipsis">
       
         Fixed
@@ -2746,7 +2768,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#fixed_1" class="md-nav__link">
+  <a href="#fixed_2" class="md-nav__link">
     <span class="md-ellipsis">
       
         Fixed
@@ -2796,7 +2818,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#fixed_2" class="md-nav__link">
+  <a href="#fixed_3" class="md-nav__link">
     <span class="md-ellipsis">
       
         Fixed
@@ -2835,7 +2857,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#fixed_3" class="md-nav__link">
+  <a href="#fixed_4" class="md-nav__link">
     <span class="md-ellipsis">
       
         Fixed
@@ -2885,7 +2907,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#fixed_4" class="md-nav__link">
+  <a href="#fixed_5" class="md-nav__link">
     <span class="md-ellipsis">
       
         Fixed
@@ -2957,7 +2979,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#fixed_5" class="md-nav__link">
+  <a href="#fixed_6" class="md-nav__link">
     <span class="md-ellipsis">
       
         Fixed
@@ -3079,7 +3101,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#fixed_6" class="md-nav__link">
+  <a href="#fixed_7" class="md-nav__link">
     <span class="md-ellipsis">
       
         Fixed
@@ -3212,7 +3234,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#fixed_7" class="md-nav__link">
+  <a href="#fixed_8" class="md-nav__link">
     <span class="md-ellipsis">
       
         Fixed
@@ -3299,10 +3321,25 @@ exhaustive commit history.</p>
 <h2 id="unreleased">Unreleased<a class="headerlink" href="#unreleased" title="Permanent link">&para;</a></h2>
 <h3 id="changed">Changed<a class="headerlink" href="#changed" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>sqlglot 30.13 or newer is required</strong>, the first release that writes
+  DuckDB's snapshot clause after a table's alias.</li>
 <li><strong>DuckDB 1.5 or newer is required</strong> (<code>strata-notebook</code>, its <code>sql-duckdb</code>
   extra, and <code>strata-client</code>'s <code>duckdb</code> and <code>all</code> extras). DuckDB 1.5
   deprecates <code>fetch_arrow_table()</code> for <code>to_arrow_table()</code>, which a connection
   only has from 1.5, so Strata now calls the new name.</li>
+</ul>
+<h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>A SQL cell reading a catalog table under an alias runs again.</strong> Pinning
+  <code>lake.taxi.trips t</code> to its snapshot wrote <code>AT (VERSION =&gt; n) AS t</code>, which
+  DuckDB rejects as a syntax error; the pin now comes after the alias. Any read
+  of an aliased catalog table failed.</li>
+<li><strong>A Snowflake cell reading <code>IDENTIFIER($var)</code> or <code>IDENTIFIER(?)</code> no longer
+  serves a stale result.</strong> Its table is named only when the query runs, so the
+  default cache could not see it change and kept returning the first result;
+  unparseable SQL had the same gap. Such a cell now runs its query every time,
+  and its header says why; <code># @cache session</code> or <code>ttl</code> opts back into reuse.
+  <code>IDENTIFIER('db.schema.table')</code> with a literal is now tracked like any table.</li>
 </ul>
 <h2 id="080-2026-09-27">0.8.0 - 2026-09-27<a class="headerlink" href="#080-2026-09-27" title="Permanent link">&para;</a></h2>
 <p>A notebook stops being one person's machine. This release is about the three
@@ -3552,7 +3589,7 @@ environment pinned below them has to move before it can install 0.8.0.</p>
   <code>*:finance.*</code> deny patterns, which also cover a named catalog holding the
   same data.</li>
 </ul>
-<h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Permanent link">&para;</a></h3>
+<h3 id="fixed_1">Fixed<a class="headerlink" href="#fixed_1" title="Permanent link">&para;</a></h3>
 <ul>
 <li><strong>The service-mode demo stack starts again.</strong> <code>docker-compose.service.yml</code>
   exited at boot: the image defaults <code>STRATA_DEPLOYMENT_MODE</code> to personal, and
@@ -4016,7 +4053,7 @@ names.</p>
   no longer publishes from an environment that is not its lockfile.</li>
 <li><strong>The SSH worker token stays out of <code>argv</code> and error messages.</strong></li>
 </ul>
-<h3 id="fixed_1">Fixed<a class="headerlink" href="#fixed_1" title="Permanent link">&para;</a></h3>
+<h3 id="fixed_2">Fixed<a class="headerlink" href="#fixed_2" title="Permanent link">&para;</a></h3>
 <ul>
 <li><strong>A notebook artifact's lineage now walks past its first hop.</strong> Cell outputs
   recorded their inputs as bare provenance digests, which neither the lineage
@@ -4208,7 +4245,7 @@ values. No breaking changes.</p>
   (default 4 MB) and any mmap error now fall back to the plain read; larger reads
   still take the faster mmap path.</li>
 </ul>
-<h3 id="fixed_2">Fixed<a class="headerlink" href="#fixed_2" title="Permanent link">&para;</a></h3>
+<h3 id="fixed_3">Fixed<a class="headerlink" href="#fixed_3" title="Permanent link">&para;</a></h3>
 <ul>
 <li><strong>Case-differing variables no longer share one artifact on a case-insensitive
   filesystem.</strong> On macOS/APFS (and Windows), two variables whose names differ
@@ -4314,7 +4351,7 @@ Artifacts</strong> operator pages. No breaking changes.</p>
   archive a run). <code># @app hide</code> and prompt-response privacy are honored, matching
   the live app view. See <a href="../notebook/export/#app-view-snapshot-app-view">Export</a>.</li>
 </ul>
-<h3 id="fixed_3">Fixed<a class="headerlink" href="#fixed_3" title="Permanent link">&para;</a></h3>
+<h3 id="fixed_4">Fixed<a class="headerlink" href="#fixed_4" title="Permanent link">&para;</a></h3>
 <ul>
 <li><strong>Widget changes now actually re-run downstream cells.</strong> A widget cell wasn't
   publishing its per-control value artifacts onto the cell, so a downstream cell
@@ -4504,7 +4541,7 @@ cell.featurize(cell.trips)…</code> - <code>cell.X</code> is any def or input a
   and classified matrix.</p>
 </li>
 </ul>
-<h3 id="fixed_4">Fixed<a class="headerlink" href="#fixed_4" title="Permanent link">&para;</a></h3>
+<h3 id="fixed_5">Fixed<a class="headerlink" href="#fixed_5" title="Permanent link">&para;</a></h3>
 <ul>
 <li>
 <p><strong>QoS slots no longer leak when a request is cancelled.</strong> Two admission paths
@@ -4834,7 +4871,7 @@ scan ← table @ snapshot</code> - answering "which snapshot trained this
   killed at the wall, and per-cell / per-notebook overrides are unchanged.</p>
 </li>
 </ul>
-<h3 id="fixed_5">Fixed<a class="headerlink" href="#fixed_5" title="Permanent link">&para;</a></h3>
+<h3 id="fixed_6">Fixed<a class="headerlink" href="#fixed_6" title="Permanent link">&para;</a></h3>
 <ul>
 <li>
 <p><strong><code>materialize(mode="artifact")</code> without a store fails fast</strong> (service-mode
@@ -5100,7 +5137,7 @@ rw</code> opt out automatically.</li>
   prompt-cell variable resolution, and auto-install hints. The buried
   feature list under "Quick Start" is gone.</li>
 </ul>
-<h3 id="fixed_6">Fixed<a class="headerlink" href="#fixed_6" title="Permanent link">&para;</a></h3>
+<h3 id="fixed_7">Fixed<a class="headerlink" href="#fixed_7" title="Permanent link">&para;</a></h3>
 <ul>
 <li><code>strata run</code> without <code>--no-sync</code> no longer fails at environment sync
   with "env sync finished without a status snapshot". The headless runner
@@ -5280,7 +5317,7 @@ startup guard. The notebook app boots via <code>strata-notebook</code> (or
 <li>connection-editor UI fixed for round-trip fidelity (auth blanking,
   driver-specific extras, theme correctness) and dark-mode parity</li>
 </ul>
-<h3 id="fixed_7">Fixed<a class="headerlink" href="#fixed_7" title="Permanent link">&para;</a></h3>
+<h3 id="fixed_8">Fixed<a class="headerlink" href="#fixed_8" title="Permanent link">&para;</a></h3>
 <ul>
 <li>service-mode session discovery / reconnect policy and related UX
   regressions</li>
