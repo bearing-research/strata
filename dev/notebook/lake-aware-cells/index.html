@@ -2330,15 +2330,13 @@ inputs change; <code>@table</code> adds the lake snapshot to the mix.</p>
 <li><strong>The embedded scan runs in-process.</strong> <code>scan@v1</code> is handled by the server
   itself in both modes: it is resolved before any executor dispatch, so
   scanning a table needs no registered executor and none is consulted.</li>
-<li><strong>Merge-on-read tables are refused.</strong> A table whose snapshot carries
-  positional or equality delete files - what Spark or Flink <code>MERGE</code> / <code>DELETE</code>
-  writes - raises <code>UnsupportedTableFormatError</code> rather than scanning. Strata
-  reads Parquet row groups directly and does not apply delete files yet, so
-  scanning one would return deleted rows <em>and</em> cache them under the snapshot
-  key, where they would be served forever. Compact to copy-on-write
-  (<code>rewrite_data_files</code>), or pin a snapshot taken before the deletes. Applying
-  delete files is tracked in
-  <a href="https://github.com/bearing-research/strata/issues/536">#536</a>.</li>
+<li><strong>Merge-on-read deletes are applied.</strong> When Spark, Flink or DuckDB
+  deletes from a table without rewriting its data files, the scan drops the
+  rows the snapshot's positional delete files (format v2) or deletion vectors
+  (format v3) name, and caches the row groups without them. Equality deletes,
+  which Flink writes for upserts, are not supported: the scan fails rather than
+  return rows it should not. Compact such a table (<code>rewrite_data_files</code>), or
+  pin a snapshot taken before the deletes.</li>
 </ul>
 <h2 id="see-also">See also<a class="headerlink" href="#see-also" title="Permanent link">&para;</a></h2>
 <ul>
