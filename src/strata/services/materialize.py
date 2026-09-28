@@ -136,15 +136,15 @@ class MaterializeService:
         snapshot_id: int,
         columns: list[str] | None,
         filters: list,
-        schema_id: int | None = None,
+        schema_id: int | None,
     ) -> str:
         """Provenance hash for a ``scan@v1`` identity transform.
 
         Uniquely identifies a table scan by table identity + snapshot, the
         (sorted) column projection, and the normalized row filters — so the same
         query dedups to the same artifact. ``schema_id`` is the schema the scan
-        read when it is not the snapshot's own (``ReadPlan.schema_id``): a
-        schema change makes no snapshot. Pure; no HTTP, no store.
+        read (``ReadPlan.schema_id``): a schema change makes no snapshot. Pure;
+        no HTTP, no store.
         """
         import hashlib
 
@@ -152,8 +152,7 @@ class MaterializeService:
 
         hasher = hashlib.sha256()
         hasher.update(f"table:{table_identity}@{snapshot_id}".encode())
-        if schema_id is not None:
-            hasher.update(f"schema:{schema_id}".encode())
+        hasher.update(f"schema:{schema_id}".encode())
         hasher.update(b"executor:scan@v1")
         if columns:
             hasher.update(f"columns:{sorted(columns)}".encode())

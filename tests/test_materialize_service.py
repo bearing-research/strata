@@ -259,24 +259,24 @@ class TestResolveInputVersion:
 
 class TestComputeIdentityProvenance:
     def test_same_query_same_hash(self, service):
-        a = service.compute_identity_provenance("cat.ns.t", 42, ["x", "y"], [])
-        b = service.compute_identity_provenance("cat.ns.t", 42, ["x", "y"], [])
+        a = service.compute_identity_provenance("cat.ns.t", 42, ["x", "y"], [], schema_id=0)
+        b = service.compute_identity_provenance("cat.ns.t", 42, ["x", "y"], [], schema_id=0)
         assert a == b
 
     def test_column_order_independent(self, service):
         # Columns are sorted before hashing — projection order must not matter.
-        a = service.compute_identity_provenance("cat.ns.t", 42, ["x", "y"], [])
-        b = service.compute_identity_provenance("cat.ns.t", 42, ["y", "x"], [])
+        a = service.compute_identity_provenance("cat.ns.t", 42, ["x", "y"], [], schema_id=0)
+        b = service.compute_identity_provenance("cat.ns.t", 42, ["y", "x"], [], schema_id=0)
         assert a == b
 
     def test_snapshot_change_changes_hash(self, service):
-        a = service.compute_identity_provenance("cat.ns.t", 42, None, [])
-        b = service.compute_identity_provenance("cat.ns.t", 43, None, [])
+        a = service.compute_identity_provenance("cat.ns.t", 42, None, [], schema_id=0)
+        b = service.compute_identity_provenance("cat.ns.t", 43, None, [], schema_id=0)
         assert a != b
 
     def test_all_columns_differs_from_projection(self, service):
-        star = service.compute_identity_provenance("cat.ns.t", 42, None, [])
-        projected = service.compute_identity_provenance("cat.ns.t", 42, ["x"], [])
+        star = service.compute_identity_provenance("cat.ns.t", 42, None, [], schema_id=0)
+        projected = service.compute_identity_provenance("cat.ns.t", 42, ["x"], [], schema_id=0)
         assert star != projected
 
 

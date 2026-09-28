@@ -183,11 +183,26 @@ def test_the_persisted_manifest_keeps_the_deletes(tmp_path, table, attach):
     assert store.manifest_hits == 1
 
 
-def test_a_manifest_persisted_before_deletes_were_recorded_is_resolved_again(tmp_path):
-    store = MetadataStore(tmp_path / "metadata.sqlite")
-    store.put_manifest("c", "db.t", 1, [{"file_path": "a.parquet", "actual_path": "/w/a.parquet"}])
+def test_a_metadata_store_from_another_version_is_discarded(tmp_path):
+    """0.8.0 persisted manifests without their delete files, and on pyiceberg
+    before 0.12 could have missed a table's deletes altogether."""
+    import sqlite3
 
-    assert ManifestCache(store=store).get("c", "db.t", 1) is None
+    db = tmp_path / "metadata.sqlite"
+    old = sqlite3.connect(db)
+    old.execute(
+        "CREATE TABLE manifest_cache (catalog_name TEXT, table_identity TEXT,"
+        " snapshot_id INTEGER, data_files_json TEXT, created_at TIMESTAMP,"
+        " PRIMARY KEY (catalog_name, table_identity, snapshot_id))"
+    )
+    old.execute(
+        "INSERT INTO manifest_cache VALUES ('c', 'db.t', 1,"
+        ' \'[{"file_path": "a.parquet", "actual_path": "/w/a.parquet"}]\', NULL)'
+    )
+    old.commit()
+    old.close()
+
+    assert MetadataStore(db).get_manifest("c", "db.t", 1) is None
 
 
 def test_a_delete_file_strata_cannot_read_is_refused(tmp_path, table, attach):

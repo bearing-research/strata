@@ -179,7 +179,7 @@ def test_a_scan_naming_a_snapshot_reads_that_snapshots_schema(lake):
     assert _pyiceberg(catalog, snapshot_id=before) == [{"id": 1, "x": 10}, {"id": 2, "x": 20}]
     table, plan = _scan(config, uri, snapshot_id=before)
     assert _rows(table) == [{"id": 1, "x": 10}, {"id": 2, "x": 20}]
-    assert plan.schema_id is None
+    assert plan.schema_id == catalog.load_table("db.t").snapshot_by_id(before).schema_id
 
 
 def test_a_schema_change_is_not_served_from_the_cache_of_the_old_schema(lake):
@@ -191,7 +191,7 @@ def test_a_schema_change_is_not_served_from_the_cache_of_the_old_schema(lake):
     _evolve(catalog, lambda u: u.add_column("x", LongType()))
 
     table, plan = _scan(config, uri, planner=planner)
-    assert plan.schema_id is not None
+    assert plan.schema_id != catalog.load_table("db.t").current_snapshot().schema_id
     assert _rows(table) == [{"id": 1, "x": None}, {"id": 2, "x": None}]
 
 
@@ -287,4 +287,3 @@ def test_an_unchanged_table_reads_its_files_as_written(lake):
     _, uri, config = lake
     _, plan = _scan(config, uri)
     assert [task.file_columns for task in plan.tasks] == [None]
-    assert plan.schema_id is None

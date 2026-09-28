@@ -409,14 +409,13 @@ class ReadPlanner:
 
         # The schema to read as. A scan of the current table reads the current
         # schema; one that names a snapshot reads that snapshot's, as pyiceberg
-        # does. A schema change makes no snapshot, so when the two differ the
-        # cache key and the scan's provenance carry the schema too.
+        # does. A schema change makes no snapshot, so the cache key and the
+        # scan's provenance carry the schema as well as the snapshot.
         if snapshot_id is None:
             snapshot_schema = table.schema()
         else:
             snapshot_schema = table.scan(snapshot_id=resolved_snapshot_id).projection()
-        if snapshot_schema.schema_id != snapshot.schema_id:
-            plan.schema_id = snapshot_schema.schema_id
+        plan.schema_id = snapshot_schema.schema_id
         name_mapping = table.name_mapping()
         table_arrow_schema = snapshot_arrow_schema(snapshot_schema)
         _assert_projection_exists(columns, table_arrow_schema, table_identity_str)

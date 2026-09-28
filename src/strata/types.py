@@ -340,8 +340,8 @@ class CacheKey:
     file_path: str
     row_group_id: int
     projection_fingerprint: str  # Used only if granularity includes projection
-    # The schema the row group was read as, when not the snapshot's own: a
-    # schema change makes no snapshot, so the snapshot alone cannot say.
+    # The Iceberg schema the row group was read as: a schema change makes no
+    # snapshot, so the snapshot alone cannot say.
     schema_id: int | None = None
 
     @property
@@ -369,8 +369,7 @@ class CacheKey:
                 f"{self.tenant_id}|{self.table_identity}|{self.snapshot_id}|"
                 f"{self.file_path}|{self.row_group_id}|{self.projection_fingerprint}"
             )
-        if self.schema_id is not None:
-            key_str += f"|schema={self.schema_id}"
+        key_str += f"|schema={self.schema_id}"
         return hashlib.sha256(key_str.encode()).hexdigest()
 
     @staticmethod
@@ -433,8 +432,7 @@ class ReadPlan:
     # Schema from Parquet metadata (no IO at query time)
     schema: "pa.Schema | None" = None
 
-    # The Iceberg schema the scan read, when not the snapshot's own (a scan of
-    # the current table after a schema change); None otherwise.
+    # The Iceberg schema the scan read (a schema change makes no snapshot).
     schema_id: int | None = None
 
     # Unique scan identifier (generated once at creation)
