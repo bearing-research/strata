@@ -317,10 +317,12 @@ async def test_per_cell_watchdog_kills_hung_cell(tmp_path: Path):
     )
 
     executor = CellExecutor(session)
-    # 2s per-cell timeout; batch_timeout_seconds left at default 600 so we
-    # know any pass under ~5s came from the per-cell kill, not the outer
-    # safety net.
-    result = await executor.execute_batch(specs, cell_timeout_seconds=2.0)
+    # A cell's window runs from the harness's cell_start until the parent has
+    # persisted it, so c1's clock includes the parent's cache lookup and store
+    # write. At 2s, a loaded full-suite run let those overrun and blamed c1.
+    # 10s leaves room for that and still sits far below c_hang's 60s sleep and
+    # the 600s batch_timeout_seconds, so a pass still means the per-cell kill.
+    result = await executor.execute_batch(specs, cell_timeout_seconds=10.0)
 
     assert not result.completed
     assert result.end_reason == "cell_timeout"
