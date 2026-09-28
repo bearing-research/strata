@@ -518,6 +518,36 @@ def test_build_mcp_app_returns_mountable_app(sm_with_session):
     assert hasattr(mcp_app.router, "lifespan_context")
 
 
+def test_without_the_mcp_extra_there_is_no_endpoint(sm_with_session, monkeypatch, caplog):
+    import sys
+
+    class _NoMcp:
+        """Import as if the package were not installed: No module named 'mcp'."""
+
+        def find_spec(self, name, path=None, target=None):
+            if name == "mcp" or name.startswith("mcp."):
+                raise ModuleNotFoundError("No module named 'mcp'", name="mcp")
+            return None
+
+    sm, _, _ = sm_with_session
+    for name in [n for n in sys.modules if n == "mcp" or n.startswith("mcp.")]:
+        monkeypatch.delitem(sys.modules, name)
+    monkeypatch.setattr(sys, "meta_path", [_NoMcp(), *sys.meta_path])
+    with caplog.at_level("WARNING", logger="strata.notebook.mcp_server"):
+        assert build_mcp_app(sm) is None
+    assert "needs mcp>=2" not in caplog.text
+
+
+def test_mcp_1_turns_the_endpoint_off_and_says_why(sm_with_session, monkeypatch, caplog):
+    """mcp 2 moved FastMCP to mcp.server.mcpserver.MCPServer. An mcp 1 left in
+    the environment used to read as "extra absent" and dropped /mcp silently."""
+    sm, _, _ = sm_with_session
+    monkeypatch.setitem(__import__("sys").modules, "mcp.server.mcpserver", None)
+    with caplog.at_level("WARNING", logger="strata.notebook.mcp_server"):
+        assert build_mcp_app(sm) is None
+    assert "needs mcp>=2" in caplog.text
+
+
 # ---------------------------------------------------------------------------
 # Registry / publication tools (item 32)
 # ---------------------------------------------------------------------------

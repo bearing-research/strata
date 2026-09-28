@@ -9,6 +9,10 @@ exhaustive commit history.
 
 ### Changed
 
+- **The `[mcp]` extra needs mcp 2.2 or newer.** mcp 2 renamed `FastMCP` to
+  `MCPServer`, and the notebook's `/mcp` endpoint now uses it. An mcp 1 left
+  in the environment used to switch `/mcp` off without a word; the server now
+  logs why and keeps running without it.
 - **sqlglot 30.13 or newer is required**, the first release that writes
   DuckDB's snapshot clause after a table's alias.
 - **DuckDB 1.5 or newer is required** (`strata-notebook`, its `sql-duckdb`

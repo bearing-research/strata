@@ -108,7 +108,7 @@ class _Resp:
 
 @pytest.mark.parametrize("status", [400, 406])
 def test_mcp_mounted_true_for_json_4xx(monkeypatch, status) -> None:
-    # A mounted FastMCP endpoint answers a bare GET with a JSON 4xx.
+    # A mounted MCP server endpoint answers a bare GET with a JSON 4xx.
     resp = _Resp(status, "application/json")
     monkeypatch.setattr(agent_launch.httpx, "get", lambda *a, **k: resp)
     assert agent_launch._mcp_mounted("http://localhost:8765") is True

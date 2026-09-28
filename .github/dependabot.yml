@@ -78,9 +78,6 @@ updates:
       # cannot be updated alone; it moves when the fsspec group does.
       - dependency-name: boto3
       - dependency-name: botocore
-      # mcp 2 changed its server API; the migration is its own task.
-      - dependency-name: mcp
-        update-types: ["version-update:semver-major"]
     commit-message:
       prefix: deps
       include: scope
