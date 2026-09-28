@@ -3321,6 +3321,10 @@ exhaustive commit history.</p>
 <h2 id="unreleased">Unreleased<a class="headerlink" href="#unreleased" title="Permanent link">&para;</a></h2>
 <h3 id="changed">Changed<a class="headerlink" href="#changed" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>The <code>[mcp]</code> extra needs mcp 2.2 or newer.</strong> mcp 2 renamed <code>FastMCP</code> to
+  <code>MCPServer</code>, and the notebook's <code>/mcp</code> endpoint now uses it. An mcp 1 left
+  in the environment used to switch <code>/mcp</code> off without a word; the server now
+  logs why and keeps running without it.</li>
 <li><strong>sqlglot 30.13 or newer is required</strong>, the first release that writes
   DuckDB's snapshot clause after a table's alias.</li>
 <li><strong>DuckDB 1.5 or newer is required</strong> (<code>strata-notebook</code>, its <code>sql-duckdb</code>
