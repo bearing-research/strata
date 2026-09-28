@@ -15,8 +15,15 @@ from strata.iceberg import (
     table_identity_for,
 )
 from strata.iceberg_deletes import READABLE_FORMATS, DeletedRows, in_row_group
+from strata.iceberg_schema import (
+    Column,
+    UnsupportedTableFormatError,
+    file_columns,
+    snapshot_arrow_schema,
+)
 from strata.metadata_cache import (
     DeleteFileEntry,
+    LRUCache,
     ManifestCache,
     ManifestEntry,
     ManifestResolution,
@@ -137,10 +144,6 @@ def _join_s3_path(base: str, relative: str) -> str:
     return _normalize_s3_path(f"{base}/{relative}")
 
 
-class UnsupportedTableFormatError(RuntimeError):
-    """The table uses an Iceberg feature Strata cannot read correctly."""
-
-
 def _delete_files(file_task, table_identity: str) -> tuple[DeleteFileEntry, ...]:
     """The positional deletes pyiceberg attached to *file_task*.
 
@@ -170,10 +173,8 @@ def _assert_projection_exists(
 ) -> None:
     """Raise when a requested column is absent from the table schema.
 
-    Nothing checked this. ``_assert_file_satisfies_scan`` only runs for the
-    SECOND and later files (the first file's schema is what it compares
-    against), so a single-file table — the common case — validated nothing at
-    all. The projection was then applied by ``CachedFetcher._project_batch``
+    Nothing checked this once: a single-file table validated nothing at all.
+    The projection was then applied by ``CachedFetcher._project_batch``
     via ``schema.get_field_index(name)``, which returns ``-1`` for a name it
     does not know, and ``batch.column(-1)`` is the LAST column. So scanning a
     column that does not exist returned the last column's data under the
@@ -240,54 +241,6 @@ def _estimate_row_group_bytes(
     return projected
 
 
-def _assert_file_satisfies_scan(
-    *,
-    expected,
-    actual,
-    columns: list[str] | None,
-    file_path: str,
-    table_identity: str,
-) -> None:
-    """Raise when *actual* can't serve the same scan as *expected*.
-
-    With an explicit projection only the requested columns have to be present
-    in every file — that is the common, still-safe case after an
-    ``ADD COLUMN`` (scanning the pre-existing columns keeps working). Without a
-    projection every file must expose the same field names, because the
-    per-row-group segments are concatenated by ``IncrementalIpcMerger``, which
-    requires identical schemas.
-    """
-    if expected is None or actual is None:
-        return
-    expected_names = set(expected.names)
-    actual_names = set(actual.names)
-
-    if columns:
-        missing = [c for c in columns if c not in actual_names]
-        if missing:
-            raise UnsupportedTableFormatError(
-                f"Table {table_identity} has files with differing schemas "
-                f"(Iceberg schema evolution): {file_path} is missing requested "
-                f"column(s) {missing}. Strata does not reconcile per-file "
-                f"schemas yet; project only columns present in every data file, "
-                f"or compact the table (rewrite_data_files) so all files share "
-                f"one schema."
-            )
-        return
-
-    if expected_names != actual_names:
-        added = sorted(expected_names - actual_names)
-        removed = sorted(actual_names - expected_names)
-        raise UnsupportedTableFormatError(
-            f"Table {table_identity} has files with differing schemas "
-            f"(Iceberg schema evolution): {file_path} differs from the first "
-            f"data file (missing {added}, extra {removed}). An unprojected scan "
-            f"concatenates row groups and requires one schema. Project an "
-            f"explicit column list common to all files, or compact the table "
-            f"(rewrite_data_files)."
-        )
-
-
 class ReadPlanner:
     """Plans reads from Iceberg tables with row-group pruning.
 
@@ -329,6 +282,12 @@ class ReadPlanner:
         )
         self.manifest_cache = manifest_cache or get_manifest_cache(cache_dir=cache_dir)
         self._deleted_rows = DeletedRows()
+        # Each data file's column layout per (table, schema): files never
+        # change, and a schema change is a new schema id. Wrapped in a
+        # 1-tuple, since a file that needs no layout is None.
+        self._file_columns: LRUCache[tuple[str, int, str], tuple[tuple[Column, ...] | None]] = (
+            LRUCache(10_000)
+        )
 
     def plan(
         self,
@@ -448,7 +407,18 @@ class ReadPlanner:
                 filter_fingerprint,
             )
 
-        table_arrow_schema = table.schema().as_arrow()
+        # The schema to read as. A scan of the current table reads the current
+        # schema; one that names a snapshot reads that snapshot's, as pyiceberg
+        # does. A schema change makes no snapshot, so when the two differ the
+        # cache key and the scan's provenance carry the schema too.
+        if snapshot_id is None:
+            snapshot_schema = table.schema()
+        else:
+            snapshot_schema = table.scan(snapshot_id=resolved_snapshot_id).projection()
+        if snapshot_schema.schema_id != snapshot.schema_id:
+            plan.schema_id = snapshot_schema.schema_id
+        name_mapping = table.name_mapping()
+        table_arrow_schema = snapshot_arrow_schema(snapshot_schema)
         _assert_projection_exists(columns, table_arrow_schema, table_identity_str)
 
         total_row_groups = 0
@@ -471,33 +441,42 @@ class ReadPlanner:
             if pq_meta is None:
                 raise RuntimeError(f"Failed to load Parquet metadata for {actual_path}")
 
-            # Capture the schema from the first file, then verify every later
-            # file can actually satisfy this scan.
-            #
-            # Iceberg schema evolution does NOT rewrite existing data files, so
-            # after ALTER TABLE ADD COLUMN the older files lack the new column.
-            # Nothing here reconciled that: a projection naming the new column
-            # raised KeyError from read_row_group on the old files, and an
-            # unprojected scan produced row groups with differing schemas that
-            # IncrementalIpcMerger rejects — both *after* the 200 and the first
-            # chunks were already on the wire, i.e. a truncated response rather
-            # than an error the client can act on.
-            #
-            # Detect it while planning, where it can still be a clean failure.
+            # Iceberg schema evolution rewrites no data files, so an older
+            # file may name, hold or type a column differently from the
+            # snapshot. Columns are matched by field id; ``layout`` says how to
+            # read this file as the snapshot's schema, None when it already is.
+            layout_key = (table_identity_str, snapshot_schema.schema_id, actual_path)
+            cached_layout = self._file_columns.get(layout_key)
+            if cached_layout is None:
+                cached_layout = (
+                    file_columns(
+                        pq_meta.arrow_schema,
+                        snapshot_schema,
+                        name_mapping,
+                        table_identity=table_identity_str,
+                        file_path=file_path,
+                    ),
+                )
+                self._file_columns.put(layout_key, cached_layout)
+            (layout,) = cached_layout
             if arrow_schema is None:
-                arrow_schema = pq_meta.arrow_schema
-            else:
-                _assert_file_satisfies_scan(
-                    expected=arrow_schema,
-                    actual=pq_meta.arrow_schema,
-                    columns=columns,
-                    file_path=file_path,
-                    table_identity=table_identity_str,
+                arrow_schema = (
+                    pq_meta.arrow_schema
+                    if layout is None
+                    else pa.schema([column.field for column in layout])
                 )
 
             # Build column index map once per file and compile filters
             # This avoids O(num_columns × num_filters × num_row_groups) scanning
             col_index_map = _build_column_index_map(pq_meta.parquet_schema)
+            if layout is not None:
+                # Statistics by the snapshot's names. A column the file lacks
+                # has none, and a dropped column's name must not lend it its own.
+                col_index_map = {
+                    column.name: col_index_map[column.source]
+                    for column in layout
+                    if column.source is not None and column.source in col_index_map
+                }
             compiled_filters = _compile_filters(filters, col_index_map)
 
             # Merge-on-read: rows this snapshot deleted from the file. The
@@ -539,6 +518,7 @@ class ReadPlanner:
                     file_path=file_path,
                     row_group_id=rg_idx,
                     projection_fingerprint=proj_fingerprint,
+                    schema_id=plan.schema_id,
                 )
 
                 # Estimated size, projection-aware. Works with both our
@@ -553,6 +533,7 @@ class ReadPlanner:
                     columns=columns,
                     estimated_bytes=rg_size,
                     deleted_rows=deleted_rows,
+                    file_columns=layout,
                 )
                 plan.tasks.append(task)
                 estimated_bytes += rg_size
@@ -562,8 +543,9 @@ class ReadPlanner:
         plan.estimated_bytes = estimated_bytes
         plan.planning_time_ms = elapsed_ms(start_time)
 
-        # Set schema: the Parquet file schema when there was a file to read,
-        # the Iceberg table schema for empty tables / fully-pruned scans.
+        # Set schema: the first file's, as the snapshot reads it, when there
+        # was a file to read; the snapshot's schema for empty tables /
+        # fully-pruned scans.
         #
         # Then apply the projection. Neither source is projected on its own,
         # and ``plan.schema`` IS the response schema when there are no tasks:

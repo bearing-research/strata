@@ -13,6 +13,7 @@ import pyarrow as pa
 import pyarrow.compute as _pc
 import pyarrow.parquet as pq
 
+from strata.iceberg_schema import read_as_snapshot, source_columns
 from strata.metrics import MetricsCollector
 from strata.types import Task
 
@@ -117,14 +118,19 @@ class PyArrowFetcher:
 
         # Read the specific row group with optional column projection, on a
         # handle no other thread holds.
+        columns = task.columns
+        if task.file_columns is not None:
+            columns = source_columns(task.file_columns, task.columns)
         pf = self._open(task.file_path)
         try:
-            table = pf.read_row_group(task.row_group_id, columns=task.columns)
+            table = pf.read_row_group(task.row_group_id, columns=columns)
         finally:
             self._close_parquet_file(pf)
         if task.deleted_rows is not None:
             positions = pa.array(range(table.num_rows), pa.int64())
             table = table.filter(pc.invert(pc.is_in(positions, value_set=task.deleted_rows)))
+        if task.file_columns is not None:
+            table = read_as_snapshot(table, task.file_columns, task.columns)
 
         # Convert to a single RecordBatch
         # combine_chunks() is more efficient than manual concat_arrays
