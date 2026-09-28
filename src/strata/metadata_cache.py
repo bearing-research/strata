@@ -17,7 +17,7 @@ import json
 from collections import OrderedDict
 from collections.abc import Callable, Hashable
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from threading import Lock
 from typing import TYPE_CHECKING, NamedTuple, Protocol, overload
@@ -262,6 +262,14 @@ class ParquetMetadata:
     parquet_schema: _SchemaColumns  # ParquetSchema or pq.ParquetSchema for column lookups
 
 
+@dataclass(frozen=True)
+class DeleteFileEntry:
+    """A positional delete file, or a deletion vector, that applies to a data file."""
+
+    file_path: str  # As the manifest names it; read through the table's FileIO
+    file_format: str  # "PARQUET" or "PUFFIN"
+
+
 @dataclass
 class ManifestEntry:
     """A single file entry from manifest resolution.
@@ -271,6 +279,9 @@ class ManifestEntry:
 
     file_path: str  # Original file path from manifest
     actual_path: str  # Resolved path for reading
+    # The snapshot's positional deletes for this file. Which ones apply is
+    # pyiceberg's call (sequence numbers, partition, referenced file).
+    delete_files: tuple[DeleteFileEntry, ...] = ()
 
 
 @dataclass
@@ -760,9 +771,21 @@ class ManifestCache:
 
         if self._store is not None:
             persisted = self._store.get_manifest(catalog_name, table_identity, snapshot_id)
-            if persisted is not None:
+            # A row without delete files was written before they were recorded,
+            # by a Strata on pyiceberg < 0.12, which could miss a table's
+            # deletes entirely. It proves nothing, so resolve the snapshot again.
+            if persisted is not None and all("delete_files" in entry for entry in persisted):
                 resolution = ManifestResolution(
-                    data_files=[ManifestEntry(file_path=fp, actual_path=ap) for fp, ap in persisted]
+                    data_files=[
+                        ManifestEntry(
+                            file_path=entry["file_path"],
+                            actual_path=entry["actual_path"],
+                            delete_files=tuple(
+                                DeleteFileEntry(**delete) for delete in entry["delete_files"]
+                            ),
+                        )
+                        for entry in persisted
+                    ]
                 )
                 self._cache.put((catalog_name, table_identity, snapshot_id), resolution)
                 return resolution
@@ -798,9 +821,7 @@ class ManifestCache:
             # Persist to store if available (unfiltered only)
             if self._store is not None:
                 try:
-                    data_files = [
-                        (entry.file_path, entry.actual_path) for entry in resolution.data_files
-                    ]
+                    data_files = [asdict(entry) for entry in resolution.data_files]
                     self._store.put_manifest(catalog_name, table_identity, snapshot_id, data_files)
                 except Exception:
                     pass  # Don't fail if persistence fails

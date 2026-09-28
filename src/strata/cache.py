@@ -728,6 +728,7 @@ class CachedFetcher:
                     num_rows=task.num_rows,
                     columns=None,
                     estimated_bytes=task.estimated_bytes,
+                    deleted_rows=task.deleted_rows,
                 )
             batch = self.fetcher.fetch(fetch_task)
             span.set_attribute("bytes_read", batch.nbytes)

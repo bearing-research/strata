@@ -393,6 +393,11 @@ class Task:
     # Estimated size from Parquet metadata (for pre-flight checks)
     estimated_bytes: int = 0
 
+    # Row-group-relative positions of rows the snapshot deleted (Iceberg
+    # merge-on-read), sorted; the fetcher drops them. ``num_rows`` already
+    # excludes them.
+    deleted_rows: "pa.Array | None" = None
+
     # Populated after fetch
     cached: bool = False
     bytes_read: int = 0

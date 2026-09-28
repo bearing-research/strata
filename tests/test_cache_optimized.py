@@ -391,7 +391,9 @@ class TestClearPreservesTheMetadataDatabase:
 
         db = cache_dir / "metadata.sqlite"
         store = MetadataStore(db)
-        store.put_manifest("cat", "db.t", 1, [("a.parquet", "/w/a.parquet")])
+        store.put_manifest(
+            "cat", "db.t", 1, [{"file_path": "a.parquet", "actual_path": "/w/a.parquet"}]
+        )
 
         held = sqlite3.connect(str(db))
         held.execute("PRAGMA journal_mode=WAL")
