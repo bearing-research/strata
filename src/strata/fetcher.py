@@ -7,9 +7,10 @@ The Fetcher protocol defines the interface that any implementation must satisfy.
 import threading
 import time
 from collections import OrderedDict
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Any, Protocol, cast
 
 import pyarrow as pa
+import pyarrow.compute as _pc
 import pyarrow.parquet as pq
 
 from strata.metrics import MetricsCollector
@@ -17,6 +18,10 @@ from strata.types import Task
 
 if TYPE_CHECKING:
     import pyarrow.fs as pafs
+
+# pyarrow.compute registers its kernels at import time, so ty does not know
+# members like ``is_in``. Cast through Any.
+pc = cast(Any, _pc)
 
 # Maximum number of ParquetFile handles to cache
 _MAX_FILE_CACHE_SIZE = 128
@@ -117,6 +122,9 @@ class PyArrowFetcher:
             table = pf.read_row_group(task.row_group_id, columns=task.columns)
         finally:
             self._close_parquet_file(pf)
+        if task.deleted_rows is not None:
+            positions = pa.array(range(table.num_rows), pa.int64())
+            table = table.filter(pc.invert(pc.is_in(positions, value_set=task.deleted_rows)))
 
         # Convert to a single RecordBatch
         # combine_chunks() is more efficient than manual concat_arrays

@@ -190,15 +190,13 @@ inputs change; `@table` adds the lake snapshot to the mix.
 - **The embedded scan runs in-process.** `scan@v1` is handled by the server
   itself in both modes: it is resolved before any executor dispatch, so
   scanning a table needs no registered executor and none is consulted.
-- **Merge-on-read tables are refused.** A table whose snapshot carries
-  positional or equality delete files - what Spark or Flink `MERGE` / `DELETE`
-  writes - raises `UnsupportedTableFormatError` rather than scanning. Strata
-  reads Parquet row groups directly and does not apply delete files yet, so
-  scanning one would return deleted rows *and* cache them under the snapshot
-  key, where they would be served forever. Compact to copy-on-write
-  (`rewrite_data_files`), or pin a snapshot taken before the deletes. Applying
-  delete files is tracked in
-  [#536](https://github.com/bearing-research/strata/issues/536).
+- **Merge-on-read deletes are applied.** When Spark, Flink or DuckDB
+  deletes from a table without rewriting its data files, the scan drops the
+  rows the snapshot's positional delete files (format v2) or deletion vectors
+  (format v3) name, and caches the row groups without them. Equality deletes,
+  which Flink writes for upserts, are not supported: the scan fails rather than
+  return rows it should not. Compact such a table (`rewrite_data_files`), or
+  pin a snapshot taken before the deletes.
 
 ## See also
 

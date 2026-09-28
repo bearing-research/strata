@@ -14,7 +14,9 @@ from strata.iceberg import (
     named_catalog,
     table_identity_for,
 )
+from strata.iceberg_deletes import READABLE_FORMATS, DeletedRows, in_row_group
 from strata.metadata_cache import (
+    DeleteFileEntry,
     ManifestCache,
     ManifestEntry,
     ManifestResolution,
@@ -139,32 +141,26 @@ class UnsupportedTableFormatError(RuntimeError):
     """The table uses an Iceberg feature Strata cannot read correctly."""
 
 
-def _assert_no_row_level_deletes(data_files, table_identity: str) -> None:
-    """Raise when any scan task carries positional / equality delete files.
+def _delete_files(file_task, table_identity: str) -> tuple[DeleteFileEntry, ...]:
+    """The positional deletes pyiceberg attached to *file_task*.
 
-    Strata reads Parquet row groups directly and applies no delete files, so a
-    merge-on-read table would return rows that have been deleted — and cache
-    them under an immutable snapshot key, where they are served forever. Fail
-    loudly instead; a wrong answer is worse than no answer.
+    pyiceberg itself refuses equality deletes while planning the scan, so what
+    reaches here is positional: Parquet delete files or Puffin deletion vectors.
+    ORC and Avro delete files are valid Iceberg but not readable here, and
+    skipping one would return the rows it deletes.
     """
-    affected = 0
-    for file_task in data_files:
-        # ``delete_files`` is a pyiceberg FileScanTask field. Guard with
-        # getattr so a catalog implementation that omits it (or a future
-        # pyiceberg rename) degrades to "no deletes" rather than crashing the
-        # planner on every scan.
-        if getattr(file_task, "delete_files", None):
-            affected += 1
-    if not affected:
-        return
-    raise UnsupportedTableFormatError(
-        f"Table {table_identity} uses Iceberg merge-on-read deletes "
-        f"({affected} data file(s) have positional or equality delete files). "
-        "Strata reads Parquet row groups directly and does not apply delete "
-        "files yet, so scanning this table would return deleted rows and cache "
-        "them under the snapshot key. Compact the table (rewrite_data_files) "
-        "to copy-on-write, or scan a snapshot taken before the deletes."
-    )
+    entries = []
+    for delete_file in file_task.delete_files:
+        file_format = delete_file.file_format.value
+        if file_format not in READABLE_FORMATS:
+            raise UnsupportedTableFormatError(
+                f"Table {table_identity} has a {file_format} delete file "
+                f"({delete_file.file_path}). Strata applies Parquet positional "
+                "deletes and Puffin deletion vectors only. Compact the table "
+                "(rewrite_data_files), or scan a snapshot taken before the deletes."
+            )
+        entries.append(DeleteFileEntry(file_path=delete_file.file_path, file_format=file_format))
+    return tuple(sorted(entries, key=lambda entry: entry.file_path))
 
 
 def _assert_projection_exists(
@@ -332,6 +328,7 @@ class ReadPlanner:
             cache_dir=cache_dir, s3_filesystem=s3_filesystem
         )
         self.manifest_cache = manifest_cache or get_manifest_cache(cache_dir=cache_dir)
+        self._deleted_rows = DeletedRows()
 
     def plan(
         self,
@@ -427,29 +424,18 @@ class ReadPlanner:
                     scan = table.scan(snapshot_id=resolved_snapshot_id)
                     data_files = list(scan.plan_files())
 
-                # Refuse merge-on-read tables rather than return wrong rows.
-                #
-                # pyiceberg attaches each data file's positional / equality
-                # delete files to the scan task, but the planner reads only
-                # ``file.file_path`` and the fetcher does a raw
-                # ``read_row_group``, so deletes were never applied: a scan of
-                # a table with a pending DELETE returned the deleted rows. And
-                # because the row group is then cached under an immutable
-                # snapshot key, the wrong rows are served from cache forever
-                # (there is no invalidation by design).
-                #
-                # Silently returning deleted rows is the one outcome this
-                # codebase's conservative-correctness posture rules out, so
-                # until deletes are applied (see the tracking issue) a MOR
-                # table is a hard error, not a quiet approximation.
-                _assert_no_row_level_deletes(data_files, table_identity_str)
-
                 # Build manifest entries with resolved paths
                 entries = []
                 for file_task in data_files:
                     file_path = file_task.file.file_path
                     actual_path = self._resolve_file_path(table_uri, file_path)
-                    entries.append(ManifestEntry(file_path=file_path, actual_path=actual_path))
+                    entries.append(
+                        ManifestEntry(
+                            file_path=file_path,
+                            actual_path=actual_path,
+                            delete_files=_delete_files(file_task, table_identity_str),
+                        )
+                    )
 
                 manifest_resolution = ManifestResolution(data_files=entries)
                 span.set_attribute("files_count", len(entries))
@@ -514,14 +500,37 @@ class ReadPlanner:
             col_index_map = _build_column_index_map(pq_meta.parquet_schema)
             compiled_filters = _compile_filters(filters, col_index_map)
 
+            # Merge-on-read: rows this snapshot deleted from the file. The
+            # fetcher drops them, so the row group is cached without them,
+            # under a key that names the snapshot and so its deletes.
+            deleted = (
+                self._deleted_rows.for_data_file(table.io, file_path, entry.delete_files)
+                if entry.delete_files
+                else None
+            )
+            row_group_start = 0
+
             for rg_idx in range(pq_meta.num_row_groups):
                 total_row_groups += 1
                 rg_meta = pq_meta.row_group_metadata[rg_idx]
+                start = row_group_start
+                row_group_start += rg_meta.num_rows
 
                 # Check if we can prune this row group using compiled filters
                 if self._should_prune_row_group(rg_meta, compiled_filters):
                     pruned_row_groups += 1
                     continue
+
+                num_rows = rg_meta.num_rows
+                deleted_rows = (
+                    in_row_group(deleted, start, num_rows) if deleted is not None else None
+                )
+                if deleted_rows is not None:
+                    num_rows -= len(deleted_rows)
+                    if num_rows == 0:
+                        # Every row deleted: nothing to read.
+                        pruned_row_groups += 1
+                        continue
 
                 cache_key = CacheKey(
                     tenant_id=get_tenant_id(),
@@ -540,9 +549,10 @@ class ReadPlanner:
                     file_path=actual_path,
                     row_group_id=rg_idx,
                     cache_key=cache_key,
-                    num_rows=rg_meta.num_rows,
+                    num_rows=num_rows,
                     columns=columns,
                     estimated_bytes=rg_size,
+                    deleted_rows=deleted_rows,
                 )
                 plan.tasks.append(task)
                 estimated_bytes += rg_size

@@ -13,7 +13,7 @@ import json
 import sqlite3
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 from urllib.parse import unquote, urlparse
 
 import pyarrow as pa
@@ -164,10 +164,11 @@ class MetadataStore:
 
     def get_manifest(
         self, catalog_name: str, table_identity: str, snapshot_id: int
-    ) -> list[tuple[str, str]] | None:
+    ) -> list[dict[str, Any]] | None:
         """Get cached manifest resolution.
 
-        Returns list of (file_path, actual_path) tuples, or None if not cached.
+        Returns the data file entries as ``put_manifest`` stored them, or None
+        if not cached.
         """
         with self._get_conn() as conn:
             row = conn.execute(
@@ -181,15 +182,14 @@ class MetadataStore:
                 return None
 
             self.manifest_hits += 1
-            entries = json.loads(row["data_files_json"])
-            return [(e["file_path"], e["actual_path"]) for e in entries]
+            return json.loads(row["data_files_json"])
 
     def put_manifest(
         self,
         catalog_name: str,
         table_identity: str,
         snapshot_id: int,
-        data_files: list[tuple[str, str]],
+        data_files: list[dict[str, Any]],
     ) -> None:
         """Store manifest resolution.
 
@@ -197,16 +197,15 @@ class MetadataStore:
             catalog_name: Catalog name (e.g., 'default', 'prod')
             table_identity: Canonical table identity string
             snapshot_id: Iceberg snapshot ID
-            data_files: List of (file_path, actual_path) tuples
+            data_files: One JSON-serializable dict per data file
         """
-        entries = [{"file_path": fp, "actual_path": ap} for fp, ap in data_files]
         conn = self._get_conn()
         try:
             conn.execute(
                 """INSERT OR REPLACE INTO manifest_cache
                    (catalog_name, table_identity, snapshot_id, data_files_json)
                    VALUES (?, ?, ?, ?)""",
-                (catalog_name, table_identity, snapshot_id, json.dumps(entries)),
+                (catalog_name, table_identity, snapshot_id, json.dumps(data_files)),
             )
             conn.commit()
         finally:

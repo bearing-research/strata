@@ -9,8 +9,19 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
 
 ## Unreleased
 
+### Added
+
+- **Scans read Iceberg tables with merge-on-read deletes.** A table that
+  Spark, Flink or DuckDB deleted from without rewriting its data files used to
+  be refused. The scan now drops the rows its positional delete files (format
+  v2) and deletion vectors (format v3) name, and caches each row group without
+  them under the snapshot's key. Equality deletes are still refused.
+
 ### Changed
 
+- **pyiceberg 0.12 or newer is required.** Before 0.12, pyiceberg misread a
+  manifest whose entries leave their snapshot id to be inherited, which is how
+  DuckDB writes them, and dropped the delete files those manifests listed.
 - **The `[mcp]` extra needs mcp 2.2 or newer.** mcp 2 renamed `FastMCP` to
   `MCPServer`, and the notebook's `/mcp` endpoint now uses it. An mcp 1 left
   in the environment used to switch `/mcp` off without a word; the server now
@@ -46,6 +57,14 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   toward the cell's per-cell timeout, so a slow store (or a busy machine) could
   time out a cell whose code had not started. The parent's work is now off the
   cell's clock.
+- **A scan no longer returns rows DuckDB deleted.** 0.8.0 refused a
+  merge-on-read table only when pyiceberg reported delete files, and
+  pyiceberg before 0.12 lost the ones DuckDB writes, so the scan served the
+  deleted rows. If you scanned such a table with 0.8.0, its cached row groups
+  and scan artifacts still hold them: after upgrading, clear the row-group
+  cache (`POST /v1/cache/clear`), then run those scans once with
+  `refresh=True` (a notebook `@table` cell's `client.materialize` takes it
+  too). Snapshot resolutions the planner saved are redone on their own.
 
 ## 0.8.0 - 2026-09-27
 

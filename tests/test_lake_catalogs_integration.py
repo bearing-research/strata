@@ -76,7 +76,9 @@ def _reads_by_name_and_pin(config: StrataConfig, name: str, catalog, first: int)
     assert _rows(config, uri, snapshot_id=resolve_table_snapshot(pinned, config)) == [1, 2]
 
 
-def test_a_rest_catalog_table_is_read_by_name(tmp_path):
+@pytest.fixture
+def rest_catalog(tmp_path):
+    """Iceberg's REST catalog fixture, with a ``taxi`` namespace; the catalog and its properties."""
     from pyiceberg.catalog import load_catalog
 
     warehouse = tmp_path / "rest-warehouse"
@@ -104,13 +106,51 @@ def test_a_rest_catalog_table_is_read_by_name(tmp_path):
     )
     try:
         properties = {"type": "rest", "uri": f"http://127.0.0.1:{port}"}
-        catalog = load_catalog("rest", **properties)
-        first = _two_snapshots(catalog)
-        config = StrataConfig(cache_dir=tmp_path / "cache", catalogs={"rest": properties})
-
-        _reads_by_name_and_pin(config, "rest", catalog, first)
+        yield load_catalog("rest", **properties), properties
     finally:
         container.stop()
+
+
+def test_a_rest_catalog_table_is_read_by_name(tmp_path, rest_catalog):
+    catalog, properties = rest_catalog
+    first = _two_snapshots(catalog)
+    config = StrataConfig(cache_dir=tmp_path / "cache", catalogs={"rest": properties})
+
+    _reads_by_name_and_pin(config, "rest", catalog, first)
+
+
+# DuckDB deletes merge-on-read: a positional delete file on a v2 table, a
+# deletion vector (Puffin) on v3. Its manifests leave snapshot ids and sequence
+# numbers to be inherited, which pyiceberg before 0.12 misread, dropping the
+# deletes without a word.
+@pytest.mark.parametrize(
+    ("format_version", "delete_format"),
+    [("2", "PARQUET"), ("3", "PUFFIN")],
+    ids=["v2-position-deletes", "v3-deletion-vector"],
+)
+def test_rows_another_engine_deleted_are_not_scanned(
+    tmp_path, rest_catalog, format_version, delete_format
+):
+    import duckdb
+
+    catalog, properties = rest_catalog
+    catalog.create_namespace("taxi")
+    catalog.create_table("taxi.trips", schema=SCHEMA, properties={"format-version": format_version})
+    conn = duckdb.connect()
+    conn.execute("INSTALL iceberg; LOAD iceberg")
+    conn.execute(
+        f"ATTACH 'warehouse' AS lake "
+        f"(TYPE iceberg, ENDPOINT '{properties['uri']}', AUTHORIZATION_TYPE 'none')"
+    )
+    conn.execute("INSERT INTO lake.taxi.trips SELECT range FROM range(10)")
+    before = catalog.load_table("taxi.trips").current_snapshot().snapshot_id
+    conn.execute("DELETE FROM lake.taxi.trips WHERE id IN (2, 5)")
+
+    (task,) = catalog.load_table("taxi.trips").scan().plan_files()
+    assert [d.file_format.value for d in task.delete_files] == [delete_format]
+    config = StrataConfig(cache_dir=tmp_path / "cache", catalogs={"rest": properties})
+    assert _rows(config, "rest:taxi.trips") == [0, 1, 3, 4, 6, 7, 8, 9]
+    assert _rows(config, "rest:taxi.trips", snapshot_id=before) == list(range(10))
 
 
 def test_a_glue_catalog_table_is_read_by_name(tmp_path, monkeypatch):

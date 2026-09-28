@@ -703,8 +703,8 @@ class TestMetadataStore:
     def test_manifest_put_and_get(self, store):
         """Test basic manifest cache operations."""
         data_files = [
-            ("/data/f1.parquet", "/abs/f1.parquet"),
-            ("/data/f2.parquet", "/abs/f2.parquet"),
+            {"file_path": "/data/f1.parquet", "actual_path": "/abs/f1.parquet"},
+            {"file_path": "/data/f2.parquet", "actual_path": "/abs/f2.parquet"},
         ]
 
         store.put_manifest("default", "ns.table", 123, data_files)
@@ -712,7 +712,7 @@ class TestMetadataStore:
         result = store.get_manifest("default", "ns.table", 123)
         assert result is not None
         assert len(result) == 2
-        assert result[0] == ("/data/f1.parquet", "/abs/f1.parquet")
+        assert result[0] == {"file_path": "/data/f1.parquet", "actual_path": "/abs/f1.parquet"}
 
     def test_manifest_miss(self, store):
         """Test manifest cache miss."""
