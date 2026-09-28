@@ -532,6 +532,18 @@ async def _execute_write_cell(
     }
 
 
+def _fetch_arrow_table(cursor: Any) -> Any:
+    """The result as an Arrow table, from a DuckDB or an ADBC cursor.
+
+    DuckDB (1.5+) calls it ``to_arrow_table`` and deprecates
+    ``fetch_arrow_table``; ADBC's DB-API cursor has only ``fetch_arrow_table``.
+    """
+    to_arrow_table = getattr(cursor, "to_arrow_table", None)
+    if to_arrow_table is not None:
+        return to_arrow_table()
+    return cursor.fetch_arrow_table()
+
+
 def _split_statements(body: str, dialect: str) -> list[str] | None:
     """The body's statements, sliced out of the text the cell declares.
 
@@ -729,7 +741,7 @@ def _sqlite_last_changes(conn: Any) -> int | None:
         cur = conn.cursor()
         try:
             cur.execute("SELECT changes()")
-            tbl = cur.fetch_arrow_table()
+            tbl = _fetch_arrow_table(cur)
             rows = tbl.to_pylist()
             if rows:
                 # ADBC returns the column under the literal expression
@@ -1140,7 +1152,7 @@ def _execute_query(
                 cursor.execute(rewritten, parameters=params)
             else:
                 cursor.execute(rewritten)
-            return cursor.fetch_arrow_table()
+            return _fetch_arrow_table(cursor)
         finally:
             _safely_close(cursor)
     finally:

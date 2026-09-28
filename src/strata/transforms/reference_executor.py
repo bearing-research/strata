@@ -240,7 +240,7 @@ class DuckDBExecutor(BaseExecutor):
                 )
 
             # Execute query
-            result = conn.execute(sql).fetch_arrow_table()
+            result = conn.execute(sql).to_arrow_table()
             logs_buffer.write(f"Result: {result.num_rows} rows\n")
 
             # Serialize to Arrow IPC stream

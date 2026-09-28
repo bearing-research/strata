@@ -16,7 +16,7 @@ present, which is true in a dev tree but not in the CI unit-test job — so it i
 environment-dependent and not part of the API surface this guards.
 """
 
-from fastapi.routing import APIRoute
+from fastapi.routing import APIRoute, iter_route_contexts
 
 from strata.server import app
 
@@ -196,10 +196,13 @@ EXPECTED_ROUTES = [
 
 
 def _current_routes():
+    # iter_route_contexts, not app.routes: since FastAPI 0.141 an included
+    # router is one entry in app.routes, and its routes (with the dependencies
+    # they get at include time) are only reachable through their contexts.
     return sorted(
         (route.path, ",".join(sorted(route.methods)), len(route.dependencies))
-        for route in app.routes
-        if isinstance(route, APIRoute) and route.path not in _EXCLUDED_PATHS
+        for route in iter_route_contexts(app.routes)
+        if isinstance(route.original_route, APIRoute) and route.path not in _EXCLUDED_PATHS
     )
 
 

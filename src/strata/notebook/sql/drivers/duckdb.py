@@ -460,7 +460,7 @@ class _ReadOnlyDuckDB:
 
     This proxy intercepts ``cursor()`` so each new cursor
     immediately enters its own RO transaction. Everything else
-    (``execute``, ``fetchall``, ``fetch_arrow_table``, ``close``,
+    (``execute``, ``fetchall``, ``to_arrow_table``, ``close``,
     context-manager protocol) is forwarded transparently. Tests
     and integration callers don't need to know the proxy is here.
     """
