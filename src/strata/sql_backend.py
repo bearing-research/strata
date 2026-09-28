@@ -201,9 +201,11 @@ class StoreConnection(Protocol):
     103 ``conn.execute`` call sites unchanged.
     """
 
-    def execute(self, sql: str, params: Sequence[Any] = ()) -> Any: ...
+    # Positional-only, as sqlite3.Connection's are: every call site passes them
+    # positionally, and a keyword-capable protocol would not match sqlite3.
+    def execute(self, sql: str, params: Sequence[Any] = (), /) -> Any: ...
 
-    def executescript(self, sql: str) -> Any: ...
+    def executescript(self, sql: str, /) -> Any: ...
 
     def commit(self) -> None: ...
 
@@ -364,7 +366,7 @@ class SqliteDialect:
         conn.execute("PRAGMA synchronous=NORMAL")
         conn.execute("PRAGMA foreign_keys=ON")
         conn.row_factory = sqlite3.Row
-        return conn  # type: ignore[return-value]
+        return conn
 
     def adapt_ddl(self, sql: str) -> str:
         # The DDL is already written in this dialect.
@@ -449,9 +451,6 @@ class _Row(Mapping):
             # letting list.index's ValueError escape would make row.get("x")
             # raise instead of returning the default.
             raise KeyError(key) from None
-
-    def keys(self) -> tuple[str, ...]:  # type: ignore[override]
-        return self._columns
 
     def __iter__(self):
         return iter(self._columns)

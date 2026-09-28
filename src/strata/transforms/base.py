@@ -46,7 +46,9 @@ class Transform[P: BaseModel](ABC):
     """
 
     ref: ClassVar[str]
-    Params: ClassVar[type[BaseModel]]
+    # Not ClassVar: typing forbids a type variable there, and this is what
+    # ties parse_params's result to P.
+    Params: type[P]
 
     def validate(self, inputs: list[pa.Table], params: P) -> None:
         """Validate inputs and parameters before execution.
@@ -104,7 +106,7 @@ class Transform[P: BaseModel](ABC):
         return [f"input{i}" for i in range(num_inputs)]
 
     @classmethod
-    def parse_params(cls, params: dict[str, Any]) -> BaseModel:
+    def parse_params(cls, params: dict[str, Any]) -> P:
         """Parse and validate raw parameters against ``Params``.
 
         Parameters

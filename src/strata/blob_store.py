@@ -20,11 +20,12 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import io
 import logging
 import os
 import tempfile
 from abc import ABC, abstractmethod
-from collections.abc import Callable, Iterator
+from collections.abc import Buffer, Callable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING, BinaryIO
@@ -872,34 +873,32 @@ class GCSBlobStore(BlobStore):
         )
 
 
-class _AzureDownloadReader:
-    """Minimal file-like wrapper over an Azure ``StorageStreamDownloader``."""
+class _AzureDownloadReader(io.RawIOBase):
+    """A raw stream over an Azure ``StorageStreamDownloader``'s chunks.
+
+    Wrapped in ``io.BufferedReader`` it is a real binary file, not a lookalike:
+    ``read(size)`` fills up to *size* across chunks, and ``read()``, iteration
+    and ``shutil.copyfileobj`` work as on any file.
+    """
 
     def __init__(self, downloader: StorageStreamDownloader) -> None:
-        self._downloader = downloader
         self._chunks: Iterator[bytes] = iter(downloader.chunks())
         self._buffer = b""
-        self._closed = False
 
-    def read(self, size: int = -1) -> bytes:
-        if self._closed:
-            raise ValueError("read from closed Azure blob reader")
-        if size < 0:
-            parts = [self._buffer]
-            self._buffer = b""
-            for chunk in self._chunks:
-                parts.append(chunk)
-            return b"".join(parts)
-        while len(self._buffer) < size:
-            try:
-                self._buffer += next(self._chunks)
-            except StopIteration:
-                break
-        out, self._buffer = self._buffer[:size], self._buffer[size:]
-        return out
+    def readable(self) -> bool:
+        return True
 
-    def close(self) -> None:
-        self._closed = True
+    def readinto(self, buffer: Buffer, /) -> int:
+        while not self._buffer:
+            chunk = next(self._chunks, None)
+            if chunk is None:
+                return 0
+            self._buffer = chunk
+        view = memoryview(buffer).cast("B")
+        n = min(len(view), len(self._buffer))
+        view[:n] = self._buffer[:n]
+        self._buffer = self._buffer[n:]
+        return n
 
 
 class AzureBlobStore(BlobStore):
@@ -1016,7 +1015,7 @@ class AzureBlobStore(BlobStore):
 
         @contextmanager
         def _reader() -> Iterator[BinaryIO]:
-            stream = _AzureDownloadReader(downloader)
+            stream = io.BufferedReader(_AzureDownloadReader(downloader))
             try:
                 yield stream
             finally:

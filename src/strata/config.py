@@ -1489,7 +1489,7 @@ class StrataConfig(BaseSettings):
         )
 
 
-def _get_env_overrides() -> dict:
+def _get_env_overrides() -> dict[str, Any]:
     """Get configuration overrides from environment variables.
 
     This function handles AWS_* fallbacks and complex parsing that
@@ -1502,7 +1502,7 @@ def _get_env_overrides() -> dict:
     - GOOGLE_APPLICATION_CREDENTIALS: GCS credentials fallback
     - STRATA_CATALOG_URI: Catalog database URI (merged into catalog_properties)
     """
-    overrides = {}
+    overrides: dict[str, Any] = {}
 
     # S3 configuration (prefer STRATA_* but fall back to AWS_* for compatibility)
     if s3_region := os.environ.get("STRATA_S3_REGION") or os.environ.get("AWS_REGION"):
