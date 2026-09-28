@@ -151,6 +151,9 @@ dev = [
     "pytest-cov>=7.0.0",
     "pytest-xdist>=3.6.0",
     "pytest-timeout>=2.3.0",
+    # Starlette's TestClient runs on httpx2 when it is installed and warns
+    # that its httpx fallback is deprecated.
+    "httpx2>=2.13.1",
     "ruff>=0.8.0",
     "moto[s3]>=5.2.3",
     "boto3>=1.35.0",

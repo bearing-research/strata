@@ -25,13 +25,26 @@ jobs:
         with:
           node-version: "26"
 
-      - name: Run pre-commit
-        uses: pre-commit/action@2c7b3805fd2a0fd8c1884dcaebf91fc102a13ecd  # v3.0.1
-
-      # Dependabot's pip updates edit pyproject.toml and leave uv.lock alone,
-      # so a raised lower bound can merge green while the lockfile still pins
-      # a version below it. Nothing else in CI reads the lock strictly.
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v10.2.0
 
+      # What pre-commit/action did, inlined: its latest release (v3.0.1) still
+      # caches with actions/cache@v4, which targets the deprecated Node 20. And
+      # pre-commit comes from uv.lock (the dev group), hash-pinned, not an
+      # unpinned pip install.
+      - name: Install pre-commit
+        run: uv sync --frozen --only-group dev --no-install-project
+
+      - name: Cache pre-commit environments
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+        with:
+          path: ~/.cache/pre-commit
+          key: pre-commit-3|${{ env.pythonLocation }}|${{ hashFiles('.pre-commit-config.yaml') }}
+
+      - name: Run pre-commit
+        run: uv run --no-sync pre-commit run --show-diff-on-failure --color=always --all-files
+
+      # A pyproject.toml edit that leaves uv.lock behind (as Dependabot's pip
+      # updater did) can otherwise merge green with a lockfile below a raised
+      # lower bound. Nothing else in CI reads the lock strictly.
       - name: Lockfile matches pyproject.toml
         run: uv lock --check

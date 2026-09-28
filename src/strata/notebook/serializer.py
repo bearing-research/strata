@@ -1942,13 +1942,13 @@ def _tensor_from_table(table: Any) -> Any:
     source = meta.get(_META_SOURCE, b"")
     if source == _SOURCE_TORCH:
         try:
-            import torch
+            import torch  # ty: ignore[unresolved-import]  # optional; not in the dev env
         except ImportError:
             return arr
         return torch.from_numpy(arr)
     if source == _SOURCE_JAX:
         try:
-            import jax.numpy as jnp
+            import jax.numpy as jnp  # ty: ignore[unresolved-import]  # optional
         except ImportError:
             return arr
         converted = jnp.asarray(arr)
@@ -1964,7 +1964,7 @@ def _tensor_from_table(table: Any) -> Any:
             # proof that the notebook wants x64. A notebook that never moves
             # one is untouched, so this cannot quietly change the arithmetic of
             # a cell that chose float32.
-            import jax
+            import jax  # ty: ignore[unresolved-import]  # optional
 
             jax.config.update("jax_enable_x64", True)
             converted = jnp.asarray(arr)
