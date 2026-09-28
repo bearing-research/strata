@@ -7,6 +7,15 @@ exhaustive commit history.
 
 The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com/bearing-research/strata/blob/main/CHANGELOG.md) in the repo root; this docs page mirrors it. Maintainers: keep the two in sync when editing.
 
+## Unreleased
+
+### Changed
+
+- **DuckDB 1.5 or newer is required** (`strata-notebook`, its `sql-duckdb`
+  extra, and `strata-client`'s `duckdb` and `all` extras). DuckDB 1.5
+  deprecates `fetch_arrow_table()` for `to_arrow_table()`, which a connection
+  only has from 1.5, so Strata now calls the new name.
+
 ## 0.8.0 - 2026-09-27
 
 A notebook stops being one person's machine. This release is about the three

@@ -135,7 +135,7 @@ class DuckDBSQLTransform(Transform[DuckDBSQLParams]):
             conn.register(name, table)
 
         # Execute query and return as Arrow
-        result = conn.execute(params.sql).fetch_arrow_table()
+        result = conn.execute(params.sql).to_arrow_table()
         return result
 
 
