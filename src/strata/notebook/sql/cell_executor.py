@@ -153,11 +153,12 @@ async def execute_sql_cell(
         return _error_result(str(exc), start_time)
 
     # The fingerprint is the freshness of the tables the analyzer could name.
-    # A table named only at run time (Snowflake's IDENTIFIER($var)), or SQL
-    # sqlglot cannot parse at all, is missing from it, so a cached result
-    # could outlive a change to that table: run the query instead. A cell that
+    # A table named only at run time (Snowflake's IDENTIFIER($var), a table
+    # function, a file path) is missing from it, so a cached result could
+    # outlive a change to that table: run the query instead. A cell that
     # declares session, ttl or forever has said what its rows depend on.
-    if policy.kind == "fingerprint" and (analysis.unresolved_tables or analysis.parse_error):
+    runs_every_time = policy.kind == "fingerprint" and bool(analysis.unresolved_tables)
+    if runs_every_time:
         use_cache = False
 
     # The on-disk spec keeps relative paths verbatim (so notebook.toml
@@ -279,6 +280,16 @@ async def execute_sql_cell(
         )
 
     blob = _serialize_arrow_ipc(table)
+    if runs_every_time:
+        # Nothing the hash above folds moves when the unnamed table changes, so
+        # every run carried the same provenance, and a downstream cell keyed on
+        # it kept its cached result from the old rows. The rows themselves are
+        # what this run knows: fold them in, and a consumer re-runs exactly
+        # when the data changed.
+        provenance_hash = derive_subkey(
+            provenance_hash, f"content={hashlib.sha256(blob).hexdigest()}"
+        )
+        var_provenance = derive_subkey(provenance_hash, output_name)
     artifact = artifact_mgr.store_cell_output(
         cell_id=cell_id,
         variable_name=output_name,

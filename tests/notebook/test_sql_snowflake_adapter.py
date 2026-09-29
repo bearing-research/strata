@@ -342,6 +342,35 @@ def test_probe_freshness_missing_table_distinct_from_present():
     assert a_present.value != a_missing.value
 
 
+def test_probes_ask_for_the_names_snowflake_stores():
+    """Snowflake stores an unquoted identifier uppercased, and
+    ``INFORMATION_SCHEMA`` compares names exactly. A cell that wrote
+    ``FROM mydb.public.events`` used to probe for ``events`` in ``"mydb"``,
+    found nothing, and folded the same "missing" token on every run, so
+    the cell never saw a write. A quoted name is stored as written."""
+    from strata.notebook.sql.analyzer import analyze_sql_cell
+
+    src = '# @sql connection=db\nSELECT * FROM mydb.public.events JOIN "MixedCase" USING (id)'
+    tables = analyze_sql_cell(src, dialect=SnowflakeAdapter.sqlglot_dialect).tables
+    a = SnowflakeAdapter()
+
+    def probe_params(probe) -> tuple[list[str], list[tuple]]:
+        cur = _FakeCursor([("CURRENT_DATABASE", ("MAIN_DB", "PUBLIC")), ("RETENTION_TIME", (1,))])
+        probe(_FakeConn(cur), tables)
+        info = [(sql, params) for sql, params in cur.executions if "INFORMATION_SCHEMA" in sql]
+        return [sql for sql, _ in info], [params for _, params in info]
+
+    for probe in (a.probe_freshness, a.probe_schema):
+        queries, params = probe_params(probe)
+        assert any('"MYDB".INFORMATION_SCHEMA' in q for q in queries)
+        assert sorted(params) == [("PUBLIC", "EVENTS"), ("PUBLIC", "MixedCase")]
+
+    _, params = probe_params(
+        lambda conn, tables: a.retention_until(conn, tables, "2026-05-01T00:00:00Z")
+    )
+    assert sorted(params) == [("PUBLIC", "EVENTS"), ("PUBLIC", "MixedCase")]
+
+
 def test_probe_freshness_empty_tables():
     """No tables touched → empty token, no queries issued."""
     cur = _FakeCursor([])

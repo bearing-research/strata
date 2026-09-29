@@ -589,21 +589,16 @@ def _validate_sql_cell_annotations(
             # name makes the executor re-run the query every time.
             reruns = sql_analysis.cache_policy.kind == "fingerprint"
             if sql_analysis.parse_error:
+                # The executor refuses SQL it cannot parse before it opens a
+                # connection, whatever the cache policy.
                 diagnostics.append(
                     AnnotationDiagnostic(
                         severity=DiagnosticSeverity.WARN,
                         code="sql_parse_error",
                         message=(
                             f"sqlglot couldn't parse this SQL cell: "
-                            f"{sql_analysis.parse_error}. The cell may still "
-                            "execute, but its tables can't be fingerprinted"
-                            + (
-                                ", so it re-runs every time instead of using its "
-                                "cache. Add `# @cache session` or `# @cache ttl=...` "
-                                "to reuse results."
-                                if reruns
-                                else "."
-                            )
+                            f"{sql_analysis.parse_error}. The cell will not run "
+                            "until its SQL parses."
                         ),
                         line=None,
                     )
@@ -615,8 +610,9 @@ def _validate_sql_cell_annotations(
                         severity=DiagnosticSeverity.WARN,
                         code="sql_dynamic_table",
                         message=(
-                            f"{named} names its table only when the query runs, "
-                            "so the cache can't tell when that table changes: "
+                            f"{named} is resolved only when the query runs (a "
+                            "table named at run time, a table function or a "
+                            "file), so the cache can't tell when it changes: "
                             "this cell re-runs every time. Add `# @cache session` "
                             "or `# @cache ttl=...` to reuse results."
                         ),

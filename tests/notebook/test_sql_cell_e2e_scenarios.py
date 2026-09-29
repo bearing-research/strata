@@ -498,3 +498,73 @@ class TestAnOutsideWriteIsSeen:
 
         assert second.cache_hit is False
         assert _load_arrow(session, second.artifact_uri).column("total").to_pylist() == [110]
+
+
+class TestACellThatAlwaysRunsMovesItsConsumers:
+    """A SQL cell whose table no probe can name (Snowflake's
+    ``IDENTIFIER($tbl)``) skips its cache under the default policy, but its
+    provenance hash was the same on every run: the freshness token over no
+    tables is constant. A downstream cell keyed on that hash kept serving what
+    it computed from the old rows."""
+
+    @staticmethod
+    def _as_if_the_table_were_named_at_run_time(monkeypatch: pytest.MonkeyPatch) -> None:
+        import dataclasses
+
+        from strata.notebook.sql import cell_executor
+        from strata.notebook.sql.adapter import FreshnessToken
+
+        real = cell_executor.analyze_sql_cell
+
+        def analyze(source: str, **kwargs: Any) -> Any:
+            return dataclasses.replace(
+                real(source, **kwargs), tables=[], unresolved_tables=["IDENTIFIER($tbl)"]
+            )
+
+        monkeypatch.setattr(cell_executor, "analyze_sql_cell", analyze)
+        # What Snowflake's probe answers for an empty table list. SQLite's own
+        # probe is database-wide and would see the write on its own.
+        monkeypatch.setattr(
+            cell_executor, "_run_probes", lambda *a, **k: (FreshnessToken(value=b""), None)
+        )
+
+    @pytest.mark.asyncio
+    async def test_a_consumer_re_runs_exactly_when_the_rows_changed(self, tmp_path, monkeypatch):
+        from strata.notebook.executor import CellExecutor
+
+        self._as_if_the_table_were_named_at_run_time(monkeypatch)
+        db_path = tmp_path / "events.db"
+        _seed_sqlite(db_path)
+        nb_dir = _build_notebook(
+            tmp_path,
+            db_path=db_path,
+            cells=[
+                ("sql", "sql", "# @sql connection=db\n# @name q\nSELECT id FROM events\n"),
+                ("count", "python", "total = len(q)\n"),
+                ("show", "python", "print(total)\n"),
+            ],
+        )
+        executor = CellExecutor(_session(nb_dir))
+
+        async def run(cell_id: str) -> Any:
+            result = await executor.execute_cell(cell_id, _read(nb_dir, cell_id))
+            assert result.success, result.error
+            return result
+
+        await run("sql")
+        await run("count")
+
+        # The same rows again: the query runs, and its consumer keeps its cache.
+        assert (await run("sql")).cache_hit is False
+        assert (await run("count")).cache_hit is True
+
+        with sqlite3.connect(db_path) as conn:
+            conn.execute("INSERT INTO events (id, name, value) VALUES (4, 'delta', 40)")
+            conn.commit()
+
+        await run("sql")
+        count = await run("count")
+        show = await run("show")
+
+        assert count.cache_hit is False, "the consumer served a count of the old rows"
+        assert show.stdout.strip() == "4"
