@@ -2011,9 +2011,10 @@ async def materialize_artifact(request: MaterializeRequest):
         except HTTPException as e:
             # Authz / not-found failures must propagate: a denied table input
             # (403 from the table ACL) or a missing name (404) must never fall
-            # back to building anyway. Only the "unresolvable URI" 400 — fake or
-            # legacy URIs used in tests — uses the raw URI as its version.
-            if e.status_code in (401, 403, 404):
+            # back to building anyway, nor may a table Strata refuses to read
+            # (422). Only the "unresolvable URI" 400 — fake or legacy URIs used
+            # in tests — uses the raw URI as its version.
+            if e.status_code in (401, 403, 404, 422):
                 raise
             input_versions[input_uri] = input_uri
 
@@ -2450,7 +2451,7 @@ async def _handle_identity_materialize(
         plan.owner_tenant = principal.tenant
 
     # Compute provenance hash for identity transform
-    from strata.services.materialize import materialize_service
+    from strata.services.materialize import materialize_service, table_input_version
 
     provenance_hash = materialize_service.compute_identity_provenance(
         table_identity=str(plan.table_identity),
@@ -2462,8 +2463,9 @@ async def _handle_identity_materialize(
     # Get artifact store (allow writes for personal mode)
     store = get_artifact_store(state.config.artifact_dir)
 
-    # Input version for staleness tracking
-    input_versions = {table_uri: str(plan.snapshot_id)}
+    # Input version for staleness tracking: the form name-status compares
+    # against, so a named scan goes stale on a schema change too.
+    input_versions = {table_uri: table_input_version(plan)}
 
     # Check for existing artifact with same provenance
     existing = None

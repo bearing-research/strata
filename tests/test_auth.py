@@ -360,6 +360,7 @@ class TestTransformInputAclParity:
         identity = TableIdentity(catalog="file", namespace=namespace, table="events")
         plan = MagicMock()
         plan.snapshot_id = 4242
+        plan.schema_id = 0
         plan.table_identity = identity
 
         state = MagicMock()
@@ -408,7 +409,7 @@ class TestTransformInputAclParity:
         server_module = self._patch_state(monkeypatch, namespace="public")
         set_principal(Principal(id="analyst"))
         try:
-            assert server_module._resolve_input_version("file:///wh#public.events") == "4242"
+            assert server_module._resolve_input_version("file:///wh#public.events") == "4242:0"
         finally:
             set_principal(None)
 
