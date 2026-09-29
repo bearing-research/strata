@@ -4,7 +4,7 @@ import json
 import os
 import threading
 import time
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import Protocol
 
@@ -615,7 +615,11 @@ class CachedFetcher:
             s3_filesystem = None
             if config.s3_region or config.s3_access_key or config.s3_anonymous:
                 s3_filesystem = config.get_s3_filesystem()
-            self.fetcher = create_fetcher(self.metrics, s3_filesystem=s3_filesystem)
+            self.fetcher = create_fetcher(
+                self.metrics,
+                s3_filesystem=s3_filesystem,
+                max_equality_delete_rows=config.max_equality_delete_rows,
+            )
         else:
             self.fetcher = fetcher
 
@@ -723,16 +727,7 @@ class CachedFetcher:
         ) as span:
             fetch_task = task
             if cache_full_row_groups and task.columns is not None:
-                fetch_task = Task(
-                    file_path=task.file_path,
-                    row_group_id=task.row_group_id,
-                    cache_key=task.cache_key,
-                    num_rows=task.num_rows,
-                    columns=None,
-                    estimated_bytes=task.estimated_bytes,
-                    deleted_rows=task.deleted_rows,
-                    file_columns=task.file_columns,
-                )
+                fetch_task = replace(task, columns=None)
             batch = self.fetcher.fetch(fetch_task)
             span.set_attribute("bytes_read", batch.nbytes)
             span.set_attribute("num_rows", batch.num_rows)

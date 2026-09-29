@@ -198,6 +198,7 @@ class StrataConfig(BaseSettings):
         plan_timeout_seconds = 30.0
         scan_timeout_seconds = 300.0
         max_response_bytes = 536870912  # 512 MB
+        max_equality_delete_rows = 10000000
 
         # Metadata persistence
         metadata_db = "/var/lib/strata/meta.sqlite"
@@ -263,6 +264,11 @@ class StrataConfig(BaseSettings):
     plan_timeout_seconds: Annotated[float, Field(gt=0)] = 30.0
     scan_timeout_seconds: Annotated[float, Field(gt=0)] = 300.0
     max_response_bytes: Annotated[int, Field(gt=0)] = 512 * 1024 * 1024  # 512 MB
+    # Iceberg equality deletes a row group may need in memory at once (all
+    # the delete rows whose key range can meet it). A scan over the limit is
+    # refused while planning, with a pointer to compaction; see
+    # iceberg_equality.
+    max_equality_delete_rows: Annotated[int, Field(ge=0)] = 10_000_000
     # How long a completed/abandoned stream's state lingers before cleanup (a
     # memory/resource knob; also lets tests use a short TTL via config instead of
     # mutating server state).

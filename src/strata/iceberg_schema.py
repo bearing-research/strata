@@ -230,6 +230,14 @@ def file_columns(
     return tuple(columns)
 
 
+def stored_columns(
+    file_schema: pa.Schema, snapshot_schema: Schema, name_mapping: NameMapping | None
+) -> dict[int, str]:
+    """The file's top-level columns by field id (by the name mapping when it has no ids)."""
+    mapping = name_mapping or create_mapping_from_schema(snapshot_schema)
+    return {field.field_id: field.name for field in pyarrow_to_schema(file_schema, mapping).fields}
+
+
 def read_as_snapshot(
     table: pa.Table, columns: tuple[Column, ...], names: list[str] | None
 ) -> pa.Table:

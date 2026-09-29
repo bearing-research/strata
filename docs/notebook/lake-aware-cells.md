@@ -194,9 +194,12 @@ inputs change; `@table` adds the lake snapshot to the mix.
   deletes from a table without rewriting its data files, the scan drops the
   rows the snapshot's positional delete files (format v2) or deletion vectors
   (format v3) name, and caches the row groups without them. Equality deletes,
-  which Flink writes for upserts, are not supported: the scan fails rather than
-  return rows it should not. Compact such a table (`rewrite_data_files`), or
-  pin a snapshot taken before the deletes.
+  which Flink and CDC sinks write for upserts, are applied too: every older
+  row whose key a delete names is dropped, null matching null. Applying them
+  holds the delete keys in memory, so a row group that would need more than
+  `max_equality_delete_rows` of them (10 million by default) is refused with a
+  message saying so; compact the table (`rewrite_data_files`) to bring the
+  count down.
 - **Schema changes are read the way Iceberg defines them.** Columns are
   matched by field id, not by name, so an older data file reads as the table's
   schema: an added column is null in it, a renamed column comes back under its

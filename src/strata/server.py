@@ -60,7 +60,7 @@ from strata.logging import (
     request_context_middleware,
 )
 from strata.metrics import MetricsCollector
-from strata.planner import ReadPlanner
+from strata.planner import ReadPlanner, UnsupportedTableFormatError
 from strata.pool_metrics import get_connection_metrics, get_pool_tracker
 from strata.rate_limiter import (
     RateLimitConfig,
@@ -2412,6 +2412,10 @@ async def _handle_identity_materialize(
             status_code=504,
             detail=f"Planning timed out after {plan_timeout}s.",
         )
+    except UnsupportedTableFormatError as e:
+        # A table Strata will not read (an unreadable delete file, too many
+        # pending equality deletes): the message says why and what to do.
+        raise HTTPException(status_code=422, detail=str(e)) from e
 
     # Enforce task limit
     max_tasks = state.config.max_tasks_per_scan

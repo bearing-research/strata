@@ -79,7 +79,8 @@ def _stat_identity(file_path: str) -> tuple[float | None, int | None]:
 # another version is discarded.
 #   1: manifest entries record each data file's delete files (0.8.0 wrote
 #      rows without them, and pyiceberg < 0.12 could lose a table's deletes)
-METADATA_STORE_VERSION = 1
+#   2: and its equality deletes
+METADATA_STORE_VERSION = 2
 
 
 class MetadataStore:
