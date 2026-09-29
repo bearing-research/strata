@@ -73,7 +73,7 @@ from strata.notebook.analyzer import imported_names
 from strata.notebook.annotations import CellAnnotations, LoopAnnotation, parse_annotations
 from strata.notebook.credentials import CredentialResolver
 from strata.notebook.dag import SweepProducer
-from strata.notebook.dependencies import UV_NOT_FOUND_MESSAGE, resolve_uv
+from strata.notebook.dependencies import UV_NOT_FOUND_MESSAGE, resolve_uv, uv_env
 from strata.notebook.env import compute_execution_env_hash, narrow_env_for_provenance
 from strata.notebook.harness_user import (
     HarnessUser,
@@ -5252,7 +5252,9 @@ class CellExecutor:
             cwd=str(self.session.path),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
-            env=identity_env(self._harness_env(), harness_user),
+            # ``uv run`` must find the notebook's .venv, not the environment
+            # the server itself runs in.
+            env=uv_env(identity_env(self._harness_env(), harness_user)),
             **spawn_kwargs(harness_user),
             **subprocess_kwargs_for_new_group(),
         )

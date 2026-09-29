@@ -321,10 +321,13 @@ def _check_resolvable(notebook_dir: Path, result: ImportResult) -> None:
     """
     import subprocess
 
+    from strata.notebook.dependencies import uv_env
+
     try:
         completed = subprocess.run(
             ["uv", "lock"],
             cwd=str(notebook_dir),
+            env=uv_env(),
             capture_output=True,
             text=True,
             timeout=120,

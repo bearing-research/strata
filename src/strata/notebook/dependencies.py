@@ -17,7 +17,7 @@ import subprocess
 import threading
 import time
 import tomllib
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -229,6 +229,33 @@ def resolve_uv() -> str | None:
     return None
 
 
+# What points uv at an environment other than the notebook's own ``.venv``.
+# The server started under ``uv run`` carries its own VIRTUAL_ENV, and one
+# started with UV_PROJECT_ENVIRONMENT set would have every notebook command
+# sync, add to, lock against and run in the server's environment instead.
+# uv only warns about a VIRTUAL_ENV that is not the project's, but that warning
+# lands in every operation log a user reads.
+_FOREIGN_ENVIRONMENT_VARS = ("UV_PROJECT_ENVIRONMENT", "VIRTUAL_ENV")
+
+
+def uv_env(
+    base: Mapping[str, str] | None = None, extra: dict[str, str] | None = None
+) -> dict[str, str]:
+    """The environment for a uv command on a notebook.
+
+    *base* (the server's own environment by default) without the variables
+    that point uv at another environment, then *extra* on top, so a caller can
+    still choose one on purpose (the shared-environment backend does).
+    """
+    env = {
+        name: value
+        for name, value in (os.environ if base is None else base).items()
+        if name not in _FOREIGN_ENVIRONMENT_VARS
+    }
+    env.update(extra or {})
+    return env
+
+
 def _run_uv_command(
     notebook_dir: Path,
     args: list[str],
@@ -260,7 +287,7 @@ def _run_uv_command(
         completed = subprocess.run(
             command,
             cwd=str(notebook_dir),
-            env={**os.environ, **env} if env else None,
+            env=uv_env(extra=env),
             timeout=timeout,
             capture_output=True,
             check=True,
@@ -349,7 +376,7 @@ async def run_uv_command_streaming(
         process = await asyncio.create_subprocess_exec(
             *command,
             cwd=str(notebook_dir),
-            env={**os.environ, **env} if env else None,
+            env=uv_env(extra=env),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
