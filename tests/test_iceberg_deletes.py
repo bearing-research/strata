@@ -73,19 +73,19 @@ def _delete_file(path, rows: dict[str, list[int]], file_format=FileFormat.PARQUE
 
 @pytest.fixture
 def attach(monkeypatch):
-    """Attach delete files to every scan task, as pyiceberg's planner does."""
-    import pyiceberg.table as ib_table
+    """Attach delete files to every data file, as the index does for a real table."""
+    import strata.planner
 
-    real_plan_files = ib_table.DataScan.plan_files
+    real_plan_files = strata.planner.plan_files
 
     def attach(*delete_files: DataFile) -> None:
-        def plan_files(scan):
-            tasks = list(real_plan_files(scan))
-            for task in tasks:
-                task.delete_files = set(delete_files)
-            return tasks
+        def plan_files(*args, **kwargs):
+            planned = real_plan_files(*args, **kwargs)
+            for file in planned:
+                file.positional_deletes = set(delete_files)
+            return planned
 
-        monkeypatch.setattr(ib_table.DataScan, "plan_files", plan_files)
+        monkeypatch.setattr(strata.planner, "plan_files", plan_files)
 
     return attach
 

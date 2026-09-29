@@ -13,6 +13,7 @@ import pyarrow as pa
 import pyarrow.compute as _pc
 import pyarrow.parquet as pq
 
+from strata.iceberg_equality import EqualityDeleteSets, deleted_mask
 from strata.iceberg_schema import read_as_snapshot, source_columns
 from strata.metrics import MetricsCollector
 from strata.types import Task
@@ -70,10 +71,12 @@ class PyArrowFetcher:
         metrics: MetricsCollector | None = None,
         max_file_cache_size: int = _MAX_FILE_CACHE_SIZE,
         s3_filesystem: "pafs.S3FileSystem | None" = None,
+        max_equality_delete_rows: int = 10_000_000,
     ) -> None:
         self.metrics = metrics or MetricsCollector()
         self._max_file_cache_size = max_file_cache_size
         self._s3_filesystem = s3_filesystem
+        self._equality_deletes = EqualityDeleteSets(s3_filesystem, max_equality_delete_rows)
         # Each file's parsed footer, least recently used first. Footers are
         # cached rather than open handles: one Fetcher serves the whole fetch
         # thread pool (``max_fetch_workers``, 32 by default), which reads row
@@ -121,21 +124,44 @@ class PyArrowFetcher:
         columns = task.columns
         if task.file_columns is not None:
             columns = source_columns(task.file_columns, task.columns)
+        # Equality delete keys the caller did not ask for: read, used, dropped.
+        keys_only: list[str] = []
+        if task.equality_deletes and columns is not None:
+            keys_only = [
+                name
+                for _, name in task.equality_columns
+                if name is not None and name not in columns
+            ]
+            columns = [*columns, *keys_only]
         pf = self._open(task.file_path)
         try:
             table = pf.read_row_group(task.row_group_id, columns=columns)
         finally:
             self._close_parquet_file(pf)
+        # One mask over the rows as read, so positions stay the file's.
+        deleted = None
         if task.deleted_rows is not None:
             positions = pa.array(range(table.num_rows), pa.int64())
-            table = table.filter(pc.invert(pc.is_in(positions, value_set=task.deleted_rows)))
+            deleted = pc.is_in(positions, value_set=task.deleted_rows)
+        if task.equality_deletes:
+            hit = deleted_mask(
+                table,
+                dict(task.equality_columns),
+                task.equality_deletes,
+                self._equality_deletes.keys,
+            )
+            deleted = hit if deleted is None else pc.or_(deleted, hit)
+        if deleted is not None:
+            table = table.filter(pc.invert(deleted))
+        if keys_only:
+            table = table.drop_columns(keys_only)
         if task.file_columns is not None:
             table = read_as_snapshot(table, task.file_columns, task.columns)
 
         # Convert to a single RecordBatch
         # combine_chunks() is more efficient than manual concat_arrays
         if table.num_rows == 0:
-            batch = pa.RecordBatch.from_pydict({}, schema=table.schema)
+            batch = pa.RecordBatch.from_pylist([], schema=table.schema)
         else:
             # Combine chunked arrays, then get single batch
             table = table.combine_chunks()
@@ -172,6 +198,7 @@ class PyArrowFetcher:
 def create_fetcher(
     metrics: MetricsCollector | None = None,
     s3_filesystem: "pafs.S3FileSystem | None" = None,
+    max_equality_delete_rows: int = 10_000_000,
 ) -> Fetcher:
     """Factory function to create a Fetcher.
 
@@ -182,8 +209,12 @@ def create_fetcher(
     Args:
         metrics: Optional metrics collector
         s3_filesystem: Optional S3 filesystem for reading from S3
+        max_equality_delete_rows: Equality delete rows kept parsed in memory
+            (``StrataConfig.max_equality_delete_rows``)
 
     Returns:
         A Fetcher instance
     """
-    return PyArrowFetcher(metrics, s3_filesystem=s3_filesystem)
+    return PyArrowFetcher(
+        metrics, s3_filesystem=s3_filesystem, max_equality_delete_rows=max_equality_delete_rows
+    )

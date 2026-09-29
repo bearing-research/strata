@@ -25,7 +25,11 @@ from typing import TYPE_CHECKING
 import pyarrow as pa
 import pyarrow.ipc as ipc
 
-from strata.fast_io import IncrementalIpcMerger, validate_ipc_stream_reader
+from strata.fast_io import (
+    IncrementalIpcMerger,
+    validate_ipc_stream,
+    validate_ipc_stream_reader,
+)
 from strata.logging import get_logger
 from strata.pool_metrics import get_pool_tracker
 
@@ -284,7 +288,9 @@ class ScanBuildManager:
                     if out:
                         blob.write(out)
                         byte_size += len(out)
-                    row_count += task.num_rows
+                    # Counted from the rows sent: with equality deletes a task's
+                    # num_rows is only an upper bound.
+                    row_count += validate_ipc_stream(chunk)
 
                 if merger is not None:
                     tail = merger.finish()

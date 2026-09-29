@@ -8,8 +8,14 @@ MinIO container. Each test reads a table by catalog name the way a notebook's
 
 from __future__ import annotations
 
+import io
+import shutil
 import socket
+import tarfile
 import time
+import urllib.request
+from pathlib import Path
+from typing import Any, NamedTuple
 
 import docker
 import pyarrow as pa
@@ -76,9 +82,16 @@ def _reads_by_name_and_pin(config: StrataConfig, name: str, catalog, first: int)
     assert _rows(config, uri, snapshot_id=resolve_table_snapshot(pinned, config)) == [1, 2]
 
 
+class RestCatalog(NamedTuple):
+    catalog: Any
+    properties: dict[str, str]
+    container: Any  # the testcontainers container, for joining its network
+    warehouse: Path
+
+
 @pytest.fixture
 def rest_catalog(tmp_path):
-    """Iceberg's REST catalog fixture, with a ``taxi`` namespace; the catalog and its properties."""
+    """Iceberg's REST catalog fixture: the catalog, its properties, container and warehouse."""
     from pyiceberg.catalog import load_catalog
 
     warehouse = tmp_path / "rest-warehouse"
@@ -106,13 +119,13 @@ def rest_catalog(tmp_path):
     )
     try:
         properties = {"type": "rest", "uri": f"http://127.0.0.1:{port}"}
-        yield load_catalog("rest", **properties), properties
+        yield RestCatalog(load_catalog("rest", **properties), properties, container, warehouse)
     finally:
         container.stop()
 
 
 def test_a_rest_catalog_table_is_read_by_name(tmp_path, rest_catalog):
-    catalog, properties = rest_catalog
+    catalog, properties, _, _ = rest_catalog
     first = _two_snapshots(catalog)
     config = StrataConfig(cache_dir=tmp_path / "cache", catalogs={"rest": properties})
 
@@ -133,7 +146,7 @@ def test_rows_another_engine_deleted_are_not_scanned(
 ):
     import duckdb
 
-    catalog, properties = rest_catalog
+    catalog, properties, _, _ = rest_catalog
     catalog.create_namespace("taxi")
     catalog.create_table("taxi.trips", schema=SCHEMA, properties={"format-version": format_version})
     conn = duckdb.connect()
@@ -232,3 +245,88 @@ def test_a_gcs_warehouse_scans(tmp_path):
         _reads_by_name_and_pin(config, "lake", catalog, first)
     finally:
         container.stop()
+
+
+REST_IMAGE = "apache/iceberg-rest-fixture:1.9.2"
+JDK_IMAGE = "eclipse-temurin:17-jdk"
+# The REST fixture's jar holds iceberg-core, -data and Hadoop; writing Parquet
+# delete files takes these too (versions matching Iceberg 1.9.2).
+MAVEN_JARS = (
+    "org/apache/iceberg/iceberg-parquet/1.9.2/iceberg-parquet-1.9.2.jar",
+    "org/apache/parquet/parquet-hadoop-bundle/1.15.2/parquet-hadoop-bundle-1.15.2.jar",
+    "org/apache/parquet/parquet-avro/1.15.2/parquet-avro-1.15.2.jar",
+)
+
+
+@pytest.fixture(scope="module")
+def java_equality_writer(tmp_path_factory) -> tuple[Path, str]:
+    """tests/java/EqualityDeletes.java compiled: Iceberg's own Java writer, the
+    one Flink's upsert sink uses. Returns its directory and classpath."""
+    root = tmp_path_factory.mktemp("java")
+    client = docker.from_env()
+    try:
+        client.images.pull(JDK_IMAGE)
+        client.images.pull(REST_IMAGE)
+        for path in MAVEN_JARS:
+            urllib.request.urlretrieve(
+                f"https://repo1.maven.org/maven2/{path}", root / path.rsplit("/", 1)[1]
+            )
+    except Exception as exc:
+        pytest.skip(f"Java writer unavailable (image or Maven Central unreachable): {exc}")
+    fixture = client.containers.create(REST_IMAGE)
+    try:
+        archive, _ = fixture.get_archive("/usr/lib/iceberg-rest/iceberg-rest-adapter.jar")
+        with tarfile.open(fileobj=io.BytesIO(b"".join(archive))) as tar:
+            tar.extractall(root, filter="data")
+    finally:
+        fixture.remove()
+    shutil.copy(Path(__file__).parent / "java" / "EqualityDeletes.java", root)
+    jars = ["iceberg-rest-adapter.jar", *(path.rsplit("/", 1)[1] for path in MAVEN_JARS)]
+    classpath = ":".join(f"/w/{jar}" for jar in jars)
+    client.containers.run(
+        JDK_IMAGE,
+        ["javac", "-cp", classpath, "EqualityDeletes.java"],
+        volumes={str(root): {"bind": "/w", "mode": "rw"}},
+        working_dir="/w",
+        remove=True,
+    )
+    return root, f"/w:{classpath}"
+
+
+def test_rows_iceberg_java_deleted_by_key_are_not_scanned(
+    tmp_path, rest_catalog, java_equality_writer
+):
+    """A real equality delete: Iceberg's Java writer deletes ids 2 and 4 by value."""
+    catalog, properties, container, warehouse = rest_catalog
+    root, classpath = java_equality_writer
+    catalog.create_namespace("taxi")
+    catalog.create_table("taxi.trips", schema=SCHEMA)
+    catalog.load_table("taxi.trips").append(pa.table({"id": pa.array([1, 2, 3, 4], pa.int64())}))
+
+    docker.from_env().containers.run(
+        JDK_IMAGE,
+        [
+            "java",
+            "-cp",
+            classpath,
+            "EqualityDeletes",
+            "http://localhost:8181",
+            "taxi.trips",
+            "id",
+            "2",
+            "4",
+        ],
+        network_mode=f"container:{container.get_wrapped_container().id}",
+        volumes={
+            str(root): {"bind": "/w", "mode": "ro"},
+            str(warehouse): {"bind": str(warehouse), "mode": "rw"},
+        },
+        user="0",
+        remove=True,
+    )
+    config = StrataConfig(cache_dir=tmp_path / "cache", catalogs={"rest": properties})
+    assert _rows(config, "rest:taxi.trips") == [1, 3]
+
+    # A row written after the delete is not deleted by it.
+    catalog.load_table("taxi.trips").append(pa.table({"id": pa.array([2], pa.int64())}))
+    assert _rows(config, "rest:taxi.trips") == [1, 2, 3]

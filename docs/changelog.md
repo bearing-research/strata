@@ -15,7 +15,15 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   Spark, Flink or DuckDB deleted from without rewriting its data files used to
   be refused. The scan now drops the rows its positional delete files (format
   v2) and deletion vectors (format v3) name, and caches each row group without
-  them under the snapshot's key. Equality deletes are still refused.
+  them under the snapshot's key.
+- **Scans read Iceberg tables with equality deletes**, which Flink's upsert
+  sink and CDC pipelines write, and which pyiceberg itself cannot yet plan.
+  Every older row whose key a delete names is dropped, null matching null, in
+  the delete's partition or across the table for an unpartitioned one. A
+  delete file whose key range cannot meet a row group is skipped for it.
+  Applying equality deletes holds their keys in memory, so a row group that
+  would need more than `max_equality_delete_rows` (10 million by default) is
+  refused with a message pointing at compaction, never read partially.
 - **Scans read Iceberg tables whose schema changed.** Columns are matched by
   field id, so a table with an added column, which used to be refused, reads
   its older files with the column null, and a widened type comes back wide. A
@@ -48,6 +56,12 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
 
 ### Fixed
 
+- **A table Strata refuses to scan says why.** `POST /v1/materialize`
+  returned a bare 500 for a table it cannot read (an unreadable delete file,
+  now too many pending equality deletes); it now returns 422 with the reason.
+- **A row group left with no rows is read as empty.** Building its empty
+  batch raised a `KeyError`; equality deletes can now remove every row of
+  one.
 - **A SQL cell reading a catalog table under an alias runs again.** Pinning
   `lake.taxi.trips t` to its snapshot wrote `AT (VERSION => n) AS t`, which
   DuckDB rejects as a syntax error; the pin now comes after the alias. Any read

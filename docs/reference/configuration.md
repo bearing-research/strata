@@ -79,6 +79,7 @@ proxy_token = "…"           # or STRATA_PROXY_TOKEN
 | `STRATA_PLAN_TIMEOUT_SECONDS` | `30.0`               | Planning timeout                    |
 | `STRATA_SCAN_TIMEOUT_SECONDS` | `300.0`              | Scan streaming timeout              |
 | `STRATA_MAX_RESPONSE_BYTES`   | `536870912` (512 MB) | Max response size (413 if exceeded) |
+| `STRATA_MAX_EQUALITY_DELETE_ROWS` | `10000000` | Iceberg equality delete rows a row group may need in memory; a scan over it is refused, pointing at compaction |
 | `STRATA_STREAM_STATE_TTL_SECONDS` | `300.0`          | How long a completed/abandoned stream's state lingers before cleanup |
 
 ## QoS (Two-Tier Admission)

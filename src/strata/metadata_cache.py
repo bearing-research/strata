@@ -20,7 +20,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from threading import Lock
-from typing import TYPE_CHECKING, NamedTuple, Protocol, overload
+from typing import TYPE_CHECKING, Any, NamedTuple, Protocol, overload
 
 import pyarrow as pa
 
@@ -270,6 +270,30 @@ class DeleteFileEntry:
     file_format: str  # "PARQUET" or "PUFFIN"
 
 
+@dataclass(frozen=True)
+class EqualityDeleteEntry:
+    """An equality delete file that applies to a data file (see iceberg_equality)."""
+
+    file_path: str  # As the manifest names it
+    actual_path: str  # Resolved for reading, like a data file's
+    equality_ids: tuple[int, ...]  # The key: rows equal on these field ids are deleted
+    record_count: int  # Delete rows in the file, for the equality-delete limit
+    # Per key field: (field id, lower bound, upper bound, null count) from the
+    # manifest, bounds as iceberg_equality.encode_bound keeps them.
+    bounds: tuple[tuple[int, str | None, str | None, int | None], ...] = ()
+
+    @classmethod
+    def from_json(cls, data: dict[str, Any]) -> "EqualityDeleteEntry":
+        """Rebuild an entry ``dataclasses.asdict`` wrote (JSON turns tuples into lists)."""
+        return cls(
+            file_path=data["file_path"],
+            actual_path=data["actual_path"],
+            equality_ids=tuple(data["equality_ids"]),
+            record_count=data["record_count"],
+            bounds=tuple(tuple(bound) for bound in data["bounds"]),
+        )
+
+
 @dataclass
 class ManifestEntry:
     """A single file entry from manifest resolution.
@@ -282,6 +306,9 @@ class ManifestEntry:
     # The snapshot's positional deletes for this file. Which ones apply is
     # pyiceberg's call (sequence numbers, partition, referenced file).
     delete_files: tuple[DeleteFileEntry, ...] = ()
+    # The snapshot's equality deletes for this file (sequence number and
+    # partition already matched; see iceberg_equality).
+    equality_deletes: tuple[EqualityDeleteEntry, ...] = ()
 
 
 @dataclass
@@ -779,6 +806,10 @@ class ManifestCache:
                             actual_path=entry["actual_path"],
                             delete_files=tuple(
                                 DeleteFileEntry(**delete) for delete in entry["delete_files"]
+                            ),
+                            equality_deletes=tuple(
+                                EqualityDeleteEntry.from_json(delete)
+                                for delete in entry["equality_deletes"]
                             ),
                         )
                         for entry in persisted

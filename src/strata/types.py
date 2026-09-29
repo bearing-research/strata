@@ -28,6 +28,7 @@ if TYPE_CHECKING:
     import pyarrow as pa
 
     from strata.iceberg_schema import Column
+    from strata.metadata_cache import EqualityDeleteEntry
 
 
 # ---------------------------------------------------------------------------
@@ -407,6 +408,12 @@ class Task:
     # How the file holds the snapshot's columns when its schema predates the
     # snapshot's (Iceberg schema evolution); None when it matches.
     file_columns: "tuple[Column, ...] | None" = None
+
+    # Equality deletes that may remove rows of this row group (merge-on-read
+    # by value), and for each key field id the file's column holding it (None
+    # when the file predates it). ``num_rows`` is an upper bound when set.
+    equality_deletes: "tuple[EqualityDeleteEntry, ...]" = ()
+    equality_columns: tuple[tuple[int, str | None], ...] = ()
 
     # Populated after fetch
     cached: bool = False

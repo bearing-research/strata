@@ -1,6 +1,7 @@
 """Read planner: builds ReadPlan from snapshot + filters + projection."""
 
 import time
+from collections.abc import Callable
 from pathlib import Path
 
 import pyarrow as pa
@@ -15,14 +16,17 @@ from strata.iceberg import (
     table_identity_for,
 )
 from strata.iceberg_deletes import READABLE_FORMATS, DeletedRows, in_row_group
+from strata.iceberg_equality import encode_bound, may_apply, plan_files
 from strata.iceberg_schema import (
     Column,
     UnsupportedTableFormatError,
     file_columns,
     snapshot_arrow_schema,
+    stored_columns,
 )
 from strata.metadata_cache import (
     DeleteFileEntry,
+    EqualityDeleteEntry,
     LRUCache,
     ManifestCache,
     ManifestEntry,
@@ -144,16 +148,14 @@ def _join_s3_path(base: str, relative: str) -> str:
     return _normalize_s3_path(f"{base}/{relative}")
 
 
-def _delete_files(file_task, table_identity: str) -> tuple[DeleteFileEntry, ...]:
-    """The positional deletes pyiceberg attached to *file_task*.
+def _delete_files(positional_deletes, table_identity: str) -> tuple[DeleteFileEntry, ...]:
+    """A data file's positional deletes: Parquet delete files or Puffin deletion vectors.
 
-    pyiceberg itself refuses equality deletes while planning the scan, so what
-    reaches here is positional: Parquet delete files or Puffin deletion vectors.
     ORC and Avro delete files are valid Iceberg but not readable here, and
     skipping one would return the rows it deletes.
     """
     entries = []
-    for delete_file in file_task.delete_files:
+    for delete_file in positional_deletes:
         file_format = delete_file.file_format.value
         if file_format not in READABLE_FORMATS:
             raise UnsupportedTableFormatError(
@@ -163,6 +165,61 @@ def _delete_files(file_task, table_identity: str) -> tuple[DeleteFileEntry, ...]
                 "(rewrite_data_files), or scan a snapshot taken before the deletes."
             )
         entries.append(DeleteFileEntry(file_path=delete_file.file_path, file_format=file_format))
+    return tuple(sorted(entries, key=lambda entry: entry.file_path))
+
+
+def _equality_deletes(
+    equality_deletes, table, table_identity: str, resolve: Callable[[str], str]
+) -> tuple[EqualityDeleteEntry, ...]:
+    """A data file's equality deletes, with what planning needs to prune and limit them.
+
+    Keys are matched by field id against the data file's top-level columns; a
+    key inside a struct is refused, as is a delete file Strata cannot read.
+    """
+    top_level = {
+        field.field_id: field.field_type
+        for schema in table.metadata.schemas
+        for field in schema.fields
+    }
+    entries = []
+    for delete_file in equality_deletes:
+        file_format = delete_file.file_format.value
+        if file_format != "PARQUET":
+            raise UnsupportedTableFormatError(
+                f"Table {table_identity} has a {file_format} equality delete file "
+                f"({delete_file.file_path}). Strata reads Parquet equality deletes only. "
+                "Compact the table (rewrite_data_files), or scan a snapshot taken "
+                "before the deletes."
+            )
+        equality_ids = tuple(delete_file.equality_ids or ())
+        nested = [field_id for field_id in equality_ids if field_id not in top_level]
+        if not equality_ids or nested:
+            raise UnsupportedTableFormatError(
+                f"Table {table_identity} has an equality delete file "
+                f"({delete_file.file_path}) keyed on field id(s) {nested or 'none'} "
+                "that are not top-level columns. Strata matches top-level keys only. "
+                "Compact the table (rewrite_data_files)."
+            )
+        lower = delete_file.lower_bounds or {}
+        upper = delete_file.upper_bounds or {}
+        nulls = delete_file.null_value_counts or {}
+        entries.append(
+            EqualityDeleteEntry(
+                file_path=delete_file.file_path,
+                actual_path=resolve(delete_file.file_path),
+                equality_ids=equality_ids,
+                record_count=delete_file.record_count,
+                bounds=tuple(
+                    (
+                        field_id,
+                        encode_bound(top_level[field_id], lower.get(field_id)),
+                        encode_bound(top_level[field_id], upper.get(field_id)),
+                        nulls.get(field_id),
+                    )
+                    for field_id in equality_ids
+                ),
+            )
+        )
     return tuple(sorted(entries, key=lambda entry: entry.file_path))
 
 
@@ -282,12 +339,12 @@ class ReadPlanner:
         )
         self.manifest_cache = manifest_cache or get_manifest_cache(cache_dir=cache_dir)
         self._deleted_rows = DeletedRows()
-        # Each data file's column layout per (table, schema): files never
-        # change, and a schema change is a new schema id. Wrapped in a
-        # 1-tuple, since a file that needs no layout is None.
-        self._file_columns: LRUCache[tuple[str, int, str], tuple[tuple[Column, ...] | None]] = (
-            LRUCache(10_000)
-        )
+        # Each data file's column layout (None when it needs none) and its
+        # columns by field id, per (table, schema): files never change, and a
+        # schema change is a new schema id.
+        self._file_columns: LRUCache[
+            tuple[str, int, str], tuple[tuple[Column, ...] | None, dict[int, str]]
+        ] = LRUCache(10_000)
 
     def plan(
         self,
@@ -371,28 +428,33 @@ class ReadPlanner:
                 iceberg_expr = filters_to_iceberg_expression(filters)
 
                 try:
-                    # Use Iceberg's file-level pruning if we have filters
-                    if iceberg_expr is not None:
-                        scan = table.scan(snapshot_id=resolved_snapshot_id, row_filter=iceberg_expr)
-                    else:
-                        scan = table.scan(snapshot_id=resolved_snapshot_id)
-                    data_files = list(scan.plan_files())
+                    # Iceberg's file-level pruning when there are filters.
+                    # Strata plans the files itself (iceberg_equality), since
+                    # pyiceberg refuses a table with equality deletes.
+                    data_files = plan_files(table, resolved_snapshot_id, iceberg_expr)
                 except Exception:
                     # If Iceberg expression fails (type mismatch, unsupported column, etc.),
                     # fall back to unfiltered scan - row-group pruning will still work
-                    scan = table.scan(snapshot_id=resolved_snapshot_id)
-                    data_files = list(scan.plan_files())
+                    data_files = plan_files(table, resolved_snapshot_id)
 
                 # Build manifest entries with resolved paths
                 entries = []
-                for file_task in data_files:
-                    file_path = file_task.file.file_path
+                for planned in data_files:
+                    file_path = planned.data_file.file_path
                     actual_path = self._resolve_file_path(table_uri, file_path)
                     entries.append(
                         ManifestEntry(
                             file_path=file_path,
                             actual_path=actual_path,
-                            delete_files=_delete_files(file_task, table_identity_str),
+                            delete_files=_delete_files(
+                                planned.positional_deletes, table_identity_str
+                            ),
+                            equality_deletes=_equality_deletes(
+                                planned.equality_deletes,
+                                table,
+                                table_identity_str,
+                                lambda path: self._resolve_file_path(table_uri, path),
+                            ),
                         )
                     )
 
@@ -455,9 +517,10 @@ class ReadPlanner:
                         table_identity=table_identity_str,
                         file_path=file_path,
                     ),
+                    stored_columns(pq_meta.arrow_schema, snapshot_schema, name_mapping),
                 )
                 self._file_columns.put(layout_key, cached_layout)
-            (layout,) = cached_layout
+            layout, stored = cached_layout
             if arrow_schema is None:
                 arrow_schema = (
                     pq_meta.arrow_schema
@@ -468,6 +531,9 @@ class ReadPlanner:
             # Build column index map once per file and compile filters
             # This avoids O(num_columns × num_filters × num_row_groups) scanning
             col_index_map = _build_column_index_map(pq_meta.parquet_schema)
+            # Equality delete keys are looked up by field id in the file itself:
+            # a key column may have been renamed or dropped since.
+            key_index = {field_id: col_index_map.get(name) for field_id, name in stored.items()}
             if layout is not None:
                 # Statistics by the snapshot's names. A column the file lacks
                 # has none, and a dropped column's name must not lend it its own.
@@ -510,6 +576,30 @@ class ReadPlanner:
                         pruned_row_groups += 1
                         continue
 
+                # Equality deletes whose key range can meet this row group's.
+                # Applying them needs every one of their rows in memory, so a
+                # row group over the limit is refused rather than read.
+                equality = tuple(
+                    delete
+                    for delete in entry.equality_deletes
+                    if may_apply(
+                        delete,
+                        lambda field_id: self._key_stats(rg_meta, key_index.get(field_id)),
+                    )
+                )
+                pending = sum(delete.record_count for delete in equality)
+                if pending > self.config.max_equality_delete_rows:
+                    raise UnsupportedTableFormatError(
+                        f"Table {table_identity_str} has {pending:,} pending equality "
+                        f"deletes for a row group of {file_path}, above the limit of "
+                        f"{self.config.max_equality_delete_rows:,} "
+                        "(max_equality_delete_rows). Compact the table "
+                        "(rewrite_data_files), or raise the limit."
+                    )
+                key_ids = sorted(
+                    {field_id for delete in equality for field_id in delete.equality_ids}
+                )
+
                 cache_key = CacheKey(
                     tenant_id=get_tenant_id(),
                     table_identity=table_identity,
@@ -533,6 +623,10 @@ class ReadPlanner:
                     estimated_bytes=rg_size,
                     deleted_rows=deleted_rows,
                     file_columns=layout,
+                    equality_deletes=equality,
+                    equality_columns=tuple(
+                        (field_id, stored.get(field_id)) for field_id in key_ids
+                    ),
                 )
                 plan.tasks.append(task)
                 estimated_bytes += rg_size
@@ -592,6 +686,18 @@ class ReadPlanner:
                 return str(candidate)
 
         return file_path
+
+    def _key_stats(
+        self, rg_meta: RowGroupMeta | pq.RowGroupMetaData, column_index: int | None
+    ) -> tuple[object, object, int | None] | None:
+        """A key column's ``(min, max, null_count)`` in a row group, when recorded."""
+        if column_index is None:
+            return None
+        column = rg_meta.column(column_index)
+        if not column.is_stats_set or column.statistics is None:
+            return None
+        low, high = self._convert_stats(column.statistics.min, column.statistics.max)
+        return low, high, getattr(column.statistics, "null_count", None)
 
     def _should_prune_row_group(
         self,
