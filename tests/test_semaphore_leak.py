@@ -106,6 +106,7 @@ class TestSemaphoreLeakRegression:
             host="127.0.0.1",
             port=port,
             cache_dir=tmp_path / "cache",
+            artifact_dir=tmp_path / "artifacts",
             max_concurrent_scans=5,  # Low limit to make leak visible quickly
             scan_timeout_seconds=300.0,  # Server-side timeout (long)
             deployment_mode="personal",
@@ -189,6 +190,7 @@ class TestSemaphoreLeakRegression:
             host="127.0.0.1",
             port=port,
             cache_dir=tmp_path / "cache",
+            artifact_dir=tmp_path / "artifacts",
             max_concurrent_scans=5,
             deployment_mode="personal",
         )
@@ -248,6 +250,7 @@ class TestSemaphoreLeakRegression:
             host="127.0.0.1",
             port=port,
             cache_dir=tmp_path / "cache",
+            artifact_dir=tmp_path / "artifacts",
             max_concurrent_scans=max_scans,
             deployment_mode="personal",
         )
@@ -309,6 +312,7 @@ class TestSemaphoreLeakRegression:
             host="127.0.0.1",
             port=port,
             cache_dir=tmp_path / "cache",
+            artifact_dir=tmp_path / "artifacts",
             max_concurrent_scans=max_scans,
             deployment_mode="personal",
         )
@@ -374,6 +378,7 @@ class TestSemaphoreInvariants:
             host="127.0.0.1",
             port=port,
             cache_dir=tmp_path / "cache",
+            artifact_dir=tmp_path / "artifacts",
             max_concurrent_scans=5,
             deployment_mode="personal",
         )
@@ -422,6 +427,7 @@ class TestSemaphoreInvariants:
             host="127.0.0.1",
             port=port,
             cache_dir=tmp_path / "cache",
+            artifact_dir=tmp_path / "artifacts",
             max_concurrent_scans=max_scans,
             deployment_mode="personal",
         )
