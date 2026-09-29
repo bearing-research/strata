@@ -263,6 +263,22 @@ class TestTheGuard:
         with pytest.raises(FetchError, match="169.254.169.254"):
             _cache(tmp_path).resolve(FetchSpec(name="zones", url=origin.url("/redirect")))
 
+    def test_a_name_that_rebinds_to_loopback_after_the_check_is_not_fetched(
+        self, tmp_path, origin, rebinding_dns
+    ):
+        """DNS rebinding: the check sees a public address, the connection would
+        see 127.0.0.1, where the origin listens. The connection is held to an
+        address its own lookup validated, so the origin is never reached."""
+        port = origin.server.server_address[1]
+        rebinding_dns.answers["rebind.test"] = [["93.184.216.34"], ["127.0.0.1"]]
+
+        with pytest.raises(FetchError, match="non-routable address 127.0.0.1"):
+            FetchCache(tmp_path).resolve(
+                FetchSpec(name="zones", url=f"http://rebind.test:{port}/zones.csv")
+            )
+
+        assert origin.requests == []
+
     def test_a_redirect_to_a_permitted_host_is_followed(self, tmp_path, origin):
         origin.redirect_to = origin.url()
 

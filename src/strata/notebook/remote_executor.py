@@ -29,7 +29,7 @@ from strata.notebook.mounts import MountResolver, parse_mount_uri
 from strata.notebook.remote_bundle import pack_notebook_output_bundle
 from strata.tracing import trace_span_from
 from strata.types import EXECUTOR_PROTOCOL_HEADER, EXECUTOR_PROTOCOL_VERSION
-from strata.url_safety import host_is_allowlisted, url_safety_problem
+from strata.url_safety import guarded_async_transport, host_is_allowlisted, url_safety_problem
 
 logger = logging.getLogger(__name__)
 
@@ -127,6 +127,15 @@ def _assert_url_safe(url: str, field: str) -> None:
         raise HTTPException(status_code=400, detail=problem)
 
 
+def _guarded_transport() -> httpx.AsyncHTTPTransport | None:
+    """A transport that connects manifest URLs only to addresses the guard passed.
+
+    ``_assert_url_safe`` checks a URL when the manifest arrives; this holds the
+    connection, made later, to the same rule (see ``url_safety``).
+    """
+    return guarded_async_transport(allowed_hosts=_allowed_hosts(), allow_local=_allow_local_hosts())
+
+
 # How many chunks may be waiting to be forwarded before the oldest are
 # dropped. Console is advisory, and a cell that outruns the link to the server
 # must keep running at its own speed rather than the link's.
@@ -173,7 +182,7 @@ async def _drain(proc: Any, log_url: str | None) -> tuple[bytes, bytes]:
 
     async def _forward() -> None:
         assert queue is not None and log_url is not None
-        async with httpx.AsyncClient(timeout=5.0) as client:
+        async with httpx.AsyncClient(timeout=5.0, transport=_guarded_transport()) as client:
             while True:
                 item = await queue.get()
                 try:
@@ -1105,7 +1114,9 @@ def create_notebook_executor_app(
             # its memory. Content-Length (when present) lets us reject up
             # front before reading any bytes.
             max_bytes = _max_input_bytes()
-            async with httpx.AsyncClient(timeout=max(timeout_seconds, 30.0)) as client:
+            async with httpx.AsyncClient(
+                timeout=max(timeout_seconds, 30.0), transport=_guarded_transport()
+            ) as client:
                 async with client.stream("GET", download_url) as response:
                     if response.status_code != 200:
                         raise HTTPException(
@@ -1180,7 +1191,9 @@ def create_notebook_executor_app(
 
             upload_fields = output.get("fields")
             try:
-                async with httpx.AsyncClient(timeout=max(timeout_seconds, 30.0)) as client:
+                async with httpx.AsyncClient(
+                    timeout=max(timeout_seconds, 30.0), transport=_guarded_transport()
+                ) as client:
                     if isinstance(upload_fields, dict):
                         # A presigned object-store upload: the policy fields,
                         # then the bundle as the file part, straight to the

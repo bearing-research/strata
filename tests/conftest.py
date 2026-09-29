@@ -655,3 +655,45 @@ def seed_build_targets(
                 store.finalize_artifact(artifact_id, created, "{}", 1, 4)
     finally:
         store.close()
+
+
+class RebindingDNS:
+    """Name resolution that answers a name differently on each lookup.
+
+    ``answers[name]`` is a list of answers, each a list of addresses; every
+    lookup of *name* takes the next one and the last repeats. Any other name
+    goes to the real resolver, so an IP literal still resolves to itself.
+    Patched in as ``socket.getaddrinfo``, the one function both the guard and
+    the socket layer resolve with, so it stands for a DNS server an attacker
+    controls.
+    """
+
+    def __init__(self) -> None:
+        self.answers: dict[str, list[list[str]]] = {}
+        self.lookups: list[str] = []
+
+    def getaddrinfo(self, host, port, *args, real, **kwargs):
+        # anyio passes the name IDNA-encoded, as bytes.
+        name = host.decode("ascii") if isinstance(host, bytes) else host
+        if name not in self.answers:
+            return real(host, port, *args, **kwargs)
+        self.lookups.append(name)
+        queue = self.answers[name]
+        addresses = queue.pop(0) if len(queue) > 1 else queue[0]
+        port_number = int(port or 0)
+        return [
+            (socket.AF_INET6, socket.SOCK_STREAM, 6, "", (address, port_number, 0, 0))
+            if ":" in address
+            else (socket.AF_INET, socket.SOCK_STREAM, 6, "", (address, port_number))
+            for address in addresses
+        ]
+
+
+@pytest.fixture
+def rebinding_dns(monkeypatch) -> RebindingDNS:
+    dns = RebindingDNS()
+    real = socket.getaddrinfo
+    monkeypatch.setattr(
+        socket, "getaddrinfo", lambda *args, **kwargs: dns.getaddrinfo(*args, real=real, **kwargs)
+    )
+    return dns
