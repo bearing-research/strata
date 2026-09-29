@@ -605,6 +605,17 @@ A cell run this way still shares the host's kernel and sees what any local user
 can. A notebook that needs more isolation than that wants a worker on another
 machine.
 
+SQL cells are different: their queries run inside the server process, not as
+the harness user. A DuckDB SQL cell is confined instead. Once its connection is
+set up, it can reach only its own database, the roots of the mounts it reads,
+and the locations of the catalog tables it reads; file access outside those is
+refused, and the cell cannot turn it back on. So `read_text` of a server file,
+`COPY ... TO`, and `ATTACH` of another path all fail. A catalog table whose data
+files live outside its own location cannot be read this way. A SQLite cell also
+runs in the server process: in a write cell `ATTACH`, `DETACH` and `VACUUM` are
+refused, since they reach other files (a read cell runs only reads already).
+Postgres, Snowflake and BigQuery cells send the query to their database server.
+
 ### What a cell is given: `STRATA_NOTEBOOK_HARNESS_ENV_ALLOWLIST`
 
 The allowlist narrows the environment a cell receives:

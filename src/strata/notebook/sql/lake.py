@@ -45,6 +45,9 @@ class Lake:
     fingerprints: list[str] = field(default_factory=list)
     # (namespace, table) → the snapshot the query reads.
     snapshots: dict[tuple[str, str], int] = field(default_factory=dict)
+    # In service mode, where the handle may still read once confined (see
+    # duckdb._confine): each mount's root and each catalog table's location.
+    locations: list[str] = field(default_factory=list)
 
 
 def lake_options(spec: ConnectionSpec) -> tuple[str | None, list[str]]:
@@ -131,6 +134,7 @@ def resolve_lake(
     lake = Lake(spec=spec)
     update: dict[str, Any] = {}
     config = session._lake_config()
+    confined = getattr(config, "deployment_mode", "personal") == "service"
     if catalog:
         properties = (getattr(config, "catalogs", None) or {}).get(catalog)
         if properties is None:
@@ -156,11 +160,42 @@ def resolve_lake(
             # fingerprint_tables invents a random one for what it could not
             # resolve, which no later run would ever match.
             lake.fingerprints.append(f"{table_spec.name}:table:{table_spec.uri}:{snapshot}")
+            if confined:
+                lake.locations.append(_table_location(table_spec, config))
     if mount_names:
         update["mount_sources"] = _mount_sources(session, cell_id, source, mount_names, lake)
+        if confined:
+            lake.locations.extend(_mount_location(m["uri"]) for m in update["mount_sources"])
     if update:
         lake.spec = spec.model_copy(update=update)
     return lake
+
+
+def _table_location(table_spec: TableSpec, config: Any) -> str:
+    """Where a catalog table's metadata and data files live, as a directory.
+
+    A table whose files live outside its own location (a ``write.data.path``
+    elsewhere) cannot be read by a confined handle; the query fails naming the
+    file it was refused.
+    """
+    from strata.iceberg import PyIcebergCatalog
+
+    try:
+        location = PyIcebergCatalog(config).load_table(table_spec.uri).location()
+    except Exception as exc:  # the catalog's own error types vary by backend
+        raise LakeError(f"table {table_spec.uri}: {exc}") from exc
+    return location.rstrip("/") + "/"
+
+
+def _mount_location(uri: str) -> str:
+    """A mount's root as a location: a directory (``.../``), or its one file."""
+    from strata.notebook.mounts import parse_mount_uri
+
+    scheme, path = parse_mount_uri(uri)
+    root = (path if scheme == "file" else f"{scheme}://{path}").rstrip("/")
+    if root.endswith((".parquet", ".csv", ".json")):
+        return root
+    return root + "/"
 
 
 def _mount_sources(
