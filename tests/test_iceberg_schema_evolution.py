@@ -18,7 +18,7 @@ from pyiceberg.types import DoubleType, LongType, StringType
 from strata.cache import CachedFetcher
 from strata.config import StrataConfig
 from strata.fast_io import IncrementalIpcMerger
-from strata.planner import ReadPlanner, UnsupportedTableFormatError
+from strata.planner import ReadPlanner
 from strata.services.materialize import materialize_service
 from strata.types import Filter, FilterOp
 
@@ -262,7 +262,12 @@ def test_a_filter_on_a_renamed_column_still_prunes_by_its_statistics(tmp_path):
     assert plan.pruned_row_groups == 1
 
 
-def test_a_change_inside_a_nested_column_is_refused(tmp_path):
+POINT = pa.struct([("a", pa.int32()), ("b", pa.string())])
+
+
+@pytest.fixture
+def nested(tmp_path):
+    """``db.t`` with a struct, a list of structs and a map to structs, one file."""
     from pyiceberg.catalog.sql import SqlCatalog
 
     warehouse = tmp_path / "warehouse"
@@ -271,15 +276,149 @@ def test_a_change_inside_a_nested_column_is_refused(tmp_path):
         "strata", uri=f"sqlite:///{warehouse / 'catalog.db'}", warehouse=warehouse.as_uri()
     )
     catalog.create_namespace("db")
-    point = pa.struct([("a", pa.int64())])
-    catalog.create_table("db.t", schema=pa.schema([("id", pa.int64()), ("p", point)])).append(
-        pa.table({"id": pa.array([1], pa.int64()), "p": pa.array([{"a": 1}], point)})
+    schema = pa.schema(
+        [
+            ("id", pa.int64()),
+            ("p", POINT),
+            ("l", pa.list_(POINT)),
+            ("m", pa.map_(pa.string(), POINT)),
+        ]
     )
-    with catalog.load_table("db.t").update_schema() as update:
-        update.add_column(("p", "b"), LongType())
+    catalog.create_table("db.t", schema=schema).append(
+        pa.table(
+            {
+                "id": pa.array([1, 2], pa.int64()),
+                "p": pa.array([{"a": 1, "b": "x"}, None], POINT),
+                "l": pa.array([[{"a": 5, "b": "y"}], [{"a": 6, "b": "w"}]], pa.list_(POINT)),
+                "m": pa.array([[("k", {"a": 7, "b": "z"})], []], pa.map_(pa.string(), POINT)),
+            }
+        )
+    )
+    return catalog, f"{warehouse.as_uri()}#db.t", StrataConfig(cache_dir=tmp_path / "cache")
 
-    with pytest.raises(UnsupportedTableFormatError, match="nested column 'p'"):
-        ReadPlanner(StrataConfig(cache_dir=tmp_path / "cache")).plan(f"{warehouse.as_uri()}#db.t")
+
+def test_nested_fields_are_matched_by_field_id(nested):
+    """Add, rename and widen inside a struct; add inside a list's elements; drop
+    inside a map's values. pyiceberg reads the same."""
+    catalog, uri, config = nested
+
+    def change(u):
+        u.add_column(("p", "c"), LongType())
+        u.rename_column("p.b", "bee")
+        u.update_column("p.a", LongType())
+        u.add_column(("l", "element", "c"), StringType())
+        u.delete_column("m.value.b")
+
+    _evolve(catalog, change)
+
+    expected = [
+        {
+            "id": 1,
+            "p": {"a": 1, "bee": "x", "c": None},
+            "l": [{"a": 5, "b": "y", "c": None}],
+            "m": [("k", {"a": 7})],
+        },
+        {"id": 2, "p": None, "l": [{"a": 6, "b": "w", "c": None}], "m": []},
+    ]
+    assert _pyiceberg(catalog) == expected
+    table, _ = _scan(config, uri)
+    assert _rows(table) == expected
+    assert table.schema.field("p").type.field("a").type == pa.int64()
+
+
+def test_a_nested_field_dropped_and_added_again_reads_as_nulls(nested):
+    catalog, uri, config = nested
+    _evolve(catalog, lambda u: u.delete_column("p.b"))
+    _evolve(catalog, lambda u: u.add_column(("p", "b"), StringType()))
+
+    rows = _rows(_scan(config, uri, columns=["id", "p"])[0])
+    assert rows == [{"id": 1, "p": {"a": 1, "b": None}}, {"id": 2, "p": None}]
+
+
+def test_older_and_newer_files_of_a_nested_column_stream_as_one_schema(nested):
+    catalog, uri, config = nested
+    _evolve(catalog, lambda u: u.add_column(("p", "c"), LongType()))
+    point = pa.struct([("a", pa.int32()), ("b", pa.string()), ("c", pa.int64())])
+    catalog.load_table("db.t").append(
+        pa.table(
+            {
+                "id": pa.array([3], pa.int64()),
+                "p": pa.array([{"a": 3, "b": "n", "c": 30}], point),
+                "l": pa.array([[]], pa.list_(POINT)),
+                "m": pa.array([[]], pa.map_(pa.string(), POINT)),
+            }
+        )
+    )
+
+    _, plan = _scan(config, uri)
+    fetcher = CachedFetcher(config)
+    merger = IncrementalIpcMerger()
+    streamed = b"".join(merger.feed(fetcher.fetch_as_stream_bytes(task)) for task in plan.tasks)
+    streamed += merger.finish()
+    rows = _rows(pa.ipc.open_stream(streamed).read_all())
+    assert [row["p"] for row in rows] == [
+        {"a": 1, "b": "x", "c": None},
+        None,
+        {"a": 3, "b": "n", "c": 30},
+    ]
+
+
+def test_a_sliced_nested_array_is_rebuilt_from_its_own_rows():
+    """Row groups arrive sliced (a delete filter, a chunk boundary): offsets count."""
+    from pyiceberg.types import IntegerType, ListType, MapType, NestedField, StructType
+
+    from strata.iceberg_schema import _reshape
+
+    file_type = ListType(3, StructType(NestedField(4, "a", IntegerType(), required=False)))
+    table_type = ListType(
+        3,
+        StructType(
+            NestedField(4, "a", LongType(), required=False),
+            NestedField(5, "c", StringType(), required=False),
+        ),
+    )
+    target = pa.list_(pa.struct([("a", pa.int64()), ("c", pa.string())]))
+    stored = pa.array(
+        [[{"a": 1}], None, [{"a": 2}, {"a": 3}], [{"a": 4}]],
+        pa.list_(pa.struct([("a", pa.int32())])),
+    ).slice(1, 2)
+
+    assert _reshape(stored, file_type, table_type, target).to_pylist() == [
+        None,
+        [{"a": 2, "c": None}, {"a": 3, "c": None}],
+    ]
+
+    map_file = MapType(6, StringType(), 7, StructType(NestedField(4, "a", IntegerType())))
+    map_table = MapType(
+        6,
+        StringType(),
+        7,
+        StructType(
+            NestedField(4, "a", LongType()), NestedField(5, "c", StringType(), required=False)
+        ),
+    )
+    map_target = pa.map_(pa.string(), pa.struct([("a", pa.int64()), ("c", pa.string())]))
+    stored_map = pa.array(
+        [[("k", {"a": 1})], None, [("m", {"a": 2}), ("n", {"a": 3})]],
+        pa.map_(pa.string(), pa.struct([("a", pa.int32())])),
+    ).slice(1, 2)
+    assert _reshape(stored_map, map_file, map_table, map_target).to_pylist() == [
+        None,
+        [("m", {"a": 2, "c": None}), ("n", {"a": 3, "c": None})],
+    ]
+
+
+def test_a_nested_type_iceberg_cannot_read_is_refused():
+    from pyiceberg.types import ListType, NestedField, StructType
+
+    from strata.iceberg_schema import _unreadable
+
+    struct = StructType(NestedField(4, "a", LongType(), required=False))
+    listed = ListType(3, LongType())
+    assert _unreadable(struct, listed) is not None
+    narrowed = StructType(NestedField(4, "a", StringType(), required=False))
+    assert _unreadable(struct, narrowed) is not None
+    assert _unreadable(struct, struct) is None
 
 
 def test_an_unchanged_table_reads_its_files_as_written(lake):
