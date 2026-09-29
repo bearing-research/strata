@@ -58,4 +58,23 @@ def test_assert_uv_managed_runtime_exits_without_marker(tmp_path, monkeypatch, c
     assert exc_info.value.code == 1
     err = capsys.readouterr().err
     assert "uv-managed Python environment" in err
+    assert "pip install" in err  # the docs' sentence: not supported
+    assert "uv tool install strata-notebook" in err
     assert "uv sync" in err
+    # A venv without the marker: say which line is missing, and where.
+    assert "no `uv = ` line" in err
+    assert str(tmp_path / "pyvenv.cfg") in err
+
+
+def test_assert_uv_managed_runtime_names_a_conda_or_system_python(tmp_path, monkeypatch, capsys):
+    """A conda env or a system Python has no pyvenv.cfg at all. The message
+    used to tell such users to look for a marker in a file they do not have."""
+    monkeypatch.setattr("sys.prefix", str(tmp_path))
+
+    with pytest.raises(SystemExit):
+        assert_uv_managed_runtime()
+
+    err = capsys.readouterr().err
+    assert "not a virtual environment (conda or a system Python)" in err
+    assert "uv tool install strata-notebook" in err
+    assert "Looked for" not in err

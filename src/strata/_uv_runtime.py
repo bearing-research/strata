@@ -35,12 +35,23 @@ def assert_uv_managed_runtime() -> None:
     if is_uv_managed_runtime():
         return
     cfg = Path(sys.prefix) / "pyvenv.cfg"
+    if cfg.exists():
+        # A venv, but not one uv made: python -m venv, virtualenv, pip.
+        found = f"{cfg} has no `uv = ` line, so uv did not create this environment"
+    else:
+        # conda and a bare interpreter have no pyvenv.cfg at all; pointing at
+        # the file only told those users to look for something they lack.
+        found = "not a virtual environment (conda or a system Python)"
     print(
-        "error: Strata requires a uv-managed Python environment.\n"
+        "error: Strata runs only inside a uv-managed Python environment;\n"
+        "plain `pip install` is not supported.\n"
         f"  Current Python: {sys.executable}\n"
-        f"  Looked for a `uv = ...` line in: {cfg}\n\n"
-        "Install via `uv sync` (project dev) or `uvx strata` (runtime),\n"
-        "then re-launch Strata from that environment.",
+        f"  {found}\n\n"
+        "Install uv (https://docs.astral.sh/uv/), then either\n"
+        "  uv tool install strata-notebook && strata-notebook\n"
+        "(a released version, in its own env; conda and pip environments are\n"
+        "left as they are), or from a checkout\n"
+        "  uv sync && uv run strata-notebook",
         file=sys.stderr,
     )
     raise SystemExit(1)
