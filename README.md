@@ -155,8 +155,8 @@ Strata runs only inside a uv-managed environment. It checks for the
 The reason is that the notebook subsystem shells out to `uv` to manage
 per-notebook `.venv/` directories; failing at startup with a clear message
 beats a confusing subprocess error later. Conda and pip-venv users install uv
-and relaunch from a uv-managed env, leaving existing data and environments
-untouched.
+and run `uv tool install strata-notebook`, which builds its own env and leaves
+existing data and environments untouched.
 
 Windows: `uv tool install strata-notebook` works directly.
 
