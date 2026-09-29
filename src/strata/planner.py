@@ -479,6 +479,9 @@ class ReadPlanner:
             snapshot_schema = table.scan(snapshot_id=resolved_snapshot_id).projection()
         plan.schema_id = snapshot_schema.schema_id
         name_mapping = table.name_mapping()
+        initial_defaults = {
+            field.field_id: field.initial_default for field in snapshot_schema.fields
+        }
         table_arrow_schema = snapshot_arrow_schema(snapshot_schema)
         _assert_projection_exists(columns, table_arrow_schema, table_identity_str)
 
@@ -516,8 +519,14 @@ class ReadPlanner:
                         name_mapping,
                         table_identity=table_identity_str,
                         file_path=file_path,
+                        format_version=table.metadata.format_version,
                     ),
-                    stored_columns(pq_meta.arrow_schema, snapshot_schema, name_mapping),
+                    stored_columns(
+                        pq_meta.arrow_schema,
+                        snapshot_schema,
+                        name_mapping,
+                        table.metadata.format_version,
+                    ),
                 )
                 self._file_columns.put(layout_key, cached_layout)
             layout, stored = cached_layout
@@ -625,7 +634,8 @@ class ReadPlanner:
                     file_columns=layout,
                     equality_deletes=equality,
                     equality_columns=tuple(
-                        (field_id, stored.get(field_id)) for field_id in key_ids
+                        (field_id, stored.get(field_id), initial_defaults.get(field_id))
+                        for field_id in key_ids
                     ),
                 )
                 plan.tasks.append(task)

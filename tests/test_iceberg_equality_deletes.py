@@ -7,7 +7,9 @@ sink commits them.
 
 from __future__ import annotations
 
+import datetime
 import sys
+from decimal import Decimal
 
 import pyarrow as pa
 import pytest
@@ -25,6 +27,7 @@ from strata.fast_io import IncrementalIpcMerger
 from strata.metadata_cache import ManifestCache
 from strata.metadata_store import MetadataStore
 from strata.planner import ReadPlanner, UnsupportedTableFormatError
+from strata.types import Filter, FilterOp
 from tests.iceberg_fixtures import commit_files, data_file, equality_delete
 
 pytestmark = pytest.mark.skipif(
@@ -75,8 +78,8 @@ def _delete(catalog, **columns) -> None:
     commit_files(table, equality_delete(table, rows))
 
 
-def _scan(config, uri, columns=None, planner=None):
-    plan = (planner or ReadPlanner(config)).plan(uri, columns=columns)
+def _scan(config, uri, columns=None, planner=None, filters=None):
+    plan = (planner or ReadPlanner(config)).plan(uri, columns=columns, filters=filters)
     fetcher = CachedFetcher(config)
     batches = [fetcher.fetch(task) for task in plan.tasks]
     return pa.Table.from_batches(batches, schema=plan.schema), plan
@@ -101,6 +104,77 @@ def test_rows_with_a_deleted_key_are_gone_and_stay_gone_from_the_cache(people):
     merger = IncrementalIpcMerger()
     streamed = b"".join(merger.feed(fetcher.fetch_as_stream_bytes(task)) for task in plan.tasks)
     assert _names(pa.ipc.open_stream(streamed + merger.finish()).read_all()) == ["ann", "cy", "nul"]
+
+
+def test_a_filtered_scan_still_applies_a_delete_whose_keys_miss_the_filter(people):
+    """The delete's key bounds (2..2) miss `id >= 3`, so pyiceberg's planner
+    prunes it. That is right for a reader that filters rows; Strata returns
+    whole row groups, and the first one still holds id 2. The filtered scan
+    used to return the deleted row and cache it under a key with no filter,
+    where the next unfiltered scan found it."""
+    catalog, uri, config = people
+    table = _table(catalog)
+    commit_files(
+        table,
+        equality_delete(
+            table,
+            pa.table({"id": pa.array([2], pa.int64())}),
+            lower_bounds={1: to_bytes(LongType(), 2)},
+            upper_bounds={1: to_bytes(LongType(), 2)},
+            null_value_counts={1: 0},
+        ),
+    )
+
+    filtered, _ = _scan(config, uri, filters=[Filter("id", FilterOp.GE, 3)])
+    assert "bo" not in filtered.column("name").to_pylist()
+
+    unfiltered, plan = _scan(config, uri)
+    assert all(task.cached for task in plan.tasks)  # the filtered scan filled the cache
+    assert _names(unfiltered) == ["ann", "cy", "dee", "nul"]
+
+
+@pytest.mark.parametrize(
+    ("key_type", "values"),
+    [
+        (pa.date32(), [datetime.date(2024, 1, 1), datetime.date(2024, 1, 2), None]),
+        (pa.decimal128(10, 2), [Decimal("1.50"), Decimal("2.50"), None]),
+    ],
+    ids=["date", "decimal"],
+)
+def test_a_null_key_of_any_type_deletes_the_null_rows(tmp_path, key_type, values):
+    """Matching nulls used to fill them with `pa.array([0]).cast(type)`, which
+    date and decimal keys cannot take."""
+    catalog, uri = _catalog(tmp_path)
+    schema = pa.schema([("k", key_type), ("name", pa.string())])
+    catalog.create_table("db.t", schema=schema).append(
+        pa.table({"k": pa.array(values, key_type), "name": ["a", "b", "nul"]}, schema=schema)
+    )
+    _delete(catalog, k=pa.array([None, values[0]], key_type))
+
+    table, _ = _scan(StrataConfig(cache_dir=tmp_path / "cache"), uri)
+    assert _names(table) == ["b"]
+
+
+def test_extension_keys_and_keys_null_on_both_sides_match_null_safely():
+    import uuid
+
+    from strata.iceberg_equality import _matching_rows
+
+    a, b = uuid.uuid4().bytes, uuid.uuid4().bytes
+    data = pa.table(
+        {"1": pa.ExtensionArray.from_storage(pa.uuid(), pa.array([a, b, None], pa.binary(16)))}
+    )
+    deletes = pa.table(
+        {"1": pa.ExtensionArray.from_storage(pa.uuid(), pa.array([b, None], pa.binary(16)))}
+    )
+    assert _matching_rows(data, deletes).to_pylist() == [False, True, True]
+
+    # A key null on every row of both sides matches on its is-null flag alone.
+    all_null = pa.table({"1": pa.nulls(2, pa.date32())})
+    assert _matching_rows(all_null, pa.table({"1": pa.nulls(1, pa.date32())})).to_pylist() == [
+        True,
+        True,
+    ]
 
 
 def test_a_delete_leaves_the_row_its_own_upsert_wrote(people):
@@ -376,3 +450,22 @@ def test_a_scan_artifact_counts_the_rows_left_and_a_refusal_says_why(people, tmp
         )
         assert response.status_code == 422
         assert "pending equality deletes" in response.json()["detail"]
+
+
+def test_a_key_the_file_predates_matches_on_its_v3_initial_default():
+    """A data file written before its key column existed holds that column's
+    initial-default, not nulls, so a delete of the default removes its rows."""
+    from strata.iceberg_equality import deleted_mask
+    from strata.metadata_cache import EqualityDeleteEntry
+
+    table = pa.table({"name": ["a", "b"]})
+    delete = EqualityDeleteEntry(file_path="d", actual_path="d", equality_ids=(3,), record_count=1)
+
+    def keys(_):
+        return pa.table({"3": ["red"]})
+
+    assert deleted_mask(table, {3: None}, [delete], keys).to_pylist() == [False, False]
+    assert deleted_mask(table, {3: None}, [delete], keys, defaults={3: "red"}).to_pylist() == [
+        True,
+        True,
+    ]
