@@ -543,9 +543,50 @@ def test_mcp_1_turns_the_endpoint_off_and_says_why(sm_with_session, monkeypatch,
     the environment used to read as "extra absent" and dropped /mcp silently."""
     sm, _, _ = sm_with_session
     monkeypatch.setitem(__import__("sys").modules, "mcp.server.mcpserver", None)
+    monkeypatch.setattr("importlib.metadata.version", lambda name: "1.26.0")
     with caplog.at_level("WARNING", logger="strata.notebook.mcp_server"):
         assert build_mcp_app(sm) is None
+    assert "mcp 1.26.0 is installed" in caplog.text
     assert "needs mcp>=2" in caplog.text
+
+
+def test_mcp_2_missing_a_dependency_names_the_dependency(sm_with_session, monkeypatch, caplog):
+    """An mcp 2 whose own dependency is absent is not too old: the warning
+    used to blame the mcp version for the missing module."""
+    import sys
+
+    class _NoMcpTypes:
+        def find_spec(self, name, path=None, target=None):
+            if name == "mcp_types" or name.startswith("mcp_types."):
+                raise ModuleNotFoundError(f"No module named {name!r}", name=name)
+            return None
+
+    sm, _, _ = sm_with_session
+    for name in [n for n in sys.modules if n.split(".")[0] in ("mcp", "mcp_types")]:
+        monkeypatch.delitem(sys.modules, name)
+    monkeypatch.setattr(sys, "meta_path", [_NoMcpTypes(), *sys.meta_path])
+    monkeypatch.setattr("importlib.metadata.version", lambda name: "2.2.0")
+    with caplog.at_level("WARNING", logger="strata.notebook.mcp_server"):
+        assert build_mcp_app(sm) is None
+    assert "no module named 'mcp_types'" in caplog.text
+    assert "needs mcp>=2" not in caplog.text
+
+
+def test_mcp_without_distribution_metadata_still_warns(sm_with_session, monkeypatch, caplog):
+    """An importable mcp with no metadata has no version; the warning must
+    not raise PackageNotFoundError out of server startup."""
+    from importlib.metadata import PackageNotFoundError
+
+    def no_metadata(name):
+        raise PackageNotFoundError(name)
+
+    sm, _, _ = sm_with_session
+    monkeypatch.setitem(__import__("sys").modules, "mcp.server.mcpserver", None)
+    monkeypatch.setattr("importlib.metadata.version", no_metadata)
+    with caplog.at_level("WARNING", logger="strata.notebook.mcp_server"):
+        assert build_mcp_app(sm) is None
+    assert "mcp (version unknown) is installed" in caplog.text
+    assert "'mcp.server.mcpserver'" in caplog.text
 
 
 # ---------------------------------------------------------------------------
