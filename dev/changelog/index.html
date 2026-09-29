@@ -3347,7 +3347,15 @@ exhaustive commit history.</p>
   Spark, Flink or DuckDB deleted from without rewriting its data files used to
   be refused. The scan now drops the rows its positional delete files (format
   v2) and deletion vectors (format v3) name, and caches each row group without
-  them under the snapshot's key. Equality deletes are still refused.</li>
+  them under the snapshot's key.</li>
+<li><strong>Scans read Iceberg tables with equality deletes</strong>, which Flink's upsert
+  sink and CDC pipelines write, and which pyiceberg itself cannot yet plan.
+  Every older row whose key a delete names is dropped, null matching null, in
+  the delete's partition or across the table for an unpartitioned one. A
+  delete file whose key range cannot meet a row group is skipped for it.
+  Applying equality deletes holds their keys in memory, so a row group that
+  would need more than <code>max_equality_delete_rows</code> (10 million by default) is
+  refused with a message pointing at compaction, never read partially.</li>
 <li><strong>Scans read Iceberg tables whose schema changed.</strong> Columns are matched by
   field id, so a table with an added column, which used to be refused, reads
   its older files with the column null, and a widened type comes back wide. A
@@ -3380,6 +3388,12 @@ exhaustive commit history.</p>
 </ul>
 <h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>A table Strata refuses to scan says why.</strong> <code>POST /v1/materialize</code>
+  returned a bare 500 for a table it cannot read (an unreadable delete file,
+  now too many pending equality deletes); it now returns 422 with the reason.</li>
+<li><strong>A row group left with no rows is read as empty.</strong> Building its empty
+  batch raised a <code>KeyError</code>; equality deletes can now remove every row of
+  one.</li>
 <li><strong>A SQL cell reading a catalog table under an alias runs again.</strong> Pinning
   <code>lake.taxi.trips t</code> to its snapshot wrote <code>AT (VERSION =&gt; n) AS t</code>, which
   DuckDB rejects as a syntax error; the pin now comes after the alias. Any read

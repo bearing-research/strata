@@ -2773,6 +2773,11 @@ authentication. This is a startup error, not a warning:</p>
 <td>Max response size (413 if exceeded)</td>
 </tr>
 <tr>
+<td><code>STRATA_MAX_EQUALITY_DELETE_ROWS</code></td>
+<td><code>10000000</code></td>
+<td>Iceberg equality delete rows a row group may need in memory; a scan over it is refused, pointing at compaction</td>
+</tr>
+<tr>
 <td><code>STRATA_STREAM_STATE_TTL_SECONDS</code></td>
 <td><code>300.0</code></td>
 <td>How long a completed/abandoned stream's state lingers before cleanup</td>
