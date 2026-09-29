@@ -156,6 +156,26 @@ class TestSessionVenvPython:
         assert session.environment_last_sync_duration_ms is not None
         assert session.environment_interpreter_source == "venv"
 
+    def test_an_existing_venv_is_the_interpreter_before_any_sync(self, tmp_path: Path):
+        """`strata run --no-sync` and `cell add --no-sync` never sync. The
+        session used to leave venv_python unset until a sync recorded it, so
+        those ran cells with whatever `python` was on PATH."""
+        from strata.notebook.parser import parse_notebook
+
+        nb_dir = create_notebook(tmp_path, "venv_present")  # creating it built .venv
+        assert (nb_dir / ".venv" / "bin" / "python").exists()
+
+        session = NotebookSession(parse_notebook(nb_dir), nb_dir)
+
+        assert session.venv_python == nb_dir / ".venv" / "bin" / "python"
+
+    def test_no_venv_means_no_interpreter_yet(self, tmp_path: Path):
+        from strata.notebook.parser import parse_notebook
+
+        nb_dir = create_notebook(tmp_path, "venv_absent", initialize_environment=False)
+
+        assert NotebookSession(parse_notebook(nb_dir), nb_dir).venv_python is None
+
     def test_venv_python_fallback_when_uv_missing(self, tmp_path: Path):
         """When uv is missing but .venv exists, keep using the notebook venv."""
         nb_dir = create_notebook(tmp_path, "no_uv_session")
