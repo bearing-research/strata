@@ -305,6 +305,59 @@ class TestGarbageCollection:
         assert store.garbage_collect(max_idle_days=0)["deleted_count"] == 0
         assert store.get_latest_version("nb_x_cell_c1_var_df").version == first
 
+    @staticmethod
+    def _ready(store, artifact_id: str, provenance: str, *, minted: bool = False) -> int:
+        version = store.create_artifact(artifact_id, provenance, _spec(), minted=minted)
+        store.finalize_artifact(artifact_id, version, "{}", row_count=0, byte_size=100)
+        return version
+
+    @staticmethod
+    def _last_used(store, artifact_id: str, seconds_ago: float) -> None:
+        conn = store._get_connection()
+        try:
+            conn.execute(
+                "UPDATE artifact_versions SET created_at = 0, last_used_at = ? WHERE id = ?",
+                (time.time() - seconds_ago, artifact_id),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+    def test_retention_runs_its_queries_on_postgres(self, store):
+        """The minted clause, least-recently-used order under a cap, the
+        version-gap check's GROUP BY and keep-superseded, on the dialect that
+        runs them only here."""
+        oldest = "0b6f2a4e-6d1a-4c0e-9b1e-2f8d6a3c1e01"
+        newer = "0b6f2a4e-6d1a-4c0e-9b1e-2f8d6a3c1e02"
+        self._ready(store, oldest, "prov-old", minted=True)
+        self._ready(store, newer, "prov-new", minted=True)
+        for version in range(1, 4):
+            self._ready(store, "nb_x_cell_c1_var_df", f"prov-nb-{version}")
+        self._last_used(store, oldest, 7200)
+        self._last_used(store, newer, 3600)
+        self._last_used(store, "nb_x_cell_c1_var_df", 7200)
+
+        # 500 bytes over a 300 cap: down to 240, least recently used first. The
+        # notebook output's current value is never a candidate.
+        result = store.garbage_collect(max_bytes=300, keep_superseded=1)
+
+        assert result["store_bytes"] == 500
+        assert store.get_artifact(oldest, 1) is None
+        assert store.get_artifact("nb_x_cell_c1_var_df", 1) is None
+        assert store.get_artifact("nb_x_cell_c1_var_df", 3) is not None
+
+        provenance = store.get_artifact("nb_x_cell_c1_var_df", 3).provenance_hash
+        store.find_by_provenance(provenance)
+        conn = store._get_connection()
+        try:
+            row = conn.execute(
+                "SELECT last_used_at FROM artifact_versions WHERE id = ? AND version = 3",
+                ("nb_x_cell_c1_var_df",),
+            ).fetchone()
+        finally:
+            conn.close()
+        assert row["last_used_at"] == pytest.approx(time.time(), abs=60)
+
 
 class TestConnectionPool:
     """A bounded pool is only safe here because acquisition is re-entrant."""

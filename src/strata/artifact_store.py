@@ -1164,12 +1164,14 @@ class ArtifactStore:
             # contended so a backend can lock narrowly; SQLite ignores it and
             # locks the file.
             self._dialect.begin_write(conn, artifact_id)
-            cursor = conn.execute(
-                "SELECT COALESCE(MAX(version), 0) + 1, COALESCE(MAX(minted), 0) "
+            row = conn.execute(
+                "SELECT COALESCE(MAX(version), 0) + 1 AS next_version, "
+                "COALESCE(MAX(minted), 0) AS was_minted "
                 "FROM artifact_versions WHERE id = ?",
                 (artifact_id,),
-            )
-            version, was_minted = cursor.fetchone()
+            ).fetchone()
+            # By name: a Postgres row unpacks to its column names, not values.
+            version, was_minted = int(row["next_version"]), row["was_minted"]
 
             # Serialize input_versions to JSON
             input_versions_json = json.dumps(input_versions) if input_versions else None
