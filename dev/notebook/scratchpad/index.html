@@ -2240,7 +2240,9 @@ question <code>find</code>/<code>awk</code> can answer proves nothing:</p>
 </code></pre></div>
 <p>If <code>./scratch</code> exists and has cells in it, the skill engaged. If it does not,
 the agent answered with <code>python -c</code> and the skill did not fire. Check that
-<code>strata --help</code> works <strong>in the agent's environment</strong>, which is the usual cause.</p>
+<code>strata cell list ./scratch</code> works <strong>in the agent's environment</strong>, which is
+the usual cause: <code>strata --help</code> prints from any Python, but every command
+needs a uv-managed environment.</p>
 <h3 id="4-nothing-else-for-the-agent">4. Nothing else, for the agent<a class="headerlink" href="#4-nothing-else-for-the-agent" title="Permanent link">&para;</a></h3>
 <p>The agent needs no server and no session: it drives the notebook through the
 <code>strata</code> CLI against the directory. (Looking at it yourself is the one thing
