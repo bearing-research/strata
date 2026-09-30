@@ -150,6 +150,7 @@ class PyArrowFetcher:
                 task.equality_deletes,
                 self._equality_deletes.keys,
                 defaults={field_id: default for field_id, _, default in task.equality_columns},
+                downcast_ns=task.downcast_ns,
             )
             deleted = hit if deleted is None else pc.or_(deleted, hit)
         if deleted is not None:

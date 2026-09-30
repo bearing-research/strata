@@ -3,9 +3,13 @@
 import time
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 import pyarrow as pa
 import pyarrow.parquet as pq
+from pyiceberg.conversions import from_bytes, to_bytes
+from pyiceberg.transforms import IdentityTransform
+from pyiceberg.types import IcebergType
 
 from strata import lake_files
 from strata.config import StrataConfig
@@ -223,6 +227,40 @@ def _equality_deletes(
     return tuple(sorted(entries, key=lambda entry: entry.file_path))
 
 
+def _partition_values(
+    data_file, table, top_level: dict[int, IcebergType]
+) -> tuple[tuple[int, str, str], ...]:
+    """*data_file*'s identity-partition values, for a source column the file omits.
+
+    A Hive-layout file registered with add_files often omits its identity
+    partition column; pyiceberg reads it as the file's partition value. Each
+    is kept with its type in Iceberg's single-value encoding, which the
+    persisted manifest holds exactly. *top_level* is the table's top-level
+    field types by id; a nested source column is not filled.
+    """
+    spec = table.metadata.specs()[data_file.spec_id or 0]
+    values = []
+    for position, partition_field in enumerate(spec.fields):
+        value = data_file.partition[position]
+        field_type = top_level.get(partition_field.source_id)
+        if (
+            isinstance(partition_field.transform, IdentityTransform)
+            and value is not None
+            and field_type is not None
+        ):
+            encoded = to_bytes(field_type, value).hex()
+            values.append((partition_field.source_id, str(field_type), encoded))
+    return tuple(values)
+
+
+def _decode_partition_values(values: tuple[tuple[int, str, str], ...]) -> dict[int, Any]:
+    """The values ``_partition_values`` kept, by source field id."""
+    return {
+        field_id: from_bytes(IcebergType.model_validate(type_name), bytes.fromhex(encoded))
+        for field_id, type_name, encoded in values
+    }
+
+
 def _assert_projection_exists(
     columns: list[str] | None,
     table_schema,
@@ -339,11 +377,12 @@ class ReadPlanner:
         )
         self.manifest_cache = manifest_cache or get_manifest_cache(cache_dir=cache_dir)
         self._deleted_rows = DeletedRows()
-        # Each data file's column layout (None when it needs none) and its
-        # columns by field id, per (table, schema): files never change, and a
-        # schema change is a new schema id.
+        # Each data file's column layout (None when it needs none), its
+        # columns by field id and its identity-partition values, per (table,
+        # schema): files never change, and a schema change is a new schema id.
         self._file_columns: LRUCache[
-            tuple[str, int, str], tuple[tuple[Column, ...] | None, dict[int, str]]
+            tuple[str, int, str],
+            tuple[tuple[Column, ...] | None, dict[int, str], dict[int, Any]],
         ] = LRUCache(10_000)
 
     def plan(
@@ -439,6 +478,11 @@ class ReadPlanner:
 
                 # Build manifest entries with resolved paths
                 entries = []
+                top_level = {
+                    field.field_id: field.field_type
+                    for schema in table.metadata.schemas
+                    for field in schema.fields
+                }
                 for planned in data_files:
                     file_path = planned.data_file.file_path
                     actual_path = self._resolve_file_path(table_uri, file_path)
@@ -455,6 +499,7 @@ class ReadPlanner:
                                 table_identity_str,
                                 lambda path: self._resolve_file_path(table_uri, path),
                             ),
+                            partition_values=_partition_values(planned.data_file, table, top_level),
                         )
                     )
 
@@ -512,6 +557,7 @@ class ReadPlanner:
             layout_key = (table_identity_str, snapshot_schema.schema_id, actual_path)
             cached_layout = self._file_columns.get(layout_key)
             if cached_layout is None:
+                partition = _decode_partition_values(entry.partition_values)
                 cached_layout = (
                     file_columns(
                         pq_meta.arrow_schema,
@@ -520,6 +566,7 @@ class ReadPlanner:
                         table_identity=table_identity_str,
                         file_path=file_path,
                         format_version=table.metadata.format_version,
+                        partition_values=partition,
                     ),
                     stored_columns(
                         pq_meta.arrow_schema,
@@ -527,9 +574,10 @@ class ReadPlanner:
                         name_mapping,
                         table.metadata.format_version,
                     ),
+                    partition,
                 )
                 self._file_columns.put(layout_key, cached_layout)
-            layout, stored = cached_layout
+            layout, stored, partition = cached_layout
             if arrow_schema is None:
                 arrow_schema = (
                     pq_meta.arrow_schema
@@ -634,9 +682,14 @@ class ReadPlanner:
                     file_columns=layout,
                     equality_deletes=equality,
                     equality_columns=tuple(
-                        (field_id, stored.get(field_id), initial_defaults.get(field_id))
+                        (
+                            field_id,
+                            stored.get(field_id),
+                            partition.get(field_id, initial_defaults.get(field_id)),
+                        )
                         for field_id in key_ids
                     ),
+                    downcast_ns=table.metadata.format_version <= 2,
                 )
                 plan.tasks.append(task)
                 estimated_bytes += rg_size

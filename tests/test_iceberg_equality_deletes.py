@@ -268,6 +268,60 @@ def test_a_promoted_key_matches_after_widening(tmp_path):
     assert _names(table) == ["ann"]
 
 
+NANOS = 1_704_153_600_000_000_123  # 2024-01-02 plus 123 ns
+
+
+@pytest.mark.parametrize(
+    "deleted",
+    [
+        pa.array([datetime.datetime(2024, 1, 2)], pa.timestamp("us")),
+        pa.array([NANOS + 333], pa.timestamp("ns")),
+    ],
+    ids=["microseconds", "other nanoseconds"],
+)
+def test_a_nanosecond_key_is_compared_at_the_tables_unit(tmp_path, deleted):
+    """A v2 table's timestamps are microseconds, but a file registered from
+    elsewhere can hold nanoseconds, which the scan truncates. A JVM writer
+    deletes a row by the value it read, microseconds; the key was compared at
+    nanoseconds instead, so the delete never matched."""
+    catalog, uri = _catalog(tmp_path)
+    schema = pa.schema([("ts", pa.timestamp("us")), ("name", pa.string())])
+    catalog.create_table("db.t", schema=schema).append(
+        pa.table({"ts": [datetime.datetime(2024, 1, 1)], "name": ["a"]}, schema=schema)
+    )
+    table = _table(catalog)
+    commit_files(
+        table,
+        data_file(table, pa.table({"ts": pa.array([NANOS], pa.timestamp("ns")), "name": ["b"]})),
+    )
+    _delete(catalog, ts=deleted)
+
+    result, _ = _scan(StrataConfig(cache_dir=tmp_path / "cache"), uri)
+    assert _names(result) == ["a"]
+
+
+def test_keys_of_one_type_in_another_arrow_form_match():
+    """A uuid key read as Arrow's uuid type on one side and its 16-byte storage
+    on the other, or a string dictionary-encoded on one side, still match."""
+    import uuid
+
+    from strata.iceberg_equality import deleted_mask
+    from strata.metadata_cache import EqualityDeleteEntry
+
+    a, b = uuid.uuid4().bytes, uuid.uuid4().bytes
+    delete = EqualityDeleteEntry(file_path="d", actual_path="d", equality_ids=(1,), record_count=1)
+    stored = pa.ExtensionArray.from_storage(pa.uuid(), pa.array([a, b], pa.binary(16)))
+    table = pa.table({"k": stored})
+    assert deleted_mask(
+        table, {1: "k"}, [delete], lambda _: pa.table({"1": pa.array([b], pa.binary(16))})
+    ).to_pylist() == [False, True]
+
+    table = pa.table({"k": pa.array(["x", "y"]).dictionary_encode()})
+    assert deleted_mask(
+        table, {1: "k"}, [delete], lambda _: pa.table({"1": pa.array(["x"])})
+    ).to_pylist() == [True, False]
+
+
 def test_positional_and_equality_deletes_on_one_file(people, tmp_path):
     import pyarrow.parquet as pq
     from pyiceberg.manifest import DataFile, DataFileContent
@@ -328,6 +382,54 @@ def test_a_delete_in_one_partition_leaves_the_others(tmp_path):
 
     result, _ = _scan(StrataConfig(cache_dir=tmp_path / "cache"), uri)
     assert result.column("region").to_pylist() == ["us"]
+
+
+def test_an_identity_partition_column_the_file_omits_reads_its_partition_value(tmp_path):
+    """A Hive-layout file registered with add_files often omits its identity
+    partition column, whose value is the file's partition. It read as nulls,
+    as pyiceberg does not, and a delete keyed on it never matched. Each file
+    reads its own value, from a restarted planner's persisted manifest too."""
+    catalog, uri = _catalog(tmp_path)
+    schema = Schema(
+        NestedField(1, "id", LongType(), required=False),
+        NestedField(2, "region", StringType(), required=False),
+    )
+    spec = PartitionSpec(PartitionField(2, 1000, IdentityTransform(), "region"))
+    catalog.create_table("db.t", schema=schema, partition_spec=spec)
+    _table(catalog).append(
+        pa.table(
+            {"id": pa.array([0], pa.int64()), "region": ["us"]},
+            schema=pa.schema([("id", pa.int64()), ("region", pa.string())]),
+        )
+    )
+    table = _table(catalog)
+    commit_files(
+        table,
+        data_file(table, pa.table({"id": pa.array([1, 2], pa.int64())}), partition=Record("eu")),
+        data_file(table, pa.table({"id": pa.array([3], pa.int64())}), partition=Record("ap")),
+    )
+    config = StrataConfig(cache_dir=tmp_path / "cache")
+
+    def rows(scanned):
+        return sorted(scanned.to_pylist(), key=lambda row: row["id"])
+
+    expected = [
+        {"id": 0, "region": "us"},
+        {"id": 1, "region": "eu"},
+        {"id": 2, "region": "eu"},
+        {"id": 3, "region": "ap"},
+    ]
+    assert rows(_table(catalog).scan().to_arrow()) == expected
+    assert rows(_scan(config, uri)[0]) == expected
+
+    table = _table(catalog)
+    deleted = pa.table({"id": pa.array([2], pa.int64()), "region": ["eu"]})
+    commit_files(table, equality_delete(table, deleted, partition=Record("eu")))
+    store = MetadataStore(config.cache_dir / "metadata.sqlite")
+    ReadPlanner(config, manifest_cache=ManifestCache(store=store)).plan(uri)
+    restarted = ReadPlanner(config, manifest_cache=ManifestCache(store=store))
+    assert rows(_scan(config, uri, planner=restarted)[0]) == [expected[0], expected[1], expected[3]]
+    assert store.manifest_hits == 1
 
 
 def test_a_delete_whose_key_range_misses_a_row_group_is_not_applied_to_it(people):

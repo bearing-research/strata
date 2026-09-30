@@ -9,11 +9,20 @@ refused the table. Each test checks the scan against pyiceberg's own read.
 
 from __future__ import annotations
 
+import datetime
 import sys
 
 import pyarrow as pa
 import pytest
-from pyiceberg.types import DoubleType, LongType, StringType
+from pyiceberg.types import (
+    DoubleType,
+    ListType,
+    LongType,
+    MapType,
+    NestedField,
+    StringType,
+    StructType,
+)
 
 from strata.cache import CachedFetcher
 from strata.config import StrataConfig
@@ -509,6 +518,142 @@ def test_a_required_column_made_optional_streams_as_one_schema(tmp_path):
     merger = IncrementalIpcMerger()
     streamed = b"".join(merger.feed(fetcher.fetch_as_stream_bytes(task)) for task in plan.tasks)
     assert pa.ipc.open_stream(streamed + merger.finish()).read_all().num_rows == 2
+
+
+@pytest.mark.parametrize(
+    ("column", "path", "older", "newer"),
+    [
+        (
+            StructType(NestedField(3, "a", LongType(), required=True)),
+            ("s", "a"),
+            pa.array([{"a": 1}], pa.struct([pa.field("a", pa.int64(), nullable=False)])),
+            pa.array([{"a": None}], pa.struct([("a", pa.int64())])),
+        ),
+        (
+            ListType(3, LongType(), element_required=True),
+            ("s", "element"),
+            pa.array([[1]], pa.list_(pa.field("element", pa.int64(), nullable=False))),
+            pa.array([[None]], pa.list_(pa.int64())),
+        ),
+        (
+            MapType(3, StringType(), 4, LongType(), value_required=True),
+            ("s", "value"),
+            pa.array(
+                [[("k", 1)]],
+                pa.map_(
+                    pa.field("key", pa.string(), nullable=False),
+                    pa.field("value", pa.int64(), nullable=False),
+                ),
+            ),
+            pa.array([[("k", None)]], pa.map_(pa.string(), pa.int64())),
+        ),
+    ],
+    ids=["struct child", "list element", "map value"],
+)
+def test_a_nested_field_made_optional_streams_as_one_schema(tmp_path, column, path, older, newer):
+    """The older file says the nested field is not null, the newer one that it
+    may be. Only a top-level column took the snapshot's nullability, so the
+    row groups of the two files could not be put in one table or stream."""
+    from pyiceberg.schema import Schema
+
+    catalog, uri = _catalog(tmp_path)
+    table = catalog.create_table(
+        "db.t",
+        schema=Schema(
+            NestedField(1, "id", LongType(), required=False),
+            NestedField(2, "s", column, required=False),
+        ),
+    )
+    table.append(pa.table({"id": [1], "s": older}, schema=table.schema().as_arrow()))
+    with catalog.load_table("db.t").update_schema() as update:
+        update.make_column_optional(path)
+    table = catalog.load_table("db.t")
+    table.append(pa.table({"id": [2], "s": newer}, schema=table.schema().as_arrow()))
+    config = StrataConfig(cache_dir=tmp_path / "cache")
+
+    scanned, plan = _scan(config, uri)
+    assert _rows(scanned) == _pyiceberg(catalog)
+    fetcher = CachedFetcher(config)
+    merger = IncrementalIpcMerger()
+    streamed = b"".join(merger.feed(fetcher.fetch_as_stream_bytes(task)) for task in plan.tasks)
+    assert _rows(pa.ipc.open_stream(streamed + merger.finish()).read_all()) == _rows(scanned)
+
+
+NANOS = 1_704_153_600_000_000_123  # 2024-01-02 plus 123 ns
+
+
+def _nanos_inside(tmp_path, table_type, file_type, first, nanos, evolve=None):
+    """``db.t`` with *first* in ``s`` (of *table_type*), then a file holding
+    *nanos* as *file_type*, as a writer from elsewhere leaves it: field ids on
+    its top-level columns only, so its nested fields go by the name mapping."""
+    from pyiceberg.table.name_mapping import create_mapping_from_schema
+
+    from tests.iceberg_fixtures import commit_files, data_file
+
+    catalog, uri = _catalog(tmp_path)
+    schema = pa.schema([("id", pa.int64()), ("s", table_type)])
+    table = catalog.create_table("db.t", schema=schema)
+    table.append(pa.table({"id": pa.array([1], pa.int64()), "s": pa.array([first], table_type)}))
+    mapping = create_mapping_from_schema(table.schema()).model_dump_json()
+    with table.transaction() as transaction:
+        transaction.set_properties({"schema.name-mapping.default": mapping})
+    if evolve is not None:
+        _evolve(catalog, evolve)
+    table = catalog.load_table("db.t")
+    rows = pa.table({"id": pa.array([2], pa.int64()), "s": pa.array([nanos], file_type)})
+    commit_files(table, data_file(table, rows))
+    return catalog, uri
+
+
+US, NS = pa.timestamp("us"), pa.timestamp("ns")
+JAN_1, JAN_2 = datetime.datetime(2024, 1, 1), datetime.datetime(2024, 1, 2)
+
+
+@pytest.mark.parametrize(
+    ("table_type", "file_type", "first", "nanos", "expected"),
+    [
+        (pa.struct([("t", US)]), pa.struct([("t", NS)]), {"t": JAN_1}, {"t": NANOS}, {"t": JAN_2}),
+        (pa.list_(US), pa.list_(NS), [JAN_1], [NANOS], [JAN_2]),
+        (
+            pa.map_(pa.string(), US),
+            pa.map_(pa.string(), NS),
+            [("k", JAN_1)],
+            [("k", NANOS)],
+            [("k", JAN_2)],
+        ),
+    ],
+    ids=["struct", "list", "map"],
+)
+def test_nanosecond_timestamps_inside_a_nested_column_read_at_the_tables_unit(
+    tmp_path, table_type, file_type, first, nanos, expected
+):
+    """Only a top-level timestamp was truncated to the table's microseconds;
+    one inside a struct, list or map kept the file's nanoseconds, so its row
+    groups did not match the plan's schema. pyiceberg truncates inside a
+    struct and refuses the lossy cast inside a list or map; the scan
+    truncates in all three."""
+    _, uri = _nanos_inside(tmp_path, table_type, file_type, first, nanos)
+
+    scanned, _ = _scan(StrataConfig(cache_dir=tmp_path / "cache"), uri)
+    assert scanned.schema.field("s").type == table_type
+    assert _rows(scanned) == [{"id": 1, "s": first}, {"id": 2, "s": expected}]
+
+
+def test_nanosecond_timestamps_inside_a_reshaped_struct_are_truncated(tmp_path):
+    """A struct that gained a field since is rebuilt field by field; its
+    nanosecond timestamp is truncated too, not refused as a lossy cast."""
+    catalog, uri = _nanos_inside(
+        tmp_path,
+        pa.struct([("t", US)]),
+        pa.struct([("t", NS)]),
+        {"t": JAN_1},
+        {"t": NANOS},
+        evolve=lambda u: u.add_column(("s", "c"), LongType()),
+    )
+
+    scanned, _ = _scan(StrataConfig(cache_dir=tmp_path / "cache"), uri)
+    assert _rows(scanned) == _pyiceberg(catalog)
+    assert _rows(scanned)[1]["s"] == {"t": JAN_2, "c": None}
 
 
 def test_a_column_older_files_predate_reads_its_v3_initial_default(tmp_path):

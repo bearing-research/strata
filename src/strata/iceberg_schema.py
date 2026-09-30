@@ -40,8 +40,8 @@ class Column(NamedTuple):
     # (file type, table type) of a struct, list or map column whose nested
     # fields changed since the file was written; None otherwise.
     reshape: tuple[IcebergType, IcebergType] | None = None
-    # What a column the file predates reads as: its Iceberg v3 initial-default,
-    # or None for nulls.
+    # What a column the file lacks reads as: the file's identity-partition
+    # value, else its Iceberg v3 initial-default, or None for nulls.
     default: Any = None
 
 
@@ -89,6 +89,42 @@ def _same_type(file_type: IcebergType, table_type: IcebergType) -> bool:
     )
 
 
+def _as_table(data_type: pa.DataType, table_type: IcebergType) -> pa.DataType:
+    """*data_type*, the file's Arrow form of *table_type*, with the table's
+    nullability and timestamp unit at every depth.
+
+    The file's own offset widths are kept: only what the table decides changes.
+    A v1 or v2 table allows only microseconds, but a file can hold nanoseconds
+    (or INT96, read as nanoseconds), inside a struct, list or map too.
+    """
+    if isinstance(table_type, StructType):
+        return pa.struct(
+            [
+                field.with_type(_as_table(field.type, child.field_type)).with_nullable(
+                    not child.required
+                )
+                for field, child in zip(data_type, table_type.fields, strict=True)
+            ]
+        )
+    if isinstance(table_type, ListType):
+        element = data_type.value_field
+        element = element.with_type(_as_table(element.type, table_type.element_type))
+        element = element.with_nullable(not table_type.element_required)
+        return pa.large_list(element) if pa.types.is_large_list(data_type) else pa.list_(element)
+    if isinstance(table_type, MapType):
+        key, item = data_type.key_field, data_type.item_field
+        return pa.map_(
+            key.with_type(_as_table(key.type, table_type.key_type)),
+            item.with_type(_as_table(item.type, table_type.value_type)).with_nullable(
+                not table_type.value_required
+            ),
+            keys_sorted=data_type.keys_sorted,
+        )
+    if pa.types.is_timestamp(data_type):
+        return _small(schema_to_pyarrow(table_type, include_field_ids=False))
+    return data_type
+
+
 def _unreadable(file_type: IcebergType, table_type: IcebergType) -> str | None:
     """Why a file's *file_type* cannot be read as *table_type*, or None when it can.
 
@@ -118,7 +154,8 @@ def _reshape(
 ) -> pa.Array:
     """*array*, stored as *file_type*, rebuilt as *table_type* (in Arrow, *target*)."""
     if isinstance(table_type, PrimitiveType):
-        return array.cast(target)
+        # Not a safe cast: a finer timestamp is truncated to the table's unit.
+        return array.cast(target, safe=False)
     mask = array.is_null()
     if isinstance(table_type, StructType):
         assert isinstance(file_type, StructType)
@@ -189,11 +226,15 @@ def file_columns(
     table_identity: str,
     file_path: str,
     format_version: int,
+    partition_values: dict[int, Any],
 ) -> tuple[Column, ...] | None:
     """How a file with *file_schema* reads as *snapshot_schema*, or None when it already does.
 
     Every column takes its nullability from the snapshot, so files written on
     either side of a required column becoming optional stream as one schema.
+    A column the file lacks reads its value in *partition_values* (the file's
+    identity partition, by source field id), else its initial-default, as
+    pyiceberg reads it.
 
     Raises ``UnsupportedTableFormatError`` for a type change Iceberg does not
     allow, at any depth.
@@ -212,20 +253,16 @@ def file_columns(
                     field.name,
                     None,
                     snapshot_arrow_field(field).with_nullable(nullable),
-                    default=field.initial_default,
+                    default=partition_values.get(field.field_id, field.initial_default),
                 )
             )
             continue
         physical = file_schema.field(held.name)
         if _same_type(held.field_type, field.field_type):
+            # Read at the table's nullability and timestamp unit, at every
+            # depth; a nanosecond timestamp is truncated, as pyiceberg does.
             read_as = physical.with_name(field.name).with_nullable(nullable)
-            if pa.types.is_timestamp(physical.type):
-                # A v1 or v2 table allows only microseconds, but a file can hold
-                # nanoseconds (or INT96, read as nanoseconds): read it at the
-                # table's unit, truncating, as pyiceberg does.
-                read_as = read_as.with_type(
-                    _small(schema_to_pyarrow(field.field_type, include_field_ids=False))
-                )
+            read_as = read_as.with_type(_as_table(physical.type, field.field_type))
             columns.append(Column(field.name, held.name, read_as))
             continue
         why = _unreadable(held.field_type, field.field_type)
@@ -291,7 +328,8 @@ def stored_columns(
 
 
 def absent_column(num_rows: int, data_type: pa.DataType, default: Any) -> pa.Array:
-    """A column the data file predates: its Iceberg v3 initial-default, else nulls."""
+    """A column the data file lacks: *default* (its identity-partition value or v3
+    initial-default) on every row, else nulls."""
     if default is None:
         return pa.nulls(num_rows, data_type)
     return pa.repeat(pa.scalar(default, type=data_type), num_rows)
