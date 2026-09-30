@@ -217,6 +217,37 @@ def read_only_violation(sql: str, dialect: str | None) -> str | None:
     return None
 
 
+def confined_write_violation(sql: str, dialect: str | None) -> str | None:
+    """The first statement in *sql* a confined write cell may not run, or None.
+
+    In service mode a SQLite cell runs inside the server process, and SQLite
+    reaches other files through ``ATTACH`` (another notebook's database, the
+    artifact store's metadata) and ``VACUUM INTO`` (a copy written anywhere the
+    server can write). DuckDB is confined by the engine (``duckdb._confine``);
+    SQLite through ADBC has no such control, so these statements are refused,
+    and SQL that does not parse is refused rather than guessed at.
+    """
+    if dialect is None or not sql.strip():
+        return None
+    import sqlglot
+
+    try:
+        statements = [statement for statement in sqlglot.parse(sql, dialect=dialect) if statement]
+    except _SqlglotError:
+        return (
+            "the SQL could not be parsed, and on this server a SQL cell runs only SQL it can check"
+        )
+    for statement in statements:
+        name = type(statement).__name__
+        head = str(statement.this or "").upper() if name == "Command" else name.upper()
+        if head in ("ATTACH", "DETACH", "VACUUM"):
+            return (
+                f"{head} reaches files outside the connection's database, which this "
+                "server does not allow"
+            )
+    return None
+
+
 def _extract_placeholder_positions(sql: str) -> list[str]:
     """Return ``:name`` placeholders in source order, duplicates kept.
 

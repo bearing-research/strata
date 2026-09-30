@@ -185,7 +185,11 @@ def test_the_query_reads_the_snapshot_its_provenance_names(
 
 
 @pytest.mark.asyncio
-async def test_an_s3_mount_is_a_view_read_with_its_storage_options(tmp_path):
+# In service mode the cell is confined to its own lake
+# (tests/notebook/test_sql_duckdb_confine.py); the mount must stay readable.
+@pytest.mark.parametrize("mode", ["personal", "service"])
+async def test_an_s3_mount_is_a_view_read_with_its_storage_options(tmp_path, monkeypatch, mode):
+    _configure(monkeypatch, StrataConfig(cache_dir=tmp_path / "cache", deployment_mode=mode))
     with MinioContainer(MINIO_IMAGE) as minio:
         minio_config = minio.get_config()
         client = minio.get_client()
@@ -236,3 +240,34 @@ async def test_a_read_cell_cannot_write_to_the_catalog(tmp_path, monkeypatch, re
     assert result.success is False
     rows = catalog.load_table("taxi.trips").scan().to_arrow().column("id").to_pylist()
     assert sorted(rows) == [1, 2]
+
+
+@pytest.mark.asyncio
+async def test_a_confined_cell_reads_its_catalog_and_nothing_outside_it(
+    tmp_path, monkeypatch, rest_catalog
+):
+    """Service mode confines a SQL cell to its lake (test_sql_duckdb_confine.py):
+    the catalog's table stays readable, a file outside it does not."""
+    catalog, properties = rest_catalog
+    _configure(
+        monkeypatch,
+        StrataConfig(
+            cache_dir=tmp_path / "cache", catalogs={"lake": properties}, deployment_mode="service"
+        ),
+    )
+    connection = 'driver = "duckdb"\npath = ":memory:"\ncatalog = "lake"'
+    nb_dir = _notebook(
+        tmp_path, "# @sql connection=lake\nSELECT id FROM lake.taxi.trips ORDER BY id\n", connection
+    )
+    session = NotebookSession(parse_notebook(nb_dir), nb_dir)
+
+    _, rows = await _run(nb_dir, session)
+    assert rows == [{"id": 1}, {"id": 2}]
+
+    outside = tmp_path / "secret.txt"
+    outside.write_text("do not read")
+    source = f"# @sql connection=lake\nSELECT content FROM read_text('{outside}')\n"
+    write_cell(nb_dir, "c1", source)
+    result = await CellExecutor(session).execute_cell("c1", source)
+    assert result.success is False
+    assert "Permission" in (result.error or "")

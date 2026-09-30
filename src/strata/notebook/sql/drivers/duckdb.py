@@ -161,10 +161,13 @@ class DuckDBAdapter:
         path = self._build_path(spec)
         catalog = getattr(spec, "catalog_properties", None)
         mounts = getattr(spec, "mount_sources", None)
+        confine = getattr(spec, "confine_to", None)
         if catalog or mounts:
             if not read_only:
                 raise RuntimeError("a connection's catalog and mounts are read-only")
-            return self._open_lake(path, getattr(spec, "catalog", None), catalog, mounts or [])
+            return self._open_lake(
+                path, getattr(spec, "catalog", None), catalog, mounts or [], confine
+            )
         is_memory = path == ":memory:"
         # ``duckdb.connect`` with ``read_only=True`` requires the
         # file to exist; a brand-new path can't be opened RO. For
@@ -172,6 +175,8 @@ class DuckDBAdapter:
         # to a writable handle and let the RO transaction enforce.
         connect_ro = read_only and not is_memory and os.path.exists(path)
         conn = self._invoke_connect(path, read_only=connect_ro)
+        if confine is not None:
+            _confine(conn, confine)
         if not read_only:
             return conn
         # DuckDB's ``conn.cursor()`` returns a *separate* child
@@ -191,6 +196,7 @@ class DuckDBAdapter:
         catalog_name: str | None,
         catalog: dict[str, str] | None,
         mounts: list[dict[str, Any]],
+        confine: list[str] | None = None,
     ) -> Any:
         """A read-only handle with the catalog attached and each mount a view.
 
@@ -222,6 +228,8 @@ class DuckDBAdapter:
             _create_mount_view(conn, mount)
         for statement in setup:
             conn.execute(statement)
+        if confine is not None:
+            _confine(conn, confine)
         conn.execute("BEGIN TRANSACTION READ ONLY")
         return _ReadOnlyDuckDB(conn, setup)
 
@@ -505,6 +513,27 @@ def _literal(value: str) -> str:
 
 def _ident(value: str) -> str:
     return '"' + value.replace('"', '""') + '"'
+
+
+def _confine(conn: Any, locations: list[str]) -> None:
+    """Limit what SQL on *conn* can reach to *locations*, and lock it there.
+
+    In service mode a SQL cell runs inside the server process, so without this
+    it could read any file the server can (on Linux, ``read_text`` of
+    ``/proc/self/environ`` returns the server's secrets), and a write cell
+    could ``COPY ... TO`` or ``ATTACH`` any path. This runs after the handle's
+    own setup (the notebook's database, extensions, the catalog, mount views),
+    which needed that access. A location ending in ``/`` is a directory and
+    admits everything under it; any other is one file. Locking the
+    configuration keeps a cell from turning access back on; ``SET
+    search_path``, which every cursor re-issues, still works under the lock.
+    """
+    directories = [location for location in locations if location.endswith("/")]
+    files = [location for location in locations if not location.endswith("/")]
+    conn.execute(f"SET allowed_directories = [{', '.join(map(_literal, directories))}]")
+    conn.execute(f"SET allowed_paths = [{', '.join(map(_literal, files))}]")
+    conn.execute("SET enable_external_access = false")
+    conn.execute("SET lock_configuration = true")
 
 
 def _mount_scheme(uri: str) -> str:

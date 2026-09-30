@@ -39,6 +39,7 @@ from strata.notebook.provenance import derive_subkey
 from strata.notebook.sql.adapter import FreshnessToken
 from strata.notebook.sql.analyzer import (
     analyze_sql_cell,
+    confined_write_violation,
     read_only_violation,
     rewrite_named_to_positional,
 )
@@ -182,6 +183,7 @@ async def execute_sql_cell(
         except LakeError as exc:
             return _error_result(f"connection {spec.name!r}: {exc}", start_time)
         runtime_spec = lake.spec
+    runtime_spec = _confined(session, runtime_spec, lake)
 
     # ---- probes (optional) -----------------------------------------
     freshness = None
@@ -448,6 +450,11 @@ async def _execute_write_cell(
         runtime_spec = _resolve_runtime_spec(spec, session.path, _credentials(session))
     except CredentialError as exc:
         return _error_result(f"connection {spec.name!r}: {exc}", start_time)
+    runtime_spec = _confined(session, runtime_spec, None)
+    if spec.driver == "sqlite" and getattr(runtime_spec, "confine_to", None) is not None:
+        violation = confined_write_violation(analysis.sql_body, adapter.sqlglot_dialect)
+        if violation is not None:
+            return _error_result(f"connection {spec.name!r}: {violation}", start_time)
     query_normalized = normalize_query(analysis.sql_body, adapter.sqlglot_dialect)
     connection_id = _with_credential(
         adapter.canonicalize_connection_id(runtime_spec, read_only=False), spec
@@ -888,6 +895,22 @@ def sql_reopen_identity(cell: Any, session: Any) -> str | None:
     except (CredentialError, ValueError, OSError):
         return None
     return hashlib.sha256(connection_id.encode() + b"|" + policy.salt).hexdigest()
+
+
+def _confined(session: Any, spec: ConnectionSpec, lake: Any) -> ConnectionSpec:
+    """In service mode, a connection confined to its own database and lake.
+
+    SQL cells run inside the server process. A DuckDB connection is confined by
+    the engine (``duckdb._confine``) to its lake's locations; one with no
+    catalog or mounts reaches nothing outside its own database. A SQLite write
+    cell is refused the statements that reach other files
+    (``confined_write_violation``); its read cells already run only reads.
+    """
+    if spec.driver not in ("duckdb", "sqlite"):
+        return spec
+    if getattr(session._lake_config(), "deployment_mode", "personal") != "service":
+        return spec
+    return spec.model_copy(update={"confine_to": list(lake.locations) if lake else []})
 
 
 def _with_credential(connection_id: str, spec: ConnectionSpec) -> str:
