@@ -8,10 +8,17 @@ rule off for *every* host. Item 15.
 
 from __future__ import annotations
 
+import httpx
 import pytest
 from fastapi import HTTPException
+from fastapi.testclient import TestClient
 
-from strata.notebook.remote_executor import _assert_url_safe, _host_is_allowlisted
+from strata.notebook.remote_executor import (
+    _assert_url_safe,
+    _host_is_allowlisted,
+    create_notebook_executor_app,
+)
+from tests.notebook.test_worker_input_streaming import _manifest, _Store
 
 
 @pytest.fixture(autouse=True)
@@ -97,3 +104,27 @@ class TestBypassOrdering:
         monkeypatch.setenv("STRATA_WORKER_ALLOW_LOCAL_HOSTS", "1")
 
         _assert_url_safe("http://127.0.0.1:8000/v1/builds/b1/finalize", "finalize_url")
+
+
+class TestRebinding:
+    def test_an_input_url_that_rebinds_to_loopback_is_not_downloaded(
+        self, monkeypatch, rebinding_dns
+    ):
+        """The manifest is checked when it arrives and the input is fetched
+        after; a name that answers the check with a public address and the
+        download with 127.0.0.1 used to reach whatever listens there."""
+        store = _Store(1024)
+        port = store.server.server_address[1]
+        manifest = _manifest(store, "x = 1")
+        manifest["inputs"][0]["url"] = f"http://rebind.test:{port}/input"
+        # The upload and finalize URLs stay on 127.0.0.1, named, so the guard
+        # passes them and only the input's name is in question.
+        monkeypatch.setenv("STRATA_WORKER_ALLOWED_HOSTS", "127.0.0.1")
+        rebinding_dns.answers["rebind.test"] = [["93.184.216.34"], ["127.0.0.1"]]
+
+        with TestClient(create_notebook_executor_app()) as worker:
+            with pytest.raises(httpx.ConnectError, match="non-routable address 127.0.0.1"):
+                worker.post("/v1/execute-manifest", json=manifest)
+
+        assert store.sent == 0
+        assert store.uploads == []

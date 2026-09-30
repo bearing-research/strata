@@ -48,7 +48,7 @@ from urllib.parse import urlparse
 import httpx
 
 from strata.notebook.models import FetchSpec
-from strata.url_safety import url_safety_problem
+from strata.url_safety import guarded_transport, url_safety_problem
 
 STALE_CHECK_SECONDS = 60.0
 FETCH_TIMEOUT_SECONDS = 60.0
@@ -196,7 +196,14 @@ class FetchCache:
             if record.get("last_modified"):
                 headers["If-Modified-Since"] = record["last_modified"]
 
-        client = self._client or httpx.Client(timeout=FETCH_TIMEOUT_SECONDS)
+        client = self._client or httpx.Client(
+            timeout=FETCH_TIMEOUT_SECONDS,
+            # The per-hop check below resolves the host; this makes the
+            # connection itself use only an address that passed the same rule.
+            transport=guarded_transport(
+                allowed_hosts=self._allowed_hosts, allow_local=self._allow_local
+            ),
+        )
         partial = self.root / f".partial-{os.getpid()}-{id(spec)}"
         try:
             url = spec.url
