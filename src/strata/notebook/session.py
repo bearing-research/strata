@@ -3889,8 +3889,13 @@ def _prune_artifacts_in_background(session: NotebookSession) -> threading.Thread
     manager = session.artifact_manager
 
     def prune() -> None:
+        from strata.notebook.quiesce import NotebookQuiesced
+
         try:
             result = manager.prune(keep, min_idle_seconds)
+        except NotebookQuiesced as exc:
+            logger.info("Not pruning %s's artifacts: %s", session.path, exc)
+            return
         except Exception:
             logger.exception("Pruning %s's artifacts failed", session.path)
             return

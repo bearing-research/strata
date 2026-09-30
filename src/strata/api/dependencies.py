@@ -394,4 +394,9 @@ def resolve_input_version(input_uri: str, tenant: str | None = None) -> str:
     if resolved.artifact is not None:
         _ensure_artifact_access(resolved.artifact, tenant)
         _authorize_artifact_read(resolved.artifact)
+        # A result read only as another computation's input is still in use:
+        # its downstream's cache hits never read it, and retention would
+        # otherwise collect it while every request for the downstream needs it.
+        if store is not None:
+            store.record_use(resolved.artifact.id, resolved.artifact.version)
     return resolved.version
