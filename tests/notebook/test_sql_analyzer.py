@@ -313,6 +313,86 @@ def test_a_table_no_probe_can_name_is_reported_not_tracked(dialect, reference):
     assert result.unresolved_tables == [reference]
 
 
+@pytest.mark.parametrize(
+    ("dialect", "reference", "unresolved"),
+    [
+        ("postgres", "ROWS FROM (generate_series(1, 3))", ["GENERATE_SERIES(1, 3)"]),
+        (
+            "postgres",
+            "ROWS FROM (generate_series(1, 3), my_func())",
+            ["GENERATE_SERIES(1, 3)", "MY_FUNC()"],
+        ),
+        ("duckdb", "ROWS FROM (range(3))", ["RANGE(0, 3)"]),
+        ("postgres", "json_to_recordset('[]')", ["JSON_TO_RECORDSET('[]')"]),
+    ],
+)
+def test_a_set_returning_function_list_is_reported_not_a_crash(dialect, reference, unresolved):
+    """``ROWS FROM (...)`` is a table with no name of its own, only the
+    functions it calls. The analyzer read the name it does not have and raised,
+    and a notebook holding such a cell did not open."""
+    src = f"# @sql connection=db\nSELECT * FROM {reference} AS x(a) JOIN orders USING (id)"
+    result = analyze_sql_cell(src, dialect=dialect)
+    assert result.parse_error is None
+    assert [t.name for t in result.tables] == ["orders"]
+    assert result.unresolved_tables == unresolved
+
+
+def test_a_notebook_with_a_rows_from_cell_opens(tmp_path):
+    """The server session and the CLI's ops both analyze every cell on open."""
+    from strata.notebook.ops import LocalNotebookOps
+    from strata.notebook.parser import parse_notebook
+    from strata.notebook.session import NotebookSession
+    from strata.notebook.writer import add_cell_to_notebook, create_notebook, write_cell
+
+    nb_dir = create_notebook(tmp_path, "rows_from")
+    add_cell_to_notebook(nb_dir, "sql", language="sql")
+    write_cell(
+        nb_dir,
+        "sql",
+        "# @sql connection=pg\n# @name q\nSELECT * FROM ROWS FROM (generate_series(1, 3))\n",
+    )
+    toml = nb_dir / "notebook.toml"
+    toml.write_text(
+        toml.read_text() + '\n[connections.pg]\ndriver = "postgresql"\nhost = "localhost"\n'
+    )
+
+    session = NotebookSession(parse_notebook(nb_dir), nb_dir)
+    cell = session.notebook_state.get_cell("sql")
+    assert cell.defines == ["q"]
+    assert [d.code for d in cell.annotation_diagnostics] == ["sql_dynamic_table"]
+
+    ops = LocalNotebookOps(nb_dir)
+    assert [c.id for c in ops.list_cells()] == ["sql"]
+
+
+def test_an_analyzer_failure_does_not_stop_a_notebook_opening(tmp_path, monkeypatch):
+    """A bug in table extraction is the analyzer's, not the notebook's: the
+    notebook opens, the cell keeps its defines, and its header says what went
+    wrong."""
+    import strata.notebook.sql.analyzer as analyzer_mod
+    from strata.notebook.parser import parse_notebook
+    from strata.notebook.session import NotebookSession
+    from strata.notebook.writer import add_cell_to_notebook, create_notebook, write_cell
+
+    def boom(_sql, _dialect):
+        raise RuntimeError("analyzer bug")
+
+    monkeypatch.setattr(analyzer_mod, "_extract_tables", boom)
+    nb_dir = create_notebook(tmp_path, "analyzer_bug")
+    add_cell_to_notebook(nb_dir, "sql", language="sql")
+    write_cell(nb_dir, "sql", "# @sql connection=pg\n# @name q\nSELECT * FROM events\n")
+    toml = nb_dir / "notebook.toml"
+    toml.write_text(
+        toml.read_text() + '\n[connections.pg]\ndriver = "postgresql"\nhost = "localhost"\n'
+    )
+
+    session = NotebookSession(parse_notebook(nb_dir), nb_dir)
+    cell = session.notebook_state.get_cell("sql")
+    assert cell.defines == ["q"]
+    messages = {d.code: d.message for d in cell.annotation_diagnostics}
+    assert "analyzer bug" in messages["sql_analysis_failed"]
+
+
 def test_table_with_a_literal_names_its_table():
     """Snowflake's ``TABLE('...')`` with a string names a table, as
     ``IDENTIFIER('...')`` does."""

@@ -815,38 +815,6 @@ class NotebookSession:
         # Rebuild full DAG (since one cell changed, downstream may be affected)
         self._analyze_and_build_dag()
 
-    def _resolve_sql_dialect(self, cell) -> str | None:
-        """Look up the sqlglot dialect for a SQL cell's connection.
-
-        Walks: cell source → ``# @sql connection=<name>`` →
-        ``notebook.connections[<name>]`` → ``DriverAdapter.sqlglot_dialect``.
-
-        Returns ``None`` when any step is unresolved — the connection
-        isn't declared, the driver isn't registered, or the cell has
-        no ``# @sql`` annotation. The analyzer treats ``None`` as
-        "skip table extraction"; the executor re-resolves at execute
-        time when the connection MUST exist.
-        """
-        from strata.notebook.annotations import parse_annotations
-
-        annotations = parse_annotations(cell.source)
-        if annotations.sql is None or not annotations.sql.connection:
-            return None
-        connection_name = annotations.sql.connection
-        connection = next(
-            (c for c in self.notebook_state.connections if c.name == connection_name),
-            None,
-        )
-        if connection is None:
-            return None
-        try:
-            from strata.notebook.sql.registry import get_adapter
-
-            adapter = get_adapter(connection.driver)
-        except (KeyError, ImportError):
-            return None
-        return adapter.sqlglot_dialect
-
     def get_artifact_manager(self) -> NotebookArtifactManager:
         """Get the artifact manager for this session.
 

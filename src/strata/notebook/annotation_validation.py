@@ -8,6 +8,7 @@ execution.
 from __future__ import annotations
 
 import ast
+import logging
 
 from strata.notebook.annotations import (
     iter_annotation_block,
@@ -22,6 +23,8 @@ from strata.notebook.models import (
     DiagnosticSeverity,
     NotebookState,
 )
+
+logger = logging.getLogger(__name__)
 
 _BUILTIN_WORKER_NAMES = frozenset({"local"})
 _SUPPORTED_MOUNT_SCHEMES = frozenset({"file", "s3", "gs", "gcs", "az", "azure"})
@@ -623,6 +626,21 @@ def _validate_sql_cell_annotations(
             # Driver not registered (handled by connection_driver_unknown
             # above) or sqlglot not installed — neither is a parse error.
             pass
+        except Exception as exc:
+            # A bug in table extraction, not in the cell. Validation runs on
+            # open, so raising here would keep the whole notebook from opening.
+            logger.exception("SQL analysis failed for cell %s", cell.id)
+            diagnostics.append(
+                AnnotationDiagnostic(
+                    severity=DiagnosticSeverity.WARN,
+                    code="sql_analysis_failed",
+                    message=(
+                        f"Strata couldn't analyze this SQL cell ({type(exc).__name__}: "
+                        f"{exc}). This is a Strata bug; running the cell may fail."
+                    ),
+                    line=None,
+                )
+            )
 
     # Re-scan raw lines to catch malformed @cache values that the
     # permissive parser silently dropped.

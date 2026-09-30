@@ -552,17 +552,23 @@ def _table_reference(table_node: Any, sql: str, dialect: str) -> QualifiedTable 
     this = table_node.this
     if isinstance(this, exp.DynamicIdentifier):
         return _named_by_literal(this, dialect)
+    if not isinstance(this, exp.Identifier):
+        return None
     start = this.meta.get("start")
-    if isinstance(this, exp.Identifier) and start is not None and sql[start] == "'":
+    if start is not None and sql[start] == "'":
         return None
     return _qualified(table_node, dialect)
 
 
 def _unresolved_text(table_node: Any, sql: str, dialect: str) -> str:
     """How a reference no probe can name reads in the cell, for a diagnostic."""
-    start, end = table_node.this.meta.get("start"), table_node.this.meta.get("end")
-    if start is not None and end is not None and sql[start] == "'":
-        return sql[start : end + 1]
+    from sqlglot import exp
+
+    this = table_node.this
+    if isinstance(this, exp.Identifier):
+        start, end = this.meta.get("start"), this.meta.get("end")
+        if start is not None and end is not None and sql[start] == "'":
+            return sql[start : end + 1]
     return ".".join(part.sql(dialect=dialect) for part in table_node.parts)
 
 
@@ -611,6 +617,10 @@ def _extract_tables(sql: str, dialect: str) -> tuple[list[QualifiedTable], list[
                 if isinstance(source, Scope):
                     # Reference to a CTE / derived table, not a
                     # base table.
+                    continue
+                if table_node.args.get("rows_from"):
+                    # ``ROWS FROM (f(), g())`` names nothing itself; each
+                    # function in it is a table node of its own, walked here.
                     continue
                 qt = _table_reference(table_node, sql, dialect)
                 record(qt, "" if qt else _unresolved_text(table_node, sql, dialect))
