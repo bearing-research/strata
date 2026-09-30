@@ -3054,6 +3054,13 @@ files live outside its own location cannot be read this way. A SQLite cell also
 runs in the server process: in a write cell <code>ATTACH</code>, <code>DETACH</code> and <code>VACUUM</code> are
 refused, since they reach other files (a read cell runs only reads already).
 Postgres, Snowflake and BigQuery cells send the query to their database server.</p>
+<p>Installing a notebook's packages runs as the server's user too, and building
+a package from a source distribution runs that package's build backend, code
+from wherever the package came from, with the server's environment. In service mode every <code>uv</code> command
+a notebook runs (<code>sync</code>, <code>add</code>, <code>lock</code>, the <code>uv run</code> that starts a cell)
+installs wheels only: a dependency with no wheel for the notebook's Python
+fails to resolve, and uv's message says a wheel is required. Personal mode
+still builds from source.</p>
 <h3 id="what-a-cell-is-given-strata_notebook_harness_env_allowlist">What a cell is given: <code>STRATA_NOTEBOOK_HARNESS_ENV_ALLOWLIST</code><a class="headerlink" href="#what-a-cell-is-given-strata_notebook_harness_env_allowlist" title="Permanent link">&para;</a></h3>
 <p>The allowlist narrows the environment a cell receives:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="c1"># Only what cells actually need; everything else stays with the server.</span>
