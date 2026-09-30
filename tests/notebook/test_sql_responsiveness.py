@@ -69,6 +69,7 @@ def _notebook(tmp_path: Path, cells: list[tuple[str, str, str]]) -> Path:
 
 def _session(nb: Path) -> Any:
     session = NotebookSession(parse_notebook(nb), nb)
+    session.refresh_environment_runtime()
     session._analyze_and_build_dag()
     session.environment_sync_state = "ready"
     return session

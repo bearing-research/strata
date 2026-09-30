@@ -1538,6 +1538,19 @@ async def _handle_cell_run_tests(
     if cell.language != CellLanguage.PYTHON:
         await _send_error_message(websocket, seq, "Cell tests are only supported for Python cells")
         return
+    # Tests run the cell's code, so they wait for the environment as a run does.
+    environment_block_reason = session.environment_execution_block_message()
+    if environment_block_reason:
+        await websocket.send_text(
+            _json_encode(
+                _make_message(
+                    MessageType.ERROR,
+                    seq,
+                    error_payload(environment_block_reason, code="ENVIRONMENT_BUSY"),
+                )
+            )
+        )
+        return
 
     busy_cell = await _reserve_execution_request(execution_state, cell_id)
     if busy_cell is not None:

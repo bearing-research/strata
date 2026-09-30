@@ -263,6 +263,32 @@ async def test_handle_cell_run_tests_failure_reports_error_status():
 
 
 @pytest.mark.asyncio
+async def test_handle_cell_run_tests_refuses_while_the_environment_is_not_ready():
+    """Tests run the cell's code, so they wait for the environment as a run
+    does. The REST route refused; the WebSocket handler ran them with whatever
+    ``python`` was on PATH."""
+    from strata.notebook.ws import _handle_cell_run_tests
+
+    session = _session_with([("cell1", "def add(a, b):\n    return a + b\n", None)])
+    session.venv_python = None
+    fake, execution_state = _register_fake_ws(session)
+
+    await _handle_cell_run_tests(
+        websocket=cast(WebSocket, fake),
+        session=session,
+        payload={"cell_id": "cell1", "test_source": "def test_x(cell):\n    assert True\n"},
+        execution_state=execution_state,
+        notebook_id=session.id,
+    )
+
+    errors = fake.frames_of("error")
+    assert errors[-1]["payload"]["code"] == "ENVIRONMENT_BUSY"
+    assert "not ready" in errors[-1]["payload"]["error"]
+    assert not fake.frames_of("cell_test_status")
+    assert not fake.frames_of("cell_test_results")
+
+
+@pytest.mark.asyncio
 async def test_handle_cell_run_tests_rejects_non_python_cell():
     from strata.notebook.ws import _handle_cell_run_tests
 

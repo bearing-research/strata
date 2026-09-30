@@ -50,6 +50,7 @@ def sample_notebook(tmp_path):
     # Parse and create session
     notebook_state = parse_notebook(notebook_dir)
     session = NotebookSession(notebook_state, notebook_dir)
+    session.refresh_environment_runtime()
 
     return session
 
@@ -1803,6 +1804,7 @@ class Person:
         write_cell(notebook_dir, "cell3", "rendered = str(p)")
 
         session = NotebookSession(parse_notebook(notebook_dir), notebook_dir)
+        session.refresh_environment_runtime()
         executor = CellExecutor(session)
 
         first = await executor.execute_cell("cell1", session.notebook_state.cells[0].source)
@@ -1845,6 +1847,7 @@ class Person:
         write_cell(notebook_dir, "cell3", "rendered = str(p)")
 
         session = NotebookSession(parse_notebook(notebook_dir), notebook_dir)
+        session.refresh_environment_runtime()
         executor = CellExecutor(session)
 
         first = await executor.execute_cell("cell1", session.notebook_state.cells[0].source)
@@ -2059,6 +2062,7 @@ class Person:
         write_cell(notebook_dir, "cell3", "rendered = str(p)")
 
         session = NotebookSession(parse_notebook(notebook_dir), notebook_dir)
+        session.refresh_environment_runtime()
         cold_executor = CellExecutor(session)
 
         first = await cold_executor.execute_cell("cell1", session.notebook_state.cells[0].source)
@@ -2160,6 +2164,7 @@ class TestPromptCellExecution:
         write_cell(notebook_dir, "p1", "# @name answer\nWhat is {{ x }}?")
 
         session = NotebookSession(parse_notebook(notebook_dir), notebook_dir)
+        session.refresh_environment_runtime()
         session.notebook_state.env["STRATA_AI_API_KEY"] = "sk-test"
 
         # Execute c1 first so x has an artifact
@@ -2204,6 +2209,7 @@ class TestPromptCellExecution:
         write_cell(notebook_dir, "p1", "# @name answer\nWhat is {{ x }}?")
 
         session = NotebookSession(parse_notebook(notebook_dir), notebook_dir)
+        session.refresh_environment_runtime()
         session.notebook_state.env["STRATA_AI_API_KEY"] = "sk-test"
         executor = CellExecutor(session)
         assert (await executor.execute_cell("c1", "x = 42")).success
@@ -2317,6 +2323,7 @@ class TestLoopCellExecution:
         add_cell_to_notebook(notebook_dir, "loop", after_cell_id="seed")
 
         session = NotebookSession(parse_notebook(notebook_dir), notebook_dir)
+        session.refresh_environment_runtime()
         return notebook_dir, session
 
     @pytest.mark.asyncio
@@ -2447,6 +2454,7 @@ class TestLoopCellExecution:
         )
 
         session = NotebookSession(parse_notebook(notebook_dir), notebook_dir)
+        session.refresh_environment_runtime()
         executor = CellExecutor(session)
 
         await executor.execute_cell("seed", "state = {'n': 0}")
@@ -2793,3 +2801,89 @@ class TestAmbientRemoteStore:
             "X-Tenant-ID": "team-a",
             "X-Strata-Principal": "alice",
         }
+
+
+class TestNoInterpreterRunsNoCellCode:
+    """A session without an interpreter (none recorded yet, or its sync raised)
+    does not run cell code. The executor used to fall back to whatever
+    ``python`` was on PATH: some other environment, whose results were then
+    stored under this notebook's provenance."""
+
+    @staticmethod
+    def _notebook(tmp_path, marker: Path):
+        from strata.notebook.writer import add_cell_to_notebook, create_notebook, write_cell
+
+        notebook_dir = create_notebook(tmp_path, "no_interpreter")
+        add_cell_to_notebook(notebook_dir, "seed")
+        write_cell(notebook_dir, "seed", "state = 0")
+        add_cell_to_notebook(notebook_dir, "c1", after_cell_id="seed")
+        write_cell(notebook_dir, "c1", f"open({str(marker)!r}, 'w').close()\nx = 1\n")
+        return notebook_dir, NotebookSession(parse_notebook(notebook_dir), notebook_dir)
+
+    @pytest.mark.asyncio
+    async def test_a_cell_is_refused(self, tmp_path):
+        marker = tmp_path / "ran"
+        _, session = self._notebook(tmp_path, marker)
+        assert session.venv_python is None
+
+        source = session.notebook_state.cells[1].source
+        result = await CellExecutor(session).execute_cell("c1", source)
+
+        assert not result.success
+        assert "not ready" in (result.error or "")
+        assert not marker.exists()
+
+    @pytest.mark.asyncio
+    async def test_a_loop_iteration_is_refused(self, tmp_path):
+        from strata.notebook.writer import write_cell
+
+        marker = tmp_path / "ran"
+        notebook_dir, session = self._notebook(tmp_path, marker)
+        loop_source = (
+            f"# @loop max_iter=2 carry=state\nopen({str(marker)!r}, 'w').close()\n"
+            "state = state + 1\n"
+        )
+        write_cell(notebook_dir, "c1", loop_source)
+        session.reload()
+        session.refresh_environment_runtime()
+        executor = CellExecutor(session)
+        assert (await executor.execute_cell("seed", "state = 0")).success
+
+        session.venv_python = None
+        result = await executor.execute_cell("c1", loop_source)
+
+        assert not result.success
+        assert "not ready" in (result.error or "")
+        assert not marker.exists()
+
+    @pytest.mark.asyncio
+    async def test_a_batch_is_refused(self, tmp_path):
+        marker = tmp_path / "ran"
+        _, session = self._notebook(tmp_path, marker)
+        spec = {
+            "cell_id": "c1",
+            "source": session.notebook_state.cells[1].source,
+            "consumed_vars": [],
+            "env": {},
+            "mount_manifest": {},
+            "source_hash": "",
+            "env_hash": "",
+        }
+
+        result = await CellExecutor(session).execute_batch([spec])
+
+        assert not result.completed
+        assert result.cell_results[0].status == "cell_error"
+        assert "not ready" in (result.cell_results[0].error or "")
+        assert not marker.exists()
+
+    @pytest.mark.asyncio
+    async def test_cell_tests_are_refused(self, tmp_path):
+        marker = tmp_path / "ran"
+        _, session = self._notebook(tmp_path, marker)
+
+        with pytest.raises(RuntimeError, match="not ready"):
+            await CellExecutor(session).run_cell_tests(
+                "c1", "def test_x(cell):\n    assert cell.x == 1\n"
+            )
+        assert not marker.exists()

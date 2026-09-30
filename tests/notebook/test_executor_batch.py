@@ -25,7 +25,9 @@ def _make_session_with_cells(tmp_path: Path, cells: list[tuple[str, str]]) -> No
         add_cell_to_notebook(notebook_dir, cell_id, after_cell_id=prev)
         write_cell(notebook_dir, cell_id, source)
         prev = cell_id
-    return NotebookSession(parse_notebook(notebook_dir), notebook_dir)
+    session = NotebookSession(parse_notebook(notebook_dir), notebook_dir)
+    session.refresh_environment_runtime()
+    return session
 
 
 def _cell_spec(

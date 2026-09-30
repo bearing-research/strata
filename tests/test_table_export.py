@@ -219,7 +219,9 @@ class TestPromotingToATable:
         write_cell(nb, "c1", source)
         add_cell_to_notebook(nb, "c2", "c1")
         write_cell(nb, "c2", "shown = snapshot")
-        return NotebookSession(parse_notebook(nb), nb), source
+        session = NotebookSession(parse_notebook(nb), nb)
+        session.refresh_environment_runtime()
+        return session, source
 
     async def test_promoting_twice_writes_two_snapshots_and_moves_champion(
         self, tmp_path, notebook_store, team

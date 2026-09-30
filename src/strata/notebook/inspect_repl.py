@@ -72,7 +72,7 @@ class InspectSession:
         str
             ``"ready"`` on success, otherwise an error message.
         """
-        from strata.notebook.executor import CellExecutor
+        from strata.notebook.executor import CellExecutor, _no_interpreter_message
         from strata.notebook.harness_env import configured_allowlist, harness_env
         from strata.notebook.harness_user import (
             LocalExecutionRefused,
@@ -88,6 +88,11 @@ class InspectSession:
             harness_user = resolve_harness_user()
         except LocalExecutionRefused as exc:
             return str(exc)
+        # Only in the notebook's interpreter, as a cell runs: never with
+        # whatever ``python`` is on PATH.
+        python_executable = session.venv_python
+        if python_executable is None:
+            return _no_interpreter_message(session)
 
         # Create temp dir for input files (persists for the session lifetime).
         self._manifest_dir = Path(tempfile.mkdtemp(prefix="strata_inspect_"))
@@ -107,7 +112,6 @@ class InspectSession:
             json.dump(manifest, f)
 
         # Spawn subprocess with the notebook interpreter used for normal runs.
-        python_executable = session.venv_python or Path("python")
         cmd = [
             str(python_executable),
             str(_HARNESS_PATH),

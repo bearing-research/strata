@@ -32,7 +32,9 @@ from tests.notebook.test_cli import _build_notebook
 
 
 def _session(nb: Path) -> NotebookSession:
-    return NotebookSession(parse_notebook(nb), nb)
+    session = NotebookSession(parse_notebook(nb), nb)
+    session.refresh_environment_runtime()
+    return session
 
 
 def _set(session: NotebookSession, nb: Path, cell_id: str, source: str) -> None:

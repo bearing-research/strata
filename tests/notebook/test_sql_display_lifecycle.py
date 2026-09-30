@@ -81,6 +81,7 @@ def orders(tmp_path) -> Path:
 
 def _session(nb: Path) -> Any:
     session = NotebookSession(parse_notebook(nb), nb)
+    session.refresh_environment_runtime()
     session._analyze_and_build_dag()
     session.environment_sync_state = "ready"
     return session

@@ -20,6 +20,7 @@ def test_stdout_persists_across_reopen(tmp_path: Path):
     # Execute the cell
     state = parse_notebook(notebook_dir)
     session = NotebookSession(state, notebook_dir)
+    session.refresh_environment_runtime()
     executor = CellExecutor(session)
 
     result = asyncio.run(executor.execute_cell("c1", 'print("hello from cell")\nx = 42'))
@@ -47,6 +48,7 @@ def test_stderr_persists_across_reopen(tmp_path: Path):
 
     state = parse_notebook(notebook_dir)
     session = NotebookSession(state, notebook_dir)
+    session.refresh_environment_runtime()
     executor = CellExecutor(session)
 
     result = asyncio.run(executor.execute_cell("c1", source))
@@ -69,6 +71,7 @@ def test_console_output_in_serialized_state(tmp_path: Path):
 
     state = parse_notebook(notebook_dir)
     session = NotebookSession(state, notebook_dir)
+    session.refresh_environment_runtime()
     executor = CellExecutor(session)
 
     asyncio.run(executor.execute_cell("c1", 'print("serialized")\nx = 1'))
@@ -86,6 +89,7 @@ def test_console_cleared_on_new_execution(tmp_path: Path):
 
     state = parse_notebook(notebook_dir)
     session = NotebookSession(state, notebook_dir)
+    session.refresh_environment_runtime()
     executor = CellExecutor(session)
 
     asyncio.run(executor.execute_cell("c1", 'print("first")\nx = 1'))

@@ -54,7 +54,9 @@ def _session(tmp_path, source: str = "x = 1"):
     notebook_dir = create_notebook(tmp_path, "Isolated")
     add_cell_to_notebook(notebook_dir, "c1", None)
     write_cell(notebook_dir, "c1", source)
-    return NotebookSession(parse_notebook(notebook_dir), notebook_dir)
+    session = NotebookSession(parse_notebook(notebook_dir), notebook_dir)
+    session.refresh_environment_runtime()
+    return session
 
 
 class TestResolution:
@@ -158,6 +160,7 @@ class TestEveryPlaceCellCodeStarts:
         add_cell_to_notebook(session.path, "c2", "c1")
         write_cell(session.path, "c2", "y = x")
         session = NotebookSession(parse_notebook(session.path), session.path)
+        session.refresh_environment_runtime()
 
         _server(monkeypatch, mode="personal")
         first = asyncio.run(CellExecutor(session).execute_cell("c1", "x = 41 + 1"))

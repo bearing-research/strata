@@ -317,7 +317,9 @@ class TestInACell:
         write_cell(nb, "c1", source)
         add_cell_to_notebook(nb, "c2", "c1")
         write_cell(nb, "c2", "n = rows")
-        return NotebookSession(parse_notebook(nb), nb)
+        session = NotebookSession(parse_notebook(nb), nb)
+        session.refresh_environment_runtime()
+        return session
 
     async def test_the_cell_reads_the_bytes_and_goes_stale_when_they_move(
         self, tmp_path, origin, monkeypatch
@@ -574,6 +576,7 @@ class TestOtherCellKinds:
         add_cell_to_notebook(nb, "loop", "seed")
         write_cell(nb, "loop", source)
         session = NotebookSession(parse_notebook(nb), nb)
+        session.refresh_environment_runtime()
 
         result = await CellExecutor(session).execute_cell("loop", source)
 

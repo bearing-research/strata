@@ -94,3 +94,33 @@ async def test_inspect_repl_uses_session_python(monkeypatch, tmp_path):
     assert spawned[1].endswith("inspect_harness.py")
 
     await inspect.close()
+
+
+@pytest.mark.asyncio
+async def test_inspect_repl_does_not_start_without_an_interpreter(monkeypatch, tmp_path):
+    """An inspect process evaluates what is typed into it, so it is cell code:
+    without the notebook's interpreter it does not start, rather than start
+    with whatever ``python`` is on PATH."""
+    nb_dir = create_notebook(tmp_path, "inspect_repl")
+    add_cell_to_notebook(nb_dir, "c1")
+    write_cell(nb_dir, "c1", "x = 1")
+    session = NotebookSession(parse_notebook(nb_dir), nb_dir)
+    assert session.venv_python is None
+
+    spawned: list[str] = []
+
+    async def fake_create_subprocess_exec(*cmd, **kwargs):
+        spawned[:] = [str(part) for part in cmd]
+        return _FakeProcess()
+
+    monkeypatch.setattr(
+        "strata.notebook.inspect_repl.asyncio.create_subprocess_exec",
+        fake_create_subprocess_exec,
+    )
+
+    inspect = InspectSession("c1")
+    status = await inspect.start(session)
+
+    assert "not ready" in status
+    assert not inspect.ready
+    assert spawned == []
