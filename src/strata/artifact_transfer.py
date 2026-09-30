@@ -348,9 +348,9 @@ PROMOTION_TAG = "nb_promotion"
 
 @dataclass(frozen=True)
 class Promotion:
-    """What promoting placed in the team's store, and under what name."""
+    """What promoting placed in the team's store, and under what name, if any."""
 
-    name: str
+    name: str | None
     ref: str
     copied: int
     alias: str | None = None
@@ -368,13 +368,18 @@ def promote_artifact(
     target: RemoteStore,
     artifact: ArtifactVersion,
     *,
-    name: str,
+    name: str | None,
     alias: str | None = None,
     tags: dict[str, str] | None = None,
     max_depth: int = 10,
     table: str | None = None,
 ) -> Promotion:
     """Copy an artifact and its chain to the team store, and name it there.
+
+    Without a name it copies the chain and names nothing. That is what a
+    platform publishing a result needs: the chain has to be in the store the
+    link is served from, and a result someone publishes is not thereby one
+    the team should find in its registry.
 
     Publishing mints a public link. Promoting does not: it puts a result where
     colleagues can find it by name, inside the store their own cells already
@@ -396,6 +401,9 @@ def promote_artifact(
         raise ValueError(
             f"{artifact.id}@v={artifact.version} is not readable (state={artifact.state})"
         )
+    if alias and not name:
+        # An alias is an alias of a name; there is nothing for it to hang on.
+        raise ValueError("An alias needs a name to be an alias of")
 
     written, landed_ref = copy_chain(source, target, artifact, max_depth)
     landed_id, _, landed_version = landed_ref.partition("@v=")
@@ -408,11 +416,13 @@ def promote_artifact(
     # naming, because only this call knows what it wrote: if the name is then
     # refused and the promotion retried, every row already exists and a retry
     # would have nothing left to stamp.
-    for ref in written:
-        written_id, _, written_version = ref.partition("@v=")
-        target.set_tag(written_id, int(written_version), PROMOTION_TAG, name)
-
-    target.set_name(name, landed_id, version)
+    # The stamp's value is the name, so an unnamed copy stamps nothing: a
+    # team-cache hit on it names no promotion, which is what happened.
+    if name:
+        for ref in written:
+            written_id, _, written_version = ref.partition("@v=")
+            target.set_tag(written_id, int(written_version), PROMOTION_TAG, name)
+        target.set_name(name, landed_id, version)
     alias_pending = False
     if alias:
         alias_pending = not target.set_alias(name, alias, landed_id, version)

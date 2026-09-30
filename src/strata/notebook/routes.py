@@ -886,9 +886,10 @@ class PreviewEnvironmentYamlRequest(BaseModel):
 
 
 class PromoteArtifactRequest(BaseModel):
-    """Send a cell's result to the team store, under a name."""
+    """Send a cell's result to the team store, under a name or, without one,
+    only its chain (``promote_artifact``)."""
 
-    name: str = Field(..., min_length=1, max_length=512)
+    name: str | None = Field(default=None, min_length=1, max_length=512)
     alias: str | None = Field(default=None, max_length=128)
     tags: dict[str, str] = Field(default_factory=dict)
     # Also write it into this Iceberg table, in the team store's catalog.
