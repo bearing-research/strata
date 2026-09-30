@@ -583,7 +583,7 @@ host: it runs the harness in place.
 Switching users needs the privilege to do it, so **the server runs as root**
 and drops to the harness user for every process that runs cell code: the cold
 and R harnesses, the batch harness behind Run All, the warm pool workers, the
-inspect REPL and cell tests. It is POSIX only. What the harness user needs:
+inspect REPL, cell tests and the R package restore. It is POSIX only. What the harness user needs:
 
 | Path | Access |
 | --- | --- |
@@ -616,13 +616,27 @@ runs in the server process: in a write cell `ATTACH`, `DETACH` and `VACUUM` are
 refused, since they reach other files (a read cell runs only reads already).
 Postgres, Snowflake and BigQuery cells send the query to their database server.
 
-Installing a notebook's packages runs as the server's user too, and building
+Installing a notebook's Python packages runs as the server's user too, and building
 a package from a source distribution runs that package's build backend, code
 from wherever the package came from, with the server's environment. In service mode every `uv` command
 a notebook runs (`sync`, `add`, `lock`, the `uv run` that starts a cell)
 installs wheels only: a dependency with no wheel for the notebook's Python
 fails to resolve, and uv's message says a wheel is required. Personal mode
 still builds from source.
+
+R has no wheels-only switch: `renv::restore()` builds CRAN packages from source
+on Linux, running their configure scripts, and every `Rscript` started in a
+notebook directory sources the notebook's `.Rprofile`. So in service mode that
+code runs as the harness user, never as the server. The restore on notebook
+open runs as the harness user with the filtered environment below, and the
+notebook's `renv/` directory (and, with the shared environment backend, the
+shared R library and package cache) is handed to that user to write. The R
+package listing in the environment panel runs as the harness user too. With no
+harness user nothing is restored, and the server log says why. Installing an R
+package from the notebook (`renv::init`, adding a package) is refused, since it
+writes `renv.lock` and `.Rprofile` into the notebook directory: commit the
+package in `renv.lock` where the notebook is authored, and the server restores it
+when the notebook opens. Personal mode is unchanged.
 
 ### What a cell is given: `STRATA_NOTEBOOK_HARNESS_ENV_ALLOWLIST`
 

@@ -28,7 +28,14 @@ from packaging.specifiers import SpecifierSet
 from packaging.utils import canonicalize_name
 from packaging.version import InvalidVersion, Version
 
-from strata.notebook.harness_user import running_server_config
+from strata.notebook.harness_user import (
+    HarnessUser,
+    LocalExecutionRefused,
+    identity_env,
+    resolve_harness_user,
+    running_server_config,
+    spawn_kwargs,
+)
 
 logger = logging.getLogger(__name__)
 _MAX_OPERATION_LOG_CHARS = 12_000
@@ -574,6 +581,24 @@ class RPackageListing:
     error: str | None = None
 
 
+def rscript_env(
+    harness_user: HarnessUser | None, extra: dict[str, str] | None = None
+) -> dict[str, str] | None:
+    """The environment for an Rscript started in a notebook directory.
+
+    As the server: the server's own with *extra* on top, ``None`` when there is
+    nothing to add. As the harness user: what a cell is given, because such an
+    Rscript runs code the notebook brought. It sources the notebook's
+    ``.Rprofile``, and a restore runs the configure scripts of the packages it
+    builds from source.
+    """
+    if harness_user is None:
+        return {**os.environ, **extra} if extra else None
+    from strata.notebook.harness_env import configured_allowlist, harness_env
+
+    return identity_env(harness_env(configured_allowlist(), extra), harness_user)
+
+
 def list_r_packages(notebook_dir: Path, *, timeout: int = 30) -> RPackageListing:
     """List R packages installed in the notebook's renv project library.
 
@@ -593,6 +618,10 @@ def list_r_packages(notebook_dir: Path, *, timeout: int = 30) -> RPackageListing
     a targeted hint rather than the misleading "no packages
     installed".
     """
+    try:
+        harness_user = resolve_harness_user()
+    except LocalExecutionRefused as exc:
+        return RPackageListing(packages=[], status="failed", error=str(exc))
     rscript = shutil.which("Rscript")
     if rscript is None:
         return RPackageListing(packages=[], status="rscript_missing", error=None)
@@ -631,6 +660,8 @@ def list_r_packages(notebook_dir: Path, *, timeout: int = 30) -> RPackageListing
             text=True,
             timeout=timeout,
             check=False,
+            env=rscript_env(harness_user),
+            **spawn_kwargs(harness_user),
         )
     except subprocess.TimeoutExpired as exc:
         logger.debug("R package listing timed out: %s", exc)
@@ -686,6 +717,29 @@ _R_PACKAGE_NAME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9.]*$")
 def is_valid_r_package_name(name: str) -> bool:
     """Whether *name* is a syntactically valid CRAN package name."""
     return bool(_R_PACKAGE_NAME_RE.fullmatch(name or ""))
+
+
+_R_INSTALL_REFUSAL = (
+    "R packages are not installed from the notebook on this server: renv builds "
+    "them from source, which runs their code, and it writes renv.lock and "
+    ".Rprofile into the notebook directory, which cell code may not change. Add "
+    "the package to renv.lock where the notebook is authored; the server restores "
+    "it as the harness user (STRATA_NOTEBOOK_HARNESS_USER) when the notebook opens."
+)
+
+
+def _r_install_refusal() -> str | None:
+    """Why ``renv_init`` / ``renv_add`` may not run here, ``None`` when they may.
+
+    They run as this process or not at all: an install cannot drop to the
+    harness user, since it writes files in the notebook directory that user
+    cannot write, and it may not run as a server that isolates cell code.
+    """
+    try:
+        harness_user = resolve_harness_user()
+    except LocalExecutionRefused:
+        return _R_INSTALL_REFUSAL
+    return None if harness_user is None else _R_INSTALL_REFUSAL
 
 
 @dataclass
@@ -1012,6 +1066,9 @@ async def renv_init(
     ``asyncio.to_thread`` so the asyncio event loop stays responsive
     if a lock is held.
     """
+    refusal = _r_install_refusal()
+    if refusal is not None:
+        return RJobResult(success=False, action="r_init", package=None, error=refusal)
     lock = _get_notebook_lock(notebook_dir)
     await asyncio.to_thread(lock.acquire)
     try:
@@ -1123,6 +1180,9 @@ async def renv_add(
                 "[A-Za-z][A-Za-z0-9.]* — no dashes, no shell metacharacters."
             ),
         )
+    refusal = _r_install_refusal()
+    if refusal is not None:
+        return RJobResult(success=False, action="r_add", package=package, error=refusal)
     lock = _get_notebook_lock(notebook_dir)
     await asyncio.to_thread(lock.acquire)
     try:

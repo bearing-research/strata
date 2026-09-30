@@ -22,7 +22,14 @@ import filelock
 import tomli_w
 from packaging.requirements import Requirement
 
-from strata.notebook.dependencies import uv_env
+from strata.notebook.dependencies import rscript_env, uv_env
+from strata.notebook.harness_user import (
+    HarnessUser,
+    LocalExecutionRefused,
+    hand_over,
+    resolve_harness_user,
+    spawn_kwargs,
+)
 from strata.notebook.layout import write_gitignore
 from strata.notebook.models import (
     ConnectionSpec,
@@ -731,6 +738,21 @@ def _renv_sync(notebook_dir: Path, *, timeout: int = 600) -> bool:
         _logger.debug("renv.lock missing in %s — nothing to restore", notebook_dir)
         return True
 
+    # Building a package from source runs its configure script, code from
+    # wherever the package came from. Where cells run as the harness user, so
+    # does the restore; a service-mode server with no harness user runs no R
+    # code on its own host, so there is nothing to restore for.
+    try:
+        harness_user = resolve_harness_user()
+    except LocalExecutionRefused as exc:
+        _logger.warning(
+            "renv restore skipped in %s: it builds R packages from source, which runs "
+            "their code. %s",
+            notebook_dir,
+            exc,
+        )
+        return False
+
     # Cross-process mutual exclusion (issue #102): a server serving
     # this notebook dir and a ``strata run`` in another process must
     # not run ``renv::restore()`` / ``renv::install()`` concurrently —
@@ -764,21 +786,44 @@ def _renv_sync(notebook_dir: Path, *, timeout: int = 600) -> bool:
             return restore_r_library(
                 notebook_dir,
                 root,
-                lambda env: _renv_restore_locked(notebook_dir, timeout=timeout, env=env),
+                lambda env: _renv_restore_locked(
+                    notebook_dir, timeout=timeout, env=env, harness_user=harness_user
+                ),
             )
-        return _renv_restore_locked(notebook_dir, timeout=timeout)
+        return _renv_restore_locked(notebook_dir, timeout=timeout, harness_user=harness_user)
     finally:
         process_lock.release()
 
 
 def _renv_restore_locked(
-    notebook_dir: Path, *, timeout: int, env: dict[str, str] | None = None
+    notebook_dir: Path,
+    *,
+    timeout: int,
+    env: dict[str, str] | None = None,
+    harness_user: HarnessUser | None = None,
 ) -> bool:
-    """Run ``renv::restore()`` with the cross-process lock already held."""
+    """Run ``renv::restore()`` with the cross-process lock already held.
+
+    As *harness_user* when there is one, which is handed what the restore
+    writes: the notebook's ``renv/`` directory, the shared library it links
+    to, and the package cache *env* names.
+    """
     rscript = shutil.which("Rscript")
     if rscript is None:
         _logger.warning("Rscript not found on PATH — skipping renv restore")
         return False
+
+    if harness_user is not None:
+        renv_dir = notebook_dir / "renv"
+        renv_dir.mkdir(exist_ok=True)
+        hand_over(renv_dir, harness_user)
+        library = renv_dir / "library"
+        if library.is_symlink():
+            hand_over(library.resolve(), harness_user)
+        cache = (env or {}).get("RENV_PATHS_CACHE")
+        if cache:
+            Path(cache).mkdir(parents=True, exist_ok=True)
+            hand_over(Path(cache), harness_user)
 
     try:
         # No ``--vanilla`` / ``--no-init-file``: the project's
@@ -793,7 +838,8 @@ def _renv_restore_locked(
             timeout=timeout,
             capture_output=True,
             check=True,
-            env={**os.environ, **env} if env else None,
+            env=rscript_env(harness_user, env),
+            **spawn_kwargs(harness_user),
         )
         _logger.debug("renv::restore() succeeded in %s", notebook_dir)
         return True

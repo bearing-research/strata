@@ -12,12 +12,16 @@ The capstone real-renv integration tests land with #59.
 
 from __future__ import annotations
 
+import os
+import shlex
 import shutil
 import subprocess
 import sys
 from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
+
+import pytest
 
 from strata.notebook.dependencies import renv_add, renv_init, renv_process_lock
 from strata.notebook.models import NotebookToml
@@ -687,3 +691,145 @@ class TestSerializeREnvironmentState:
         assert payload["sync_state"] == "ok"
         assert payload["current_lock_hash"] == lock_hash
         assert payload["lock_hash"] == lock_hash
+
+
+# ---------------------------------------------------------------------------
+# Who builds R packages
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="the recording Rscript is a shell script")
+class TestRCodeRunsAsTheHarnessUser:
+    """``renv::restore()`` builds source packages, which runs their configure
+    scripts, and every Rscript started in a notebook directory sources the
+    notebook's ``.Rprofile``. Where cells run as the harness user, so does
+    that code; a service-mode server with no harness user runs none of it.
+
+    The harness user here is the current user, as in ``test_harness_user.py``:
+    dropping to someone else needs root. What shows the drop is the identity
+    the spawn is given and the environment it is filtered to.
+    """
+
+    @pytest.fixture
+    def recorded(self, tmp_path, monkeypatch):
+        bin_dir = tmp_path / "bin"
+        bin_dir.mkdir()
+        record = tmp_path / "rscript-run.txt"
+        fake = bin_dir / "Rscript"
+        target = shlex.quote(str(record))
+        fake.write_text(
+            f'#!/bin/sh\n{{ echo "uid=$(id -u)"; echo "cwd=$(pwd)"; env; }} > {target}\n'
+        )
+        fake.chmod(0o755)
+        monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
+        # The server's own environment: a home that is not the harness user's,
+        # and a credential cells are not given.
+        monkeypatch.setenv("HOME", str(tmp_path / "server-home"))
+        monkeypatch.setenv("SERVER_ONLY_SECRET", "s3cret")
+
+        def read() -> dict[str, str] | None:
+            if not record.exists():
+                return None
+            lines = record.read_text().splitlines()
+            return dict(line.split("=", 1) for line in lines if "=" in line)
+
+        return read
+
+    @staticmethod
+    def _server(monkeypatch, *, mode: str, user: str | None) -> None:
+        monkeypatch.setattr(
+            "strata.server._state",
+            SimpleNamespace(
+                config=SimpleNamespace(
+                    deployment_mode=mode,
+                    notebook_harness_user=user,
+                    notebook_harness_env_allowlist=["PATH"],
+                )
+            ),
+        )
+
+    @staticmethod
+    def _me():
+        import pwd
+
+        return pwd.getpwuid(os.getuid())
+
+    def _assert_ran_as_the_harness_user(self, run, notebook_dir):
+        assert run is not None, "Rscript was not started"
+        assert run["uid"] == str(os.getuid())
+        assert run["HOME"] == self._me().pw_dir
+        assert run["USER"] == self._me().pw_name
+        assert "SERVER_ONLY_SECRET" not in run
+        assert Path(run["cwd"]).resolve() == notebook_dir.resolve()
+
+    def test_restore_runs_as_the_harness_user(self, tmp_path, recorded, monkeypatch):
+        notebook_dir = tmp_path / "nb"
+        notebook_dir.mkdir()
+        (notebook_dir / "renv.lock").write_text("{}")
+        self._server(monkeypatch, mode="service", user=self._me().pw_name)
+
+        assert _renv_sync(notebook_dir) is True
+        self._assert_ran_as_the_harness_user(recorded(), notebook_dir)
+
+    def test_service_mode_without_a_harness_user_does_not_restore(
+        self, tmp_path, recorded, monkeypatch, caplog
+    ):
+        notebook_dir = tmp_path / "nb"
+        notebook_dir.mkdir()
+        (notebook_dir / "renv.lock").write_text("{}")
+        self._server(monkeypatch, mode="service", user=None)
+
+        with caplog.at_level("WARNING", logger="strata.notebook.writer"):
+            assert _renv_sync(notebook_dir) is False
+
+        assert recorded() is None
+        assert "STRATA_NOTEBOOK_HARNESS_USER" in caplog.text
+
+    def test_personal_mode_restores_as_the_server(self, tmp_path, recorded, monkeypatch):
+        notebook_dir = tmp_path / "nb"
+        notebook_dir.mkdir()
+        (notebook_dir / "renv.lock").write_text("{}")
+        self._server(monkeypatch, mode="personal", user=None)
+
+        assert _renv_sync(notebook_dir) is True
+        run = recorded()
+        assert run is not None
+        assert run["HOME"] == str(tmp_path / "server-home")
+
+    def test_listing_packages_runs_as_the_harness_user(self, tmp_path, recorded, monkeypatch):
+        from strata.notebook.dependencies import list_r_packages
+
+        self._server(monkeypatch, mode="service", user=self._me().pw_name)
+
+        list_r_packages(tmp_path)
+        self._assert_ran_as_the_harness_user(recorded(), tmp_path)
+
+    def test_listing_packages_is_refused_without_a_harness_user(
+        self, tmp_path, recorded, monkeypatch
+    ):
+        from strata.notebook.dependencies import list_r_packages
+
+        self._server(monkeypatch, mode="service", user=None)
+
+        listing = list_r_packages(tmp_path)
+
+        assert recorded() is None
+        assert listing.status == "failed"
+        assert "STRATA_NOTEBOOK_HARNESS_USER" in (listing.error or "")
+
+    @pytest.mark.parametrize("user", [None, "me"])
+    async def test_installing_a_package_is_refused_where_cells_are_isolated(
+        self, tmp_path, recorded, monkeypatch, user
+    ):
+        """renv writes ``renv.lock`` and ``.Rprofile`` into the notebook
+        directory, which the harness user cannot write, so an install cannot
+        drop to it; it does not run as the server either."""
+        self._server(monkeypatch, mode="service", user=self._me().pw_name if user else None)
+
+        added = await renv_add(tmp_path, "ggplot2", timeout=5)
+        initialized = await renv_init(tmp_path, timeout=5)
+
+        assert recorded() is None
+        for result in (added, initialized):
+            assert result.success is False
+            assert "renv.lock" in (result.error or "")
