@@ -38,9 +38,26 @@ def _read(io: FileIO, delete_file: DeleteFileEntry) -> dict[str, pa.ChunkedArray
             return {vector.referenced_data_file: vector.to_vector() for vector in vectors}
         table = pq.read_table(stream, columns=["file_path", "pos"])
     paths = table.column("file_path")
-    return {
-        path.as_py(): table.filter(pc.equal(paths, path)).column("pos") for path in pc.unique(paths)
-    }
+    if pa.types.is_dictionary(paths.type):
+        # A file pyarrow wrote from a dictionary column reads back as one, and
+        # neither the sort nor the run encoding below takes dictionaries.
+        table = table.set_column(
+            table.schema.get_field_index("file_path"),
+            "file_path",
+            paths.cast(paths.type.value_type),
+        )
+    # One stable sort, then a slice per run of equal paths. Filtering the whole
+    # table once per path was quadratic: a Spark delete file of 2M rows over
+    # 2000 data files took longer to parse than the plan timeout.
+    table = table.sort_by("file_path")
+    runs = pc.run_end_encode(table.column("file_path").combine_chunks())
+    positions = table.column("pos")
+    by_data_file: dict[str, pa.ChunkedArray] = {}
+    start = 0
+    for path, end in zip(runs.values.to_pylist(), runs.run_ends.to_pylist(), strict=True):
+        by_data_file[path] = positions.slice(start, end - start)
+        start = end
+    return by_data_file
 
 
 class DeletedRows:

@@ -883,7 +883,10 @@ class _AzureDownloadReader(io.RawIOBase):
 
     def __init__(self, downloader: StorageStreamDownloader) -> None:
         self._chunks: Iterator[bytes] = iter(downloader.chunks())
-        self._buffer = b""
+        # The unread rest of the current chunk. A memoryview, so taking bytes
+        # off the front is a new view rather than a copy of what remains:
+        # re-slicing bytes copied a 32 MiB chunk once per 128 KiB read.
+        self._buffer = memoryview(b"")
 
     def readable(self) -> bool:
         return True
@@ -893,12 +896,19 @@ class _AzureDownloadReader(io.RawIOBase):
             chunk = next(self._chunks, None)
             if chunk is None:
                 return 0
-            self._buffer = chunk
+            self._buffer = memoryview(chunk)
         view = memoryview(buffer).cast("B")
         n = min(len(view), len(self._buffer))
         view[:n] = self._buffer[:n]
         self._buffer = self._buffer[n:]
         return n
+
+    def readall(self) -> bytes:
+        # ``BufferedReader.read()`` lands here; the inherited loop would copy
+        # through a 128 KiB buffer, so join the chunks instead.
+        rest = [self._buffer, *self._chunks]
+        self._buffer = memoryview(b"")
+        return b"".join(rest)
 
 
 class AzureBlobStore(BlobStore):

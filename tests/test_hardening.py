@@ -1494,8 +1494,10 @@ class TestNonBlockingLogging:
 class TestCacheVersioning:
     """Test that cache versioning works correctly."""
 
-    def test_different_cache_versions_coexist(self, temp_warehouse, tmp_path):
-        """Different cache versions don't interfere with each other."""
+    def test_another_cache_version_is_removed_and_the_current_one_kept(
+        self, temp_warehouse, tmp_path
+    ):
+        """A new cache deletes another version's directory, keeping its own entries."""
 
         cache_dir = tmp_path / "cache"
         table_uri = temp_warehouse["table_uri"]
@@ -1520,8 +1522,8 @@ class TestCacheVersioning:
         cache_hits = sum(1 for t in plan2.tasks if fetcher2.cache.contains(t.cache_key))
         assert cache_hits == len(plan2.tasks), "Should hit current version cache"
 
-        # Old version files should still exist (not deleted)
-        assert (old_version_dir / "fake_old_cache.arrowstream").exists()
+        # Nothing counts or evicts another version's entries, so they go.
+        assert not (cache_dir / "v0").exists()
 
         # Stats should only count current version
         assert isinstance(fetcher2.cache, DiskCache)

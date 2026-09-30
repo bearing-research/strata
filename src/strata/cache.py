@@ -1,7 +1,10 @@
 """Disk cache for Arrow IPC row group data."""
 
 import json
+import logging
 import os
+import re
+import shutil
 import threading
 import time
 from dataclasses import asdict, dataclass, replace
@@ -25,7 +28,8 @@ CACHE_FILE_EXTENSION = ".arrowstream"
 CACHE_META_EXTENSION = ".meta.json"
 
 # Cache version - bump this when cache format changes to invalidate old caches.
-# This is baked into the cache directory structure so old and new caches coexist.
+# This is baked into the cache directory structure; a DiskCache deletes other
+# versions' directories when it starts, since nothing would ever evict them.
 # Version history:
 #   1: Initial version (Arrow IPC stream format, SHA-256 keyed)
 #   2: Multi-tenancy support (tenant_id in cache key, tenant-prefixed directories)
@@ -33,6 +37,11 @@ CACHE_META_EXTENSION = ".meta.json"
 #   4: keys name the Iceberg schema read; rows deleted merge-on-read are
 #      dropped (0.8.0 could cache a DuckDB-deleted table's rows)
 CACHE_VERSION = 4
+
+# A cache directory of some version, current or not: ``v`` and digits only.
+_VERSION_DIR = re.compile(r"v\d+")
+
+logger = logging.getLogger(__name__)
 
 # Every Arrow IPC stream opens with a continuation marker and, once its writer
 # is closed (``put`` always closes), ends with an end-of-stream marker. Both are
@@ -172,6 +181,29 @@ class DiskCache:
 
         # Ensure cache directory exists
         self.cache_dir.mkdir(parents=True, exist_ok=True)
+        self._remove_other_versions()
+
+    def _remove_other_versions(self) -> None:
+        """Delete the directories of other cache versions.
+
+        Size accounting, stats and eviction only walk the current version's
+        directory, so an older one would sit on disk uncounted and unevicted
+        forever. Only ``v<N>`` directories go; nothing else in ``cache_dir``.
+        """
+        current = f"v{CACHE_VERSION}"
+        for item in self.cache_dir.iterdir():
+            if item.name == current or not _VERSION_DIR.fullmatch(item.name):
+                continue
+            if not item.is_dir():
+                continue
+            try:
+                shutil.rmtree(item)
+            except OSError as e:
+                # Another process sharing the cache may be removing it too; a
+                # leftover directory is not worth failing startup over.
+                logger.warning("Could not remove cache directory %s: %s", item, e)
+                continue
+            logger.info("Removed cache directory %s left by another cache version", item)
 
     def _key_path(self, key: CacheKey) -> Path:
         """Return (and create the directory for) a cache key's data file.

@@ -1,6 +1,8 @@
 """Tests for blob storage backends."""
 
+import io
 import json
+import shutil
 import stat
 import sys
 from pathlib import Path
@@ -780,6 +782,80 @@ class TestGCSBlobStore:
         result = store.read_blob("artifact-1", 1)
 
         assert result == data
+
+
+class TestAzureDownloadReader:
+    """The file-like over an Azure download's chunks returns the blob's bytes.
+
+    Chunk sizes vary (the SDK's first GET is larger than the rest) and a read
+    may straddle any number of chunk boundaries.
+    """
+
+    DATA = bytes(range(256)) * 400  # 102400 bytes
+    CHUNK_SIZES = (40000, 0, 7, 30000, 1, 32392)
+
+    class Downloader:
+        def __init__(self, data: bytes, sizes: tuple[int, ...]) -> None:
+            assert sum(sizes) == len(data)
+            self._data = data
+            self._sizes = sizes
+
+        def chunks(self):
+            start = 0
+            for size in self._sizes:
+                yield self._data[start : start + size]
+                start += size
+
+    def _raw(self):
+        from strata.blob_store import _AzureDownloadReader
+
+        return _AzureDownloadReader(self.Downloader(self.DATA, self.CHUNK_SIZES))
+
+    def test_read_returns_the_whole_blob(self):
+        assert io.BufferedReader(self._raw()).read() == self.DATA
+
+    @pytest.mark.parametrize("size", [1, 3, 4096, 39999, 40008, 70007, 200000])
+    def test_read_size_fills_across_chunks(self, size: int):
+        stream = io.BufferedReader(self._raw())
+        pieces = []
+        remaining = len(self.DATA)
+        while piece := stream.read(size):
+            assert len(piece) == min(size, remaining)
+            remaining -= len(piece)
+            pieces.append(piece)
+        assert b"".join(pieces) == self.DATA
+
+    def test_readinto_with_odd_buffer_sizes(self):
+        raw = self._raw()
+        sizes = [5, 39990, 13, 1, 30001, 65536]
+        out = bytearray()
+        n = 1
+        i = 0
+        while n:
+            buffer = bytearray(sizes[i % len(sizes)])
+            n = raw.readinto(buffer)
+            out += buffer[:n]
+            i += 1
+        assert bytes(out) == self.DATA
+        assert raw.readall() == b""
+
+    def test_readall_after_partial_reads_returns_the_rest(self):
+        raw = self._raw()
+        head = bytearray(40003)
+        assert raw.readinto(head) == 40000  # stops at the first chunk's end
+        assert raw.readinto(head) == 7
+        assert raw.readall() == self.DATA[40007:]
+        assert raw.readinto(head) == 0
+
+        stream = io.BufferedReader(self._raw())
+        assert stream.read(12345) == self.DATA[:12345]
+        assert stream.read() == self.DATA[12345:]
+        assert stream.read() == b""
+
+    def test_copyfileobj_copies_the_blob(self):
+        out = io.BytesIO()
+        shutil.copyfileobj(io.BufferedReader(self._raw()), out, length=9999)
+        assert out.getvalue() == self.DATA
 
 
 class TestAzureBlobStore:

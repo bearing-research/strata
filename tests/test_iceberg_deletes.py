@@ -9,6 +9,7 @@ pyiceberg does the attaching itself.
 
 from __future__ import annotations
 
+import random
 import sys
 
 import pyarrow as pa
@@ -18,7 +19,7 @@ from pyiceberg.manifest import DataFile, DataFileContent, FileFormat
 
 from strata.cache import CachedFetcher
 from strata.config import StrataConfig
-from strata.iceberg_deletes import DeletedRows, in_row_group
+from strata.iceberg_deletes import DeletedRows, _read, in_row_group
 from strata.metadata_cache import DeleteFileEntry, ManifestCache
 from strata.metadata_store import MetadataStore
 from strata.planner import ReadPlanner, UnsupportedTableFormatError
@@ -232,6 +233,71 @@ def test_a_delete_file_is_read_once(tmp_path):
     assert rows.for_data_file(io, "file:///b.parquet", delete_files).to_pylist() == [4]
     assert rows.for_data_file(io, "file:///c.parquet", delete_files) is None
     assert opened == [path.as_uri()]
+
+
+def _read_local(path):
+    from pyiceberg.io.pyarrow import PyArrowFileIO
+
+    return _read(PyArrowFileIO(), DeleteFileEntry(file_path=path.as_uri(), file_format="PARQUET"))
+
+
+def test_a_delete_file_over_many_data_files_splits_per_data_file(tmp_path):
+    # Spark sorts a delete file by path; interleave the rows so the split cannot
+    # lean on that, and read it in several row groups.
+    rng = random.Random(0)
+    rows = [(f"file:///data/{rng.randrange(300):04d}.parquet", n) for n in range(5000)]
+    rng.shuffle(rows)
+    path = tmp_path / "d.parquet"
+    pq.write_table(
+        pa.table(
+            {
+                "file_path": [p for p, _ in rows],
+                "pos": pa.array([n for _, n in rows], pa.int64()),
+            }
+        ),
+        path,
+        row_group_size=700,
+    )
+
+    expected: dict[str, list[int]] = {}
+    for data_file, position in rows:
+        expected.setdefault(data_file, []).append(position)
+
+    by_data_file = _read_local(path)
+
+    # Positions keep their file order within each data file.
+    assert {p: positions.to_pylist() for p, positions in by_data_file.items()} == expected
+
+
+def test_a_delete_file_with_a_dictionary_path_column_is_read(tmp_path):
+    # pyarrow keeps a dictionary column's type in the file's schema metadata,
+    # so the path column reads back dictionary-encoded.
+    path = tmp_path / "d.parquet"
+    pq.write_table(
+        pa.table(
+            {
+                "file_path": pa.array(["file:///b", "file:///a", "file:///b"]).dictionary_encode(),
+                "pos": pa.array([5, 1, 3], pa.int64()),
+            }
+        ),
+        path,
+    )
+
+    by_data_file = _read_local(path)
+
+    assert {p: positions.to_pylist() for p, positions in by_data_file.items()} == {
+        "file:///a": [1],
+        "file:///b": [5, 3],
+    }
+
+
+def test_an_empty_delete_file_deletes_nothing(tmp_path):
+    path = tmp_path / "d.parquet"
+    pq.write_table(
+        pa.table({"file_path": pa.array([], pa.string()), "pos": pa.array([], pa.int64())}), path
+    )
+
+    assert _read_local(path) == {}
 
 
 @pytest.mark.parametrize(
