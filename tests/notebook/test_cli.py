@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import sys
 from pathlib import Path
 from unittest.mock import patch
 
@@ -12,6 +11,7 @@ import pytest
 
 from strata.notebook.cli import _sync_environment, run_main
 from strata.notebook.executor import CellExecutionResult
+from tests.conftest import prepared_venv
 from tests.notebook.conftest import skip_if_no_r
 
 
@@ -50,11 +50,7 @@ def _build_notebook(
     return notebook_dir
 
 
-def _mk_fake_venv(notebook_dir: Path) -> None:
-    """Create a ``.venv`` whose interpreter is this one, so ``--no-sync`` passes."""
-    bin_dir = notebook_dir / ".venv" / "bin"
-    bin_dir.mkdir(parents=True, exist_ok=True)
-    (bin_dir / "python").symlink_to(sys.executable)
+_mk_fake_venv = prepared_venv
 
 
 def _make_result(
