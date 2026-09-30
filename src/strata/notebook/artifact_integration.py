@@ -65,7 +65,14 @@ class NotebookArtifactManager:
         The current value of every output is kept (its id is the notebook's
         own, never minted), as is anything named, pinned or published and
         anything used in the last *min_idle_seconds*.
+
+        Raises:
+            NotebookQuiesced: the notebook is held still for a copy, which
+                must see its store as it was.
         """
+        from strata.notebook.quiesce import assert_writable
+
+        assert_writable(self.artifact_dir)
         return self.artifact_store.garbage_collect(
             keep_superseded=keep_superseded, min_idle_seconds=min_idle_seconds
         )

@@ -765,15 +765,25 @@ def _should_warn_unset_signing_secret(config: StrataConfig) -> bool:
     return not config.transform_signing_secret and config.deployment_mode == "service"
 
 
+# Long enough that startup (migrations, warm pools, the first requests) is not
+# competing with a sweep, short enough that a laptop server that is restarted
+# often still sweeps.
+_FIRST_ARTIFACT_GC_DELAY_SECONDS = 60.0
+
+
 async def _artifact_gc_loop(store, interval_seconds: float, policy: dict[str, Any]) -> None:
     """Run ``garbage_collect`` every ``interval_seconds`` until cancelled.
 
-    *policy* is ``StrataConfig.artifact_gc_policy()``. A pass that raises is
-    logged and the loop carries on: one bad sweep must not turn scheduled
-    collection off for the life of the server.
+    *policy* is ``StrataConfig.artifact_gc_policy()``. The first pass runs
+    shortly after startup rather than a whole interval in, or a server
+    restarted more often than the interval would never sweep. A pass that
+    raises is logged and the loop carries on: one bad sweep must not turn
+    scheduled collection off for the life of the server.
     """
+    delay = min(interval_seconds, _FIRST_ARTIFACT_GC_DELAY_SECONDS)
     while True:
-        await asyncio.sleep(interval_seconds)
+        await asyncio.sleep(delay)
+        delay = interval_seconds
         try:
             result = await asyncio.to_thread(store.garbage_collect, **policy)
         except Exception:

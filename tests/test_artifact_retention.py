@@ -402,6 +402,37 @@ class TestThroughTheServer:
         finally:
             client.close()
 
+    def test_a_result_used_only_as_an_input_stays_while_its_downstream_is_asked_for(
+        self, server, temp_warehouse
+    ):
+        """A dashboard's request always hit the downstream and never read the
+        scan, so the scan idled out and every later request was a 404."""
+        from strata_client.client import StrataClient
+
+        base_url, store = server
+        scan_spec = {"executor": "scan@v1", "params": {"columns": ["id", "value"]}}
+        sql_spec = {"executor": "duckdb_sql@v1", "params": {"sql": "SELECT id FROM input0"}}
+        client = StrataClient(base_url=base_url)
+        try:
+            scan = client.materialize(inputs=[temp_warehouse["table_uri"]], transform=scan_spec)
+            scan.to_table()
+            client.materialize(inputs=[scan.uri], transform=sql_spec).to_table()
+            conn = sqlite3.connect(store.db_path)
+            conn.execute(
+                "UPDATE artifact_versions SET created_at = ?, last_used_at = ?",
+                (time.time() - 40 * DAY, time.time() - 40 * DAY),
+            )
+            conn.commit()
+            conn.close()
+
+            assert client.materialize(inputs=[scan.uri], transform=sql_spec).cache_hit
+            client.garbage_collect()  # the configured retention, as the sweep runs it
+
+            assert _exists(store, (scan.artifact_id, scan.version))
+            assert client.materialize(inputs=[scan.uri], transform=sql_spec).cache_hit
+        finally:
+            client.close()
+
     def test_a_transform_result_is_minted(self, server, temp_warehouse):
         from strata_client.client import StrataClient
 
@@ -637,3 +668,157 @@ class TestNotebookStores:
         config = StrataConfig(cache_dir=tmp_path / "cache", artifact_dir=tmp_path / "a")
 
         assert config.notebook_keep_superseded_versions == 5
+
+
+class TestWhatAKeptResultNeeds:
+    """A kept result keeps what it was built from, and a result in use as an
+    input is in use (pre-release review, round 2)."""
+
+    @staticmethod
+    def _chain(store: ArtifactStore) -> tuple[tuple[str, int], tuple[str, int]]:
+        """A scan, and a result built from it; both minted, both long idle."""
+        scan = _ready(store)
+        ref = f"{scan[0]}@v={scan[1]}"
+        result = _ready(store, inputs={f"strata://artifact/{ref}": ref})
+        for key in (scan, result):
+            _last_used(store, key, 40 * DAY)
+        return scan, result
+
+    def test_a_name_keeps_the_chain_behind_it(self, store):
+        """Named "reconstructible", and a refresh re-reads the recorded inputs."""
+        scan, result = self._chain(store)
+        store.set_name("features", *result)
+
+        store.garbage_collect(max_idle_days=30)
+
+        assert _exists(store, result)
+        assert _exists(store, scan)
+
+    def test_an_alias_awaiting_approval_keeps_its_target(self, store):
+        """The approver is asked to point the alias at it."""
+        champion = _ready(store)
+        store.set_name("model", *champion)
+        store.set_alias("model", "champion", *champion)
+        candidate = _ready(store)
+        store.request_alias_change("model", "champion", "set", *candidate, actor="alice")
+        for key in (champion, candidate):
+            _last_used(store, key, 40 * DAY)
+
+        store.garbage_collect(max_idle_days=30)
+        store.approve_alias_change("model", "champion", actor="bob")
+
+        assert store.resolve_alias("model", "champion").id == candidate[0]
+
+    def test_a_cell_value_keeps_the_upstream_value_it_was_built_from(self, store):
+        """Pruning an upstream's older values must not take the one a current
+        downstream value recorded, or publishing it copies a broken chain."""
+        up = "nb_n1_cell_up_var_x"
+        _values(store, up, 1)
+        ref = f"{up}@v=1"
+        down = "nb_n1_cell_dn_var_y"
+        store.create_artifact(down, "prov-down", input_versions={f"strata://artifact/{ref}": ref})
+        store.write_blob(down, 1, b"y")
+        store.finalize_artifact(down, 1, "{}", 1, 1)
+        for version in range(2, 7):  # the upstream edited five more times
+            store.create_artifact(up, f"prov-{up}-{version}")
+            store.write_blob(up, version, b"x")
+            store.finalize_artifact(up, version, "{}", 1, 1)
+
+        store.garbage_collect(keep_superseded=3)
+
+        assert _exists(store, (up, 1))
+        assert not _exists(store, (up, 2))
+
+    def test_the_floor_allows_for_a_use_recorded_late(self, store):
+        """A use writes at most every few minutes, so the recorded time can
+        trail a real read: a floor of one hour must still hold for it."""
+        from strata.artifact_store import _USE_RESOLUTION_SECONDS
+
+        read_late = _ready(store)
+        long_idle = _ready(store)
+        _last_used(store, read_late, 3600 + _USE_RESOLUTION_SECONDS / 2)
+        _last_used(store, long_idle, 3600 + _USE_RESOLUTION_SECONDS * 2)
+
+        store.garbage_collect(max_idle_days=0, min_idle_seconds=3600)
+
+        assert _exists(store, read_late)
+        assert not _exists(store, long_idle)
+
+    def test_a_tenants_cap_is_on_its_own_share(self, store):
+        """Measured against the whole store, one tenant's sweep emptied its
+        own cache while the others kept the store over the cap."""
+        mine = []
+        for _ in range(2):
+            artifact_id = str(uuid.uuid4())
+            store.create_artifact(artifact_id, f"p-{artifact_id}", tenant="a", minted=True)
+            store.write_blob(artifact_id, 1, b"x" * 10)
+            store.finalize_artifact(artifact_id, 1, "{}", 1, 10)
+            mine.append((artifact_id, 1))
+        other = str(uuid.uuid4())
+        store.create_artifact(other, "p-other", tenant="b", minted=True)
+        store.write_blob(other, 1, b"x" * 1000)
+        store.finalize_artifact(other, 1, "{}", 1, 1000)
+        for key in [*mine, (other, 1)]:
+            _last_used(store, key, 40 * DAY)
+
+        result = store.garbage_collect(max_bytes=100, tenant="a")
+
+        assert result["store_bytes"] == 20
+        assert result["deleted_count"] == 0
+        assert all(_exists(store, key) for key in mine)
+
+    def test_an_imported_copy_starts_its_idle_clock_at_the_import(self, tmp_path):
+        """A promoted chain keeps its source's created_at; without this the
+        next sweep read a chain copied a second ago as days idle."""
+        from dataclasses import replace
+
+        source = ArtifactStore(tmp_path / "source")
+        target = ArtifactStore(tmp_path / "target")
+        key = _ready(source, "nb_nb_cell_c2_var_fig")
+        _set(source, *key, created_at=time.time() - 2 * DAY)
+        record = source.get_artifact(*key)
+
+        target.import_artifact(replace(record), source.read_blob(*key))
+
+        assert _row(target, *key)["last_used_at"] == pytest.approx(time.time(), abs=60)
+        assert target.garbage_collect(max_idle_days=1, min_idle_seconds=3600)["deleted_count"] == 0
+
+    def test_a_quiesced_notebook_is_not_pruned(self, tmp_path):
+        """A copy in progress must see the store as it was."""
+        from strata.notebook import quiesce
+        from strata.notebook.artifact_integration import NotebookArtifactManager
+
+        notebook = (tmp_path / "nb").resolve()
+        manager = NotebookArtifactManager("nb", artifact_dir=notebook / ".strata" / "artifacts")
+        _values(manager.artifact_store, "nb_nb_cell_c_var_x", 5)
+        quiesce.settle(quiesce.begin(notebook, max_hold_seconds=60))
+        try:
+            with pytest.raises(quiesce.NotebookQuiesced):
+                manager.prune(1, 0)
+        finally:
+            quiesce.release(notebook)
+
+        assert all(_exists(manager.artifact_store, ("nb_nb_cell_c_var_x", v)) for v in range(1, 6))
+
+
+async def test_the_first_sweep_runs_soon_after_startup(monkeypatch):
+    """A laptop server restarted more often than hourly used to never sweep."""
+    import asyncio
+    from types import SimpleNamespace
+
+    import strata.server as server_module
+
+    monkeypatch.setattr(server_module, "_FIRST_ARTIFACT_GC_DELAY_SECONDS", 0.0)
+    swept = asyncio.Event()
+
+    def garbage_collect(**_policy):
+        swept.set()
+        return {"deleted_count": 0, "deleted_bytes": 0}
+
+    task = asyncio.create_task(
+        server_module._artifact_gc_loop(SimpleNamespace(garbage_collect=garbage_collect), 3600, {})
+    )
+    try:
+        await asyncio.wait_for(swept.wait(), timeout=30)
+    finally:
+        task.cancel()

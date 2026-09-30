@@ -622,7 +622,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "--max-idle-days",
         type=float,
         default=None,
-        help="Collect what has not been used for this many days",
+        help="Collect what has not been used for this many days (0: everything past the floor)",
     )
     gc_parser.add_argument(
         "--min-idle-seconds",

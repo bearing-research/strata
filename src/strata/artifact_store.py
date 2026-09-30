@@ -586,10 +586,11 @@ def _add_import_staging(conn: StoreConnection, dialect: SqlDialect) -> None:
     )
 
 
-# How stale ``last_used_at`` may get before a use writes it again. Retention
-# works in hours and days, so recording every read would only turn reads into
-# writes: a hot artifact costs one UPDATE an hour this way.
-_USE_RESOLUTION_SECONDS = 3600.0
+# How stale ``last_used_at`` may get before a use writes it again: recording
+# every read would turn reads into writes, and a hot artifact costs one UPDATE
+# per interval this way. A sweep adds it to its recent-use floor, because the
+# recorded time can be this far behind the last real use.
+_USE_RESOLUTION_SECONDS = 300.0
 
 # A sweep over its byte cap collects down to this fraction of it, so the next
 # write does not put it straight back over (the row-group cache does the same).
@@ -1513,6 +1514,7 @@ class ArtifactStore:
             conn.close()
         if no_op is not None:
             self._complete_imported(no_op, record, blob)
+            self.record_use(no_op.id, no_op.version)
             return no_op
 
         if blob is not None:
@@ -1524,15 +1526,19 @@ class ArtifactStore:
             no_op = self._import_no_op(conn, record)
             if no_op is not None:
                 conn.commit()
+                self.record_use(no_op.id, no_op.version)
                 return no_op
 
+            # The copy keeps the source's created_at, which is when the result
+            # was computed; its last use is now, so retention does not read a
+            # chain someone just copied here as long idle.
             conn.execute(
                 """
                 INSERT INTO artifact_versions
                     (id, version, state, provenance_hash, schema_json, row_count,
                      byte_size, created_at, transform_spec, input_versions,
-                     tenant, principal, content_sha256)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     tenant, principal, content_sha256, last_used_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     record.id,
@@ -1553,6 +1559,7 @@ class ArtifactStore:
                     # construction and prove nothing.
                     record.content_sha256
                     or (hashlib.sha256(blob).hexdigest() if isinstance(blob, bytes) else None),
+                    time.time(),
                 ),
             )
             conn.commit()
@@ -2472,6 +2479,25 @@ class ArtifactStore:
                 principal=row["principal"],
                 content_sha256=row["content_sha256"],
             )
+        finally:
+            conn.close()
+
+    def record_use(self, artifact_id: str, version: int) -> None:
+        """Note that *artifact_id@v=version* was just used for something.
+
+        For uses that neither read its bytes nor look it up by provenance,
+        such as resolving it as another computation's input: a result used
+        only that way would otherwise look idle to retention while every
+        request for its downstream still needs it.
+        """
+        conn = self._get_connection()
+        try:
+            row = conn.execute(
+                "SELECT last_used_at FROM artifact_versions WHERE id = ? AND version = ?",
+                (artifact_id, version),
+            ).fetchone()
+            if row is not None:
+                self._note_use(conn, artifact_id, version, row["last_used_at"])
         finally:
             conn.close()
 
@@ -4333,35 +4359,57 @@ class ArtifactStore:
                 (artifact_id, version),
             )
 
-    def _protected_reachable(self, conn: StoreConnection) -> set[tuple[str, int]]:
-        """Every artifact version a publication, a pin or a build depends on,
-        roots included.
+    def _protected_reachable(
+        self, conn: StoreConnection, *, current_values: bool = True
+    ) -> set[tuple[str, int]]:
+        """Every version something holds, with everything it was built from.
 
-        A pin is a root for the same reason a publication is: whoever placed it
-        needs the chain, not only the version, to restore or explain it. A
-        build still running is a root because it is reading its inputs, and a
-        sweep taking one would fail it partway.
+        The roots, each kept with its whole chain of inputs:
 
-        A published page shows the code and environment of every step behind
-        the result, so the chain is part of what was published: collecting an
-        ancestor would leave a live token whose lineage resolves to nothing.
-
-        Revoked publications count too. Their rows are kept so the token fails
-        closed rather than being reissued, and the chain stays readable for
-        audit; deleting it would make a withdrawal destroy the record of what
-        was withdrawn.
+        - a name or an alias: a registered result has to stay explainable and
+          rebuildable, and a refresh of it reads its recorded inputs;
+        - an alias change awaiting approval: its target is what the approver
+          is being asked to point at;
+        - a publication or a pin: whoever placed it needs the chain, not only
+          the version, to restore or explain it. Revoked publications count
+          too, so a withdrawal does not destroy the record of what was
+          withdrawn;
+        - a build still running, which is reading its inputs;
+        - with *current_values*, the current value of every id somebody chose
+          (a notebook's cell outputs), whose recorded inputs are what the
+          notebook shows, publishes and promotes as that value's lineage.
 
         Not tenant-scoped, deliberately. Protecting more than a sweep would
-        have collected is free, and the alternative — reasoning about whether a
-        chain can cross tenants — is the kind of proof this store's pruning
+        have collected is free, and the alternative (reasoning about whether a
+        chain can cross tenants) is the kind of proof this store's pruning
         rules refuse to rely on elsewhere.
         """
-        roots = conn.execute(
+        roots_sql = (
             "SELECT artifact_id, version FROM artifact_publications "
             "UNION SELECT artifact_id, version FROM artifact_pins "
+            "UNION SELECT artifact_id, version FROM artifact_names "
+            "UNION SELECT artifact_id, version FROM artifact_aliases "
+            "UNION SELECT artifact_id, version FROM registry_pending "
+            "WHERE action = 'set' AND artifact_id IS NOT NULL "
             "UNION SELECT id AS artifact_id, version FROM artifact_versions "
             "WHERE state = 'building'"
-        ).fetchall()
+        )
+        if current_values:
+            roots_sql += (
+                " UNION SELECT id AS artifact_id, MAX(version) AS version "
+                "FROM artifact_versions WHERE minted = 0 "
+                "AND state IN ('ready', 'superseded') GROUP BY id"
+            )
+        roots = conn.execute(roots_sql).fetchall()
+        # One read of every recorded edge, walked in memory: a notebook store
+        # has a root per cell output, and a query per node would be the sweep.
+        inputs: dict[tuple[str, int], str] = {
+            (row["id"], row["version"]): row["input_versions"]
+            for row in conn.execute(
+                "SELECT id, version, input_versions FROM artifact_versions "
+                "WHERE input_versions IS NOT NULL"
+            ).fetchall()
+        }
 
         reachable: set[tuple[str, int]] = set()
         pending = [(row["artifact_id"], row["version"]) for row in roots]
@@ -4370,13 +4418,10 @@ class ArtifactStore:
             if node in reachable:
                 continue
             reachable.add(node)
-            row = conn.execute(
-                "SELECT input_versions FROM artifact_versions WHERE id = ? AND version = ?",
-                node,
-            ).fetchone()
-            if row is None or not row["input_versions"]:
+            recorded_inputs = inputs.get(node)
+            if not recorded_inputs:
                 continue
-            for uri, recorded in json.loads(row["input_versions"]).items():
+            for uri, recorded in json.loads(recorded_inputs).items():
                 # Parsed as the lineage walk parses it, so that what GC protects
                 # and what a publication's chain will follow cannot drift apart:
                 # a "strata://name/" edge records the concrete version it read
@@ -4503,8 +4548,9 @@ class ArtifactStore:
         A version is a candidate when nothing holds it:
 
         - no name or alias points at it;
-        - it is not published or pinned, nothing published or pinned depends
-          on it, and no build in flight reads it (``_protected_reachable``);
+        - nothing named, aliased, awaiting approval, published, pinned or
+          still building depends on it, and no current value of a
+          caller-named id was built from it (``_protected_reachable``);
         - it is ``ready``, ``superseded`` or ``failed``, not ``building``;
         - it is not the current value of an id somebody chose. The latest
           version of a caller-named id is what ``get_latest_version`` resolves,
@@ -4513,9 +4559,11 @@ class ArtifactStore:
           beyond the version its caller was handed, so its latest version is a
           candidate like any other. ``collect_latest`` makes every id's latest
           a candidate, for a store being deliberately reclaimed;
-        - it was last used (hit or read, see ``_note_use``; its creation if
-          never) at least ``min_idle_seconds`` ago, so a sweep never takes
-          what a reader has just been handed.
+        - it was last used (a hit, a read, or resolved as another
+          computation's input; its creation if never) at least
+          ``min_idle_seconds`` ago, so a sweep never takes what a reader has
+          just been handed. The floor allows for the recorded use trailing the
+          real one by up to ``_USE_RESOLUTION_SECONDS``.
 
         Of the candidates, it collects every one idle longer than
         ``max_idle_days``, and, when the store holds more than ``max_bytes``,
@@ -4537,7 +4585,7 @@ class ArtifactStore:
                 its current value; a failed version never counts.
             min_idle_seconds: Never collect anything used more recently.
             tenant: Collect only this tenant's versions (and legacy tenantless
-                ones). ``max_bytes`` still measures the whole store.
+                ones), and measure ``max_bytes`` against those alone.
             collect_latest: Also collect the current value of caller-named
                 ids. Off by default because it deletes live state.
             dry_run: Choose, but delete nothing.
@@ -4591,7 +4639,10 @@ class ArtifactStore:
                       )
                   )
                 """
-            params: list[float | str] = [now - min_idle_seconds]
+            # The recorded last use can trail the real one by up to
+            # _USE_RESOLUTION_SECONDS, so a floor honours that lag too.
+            floor = min_idle_seconds + _USE_RESOLUTION_SECONDS if min_idle_seconds else 0.0
+            params: list[float | str] = [now - floor]
             if tenant is not None:
                 query += " AND (av.tenant = ? OR av.tenant = '' OR av.tenant IS NULL)"
                 params.append(tenant)
@@ -4599,17 +4650,21 @@ class ArtifactStore:
             # facing an id whose versions share a timestamp takes the oldest.
             query += f" ORDER BY {used} ASC, av.id ASC, av.version ASC"
 
-            protected = self._protected_reachable(conn)
+            protected = self._protected_reachable(conn, current_values=not collect_latest)
             candidates = [
                 row
                 for row in conn.execute(query, params).fetchall()
                 if (row["id"], row["version"]) not in protected
             ]
-            store_bytes = int(
-                conn.execute(
-                    "SELECT COALESCE(SUM(byte_size), 0) FROM artifact_versions"
-                ).fetchone()[0]
-            )
+            # Measured over what the sweep may collect: a tenant's cap is on
+            # its own share, or one tenant's sweep would empty its cache while
+            # the others kept the store over the cap.
+            size_sql = "SELECT COALESCE(SUM(byte_size), 0) FROM artifact_versions"
+            size_params: list[str] = []
+            if tenant is not None:
+                size_sql += " WHERE tenant = ? OR tenant = '' OR tenant IS NULL"
+                size_params.append(tenant)
+            store_bytes = int(conn.execute(size_sql, size_params).fetchone()[0])
 
             chosen: dict[tuple[str, int], Any] = {}
             if max_idle_days is not None:

@@ -104,14 +104,15 @@ Service mode does this only when an operator sets
 
 A version is collected only when nothing holds it:
 
-- no name or alias points at it;
-- it is not pinned or published, and nothing pinned, published or still
-  building depends on it;
-- it is not the current value of an id somebody chose. A notebook stores each
-  cell output under its own id and reads the latest version back, so that
-  version stays. An id the store made up for one `materialize` has no such
-  value;
-- it has not been used (a cache hit or a read) in the last hour.
+- nothing named, aliased, pinned, published, awaiting alias approval or still
+  building is, or was built from, it. A named result keeps its whole chain, so
+  its lineage stays walkable and a refresh can re-read its inputs;
+- it is not the current value of an id somebody chose, nor something one was
+  built from. A notebook stores each cell output under its own id and reads the
+  latest version back, so that version stays. An id the store made up for one
+  `materialize` has no such value;
+- it has not been used in the last hour: a cache hit, a read of its data, or a
+  request that names it as an input all count.
 
 So **an unnamed result is a cache entry**. Its URI keeps working while it is
 used, and once it is collected the same request computes it again. To keep a
@@ -136,7 +137,9 @@ client.garbage_collect(max_idle_days=7)
 # {"deleted_count": 14, "deleted_bytes": 8429283, "store_bytes": 51239012, "dry_run": false}
 ```
 
-Each limit you leave out takes the configured one. `collect_latest=true`
+Each limit you leave out takes the configured one. On the command line and the
+route a limit of `0` means "everything past the recent-use floor", unlike the
+settings, where `0` turns the limit off. `collect_latest=true`
 (`--collect-latest`) also collects the current value of caller-chosen ids,
 which deletes live notebook state; use it only on a store you are deliberately
 reclaiming. In service mode the route needs a principal holding `admin:*`, and
