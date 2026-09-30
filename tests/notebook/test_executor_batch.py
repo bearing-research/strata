@@ -306,12 +306,15 @@ async def test_the_parents_own_work_is_not_charged_to_a_cell(tmp_path: Path, mon
     real_cache_check = executor._batch_service_cache_check
 
     async def slow_cache_check(*args, **kwargs):
-        await asyncio.sleep(3.0)  # past the 2s cell timeout below
+        # Past the cell timeout below. The timeout itself is generous: what
+        # still counts is the harness's own work (starting Python, running
+        # the cell, serializing), which a loaded machine can stretch past 2s.
+        await asyncio.sleep(10.0)
         return await real_cache_check(*args, **kwargs)
 
     monkeypatch.setattr(executor, "_batch_service_cache_check", slow_cache_check)
 
-    result = await executor.execute_batch(specs, cell_timeout_seconds=2.0)
+    result = await executor.execute_batch(specs, cell_timeout_seconds=8.0)
 
     assert result.completed, (result.end_reason, result.failed_cell_id)
     assert {r.cell_id: r.status for r in result.cell_results} == {"c1": "ok"}
