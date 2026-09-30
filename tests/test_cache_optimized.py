@@ -5,7 +5,7 @@ import pyarrow.ipc as ipc
 import pytest
 
 from strata import fast_io
-from strata.cache import CACHE_META_EXTENSION, CachedFetcher, DiskCache
+from strata.cache import CACHE_META_EXTENSION, CACHE_VERSION, CachedFetcher, DiskCache
 from strata.config import StrataConfig
 from strata.types import CacheKey, TableIdentity
 
@@ -149,6 +149,35 @@ class TestDiskCacheStatsAndCleanup:
         assert not path.exists()
         assert not meta_path.exists()
         assert cache.get_stats().total_entries == 0
+
+    def test_other_cache_versions_are_removed_on_startup(
+        self, strata_config, cache_key, sample_batch, caplog
+    ):
+        """An old version's directory would never be counted or evicted."""
+        cache_dir = strata_config.cache_dir
+        current = cache_dir / f"v{CACHE_VERSION}"
+        DiskCache(strata_config).put(cache_key, sample_batch)
+        old = cache_dir / "v3" / "ab" / "cd"
+        old.mkdir(parents=True)
+        (old / "abcd.arrowstream").write_bytes(b"0.8.0 row group")
+        (cache_dir / "v1").mkdir()
+        # Only v<N> directories are the cache's to remove.
+        keep = [cache_dir / "vendor", cache_dir / "v3.bak", cache_dir / "notes"]
+        for path in keep:
+            path.mkdir()
+        (cache_dir / "v2").write_text("a file, not a cache directory")
+        (cache_dir / "metadata.sqlite").write_bytes(b"")
+
+        with caplog.at_level("INFO", logger="strata.cache"):
+            cache = DiskCache(strata_config)
+
+        assert sorted(p.name for p in cache_dir.iterdir()) == sorted(
+            [current.name, "metadata.sqlite", "v2", *(p.name for p in keep)]
+        )
+        assert cache.get(cache_key) is not None
+        assert cache.get_size_bytes() > 0
+        assert str(cache_dir / "v3") in caplog.text
+        assert str(cache_dir / "v1") in caplog.text
 
 
 class TestCachedFetcherFetchAsStreamBytes:
