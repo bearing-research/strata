@@ -40,6 +40,11 @@ CACHE_VERSION = 4
 
 # A cache directory of some version, current or not: ``v`` and digits only.
 _VERSION_DIR = re.compile(r"v\d+")
+# What every version has written under its directory: hex-named directories
+# (a tenant prefix of 8, then two levels of 2; version 1 had no tenant prefix)
+# holding entries, their metadata sidecars and write temp files.
+_CACHE_SUBDIR = re.compile(r"[0-9a-f]{2}|[0-9a-f]{8}")
+_CACHE_FILE_SUFFIXES = (CACHE_FILE_EXTENSION, CACHE_META_EXTENSION, ".tmp")
 
 logger = logging.getLogger(__name__)
 
@@ -149,6 +154,18 @@ class Cache(Protocol):
         ...
 
 
+def _not_a_cache_entry(tree: Path) -> Path | None:
+    """The first thing under *tree* that a cache does not write, or ``None``."""
+    for root, dirs, files in os.walk(tree):
+        for name in dirs:
+            if not _CACHE_SUBDIR.fullmatch(name):
+                return Path(root) / name
+        for name in files:
+            if not name.endswith(_CACHE_FILE_SUFFIXES):
+                return Path(root) / name
+    return None
+
+
 class DiskCache:
     """Disk-based cache using the Arrow IPC Stream format.
 
@@ -188,13 +205,23 @@ class DiskCache:
 
         Size accounting, stats and eviction only walk the current version's
         directory, so an older one would sit on disk uncounted and unevicted
-        forever. Only ``v<N>`` directories go; nothing else in ``cache_dir``.
+        forever. Only ``v<N>`` directories go, and only one holding nothing a
+        cache does not write: ``v1`` is an ordinary name for a directory of
+        one's own, and ``cache_dir`` a place people keep other things.
         """
         current = f"v{CACHE_VERSION}"
         for item in self.cache_dir.iterdir():
             if item.name == current or not _VERSION_DIR.fullmatch(item.name):
                 continue
             if not item.is_dir():
+                continue
+            foreign = _not_a_cache_entry(item)
+            if foreign is not None:
+                logger.warning(
+                    "Left %s in the cache directory: it holds %s, which the cache did not write",
+                    item,
+                    foreign,
+                )
                 continue
             try:
                 shutil.rmtree(item)
