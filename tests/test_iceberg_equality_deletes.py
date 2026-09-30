@@ -384,6 +384,54 @@ def test_a_delete_in_one_partition_leaves_the_others(tmp_path):
     assert result.column("region").to_pylist() == ["us"]
 
 
+def test_an_identity_partition_column_the_file_omits_reads_its_partition_value(tmp_path):
+    """A Hive-layout file registered with add_files often omits its identity
+    partition column, whose value is the file's partition. It read as nulls,
+    as pyiceberg does not, and a delete keyed on it never matched. Each file
+    reads its own value, from a restarted planner's persisted manifest too."""
+    catalog, uri = _catalog(tmp_path)
+    schema = Schema(
+        NestedField(1, "id", LongType(), required=False),
+        NestedField(2, "region", StringType(), required=False),
+    )
+    spec = PartitionSpec(PartitionField(2, 1000, IdentityTransform(), "region"))
+    catalog.create_table("db.t", schema=schema, partition_spec=spec)
+    _table(catalog).append(
+        pa.table(
+            {"id": pa.array([0], pa.int64()), "region": ["us"]},
+            schema=pa.schema([("id", pa.int64()), ("region", pa.string())]),
+        )
+    )
+    table = _table(catalog)
+    commit_files(
+        table,
+        data_file(table, pa.table({"id": pa.array([1, 2], pa.int64())}), partition=Record("eu")),
+        data_file(table, pa.table({"id": pa.array([3], pa.int64())}), partition=Record("ap")),
+    )
+    config = StrataConfig(cache_dir=tmp_path / "cache")
+
+    def rows(scanned):
+        return sorted(scanned.to_pylist(), key=lambda row: row["id"])
+
+    expected = [
+        {"id": 0, "region": "us"},
+        {"id": 1, "region": "eu"},
+        {"id": 2, "region": "eu"},
+        {"id": 3, "region": "ap"},
+    ]
+    assert rows(_table(catalog).scan().to_arrow()) == expected
+    assert rows(_scan(config, uri)[0]) == expected
+
+    table = _table(catalog)
+    deleted = pa.table({"id": pa.array([2], pa.int64()), "region": ["eu"]})
+    commit_files(table, equality_delete(table, deleted, partition=Record("eu")))
+    store = MetadataStore(config.cache_dir / "metadata.sqlite")
+    ReadPlanner(config, manifest_cache=ManifestCache(store=store)).plan(uri)
+    restarted = ReadPlanner(config, manifest_cache=ManifestCache(store=store))
+    assert rows(_scan(config, uri, planner=restarted)[0]) == [expected[0], expected[1], expected[3]]
+    assert store.manifest_hits == 1
+
+
 def test_a_delete_whose_key_range_misses_a_row_group_is_not_applied_to_it(people):
     """ids 1-3 and 4-null sit in two row groups; a delete of ids 100-200 meets neither."""
     catalog, uri, config = people

@@ -413,7 +413,8 @@ class Task:
     # by value), and for each key field id the file's column holding it (None
     # when the file predates it). ``num_rows`` is an upper bound when set.
     equality_deletes: "tuple[EqualityDeleteEntry, ...]" = ()
-    # (field id, the file's column or None, the key's v3 initial-default)
+    # (field id, the file's column or None, what the key reads as when the
+    # file lacks it: its identity-partition value or v3 initial-default)
     equality_columns: tuple[tuple[int, str | None, Any], ...] = ()
     # Whether nanosecond timestamps read at microseconds, the only unit of an
     # Iceberg v1 or v2 table; equality delete keys are compared so.

@@ -40,8 +40,8 @@ class Column(NamedTuple):
     # (file type, table type) of a struct, list or map column whose nested
     # fields changed since the file was written; None otherwise.
     reshape: tuple[IcebergType, IcebergType] | None = None
-    # What a column the file predates reads as: its Iceberg v3 initial-default,
-    # or None for nulls.
+    # What a column the file lacks reads as: the file's identity-partition
+    # value, else its Iceberg v3 initial-default, or None for nulls.
     default: Any = None
 
 
@@ -226,11 +226,15 @@ def file_columns(
     table_identity: str,
     file_path: str,
     format_version: int,
+    partition_values: dict[int, Any],
 ) -> tuple[Column, ...] | None:
     """How a file with *file_schema* reads as *snapshot_schema*, or None when it already does.
 
     Every column takes its nullability from the snapshot, so files written on
     either side of a required column becoming optional stream as one schema.
+    A column the file lacks reads its value in *partition_values* (the file's
+    identity partition, by source field id), else its initial-default, as
+    pyiceberg reads it.
 
     Raises ``UnsupportedTableFormatError`` for a type change Iceberg does not
     allow, at any depth.
@@ -249,7 +253,7 @@ def file_columns(
                     field.name,
                     None,
                     snapshot_arrow_field(field).with_nullable(nullable),
-                    default=field.initial_default,
+                    default=partition_values.get(field.field_id, field.initial_default),
                 )
             )
             continue
@@ -324,7 +328,8 @@ def stored_columns(
 
 
 def absent_column(num_rows: int, data_type: pa.DataType, default: Any) -> pa.Array:
-    """A column the data file predates: its Iceberg v3 initial-default, else nulls."""
+    """A column the data file lacks: *default* (its identity-partition value or v3
+    initial-default) on every row, else nulls."""
     if default is None:
         return pa.nulls(num_rows, data_type)
     return pa.repeat(pa.scalar(default, type=data_type), num_rows)

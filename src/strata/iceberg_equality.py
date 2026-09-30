@@ -339,8 +339,9 @@ def deleted_mask(
     """For each row of *table*, whether an equality delete in *deletes* removes it.
 
     *key_columns* maps each equality field id to *table*'s column holding it,
-    or None when the data file predates the column (its values are then its
-    *defaults* entry, the v3 initial-default, or null). *downcast_ns* compares
+    or None when the data file lacks the column (its values are then its
+    *defaults* entry, the file's identity-partition value or the v3
+    initial-default, or null). *downcast_ns* compares
     nanosecond timestamp keys at microseconds, a v1 or v2 table's only unit.
     Deletes are grouped by their equality ids; a row goes if any group matches.
     """

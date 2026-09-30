@@ -309,6 +309,10 @@ class ManifestEntry:
     # The snapshot's equality deletes for this file (sequence number and
     # partition already matched; see iceberg_equality).
     equality_deletes: tuple[EqualityDeleteEntry, ...] = ()
+    # The file's identity-partition values, what a source column the file
+    # omits reads as: (source field id, Iceberg type, the value in Iceberg's
+    # single-value encoding as hex).
+    partition_values: tuple[tuple[int, str, str], ...] = ()
 
 
 @dataclass
@@ -810,6 +814,9 @@ class ManifestCache:
                             equality_deletes=tuple(
                                 EqualityDeleteEntry.from_json(delete)
                                 for delete in entry["equality_deletes"]
+                            ),
+                            partition_values=tuple(
+                                tuple(value) for value in entry["partition_values"]
                             ),
                         )
                         for entry in persisted
