@@ -72,6 +72,8 @@ Routing-only config for an external secret manager (Infisical, Doppler, AWS SM, 
 
 Allowed keys: `provider`, `project_id`, `environment`, `path`, `base_url`. Unknown keys are dropped on save.
 
+On a server in service mode, `base_url` must be the operator's `INFISICAL_HOST` (or the public default when unset); any other host is refused, since the server would log in there with its own credentials.
+
 ## `[[mounts]]` - Filesystem mounts
 
 ```toml

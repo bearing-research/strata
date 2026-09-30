@@ -680,6 +680,24 @@ can still read the server's whole environment from `/proc/<server pid>/environ`,
 because it *is* that user. The allowlist decides what a cell is handed; the
 harness user is what stops it taking the rest.
 
+### A notebook's secret manager
+
+A notebook's `[secret_manager]` block names where its secrets come from, and the
+server fetches them with its own Infisical credentials (`INFISICAL_CLIENT_ID` /
+`INFISICAL_CLIENT_SECRET` or `INFISICAL_TOKEN`). Two consequences on a shared
+server:
+
+- **The host is yours.** The server logs in only at `INFISICAL_HOST` (or the
+  public `https://app.infisical.com` when unset). A notebook whose `base_url`
+  names another host fails to fetch, with a message naming `base_url`, and no
+  login is attempted: otherwise the author could have the server send its
+  credentials anywhere.
+- **The project is the author's.** `project_id`, `environment` and `path` come
+  from the notebook, and Strata has no list of projects a notebook may read. Any
+  notebook author can read every secret the server's machine identity can
+  read. Scope that identity to what every author on this server may see, or run
+  a separate server (with its own identity) per group that may see more.
+
 ## Migrating from personal mode
 
 If you've been running personal mode and want to grow into service:
