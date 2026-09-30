@@ -18,18 +18,22 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   sweep, which was off by default, could not have collected one anyway: each
   result is the only version of an id the store made up for it, and the latest
   version of an id was always kept. Retention now tracks when a version was
-  last used (a cache hit or a read) rather than when it was made, and knows
-  which ids the store made up, so a notebook's cell outputs, whose latest
-  version is the cell's value, are still kept. Nothing named, aliased, pinned
-  or published is collected, nor anything those or a running build depend on,
-  nor anything used in the last hour. `strata artifact gc` runs or previews a
-  sweep without a server, and `POST /v1/artifacts/gc` takes `dry_run`. Every
-  limit is a setting: `STRATA_ARTIFACT_GC_INTERVAL_SECONDS`, `_MAX_BYTES`,
-  `_MAX_IDLE_DAYS` and `_MIN_IDLE_SECONDS`. Service mode sweeps only when an
-  operator sets the interval. A notebook's own store keeps each cell output's
-  current value and its three most recent earlier ones
+  last used (a cache hit, a read, or a request that names it as an input)
+  rather than when it was made, and knows which ids the store made up, so a
+  notebook's cell outputs, whose latest version is the cell's value, are
+  still kept. Nothing named, aliased, pinned, published, awaiting alias
+  approval or still building is collected, nor anything those, or a
+  notebook's current values, were built from, nor anything used in the last
+  hour; a copy promoted into a store counts as just used. The first sweep
+  runs a minute after the server starts. `strata artifact gc` runs or
+  previews a sweep without a server, and `POST /v1/artifacts/gc` takes
+  `dry_run`. Every limit is a setting: `STRATA_ARTIFACT_GC_INTERVAL_SECONDS`,
+  `_MAX_BYTES`, `_MAX_IDLE_DAYS` and `_MIN_IDLE_SECONDS`. Service mode sweeps
+  only when an operator sets the interval, and a tenant's cap covers that
+  tenant's own share. A notebook's own store keeps each cell output's current
+  value and its three most recent earlier ones
   (`STRATA_NOTEBOOK_KEEP_SUPERSEDED_VERSIONS`), pruned when the server opens
-  the notebook.
+  the notebook (not while it is held still for a copy).
 - **A result can be promoted without a name.** `POST
   /v1/notebooks/{id}/artifacts/{aid}/v/{n}/promote` without `name` copies the
   result and its chain into the team store and names nothing, so a platform
@@ -51,16 +55,22 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   row group would need more than `max_equality_delete_rows` (10 million by
   default) is refused while planning, with a message pointing at compaction,
   never read partially. A delete file in ORC or Avro, or keyed on a struct
-  column, is refused the same way.
+  column, is refused the same way. Keys compare the values the scan returns:
+  on a v1 or v2 table a key a file holds in nanoseconds is truncated to
+  microseconds, so a delete a JVM writer (Flink, Spark) wrote with the
+  microsecond value matches, and a key a file omits because it is the file's
+  identity partition matches on the partition value.
 - **Scans read Iceberg tables whose schema changed.** Columns are matched by
   field id, so a table with an added column, which used to be refused, reads
   its older files with the column null, and a widened type comes back wide. A
   scan of the current table reads the current schema; one that names a
   snapshot reads that snapshot's. The same goes for the fields inside a
   struct, list or map column. A column added with a default (format v3) reads
-  its default from files that predate it, a required column made optional
-  reads across both kinds of file, and a file with nanosecond timestamps in a
-  v1 or v2 table is read at the table's microsecond unit, truncating.
+  its default from files that predate it, and an identity-partition column a
+  file omits (a Hive-layout file registered with `add_files`) reads the
+  file's partition value, as pyiceberg reads it. Nanosecond timestamps in a
+  v1 or v2 table, nested ones included, are read at the table's microsecond
+  unit, truncating.
 
 ### Changed
 
@@ -82,9 +92,9 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   manifest whose entries leave their snapshot id to be inherited, which is how
   DuckDB writes them, and dropped the delete files those manifests listed.
 - **The `[mcp]` extra needs mcp 2.2 or newer.** mcp 2 renamed `FastMCP` to
-  `MCPServer`, and the notebook's `/mcp` endpoint now uses it. An mcp 1 left
-  in the environment used to switch `/mcp` off without a word; the server now
-  logs why and keeps running without it.
+  `MCPServer`, and the notebook's `/mcp` endpoint now uses it. With mcp 1
+  still installed, `/mcp` is off after upgrading: the server logs why,
+  naming the module that failed to import, and keeps running without it.
 - **sqlglot 30.13 or newer is required**, the first release that writes
   DuckDB's snapshot clause after a table's alias.
 - **DuckDB 1.5 or newer is required** (`strata-notebook`, its `sql-duckdb`
@@ -130,6 +140,40 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   go direct and ignore `HTTPS_PROXY`, since through a proxy the proxy would
   resolve the name; personal-mode fetches and
   `STRATA_WORKER_ALLOW_LOCAL_HOSTS` keep the environment's proxy settings.
+- **A service-mode notebook cannot choose where the server's Infisical
+  credentials go.** The secret manager logged in with the server's
+  `INFISICAL_CLIENT_ID` / `INFISICAL_CLIENT_SECRET` (or `INFISICAL_TOKEN`) at
+  whatever host the notebook's `[secret_manager] base_url` named. In service
+  mode the host is the operator's `INFISICAL_HOST` (or the public default),
+  and any other `base_url` is refused before any login. `project_id`,
+  `environment` and `path` still come from the notebook, so scope the machine
+  identity to what every notebook author may read.
+- **R package restores in service mode run as the harness user.** Restoring a
+  notebook's `renv.lock` builds packages from source, which runs their
+  configure scripts, and it ran as the server with the server's environment.
+  It now runs as `STRATA_NOTEBOOK_HARNESS_USER`, and so does the R package
+  listing; with no harness user nothing is restored, and the log says why.
+  What the restore writes (the notebook's `renv/`, its library in the shared
+  store, the package cache) is handed to that user, and a library link that
+  points anywhere but the shared store stops the restore rather than giving
+  the harness user that directory. Where cells are isolated, R packages are
+  no longer added from the notebook: add them to the committed `renv.lock`.
+- **A notebook's `[ai] base_url` is checked like an `@fetch` URL in service
+  mode.** A prompt cell posts to it from the server and shows the answer, so
+  it could read the cloud metadata address or an internal service. Private,
+  loopback and link-local hosts are refused unless listed in
+  `STRATA_NOTEBOOK_FETCH_ALLOWED_HOSTS`. The operator's `STRATA_AI_BASE_URL`
+  and the providers' own URLs are not checked.
+- **A confined SQL cell refuses a local mount root that exposes the server.**
+  Confinement admits everything under a mount's root, so a `file:///` mount
+  let a DuckDB cell read the whole disk. In service mode a local root is
+  refused if it is `/` or has fewer than two path components, if it holds the
+  server's artifact, cache, metadata or notebook directories or its home, or
+  if it is inside the home directory, `/proc`, `/sys` or `/dev`.
+- **A denied table input is denied before it is planned.** A principal denied
+  a table used as a transform input got a 422 naming the table and its
+  delete-file paths, or a 400 that let materialize build without checking the
+  ACL. It now gets a 403, or a 404 under `STRATA_HIDE_FORBIDDEN_AS_NOT_FOUND`.
 
 ### Fixed
 
@@ -149,8 +193,9 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   result, and neither do the cells below it.** Snowflake's `IDENTIFIER($var)`,
   `TABLE($var)` and a bare `$var`, a table function such as DuckDB's
   `read_parquet(...)` or `query_table(...)` or a Postgres set-returning
-  function, and DuckDB's `FROM 'file.parquet'` name their table only when the
-  query runs, so the default cache could not see it change and kept returning
+  function, DuckDB's `FROM 'file.parquet'` (or `"file.parquet"`, or
+  `file.parquet` unquoted), and BigQuery's wildcard tables and
+  `INFORMATION_SCHEMA` views name their table only when the query runs, so the default cache could not see it change and kept returning
   the first result. Such a cell now runs its query every time, its header
   says why, and its result's content is folded into its provenance, so a
   downstream cell re-runs exactly when the rows changed instead of serving a
@@ -162,35 +207,39 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   and retention probes asked for a table's name as typed, and Snowflake stores
   an unquoted `events` as `EVENTS`, so a change to it was never detected.
   Unquoted identifiers are now looked up uppercased; quoted ones as written.
-- **`--no-sync` runs cells in the notebook's own environment.** `strata run
+- **Cell code runs only in the notebook's own environment.** `strata run
   --no-sync` and the `cell` commands' `--no-sync` ran cells with whatever
   `python` was on PATH rather than the notebook's `.venv`, and failed outright
   where no bare `python` exists. They now use `.venv/bin/python`, and refuse
-  with exit 2 when it is missing or points nowhere, rather than checking only
-  that a `.venv` directory exists.
+  with exit 2 when it is missing or points nowhere. Wherever the environment
+  is not ready, cells, cell tests (the WebSocket path too) and the inspect REPL
+  refuse and say so instead of running with PATH `python` and storing results
+  the notebook's environment never produced, and reopening a notebook whose
+  sync failed syncs again rather than making its cells runnable.
+- **Postgres cells notice changes to tables named in mixed case without
+  quotes.** Postgres stores `FROM Events` as `events`, but the freshness probe
+  asked for `"Events"`, found nothing, and served the cached result however
+  the table changed.
+- **A required column made optional no longer fails a scan.** Files written
+  before the change carried the column as not null and files after it as
+  nullable, and the scan refused to stream the two as one schema. Every
+  column, and every field inside a struct, list or map, now reads at the
+  snapshot's nullability.
+- **Starting the cache no longer deletes a user's `v1` directory.** On
+  startup the disk cache removed every `v<N>` directory in `cache_dir` other
+  than its own, whatever it held. It now removes only trees that contain
+  nothing but cache entries, and leaves anything else with a warning.
 - **Notebook uv commands act on the notebook's environment.** A server
   started with `UV_PROJECT_ENVIRONMENT` set passed it to every `uv sync`,
   `add`, `lock` and the `uv run` that starts a cell, which then acted on the
   server's environment instead of the notebook's `.venv`; a server started
   under `uv run` passed its `VIRTUAL_ENV`, which put a uv warning in every
   operation log. Both are dropped now.
-- **The `/mcp` warning names the missing module.** An installed mcp 2 missing
-  one of its own dependencies was reported as "mcp is older than 2", and mcp
-  without package metadata crashed the check. The warning now names the module
-  that failed to import, or says the version is unknown.
 - **A transform over a table input rebuilds after a schema change.** A rename
   or a dropped column makes no snapshot, and a table input was versioned by
   its snapshot alone, so `duckdb_sql@v1` over a renamed table returned the
   artifact built before the rename and its name reported itself fresh. Table
   inputs are now versioned by snapshot and schema.
-- **A Spark delete file over thousands of data files plans in time.**
-  Splitting a positional delete file per data file filtered the whole file
-  once per data file, so a 2M-row delete file over 2000 files took longer
-  than the plan timeout and the scan failed with a 504. It is now sorted once
-  and sliced.
-- **Azure blob reads are as fast as before 0.8.0.** The buffered reader copied
-  up to a full chunk on every 128 KiB read, about 6x slower; it now hands
-  bytes off the front of the chunk without copying.
 - **A GCS mount on its own endpoint no longer stalls for two minutes.** Since
   2026.6, gcsfs asks Google's Storage Control API over gRPC what kind of
   bucket it is, and an endpoint that is not Google's (the fake-gcs-server
