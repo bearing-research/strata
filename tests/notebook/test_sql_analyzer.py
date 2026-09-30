@@ -319,6 +319,26 @@ def test_a_table_no_probe_can_name_is_reported_not_tracked(dialect, reference):
     assert result.unresolved_tables == [reference]
 
 
+@pytest.mark.parametrize(
+    ("reference", "unresolved"),
+    [
+        ("`proj.ds.events_*`", "`proj`.`ds`.`events_*`"),
+        ("proj.ds.INFORMATION_SCHEMA.TABLES", "proj.ds.`INFORMATION_SCHEMA.TABLES`"),
+        ("`region-us`.INFORMATION_SCHEMA.JOBS", "`region-us`.`INFORMATION_SCHEMA.JOBS`"),
+    ],
+)
+def test_a_bigquery_wildcard_or_metadata_view_is_reported_not_tracked(reference, unresolved):
+    """The BigQuery probe looks each table up in its dataset's ``__TABLES__``,
+    which has no row for a wildcard table or an ``INFORMATION_SCHEMA`` view.
+    "Missing" is the same answer on every run, so the cell was served from its
+    cache however the data changed, and a region-qualified view failed the
+    probe outright."""
+    src = f"# @sql connection=db\nSELECT * FROM {reference} AS x JOIN ds.orders USING (id)"
+    result = analyze_sql_cell(src, dialect="bigquery")
+    assert result.tables == [QualifiedTable(catalog=None, schema="ds", name="orders")]
+    assert result.unresolved_tables == [unresolved]
+
+
 def test_a_file_looking_name_is_a_table_outside_duckdb():
     """Only DuckDB reads a file where a table name goes. Elsewhere
     ``events.parquet`` is the table ``parquet`` in the schema ``events``."""

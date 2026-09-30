@@ -553,6 +553,9 @@ def _table_reference(table_node: Any, sql: str, dialect: str) -> QualifiedTable 
     ``events.parquet``, ``"data/*.csv"``. A mount on a lake connection is the
     way to read files the cache can see, since each mount's fingerprint is
     folded into the cell's provenance.
+
+    BigQuery's wildcard tables (``events_*``) and ``INFORMATION_SCHEMA`` views
+    are names, but not tables its probe can find: ``__TABLES__`` lists neither.
     """
     from sqlglot import exp
 
@@ -564,7 +567,10 @@ def _table_reference(table_node: Any, sql: str, dialect: str) -> QualifiedTable 
     start = this.meta.get("start")
     if start is not None and sql[start] == "'":
         return None
-    if dialect == "duckdb" and _names_a_file(".".join(part.name for part in table_node.parts)):
+    name = ".".join(part.name for part in table_node.parts)
+    if dialect == "duckdb" and _names_a_file(name):
+        return None
+    if dialect == "bigquery" and ("*" in name or "INFORMATION_SCHEMA" in name.upper().split(".")):
         return None
     return _qualified(table_node, dialect)
 
