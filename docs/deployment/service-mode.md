@@ -616,6 +616,15 @@ runs in the server process: in a write cell `ATTACH`, `DETACH` and `VACUUM` are
 refused, since they reach other files (a read cell runs only reads already).
 Postgres, Snowflake and BigQuery cells send the query to their database server.
 
+Prompt cells call their model from the server process too, and show the author
+what came back. A `base_url` from the notebook's `[ai]` section is checked like
+an `@fetch` URL: http(s) only, and a host on a loopback, private or link-local
+address (the cloud metadata address among them) is refused unless it is named in
+`STRATA_NOTEBOOK_FETCH_ALLOWED_HOSTS`, the same list `@fetch` uses. The
+connection goes only to an address that passed the check, so it ignores proxy
+settings. `STRATA_AI_BASE_URL` is yours and is not checked, nor is a notebook
+naming that same URL or a provider's default one.
+
 Installing a notebook's Python packages runs as the server's user too, and building
 a package from a source distribution runs that package's build backend, code
 from wherever the package came from, with the server's environment. In service mode every `uv` command

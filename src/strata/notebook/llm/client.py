@@ -8,9 +8,11 @@ and yields text deltas suitable for surfacing intermediate output.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from typing import Any
 
 import httpx
@@ -30,8 +32,38 @@ from strata.notebook.llm.structured import (
     response_format_for,
 )
 from strata.notebook.llm.usage import record_llm_usage
+from strata.url_safety import guarded_async_transport, url_safety_problem
 
 logger = logging.getLogger(__name__)
+
+
+@asynccontextmanager
+async def _provider_client(config: LlmConfig) -> AsyncIterator[httpx.AsyncClient]:
+    """An HTTP client for *config*'s provider.
+
+    With ``guard_hosts`` set (a base_url the notebook chose, on a service-mode
+    server) the URL is checked as an ``@fetch`` URL is, and every connection
+    goes only to an address that passed, so a name cannot pass the check and
+    then connect to 127.0.0.1.
+
+    Raises:
+        RuntimeError: the base_url is refused; the message says how to allow it.
+    """
+    if config.guard_hosts is None:
+        async with httpx.AsyncClient(timeout=config.timeout_seconds) as client:
+            yield client
+        return
+    problem = await asyncio.to_thread(
+        url_safety_problem, config.base_url, "[ai] base_url", allowed_hosts=config.guard_hosts
+    )
+    if problem is not None:
+        raise RuntimeError(
+            f"{problem} On this server a notebook's base_url may reach a private "
+            "address only when the host is named in STRATA_NOTEBOOK_FETCH_ALLOWED_HOSTS."
+        )
+    transport = guarded_async_transport(allowed_hosts=config.guard_hosts)
+    async with httpx.AsyncClient(timeout=config.timeout_seconds, transport=transport) as client:
+        yield client
 
 
 async def _chat_completion_anthropic_native(
@@ -49,7 +81,7 @@ async def _chat_completion_anthropic_native(
         temperature=temperature,
         output_schema=output_schema,
     )
-    async with httpx.AsyncClient(timeout=config.timeout_seconds) as client:
+    async with _provider_client(config) as client:
         resp = await client.post(
             f"{config.base_url.rstrip('/')}/messages",
             headers={
@@ -127,7 +159,7 @@ async def _chat_completion_openai_compat(
     if response_format is not None:
         body["response_format"] = response_format
 
-    async with httpx.AsyncClient(timeout=config.timeout_seconds) as client:
+    async with _provider_client(config) as client:
         resp = await client.post(
             f"{config.base_url.rstrip('/')}/chat/completions",
             headers={
@@ -317,7 +349,7 @@ async def _stream_openai_compat(
     input_tokens = 0
     output_tokens = 0
 
-    async with httpx.AsyncClient(timeout=config.timeout_seconds) as client:
+    async with _provider_client(config) as client:
         async with client.stream(
             "POST",
             f"{config.base_url.rstrip('/')}/chat/completions",

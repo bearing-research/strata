@@ -421,6 +421,8 @@ model = "llama3"
 
 The `[ai]` section accepts `api_key` (use sparingly: it persists in `notebook.toml`; prefer the Runtime panel), `base_url`, `model`, `max_output_tokens` and `timeout_seconds`. `model` is the notebook's default for every prompt cell, and there is no UI for it: set it here, or override it for one cell with `# @model`. Any service that implements the OpenAI `/v1/chat/completions` endpoint works, including OpenAI, Anthropic, Google and Mistral through their OpenAI-compatible endpoints, Ollama, and self-hosted vLLM, TGI or LiteLLM.
 
+On a server in service mode the request is made by the server, so a `base_url` set here is checked like an `@fetch` URL: a host on a private, loopback or link-local address is refused unless the operator lists it in `STRATA_NOTEBOOK_FETCH_ALLOWED_HOSTS`. Personal mode reaches `localhost` as before.
+
 ---
 
 ## SQL Cells

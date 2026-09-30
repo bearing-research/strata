@@ -539,9 +539,10 @@ class StrataConfig(BaseSettings):
     # any notebook change.
     notebook_mount_credentials: Annotated[dict[str, str], NoDecode] = Field(default_factory=dict)
 
-    # Hosts ``@fetch`` may reach even on a private address, e.g. an internal
-    # data server. Public hosts need no entry; private, loopback and link-local
-    # addresses are refused unless named here. Exact names, or a leading dot
+    # Hosts ``@fetch``, and a prompt cell's ``[ai] base_url`` from
+    # notebook.toml, may reach even on a private address, e.g. an internal data
+    # or model server. Public hosts need no entry; private, loopback and
+    # link-local addresses are refused unless named here. Exact names, or a leading dot
     # for a suffix (``.internal``). Same rule as STRATA_WORKER_ALLOWED_HOSTS.
     notebook_fetch_allowed_hosts: Annotated[list[str], NoDecode] = Field(default_factory=list)
 
