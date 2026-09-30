@@ -8,6 +8,8 @@ This module provides:
 """
 
 import io
+import os
+import shlex
 import socket
 import sys
 import threading
@@ -45,6 +47,27 @@ from strata.config import StrataConfig
 # =============================================================================
 # Global-state isolation
 # =============================================================================
+
+
+def prepared_venv(notebook_dir: Path) -> None:
+    """Give a notebook a ``.venv`` whose interpreter is this one, for ``--no-sync``.
+
+    ``--no-sync`` takes the interpreter at ``.venv/bin/python`` and refuses a
+    venv without one. An empty ``.venv`` directory used to pass, and the cells
+    then ran with whatever ``python`` was on PATH; that fallback is what the
+    check removed. No Windows venv has ``bin/python``, and the notebook
+    subsystem is skipped there (ci.yml), so a test that needs this is too.
+    """
+    if os.name == "nt":
+        pytest.skip("Strata's venv interpreter path is bin/python; not a Windows venv layout")
+    python = notebook_dir / ".venv" / "bin" / "python"
+    python.parent.mkdir(parents=True, exist_ok=True)
+    if not python.exists():
+        # A wrapper, not a symlink: Python started through a symlink looks
+        # for pyvenv.cfg beside the symlink, finds none, and comes up as the
+        # base interpreter without this venv's packages.
+        python.write_text(f'#!/bin/sh\nexec {shlex.quote(sys.executable)} "$@"\n')
+        python.chmod(0o755)
 
 
 @pytest.fixture(autouse=True)

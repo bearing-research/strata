@@ -21,6 +21,7 @@ from strata.notebook.session import NotebookSession
 from strata.notebook.snapshot import write_committed_files, write_snapshot
 from strata.notebook.snapshot_import import import_snapshot
 from strata.notebook.writer import add_cell_to_notebook, create_notebook, write_cell
+from tests.conftest import prepared_venv
 
 FAILING = 'print("Checking snapshot 7")\n1 / 0\n'
 
@@ -31,7 +32,7 @@ def failed(tmp_path, capsys) -> Path:
     from strata.notebook.cli import run_main
 
     nb = create_notebook(tmp_path / "src", "Failures", initialize_environment=False)
-    (nb / ".venv").mkdir(exist_ok=True)  # --no-sync placeholder
+    prepared_venv(nb)
     add_cell_to_notebook(nb, "good", None)
     write_cell(nb, "good", "x = 1\nx\n")
     add_cell_to_notebook(nb, "diag", "good")

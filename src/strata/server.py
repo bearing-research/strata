@@ -2951,9 +2951,10 @@ def main(argv: list[str] | None = None):
     from strata._uv_runtime import assert_uv_managed_runtime
 
     args = _build_server_arg_parser().parse_args(argv)
-    _apply_server_cli_overrides(args)
-
+    # After parsing, so --help prints from any Python; before the overrides,
+    # so a refused run changes nothing.
     assert_uv_managed_runtime()
+    _apply_server_cli_overrides(args)
 
     config = StrataConfig.load()
     # Make the notebook location obvious — it's a common surprise that new

@@ -156,10 +156,10 @@ class TestSessionVenvPython:
         assert session.environment_last_sync_duration_ms is not None
         assert session.environment_interpreter_source == "venv"
 
-    def test_an_existing_venv_is_the_interpreter_before_any_sync(self, tmp_path: Path):
-        """`strata run --no-sync` and `cell add --no-sync` never sync. The
-        session used to leave venv_python unset until a sync recorded it, so
-        those ran cells with whatever `python` was on PATH."""
+    def test_a_new_session_has_no_interpreter_even_with_a_venv(self, tmp_path: Path):
+        """While venv_python is None cells do not run. A session that seeded
+        it from an existing .venv let a sync that raised on open leave cells
+        running in the old environment with no notice."""
         from strata.notebook.parser import parse_notebook
 
         nb_dir = create_notebook(tmp_path, "venv_present")  # creating it built .venv
@@ -167,14 +167,55 @@ class TestSessionVenvPython:
 
         session = NotebookSession(parse_notebook(nb_dir), nb_dir)
 
-        assert session.venv_python == nb_dir / ".venv" / "bin" / "python"
+        assert session.venv_python is None
+        assert session.environment_execution_block_message() is not None
 
-    def test_no_venv_means_no_interpreter_yet(self, tmp_path: Path):
+    def test_a_sync_that_raises_on_open_leaves_cells_blocked(self, tmp_path: Path, monkeypatch):
+        from strata.notebook.session import SessionManager
+
+        nb_dir = create_notebook(tmp_path, "sync_raises")
+
+        def boom(self):
+            raise RuntimeError("shared environment store is unreachable")
+
+        monkeypatch.setattr(NotebookSession, "ensure_venv_synced", boom)
+        session = SessionManager().open_notebook(nb_dir)
+
+        assert session.venv_python is None
+        assert "not ready" in (session.environment_execution_block_message() or "")
+
+    def test_no_sync_takes_the_prepared_venv_as_the_interpreter(self, tmp_path: Path):
+        """`strata run --no-sync` and `cell add --no-sync` never sync; they
+        used to leave the session on whatever `python` was on PATH."""
+        from strata.notebook.cli import _use_existing_environment
         from strata.notebook.parser import parse_notebook
 
-        nb_dir = create_notebook(tmp_path, "venv_absent", initialize_environment=False)
+        nb_dir = create_notebook(tmp_path, "venv_prepared")
+        session = NotebookSession(parse_notebook(nb_dir), nb_dir)
 
-        assert NotebookSession(parse_notebook(nb_dir), nb_dir).venv_python is None
+        assert _use_existing_environment(session) == (True, None)
+        assert session.venv_python == nb_dir / ".venv" / "bin" / "python"
+        assert session.environment_interpreter_source == "venv"
+        assert session.environment_python_version
+        assert session.environment_sync_state == "ready"
+        assert session.environment_execution_block_message() is None
+
+    def test_no_sync_refuses_a_venv_with_no_interpreter(self, tmp_path: Path):
+        """The check is for bin/python, not the directory: a venv whose
+        interpreter points nowhere used to pass and fall back to PATH."""
+        from strata.notebook.cli import _use_existing_environment
+        from strata.notebook.parser import parse_notebook
+
+        nb_dir = create_notebook(tmp_path, "venv_broken", initialize_environment=False)
+        (nb_dir / ".venv" / "bin").mkdir(parents=True)
+        (nb_dir / ".venv" / "bin" / "python").symlink_to(tmp_path / "gone")
+        session = NotebookSession(parse_notebook(nb_dir), nb_dir)
+
+        ok, err = _use_existing_environment(session)
+
+        assert not ok
+        assert "no usable .venv" in (err or "")
+        assert session.venv_python is None
 
     def test_venv_python_fallback_when_uv_missing(self, tmp_path: Path):
         """When uv is missing but .venv exists, keep using the notebook venv."""

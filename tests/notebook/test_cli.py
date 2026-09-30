@@ -11,6 +11,7 @@ import pytest
 
 from strata.notebook.cli import _sync_environment, run_main
 from strata.notebook.executor import CellExecutionResult
+from tests.conftest import prepared_venv
 from tests.notebook.conftest import skip_if_no_r
 
 
@@ -49,9 +50,7 @@ def _build_notebook(
     return notebook_dir
 
 
-def _mk_fake_venv(notebook_dir: Path) -> None:
-    """Create a placeholder ``.venv`` directory so ``--no-sync`` passes."""
-    (notebook_dir / ".venv").mkdir(exist_ok=True)
+_mk_fake_venv = prepared_venv
 
 
 def _make_result(
@@ -85,6 +84,19 @@ class TestArgumentHandling:
         notebook_dir = _build_notebook(tmp_path, cells=[("c1", "x = 1", None)])
         # Intentionally do NOT create .venv.
         assert run_main([str(notebook_dir), "--no-sync"]) == 2
+
+    def test_no_sync_with_a_venv_that_has_no_interpreter_exits_2(self, tmp_path, capsys):
+        """A .venv directory whose bin/python points nowhere used to pass the
+        check, and the cells then ran with whatever python was on PATH."""
+        notebook_dir = _build_notebook(tmp_path, cells=[("c1", "x = 1", None)])
+        (notebook_dir / ".venv" / "bin").mkdir(parents=True)
+        (notebook_dir / ".venv" / "bin" / "python").symlink_to(tmp_path / "gone")
+
+        with patch("strata.notebook.executor.CellExecutor.execute_cell") as execute:
+            assert run_main([str(notebook_dir), "--no-sync"]) == 2
+
+        execute.assert_not_called()
+        assert "no usable .venv" in capsys.readouterr().err
 
 
 class TestExecutionFlow:

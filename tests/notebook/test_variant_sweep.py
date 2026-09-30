@@ -16,6 +16,7 @@ from strata.notebook.annotation_validation import validate_cell_annotations
 from strata.notebook.models import CellState, NotebookState, VariantGroupConfig
 from strata.notebook.parser import parse_notebook
 from strata.notebook.writer import create_notebook, set_variant_mode
+from tests.conftest import prepared_venv
 
 
 class TestVariantGroupConfigMode:
@@ -232,7 +233,7 @@ class TestSweepEndToEnd:
         )
 
         nb = create_notebook(tmp_path, "Sweep", initialize_environment=False)
-        (nb / ".venv").mkdir(exist_ok=True)  # --no-sync placeholder
+        prepared_venv(nb)
         cells = [
             ("load", "X = [1.0, 2.0, 3.0]\n", None),
             ("vdouble", "# @variant model double\npreds = [v * 2 for v in X]\n", "load"),
@@ -270,7 +271,7 @@ class TestPerVariantEndToEnd:
         )
 
         nb = create_notebook(tmp_path, "Fanout", initialize_environment=False)
-        (nb / ".venv").mkdir(exist_ok=True)
+        prepared_venv(nb)
         cells = [
             ("load", "X = [1.0, 2.0, 3.0]\n", None),
             ("vdouble", "# @variant model double\npreds = [v * 2 for v in X]\n", "load"),

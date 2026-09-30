@@ -20,6 +20,7 @@ import pytest
 
 from strata.notebook.cli import run_main
 from strata.notebook.writer import add_cell_to_notebook, create_notebook, write_cell
+from tests.conftest import prepared_venv
 
 
 @pytest.fixture(autouse=True)
@@ -30,7 +31,7 @@ def a_server_holding_secrets(monkeypatch):
 
 def _notebook(tmp_path):
     nb = create_notebook(tmp_path, "Isolation", initialize_environment=False)
-    (nb / ".venv").mkdir(exist_ok=True)  # --no-sync placeholder
+    prepared_venv(nb)
     add_cell_to_notebook(nb, "peek", None, language="python")
     write_cell(
         nb,

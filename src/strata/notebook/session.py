@@ -282,14 +282,11 @@ class NotebookSession:
         self.id: str = str(uuid.uuid4())
         self.notebook_state = notebook_state
         self.path = Path(path)
-        # A venv that is already there is the interpreter until a sync says
-        # otherwise. Left unset, a session that never syncs (`strata run
-        # --no-sync`, `cell add --no-sync`) ran cells with whatever `python`
-        # is on PATH instead of the notebook's own environment.
-        existing_venv_python = self.path / ".venv" / "bin" / "python"
-        self.venv_python: Path | None = (
-            existing_venv_python if existing_venv_python.exists() else None
-        )
+        # Unset until a sync, or ``refresh_environment_runtime``, records the
+        # notebook's interpreter: while it is None, cells do not run. Seeding
+        # it from an existing .venv here would let a sync that raises on open
+        # leave cells running in the old environment with no notice.
+        self.venv_python: Path | None = None
         self.dag: NotebookDag | None = None
         # Why the last DAG build failed, or None when it succeeded. Consumers
         # must distinguish "no dependencies" from "could not be computed".

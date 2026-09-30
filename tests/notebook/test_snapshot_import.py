@@ -16,6 +16,7 @@ from strata.notebook.session import NotebookSession
 from strata.notebook.snapshot import write_committed_files, write_snapshot
 from strata.notebook.snapshot_import import NotASnapshotError, import_snapshot
 from strata.notebook.writer import add_cell_to_notebook, create_notebook, write_cell
+from tests.conftest import prepared_venv
 
 
 @pytest.fixture
@@ -25,7 +26,7 @@ def ran(tmp_path, capsys):
     from strata.notebook.cli import run_main
 
     nb = create_notebook(tmp_path / "src", "Roundtrip", initialize_environment=False)
-    (nb / ".venv").mkdir(exist_ok=True)  # --no-sync placeholder
+    prepared_venv(nb)
     add_cell_to_notebook(nb, "rows", None)
     write_cell(nb, "rows", "rows = [1, 2, 3]\n")
     add_cell_to_notebook(nb, "total", "rows")
@@ -230,7 +231,7 @@ class TestRunningTheImport:
 
         imported = import_snapshot(_export(ran, tmp_path / "snap.zip"), tmp_path / "dst")
         nb = imported.notebook_dir
-        (nb / ".venv").mkdir(exist_ok=True)  # --no-sync placeholder
+        prepared_venv(nb)
         write_cell(nb, "report", "doubled = total * 2\nprint(doubled, 'recomputed')\n")
 
         assert run_main([str(nb), "--no-sync", "--format", "json"]) == 0
@@ -433,7 +434,7 @@ class TestWidgetSelections:
         from strata.notebook.runtime_state import persist_cell_widget_values
 
         nb = create_notebook(tmp_path / "src", "Widget Snapshot", initialize_environment=False)
-        (nb / ".venv").mkdir(exist_ok=True)
+        prepared_venv(nb)
         add_cell_to_notebook(nb, "controls", None, language="widget")
         write_cell(nb, "controls", "alpha = slider(0, 1, default=0.5)\n")
 

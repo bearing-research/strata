@@ -15,6 +15,7 @@ import pyarrow.ipc as ipc
 import pytest
 
 from strata.artifact_store import ArtifactStore
+from tests.conftest import prepared_venv
 
 
 def _ipc_bytes(values: list[int]) -> bytes:
@@ -244,7 +245,7 @@ class TestRunReport:
         from strata.notebook.writer import add_cell_to_notebook, create_notebook, write_cell
 
         nb = create_notebook(tmp_path, "Digests", initialize_environment=False)
-        (nb / ".venv").mkdir(exist_ok=True)  # --no-sync placeholder
+        prepared_venv(nb)
         add_cell_to_notebook(nb, "rows", None, language="python")
         write_cell(nb, "rows", f"rows = {value}\n")
         add_cell_to_notebook(nb, "total", "rows", language="python")
