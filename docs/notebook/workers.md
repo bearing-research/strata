@@ -289,8 +289,8 @@ import modal
 
 # Modal's pip_install pulls wheels from PyPI. strata-notebook ships
 # pre-built abi3-py312 wheels so no Rust toolchain is needed, and the
-# worker entry isn't gated by the runtime guard (only strata-notebook is)
-# so Modal's standard image stack works. uv is installed alongside so the
+# worker entry isn't gated by the runtime guard (strata and strata-notebook
+# are) so Modal's standard image stack works. uv is installed alongside so the
 # worker can run cells in the notebook's locked environment.
 gpu_image = modal.Image.debian_slim(python_version="3.12").pip_install(
     "pyarrow>=18.0.0",

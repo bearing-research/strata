@@ -72,7 +72,9 @@ strata cell list ./scratch     # the same thing as JSON, with each cell's output
 
 If `./scratch` exists and has cells in it, the skill engaged. If it does not,
 the agent answered with `python -c` and the skill did not fire. Check that
-`strata --help` works **in the agent's environment**, which is the usual cause.
+`strata cell list ./scratch` works **in the agent's environment**, which is
+the usual cause: `strata --help` prints from any Python, but every command
+needs a uv-managed environment.
 
 ### 4. Nothing else, for the agent
 

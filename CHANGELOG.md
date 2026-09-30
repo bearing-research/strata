@@ -13,21 +13,26 @@ exhaustive commit history.
   Spark, Flink or DuckDB deleted from without rewriting its data files used to
   be refused. The scan now drops the rows its positional delete files (format
   v2) and deletion vectors (format v3) name, and caches each row group without
-  them under the snapshot's key.
+  them under a key that names the snapshot and the schema.
 - **Scans read Iceberg tables with equality deletes**, which Flink's upsert
   sink and CDC pipelines write, and which pyiceberg itself cannot yet plan.
   Every older row whose key a delete names is dropped, null matching null, in
   the delete's partition or across the table for an unpartitioned one. A
   delete file whose key range cannot meet a row group is skipped for it.
-  Applying equality deletes holds their keys in memory, so a row group that
-  would need more than `max_equality_delete_rows` (10 million by default) is
-  refused with a message pointing at compaction, never read partially.
+  Applying equality deletes holds their keys in memory, so a scan in which a
+  row group would need more than `max_equality_delete_rows` (10 million by
+  default) is refused while planning, with a message pointing at compaction,
+  never read partially. A delete file in ORC or Avro, or keyed on a struct
+  column, is refused the same way.
 - **Scans read Iceberg tables whose schema changed.** Columns are matched by
   field id, so a table with an added column, which used to be refused, reads
   its older files with the column null, and a widened type comes back wide. A
   scan of the current table reads the current schema; one that names a
   snapshot reads that snapshot's. The same goes for the fields inside a
-  struct, list or map column.
+  struct, list or map column. A column added with a default (format v3) reads
+  its default from files that predate it, a required column made optional
+  reads across both kinds of file, and a file with nanosecond timestamps in a
+  v1 or v2 table is read at the table's microsecond unit, truncating.
 
 ### Changed
 
@@ -36,8 +41,8 @@ exhaustive commit history.
   scan's provenance now includes the schema, so scan artifacts are built
   afresh. 0.8.0 could have cached rows a merge-on-read delete removed, or a
   column's values under another column's name. The first scan of each table
-  after upgrading reads from storage. Delete the old `v3` directory under the
-  cache directory to reclaim its space.
+  after upgrading reads from storage. The old `v3` directory under the cache
+  directory is deleted when the server starts, and the log says so.
 - **pyiceberg 0.12 or newer is required.** Before 0.12, pyiceberg misread a
   manifest whose entries leave their snapshot id to be inherited, which is how
   DuckDB writes them, and dropped the delete files those manifests listed.
@@ -51,12 +56,53 @@ exhaustive commit history.
   extra, and `strata-client`'s `duckdb` and `all` extras). DuckDB 1.5
   deprecates `fetch_arrow_table()` for `to_arrow_table()`, which a connection
   only has from 1.5, so Strata now calls the new name.
+- **The `[tui]` extra needs textual-image 0.14 and Pillow 12.1 or newer.**
+  The older floors let the TUI install versions that fail at import or when
+  drawing an image.
+- **The uv-only guard says what to run.** Started from a conda environment or
+  a plain `pip install`, `strata` and `strata-notebook` used to point at a
+  `pyvenv.cfg` marker those environments do not have. The message now says
+  which case it is and names the two supported ways in: `uv tool install
+  strata-notebook` for a release, or `uv sync && uv run strata-notebook` from
+  a checkout. `strata --help` prints from any Python; every command is still
+  refused outside a uv-managed environment before it does anything.
+
+### Security
+
+- **Service-mode SQL cells are confined to their own database and lake.** SQL
+  cells run inside the server process, and a DuckDB cell could read any file
+  the server can (on Linux, `/proc/self/environ` holds the server's secrets)
+  or `COPY ... TO` and `ATTACH` any path. In service mode a DuckDB connection
+  is now locked once its own setup is done: it reaches its database, the
+  roots of the mounts it reads and the locations of the catalog tables it
+  reads, nothing else, and the cell cannot turn that back on. A catalog table
+  whose data files live outside its own location is refused under
+  confinement, naming the file. A SQLite write cell is refused `ATTACH`,
+  `DETACH` and `VACUUM`. Personal mode is unchanged.
+- **Service-mode notebooks install wheels only.** Building a package from a
+  source distribution runs its build backend as the server's user with the
+  server's environment, which is what the harness user keeps cell code away
+  from. Every uv command a notebook runs in service mode (`sync`, `add`,
+  `lock`, the `uv run` that starts a cell) now refuses to build, and a
+  dependency with no wheel fails to resolve with uv's message saying so.
+- **Outbound fetches connect only to an address the guard checked.** The URL
+  guard on `@fetch` and worker manifest URLs resolved a host and checked every
+  address, but the request resolved the name again when it connected, so a
+  name could pass with a public address and then connect to `127.0.0.1` or
+  the cloud metadata address (DNS rebinding). Each connection now resolves
+  the host once, checks every answer and connects only to one of them; TLS
+  still verifies the certificate against the hostname. Guarded connections
+  go direct and ignore `HTTPS_PROXY`, since through a proxy the proxy would
+  resolve the name; personal-mode fetches and
+  `STRATA_WORKER_ALLOW_LOCAL_HOSTS` keep the environment's proxy settings.
 
 ### Fixed
 
-- **A table Strata refuses to scan says why.** `POST /v1/materialize`
-  returned a bare 500 for a table it cannot read (an unreadable delete file,
-  now too many pending equality deletes); it now returns 422 with the reason.
+- **A table Strata refuses to read says why.** `POST /v1/materialize`
+  returned a bare 500 for a scan of a table it cannot read (an unreadable
+  delete file, now too many pending equality deletes), and accepted the same
+  table as the input of another transform only to fail later in the build;
+  both now return 422 with the reason.
 - **A row group left with no rows is read as empty.** Building its empty
   batch raised a `KeyError`; equality deletes can now remove every row of
   one.
@@ -64,12 +110,51 @@ exhaustive commit history.
   `lake.taxi.trips t` to its snapshot wrote `AT (VERSION => n) AS t`, which
   DuckDB rejects as a syntax error; the pin now comes after the alias. Any read
   of an aliased catalog table failed.
-- **A Snowflake cell reading `IDENTIFIER($var)` or `IDENTIFIER(?)` no longer
-  serves a stale result.** Its table is named only when the query runs, so the
-  default cache could not see it change and kept returning the first result;
-  unparseable SQL had the same gap. Such a cell now runs its query every time,
-  and its header says why; `# @cache session` or `ttl` opts back into reuse.
-  `IDENTIFIER('db.schema.table')` with a literal is now tracked like any table.
+- **A SQL cell over a table named only at run time no longer serves a stale
+  result, and neither do the cells below it.** Snowflake's `IDENTIFIER($var)`,
+  `TABLE($var)` and a bare `$var`, a table function such as DuckDB's
+  `read_parquet(...)` or `query_table(...)` or a Postgres set-returning
+  function, and DuckDB's `FROM 'file.parquet'` name their table only when the
+  query runs, so the default cache could not see it change and kept returning
+  the first result. Such a cell now runs its query every time, its header
+  says why, and its result's content is folded into its provenance, so a
+  downstream cell re-runs exactly when the rows changed instead of serving a
+  result computed from the old ones. `# @cache session` or `ttl` opts back
+  into reuse. `IDENTIFIER('db.schema.table')` and `TABLE('t')` with a literal
+  are tracked like any table. The diagnostic for SQL that does not parse now
+  says the cell will not run until it does, which is what happens.
+- **Snowflake freshness probes find unquoted tables.** The freshness, schema
+  and retention probes asked for a table's name as typed, and Snowflake stores
+  an unquoted `events` as `EVENTS`, so a change to it was never detected.
+  Unquoted identifiers are now looked up uppercased; quoted ones as written.
+- **A session finds its venv without a sync.** `strata run --no-sync` and
+  `cell add --no-sync` ran cells with whatever `python` was on PATH rather
+  than the notebook's own environment, and failed outright where no bare
+  `python` exists. A session now takes an existing `.venv` as its interpreter
+  from the start.
+- **Notebook uv commands act on the notebook's environment.** A server
+  started with `UV_PROJECT_ENVIRONMENT` set passed it to every `uv sync`,
+  `add`, `lock` and the `uv run` that starts a cell, which then acted on the
+  server's environment instead of the notebook's `.venv`; a server started
+  under `uv run` passed its `VIRTUAL_ENV`, which put a uv warning in every
+  operation log. Both are dropped now.
+- **The `/mcp` warning names the missing module.** An installed mcp 2 missing
+  one of its own dependencies was reported as "mcp is older than 2", and mcp
+  without package metadata crashed the check. The warning now names the module
+  that failed to import, or says the version is unknown.
+- **A transform over a table input rebuilds after a schema change.** A rename
+  or a dropped column makes no snapshot, and a table input was versioned by
+  its snapshot alone, so `duckdb_sql@v1` over a renamed table returned the
+  artifact built before the rename and its name reported itself fresh. Table
+  inputs are now versioned by snapshot and schema.
+- **A Spark delete file over thousands of data files plans in time.**
+  Splitting a positional delete file per data file filtered the whole file
+  once per data file, so a 2M-row delete file over 2000 files took longer
+  than the plan timeout and the scan failed with a 504. It is now sorted once
+  and sliced.
+- **Azure blob reads are as fast as before 0.8.0.** The buffered reader copied
+  up to a full chunk on every 128 KiB read, about 6x slower; it now hands
+  bytes off the front of the chunk without copying.
 - **A GCS mount on its own endpoint no longer stalls for two minutes.** Since
   2026.6, gcsfs asks Google's Storage Control API over gRPC what kind of
   bucket it is, and an endpoint that is not Google's (the fake-gcs-server

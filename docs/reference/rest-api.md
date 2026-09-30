@@ -95,7 +95,7 @@ Validation errors (`422`) come from Pydantic and contain structured field info:
 | `404` | Notebook session not found, or a hidden 403 (see above) |
 | `409` | Conflict - concurrent environment job, a cell someone else is editing (`cell_locked`), or a quiesced notebook (`NOTEBOOK_QUIESCED`) |
 | `413` | Request body or scan response exceeded the configured byte cap |
-| `422` | Pydantic validation error on the request body |
+| `422` | Pydantic validation error on the request body, or a table input Strata refuses to read (an unreadable delete file, too many pending equality deletes); the detail says which |
 | `429` | Rate limit exceeded - global, per-client, or per-tenant |
 | `500` | Server bug - captured to logs with the request ID |
 
