@@ -2303,14 +2303,15 @@ nothing needs, least recently used first:</p>
 <a href="../../reference/configuration/#artifact-storage">Configuration</a>.</p>
 <p>A version is collected only when nothing holds it:</p>
 <ul>
-<li>no name or alias points at it;</li>
-<li>it is not pinned or published, and nothing pinned, published or still
-  building depends on it;</li>
-<li>it is not the current value of an id somebody chose. A notebook stores each
-  cell output under its own id and reads the latest version back, so that
-  version stays. An id the store made up for one <code>materialize</code> has no such
-  value;</li>
-<li>it has not been used (a cache hit or a read) in the last hour.</li>
+<li>nothing named, aliased, pinned, published, awaiting alias approval or still
+  building is, or was built from, it. A named result keeps its whole chain, so
+  its lineage stays walkable and a refresh can re-read its inputs;</li>
+<li>it is not the current value of an id somebody chose, nor something one was
+  built from. A notebook stores each cell output under its own id and reads the
+  latest version back, so that version stays. An id the store made up for one
+  <code>materialize</code> has no such value;</li>
+<li>it has not been used in the last hour: a cache hit, a read of its data, or a
+  request that names it as an input all count.</li>
 </ul>
 <p>So <strong>an unnamed result is a cache entry</strong>. Its URI keeps working while it is
 used, and once it is collected the same request computes it again. To keep a
@@ -2328,7 +2329,9 @@ needed) or over HTTP:</p>
 <a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="n">client</span><span class="o">.</span><span class="n">garbage_collect</span><span class="p">(</span><span class="n">max_idle_days</span><span class="o">=</span><span class="mi">7</span><span class="p">)</span>
 <a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="c1"># {"deleted_count": 14, "deleted_bytes": 8429283, "store_bytes": 51239012, "dry_run": false}</span>
 </code></pre></div>
-<p>Each limit you leave out takes the configured one. <code>collect_latest=true</code>
+<p>Each limit you leave out takes the configured one. On the command line and the
+route a limit of <code>0</code> means "everything past the recent-use floor", unlike the
+settings, where <code>0</code> turns the limit off. <code>collect_latest=true</code>
 (<code>--collect-latest</code>) also collects the current value of caller-chosen ids,
 which deletes live notebook state; use it only on a store you are deliberately
 reclaiming. In service mode the route needs a principal holding <code>admin:*</code>, and
