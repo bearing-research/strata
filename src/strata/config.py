@@ -173,6 +173,13 @@ def _parse_acl_config(raw: dict) -> AclConfig:
     return AclConfig.model_validate(raw)
 
 
+# Personal mode's retention when nothing is configured (see
+# StrataConfig.artifact_gc_interval_seconds): an hourly sweep, capped at the
+# size of two row-group caches.
+_PERSONAL_GC_INTERVAL_SECONDS = 3600.0
+_PERSONAL_GC_MAX_BYTES = 20 * 1024 * 1024 * 1024
+
+
 class StrataConfig(BaseSettings):
     """Configuration for Strata server and client.
 
@@ -412,13 +419,23 @@ class StrataConfig(BaseSettings):
     # startup (zombie sweep) — they can never serve data and would otherwise
     # linger in the store forever.
     artifact_zombie_build_timeout_seconds: Annotated[float, Field(gt=0)] = 3600.0
-    # Collect unreachable artifacts on a timer: unnamed, not the latest version
-    # of their id, not published or pinned, nothing published or pinned
-    # depending on them, and older than artifact_gc_max_age_days. Off (None)
-    # by default: a store that has never been collected should not start
-    # losing data because a server was upgraded.
-    artifact_gc_interval_seconds: Annotated[float, Field(gt=0)] | None = None
-    artifact_gc_max_age_days: Annotated[float, Field(ge=0)] = 7.0
+    # Retention for the server's artifact store (ArtifactStore.garbage_collect):
+    # a sweep every artifact_gc_interval_seconds collects what nothing holds
+    # (no name, alias, pin or publication, and not the current value of an id
+    # somebody chose), least recently used first. It takes anything idle longer
+    # than artifact_gc_max_idle_days, and whatever it takes to bring a store
+    # over artifact_gc_max_bytes down to 80% of that, but never anything used
+    # in the last artifact_gc_min_idle_seconds. Losing one costs a recompute.
+    #
+    # Unset, personal mode sweeps hourly with a 20 GiB cap: a laptop's store
+    # otherwise grows by every distinct query, forever. Service mode sweeps
+    # only when an operator sets the interval, because a team store is a
+    # shared record and how long it keeps things is the operator's call. For
+    # the interval and the cap, 0 means off; so does an idle limit of 0.
+    artifact_gc_interval_seconds: Annotated[float, Field(ge=0)] | None = None
+    artifact_gc_max_bytes: Annotated[int, Field(ge=0)] | None = None
+    artifact_gc_max_idle_days: Annotated[float, Field(ge=0)] = 30.0
+    artifact_gc_min_idle_seconds: Annotated[float, Field(ge=0)] = 3600.0
     # Registry aliases that require approval: moves/deletes of these aliases
     # (e.g. "champion") land in a pending queue instead of applying, and an
     # explicit approve applies them. Empty (the default) = no gating.
@@ -806,6 +823,14 @@ class StrataConfig(BaseSettings):
         if self.artifact_dir is None and self.deployment_mode == "personal":
             self.artifact_dir = Path.home() / ".strata" / "artifacts"
 
+        # Personal mode keeps its artifact store bounded unless told not to
+        # (see artifact_gc_interval_seconds).
+        if self.deployment_mode == "personal":
+            if self.artifact_gc_interval_seconds is None:
+                self.artifact_gc_interval_seconds = _PERSONAL_GC_INTERVAL_SECONDS
+            if self.artifact_gc_max_bytes is None:
+                self.artifact_gc_max_bytes = _PERSONAL_GC_MAX_BYTES
+
         # Ensure artifact_dir exists in personal mode
         if self.deployment_mode == "personal" and self.artifact_dir is not None:
             self.artifact_dir.mkdir(parents=True, exist_ok=True)
@@ -1151,6 +1176,18 @@ class StrataConfig(BaseSettings):
                 f"Either bind to 127.0.0.1/localhost, or set "
                 f"allow_remote_clients_in_personal=True if you have firewall protection."
             )
+
+    def artifact_gc_policy(self) -> dict[str, Any]:
+        """The configured retention as ``garbage_collect`` keyword arguments.
+
+        One place reads "0 means off", so the scheduled sweep, the route and
+        ``strata artifact gc`` cannot disagree about what the settings mean.
+        """
+        return {
+            "max_idle_days": self.artifact_gc_max_idle_days or None,
+            "max_bytes": self.artifact_gc_max_bytes or None,
+            "min_idle_seconds": self.artifact_gc_min_idle_seconds,
+        }
 
     @property
     def writes_enabled(self) -> bool:

@@ -188,8 +188,10 @@ credential.
 | --------------------------------- | ----------- | -------------------------------- |
 | `STRATA_ARTIFACT_DIR`             | `None`      | Artifact store directory. In service mode the store exists only when this is set, even when the metadata DSN and a blob backend hold everything, and startup refuses a DSN, a non-local blob backend or service writes without it |
 | `STRATA_ARTIFACT_ZOMBIE_BUILD_TIMEOUT_SECONDS` | `3600.0` | Builds stuck in `building` longer than this are demoted to `failed` at startup |
-| `STRATA_ARTIFACT_GC_INTERVAL_SECONDS` | unset (off) | Run artifact garbage collection on this interval. Never collects anything named, latest, published or pinned, or anything those depend on. See [Lifecycle](../deployment/lifecycle.md#cleaning-up-the-core-artifact-store) |
-| `STRATA_ARTIFACT_GC_MAX_AGE_DAYS` | `7.0` | Minimum age of a version the scheduled sweep may collect |
+| `STRATA_ARTIFACT_GC_INTERVAL_SECONDS` | `3600` in personal mode, unset (off) in service mode | How often the server sweeps its artifact store. `0` turns the sweep off. A sweep collects only what nothing holds: nothing named, aliased, pinned or published, nothing those or a running build depend on, and not the current value of an id somebody chose (a notebook's cell outputs). An unnamed `materialize` result is a cache entry; name or pin it to keep it. See [Cleaning up the Core artifact store](../deployment/lifecycle.md#cleaning-up-the-core-artifact-store). |
+| `STRATA_ARTIFACT_GC_MAX_BYTES` | `21474836480` (20 GiB) in personal mode, unset in service mode | When the store holds more than this, a sweep collects the least recently used until it is at 80% of it. `0` means no cap. |
+| `STRATA_ARTIFACT_GC_MAX_IDLE_DAYS` | `30.0` | A sweep collects what has not been used (a cache hit or a read) for this long, whatever the store's size. `0` means no idle limit. |
+| `STRATA_ARTIFACT_GC_MIN_IDLE_SECONDS` | `3600.0` | A sweep never collects anything used more recently than this, so a result just handed to a reader stays. |
 | `STRATA_REGISTRY_PROTECTED_ALIASES` | _(empty)_ | Comma-separated alias names (e.g. `champion,production`) whose moves/deletes queue for approval instead of applying |
 | `STRATA_ARTIFACT_BLOB_BACKEND`    | `local`     | `local`, `s3`, `gcs`, or `azure` |
 | `STRATA_ARTIFACT_S3_BUCKET`       | `None`      | S3 bucket for artifacts          |

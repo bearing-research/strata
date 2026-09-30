@@ -17,6 +17,10 @@ client.set_name("taxi/tip-model", artifact_id, version)
 resolved = client.resolve_name("taxi/tip-model")
 ```
 
+A named version is also kept: the store's retention sweep collects only what
+nothing holds, and an unnamed result is a cache entry that may be computed again
+later. See [Cleaning up the Core artifact store](../deployment/lifecycle.md#cleaning-up-the-core-artifact-store).
+
 Slash-namespaced names (`team/dataset/raw`) are the natural convention and
 fully supported. A name tracks "the latest blessed build of this line";
 every move is audited.
@@ -155,6 +159,7 @@ strata artifact lineage taxi/tip-model@champion
 # model <- features <- scan <- table file://...#nyc.trips @ snapshot 2558063...
 strata artifact audit taxi/tip-model
 strata artifact verify    # store-wide blob/metadata consistency check
+strata artifact gc --dry-run   # what the retention sweep would collect
 ```
 
 ## In the notebook (the registry dashboard)

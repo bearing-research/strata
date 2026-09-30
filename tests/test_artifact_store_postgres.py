@@ -302,7 +302,7 @@ class TestGarbageCollection:
         store.finalize_artifact("nb_x_cell_c1_var_df", first, "{}", row_count=0, byte_size=0)
         store.create_artifact("nb_x_cell_c1_var_df", "prov-v2", _spec())
 
-        assert store.garbage_collect(max_age_days=0)["deleted_count"] == 0
+        assert store.garbage_collect(max_idle_days=0)["deleted_count"] == 0
         assert store.get_latest_version("nb_x_cell_c1_var_df").version == first
 
 

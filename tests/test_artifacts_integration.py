@@ -613,10 +613,12 @@ class TestArtifactLifecycle:
             usage_before = client.get_artifact_usage()
             assert usage_before["unreferenced_count"] >= 1
 
-            # GC with max_age_days=0 should delete the unreferenced one immediately
+            # GC with max_idle_days=0 should delete the unreferenced one immediately
             # collect_latest: the unnamed artifact above is a single-version
             # current value, which GC now spares by default.
-            gc_result = client.garbage_collect(max_age_days=0, collect_latest=True)
+            gc_result = client.garbage_collect(
+                max_idle_days=0, min_idle_seconds=0, collect_latest=True
+            )
             assert gc_result["deleted_count"] >= 1
 
             # Named artifact should still exist
@@ -668,7 +670,7 @@ class TestArtifactLifecycle:
                 artifacts.append(artifact)
 
             # Run aggressive GC
-            client.garbage_collect(max_age_days=0)
+            client.garbage_collect(max_idle_days=0, min_idle_seconds=0)
 
             # All named artifacts should still exist
             for i, artifact in enumerate(artifacts):

@@ -270,6 +270,16 @@ class SqlDialect(Protocol):
         ...
 
     @property
+    def operational_error(self) -> type[Exception]:
+        """Exception raised when the database cannot take a write right now.
+
+        A locked SQLite file, a read-only filesystem, a Postgres connection
+        that dropped. The store catches it where a write is advisory (noting
+        that a version was used), so a read never fails for want of it.
+        """
+        ...
+
+    @property
     def rejectable_errors(self) -> tuple[type[Exception], ...]:
         """Errors a bulk copy should attribute to one row, not the whole run.
 
@@ -389,6 +399,10 @@ class SqliteDialect:
     @property
     def integrity_error(self) -> type[Exception]:
         return sqlite3.IntegrityError
+
+    @property
+    def operational_error(self) -> type[Exception]:
+        return sqlite3.OperationalError
 
     @property
     def rejectable_errors(self) -> tuple[type[Exception], ...]:
@@ -689,6 +703,12 @@ class PostgresDialect:
         import psycopg
 
         return psycopg.IntegrityError
+
+    @property
+    def operational_error(self) -> type[Exception]:
+        import psycopg
+
+        return psycopg.OperationalError
 
     @property
     def rejectable_errors(self) -> tuple[type[Exception], ...]:

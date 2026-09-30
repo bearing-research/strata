@@ -10,6 +10,7 @@ Commands:
     lineage  Walk provenance upstream to tables/snapshots
     pull     Write an artifact's blob to a local file
     verify   Check every blob against its metadata (see #123)
+    gc       Collect versions nothing needs, least recently used first
 """
 
 from __future__ import annotations
@@ -863,6 +864,70 @@ def cmd_verify(args: argparse.Namespace) -> int:
             print(f"\n{len(findings)} problem(s) found")
 
     return 1 if findings else 0
+
+
+# ---------------------------------------------------------------------------
+# gc
+# ---------------------------------------------------------------------------
+
+_SIZE_UNITS = {"": 1, "K": 1024, "M": 1024**2, "G": 1024**3, "T": 1024**4}
+
+
+def _parse_size(text: str) -> int:
+    """``20G``, ``500M`` or a plain byte count, as bytes.
+
+    Raises:
+        ValueError: *text* is not a size.
+    """
+    cleaned = text.strip().upper().removesuffix("B").removesuffix("I")
+    unit = cleaned[-1:] if cleaned[-1:] in _SIZE_UNITS else ""
+    number = cleaned[: len(cleaned) - len(unit)]
+    try:
+        return int(float(number) * _SIZE_UNITS[unit])
+    except ValueError:
+        raise ValueError(f"not a size: {text!r} (try 20G or 500M)") from None
+
+
+def cmd_gc(args: argparse.Namespace) -> int:
+    from strata.config import StrataConfig
+
+    try:
+        policy = StrataConfig.load().artifact_gc_policy()
+        if args.max_bytes is not None:
+            policy["max_bytes"] = _parse_size(args.max_bytes)
+    except ValueError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    if args.max_idle_days is not None:
+        policy["max_idle_days"] = args.max_idle_days
+    if args.min_idle_seconds is not None:
+        policy["min_idle_seconds"] = args.min_idle_seconds
+
+    store = _open_store(args.artifact_dir)
+    if store is None:
+        return 2
+
+    result = store.garbage_collect(
+        **policy, collect_latest=args.collect_latest, dry_run=args.dry_run
+    )
+
+    if args.format == "json":
+        print(json.dumps({"artifact_dir": str(store.artifact_dir), **result}, indent=2))
+        return 0
+
+    verb = "would collect" if args.dry_run else "collected"
+    print(f"store: {store.artifact_dir} ({_fmt_size(result['store_bytes'])})")
+    print(f"{verb} {result['deleted_count']} version(s), {_fmt_size(result['deleted_bytes'])}")
+    for entry in result.get("collected", [])[:20]:
+        print(
+            f"  {entry['artifact_id']}@v={entry['version']}  "
+            f"{_fmt_size(entry['byte_size']):>8}  last used {_fmt_when(entry['last_used_at'])}"
+        )
+    if len(result.get("collected", [])) > 20:
+        print(f"  … and {len(result['collected']) - 20} more")
+    if policy["max_idle_days"] is None and policy["max_bytes"] is None:
+        print("no limit is set (STRATA_ARTIFACT_GC_*, --max-bytes, --max-idle-days): nothing to do")
+    return 0
 
 
 # ---------------------------------------------------------------------------

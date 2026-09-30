@@ -599,6 +599,49 @@ def _build_parser() -> argparse.ArgumentParser:
     _add_store_args(verify_parser)
     verify_parser.set_defaults(func=_dispatch_artifact("cmd_verify"))
 
+    gc_parser = artifact_sub.add_parser(
+        "gc",
+        help="Collect artifact versions nothing needs, least recently used first",
+        description=(
+            "Collect what nothing holds: no name, alias, pin or publication, "
+            "not the current value of an id somebody chose (a notebook's cell "
+            "outputs), and not used recently. Each limit not given takes the "
+            "configured retention (STRATA_ARTIFACT_GC_*), so a bare run does "
+            "what the server's scheduled sweep does. Losing a result costs "
+            "only a recompute; name or pin one to keep it."
+        ),
+    )
+    _add_store_args(gc_parser)
+    gc_parser.add_argument(
+        "--max-bytes",
+        default=None,
+        metavar="SIZE",
+        help="Keep the store under this size, e.g. 20G or 500M (K, M, G, T are powers of 1024)",
+    )
+    gc_parser.add_argument(
+        "--max-idle-days",
+        type=float,
+        default=None,
+        help="Collect what has not been used for this many days",
+    )
+    gc_parser.add_argument(
+        "--min-idle-seconds",
+        type=float,
+        default=None,
+        help="Never collect anything used more recently than this",
+    )
+    gc_parser.add_argument(
+        "--collect-latest",
+        action="store_true",
+        help="Also collect the current value of ids callers chose. Deletes live state.",
+    )
+    gc_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Report what would be collected, and delete nothing",
+    )
+    gc_parser.set_defaults(func=_dispatch_artifact("cmd_gc"))
+
     artifact_parser.set_defaults(func=lambda args: (artifact_parser.print_help(), 0)[1])
 
     # Agent inspect commands (CLI-hardening P0, NotebookOps local backend).

@@ -262,6 +262,7 @@ async def put_artifact(request: Request, store: WriteStore, principal: CurrentPr
         # which left every published artifact anonymous — including under
         # `service_writes_enabled`, whose whole premise is attributed publish.
         principal=principal.id if principal else None,
+        minted=True,
     )
 
     # Write blob
@@ -684,7 +685,8 @@ async def put_artifact_by_provenance(
     if env_hash:
         params["env_hash"] = str(env_hash)
 
-    artifact_id = str(metadata.get("artifact_id") or uuid.uuid4())
+    named_id = metadata.get("artifact_id")
+    artifact_id = str(named_id or uuid.uuid4())
     # The caller names the id, so it can name somebody else's — and a version
     # appended there becomes that artifact's latest, which is what a notebook
     # reads and what GC protects. The import route refuses the same case.
@@ -704,6 +706,9 @@ async def put_artifact_by_provenance(
         ),
         tenant=tenant_id,
         principal=principal.id if principal else None,
+        # A notebook storing a cell output names its id and reads it back as
+        # "latest"; an upload that named nothing got an id nobody resolves.
+        minted=not named_id,
     )
     store.write_blob(artifact_id, version, blob)
     finalized = store.finalize_artifact(
@@ -1147,46 +1152,64 @@ async def export_artifact_to_table(
 @router.post("/v1/artifacts/gc")
 async def garbage_collect_artifacts(
     tenant_filter: CurrentTenant,
-    max_age_days: float = 7.0,
+    max_idle_days: float | None = None,
+    max_bytes: int | None = None,
+    min_idle_seconds: float | None = None,
     collect_latest: bool = False,
+    dry_run: bool = False,
     store: ArtifactStore = store_for_scope("admin:*"),
 ):
-    """Garbage collect unreachable artifacts.
+    """Collect the artifact versions nothing needs, least recently used first.
 
     Personal mode, or service mode for a principal holding ``admin:*``, scoped
     to the caller's tenant.
 
-    Deletes artifact versions that:
-    1. Have no name **or alias** pointing at them
-    2. Are not the latest version of their id (unless ``collect_latest``)
-    3. Are older than ``max_age_days``
-    4. Are in "ready", "superseded" or "failed" state
-    5. Are not published or pinned, and nothing published or pinned depends
-       on them
+    A version nothing holds is one with no name, alias, pin or publication,
+    that nothing pinned, published or still building depends on, and that is
+    not the current value of an id somebody chose: a notebook's cell outputs
+    are stored under their own ids, never named, and read back as the latest
+    version. An id the store minted for one ``materialize`` has no such value.
+    See ``ArtifactStore.garbage_collect``.
 
-    The latest version of an id is spared because that is the artifact's
-    *current value*: ``get_latest_version(id)`` is how the store resolves it,
-    and for some producers it is the only handle that exists — notebook cell
-    outputs are stored under a canonical id and never named, so the previous
-    rule treated every live notebook variable as garbage.
+    Each parameter left out takes the server's configured retention
+    (``STRATA_ARTIFACT_GC_*``), so a bare call does what the scheduled sweep
+    does.
 
     Args:
-        max_age_days: Maximum age in days for unreachable artifacts (default 7)
-        collect_latest: Also reclaim current values (see above). Off by
-            default because it deletes live state.
+        max_idle_days: Collect what has not been used for this long.
+        max_bytes: Collect least recently used first until the store is at
+            80% of this.
+        min_idle_seconds: Never collect anything used more recently.
+        collect_latest: Also collect the current value of caller-named ids.
+            Off by default because it deletes live state.
+        dry_run: Report what would go, and delete nothing.
 
     Returns:
-        GC statistics including deleted count and bytes freed
+        ``deleted_count``, ``deleted_bytes``, ``store_bytes`` and, with
+        ``dry_run``, the chosen versions under ``collected``.
     """
-    if max_age_days < 0:
-        raise HTTPException(status_code=400, detail="max_age_days must be non-negative")
+    for name, value in (
+        ("max_idle_days", max_idle_days),
+        ("max_bytes", max_bytes),
+        ("min_idle_seconds", min_idle_seconds),
+    ):
+        if value is not None and value < 0:
+            raise HTTPException(status_code=400, detail=f"{name} must be non-negative")
+    from strata.server import get_state
 
-    result = store.garbage_collect(
-        max_age_days=max_age_days,
+    policy = get_state().config.artifact_gc_policy()
+    if max_idle_days is not None:
+        policy["max_idle_days"] = max_idle_days
+    if max_bytes is not None:
+        policy["max_bytes"] = max_bytes
+    if min_idle_seconds is not None:
+        policy["min_idle_seconds"] = min_idle_seconds
+    return store.garbage_collect(
+        **policy,
         tenant=tenant_filter,
         collect_latest=collect_latest,
+        dry_run=dry_run,
     )
-    return result
 
 
 @router.get("/v1/artifacts/{artifact_id}/v/{version}/data")

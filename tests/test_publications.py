@@ -829,7 +829,7 @@ class TestPublicationRetention:
     def test_a_sweep_keeps_the_chain_behind_a_publication(self, store):
         upstream_v1, figure_version, _ = self._chain(store)
 
-        store.garbage_collect(max_age_days=0)
+        store.garbage_collect(max_idle_days=0)
 
         assert store.get_artifact("figure", figure_version) is not None
         assert store.get_artifact("rows", upstream_v1) is not None, (
@@ -845,7 +845,7 @@ class TestPublicationRetention:
         upstream_v1, figure_version, publication = self._chain(store)
         store.revoke_publication(publication.token)
 
-        store.garbage_collect(max_age_days=0)
+        store.garbage_collect(max_idle_days=0)
 
         assert store.get_artifact("rows", upstream_v1) is not None
 
@@ -854,7 +854,7 @@ class TestPublicationRetention:
         orphan = _ready_artifact(store, "scratch", b"a")
         _ready_artifact(store, "scratch", b"b")  # supersedes it
 
-        store.garbage_collect(max_age_days=0)
+        store.garbage_collect(max_idle_days=0)
 
         assert store.get_artifact("scratch", orphan) is None
 
@@ -1525,7 +1525,7 @@ class TestWhatTheSweepProtects:
         store.publish_artifact("figure", figure)
         store.set_name("team/rows", "rows", _ready_artifact(store, "rows", b"[2]"))
 
-        store.garbage_collect(max_age_days=0)
+        store.garbage_collect(max_idle_days=0)
 
         assert store.get_artifact("rows", rows) is not None, (
             "the published figure's input was collected"
