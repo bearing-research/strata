@@ -415,6 +415,9 @@ class Task:
     equality_deletes: "tuple[EqualityDeleteEntry, ...]" = ()
     # (field id, the file's column or None, the key's v3 initial-default)
     equality_columns: tuple[tuple[int, str | None, Any], ...] = ()
+    # Whether nanosecond timestamps read at microseconds, the only unit of an
+    # Iceberg v1 or v2 table; equality delete keys are compared so.
+    downcast_ns: bool = False
 
     # Populated after fetch
     cached: bool = False

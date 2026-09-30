@@ -637,6 +637,7 @@ class ReadPlanner:
                         (field_id, stored.get(field_id), initial_defaults.get(field_id))
                         for field_id in key_ids
                     ),
+                    downcast_ns=table.metadata.format_version <= 2,
                 )
                 plan.tasks.append(task)
                 estimated_bytes += rg_size

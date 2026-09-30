@@ -268,6 +268,60 @@ def test_a_promoted_key_matches_after_widening(tmp_path):
     assert _names(table) == ["ann"]
 
 
+NANOS = 1_704_153_600_000_000_123  # 2024-01-02 plus 123 ns
+
+
+@pytest.mark.parametrize(
+    "deleted",
+    [
+        pa.array([datetime.datetime(2024, 1, 2)], pa.timestamp("us")),
+        pa.array([NANOS + 333], pa.timestamp("ns")),
+    ],
+    ids=["microseconds", "other nanoseconds"],
+)
+def test_a_nanosecond_key_is_compared_at_the_tables_unit(tmp_path, deleted):
+    """A v2 table's timestamps are microseconds, but a file registered from
+    elsewhere can hold nanoseconds, which the scan truncates. A JVM writer
+    deletes a row by the value it read, microseconds; the key was compared at
+    nanoseconds instead, so the delete never matched."""
+    catalog, uri = _catalog(tmp_path)
+    schema = pa.schema([("ts", pa.timestamp("us")), ("name", pa.string())])
+    catalog.create_table("db.t", schema=schema).append(
+        pa.table({"ts": [datetime.datetime(2024, 1, 1)], "name": ["a"]}, schema=schema)
+    )
+    table = _table(catalog)
+    commit_files(
+        table,
+        data_file(table, pa.table({"ts": pa.array([NANOS], pa.timestamp("ns")), "name": ["b"]})),
+    )
+    _delete(catalog, ts=deleted)
+
+    result, _ = _scan(StrataConfig(cache_dir=tmp_path / "cache"), uri)
+    assert _names(result) == ["a"]
+
+
+def test_keys_of_one_type_in_another_arrow_form_match():
+    """A uuid key read as Arrow's uuid type on one side and its 16-byte storage
+    on the other, or a string dictionary-encoded on one side, still match."""
+    import uuid
+
+    from strata.iceberg_equality import deleted_mask
+    from strata.metadata_cache import EqualityDeleteEntry
+
+    a, b = uuid.uuid4().bytes, uuid.uuid4().bytes
+    delete = EqualityDeleteEntry(file_path="d", actual_path="d", equality_ids=(1,), record_count=1)
+    stored = pa.ExtensionArray.from_storage(pa.uuid(), pa.array([a, b], pa.binary(16)))
+    table = pa.table({"k": stored})
+    assert deleted_mask(
+        table, {1: "k"}, [delete], lambda _: pa.table({"1": pa.array([b], pa.binary(16))})
+    ).to_pylist() == [False, True]
+
+    table = pa.table({"k": pa.array(["x", "y"]).dictionary_encode()})
+    assert deleted_mask(
+        table, {1: "k"}, [delete], lambda _: pa.table({"1": pa.array(["x"])})
+    ).to_pylist() == [True, False]
+
+
 def test_positional_and_equality_deletes_on_one_file(people, tmp_path):
     import pyarrow.parquet as pq
     from pyiceberg.manifest import DataFile, DataFileContent

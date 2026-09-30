@@ -258,6 +258,26 @@ def _joinable(column: pa.ChunkedArray) -> pa.ChunkedArray:
     return column
 
 
+def _comparable(keys: pa.Table, downcast_ns: bool) -> pa.Table:
+    """*keys* in a form the other side's can share one type with.
+
+    An extension type (uuid) becomes its storage and a dictionary its values,
+    so the same key read in another Arrow form still unifies. When
+    *downcast_ns* (a v1 or v2 table, whose timestamps are microseconds), a
+    nanosecond timestamp is truncated as the scan returns it: a JVM writer
+    deletes a row by the value it read.
+    """
+    columns = {}
+    for name in keys.column_names:
+        column = _joinable(keys.column(name))
+        if pa.types.is_dictionary(column.type):
+            column = column.cast(column.type.value_type)
+        if downcast_ns and pa.types.is_timestamp(column.type) and column.type.unit == "ns":
+            column = column.cast(pa.timestamp("us", column.type.tz), safe=False)
+        columns[name] = column
+    return pa.table(columns)
+
+
 def _any_value(*columns: pa.ChunkedArray) -> pa.Scalar | None:
     """A non-null value from the first of *columns* that has one, or None."""
     for column in columns:
@@ -314,12 +334,14 @@ def deleted_mask(
     deletes: Iterable[EqualityDeleteEntry],
     keys: Callable[[EqualityDeleteEntry], pa.Table],
     defaults: dict[int, Any] | None = None,
+    downcast_ns: bool = False,
 ) -> pa.Array | None:
     """For each row of *table*, whether an equality delete in *deletes* removes it.
 
     *key_columns* maps each equality field id to *table*'s column holding it,
     or None when the data file predates the column (its values are then its
-    *defaults* entry, the v3 initial-default, or null).
+    *defaults* entry, the v3 initial-default, or null). *downcast_ns* compares
+    nanosecond timestamp keys at microseconds, a v1 or v2 table's only unit.
     Deletes are grouped by their equality ids; a row goes if any group matches.
     """
     groups: dict[tuple[int, ...], list[EqualityDeleteEntry]] = defaultdict(list)
@@ -343,6 +365,8 @@ def deleted_mask(
                 for field_id, name in zip(field_ids, names, strict=True)
             }
         )
+        data_keys = _comparable(data_keys, downcast_ns)
+        delete_keys = _comparable(delete_keys, downcast_ns)
         # One type per key on both sides (a key promoted since, say int to long).
         common = pa.unify_schemas(
             [data_keys.schema, delete_keys.schema], promote_options="permissive"
