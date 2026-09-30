@@ -3035,9 +3035,12 @@ run read as one of its inputs. That record is how a
 pinned, so an unpinned one can be flagged before the snapshot is shared.</p>
 <p>Only <code>http</code> and <code>https</code> are fetched. In service mode every redirect hop passes
 the same guard as a worker's URLs: no private, loopback or link-local address
-unless the host is listed in <code>STRATA_NOTEBOOK_FETCH_ALLOWED_HOSTS</code>. Personal
+unless the host is listed in <code>STRATA_NOTEBOOK_FETCH_ALLOWED_HOSTS</code>. The
+connection goes only to an address that passed the check, so a name cannot
+pass with a public address and then connect to <code>127.0.0.1</code>; for the same
+reason service mode fetches directly and ignores <code>HTTPS_PROXY</code>. Personal
 mode allows those addresses, so <code>http://localhost:8000/data.csv</code> works on your
-own machine. A URL that cannot be checked shows the cell as stale, and running
+own machine, and uses the proxy settings as usual. A URL that cannot be checked shows the cell as stale, and running
 it fails with the reason. A cell with <code>@fetch</code> runs on its own in Run All rather
 than in a batch.</p>
 <p>On a remote worker the server does the fetching: the bytes travel with the
