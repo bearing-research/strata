@@ -28,6 +28,8 @@ from packaging.specifiers import SpecifierSet
 from packaging.utils import canonicalize_name
 from packaging.version import InvalidVersion, Version
 
+from strata.notebook.harness_user import running_server_config
+
 logger = logging.getLogger(__name__)
 _MAX_OPERATION_LOG_CHARS = 12_000
 
@@ -246,12 +248,20 @@ def uv_env(
     *base* (the server's own environment by default) without the variables
     that point uv at another environment, then *extra* on top, so a caller can
     still choose one on purpose (the shared-environment backend does).
+
+    In service mode uv installs wheels only. Building a source distribution
+    runs its build backend, code from wherever the package came from, as the
+    server's user with the server's environment, which is what the harness
+    user keeps cell code away from. A notebook does not build itself: it
+    declares no build backend.
     """
     env = {
         name: value
         for name, value in (os.environ if base is None else base).items()
         if name not in _FOREIGN_ENVIRONMENT_VARS
     }
+    if getattr(running_server_config(), "deployment_mode", None) == "service":
+        env["UV_NO_BUILD"] = "1"
     env.update(extra or {})
     return env
 
