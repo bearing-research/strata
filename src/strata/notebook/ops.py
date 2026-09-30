@@ -623,6 +623,20 @@ class LocalNotebookOps:
         if not ok:
             raise NotebookOpsError(err or "environment sync failed")
 
+    def use_existing_environment(self) -> None:
+        """Take the prepared notebook venv as the interpreter (``--no-sync``).
+
+        Raises
+        ------
+        NotebookOpsError
+            If the venv has no interpreter.
+        """
+        from strata.notebook.cli import _use_existing_environment
+
+        ok, err = _use_existing_environment(self._session)
+        if not ok:
+            raise NotebookOpsError(err or "notebook venv is not usable")
+
     async def run_cell(self, cell_id: str, *, mode: str = "normal") -> RunResult:
         """Execute one cell (see :meth:`NotebookOps.run_cell`).
 

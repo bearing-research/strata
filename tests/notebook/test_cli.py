@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import sys
 from pathlib import Path
 from unittest.mock import patch
 
@@ -50,8 +51,10 @@ def _build_notebook(
 
 
 def _mk_fake_venv(notebook_dir: Path) -> None:
-    """Create a placeholder ``.venv`` directory so ``--no-sync`` passes."""
-    (notebook_dir / ".venv").mkdir(exist_ok=True)
+    """Create a ``.venv`` whose interpreter is this one, so ``--no-sync`` passes."""
+    bin_dir = notebook_dir / ".venv" / "bin"
+    bin_dir.mkdir(parents=True, exist_ok=True)
+    (bin_dir / "python").symlink_to(sys.executable)
 
 
 def _make_result(
@@ -85,6 +88,19 @@ class TestArgumentHandling:
         notebook_dir = _build_notebook(tmp_path, cells=[("c1", "x = 1", None)])
         # Intentionally do NOT create .venv.
         assert run_main([str(notebook_dir), "--no-sync"]) == 2
+
+    def test_no_sync_with_a_venv_that_has_no_interpreter_exits_2(self, tmp_path, capsys):
+        """A .venv directory whose bin/python points nowhere used to pass the
+        check, and the cells then ran with whatever python was on PATH."""
+        notebook_dir = _build_notebook(tmp_path, cells=[("c1", "x = 1", None)])
+        (notebook_dir / ".venv" / "bin").mkdir(parents=True)
+        (notebook_dir / ".venv" / "bin" / "python").symlink_to(tmp_path / "gone")
+
+        with patch("strata.notebook.executor.CellExecutor.execute_cell") as execute:
+            assert run_main([str(notebook_dir), "--no-sync"]) == 2
+
+        execute.assert_not_called()
+        assert "no usable .venv" in capsys.readouterr().err
 
 
 class TestExecutionFlow:

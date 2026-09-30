@@ -140,6 +140,26 @@ def _print_summary(results: list[dict[str, Any]], total_ms: int) -> None:
     print(f"{', '.join(parts)} in {_format_ms(total_ms)}")
 
 
+def _use_existing_environment(session: Any) -> tuple[bool, str | None]:
+    """Take the notebook's prepared ``.venv`` as its interpreter (``--no-sync``).
+
+    Returns ``(ok, error_message)``. The check is for the interpreter, not the
+    directory: a venv whose ``bin/python`` points nowhere would otherwise pass
+    and cells would run with whatever ``python`` is on PATH.
+    """
+    venv_python = session.path / ".venv" / "bin" / "python"
+    if not venv_python.exists():
+        return False, (
+            f"notebook has no usable .venv at {session.path / '.venv'} "
+            f"({venv_python} is missing)\n"
+            "hint: run without --no-sync, or `uv sync` in the notebook dir first"
+        )
+    # Sets the interpreter and every environment field with it (source,
+    # version, sync state); a session never records an interpreter on its own.
+    session.refresh_environment_runtime()
+    return True, None
+
+
 async def _sync_environment(session: Any) -> tuple[bool, str | None]:
     """Run `uv sync` via the session's environment job machinery.
 
@@ -224,16 +244,11 @@ async def _run_async(args: argparse.Namespace) -> int:
         )
         return 2
 
-    # Environment: either sync now, or verify the user's prepared venv exists.
+    # Environment: either sync now, or take the user's prepared venv.
     if args.no_sync:
-        venv_dir = notebook_dir / ".venv"
-        if not venv_dir.exists():
-            print(
-                f"error: notebook has no .venv at {venv_dir}\n"
-                f"hint: run without --no-sync, or run `uv sync` in the notebook "
-                f"directory first",
-                file=sys.stderr,
-            )
+        ok, err = _use_existing_environment(session)
+        if not ok:
+            print(f"error: {err}", file=sys.stderr)
             return 2
     else:
         if args.format == "human":
@@ -1887,19 +1902,12 @@ async def _prepare_env_for_ops(ops: object, args: argparse.Namespace) -> int:
     # Every caller skips this for a remote server, which syncs its own venv.
     assert isinstance(ops, LocalNotebookOps)
 
-    if args.no_sync:
-        venv_dir = Path(args.notebook_dir).expanduser().resolve() / ".venv"
-        if not venv_dir.exists():
-            print(
-                f"error: notebook has no .venv at {venv_dir}\n"
-                f"hint: run without --no-sync, or `uv sync` in the notebook dir first",
-                file=sys.stderr,
-            )
-            return 2
-        return 0
-    if args.format == "human":
-        print(_dim("syncing environment…"))
     try:
+        if args.no_sync:
+            ops.use_existing_environment()
+            return 0
+        if args.format == "human":
+            print(_dim("syncing environment…"))
         await ops.sync_environment()
     except NotebookOpsError as exc:
         print(f"error: {exc}", file=sys.stderr)

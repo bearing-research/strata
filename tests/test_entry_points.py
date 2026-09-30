@@ -7,6 +7,8 @@ on both is refused outside a uv-managed environment before it does anything.
 
 from __future__ import annotations
 
+import os
+
 import pytest
 
 from strata import cli, server
@@ -47,8 +49,12 @@ def test_the_server_is_refused_outside_uv_before_it_starts(outside_uv, capsys, m
 
     monkeypatch.setattr(uvicorn, "run", lambda *a, **k: pytest.fail("the server started"))
 
+    monkeypatch.delenv("STRATA_NOTEBOOK_STORAGE_DIR", raising=False)
+
     with pytest.raises(SystemExit) as exc_info:
-        server.main([])
+        server.main(["--notebook-dir", "."])
 
     assert exc_info.value.code == 1
     assert "uv-managed Python environment" in capsys.readouterr().err
+    # The refusal comes before the command line is applied to the environment.
+    assert "STRATA_NOTEBOOK_STORAGE_DIR" not in os.environ
