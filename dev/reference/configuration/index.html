@@ -3117,13 +3117,23 @@ credential.</p>
 </tr>
 <tr>
 <td><code>STRATA_ARTIFACT_GC_INTERVAL_SECONDS</code></td>
-<td>unset (off)</td>
-<td>Run artifact garbage collection on this interval. Never collects anything named, latest, published or pinned, or anything those depend on. See <a href="../../deployment/lifecycle/#cleaning-up-the-core-artifact-store">Lifecycle</a></td>
+<td><code>3600</code> in personal mode, unset (off) in service mode</td>
+<td>How often the server sweeps its artifact store. <code>0</code> turns the sweep off. A sweep collects only what nothing holds: nothing named, aliased, pinned or published, nothing those or a running build depend on, and not the current value of an id somebody chose (a notebook's cell outputs). An unnamed <code>materialize</code> result is a cache entry; name or pin it to keep it. See <a href="../../deployment/lifecycle/#cleaning-up-the-core-artifact-store">Cleaning up the Core artifact store</a>.</td>
 </tr>
 <tr>
-<td><code>STRATA_ARTIFACT_GC_MAX_AGE_DAYS</code></td>
-<td><code>7.0</code></td>
-<td>Minimum age of a version the scheduled sweep may collect</td>
+<td><code>STRATA_ARTIFACT_GC_MAX_BYTES</code></td>
+<td><code>21474836480</code> (20 GiB) in personal mode, unset in service mode</td>
+<td>When the store holds more than this, a sweep collects the least recently used until it is at 80% of it. <code>0</code> means no cap.</td>
+</tr>
+<tr>
+<td><code>STRATA_ARTIFACT_GC_MAX_IDLE_DAYS</code></td>
+<td><code>30.0</code></td>
+<td>A sweep collects what has not been used (a cache hit or a read) for this long, whatever the store's size. <code>0</code> means no idle limit.</td>
+</tr>
+<tr>
+<td><code>STRATA_ARTIFACT_GC_MIN_IDLE_SECONDS</code></td>
+<td><code>3600.0</code></td>
+<td>A sweep never collects anything used more recently than this, so a result just handed to a reader stays.</td>
 </tr>
 <tr>
 <td><code>STRATA_REGISTRY_PROTECTED_ALIASES</code></td>
@@ -3593,6 +3603,11 @@ deployment, not only in one that opted in to something.</p>
 <td><code>STRATA_NOTEBOOK_OBJECT_CODEC</code></td>
 <td><code>cloudpickle</code></td>
 <td>How a cell's value that is neither Arrow nor JSON is pickled when it is handed to another cell: <code>cloudpickle</code> (stdlib <code>pickle</code> if cloudpickle is not installed) or <code>pickle</code>. Any other value fails the cell's serialization.</td>
+</tr>
+<tr>
+<td><code>STRATA_NOTEBOOK_KEEP_SUPERSEDED_VERSIONS</code></td>
+<td><code>3</code></td>
+<td>How many earlier values of each cell output a notebook's own store keeps beside the current one, so reverting a recent edit is still a cache hit. Older ones are pruned when the server opens the notebook. <code>0</code> turns pruning off and keeps every value.</td>
 </tr>
 <tr>
 <td><code>STRATA_PERSONAL_MODE_USER_HEADER</code></td>

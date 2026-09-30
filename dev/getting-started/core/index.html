@@ -2260,6 +2260,7 @@ dropping a row you asked for.</p>
 <li>Same inputs + transform → existing artifact, no recomputation</li>
 <li>Artifacts are immutable and versioned</li>
 <li>Names are mutable pointers to specific artifact versions</li>
+<li>An unnamed result is a cache entry: kept while it is used, and computed again if the store collected it. Name or pin a result to keep it (<a href="../../deployment/lifecycle/#cleaning-up-the-core-artifact-store">retention</a>)</li>
 <li>Provenance hash is derived from pinned inputs and transform identity</li>
 </ul>
 <h2 id="whats-next">What's next<a class="headerlink" href="#whats-next" title="Permanent link">&para;</a></h2>
