@@ -14,14 +14,26 @@ import re
 from typing import TYPE_CHECKING, NamedTuple
 
 from strata.artifact_store import TransformSpec, compute_provenance_hash
+from strata.iceberg_schema import UnsupportedTableFormatError
 from strata.types import (
     ExplainMaterializeRequest,
     ExplainMaterializeResponse,
     InputChangeInfo,
+    ReadPlan,
 )
 
 if TYPE_CHECKING:
     from strata.artifact_store import ArtifactStore, ArtifactVersion
+
+
+def table_input_version(plan: ReadPlan) -> str:
+    """The version a table input records: its snapshot and schema id.
+
+    A schema change (a rename, a dropped column) makes no snapshot, so the
+    snapshot id alone would let a transform over the table hit the artifact it
+    built before the change, with the old column names.
+    """
+    return f"{plan.snapshot_id}:{plan.schema_id}"
 
 
 class InputResolutionError(Exception):
@@ -29,8 +41,9 @@ class InputResolutionError(Exception):
 
     Carries the HTTP ``status_code`` + ``detail`` the original inline resolver
     raised (400 for a malformed/unknown URI or a failed table plan, 404 for an
-    unknown name) so the dependency-layer wrapper can reproduce the exact
-    response without the service importing FastAPI.
+    unknown name, 422 for a table Strata refuses to read) so the
+    dependency-layer wrapper can reproduce the exact response without the
+    service importing FastAPI.
     """
 
     def __init__(self, status_code: int, detail: str):
@@ -68,12 +81,15 @@ class MaterializeService:
 
         - ``strata://artifact/{id}@v={n}`` → ``"{id}@v={n}"``
         - ``strata://name/{name}`` → the named artifact's ``"{id}@v={version}"``
-        - ``file://…`` / ``s3://…`` table → the current snapshot id, plus the
-          plan's ``table_identity`` so the caller can ACL-gate it.
+        - ``file://…`` / ``s3://…`` table → the current snapshot and schema id
+          (:func:`table_input_version`), plus the plan's ``table_identity`` so
+          the caller can ACL-gate it.
 
         Raises:
             InputResolutionError: malformed/unknown URI, unknown name, or a table
-                whose plan fails — carrying the status the wrapper re-raises.
+                whose plan fails — carrying the status the wrapper re-raises. A
+                table Strata refuses to read is 422 with the planner's message,
+                as on the scan path.
         """
         # Artifact URI: strata://artifact/{id}@v={version}
         if input_uri.startswith("strata://artifact/"):
@@ -108,11 +124,13 @@ class MaterializeService:
                     columns=None,
                     filters=None,
                 )
+            except UnsupportedTableFormatError as e:
+                raise InputResolutionError(422, str(e)) from e
             except Exception as e:
                 raise InputResolutionError(
                     400, f"Could not resolve table {input_uri}: {str(e)}"
                 ) from e
-            return ResolvedInput(str(plan.snapshot_id), table_identity=plan.table_identity)
+            return ResolvedInput(table_input_version(plan), table_identity=plan.table_identity)
 
         raise InputResolutionError(400, f"Unknown input URI type: {input_uri}")
 

@@ -22,6 +22,7 @@ import filelock
 import tomli_w
 from packaging.requirements import Requirement
 
+from strata.notebook.dependencies import uv_env
 from strata.notebook.layout import write_gitignore
 from strata.notebook.models import (
     ConnectionSpec,
@@ -679,6 +680,7 @@ def _uv_sync(notebook_dir: Path, *, timeout: int = 60, python_version: str | Non
         subprocess.run(
             command,
             cwd=str(notebook_dir),
+            env=uv_env(),
             timeout=timeout,
             capture_output=True,
             check=True,

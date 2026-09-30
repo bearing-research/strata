@@ -120,12 +120,15 @@ tui = [
     # Pure-Python Sugiyama layered layout for the ASCII DAG view.
     "grandalf>=0.8",
     # Inline image rendering — terminal graphics protocol (kitty/iTerm/Sixel)
-    # with a Unicode half-block fallback.
-    "textual-image>=0.13",
+    # with a Unicode half-block fallback. The 0.13.0 and 0.13.1 wheels hold no
+    # Python modules, so 0.14.0 is the first that imports.
+    "textual-image>=0.14.0",
     # tui/app.py imports PIL at module load; declare Pillow explicitly rather
     # than rely on textual-image to pull it, so `[tui]` alone (the documented
     # install) launches instead of ModuleNotFoundError: No module named 'PIL'.
-    "pillow>=10.0.0",
+    # 12.1.0 added Image.get_flattened_data, which textual-image 0.14 calls to
+    # draw every image.
+    "pillow>=12.1.0",
 ]
 # MCP server: exposes the live notebook session to an external coding agent
 # (Claude Code, etc.) over streamable HTTP at `/mcp`. MCPServer ships in the
@@ -175,7 +178,7 @@ dev = [
     # TUI viewer (the [tui] extra) — dev-installed so its tests can import it.
     "textual>=0.80.0",
     "grandalf>=0.8",
-    "textual-image>=0.13",
+    "textual-image>=0.14.0",
 ]
 docs = [
     "mkdocs>=1.6.0",

@@ -882,6 +882,34 @@ def _caller(context: Any) -> Principal | None:
         return None
 
 
+def _mcp_import_failure(missing: str | None) -> str:
+    """Why an installed mcp could not give the notebook its MCPServer.
+
+    Either the mcp is older than 2, where FastMCP became MCPServer, or it is an
+    mcp 2 whose own dependency (*missing*) is not installed.
+    """
+    from importlib.metadata import PackageNotFoundError, version
+
+    from packaging.version import Version
+
+    try:
+        installed = version("mcp")
+    except PackageNotFoundError:
+        # Importable without distribution metadata (a bare source tree on
+        # sys.path): no version to judge, so name the missing module.
+        installed = "(version unknown)"
+    else:
+        if Version(installed).major < 2:
+            return (
+                f"mcp {installed} is installed, but the notebook's /mcp endpoint needs "
+                "mcp>=2 (install strata-notebook[mcp]); /mcp is off"
+            )
+    return (
+        f"mcp {installed} is installed, but importing it failed: no module named "
+        f"{missing!r} (reinstall strata-notebook[mcp]); /mcp is off"
+    )
+
+
 def build_mcp_app(session_manager: SessionManager) -> Starlette | None:
     """Build the streamable-HTTP MCP ASGI app, or ``None`` if ``[mcp]`` is absent.
 
@@ -898,16 +926,10 @@ def build_mcp_app(session_manager: SessionManager) -> Starlette | None:
         from mcp.server.mcpserver import MCPServer
     except ModuleNotFoundError as exc:
         if exc.name != "mcp":
-            # mcp is installed, but not mcp 2, where FastMCP became MCPServer.
-            # Another tool in the environment may need it, so say why the
-            # endpoint is off rather than refusing to start.
-            from importlib.metadata import version
-
-            logger.warning(
-                "mcp %s is installed, but the notebook's /mcp endpoint needs mcp>=2 "
-                "(install strata-notebook[mcp]); /mcp is off",
-                version("mcp"),
-            )
+            # mcp is installed, but MCPServer did not import. Another tool in
+            # the environment may need mcp as it is, so say why the endpoint
+            # is off rather than refusing to start.
+            logger.warning(_mcp_import_failure(exc.name))
         return None
 
     from mcp.server.mcpserver.exceptions import ToolError

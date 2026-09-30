@@ -683,3 +683,86 @@ class TestClientFetch:
             assert set(table.column_names) == {"value"}
         finally:
             client.close()
+
+
+class TestTransformOverATable:
+    """A non-scan transform whose input is a table URI."""
+
+    def test_a_schema_change_rebuilds_and_stales_the_name(self, server_with_personal_mode):
+        """A rename makes no snapshot, so the table's version must name the schema.
+
+        Versioned by snapshot id alone, the second materialize hit the first
+        artifact and served the column under its old name, and the name's
+        status said it was fresh.
+        """
+        from strata_client.client import StrataClient
+
+        base_url = server_with_personal_mode["base_url"]
+        warehouse = server_with_personal_mode["warehouse"]
+        table_uri = warehouse["table_uri"]
+        sql = {"executor": "duckdb_sql@v1", "params": {"sql": "SELECT * FROM input0"}}
+
+        client = StrataClient(base_url=base_url)
+        try:
+            first = client.materialize(inputs=[table_uri], transform=sql, name="events_sql")
+            assert "name" in client.fetch(first.uri).column_names
+            assert client.get_name_status("events_sql")["is_stale"] is False
+
+            with warehouse["catalog"].load_table("test_db.events").update_schema() as update:
+                update.rename_column("name", "label")
+
+            assert client.get_name_status("events_sql")["is_stale"] is True
+            second = client.materialize(inputs=[table_uri], transform=sql)
+            assert second.cache_hit is False
+            columns = client.fetch(second.uri).column_names
+            assert "label" in columns
+            assert "name" not in columns
+        finally:
+            client.close()
+
+    def test_a_named_scan_stays_fresh(self, server_with_personal_mode):
+        """The scan path records the table's version in the form name status reads."""
+        from strata_client.client import StrataClient
+
+        base_url = server_with_personal_mode["base_url"]
+        table_uri = server_with_personal_mode["warehouse"]["table_uri"]
+
+        client = StrataClient(base_url=base_url)
+        try:
+            artifact = client.materialize(
+                inputs=[table_uri],
+                transform={"executor": "scan@v1", "params": {}},
+                name="events_scan",
+                mode="artifact",
+            )
+            client.fetch(artifact.uri)
+            assert client.get_name_status("events_scan")["is_stale"] is False
+        finally:
+            client.close()
+
+    def test_a_table_strata_refuses_to_read_is_422(self, server_with_personal_mode):
+        """The planner's refusal keeps its status and message, as on the scan path."""
+        from pyiceberg.manifest import FileFormat
+
+        from tests.iceberg_fixtures import commit_files, equality_delete
+
+        base_url = server_with_personal_mode["base_url"]
+        warehouse = server_with_personal_mode["warehouse"]
+        table = warehouse["catalog"].load_table("test_db.events")
+        commit_files(
+            table,
+            equality_delete(
+                table, pa.table({"id": pa.array([1], pa.int64())}), file_format=FileFormat.AVRO
+            ),
+        )
+
+        response = requests.post(
+            f"{base_url}/v1/materialize",
+            json={
+                "inputs": [warehouse["table_uri"]],
+                "transform": {"executor": "duckdb_sql@v1", "params": {"sql": "SELECT 1"}},
+            },
+            timeout=60,
+        )
+        assert response.status_code == 422
+        assert "AVRO equality delete file" in response.json()["detail"]

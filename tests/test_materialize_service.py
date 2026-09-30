@@ -11,6 +11,7 @@ from types import SimpleNamespace
 import pytest
 
 from strata.artifact_store import TransformSpec as ArtifactTransformSpec
+from strata.iceberg_schema import UnsupportedTableFormatError
 from strata.services.materialize import InputResolutionError, MaterializeService
 from strata.types import ExplainMaterializeRequest, TransformSpec
 
@@ -185,8 +186,9 @@ class _FakeResolveStore:
 class _FakePlanner:
     """Planner stub returning a fixed plan, or raising to simulate a bad table."""
 
-    def __init__(self, *, snapshot_id=None, table_identity=None, error=None):
+    def __init__(self, *, snapshot_id=None, schema_id=None, table_identity=None, error=None):
         self._snapshot_id = snapshot_id
+        self._schema_id = schema_id
         self._table_identity = table_identity
         self._error = error
         self.calls = []
@@ -195,7 +197,11 @@ class _FakePlanner:
         self.calls.append(table_uri)
         if self._error is not None:
             raise self._error
-        return SimpleNamespace(snapshot_id=self._snapshot_id, table_identity=self._table_identity)
+        return SimpleNamespace(
+            snapshot_id=self._snapshot_id,
+            schema_id=self._schema_id,
+            table_identity=self._table_identity,
+        )
 
 
 class TestResolveInputVersion:
@@ -231,12 +237,13 @@ class TestResolveInputVersion:
             )
         assert exc.value.status_code == 404
 
-    def test_table_uri_returns_snapshot_and_identity(self, service):
-        planner = _FakePlanner(snapshot_id=4242, table_identity="cat.ns.t")
+    def test_table_uri_returns_snapshot_schema_and_identity(self, service):
+        planner = _FakePlanner(snapshot_id=4242, schema_id=3, table_identity="cat.ns.t")
         resolved = service.resolve_input_version(
             "file:///wh#db.t", store=_FakeResolveStore(), planner=planner
         )
-        assert resolved.version == "4242"
+        # The schema id too: a schema change makes no snapshot.
+        assert resolved.version == "4242:3"
         # The identity is surfaced so the wrapper can ACL-gate the table input.
         assert resolved.table_identity == "cat.ns.t"
 
@@ -248,6 +255,15 @@ class TestResolveInputVersion:
             )
         assert exc.value.status_code == 400
         assert "no such table" in exc.value.detail
+
+    def test_a_table_strata_refuses_to_read_is_422(self, service):
+        refusal = UnsupportedTableFormatError("Strata cannot read this table: rewrite it")
+        with pytest.raises(InputResolutionError) as exc:
+            service.resolve_input_version(
+                "s3://wh#db.t", store=_FakeResolveStore(), planner=_FakePlanner(error=refusal)
+            )
+        assert exc.value.status_code == 422
+        assert exc.value.detail == "Strata cannot read this table: rewrite it"
 
     def test_unknown_uri_scheme_is_400(self, service):
         with pytest.raises(InputResolutionError) as exc:

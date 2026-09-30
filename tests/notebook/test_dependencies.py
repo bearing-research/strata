@@ -10,8 +10,11 @@ Validates:
 from __future__ import annotations
 
 import asyncio
+import os
+import shlex
 import shutil
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 from types import SimpleNamespace
@@ -1390,3 +1393,94 @@ class TestResolveUv:
 
         assert "uv not found on PATH" in UV_NOT_FOUND_MESSAGE
         assert "~/.local/bin" in UV_NOT_FOUND_MESSAGE
+
+
+# ============================================================================
+# uv runs on the notebook's environment, not the server's
+# ============================================================================
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="the recording uv is a shell script")
+class TestUvCommandsIgnoreTheServersEnvironment:
+    """A server started with UV_PROJECT_ENVIRONMENT (or under ``uv run``, which
+    sets VIRTUAL_ENV) passed it to every uv command it ran for a notebook, and
+    UV_PROJECT_ENVIRONMENT makes uv sync, add to and run in that environment
+    instead of the notebook's ``.venv``."""
+
+    @pytest.fixture
+    def recorded(self, tmp_path, monkeypatch):
+        """Put a ``uv`` first on PATH that writes its environment to a file."""
+        bin_dir = tmp_path / "bin"
+        bin_dir.mkdir()
+        record = tmp_path / "uv-env.txt"
+        fake_uv = bin_dir / "uv"
+        fake_uv.write_text(f"#!/bin/sh\nenv > {shlex.quote(str(record))}\n")
+        fake_uv.chmod(0o755)
+        monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
+        monkeypatch.setenv("UV_PROJECT_ENVIRONMENT", "/server/env")
+        monkeypatch.setenv("VIRTUAL_ENV", "/server/venv")
+
+        def read() -> dict[str, str]:
+            lines = record.read_text().splitlines()
+            return dict(line.split("=", 1) for line in lines if "=" in line)
+
+        return read
+
+    @staticmethod
+    def _assert_notebook_environment(env: dict[str, str]) -> None:
+        assert "UV_PROJECT_ENVIRONMENT" not in env
+        assert "VIRTUAL_ENV" not in env
+
+    def test_a_uv_command(self, tmp_path, recorded):
+        from strata.notebook.dependencies import _run_uv_command
+
+        result = _run_uv_command(tmp_path, ["sync"], timeout=30, display_name="uv sync")
+        assert result.success
+        self._assert_notebook_environment(recorded())
+
+    def test_an_environment_the_caller_chooses_is_kept(self, tmp_path, recorded):
+        """The shared-environment backend points uv at its store on purpose."""
+        from strata.notebook.dependencies import _run_uv_command
+
+        _run_uv_command(
+            tmp_path,
+            ["sync"],
+            timeout=30,
+            display_name="uv sync",
+            env={"UV_PROJECT_ENVIRONMENT": "/shared/key"},
+        )
+        env = recorded()
+        assert env["UV_PROJECT_ENVIRONMENT"] == "/shared/key"
+        assert "VIRTUAL_ENV" not in env
+
+    async def test_a_streamed_uv_command(self, tmp_path, recorded):
+        from strata.notebook.dependencies import run_uv_command_streaming
+
+        result = await run_uv_command_streaming(
+            tmp_path, ["add", "rich"], timeout=30, display_name="uv add"
+        )
+        assert result.success
+        self._assert_notebook_environment(recorded())
+
+    def test_the_sync_at_notebook_creation(self, tmp_path, recorded):
+        from strata.notebook.writer import _uv_sync
+
+        assert _uv_sync(tmp_path)
+        self._assert_notebook_environment(recorded())
+
+    def test_the_lock_a_jupyter_import_checks(self, tmp_path, recorded):
+        from strata.notebook.jupyter_import import ImportResult, _check_resolvable
+
+        _check_resolvable(tmp_path, ImportResult(notebook_dir=tmp_path))
+        self._assert_notebook_environment(recorded())
+
+    async def test_the_uv_run_that_starts_a_cell(self, tmp_path, recorded):
+        executor = CellExecutor.__new__(CellExecutor)
+        executor.harness_path = tmp_path / "harness.py"
+        executor.session = SimpleNamespace(path=tmp_path)  # type: ignore[assignment]
+        manifest = tmp_path / "run" / "manifest.json"
+        manifest.parent.mkdir()
+        manifest.write_text("{}")
+
+        await executor._run_harness(manifest, tmp_path / ".venv" / "bin" / "python", 30.0)
+        self._assert_notebook_environment(recorded())
