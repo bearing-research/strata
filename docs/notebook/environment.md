@@ -35,6 +35,8 @@ matplotlib
 
 The operation runs asynchronously, you can continue editing cells while it installs.
 
+On a server in service mode, packages install from wheels only: a package with no wheel for the notebook's Python fails to resolve, and the message says a wheel is required. See [Service mode](../deployment/service-mode.md).
+
 ### Import from requirements.txt
 
 In the Environment panel, click **Import** and paste a `requirements.txt`:

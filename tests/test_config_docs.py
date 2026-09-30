@@ -21,11 +21,14 @@ import pytest
 
 from strata.config import StrataConfig
 from strata.notebook.remote_executor import _WORKER_SECRETS
+from strata.notebook.serializer import OBJECT_CODEC_ENV_VAR
 from strata.notebook.worker_env import ENV_ROOT_VAR, REGISTRY_VAR
 
 _REPO = Path(__file__).resolve().parent.parent
 _DOC = _REPO / "docs" / "reference" / "configuration.md"
 _SRC = _REPO / "src"
+# The client finds its server from the environment too (STRATA_SERVER_URL).
+_CLIENT_SRC = _REPO / "packages" / "strata-client" / "src"
 
 # Vars read straight from ``os.environ`` rather than declared on StrataConfig
 # (logging and tracing initialize before config exists; the worker vars are
@@ -60,15 +63,16 @@ def _from_config() -> set[str]:
 
 def _from_environ_lookups() -> set[str]:
     found: set[str] = set()
-    for path in _SRC.rglob("*.py"):
-        found |= set(_ENV_LOOKUP.findall(_read(path)))
+    for root in (_SRC, _CLIENT_SRC):
+        for path in root.rglob("*.py"):
+            found |= set(_ENV_LOOKUP.findall(_read(path)))
     # A worker takes its secrets out of the environment at startup and reads
     # them from memory afterwards, so the only ``os.environ`` call naming them
     # takes the name as a variable. They are set by an operator like any other.
     found |= set(_WORKER_SECRETS)
     # The locked-environment settings are named once, as constants, and read
     # through them.
-    found |= {ENV_ROOT_VAR, REGISTRY_VAR}
+    found |= {ENV_ROOT_VAR, REGISTRY_VAR, OBJECT_CODEC_ENV_VAR}
     return found
 
 
@@ -98,6 +102,7 @@ def test_the_scan_finds_the_variables_it_claims_to():
     # would make both assertions above pass forever.
     assert "STRATA_HOST" in _from_config()
     assert "STRATA_LOG_LEVEL" in _from_environ_lookups()
+    assert "STRATA_SERVER_URL" in _from_environ_lookups()
     assert "STRATA_HOST" in _documented()
 
 

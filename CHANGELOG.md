@@ -134,11 +134,12 @@ exhaustive commit history.
   and retention probes asked for a table's name as typed, and Snowflake stores
   an unquoted `events` as `EVENTS`, so a change to it was never detected.
   Unquoted identifiers are now looked up uppercased; quoted ones as written.
-- **A session finds its venv without a sync.** `strata run --no-sync` and
-  `cell add --no-sync` ran cells with whatever `python` was on PATH rather
-  than the notebook's own environment, and failed outright where no bare
-  `python` exists. A session now takes an existing `.venv` as its interpreter
-  from the start.
+- **`--no-sync` runs cells in the notebook's own environment.** `strata run
+  --no-sync` and the `cell` commands' `--no-sync` ran cells with whatever
+  `python` was on PATH rather than the notebook's `.venv`, and failed outright
+  where no bare `python` exists. They now use `.venv/bin/python`, and refuse
+  with exit 2 when it is missing or points nowhere, rather than checking only
+  that a `.venv` directory exists.
 - **Notebook uv commands act on the notebook's environment.** A server
   started with `UV_PROJECT_ENVIRONMENT` set passed it to every `uv sync`,
   `add`, `lock` and the `uv run` that starts a cell, which then acted on the

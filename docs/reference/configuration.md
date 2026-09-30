@@ -477,6 +477,7 @@ deployment, not only in one that opted in to something.
 | `STRATA_NOTEBOOK_ENV_BACKEND`       | `uv`                        | How notebook Python environments are kept. `uv`: each notebook has its own `.venv`. `shared`: notebooks with the same `uv.lock` and interpreter build share one environment, and each notebook's `.venv` is a symlink to it, so a second notebook with that lock installs nothing. Adding or removing a package moves only that notebook to another environment. R libraries are shared the same way, one per `renv.lock` and R build, with `renv/library` a symlink. POSIX only. See [Shared environments](../notebook/environment.md#shared-environments). |
 | `STRATA_NOTEBOOK_SHARED_ENV_DIR`    | `envs` beside `STRATA_NOTEBOOK_STORAGE_DIR` | Where shared environments live, one directory per lockfile and interpreter. |
 | `STRATA_NOTEBOOK_SHARED_ENV_TTL_DAYS` | `7.0`                     | A shared environment no notebook links to is removed once unused this long, by an hourly sweep in the server or `strata env gc`. One a notebook links to is never removed. |
+| `STRATA_NOTEBOOK_OBJECT_CODEC` | `cloudpickle` | How a cell's value that is neither Arrow nor JSON is pickled when it is handed to another cell: `cloudpickle` (stdlib `pickle` if cloudpickle is not installed) or `pickle`. Any other value fails the cell's serialization. |
 | `STRATA_PERSONAL_MODE_USER_HEADER`  | `None`                      | Request header carrying caller identity. When set in personal mode, notebooks are stamped with the caller's identity on create and `discover`/`delete` scope to it. Intended for proxy-fronted personal deployments. |
 | `STRATA_NOTEBOOK_REMOTE_STORE_URL`  | `None`                      | Point the ambient `strata` client injected into cells at a remote shared store instead of this local notebook server, so a team publishes/consumes against one central deployment. Also what the Registry tab and the per-cell strip describe: with this set they forward there, so the dashboard shows the store the notebook actually names things in. Unset → both target the local server. Naming this server's own host and port is rejected at startup, because the registry routes would forward to themselves. See [Service Mode → shared research store](../deployment/service-mode.md#authenticated-write-back-the-shared-research-store). |
 | `STRATA_NOTEBOOK_REMOTE_STORE_HEADERS` | `{}`                     | Auth headers the ambient client attaches when pointed at a remote store (e.g. the trusted-proxy identity/token). JSON object; set via env so secrets stay out of committed config. |
@@ -502,6 +503,16 @@ flag, and the flag wins.
 | `STRATA_TUI_USER`              | `None`                  | Caller identity to send, for a personal deployment behind a proxy |
 | `STRATA_TUI_USER_HEADER_NAME`  | `None`                  | Header carrying that identity (matches `STRATA_PERSONAL_MODE_USER_HEADER` on the server) |
 
+## Client
+
+Read by `StrataClient` (the `strata-client` package) when it is constructed
+without a URL or a config, to find the server. The server does not read
+`STRATA_SERVER_URL`.
+
+| Variable            | Default | Description |
+| ------------------- | ------- | ----------- |
+| `STRATA_SERVER_URL` | `None`  | The server's full URL, e.g. `https://strata.internal:8765`. Wins over `STRATA_HOST` / `STRATA_PORT`, which win over `[tool.strata]` `host` / `port` in the nearest `pyproject.toml`; with none of them set the client uses `http://127.0.0.1:8765`. |
+
 ## Worker
 
 These are read by `strata-worker`, not the main server. They have no effect on a `strata-notebook` process.
@@ -516,6 +527,8 @@ These are read by `strata-worker`, not the main server. They have no effect on a
 | `STRATA_WORKER_GPU_SLOTS`         | none                 | GPUs to hand out, one per execution: the worker sets `CUDA_VISIBLE_DEVICES` for each cell itself. Same as `--gpu-slots`, which wins. |
 | `STRATA_WORKER_ENV_ROOT`          | `~/.strata/worker-envs` | Where the worker keeps one locked environment per notebook `uv.lock` and interpreter build. See [the `environment` block](executor-protocol.md#the-environment-block). |
 | `STRATA_WORKER_ENV_REGISTRY_URL`  | `None`               | Fetch a missing locked environment from `<url>/<key>` as a `.tar.gz` instead of building it with `uv sync`. |
+
+The worker's input downloads, result uploads and log forwarding connect only to an address that passed the private-address check, and they connect directly: `HTTPS_PROXY` and the other proxy variables are ignored, because through a proxy the proxy would resolve the name and the check would say nothing about where it connects. A worker that can reach its store only through a proxy needs `STRATA_WORKER_ALLOW_LOCAL_HOSTS`, under which nothing is checked and the proxy variables apply. See the SSRF defenses in the [executor protocol](executor-protocol.md).
 
 ## Rate Limiting
 

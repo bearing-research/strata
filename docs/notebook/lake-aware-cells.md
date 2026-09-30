@@ -196,18 +196,23 @@ inputs change; `@table` adds the lake snapshot to the mix.
   (format v3) name, and caches the row groups without them. Equality deletes,
   which Flink and CDC sinks write for upserts, are applied too: every older
   row whose key a delete names is dropped, null matching null. Applying them
-  holds the delete keys in memory, so a row group that would need more than
-  `max_equality_delete_rows` of them (10 million by default) is refused with a
-  message saying so; compact the table (`rewrite_data_files`) to bring the
-  count down.
+  holds the delete keys in memory, so a scan in which a row group would need
+  more than `max_equality_delete_rows` of them (10 million by default) is
+  refused while planning, with a message saying so, rather than read
+  partially; compact the table (`rewrite_data_files`) to bring the count
+  down. An equality delete file in ORC or Avro, or keyed on a struct column,
+  is refused the same way.
 - **Schema changes are read the way Iceberg defines them.** Columns are
   matched by field id, not by name, so an older data file reads as the table's
-  schema: an added column is null in it, a renamed column comes back under its
-  new name, a column dropped and added again is null rather than the old
-  values, and a widened type (int to long, float to double, a wider decimal)
-  comes back wide, including for the fields inside a struct, list or map
-  column. A scan of the current table reads the current schema; one that names
-  a snapshot reads that snapshot's.
+  schema: an added column is null in it (or its default, for a column a v3
+  table added with one), a renamed column comes back under its new name, a
+  column dropped and added again is null rather than the old values, a
+  widened type (int to long, float to double, a wider decimal) comes back
+  wide, and a required column made optional reads across both kinds of file,
+  including for the fields inside a struct, list or map column. Nanosecond
+  timestamps in a v1 or v2 table are read at the table's microsecond unit,
+  truncating, as pyiceberg does. A scan of the current table reads the
+  current schema; one that names a snapshot reads that snapshot's.
 
 ## See also
 

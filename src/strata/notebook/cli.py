@@ -1205,7 +1205,7 @@ def add_cell_arguments(parser: argparse.ArgumentParser) -> None:
         "--force", action="store_true", help="Run against existing upstream artifacts only"
     )
     run_p.add_argument(
-        "--no-sync", action="store_true", help="Skip `uv sync`; require an existing .venv"
+        "--no-sync", action="store_true", help="Skip `uv sync`; use the existing .venv/bin/python"
     )
     run_p.add_argument("--format", choices=["human", "json"], default="json")
     run_p.set_defaults(func=cell_run_main)
@@ -1218,7 +1218,7 @@ def add_cell_arguments(parser: argparse.ArgumentParser) -> None:
         help="Set the cell's test source from this file (`-` for stdin) before running",
     )
     test_p.add_argument(
-        "--no-sync", action="store_true", help="Skip `uv sync`; require an existing .venv"
+        "--no-sync", action="store_true", help="Skip `uv sync`; use the existing .venv/bin/python"
     )
     test_p.add_argument("--format", choices=["human", "json"], default="json")
     test_p.set_defaults(func=cell_test_main)
@@ -1242,7 +1242,7 @@ def add_cell_arguments(parser: argparse.ArgumentParser) -> None:
     add_p.add_argument(
         "--no-sync",
         action="store_true",
-        help="With --run: skip `uv sync`; require an existing .venv",
+        help="With --run: skip `uv sync`; use the existing .venv/bin/python",
     )
     add_p.add_argument("--format", choices=["human", "json"], default="json")
     add_p.set_defaults(func=cell_add_main)
