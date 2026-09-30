@@ -426,3 +426,127 @@ def test_an_unchanged_table_reads_its_files_as_written(lake):
     _, uri, config = lake
     _, plan = _scan(config, uri)
     assert [task.file_columns for task in plan.tasks] == [None]
+
+
+def _catalog(tmp_path):
+    from pyiceberg.catalog.sql import SqlCatalog
+
+    warehouse = tmp_path / "warehouse"
+    warehouse.mkdir()
+    catalog = SqlCatalog(
+        "strata", uri=f"sqlite:///{warehouse / 'catalog.db'}", warehouse=warehouse.as_uri()
+    )
+    catalog.create_namespace("db")
+    return catalog, f"{warehouse.as_uri()}#db.t"
+
+
+def test_a_file_holding_nanosecond_timestamps_reads_at_the_tables_unit(tmp_path):
+    """A v1 or v2 table allows only microseconds, but a file registered from
+    elsewhere can hold nanoseconds (INT96 reads as nanoseconds too). Planning
+    used to fail on it; pyiceberg reads it at the table's unit, truncating,
+    and so does the scan."""
+    import datetime
+
+    from tests.iceberg_fixtures import commit_files, data_file
+
+    catalog, uri = _catalog(tmp_path)
+    schema = pa.schema([("id", pa.int64()), ("ts", pa.timestamp("us"))])
+    catalog.create_table("db.t", schema=schema).append(
+        pa.table(
+            {
+                "id": pa.array([1], pa.int64()),
+                "ts": pa.array([datetime.datetime(2024, 1, 1)], pa.timestamp("us")),
+            },
+            schema=schema,
+        )
+    )
+    table = catalog.load_table("db.t")
+    nanos = 1_704_153_600_000_000_123  # 2024-01-02 plus 123 ns
+    commit_files(
+        table,
+        data_file(
+            table,
+            pa.table(
+                {"id": pa.array([2], pa.int64()), "ts": pa.array([nanos], pa.timestamp("ns"))}
+            ),
+        ),
+    )
+
+    scanned, _ = _scan(StrataConfig(cache_dir=tmp_path / "cache"), uri)
+    assert scanned.schema.field("ts").type == pa.timestamp("us")
+    assert _rows(scanned) == _pyiceberg(catalog)
+    assert _rows(scanned)[1]["ts"] == datetime.datetime(2024, 1, 2)
+
+
+def test_a_required_column_made_optional_streams_as_one_schema(tmp_path):
+    """The older file says `id` is not null, the newer one that it may be.
+    Each row group carried its own file's nullability, so the stream merge
+    and the plan's schema both rejected the mix."""
+    from pyiceberg.schema import Schema
+    from pyiceberg.types import NestedField
+
+    catalog, uri = _catalog(tmp_path)
+    catalog.create_table(
+        "db.t",
+        schema=Schema(
+            NestedField(1, "id", LongType(), required=True),
+            NestedField(2, "name", StringType(), required=False),
+        ),
+    ).append(
+        pa.table(
+            {"id": pa.array([1], pa.int64()), "name": ["a"]},
+            schema=pa.schema([pa.field("id", pa.int64(), nullable=False), ("name", pa.string())]),
+        )
+    )
+    with catalog.load_table("db.t").update_schema(allow_incompatible_changes=True) as update:
+        update.update_column("id", required=False)
+    catalog.load_table("db.t").append(pa.table({"id": pa.array([None], pa.int64()), "name": ["b"]}))
+    config = StrataConfig(cache_dir=tmp_path / "cache")
+
+    table, plan = _scan(config, uri)
+    assert sorted(table.column("name").to_pylist()) == ["a", "b"]
+    fetcher = CachedFetcher(config)
+    merger = IncrementalIpcMerger()
+    streamed = b"".join(merger.feed(fetcher.fetch_as_stream_bytes(task)) for task in plan.tasks)
+    assert pa.ipc.open_stream(streamed + merger.finish()).read_all().num_rows == 2
+
+
+def test_a_column_older_files_predate_reads_its_v3_initial_default(tmp_path):
+    """Iceberg v3 lets a new column carry an initial-default: files written
+    before it read that value, not null. pyiceberg cannot write one yet, so the
+    table's metadata gains it in memory."""
+    from pyiceberg.schema import Schema
+    from pyiceberg.table import Table
+    from pyiceberg.types import NestedField
+
+    from strata.iceberg import PyIcebergCatalog
+
+    catalog, uri = _catalog(tmp_path)
+    schema = pa.schema([("id", pa.int64())])
+    catalog.create_table("db.t", schema=schema).append(
+        pa.table({"id": pa.array([1], pa.int64())}, schema=schema)
+    )
+    table = catalog.load_table("db.t")
+    evolved = Schema(
+        NestedField(1, "id", LongType(), required=False),
+        NestedField(
+            2, "team", StringType(), required=False, initial_default="red", write_default="red"
+        ),
+        schema_id=1,
+    )
+    metadata = table.metadata.model_copy(
+        update={
+            "schemas": [*table.metadata.schemas, evolved],
+            "current_schema_id": 1,
+            "last_column_id": 2,
+        }
+    )
+    patched = Table(table._identifier, metadata, table.metadata_location, table.io, table.catalog)
+
+    class WithDefault(PyIcebergCatalog):
+        def load_table(self, table_uri):
+            return patched
+
+    config = StrataConfig(cache_dir=tmp_path / "cache")
+    scanned, _ = _scan(config, uri, planner=ReadPlanner(config, catalog=WithDefault(config)))
+    assert scanned.to_pylist() == [{"id": 1, "team": "red"}]

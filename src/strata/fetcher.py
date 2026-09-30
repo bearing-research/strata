@@ -129,7 +129,7 @@ class PyArrowFetcher:
         if task.equality_deletes and columns is not None:
             keys_only = [
                 name
-                for _, name in task.equality_columns
+                for _, name, _ in task.equality_columns
                 if name is not None and name not in columns
             ]
             columns = [*columns, *keys_only]
@@ -146,9 +146,10 @@ class PyArrowFetcher:
         if task.equality_deletes:
             hit = deleted_mask(
                 table,
-                dict(task.equality_columns),
+                {field_id: name for field_id, name, _ in task.equality_columns},
                 task.equality_deletes,
                 self._equality_deletes.keys,
+                defaults={field_id: default for field_id, _, default in task.equality_columns},
             )
             deleted = hit if deleted is None else pc.or_(deleted, hit)
         if deleted is not None:

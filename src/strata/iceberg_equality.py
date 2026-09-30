@@ -23,12 +23,13 @@ import threading
 from collections import OrderedDict, defaultdict
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
+from itertools import chain
 from typing import Any, cast
 
 import pyarrow as pa
 import pyarrow.compute as _pc
 from pyiceberg.expressions import AlwaysTrue, BooleanExpression
-from pyiceberg.manifest import DataFile, DataFileContent, ManifestEntry
+from pyiceberg.manifest import DataFile, DataFileContent, ManifestContent, ManifestEntry
 from pyiceberg.partitioning import PartitionSpec
 from pyiceberg.table import ManifestGroupPlanner, Table
 from pyiceberg.table.delete_file_index import DeleteFileIndex
@@ -36,6 +37,7 @@ from pyiceberg.table.metadata import INITIAL_SEQUENCE_NUMBER
 from pyiceberg.typedef import Record
 
 from strata import lake_files
+from strata.iceberg_schema import absent_column
 from strata.metadata_cache import EqualityDeleteEntry
 
 # pyarrow.compute registers its kernels at import time, so ty does not know
@@ -93,13 +95,29 @@ def plan_files(
     snapshot = table.snapshot_by_id(snapshot_id)
     if snapshot is None:
         raise ValueError(f"Snapshot {snapshot_id} not found")
-    planner = ManifestGroupPlanner(
+    # Only data files are pruned by the filter. pyiceberg prunes delete files
+    # by it too, which is right for a reader that then filters rows; Strata
+    # returns every row of a row group it reads, so an equality delete whose
+    # keys all miss the filter still has to apply to the rows it does return.
+    manifests = snapshot.manifests(table.io)
+    data_planner = ManifestGroupPlanner(
         table_metadata=table.metadata, io=table.io, row_filter=row_filter or AlwaysTrue()
+    )
+    delete_planner = ManifestGroupPlanner(
+        table_metadata=table.metadata, io=table.io, row_filter=AlwaysTrue()
     )
     data_entries: list[ManifestEntry] = []
     positional = DeleteFileIndex()
     equality = EqualityDeleteIndex(table.metadata.specs())
-    for entries in planner.plan_manifest_entries(snapshot.manifests(table.io)):
+    planned_entries = chain(
+        data_planner.plan_manifest_entries(
+            [m for m in manifests if m.content == ManifestContent.DATA]
+        ),
+        delete_planner.plan_manifest_entries(
+            [m for m in manifests if m.content != ManifestContent.DATA]
+        ),
+    )
+    for entries in planned_entries:
         for entry in entries:
             content = entry.data_file.content
             if content == DataFileContent.DATA:
@@ -231,40 +249,62 @@ class EqualityDeleteSets:
         )
 
 
-def _placeholder(data_type: pa.DataType) -> pa.Scalar:
-    """Any valid value of *data_type*, to stand in for a null in a join key."""
-    if pa.types.is_string(data_type) or pa.types.is_large_string(data_type):
-        return pa.scalar("", data_type)
-    if pa.types.is_binary(data_type) or pa.types.is_large_binary(data_type):
-        return pa.scalar(b"", data_type)
-    if pa.types.is_fixed_size_binary(data_type):
-        return pa.scalar(b"\0" * data_type.byte_width, data_type)
-    if pa.types.is_boolean(data_type):
-        return pa.scalar(False)
-    return pa.array([0]).cast(data_type)[0]
+def _joinable(column: pa.ChunkedArray) -> pa.ChunkedArray:
+    """*column* in a form a join can key on: an extension type (uuid) as its storage."""
+    if isinstance(column.type, pa.BaseExtensionType):
+        return pa.chunked_array(
+            [chunk.storage for chunk in column.chunks], column.type.storage_type
+        )
+    return column
 
 
-def _null_safe(keys: pa.Table) -> pa.Table:
-    """*keys* with each column split in two, so an Arrow join treats null as equal to null.
+def _any_value(*columns: pa.ChunkedArray) -> pa.Scalar | None:
+    """A non-null value from the first of *columns* that has one, or None."""
+    for column in columns:
+        if len(column) > column.null_count:
+            return column[0] if column.null_count == 0 else column.drop_null()[0]
+    return None
+
+
+def _null_safe(data_keys: pa.Table, delete_keys: pa.Table) -> tuple[pa.Table, pa.Table]:
+    """Both sides' keys split so an Arrow join treats null as equal to null.
 
     A hash join never matches null to null; Iceberg equality does. Each key
-    becomes its value with nulls filled plus an is-null flag, and two rows match
-    on those exactly when they match under Iceberg's rule.
+    becomes an is-null flag plus its values with nulls filled, and two rows
+    match on those exactly when they match under Iceberg's rule. The fill must
+    be the same value on both sides, and any value of the key's type will do,
+    so it is taken from the keys themselves: that works for every type. A key
+    that is null on every row of both sides is matched on its flag alone.
     """
-    columns = {}
-    for name in keys.column_names:
-        column = keys.column(name)
-        columns[f"{name}.null"] = column.is_null()
-        columns[name] = column.fill_null(_placeholder(column.type)) if column.null_count else column
-    return pa.table(columns)
+    data_columns: dict[str, pa.ChunkedArray] = {}
+    delete_columns: dict[str, pa.ChunkedArray] = {}
+    for name in delete_keys.column_names:
+        data = _joinable(data_keys.column(name))
+        deletes = _joinable(delete_keys.column(name))
+        data_columns[f"{name}.null"] = data.is_null()
+        delete_columns[f"{name}.null"] = deletes.is_null()
+        if data.null_count or deletes.null_count:
+            fill = _any_value(deletes, data)
+            if fill is None:
+                continue
+            data, deletes = data.fill_null(fill), deletes.fill_null(fill)
+        data_columns[name] = data
+        delete_columns[name] = deletes
+    return pa.table(data_columns), pa.table(delete_columns)
 
 
 def _matching_rows(data_keys: pa.Table, delete_keys: pa.Table) -> pa.Array:
     """For each row of *data_keys*, whether some row of *delete_keys* equals it."""
     rows = pa.array(range(data_keys.num_rows), pa.int64())
-    left = _null_safe(data_keys).append_column("row", rows)
-    right = _null_safe(delete_keys)
-    hits = left.join(right, keys=right.column_names, join_type="left semi").column("row")
+    data, deletes = _null_safe(data_keys, delete_keys)
+    # The hash is built on the right side. The row group is the small side (a
+    # delete set can hold millions of keys), so it is built there and the
+    # deletes stream past it: at 10 million keys against a 100k-row row group,
+    # about 13 ms instead of 3.6 s, holding one row group's hash rather than
+    # a copy of every key per fetch thread.
+    hits = deletes.join(
+        data.append_column("row", rows), keys=deletes.column_names, join_type="right semi"
+    ).column("row")
     return pc.is_in(rows, value_set=hits)
 
 
@@ -273,11 +313,13 @@ def deleted_mask(
     key_columns: dict[int, str | None],
     deletes: Iterable[EqualityDeleteEntry],
     keys: Callable[[EqualityDeleteEntry], pa.Table],
+    defaults: dict[int, Any] | None = None,
 ) -> pa.Array | None:
     """For each row of *table*, whether an equality delete in *deletes* removes it.
 
     *key_columns* maps each equality field id to *table*'s column holding it,
-    or None when the data file predates the column (its values are then null).
+    or None when the data file predates the column (its values are then its
+    *defaults* entry, the v3 initial-default, or null).
     Deletes are grouped by their equality ids; a row goes if any group matches.
     """
     groups: dict[tuple[int, ...], list[EqualityDeleteEntry]] = defaultdict(list)
@@ -293,7 +335,11 @@ def deleted_mask(
             {
                 name: table.column(column)
                 if (column := key_columns.get(field_id)) is not None
-                else pa.nulls(table.num_rows, delete_keys.schema.field(name).type)
+                else absent_column(
+                    table.num_rows,
+                    delete_keys.schema.field(name).type,
+                    (defaults or {}).get(field_id),
+                )
                 for field_id, name in zip(field_ids, names, strict=True)
             }
         )

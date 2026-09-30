@@ -40,6 +40,9 @@ class Column(NamedTuple):
     # (file type, table type) of a struct, list or map column whose nested
     # fields changed since the file was written; None otherwise.
     reshape: tuple[IcebergType, IcebergType] | None = None
+    # What a column the file predates reads as: its Iceberg v3 initial-default,
+    # or None for nulls.
+    default: Any = None
 
 
 def _small(data_type: pa.DataType) -> pa.DataType:
@@ -185,23 +188,45 @@ def file_columns(
     *,
     table_identity: str,
     file_path: str,
+    format_version: int,
 ) -> tuple[Column, ...] | None:
     """How a file with *file_schema* reads as *snapshot_schema*, or None when it already does.
+
+    Every column takes its nullability from the snapshot, so files written on
+    either side of a required column becoming optional stream as one schema.
 
     Raises ``UnsupportedTableFormatError`` for a type change Iceberg does not
     allow, at any depth.
     """
-    mapping = name_mapping or create_mapping_from_schema(snapshot_schema)
-    stored = {field.field_id: field for field in pyarrow_to_schema(file_schema, mapping).fields}
+    stored = {
+        field.field_id: field
+        for field in _file_schema(file_schema, snapshot_schema, name_mapping, format_version).fields
+    }
     columns = []
     for field in snapshot_schema.fields:
+        nullable = not field.required
         held = stored.get(field.field_id)
         if held is None:
-            columns.append(Column(field.name, None, snapshot_arrow_field(field)))
+            columns.append(
+                Column(
+                    field.name,
+                    None,
+                    snapshot_arrow_field(field).with_nullable(nullable),
+                    default=field.initial_default,
+                )
+            )
             continue
         physical = file_schema.field(held.name)
         if _same_type(held.field_type, field.field_type):
-            columns.append(Column(field.name, held.name, physical.with_name(field.name)))
+            read_as = physical.with_name(field.name).with_nullable(nullable)
+            if pa.types.is_timestamp(physical.type):
+                # A v1 or v2 table allows only microseconds, but a file can hold
+                # nanoseconds (or INT96, read as nanoseconds): read it at the
+                # table's unit, truncating, as pyiceberg does.
+                read_as = read_as.with_type(
+                    _small(schema_to_pyarrow(field.field_type, include_field_ids=False))
+                )
+            columns.append(Column(field.name, held.name, read_as))
             continue
         why = _unreadable(held.field_type, field.field_type)
         if why is not None:
@@ -218,24 +243,58 @@ def file_columns(
             else (held.field_type, field.field_type)
         )
         columns.append(
-            Column(field.name, held.name, physical.with_name(field.name).with_type(target), reshape)
+            Column(
+                field.name,
+                held.name,
+                physical.with_name(field.name).with_type(target).with_nullable(nullable),
+                reshape,
+            )
         )
 
     # Compare sources and reshapes, not just fields: Arrow's type equality
     # ignores field ids, so a re-added column or nested field of the old one's
     # name and type looks the same.
-    as_stored = [(field.name, field.name, field, None) for field in file_schema]
-    if as_stored == [(c.name, c.source, c.field, c.reshape) for c in columns]:
+    as_stored = [(field.name, field.name, field, None, None) for field in file_schema]
+    if as_stored == [(c.name, c.source, c.field, c.reshape, c.default) for c in columns]:
         return None
     return tuple(columns)
 
 
+def _file_schema(
+    file_schema: pa.Schema,
+    snapshot_schema: Schema,
+    name_mapping: NameMapping | None,
+    format_version: int,
+) -> Schema:
+    """The Iceberg schema a data file holds (by the name mapping when it has no ids).
+
+    Nanosecond timestamps are read as microseconds in a v1 or v2 table, the
+    only unit those formats allow; pyiceberg's own reader does the same.
+    """
+    return pyarrow_to_schema(
+        file_schema,
+        name_mapping or create_mapping_from_schema(snapshot_schema),
+        downcast_ns_timestamp_to_us=format_version <= 2,
+        format_version=cast(Any, format_version),
+    )
+
+
 def stored_columns(
-    file_schema: pa.Schema, snapshot_schema: Schema, name_mapping: NameMapping | None
+    file_schema: pa.Schema,
+    snapshot_schema: Schema,
+    name_mapping: NameMapping | None,
+    format_version: int,
 ) -> dict[int, str]:
-    """The file's top-level columns by field id (by the name mapping when it has no ids)."""
-    mapping = name_mapping or create_mapping_from_schema(snapshot_schema)
-    return {field.field_id: field.name for field in pyarrow_to_schema(file_schema, mapping).fields}
+    """The file's top-level columns by field id."""
+    schema = _file_schema(file_schema, snapshot_schema, name_mapping, format_version)
+    return {field.field_id: field.name for field in schema.fields}
+
+
+def absent_column(num_rows: int, data_type: pa.DataType, default: Any) -> pa.Array:
+    """A column the data file predates: its Iceberg v3 initial-default, else nulls."""
+    if default is None:
+        return pa.nulls(num_rows, data_type)
+    return pa.repeat(pa.scalar(default, type=data_type), num_rows)
 
 
 def read_as_snapshot(
@@ -249,7 +308,7 @@ def read_as_snapshot(
     arrays = []
     for column in wanted:
         if column.source is None:
-            arrays.append(pa.nulls(table.num_rows, column.field.type))
+            arrays.append(absent_column(table.num_rows, column.field.type, column.default))
         elif column.reshape is not None:
             chunks = table.column(column.source).chunks
             arrays.append(
@@ -259,8 +318,12 @@ def read_as_snapshot(
                 )
             )
         else:
-            arrays.append(table.column(column.source))
-    # Built to the fields' schema, which casts a promoted column to its new width.
+            data = table.column(column.source)
+            if data.type != column.field.type:
+                # Widen a promoted column; truncate a finer timestamp to the
+                # table's unit, as pyiceberg does (hence not a safe cast).
+                data = data.cast(column.field.type, safe=False)
+            arrays.append(data)
     return pa.table(arrays, schema=pa.schema([c.field for c in wanted]))
 
 

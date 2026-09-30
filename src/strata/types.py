@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from datetime import date, datetime
 from decimal import Decimal
 from enum import Enum, StrEnum
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, Field
 
@@ -413,7 +413,8 @@ class Task:
     # by value), and for each key field id the file's column holding it (None
     # when the file predates it). ``num_rows`` is an upper bound when set.
     equality_deletes: "tuple[EqualityDeleteEntry, ...]" = ()
-    equality_columns: tuple[tuple[int, str | None], ...] = ()
+    # (field id, the file's column or None, the key's v3 initial-default)
+    equality_columns: tuple[tuple[int, str | None, Any], ...] = ()
 
     # Populated after fetch
     cached: bool = False
