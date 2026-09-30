@@ -3870,6 +3870,43 @@ class NotebookSession:
             )
 
 
+def _prune_artifacts_in_background(session: NotebookSession) -> threading.Thread | None:
+    """Drop the notebook's older cell values, off the request path.
+
+    Only under a server, whose config says how many to keep: a CLI run or a
+    test opening a session changes nothing in its store. Returns the thread,
+    or ``None`` when nothing was started.
+    """
+    from strata.notebook.harness_user import running_server_config
+
+    # Read as harness_user reads it: the config is whatever the running
+    # server holds, and one without these fields prunes nothing.
+    config = running_server_config()
+    keep = getattr(config, "notebook_keep_superseded_versions", 0)
+    if not keep:
+        return None
+    min_idle_seconds = getattr(config, "artifact_gc_min_idle_seconds", 0.0)
+    manager = session.artifact_manager
+
+    def prune() -> None:
+        try:
+            result = manager.prune(keep, min_idle_seconds)
+        except Exception:
+            logger.exception("Pruning %s's artifacts failed", session.path)
+            return
+        if result["deleted_count"]:
+            logger.info(
+                "Pruned %d earlier cell value(s), %d bytes, from %s",
+                result["deleted_count"],
+                result["deleted_bytes"],
+                session.path,
+            )
+
+    thread = threading.Thread(target=prune, name="notebook-artifact-prune", daemon=True)
+    thread.start()
+    return thread
+
+
 class SessionManager:
     """Manages multiple open notebooks by ID.
 
@@ -3967,6 +4004,7 @@ class SessionManager:
             with timing.phase("session_parse"):
                 notebook_state = parse_notebook(Path(directory))
         session = NotebookSession(notebook_state, Path(directory))
+        _prune_artifacts_in_background(session)
 
         # Ensure venv is ready. Freshly-created notebooks may already have a
         # synced .venv from writer.create_notebook(), so avoid immediately

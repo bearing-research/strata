@@ -436,6 +436,11 @@ class StrataConfig(BaseSettings):
     artifact_gc_max_bytes: Annotated[int, Field(ge=0)] | None = None
     artifact_gc_max_idle_days: Annotated[float, Field(ge=0)] = 30.0
     artifact_gc_min_idle_seconds: Annotated[float, Field(ge=0)] = 3600.0
+    # A notebook's own store (<notebook>/.strata/artifacts) keeps each cell
+    # output's current value plus this many earlier ones, so reverting a
+    # recent edit is still a cache hit; older values are pruned when the
+    # server opens the notebook. 0 turns pruning off and keeps every value.
+    notebook_keep_superseded_versions: Annotated[int, Field(ge=0)] = 3
     # Registry aliases that require approval: moves/deletes of these aliases
     # (e.g. "champion") land in a pending queue instead of applying, and an
     # explicit approve applies them. Empty (the default) = no gating.

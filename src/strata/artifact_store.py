@@ -4490,6 +4490,7 @@ class ArtifactStore:
         *,
         max_idle_days: float | None = None,
         max_bytes: int | None = None,
+        keep_superseded: int | None = None,
         min_idle_seconds: float = 0.0,
         tenant: str | None = None,
         collect_latest: bool = False,
@@ -4517,8 +4518,11 @@ class ArtifactStore:
         Of the candidates, it collects every one idle longer than
         ``max_idle_days``, and, when the store holds more than ``max_bytes``,
         the least recently used until it is down to 80% of that, so a sweep
-        does not have to run again on the next write. With neither set it
-        collects nothing.
+        does not have to run again on the next write. With ``keep_superseded``
+        it also collects, per id, every candidate past the newest that many
+        ready or superseded ones: a notebook keeps a few earlier values of each
+        cell, so reverting a recent edit is still a cache hit, and not every
+        value it ever had. With none of the three set it collects nothing.
 
         An id never loses its highest version while keeping a lower one:
         ``create_artifact`` numbers versions ``MAX(version) + 1``, and a
@@ -4527,6 +4531,8 @@ class ArtifactStore:
         Args:
             max_idle_days: Collect candidates unused for longer than this.
             max_bytes: Keep the store at or under this many bytes.
+            keep_superseded: Per id, keep this many earlier versions beyond
+                its current value; a failed version never counts.
             min_idle_seconds: Never collect anything used more recently.
             tenant: Collect only this tenant's versions (and legacy tenantless
                 ones). ``max_bytes`` still measures the whole store.
@@ -4544,7 +4550,8 @@ class ArtifactStore:
         try:
             used = "COALESCE(av.last_used_at, av.created_at)"
             query = f"""
-                SELECT av.id, av.version, av.byte_size, av.blob_attempt, {used} AS used
+                SELECT av.id, av.version, av.state, av.byte_size, av.blob_attempt,
+                       {used} AS used
                 FROM artifact_versions av
                 LEFT JOIN artifact_names an ON av.id = an.artifact_id AND av.version = an.version
                 LEFT JOIN artifact_aliases aa ON av.id = aa.artifact_id AND av.version = aa.version
@@ -4618,6 +4625,14 @@ class ArtifactStore:
                     if key not in chosen:
                         chosen[key] = row
                         remaining -= row["byte_size"] or 0
+
+            if keep_superseded is not None:
+                kept: dict[str, int] = {}
+                for row in sorted(candidates, key=lambda r: (r["id"], -r["version"])):
+                    if row["state"] != "failed" and kept.get(row["id"], 0) < keep_superseded:
+                        kept[row["id"]] = kept.get(row["id"], 0) + 1
+                        continue
+                    chosen.setdefault((row["id"], row["version"]), row)
 
             chosen = self._without_version_gaps(conn, chosen)
 

@@ -526,3 +526,114 @@ class TestTheCommand:
 
         assert code == 2
         assert "not a size" in capsys.readouterr().err
+
+
+def _values(
+    store: ArtifactStore, artifact_id: str, count: int, *, fail: tuple[int, ...] = ()
+) -> None:
+    """*count* successive values of one cell output; the ones in *fail* failed."""
+    for version in range(1, count + 1):
+        store.create_artifact(artifact_id, f"prov-{artifact_id}-{version}")
+        if version in fail:
+            store.fail_artifact(artifact_id, version)
+            continue
+        store.write_blob(artifact_id, version, b"x")
+        store.finalize_artifact(artifact_id, version, "{}", 1, 1)
+
+
+class TestNotebookStores:
+    OUTPUT = "nb_abc_cell_def_var_df"
+
+    def test_each_output_keeps_its_value_and_the_last_few_before_it(self, store):
+        """Reverting a recent edit is still a cache hit; the tenth edit back is not kept."""
+        _values(store, self.OUTPUT, 6)
+
+        store.garbage_collect(keep_superseded=3)
+
+        assert [_exists(store, (self.OUTPUT, v)) for v in range(1, 7)] == [
+            False,
+            False,
+            True,
+            True,
+            True,
+            True,
+        ]
+        assert store.get_latest_version(self.OUTPUT).version == 6
+
+    def test_a_failed_value_does_not_count(self, store):
+        """v3 failed, so the one earlier value kept beside v4 is v2, not v3."""
+        _values(store, self.OUTPUT, 4, fail=(3,))
+
+        store.garbage_collect(keep_superseded=1)
+
+        assert [_exists(store, (self.OUTPUT, v)) for v in range(1, 5)] == [
+            False,
+            True,
+            False,
+            True,
+        ]
+
+    @staticmethod
+    def _notebook_with_history(tmp_path: Path) -> tuple[Path, ArtifactStore]:
+        from strata.notebook.writer import create_notebook
+
+        notebook = create_notebook(tmp_path, "history", initialize_environment=False)
+        store = ArtifactStore(notebook / ".strata" / "artifacts")
+        _values(store, TestNotebookStores.OUTPUT, 5)
+        return notebook, store
+
+    @staticmethod
+    def _open(notebook: Path, monkeypatch, config) -> None:
+        import threading
+
+        from strata.notebook import harness_user
+        from strata.notebook.session import SessionManager
+
+        monkeypatch.setattr(harness_user, "running_server_config", lambda: config)
+        SessionManager().open_notebook(notebook, skip_initial_venv_sync=True)
+        for thread in threading.enumerate():
+            if thread.name == "notebook-artifact-prune":
+                thread.join(timeout=30)
+
+    def test_the_server_prunes_a_notebook_it_opens(self, tmp_path, monkeypatch):
+        from types import SimpleNamespace
+
+        notebook, store = self._notebook_with_history(tmp_path)
+        config = SimpleNamespace(
+            notebook_keep_superseded_versions=2, artifact_gc_min_idle_seconds=0
+        )
+
+        self._open(notebook, monkeypatch, config)
+
+        assert [_exists(store, (self.OUTPUT, v)) for v in range(1, 6)] == [
+            False,
+            False,
+            True,
+            True,
+            True,
+        ]
+
+    @pytest.mark.parametrize("config", [None, "off"], ids=["no server", "set to 0"])
+    def test_without_a_server_or_with_pruning_off_nothing_changes(
+        self, tmp_path, monkeypatch, config
+    ):
+        from types import SimpleNamespace
+
+        notebook, store = self._notebook_with_history(tmp_path)
+        if config == "off":
+            config = SimpleNamespace(
+                notebook_keep_superseded_versions=0, artifact_gc_min_idle_seconds=0
+            )
+
+        self._open(notebook, monkeypatch, config)
+
+        assert all(_exists(store, (self.OUTPUT, v)) for v in range(1, 6))
+
+    def test_the_setting_reads_from_the_environment(self, tmp_path, monkeypatch):
+        from strata.config import StrataConfig
+
+        monkeypatch.setenv("STRATA_NOTEBOOK_KEEP_SUPERSEDED_VERSIONS", "5")
+
+        config = StrataConfig(cache_dir=tmp_path / "cache", artifact_dir=tmp_path / "a")
+
+        assert config.notebook_keep_superseded_versions == 5

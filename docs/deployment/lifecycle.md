@@ -162,7 +162,12 @@ independently, and pinning again under the same reason only refreshes it. In
 service mode pins need the `artifacts:pin` scope (or `admin:*`) and are scoped to
 the caller's tenant.
 
-GC the **per-notebook** artifact store by deleting the notebook (or by deleting `.strata/artifacts/` while the server isn't running). There's no per-notebook GC endpoint - cell-output artifacts are content-addressed and pruning them would defeat the cache.
+A **notebook's own** artifact store (`.strata/artifacts/`) keeps each cell
+output's current value plus its three most recent earlier values, so reverting
+a recent edit is still a cache hit. Older values are pruned in the background
+when the server opens the notebook. Set `STRATA_NOTEBOOK_KEEP_SUPERSEDED_VERSIONS`
+to keep more, or to `0` to keep every value. Deleting the notebook deletes its
+store.
 
 ## Cleaning up the Iceberg row-group cache
 
@@ -183,7 +188,7 @@ There are **two** caps to understand, and they don't cover everything.
 
 Things with **no built-in size limit**:
 
-- `~/.strata/notebooks/*/​.strata/artifacts/` - per-notebook artifact stores. Grow with each cell run that produces new outputs (cache hits don't add bytes; only new provenance hashes do).
+- `~/.strata/notebooks/*/​.strata/artifacts/` - per-notebook artifact stores. Each cell output keeps its current value and a few earlier ones (`STRATA_NOTEBOOK_KEEP_SUPERSEDED_VERSIONS`), so a store grows with the number and size of a notebook's outputs rather than with every run.
 - `~/.strata/notebooks/*/​.venv/` - per-notebook venvs. Grow with each `uv add`; the heaviest notebooks (torch + cuda) can run to several GB each. Use shared system packages or smaller deps if disk is tight.
 
 Practical guidance:

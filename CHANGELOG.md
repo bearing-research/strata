@@ -24,7 +24,10 @@ exhaustive commit history.
   sweep without a server, and `POST /v1/artifacts/gc` takes `dry_run`. Every
   limit is a setting: `STRATA_ARTIFACT_GC_INTERVAL_SECONDS`, `_MAX_BYTES`,
   `_MAX_IDLE_DAYS` and `_MIN_IDLE_SECONDS`. Service mode sweeps only when an
-  operator sets the interval.
+  operator sets the interval. A notebook's own store keeps each cell output's
+  current value and its three most recent earlier ones
+  (`STRATA_NOTEBOOK_KEEP_SUPERSEDED_VERSIONS`), pruned when the server opens
+  the notebook.
 - **A result can be promoted without a name.** `POST
   /v1/notebooks/{id}/artifacts/{aid}/v/{n}/promote` without `name` copies the
   result and its chain into the team store and names nothing, so a platform
