@@ -16,6 +16,7 @@ import httpx
 import pytest
 
 from strata.artifact_store import ArtifactStore
+from strata.artifact_transfer import PROMOTION_TAG
 from strata.notebook.artifact_integration import NotebookArtifactManager
 
 
@@ -618,6 +619,30 @@ class TestPromoteRoute:
 
         tags = ArtifactStore(team_dir).get_tags(chain["figure"].id, chain["figure"].version)
         assert tags.get("stage") == "candidate"
+
+    def test_without_a_name_the_chain_travels_and_nothing_is_named(
+        self, team_store, team_dir, chain, monkeypatch
+    ):
+        """What a platform publishing a result needs: the chain in the store
+        the link is served from, and nothing added to the team's registry."""
+        result = self._call(chain, team_store, monkeypatch, name=None)
+
+        assert result["name"] is None and result["copied"] == 2
+        store = ArtifactStore(team_dir)
+        assert store.get_artifact(chain["upstream"].id, chain["upstream"].version) is not None
+        assert store.get_artifact(chain["figure"].id, chain["figure"].version) is not None
+        assert httpx.get(f"{team_store}/v1/names/taxi/model", timeout=10).status_code == 404
+        for step in (chain["upstream"], chain["figure"]):
+            assert PROMOTION_TAG not in store.get_tags(step.id, step.version)
+
+    def test_an_alias_without_a_name_is_refused(self, team_store, chain, monkeypatch):
+        from fastapi import HTTPException
+
+        with pytest.raises(HTTPException) as caught:
+            self._call(chain, team_store, monkeypatch, name=None, alias="champion")
+
+        assert caught.value.status_code == 400
+        assert "name" in caught.value.detail
 
     def test_no_team_store_says_which_setting_is_missing(self, team_store, chain, monkeypatch):
         """A 409 naming the config beats a 500 the UI cannot explain."""

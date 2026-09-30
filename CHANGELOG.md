@@ -9,6 +9,13 @@ exhaustive commit history.
 
 ### Added
 
+- **A result can be promoted without a name.** `POST
+  /v1/notebooks/{id}/artifacts/{aid}/v/{n}/promote` without `name` copies the
+  result and its chain into the team store and names nothing, so a platform
+  can move a chain there to publish it without adding every published result
+  to the team's registry. An unnamed copy stamps no promotion tag, and an
+  alias without a name is refused with a 400. The CLI and the MCP tool still
+  take a name.
 - **Scans read Iceberg tables with merge-on-read deletes.** A table that
   Spark, Flink or DuckDB deleted from without rewriting its data files used to
   be refused. The scan now drops the rows its positional delete files (format
