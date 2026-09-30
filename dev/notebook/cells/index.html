@@ -3975,6 +3975,7 @@ database's rows.</p>
 <li><strong>BigQuery</strong>: the configured <code>credentials_path</code> must point at a read-only service account</li>
 </ul>
 <p>For SQLite, DuckDB and PostgreSQL, Strata enforces read-only at the connection/session level. For Snowflake and BigQuery, Strata selects the read-scoped role or credentials, and the cloud platform's grants are the actual boundary. In all cases, the default path is “read unless you explicitly opt into <code>write=true</code>,” and the statement check above refuses anything but a read before the driver sees it.</p>
+<p>In service mode a DuckDB or SQLite cell, which runs inside the server process, is also confined: a DuckDB connection reaches only its own database and the mounts and catalog tables it reads, and a SQLite write cell cannot <code>ATTACH</code>, <code>DETACH</code> or <code>VACUUM</code>. See <a href="../../deployment/service-mode/">Service mode</a>.</p>
 <h3 id="write-cells">Write cells<a class="headerlink" href="#write-cells" title="Permanent link">&para;</a></h3>
 <p>Setup, seeding, and migration scripts opt into writable execution per cell:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-27-1" name="__codelineno-27-1" href="#__codelineno-27-1"></a><span class="o">#</span><span class="w"> </span><span class="o">@</span><span class="k">sql</span><span class="w"> </span><span class="k">connection</span><span class="o">=</span><span class="n">warehouse</span><span class="w"> </span><span class="k">write</span><span class="o">=</span><span class="k">true</span>

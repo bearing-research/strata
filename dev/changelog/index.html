@@ -3365,6 +3365,13 @@ exhaustive commit history.</p>
 <h2 id="unreleased">Unreleased<a class="headerlink" href="#unreleased" title="Permanent link">&para;</a></h2>
 <h3 id="added">Added<a class="headerlink" href="#added" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>A result can be promoted without a name.</strong> <code>POST
+  /v1/notebooks/{id}/artifacts/{aid}/v/{n}/promote</code> without <code>name</code> copies the
+  result and its chain into the team store and names nothing, so a platform
+  can move a chain there to publish it without adding every published result
+  to the team's registry. An unnamed copy stamps no promotion tag, and an
+  alias without a name is refused with a 400. The CLI and the MCP tool still
+  take a name.</li>
 <li><strong>Scans read Iceberg tables with merge-on-read deletes.</strong> A table that
   Spark, Flink or DuckDB deleted from without rewriting its data files used to
   be refused. The scan now drops the rows its positional delete files (format
@@ -3483,11 +3490,12 @@ exhaustive commit history.</p>
   and retention probes asked for a table's name as typed, and Snowflake stores
   an unquoted <code>events</code> as <code>EVENTS</code>, so a change to it was never detected.
   Unquoted identifiers are now looked up uppercased; quoted ones as written.</li>
-<li><strong>A session finds its venv without a sync.</strong> <code>strata run --no-sync</code> and
-  <code>cell add --no-sync</code> ran cells with whatever <code>python</code> was on PATH rather
-  than the notebook's own environment, and failed outright where no bare
-  <code>python</code> exists. A session now takes an existing <code>.venv</code> as its interpreter
-  from the start.</li>
+<li><strong><code>--no-sync</code> runs cells in the notebook's own environment.</strong> <code>strata run
+  --no-sync</code> and the <code>cell</code> commands' <code>--no-sync</code> ran cells with whatever
+  <code>python</code> was on PATH rather than the notebook's <code>.venv</code>, and failed outright
+  where no bare <code>python</code> exists. They now use <code>.venv/bin/python</code>, and refuse
+  with exit 2 when it is missing or points nowhere, rather than checking only
+  that a <code>.venv</code> directory exists.</li>
 <li><strong>Notebook uv commands act on the notebook's environment.</strong> A server
   started with <code>UV_PROJECT_ENVIRONMENT</code> set passed it to every <code>uv sync</code>,
   <code>add</code>, <code>lock</code> and the <code>uv run</code> that starts a cell, which then acted on the

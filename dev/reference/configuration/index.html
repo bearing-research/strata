@@ -1938,6 +1938,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#client" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Client
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#worker" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2501,6 +2512,17 @@
     <span class="md-ellipsis">
       
         TUI
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#client" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Client
       
     </span>
   </a>
@@ -3568,6 +3590,11 @@ deployment, not only in one that opted in to something.</p>
 <td>A shared environment no notebook links to is removed once unused this long, by an hourly sweep in the server or <code>strata env gc</code>. One a notebook links to is never removed.</td>
 </tr>
 <tr>
+<td><code>STRATA_NOTEBOOK_OBJECT_CODEC</code></td>
+<td><code>cloudpickle</code></td>
+<td>How a cell's value that is neither Arrow nor JSON is pickled when it is handed to another cell: <code>cloudpickle</code> (stdlib <code>pickle</code> if cloudpickle is not installed) or <code>pickle</code>. Any other value fails the cell's serialization.</td>
+</tr>
+<tr>
 <td><code>STRATA_PERSONAL_MODE_USER_HEADER</code></td>
 <td><code>None</code></td>
 <td>Request header carrying caller identity. When set in personal mode, notebooks are stamped with the caller's identity on create and <code>discover</code>/<code>delete</code> scope to it. Intended for proxy-fronted personal deployments.</td>
@@ -3663,6 +3690,26 @@ flag, and the flag wins.</p>
 </tr>
 </tbody>
 </table>
+<h2 id="client">Client<a class="headerlink" href="#client" title="Permanent link">&para;</a></h2>
+<p>Read by <code>StrataClient</code> (the <code>strata-client</code> package) when it is constructed
+without a URL or a config, to find the server. The server does not read
+<code>STRATA_SERVER_URL</code>.</p>
+<table>
+<thead>
+<tr>
+<th>Variable</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>STRATA_SERVER_URL</code></td>
+<td><code>None</code></td>
+<td>The server's full URL, e.g. <code>https://strata.internal:8765</code>. Wins over <code>STRATA_HOST</code> / <code>STRATA_PORT</code>, which win over <code>[tool.strata]</code> <code>host</code> / <code>port</code> in the nearest <code>pyproject.toml</code>; with none of them set the client uses <code>http://127.0.0.1:8765</code>.</td>
+</tr>
+</tbody>
+</table>
 <h2 id="worker">Worker<a class="headerlink" href="#worker" title="Permanent link">&para;</a></h2>
 <p>These are read by <code>strata-worker</code>, not the main server. They have no effect on a <code>strata-notebook</code> process.</p>
 <table>
@@ -3716,6 +3763,7 @@ flag, and the flag wins.</p>
 </tr>
 </tbody>
 </table>
+<p>The worker's input downloads, result uploads and log forwarding connect only to an address that passed the private-address check, and they connect directly: <code>HTTPS_PROXY</code> and the other proxy variables are ignored, because through a proxy the proxy would resolve the name and the check would say nothing about where it connects. A worker that can reach its store only through a proxy needs <code>STRATA_WORKER_ALLOW_LOCAL_HOSTS</code>, under which nothing is checked and the proxy variables apply. See the SSRF defenses in the <a href="../executor-protocol/">executor protocol</a>.</p>
 <h2 id="rate-limiting">Rate Limiting<a class="headerlink" href="#rate-limiting" title="Permanent link">&para;</a></h2>
 <table>
 <thead>
