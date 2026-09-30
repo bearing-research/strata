@@ -32,7 +32,7 @@ invocation opens its own `NotebookSession`, runs the cells, and exits.
 | Flag          | Description                                                      |
 | ------------- | ---------------------------------------------------------------- |
 | `--force`     | Ignore the artifact cache and re-execute every cell from scratch |
-| `--no-sync`   | Skip `uv sync`; require `.venv/` to already exist                |
+| `--no-sync`   | Skip `uv sync`; use `.venv/bin/python`, which must already exist |
 | `--timeout`   | Per-cell timeout (seconds) for this run, overriding the 300s default; a per-cell `# @timeout` or notebook.toml `timeout` still wins. For compute-heavy cells (model training, feature extraction). |
 | `--format`    | `human` (default) or `json` - both write to stdout               |
 | `--quiet`     | Suppress per-cell status lines (human format only)               |
@@ -272,7 +272,7 @@ strata cell test nb featurize --format json | jq '.cases[] | select(.outcome != 
 ```
 
 Exit codes: `cell run` → `0` ran ok, `1` the cell errored (or unknown cell), `2`
-setup error (no venv under `--no-sync`, sync failure). `cell test` → `0` all
+setup error (no `.venv/bin/python` under `--no-sync`, sync failure). `cell test` → `0` all
 passed, `1` a test failed/errored, `2` pytest unavailable in the venv.
 
 ## Authoring cells and dependencies (`cell add/edit/rm/mv`, `dep`)

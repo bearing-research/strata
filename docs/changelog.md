@@ -11,6 +11,13 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
 
 ### Added
 
+- **A result can be promoted without a name.** `POST
+  /v1/notebooks/{id}/artifacts/{aid}/v/{n}/promote` without `name` copies the
+  result and its chain into the team store and names nothing, so a platform
+  can move a chain there to publish it without adding every published result
+  to the team's registry. An unnamed copy stamps no promotion tag, and an
+  alias without a name is refused with a 400. The CLI and the MCP tool still
+  take a name.
 - **Scans read Iceberg tables with merge-on-read deletes.** A table that
   Spark, Flink or DuckDB deleted from without rewriting its data files used to
   be refused. The scan now drops the rows its positional delete files (format
@@ -129,11 +136,12 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   and retention probes asked for a table's name as typed, and Snowflake stores
   an unquoted `events` as `EVENTS`, so a change to it was never detected.
   Unquoted identifiers are now looked up uppercased; quoted ones as written.
-- **A session finds its venv without a sync.** `strata run --no-sync` and
-  `cell add --no-sync` ran cells with whatever `python` was on PATH rather
-  than the notebook's own environment, and failed outright where no bare
-  `python` exists. A session now takes an existing `.venv` as its interpreter
-  from the start.
+- **`--no-sync` runs cells in the notebook's own environment.** `strata run
+  --no-sync` and the `cell` commands' `--no-sync` ran cells with whatever
+  `python` was on PATH rather than the notebook's `.venv`, and failed outright
+  where no bare `python` exists. They now use `.venv/bin/python`, and refuse
+  with exit 2 when it is missing or points nowhere, rather than checking only
+  that a `.venv` directory exists.
 - **Notebook uv commands act on the notebook's environment.** A server
   started with `UV_PROJECT_ENVIRONMENT` set passed it to every `uv sync`,
   `add`, `lock` and the `uv run` that starts a cell, which then acted on the
