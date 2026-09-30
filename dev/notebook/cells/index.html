@@ -3964,6 +3964,7 @@ database's rows.</p>
 </tbody>
 </table>
 <p>The schema fingerprint catches metadata-only changes (<code>ADD COLUMN</code>, type changes, nullability flips) that the freshness token would miss.</p>
+<p>A probe can only ask about a table the query names. A table named at run time (Snowflake's <code>IDENTIFIER($tbl)</code> or <code>TABLE($tbl)</code>), a table function (<code>read_parquet(...)</code>, <code>query_table(...)</code>, a Postgres set-returning function) or a file read in place of a table (DuckDB's <code>FROM 'events.parquet'</code>) is not fingerprinted, so under <code>fingerprint</code> such a cell re-runs every time, and the header says so. Its result's content is folded into its provenance, so a downstream cell re-runs only when the rows actually changed. Declare <code># @cache session</code> or <code># @cache ttl=...</code> to reuse results instead, or read files through a mount on a <a href="#duckdb-over-the-lake">DuckDB lake connection</a>, whose fingerprint the cache does track.</p>
 <h3 id="read-only-by-default">Read-only by default<a class="headerlink" href="#read-only-by-default" title="Permanent link">&para;</a></h3>
 <p>SQL cells are <strong>read-only by default</strong>, but the enforcement mechanism depends on the backend:</p>
 <ul>
