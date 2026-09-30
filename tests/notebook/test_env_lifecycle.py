@@ -184,6 +184,35 @@ class TestSessionVenvPython:
         assert session.venv_python is None
         assert "not ready" in (session.environment_execution_block_message() or "")
 
+    def test_a_reopen_retries_a_sync_that_raised_instead_of_undoing_it(
+        self, tmp_path: Path, monkeypatch
+    ):
+        """Reopening an open notebook (a browser reload) refreshed the runtime
+        from whatever .venv held, which recorded it as the interpreter and made
+        the cells runnable although the sync never succeeded. The reopen syncs
+        again: a failure keeps the cells blocked, a success unblocks them."""
+        from strata.notebook.session import SessionManager
+
+        nb_dir = create_notebook(tmp_path, "sync_raises_reopen")
+        synced = NotebookSession.ensure_venv_synced
+
+        def boom(self):
+            raise RuntimeError("shared environment store is unreachable")
+
+        monkeypatch.setattr(NotebookSession, "ensure_venv_synced", boom)
+        manager = SessionManager()
+        session = manager.open_notebook(nb_dir)
+
+        reopened = manager.open_notebook(nb_dir, reuse_existing=True)
+        assert reopened is session
+        assert session.venv_python is None
+        assert "not ready" in (session.environment_execution_block_message() or "")
+
+        monkeypatch.setattr(NotebookSession, "ensure_venv_synced", synced)
+        manager.open_notebook(nb_dir, reuse_existing=True)
+        assert session.venv_python == nb_dir / ".venv" / "bin" / "python"
+        assert session.environment_execution_block_message() is None
+
     def test_no_sync_takes_the_prepared_venv_as_the_interpreter(self, tmp_path: Path):
         """`strata run --no-sync` and `cell add --no-sync` never sync; they
         used to leave the session on whatever `python` was on PATH."""

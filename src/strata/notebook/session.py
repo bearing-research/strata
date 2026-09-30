@@ -3941,12 +3941,20 @@ class SessionManager:
                 else:
                     with timing.phase("session_reload"):
                         existing.reload()
+                # A session with no interpreter never got one from a sync (it
+                # raised on open). Refreshing would record whatever .venv holds
+                # and make the cells runnable; syncing again keeps a failure
+                # visible and clears it once the sync succeeds.
+                if existing.venv_python is None:
+                    phase, prepare = "session_env_sync", existing.ensure_venv_synced
+                else:
+                    phase, prepare = "session_env_refresh", existing.refresh_environment_runtime
                 try:
                     if timing is None:
-                        existing.refresh_environment_runtime()
+                        prepare()
                     else:
-                        with timing.phase("session_env_refresh"):
-                            existing.refresh_environment_runtime()
+                        with timing.phase(phase):
+                            prepare()
                 except Exception as e:
                     logger.warning("Failed to refresh existing notebook runtime: %s", e)
                 # Re-check renv.lock on every reopen. The hash short-circuit
