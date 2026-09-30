@@ -611,7 +611,16 @@ set up, it can reach only its own database, the roots of the mounts it reads,
 and the locations of the catalog tables it reads; file access outside those is
 refused, and the cell cannot turn it back on. So `read_text` of a server file,
 `COPY ... TO`, and `ATTACH` of another path all fail. A catalog table whose data
-files live outside its own location cannot be read this way. A SQLite cell also
+files live outside its own location cannot be read this way.
+
+A mount's root is therefore as much of the disk as the cell may read, as the
+server, so a SQL cell refuses a local (`file://`) mount root, after following
+links, that is `/` or has fewer than two path components (`/data`); that holds
+the server's state (the artifact directory, the cache directory, the metadata
+database's directory, the notebook storage directory or the server's home); or
+that is inside the server's home, `/proc`, `/sys` or `/dev`. The cell fails
+naming the mount. Python cells mount the same roots unchecked: they run as the
+harness user, whose own file permissions decide what a root exposes. A SQLite cell also
 runs in the server process: in a write cell `ATTACH`, `DETACH` and `VACUUM` are
 refused, since they reach other files (a read cell runs only reads already).
 Postgres, Snowflake and BigQuery cells send the query to their database server.
