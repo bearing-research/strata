@@ -264,15 +264,17 @@ def test_analyze_with_dialect_dedupes_table_references():
 
 def test_identifier_with_a_literal_names_its_table():
     """Snowflake's ``IDENTIFIER('...')`` with a string is a static name,
-    qualified or not, so the analyzer can fingerprint the table."""
+    qualified or not, so the analyzer can fingerprint the table. Snowflake
+    reads the string as it reads an identifier, so unquoted parts are the
+    uppercased names it stores."""
     src = "# @sql connection=db\nSELECT * FROM IDENTIFIER('events')"
     result = analyze_sql_cell(src, dialect="snowflake")
-    assert result.tables == [QualifiedTable(catalog=None, schema=None, name="events")]
+    assert result.tables == [QualifiedTable(catalog=None, schema=None, name="EVENTS")]
     assert result.unresolved_tables == []
 
     src = "# @sql connection=db\nSELECT * FROM IDENTIFIER('db.sch.events')"
     result = analyze_sql_cell(src, dialect="snowflake")
-    assert result.tables == [QualifiedTable(catalog="db", schema="sch", name="events")]
+    assert result.tables == [QualifiedTable(catalog="DB", schema="SCH", name="EVENTS")]
 
 
 @pytest.mark.parametrize("reference", ["IDENTIFIER($tbl)", "IDENTIFIER(:tbl)", "IDENTIFIER(?)"])
@@ -282,8 +284,56 @@ def test_identifier_named_at_run_time_is_reported_not_guessed(reference):
     fingerprinting that would track a table the query never reads."""
     src = f"# @sql connection=db\nSELECT * FROM {reference} JOIN orders USING (id)"
     result = analyze_sql_cell(src, dialect="snowflake")
-    assert result.tables == [QualifiedTable(catalog=None, schema=None, name="orders")]
+    assert result.tables == [QualifiedTable(catalog=None, schema=None, name="ORDERS")]
     assert result.unresolved_tables == [reference]
+
+
+@pytest.mark.parametrize(
+    ("dialect", "reference"),
+    [
+        ("snowflake", "TABLE($tbl)"),
+        ("snowflake", "TABLE(IDENTIFIER($tbl))"),
+        ("snowflake", "TABLE(MY_UDTF(1))"),
+        ("snowflake", "$tbl"),
+        ("snowflake", "$sch.events"),
+        ("duckdb", "QUERY_TABLE(GETVARIABLE('t'))"),
+        ("duckdb", "READ_PARQUET('events.parquet')"),
+        ("duckdb", "'events.parquet'"),
+        ("postgres", "MY_FUNC()"),
+    ],
+)
+def test_a_table_no_probe_can_name_is_reported_not_tracked(dialect, reference):
+    """A table function, a session variable or a file path sits where a table
+    name goes, and a freshness probe cannot ask about any of them. Each used to
+    come back as a table with an empty or invented name, or as nothing at all,
+    and the cell was then served from its cache however the data changed."""
+    src = f"# @sql connection=db\nSELECT * FROM {reference} AS x JOIN orders USING (id)"
+    result = analyze_sql_cell(src, dialect=dialect)
+    assert [t.name.lower() for t in result.tables] == ["orders"]
+    assert result.unresolved_tables == [reference]
+
+
+def test_table_with_a_literal_names_its_table():
+    """Snowflake's ``TABLE('...')`` with a string names a table, as
+    ``IDENTIFIER('...')`` does."""
+    src = "# @sql connection=db\nSELECT * FROM TABLE('db.sch.events')"
+    result = analyze_sql_cell(src, dialect="snowflake")
+    assert result.tables == [QualifiedTable(catalog="DB", schema="SCH", name="EVENTS")]
+    assert result.unresolved_tables == []
+
+
+def test_snowflake_names_are_the_ones_it_stores():
+    """Snowflake stores an unquoted identifier uppercased and a quoted one as
+    written; other dialects keep the name as typed."""
+    src = '# @sql connection=db\nSELECT * FROM mydb.public.events JOIN "MixedCase" USING (id)'
+    result = analyze_sql_cell(src, dialect="snowflake")
+    assert result.tables == [
+        QualifiedTable(catalog="MYDB", schema="PUBLIC", name="EVENTS"),
+        QualifiedTable(catalog=None, schema=None, name="MixedCase"),
+    ]
+
+    result = analyze_sql_cell(src, dialect="postgres")
+    assert [t.name for t in result.tables] == ["events", "MixedCase"]
 
 
 # --- result type ----------------------------------------------------------

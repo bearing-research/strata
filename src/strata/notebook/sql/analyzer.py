@@ -478,29 +478,92 @@ def base_table_nodes(tree: Any, dialect: str) -> list[Any]:
     return nodes
 
 
-def _table_reference(table_node: Any, dialect: str) -> QualifiedTable | None:
-    """The table *table_node* names, or ``None`` when it is named only at run time.
+def _stored_name(identifier: Any, dialect: str) -> str | None:
+    """*identifier*'s name as the database stores it, or ``None`` when absent.
 
-    Snowflake's ``IDENTIFIER(...)`` parses to a ``DynamicIdentifier``. A string
-    literal inside it is a static, possibly qualified name; a session variable
-    (``$var``) or a bind parameter (``:name``, ``?``) is resolved only when the
-    query runs.
+    Snowflake stores an unquoted identifier uppercased, and its
+    ``INFORMATION_SCHEMA`` compares names exactly: ``events`` is ``EVENTS``
+    there, while ``"events"`` stays as written. A probe that asked for the name
+    as typed found nothing, and "missing" is the same answer on every run.
     """
     from sqlglot import exp
 
-    if isinstance(table_node.this, exp.DynamicIdentifier):
-        inner = table_node.this.this
-        if not (isinstance(inner, exp.Literal) and inner.is_string):
+    if not isinstance(identifier, exp.Identifier):
+        return identifier or None  # absent: ``None``, or ``""`` for ``db..t``
+    if not identifier.name:
+        return None
+    if dialect == "snowflake" and not identifier.args.get("quoted"):
+        return identifier.name.upper()
+    return identifier.name
+
+
+def _qualified(table_node: Any, dialect: str) -> QualifiedTable | None:
+    """The table *table_node* names, or ``None`` when a part of it is not a name.
+
+    ``$tbl``, ``$sch.events``, ``getvariable('db').events`` and a table function
+    such as ``read_parquet(...)`` all sit where a name goes, and each is
+    resolved only when the query runs.
+    """
+    from sqlglot import exp
+
+    this = table_node.this
+    if not isinstance(this, exp.Identifier) or not this.name:
+        return None
+    for qualifier in (table_node.args.get("catalog"), table_node.args.get("db")):
+        if not (qualifier is None or isinstance(qualifier, (str, exp.Identifier))):
             return None
-        named = exp.to_table(inner.name, dialect=dialect)
-        return QualifiedTable(
-            catalog=named.catalog or None, schema=named.db or None, name=named.name
-        )
     return QualifiedTable(
-        catalog=table_node.catalog or None,
-        schema=table_node.db or None,
-        name=table_node.name,
+        catalog=_stored_name(table_node.args.get("catalog"), dialect),
+        schema=_stored_name(table_node.args.get("db"), dialect),
+        name=_stored_name(this, dialect) or "",
     )
+
+
+def _named_by_literal(node: Any, dialect: str) -> QualifiedTable | None:
+    """The table a string literal names, as ``IDENTIFIER('db.sch.t')`` or
+    ``TABLE('t')`` do, or ``None`` for anything that is not a string literal."""
+    from sqlglot import exp
+
+    if isinstance(node, exp.DynamicIdentifier):
+        node = node.this
+    if not (isinstance(node, exp.Literal) and node.is_string and node.name):
+        return None
+    return _qualified(exp.to_table(node.name, dialect=dialect), dialect)
+
+
+def _table_reference(table_node: Any, sql: str, dialect: str) -> QualifiedTable | None:
+    """The table *table_node* names, or ``None`` when no probe can name it.
+
+    A base table is a name, qualified or not. Anything else in its place is
+    resolved only when the query runs, and a freshness probe cannot ask about
+    it: Snowflake's ``IDENTIFIER($var)`` or ``IDENTIFIER(?)`` (a string literal
+    inside ``IDENTIFIER`` is a static name, and is tracked), a session variable
+    (``$tbl``), and a table function such as DuckDB's ``query_table(...)`` or
+    ``read_parquet(...)`` or a Postgres set-returning function, which read
+    whatever they read.
+
+    So is DuckDB's ``FROM 'events.parquet'``: a string where a table goes is a
+    file read, not a table, and nothing fingerprints the file. A mount on a
+    lake connection is the way to read files the cache can see, since each
+    mount's fingerprint is folded into the cell's provenance.
+    """
+    from sqlglot import exp
+
+    this = table_node.this
+    if isinstance(this, exp.DynamicIdentifier):
+        return _named_by_literal(this, dialect)
+    start = this.meta.get("start")
+    if isinstance(this, exp.Identifier) and start is not None and sql[start] == "'":
+        return None
+    return _qualified(table_node, dialect)
+
+
+def _unresolved_text(table_node: Any, sql: str, dialect: str) -> str:
+    """How a reference no probe can name reads in the cell, for a diagnostic."""
+    start, end = table_node.this.meta.get("start"), table_node.this.meta.get("end")
+    if start is not None and end is not None and sql[start] == "'":
+        return sql[start : end + 1]
+    return ".".join(part.sql(dialect=dialect) for part in table_node.parts)
 
 
 def _extract_tables(sql: str, dialect: str) -> tuple[list[QualifiedTable], list[str]]:
@@ -528,6 +591,17 @@ def _extract_tables(sql: str, dialect: str) -> tuple[list[QualifiedTable], list[
     seen: set[tuple[str | None, str | None, str]] = set()
     out: list[QualifiedTable] = []
     unresolved: list[str] = []
+
+    def record(qt: QualifiedTable | None, text: str) -> None:
+        if qt is None:
+            if text not in unresolved:
+                unresolved.append(text)
+            return
+        key = (qt.catalog, qt.schema, qt.name)
+        if key not in seen:
+            seen.add(key)
+            out.append(qt)
+
     for parsed in parsed_list:
         if parsed is None:
             continue
@@ -538,15 +612,14 @@ def _extract_tables(sql: str, dialect: str) -> tuple[list[QualifiedTable], list[
                     # Reference to a CTE / derived table, not a
                     # base table.
                     continue
-                qt = _table_reference(table_node, dialect)
-                if qt is None:
-                    text = table_node.this.sql(dialect=dialect)
-                    if text not in unresolved:
-                        unresolved.append(text)
-                    continue
-                key = (qt.catalog, qt.schema, qt.name)
-                if key in seen:
-                    continue
-                seen.add(key)
-                out.append(qt)
+                qt = _table_reference(table_node, sql, dialect)
+                record(qt, "" if qt else _unresolved_text(table_node, sql, dialect))
+            # Snowflake's ``TABLE(...)`` is not an ``exp.Table``, so the walk
+            # above never sees it. With a string literal it names a table;
+            # with ``$var``, ``IDENTIFIER($var)`` or a table function it is
+            # resolved only when the query runs.
+            for rows_node in scope.find_all(exp.TableFromRows):
+                bare = rows_node.copy()
+                bare.set("alias", None)
+                record(_named_by_literal(rows_node.this, dialect), bare.sql(dialect=dialect))
     return out, unresolved
