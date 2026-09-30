@@ -140,6 +140,7 @@ print(df.head())
 - Same inputs + transform → existing artifact, no recomputation
 - Artifacts are immutable and versioned
 - Names are mutable pointers to specific artifact versions
+- An unnamed result is a cache entry: kept while it is used, and computed again if the store collected it. Name or pin a result to keep it ([retention](../deployment/lifecycle.md#cleaning-up-the-core-artifact-store))
 - Provenance hash is derived from pinned inputs and transform identity
 
 ## What's next

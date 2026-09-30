@@ -11,6 +11,25 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
 
 ### Added
 
+- **The artifact store stays bounded on its own.** A personal server sweeps its
+  store every hour, collecting results unused for 30 days, and the least
+  recently used whenever the store is over 20 GiB (down to 80% of that).
+  Before, every distinct `materialize` was kept forever, and the existing
+  sweep, which was off by default, could not have collected one anyway: each
+  result is the only version of an id the store made up for it, and the latest
+  version of an id was always kept. Retention now tracks when a version was
+  last used (a cache hit or a read) rather than when it was made, and knows
+  which ids the store made up, so a notebook's cell outputs, whose latest
+  version is the cell's value, are still kept. Nothing named, aliased, pinned
+  or published is collected, nor anything those or a running build depend on,
+  nor anything used in the last hour. `strata artifact gc` runs or previews a
+  sweep without a server, and `POST /v1/artifacts/gc` takes `dry_run`. Every
+  limit is a setting: `STRATA_ARTIFACT_GC_INTERVAL_SECONDS`, `_MAX_BYTES`,
+  `_MAX_IDLE_DAYS` and `_MIN_IDLE_SECONDS`. Service mode sweeps only when an
+  operator sets the interval. A notebook's own store keeps each cell output's
+  current value and its three most recent earlier ones
+  (`STRATA_NOTEBOOK_KEEP_SUPERSEDED_VERSIONS`), pruned when the server opens
+  the notebook.
 - **A result can be promoted without a name.** `POST
   /v1/notebooks/{id}/artifacts/{aid}/v/{n}/promote` without `name` copies the
   result and its chain into the team store and names nothing, so a platform
@@ -45,6 +64,13 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
 
 ### Changed
 
+- **An unnamed result is a cache entry.** In personal mode a `materialize`
+  result nobody has used for 30 days, or the least recently used ones once the
+  store is over 20 GiB, is collected, and the same request computes it again.
+  Name it or pin it to keep it. `STRATA_ARTIFACT_GC_MAX_AGE_DAYS` is gone:
+  `STRATA_ARTIFACT_GC_MAX_IDLE_DAYS` counts from a version's last use, and
+  `garbage_collect` (client and route) takes `max_idle_days` in place of
+  `max_age_days`.
 - **Nothing 0.8.0 cached for a scan is reused.** The row-group cache moves to
   a new version directory, the metadata store is discarded and rebuilt, and a
   scan's provenance now includes the schema, so scan artifacts are built

@@ -1216,32 +1216,49 @@ class StrataClient:
         response.raise_for_status()
         return response.json()
 
-    def garbage_collect(self, max_age_days: float = 7.0, collect_latest: bool = False) -> dict:
-        """Garbage collect unreachable artifacts.
+    def garbage_collect(
+        self,
+        *,
+        max_idle_days: float | None = None,
+        max_bytes: int | None = None,
+        min_idle_seconds: float | None = None,
+        collect_latest: bool = False,
+        dry_run: bool = False,
+    ) -> dict:
+        """Collect the artifact versions nothing needs, least recently used first.
 
-        Deletes artifact versions that:
-        1. Have no name or alias pointing at them
-        2. Are not the latest version of their id (unless ``collect_latest``)
-        3. Are older than ``max_age_days``
-        4. Are in "ready", "superseded" or "failed" state
-
-        The latest version of an id is its *current value* — the handle
-        ``get_latest_version`` resolves, and the only one some producers ever
-        have (notebook cell outputs are never named) — so it is spared unless
-        you explicitly ask for it.
+        Nothing named, aliased, pinned or published is collected, nor anything
+        those depend on, nor the current value of an id somebody chose (a
+        notebook's cell outputs). An unnamed ``materialize`` result is a cache
+        entry: name or pin it to keep it. Each argument left out takes the
+        server's configured retention, so a bare call does what its scheduled
+        sweep does.
 
         Args:
-            max_age_days: Maximum age in days for unreachable artifacts (default 7)
-            collect_latest: Also reclaim current values. Off by default because
-                it deletes live state.
+            max_idle_days: Collect what has not been used for this long.
+            max_bytes: Collect least recently used first until the store is
+                at 80% of this.
+            min_idle_seconds: Never collect anything used more recently.
+            collect_latest: Also collect the current value of caller-named
+                ids. Off by default because it deletes live state.
+            dry_run: Report what would go, and delete nothing.
 
         Returns:
-            Dict with GC statistics (deleted_count, deleted_bytes, cutoff_timestamp)
+            Dict with ``deleted_count``, ``deleted_bytes``, ``store_bytes``
+            and, with ``dry_run``, the chosen versions under ``collected``.
         """
-        response = self._client.post(
-            "/v1/artifacts/gc",
-            params={"max_age_days": max_age_days, "collect_latest": collect_latest},
-        )
+        params: dict[str, float | int | bool] = {
+            "collect_latest": collect_latest,
+            "dry_run": dry_run,
+        }
+        for name, value in (
+            ("max_idle_days", max_idle_days),
+            ("max_bytes", max_bytes),
+            ("min_idle_seconds", min_idle_seconds),
+        ):
+            if value is not None:
+                params[name] = value
+        response = self._client.post("/v1/artifacts/gc", params=params)
         response.raise_for_status()
         return response.json()
 

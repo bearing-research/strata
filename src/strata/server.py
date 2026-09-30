@@ -10,7 +10,7 @@ import re
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Any, cast
 
 if TYPE_CHECKING:
     from starlette.applications import Starlette
@@ -765,16 +765,17 @@ def _should_warn_unset_signing_secret(config: StrataConfig) -> bool:
     return not config.transform_signing_secret and config.deployment_mode == "service"
 
 
-async def _artifact_gc_loop(store, interval_seconds: float, max_age_days: float) -> None:
+async def _artifact_gc_loop(store, interval_seconds: float, policy: dict[str, Any]) -> None:
     """Run ``garbage_collect`` every ``interval_seconds`` until cancelled.
 
-    A pass that raises is logged and the loop carries on: one bad sweep must not
-    turn scheduled collection off for the life of the server.
+    *policy* is ``StrataConfig.artifact_gc_policy()``. A pass that raises is
+    logged and the loop carries on: one bad sweep must not turn scheduled
+    collection off for the life of the server.
     """
     while True:
         await asyncio.sleep(interval_seconds)
         try:
-            result = await asyncio.to_thread(store.garbage_collect, max_age_days=max_age_days)
+            result = await asyncio.to_thread(store.garbage_collect, **policy)
         except Exception:
             logger.exception("artifact_gc_failed")
             continue
@@ -1022,7 +1023,7 @@ async def lifespan(app: FastAPI):
                 _artifact_gc_loop(
                     gc_store,
                     config.artifact_gc_interval_seconds,
-                    config.artifact_gc_max_age_days,
+                    config.artifact_gc_policy(),
                 )
             )
 
@@ -2040,8 +2041,9 @@ async def materialize_artifact(request: MaterializeRequest):
 
     # Cache miss — create a new artifact in building state (tenant-scoped). A
     # refresh rebuild reuses the existing id (#123); see rebuild_artifact_id.
+    new_id = str(uuid.uuid4())
     artifact_id = materialize_service.rebuild_artifact_id(
-        existing, refresh=request.refresh, new_id=str(uuid.uuid4())
+        existing, refresh=request.refresh, new_id=new_id
     )
     version = store.create_artifact(
         artifact_id=artifact_id,
@@ -2050,6 +2052,7 @@ async def materialize_artifact(request: MaterializeRequest):
         input_versions=input_versions,  # Track for staleness detection
         tenant=tenant_id,
         principal=principal_id,
+        minted=artifact_id == new_id,
     )
 
     artifact_uri = f"strata://artifact/{artifact_id}@v={version}"
@@ -2502,8 +2505,9 @@ async def _handle_identity_materialize(
     # rebuild. The stream id stays unique per request (older streams for the same
     # artifact id may linger in the registry); a fresh miss reuses the artifact
     # id as the stream id.
+    new_id = str(uuid.uuid4())
     artifact_id = materialize_service.rebuild_artifact_id(
-        existing, refresh=request.refresh, new_id=str(uuid.uuid4())
+        existing, refresh=request.refresh, new_id=new_id
     )
     stream_id = str(uuid.uuid4()) if (request.refresh and existing is not None) else artifact_id
 
@@ -2522,6 +2526,7 @@ async def _handle_identity_materialize(
             input_versions=input_versions,
             tenant=tenant_id,
             principal=principal_id,
+            minted=artifact_id == new_id,
         )
 
     artifact_uri = f"strata://artifact/{artifact_id}@v={artifact_version}"

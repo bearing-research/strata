@@ -59,6 +59,17 @@ class NotebookArtifactManager:
         # Initialize artifact store with local blob storage
         self.artifact_store = ArtifactStore(artifact_dir)
 
+    def prune(self, keep_superseded: int, min_idle_seconds: float) -> dict:
+        """Drop each cell output's values older than its newest *keep_superseded*.
+
+        The current value of every output is kept (its id is the notebook's
+        own, never minted), as is anything named, pinned or published and
+        anything used in the last *min_idle_seconds*.
+        """
+        return self.artifact_store.garbage_collect(
+            keep_superseded=keep_superseded, min_idle_seconds=min_idle_seconds
+        )
+
     def find_cached(self, provenance_hash: str) -> ArtifactVersion | None:
         """Find a cached artifact by provenance hash.
 

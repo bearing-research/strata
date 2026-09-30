@@ -89,10 +89,41 @@ Deleting a notebook also deletes its `.strata/artifacts/` - there's no shared ar
 
 ## Cleaning up the Core artifact store
 
-The **server-side** artifact store (driven by `StrataClient.materialize`) accumulates blobs that may no longer be referenced by any name pointer. GC it on demand, or on a timer with `STRATA_ARTIFACT_GC_INTERVAL_SECONDS` (off by default) and `STRATA_ARTIFACT_GC_MAX_AGE_DAYS` (default 7):
+The **server-side** artifact store (driven by `StrataClient.materialize`) keeps
+every distinct result it computes, so it grows with every new query. In
+personal mode it looks after itself: every hour the server collects what
+nothing needs, least recently used first:
+
+- anything unused for 30 days;
+- and, when the store is over 20 GiB, the least recently used until it is down
+  to 80% of that.
+
+Service mode does this only when an operator sets
+`STRATA_ARTIFACT_GC_INTERVAL_SECONDS`. Every limit is a setting; see
+[Configuration](../reference/configuration.md#artifact-storage).
+
+A version is collected only when nothing holds it:
+
+- no name or alias points at it;
+- it is not pinned or published, and nothing pinned, published or still
+  building depends on it;
+- it is not the current value of an id somebody chose. A notebook stores each
+  cell output under its own id and reads the latest version back, so that
+  version stays. An id the store made up for one `materialize` has no such
+  value;
+- it has not been used (a cache hit or a read) in the last hour.
+
+So **an unnamed result is a cache entry**. Its URI keeps working while it is
+used, and once it is collected the same request computes it again. To keep a
+result regardless, name it (`name=` on `materialize`) or pin it.
+
+Run a sweep yourself, or preview one, from the command line (no server
+needed) or over HTTP:
 
 ```bash
-curl -X POST 'http://localhost:8765/v1/artifacts/gc?max_age_days=7'
+strata artifact gc --dry-run              # what the configured retention would take
+strata artifact gc --max-bytes 5G         # bring the store under 5 GiB now
+curl -X POST 'http://localhost:8765/v1/artifacts/gc?dry_run=true'
 ```
 
 Or from Python:
@@ -101,22 +132,18 @@ Or from Python:
 from strata_client import StrataClient
 
 client = StrataClient(base_url="http://localhost:8765")
-client.garbage_collect(max_age_days=7.0)
-# {"deleted_count": 14, "deleted_bytes": 8429283, "cutoff_timestamp": ...}
+client.garbage_collect(max_idle_days=7)
+# {"deleted_count": 14, "deleted_bytes": 8429283, "store_bytes": 51239012, "dry_run": false}
 ```
 
-The GC pass deletes a version only when all of these hold:
-
-- it is older than `max_age_days`;
-- no name or alias points at it, and it is not the latest version of its id (pass `collect_latest=true` to reclaim those too);
-- it is `ready`, `superseded` or `failed` (in-flight artifacts are safe);
-- it is not published or pinned, and nothing published or pinned depends on it.
+Each limit you leave out takes the configured one. `collect_latest=true`
+(`--collect-latest`) also collects the current value of caller-chosen ids,
+which deletes live notebook state; use it only on a store you are deliberately
+reclaiming. In service mode the route needs a principal holding `admin:*`, and
+collects within the caller's tenant.
 
 A publication (withdrawn ones included) or a pin protects its whole lineage, not
 only the version. A page or a snapshot needs every step behind the result.
-
-It returns counts and bytes freed. In service mode the route needs a principal
-holding `admin:*`, and collects within the caller's tenant.
 
 ### Pins
 
@@ -135,7 +162,12 @@ independently, and pinning again under the same reason only refreshes it. In
 service mode pins need the `artifacts:pin` scope (or `admin:*`) and are scoped to
 the caller's tenant.
 
-GC the **per-notebook** artifact store by deleting the notebook (or by deleting `.strata/artifacts/` while the server isn't running). There's no per-notebook GC endpoint - cell-output artifacts are content-addressed and pruning them would defeat the cache.
+A **notebook's own** artifact store (`.strata/artifacts/`) keeps each cell
+output's current value plus its three most recent earlier values, so reverting
+a recent edit is still a cache hit. Older values are pruned in the background
+when the server opens the notebook. Set `STRATA_NOTEBOOK_KEEP_SUPERSEDED_VERSIONS`
+to keep more, or to `0` to keep every value. Deleting the notebook deletes its
+store.
 
 ## Cleaning up the Iceberg row-group cache
 
@@ -147,22 +179,21 @@ Clears the in-memory + on-disk Iceberg cache. Personal mode is unrestricted; ser
 
 ## Disk-usage budgeting
 
-This is the part most people get bitten by. There are **two** caps to understand and they don't cover everything.
+There are **two** caps to understand, and they don't cover everything.
 
 | Knob | Default | What it caps | What it doesn't cap |
 | --- | --- | --- | --- |
 | `STRATA_MAX_CACHE_SIZE_BYTES` | 10 GB | The Iceberg row-group cache (`~/.strata/cache/`) - LRU-evicted to stay under the cap | Anything else |
-| Artifact GC `max_age_days` | no automatic run unless `STRATA_ARTIFACT_GC_INTERVAL_SECONDS` is set | The Core artifact store, by age, when GC runs | The notebook-scoped artifact stores, and anything published or pinned |
+| `STRATA_ARTIFACT_GC_MAX_BYTES` | 20 GiB in personal mode, off in service mode | The Core artifact store (`~/.strata/artifacts/`), least recently used first, on the hourly sweep | The notebook-scoped artifact stores, and anything named, pinned or published |
 
 Things with **no built-in size limit**:
 
-- `~/.strata/notebooks/*/​.strata/artifacts/` - per-notebook artifact stores. Grow with each cell run that produces new outputs (cache hits don't add bytes; only new provenance hashes do).
+- `~/.strata/notebooks/*/​.strata/artifacts/` - per-notebook artifact stores. Each cell output keeps its current value and a few earlier ones (`STRATA_NOTEBOOK_KEEP_SUPERSEDED_VERSIONS`), so a store grows with the number and size of a notebook's outputs rather than with every run.
 - `~/.strata/notebooks/*/​.venv/` - per-notebook venvs. Grow with each `uv add`; the heaviest notebooks (torch + cuda) can run to several GB each. Use shared system packages or smaller deps if disk is tight.
-- The server's `~/.strata/artifacts/` until you GC it.
 
 Practical guidance:
 
-- Set `STRATA_ARTIFACT_GC_INTERVAL_SECONDS` (for example `604800`, weekly), or run `POST /v1/artifacts/gc` on a cron, if you use the Core SDK.
+- In personal mode the Core store is capped out of the box; lower `STRATA_ARTIFACT_GC_MAX_BYTES` if 20 GiB is too much for the disk. In service mode set `STRATA_ARTIFACT_GC_INTERVAL_SECONDS` and a limit, or run `POST /v1/artifacts/gc` on a cron.
 - The Iceberg cache is self-managing under its byte cap - leave it.
 - If a single notebook's `.strata/artifacts/` gets uncomfortably large, the cleanest reset is to delete the notebook's `.strata/` directory while the server isn't running. Cell source survives; provenance cache resets.
 - For `.venv/` sprawl: `du -sh ~/.strata/notebooks/*/.venv` is the quickest audit. Old notebooks you don't open anymore can have their `.venv/` deleted - `uv sync` will recreate it next time. With `STRATA_NOTEBOOK_ENV_BACKEND=shared`, notebooks with the same lockfile share one environment instead; the server removes shared environments nothing links to after `STRATA_NOTEBOOK_SHARED_ENV_TTL_DAYS` (default 7), and `strata env gc` does it on demand. See [Shared environments](../notebook/environment.md#shared-environments).

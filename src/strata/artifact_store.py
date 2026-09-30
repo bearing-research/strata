@@ -586,12 +586,53 @@ def _add_import_staging(conn: StoreConnection, dialect: SqlDialect) -> None:
     )
 
 
+# How stale ``last_used_at`` may get before a use writes it again. Retention
+# works in hours and days, so recording every read would only turn reads into
+# writes: a hot artifact costs one UPDATE an hour this way.
+_USE_RESOLUTION_SECONDS = 3600.0
+
+# A sweep over its byte cap collects down to this fraction of it, so the next
+# write does not put it straight back over (the row-group cache does the same).
+_EVICT_TO_FRACTION = 0.8
+
+# A canonical uuid4, the shape of every id the store mints (``uuid.uuid4()``).
+_MINTED_ID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$")
+
+
+def _add_use_and_minted(conn: StoreConnection, dialect: SqlDialect) -> None:
+    """Record when a version was last used, and whether the store minted its id.
+
+    Retention keys on both. ``last_used_at`` is NULL until a version is first
+    used, and a sweep reads it as ``created_at`` then. ``minted`` marks an id
+    the store made up for one computation (a cache-miss materialize, an upload
+    that named no id): its latest version is nobody's current value, so it can
+    be collected like any other version.
+
+    Rows from before this column are backfilled by shape: every id the store
+    minted is a uuid4, and the ids callers choose (``nb_…`` notebook outputs)
+    are not. A uuid-shaped id a caller chose is read as minted, which costs a
+    recompute if its latest version is collected after a long idle.
+    """
+    if not dialect.column_exists(conn, "artifact_versions", "last_used_at"):
+        conn.execute(f"ALTER TABLE artifact_versions ADD COLUMN last_used_at {dialect.float_type}")
+    if not dialect.column_exists(conn, "artifact_versions", "minted"):
+        conn.execute(
+            "ALTER TABLE artifact_versions "
+            f"ADD COLUMN minted {dialect.integer_type} NOT NULL DEFAULT 0"
+        )
+        ids = [row["id"] for row in conn.execute("SELECT DISTINCT id FROM artifact_versions")]
+        for artifact_id in ids:
+            if _MINTED_ID.match(artifact_id):
+                conn.execute("UPDATE artifact_versions SET minted = 1 WHERE id = ?", (artifact_id,))
+
+
 _MIGRATIONS: list[_Migration] = [
     _Migration(1, "artifact_versions.content_sha256", _add_content_sha256),
     _Migration(2, "artifact_publications.authors + external_ids", _add_publication_credits),
     _Migration(3, "artifact_pins", _add_pins),
     _Migration(4, "artifact_versions.blob_attempt", _add_blob_attempt),
     _Migration(5, "import_staging", _add_import_staging),
+    _Migration(6, "artifact_versions.last_used_at + minted", _add_use_and_minted),
 ]
 
 _LATEST_SCHEMA_VERSION = max((m.version for m in _MIGRATIONS), default=_BASELINE_SCHEMA_VERSION)
@@ -615,6 +656,8 @@ CREATE TABLE IF NOT EXISTS artifact_versions (
     principal TEXT,  -- Principal ID that created this artifact
     content_sha256 TEXT,  -- Digest of the stored bytes (see migration 1)
     blob_attempt TEXT,  -- Build attempt whose bytes this reads; NULL = shared key (migration 4)
+    last_used_at REAL,  -- Last hit or read; NULL = never since created (migration 6)
+    minted INTEGER NOT NULL DEFAULT 0,  -- 1 = the store made up the id (migration 6)
     PRIMARY KEY (id, version)
 );
 
@@ -1090,6 +1133,7 @@ class ArtifactStore:
         input_versions: dict[str, str] | None = None,
         tenant: str | None = None,
         principal: str | None = None,
+        minted: bool = False,
     ) -> int:
         """Create a new artifact version in "building" state.
 
@@ -1102,6 +1146,11 @@ class ArtifactStore:
                 For artifacts, version is "artifact_id@v=N".
             tenant: Optional tenant ID for multi-tenant isolation
             principal: Optional principal ID that created this artifact
+            minted: The caller made ``artifact_id`` up for this computation
+                (``uuid.uuid4()``) rather than choosing it, so no reader
+                resolves it as "the latest version of that id" and retention
+                may collect it like any other version. Later versions of a
+                minted id (a refresh rebuild) stay minted.
 
         Returns:
             The new version number
@@ -1115,11 +1164,14 @@ class ArtifactStore:
             # contended so a backend can lock narrowly; SQLite ignores it and
             # locks the file.
             self._dialect.begin_write(conn, artifact_id)
-            cursor = conn.execute(
-                "SELECT COALESCE(MAX(version), 0) + 1 FROM artifact_versions WHERE id = ?",
+            row = conn.execute(
+                "SELECT COALESCE(MAX(version), 0) + 1 AS next_version, "
+                "COALESCE(MAX(minted), 0) AS was_minted "
+                "FROM artifact_versions WHERE id = ?",
                 (artifact_id,),
-            )
-            version = cursor.fetchone()[0]
+            ).fetchone()
+            # By name: a Postgres row unpacks to its column names, not values.
+            version, was_minted = int(row["next_version"]), row["was_minted"]
 
             # Serialize input_versions to JSON
             input_versions_json = json.dumps(input_versions) if input_versions else None
@@ -1129,8 +1181,8 @@ class ArtifactStore:
                 """
                 INSERT INTO artifact_versions
                     (id, version, state, provenance_hash, created_at,
-                     transform_spec, input_versions, tenant, principal)
-                VALUES (?, ?, 'building', ?, ?, ?, ?, ?, ?)
+                     transform_spec, input_versions, tenant, principal, minted)
+                VALUES (?, ?, 'building', ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     artifact_id,
@@ -1143,6 +1195,7 @@ class ArtifactStore:
                     # index treats them as equal — matches names/aliases/tags.
                     tenant if tenant is not None else "",
                     principal,
+                    1 if minted or was_minted else 0,
                 ),
             )
             conn.commit()
@@ -2374,7 +2427,8 @@ class ArtifactStore:
                     """
                     SELECT id, version, state, provenance_hash, schema_json,
                            row_count, byte_size, created_at, transform_spec,
-                           input_versions, tenant, principal, content_sha256
+                           input_versions, tenant, principal, content_sha256,
+                           last_used_at
                     FROM artifact_versions
                     WHERE provenance_hash = ? AND state = 'ready' AND tenant = ?
                     ORDER BY created_at DESC
@@ -2387,7 +2441,8 @@ class ArtifactStore:
                     """
                     SELECT id, version, state, provenance_hash, schema_json,
                            row_count, byte_size, created_at, transform_spec,
-                           input_versions, tenant, principal, content_sha256
+                           input_versions, tenant, principal, content_sha256,
+                           last_used_at
                     FROM artifact_versions
                     WHERE provenance_hash = ? AND state = 'ready'
                       AND (tenant = '' OR tenant IS NULL)
@@ -2399,6 +2454,9 @@ class ArtifactStore:
             row = cursor.fetchone()
             if row is None:
                 return None
+            # A hit is the use retention cares most about: the computation
+            # was asked for again and did not have to run.
+            self._note_use(conn, row["id"], row["version"], row["last_used_at"])
             return ArtifactVersion(
                 id=row["id"],
                 version=row["version"],
@@ -2417,11 +2475,40 @@ class ArtifactStore:
         finally:
             conn.close()
 
+    def _note_use(
+        self, conn: StoreConnection, artifact_id: str, version: int, last_used_at: float | None
+    ) -> None:
+        """Record that a version was just used, unless it was within the hour.
+
+        Advisory: a store that cannot take the write (a locked file, a
+        read-only mount) serves the read anyway, and the version only looks
+        idler to retention than it is.
+        """
+        now = time.time()
+        if last_used_at is not None and now - last_used_at < _USE_RESOLUTION_SECONDS:
+            return
+        try:
+            conn.execute(
+                "UPDATE artifact_versions SET last_used_at = ? WHERE id = ? AND version = ?",
+                (now, artifact_id, version),
+            )
+            conn.commit()
+        except self._dialect.operational_error as exc:
+            conn.rollback()
+            logger.debug("Could not note a use of %s@v=%d: %s", artifact_id, version, exc)
+
     # -----------------------------------------------------------------------
     # Blob I/O
     # -----------------------------------------------------------------------
 
-    def _blob_id(self, artifact_id: str, version: int, attempt: str | None = None) -> str:
+    def _blob_id(
+        self,
+        artifact_id: str,
+        version: int,
+        attempt: str | None = None,
+        *,
+        note_use: bool = False,
+    ) -> str:
         """The id a version's bytes are stored under in the blob store.
 
         A transform build writes each attempt's output under its own id, so an
@@ -2435,9 +2522,12 @@ class ArtifactStore:
             conn = self._get_connection()
             try:
                 row = conn.execute(
-                    "SELECT blob_attempt FROM artifact_versions WHERE id = ? AND version = ?",
+                    "SELECT blob_attempt, last_used_at FROM artifact_versions "
+                    "WHERE id = ? AND version = ?",
                     (artifact_id, version),
                 ).fetchone()
+                if row is not None and note_use:
+                    self._note_use(conn, artifact_id, version, row["last_used_at"])
             finally:
                 conn.close()
             attempt = row["blob_attempt"] if row is not None else None
@@ -2472,7 +2562,11 @@ class ArtifactStore:
         Returns:
             Arrow IPC stream bytes, or None if not found
         """
-        return self.blob_store.read_blob(self._blob_id(artifact_id, version, attempt), version)
+        # Reading a version's bytes is a use; reading one build attempt's
+        # bytes (finalize checking what it wrote) is not.
+        return self.blob_store.read_blob(
+            self._blob_id(artifact_id, version, attempt, note_use=attempt is None), version
+        )
 
     def open_blob_reader(self, artifact_id: str, version: int, attempt: str | None = None):
         """Open a streaming reader for an artifact blob.
@@ -2481,7 +2575,7 @@ class ArtifactStore:
         context manager yielding a binary file-like object.
         """
         return self.blob_store.open_blob_reader(
-            self._blob_id(artifact_id, version, attempt), version
+            self._blob_id(artifact_id, version, attempt, note_use=attempt is None), version
         )
 
     def open_blob_writer(self, artifact_id: str, version: int):
@@ -2840,7 +2934,11 @@ class ArtifactStore:
         any size, and publishing must not be the operation that decides how
         much memory the server needs.
         """
-        reader_cm = self.open_blob_reader(artifact_id, version, attempt)
+        # Below open_blob_reader: hashing a version's bytes (finalize, verify)
+        # is bookkeeping, not somebody using the result.
+        reader_cm = self.blob_store.open_blob_reader(
+            self._blob_id(artifact_id, version, attempt), version
+        )
         if reader_cm is None:
             return None
         hasher = hashlib.sha256()
@@ -4236,10 +4334,13 @@ class ArtifactStore:
             )
 
     def _protected_reachable(self, conn: StoreConnection) -> set[tuple[str, int]]:
-        """Every artifact version a publication or a pin depends on, roots included.
+        """Every artifact version a publication, a pin or a build depends on,
+        roots included.
 
         A pin is a root for the same reason a publication is: whoever placed it
-        needs the chain, not only the version, to restore or explain it.
+        needs the chain, not only the version, to restore or explain it. A
+        build still running is a root because it is reading its inputs, and a
+        sweep taking one would fail it partway.
 
         A published page shows the code and environment of every step behind
         the result, so the chain is part of what was published: collecting an
@@ -4257,7 +4358,9 @@ class ArtifactStore:
         """
         roots = conn.execute(
             "SELECT artifact_id, version FROM artifact_publications "
-            "UNION SELECT artifact_id, version FROM artifact_pins"
+            "UNION SELECT artifact_id, version FROM artifact_pins "
+            "UNION SELECT id AS artifact_id, version FROM artifact_versions "
+            "WHERE state = 'building'"
         ).fetchall()
 
         reachable: set[tuple[str, int]] = set()
@@ -4386,110 +4489,171 @@ class ArtifactStore:
 
     def garbage_collect(
         self,
-        max_age_days: float = 7.0,
+        *,
+        max_idle_days: float | None = None,
+        max_bytes: int | None = None,
+        keep_superseded: int | None = None,
+        min_idle_seconds: float = 0.0,
         tenant: str | None = None,
         collect_latest: bool = False,
+        dry_run: bool = False,
     ) -> dict:
-        """Delete unreachable artifacts older than max_age.
+        """Collect the versions nothing needs, least recently used first.
 
-        An artifact version is reachable when a name or alias points at it, or
-        when it is the latest version of its id — ``get_latest_version(id)`` is
-        how the store resolves "the current value", and for some producers it
-        is the only handle that ever exists (notebook cell outputs are stored
-        as ``nb_…_var_…`` and never named). Only "ready", "superseded" or
-        "failed" versions older than ``max_age_days`` are considered.
+        A version is a candidate when nothing holds it:
+
+        - no name or alias points at it;
+        - it is not published or pinned, nothing published or pinned depends
+          on it, and no build in flight reads it (``_protected_reachable``);
+        - it is ``ready``, ``superseded`` or ``failed``, not ``building``;
+        - it is not the current value of an id somebody chose. The latest
+          version of a caller-named id is what ``get_latest_version`` resolves,
+          and for a notebook's ``nb_…`` outputs it is the only handle there
+          is. An id the store minted for one computation has no current value
+          beyond the version its caller was handed, so its latest version is a
+          candidate like any other. ``collect_latest`` makes every id's latest
+          a candidate, for a store being deliberately reclaimed;
+        - it was last used (hit or read, see ``_note_use``; its creation if
+          never) at least ``min_idle_seconds`` ago, so a sweep never takes
+          what a reader has just been handed.
+
+        Of the candidates, it collects every one idle longer than
+        ``max_idle_days``, and, when the store holds more than ``max_bytes``,
+        the least recently used until it is down to 80% of that, so a sweep
+        does not have to run again on the next write. With ``keep_superseded``
+        it also collects, per id, every candidate past the newest that many
+        ready or superseded ones: a notebook keeps a few earlier values of each
+        cell, so reverting a recent edit is still a cache hit, and not every
+        value it ever had. With none of the three set it collects nothing.
+
+        An id never loses its highest version while keeping a lower one:
+        ``create_artifact`` numbers versions ``MAX(version) + 1``, and a
+        number reused would make a URI somebody holds serve other bytes.
 
         Args:
-            max_age_days: Maximum age in days for unreachable artifacts
-            tenant: Optional tenant filter. When provided, includes legacy
-                tenantless artifacts for backwards compatibility.
-            collect_latest: Also collect current values — the latest version of
-                an unnamed id. Off by default because it deletes live state
-                (this is what made a routine GC wipe week-old notebooks); turn
-                it on only for a store you are deliberately reclaiming, where
-                "unnamed and old" really does mean garbage.
+            max_idle_days: Collect candidates unused for longer than this.
+            max_bytes: Keep the store at or under this many bytes.
+            keep_superseded: Per id, keep this many earlier versions beyond
+                its current value; a failed version never counts.
+            min_idle_seconds: Never collect anything used more recently.
+            tenant: Collect only this tenant's versions (and legacy tenantless
+                ones). ``max_bytes`` still measures the whole store.
+            collect_latest: Also collect the current value of caller-named
+                ids. Off by default because it deletes live state.
+            dry_run: Choose, but delete nothing.
 
         Returns:
-            Dictionary with GC statistics
+            ``deleted_count`` and ``deleted_bytes`` (what was, or with
+            ``dry_run`` would be, collected), ``store_bytes`` before the pass,
+            and with ``dry_run`` the chosen versions under ``collected``.
         """
+        now = time.time()
         conn = self._get_connection()
         try:
-            cutoff = time.time() - (max_age_days * 86400)
-
-            # Find unreachable artifacts older than cutoff.
-            #
-            # "Reachable" is deliberately wider than "has a name pointer":
-            #
-            # - a NAME or an ALIAS points at the version — aliases pin registry
-            #   entries (e.g. champion on a superseded version), and collecting
-            #   an aliased artifact would leave a dangling pointer;
-            # - it is the LATEST version of its artifact id. ``get_latest_version(id)``
-            #   is how the store resolves "the current value" and is the ONLY
-            #   handle some producers ever use — notebook cell outputs are stored
-            #   as ``nb_{notebook}_cell_{cell}_var_{name}`` and never given a name
-            #   or alias, so the old rule classified every one of them as garbage.
-            #   A GC run with the default 7-day cutoff deleted the live state of
-            #   any notebook older than a week, and the next cell run found its
-            #   upstream missing. Collecting superseded versions is still fine —
-            #   that is what makes GC useful — but never the current one.
-            #
-            # Publications, pins and everything behind them are excluded below,
-            # after the SELECT, by a lineage walk rather than by a clause here.
-            # ``input_versions`` is JSON in a TEXT column, so expressing the
-            # walk in SQL means ``json_each`` on one dialect and ``jsonb_each``
-            # on the other plus splitting ids on ``@v=``; the walk is bounded
-            # by publications times chain depth and runs at most hourly, so it
-            # is cheaper to keep it in one place in Python.
-            #
-            # Still NOT covered: artifacts reachable only through the lineage
-            # of an *unpublished* artifact. Those keep the older justification
-            # — the latest-version rule protects a pipeline's inputs, which are
-            # the latest versions of their own ids. That argument never held
-            # for a published chain, which is exactly a chain whose ancestors
-            # are expected to be superseded while the published version stays.
-            query = """
-                SELECT av.id, av.version, av.byte_size, av.blob_attempt
+            used = "COALESCE(av.last_used_at, av.created_at)"
+            query = f"""
+                SELECT av.id, av.version, av.state, av.byte_size, av.blob_attempt,
+                       {used} AS used
                 FROM artifact_versions av
                 LEFT JOIN artifact_names an ON av.id = an.artifact_id AND av.version = an.version
                 LEFT JOIN artifact_aliases aa ON av.id = aa.artifact_id AND av.version = aa.version
                 WHERE an.name IS NULL
                   AND aa.alias IS NULL
                   AND av.state IN ('ready', 'superseded', 'failed')
-                  AND av.created_at < ?
+                  AND {used} <= ?
             """
             if not collect_latest:
-                # Two rules, and both are needed. The version
-                # ``get_latest_version`` resolves (its newest ready or
-                # superseded row) is spared, because a rebuild's building row,
-                # or a failed one, outranks it in MAX(version) while it is
-                # still the value readers get. MAX(version) stays spared too:
-                # deleting the highest row lets ``create_artifact`` reuse its
-                # number.
+                # The current value of a caller-named id is spared, by two
+                # rules that are both needed. The version ``get_latest_version``
+                # resolves (its newest ready or superseded row) is spared,
+                # because a rebuild's building row, or a failed one, outranks
+                # it in MAX(version) while it is still the value readers get.
+                # MAX(version) is spared too, which the id-wide rule below
+                # would also ensure. A minted id has no current value.
                 query += """
-                  AND av.version < (
-                      SELECT MAX(latest.version)
-                      FROM artifact_versions latest
-                      WHERE latest.id = av.id
-                  )
-                  AND NOT (
-                      av.state IN ('ready', 'superseded')
-                      AND NOT EXISTS (
-                          SELECT 1 FROM artifact_versions newer
-                          WHERE newer.id = av.id
-                            AND newer.state IN ('ready', 'superseded')
-                            AND newer.version > av.version
+                  AND (
+                      av.minted = 1
+                      OR (
+                          av.version < (
+                              SELECT MAX(latest.version)
+                              FROM artifact_versions latest
+                              WHERE latest.id = av.id
+                          )
+                          AND NOT (
+                              av.state IN ('ready', 'superseded')
+                              AND NOT EXISTS (
+                                  SELECT 1 FROM artifact_versions newer
+                                  WHERE newer.id = av.id
+                                    AND newer.state IN ('ready', 'superseded')
+                                    AND newer.version > av.version
+                              )
+                          )
                       )
                   )
                 """
-            params: list[float | str] = [cutoff]
+            params: list[float | str] = [now - min_idle_seconds]
             if tenant is not None:
                 query += " AND (av.tenant = ? OR av.tenant = '' OR av.tenant IS NULL)"
                 params.append(tenant)
-
-            cursor = conn.execute(query, params)
-            rows = cursor.fetchall()
+            # Least recently used first; the version breaks ties, so a sweep
+            # facing an id whose versions share a timestamp takes the oldest.
+            query += f" ORDER BY {used} ASC, av.id ASC, av.version ASC"
 
             protected = self._protected_reachable(conn)
+            candidates = [
+                row
+                for row in conn.execute(query, params).fetchall()
+                if (row["id"], row["version"]) not in protected
+            ]
+            store_bytes = int(
+                conn.execute(
+                    "SELECT COALESCE(SUM(byte_size), 0) FROM artifact_versions"
+                ).fetchone()[0]
+            )
+
+            chosen: dict[tuple[str, int], Any] = {}
+            if max_idle_days is not None:
+                idle_before = now - max_idle_days * 86400
+                for row in candidates:
+                    if row["used"] < idle_before:
+                        chosen[(row["id"], row["version"])] = row
+            if max_bytes is not None and store_bytes > max_bytes:
+                target = int(max_bytes * _EVICT_TO_FRACTION)
+                remaining = store_bytes - sum(r["byte_size"] or 0 for r in chosen.values())
+                for row in candidates:
+                    if remaining <= target:
+                        break
+                    key = (row["id"], row["version"])
+                    if key not in chosen:
+                        chosen[key] = row
+                        remaining -= row["byte_size"] or 0
+
+            if keep_superseded is not None:
+                kept: dict[str, int] = {}
+                for row in sorted(candidates, key=lambda r: (r["id"], -r["version"])):
+                    if row["state"] != "failed" and kept.get(row["id"], 0) < keep_superseded:
+                        kept[row["id"]] = kept.get(row["id"], 0) + 1
+                        continue
+                    chosen.setdefault((row["id"], row["version"]), row)
+
+            chosen = self._without_version_gaps(conn, chosen)
+
+            if dry_run:
+                return {
+                    "deleted_count": len(chosen),
+                    "deleted_bytes": sum(r["byte_size"] or 0 for r in chosen.values()),
+                    "store_bytes": store_bytes,
+                    "dry_run": True,
+                    "collected": [
+                        {
+                            "artifact_id": r["id"],
+                            "version": r["version"],
+                            "byte_size": r["byte_size"] or 0,
+                            "last_used_at": r["used"],
+                        }
+                        for r in chosen.values()
+                    ],
+                }
 
             deleted_count = 0
             deleted_bytes = 0
@@ -4503,11 +4667,8 @@ class ArtifactStore:
             # reports it as missing_blob. Losing a blob whose row is gone is
             # merely wasted bytes; the reverse is a corrupt store.
             collected: list[tuple[str, int]] = []
-            for row in rows:
+            for row in chosen.values():
                 artifact_id, version, byte_size = row["id"], row["version"], row["byte_size"] or 0
-
-                if (artifact_id, version) in protected:
-                    continue
 
                 self._delete_version_children(conn, artifact_id, version)
                 try:
@@ -4562,7 +4723,40 @@ class ArtifactStore:
         return {
             "deleted_count": deleted_count,
             "deleted_bytes": deleted_bytes,
-            "cutoff_timestamp": cutoff,
+            "store_bytes": store_bytes,
+            "dry_run": False,
+        }
+
+    @staticmethod
+    def _without_version_gaps(
+        conn: StoreConnection, chosen: dict[tuple[str, int], Any]
+    ) -> dict[tuple[str, int], Any]:
+        """*chosen*, less any id's highest version whose lower versions stay.
+
+        Collecting the top of an id and keeping something under it would let
+        the next ``create_artifact`` for that id reuse the number. Taking the
+        whole id is fine: nothing writes to a minted id once its rows are gone
+        (a later miss mints another), and a caller-named id's top is spared
+        before this unless ``collect_latest``.
+        """
+        by_id: dict[str, int] = {}
+        for artifact_id, _ in chosen:
+            by_id[artifact_id] = by_id.get(artifact_id, 0) + 1
+        ids = list(by_id)
+        tops: dict[str, tuple[int, int]] = {}
+        for start in range(0, len(ids), 500):
+            batch = ids[start : start + 500]
+            placeholders = ", ".join("?" for _ in batch)
+            for row in conn.execute(
+                "SELECT id, MAX(version) AS top, COUNT(*) AS n FROM artifact_versions "
+                f"WHERE id IN ({placeholders}) GROUP BY id",
+                batch,
+            ).fetchall():
+                tops[row["id"]] = (row["top"], row["n"])
+        return {
+            key: row
+            for key, row in chosen.items()
+            if not (key[1] == tops[key[0]][0] and by_id[key[0]] < tops[key[0]][1])
         }
 
     def get_usage(self, tenant: str | None = None, *, include_tenantless: bool = True) -> dict:

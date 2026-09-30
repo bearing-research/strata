@@ -56,7 +56,7 @@ class TestPinsInTheStore:
         rows, figure = _superseded_chain(store)
         store.pin_artifact("figure", figure, "snapshot:s1", pinned_by="amber")
 
-        store.garbage_collect(max_age_days=0)
+        store.garbage_collect(max_idle_days=0)
 
         assert store.get_artifact("figure", figure) is not None
         assert store.get_artifact("rows", rows) is not None
@@ -66,7 +66,7 @@ class TestPinsInTheStore:
         store.pin_artifact("figure", figure, "snapshot:s1")
         assert store.unpin_artifact("figure", figure, "snapshot:s1")
 
-        result = store.garbage_collect(max_age_days=0)
+        result = store.garbage_collect(max_idle_days=0)
 
         assert result["deleted_count"] == 2
         assert store.get_artifact("figure", figure) is None
@@ -80,7 +80,7 @@ class TestPinsInTheStore:
         store.pin_artifact("figure", figure, "snapshot:s1", pinned_by="again")
 
         assert store.unpin_artifact("figure", figure, "snapshot:s1")
-        store.garbage_collect(max_age_days=0)
+        store.garbage_collect(max_idle_days=0)
 
         assert store.get_artifact("figure", figure) is not None
         assert [pin["reason"] for pin in store.list_pins("figure", figure)] == ["review:42"]
@@ -136,11 +136,13 @@ class TestTheRoutesInServiceMode:
 
         refused = client.post(
             "/v1/artifacts/gc",
-            params={"max_age_days": 0},
+            params={"max_idle_days": 0, "min_idle_seconds": 0},
             headers=_as("m", "acme", "artifacts:read"),
         )
         swept = client.post(
-            "/v1/artifacts/gc", params={"max_age_days": 0}, headers=_as("ops", "acme", "admin:*")
+            "/v1/artifacts/gc",
+            params={"max_idle_days": 0, "min_idle_seconds": 0},
+            headers=_as("ops", "acme", "admin:*"),
         )
 
         assert refused.status_code == 403
@@ -164,7 +166,7 @@ class TestTheRoutesInServiceMode:
             json={"reason": "snapshot:s1"},
             headers=_as("amber", "acme", "artifacts:pin"),
         )
-        store.garbage_collect(max_age_days=0)
+        store.garbage_collect(max_idle_days=0)
 
         assert refused.status_code == 403
         assert pinned.status_code == 200, pinned.text
@@ -209,21 +211,22 @@ def test_without_principal_auth_service_mode_refuses_gc(monkeypatch, tmp_path):
 async def test_the_scheduled_sweep_runs_and_survives_a_failing_pass():
     from strata.server import _artifact_gc_loop
 
-    calls: list[float] = []
+    calls: list[dict] = []
     done = asyncio.Event()
 
-    def garbage_collect(max_age_days):
-        calls.append(max_age_days)
+    def garbage_collect(**policy):
+        calls.append(policy)
         if len(calls) == 1:
             raise RuntimeError("blob store down")
         if len(calls) == 3:
             done.set()
         return {"deleted_count": 0, "deleted_bytes": 0}
 
+    policy = {"max_idle_days": 3.0, "max_bytes": None, "min_idle_seconds": 60.0}
     task = asyncio.create_task(
-        _artifact_gc_loop(SimpleNamespace(garbage_collect=garbage_collect), 0, 3.0)
+        _artifact_gc_loop(SimpleNamespace(garbage_collect=garbage_collect), 0, policy)
     )
     await asyncio.wait_for(done.wait(), timeout=30)
     task.cancel()
 
-    assert calls[:3] == [3.0, 3.0, 3.0]
+    assert calls[:3] == [policy, policy, policy]

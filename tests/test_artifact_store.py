@@ -567,7 +567,7 @@ class TestForeignKeyEnforcement:
         finally:
             conn.close()
 
-        stats = store.garbage_collect(max_age_days=1.0)
+        stats = store.garbage_collect(max_idle_days=1.0)
 
         assert stats["deleted_count"] == 1
         assert store.get_artifact("art-1", 1) is None
@@ -1075,7 +1075,7 @@ class TestAliasedArtifactProtection:
         _make_ready_artifact(store, "pinned", "prov-p")
         store.set_alias("demo/model", "champion", "pinned", 1)
 
-        result = store.garbage_collect(max_age_days=0)
+        result = store.garbage_collect(max_idle_days=0)
         assert store.get_artifact("pinned", 1) is not None, result
         assert store.resolve_alias("demo/model", "champion") is not None
 
@@ -1088,7 +1088,7 @@ class TestAliasedArtifactProtection:
         store.set_alias("demo/model", "champion", "model", 1)
         store.set_name("demo/model", "model", 2)  # name guards v2
 
-        store.garbage_collect(max_age_days=0)
+        store.garbage_collect(max_idle_days=0)
 
         champion = store.resolve_alias("demo/model", "champion")
         assert champion is not None and champion.version == 1
@@ -1097,7 +1097,7 @@ class TestAliasedArtifactProtection:
         """A lone unnamed artifact is a *current value* (get_latest_version
         resolves it), so reclaiming it now takes the explicit opt-in."""
         _make_ready_artifact(store, "loose", "prov-l")
-        result = store.garbage_collect(max_age_days=0, collect_latest=True)
+        result = store.garbage_collect(max_idle_days=0, collect_latest=True)
         assert result["deleted_count"] == 1
         assert store.get_artifact("loose", 1) is None
 
@@ -1587,7 +1587,7 @@ class TestGcSparesCurrentValues:
     def test_gc_spares_an_unnamed_notebook_cell_artifact(self, store):
         _make_ready_artifact(store, "nb_abc_cell_def_var_model", "prov-nb")
 
-        result = store.garbage_collect(max_age_days=0)
+        result = store.garbage_collect(max_idle_days=0)
 
         assert result["deleted_count"] == 0
         assert store.get_latest_version("nb_abc_cell_def_var_model") is not None
@@ -1599,7 +1599,7 @@ class TestGcSparesCurrentValues:
         store.write_blob("model", 2, _ipc_bytes(1))
         store.finalize_artifact("model", 2, "{}", 1, 10)  # supersedes v1
 
-        result = store.garbage_collect(max_age_days=0)
+        result = store.garbage_collect(max_idle_days=0)
 
         assert result["deleted_count"] == 1
         assert store.get_artifact("model", 1) is None
@@ -1613,17 +1613,17 @@ class TestGcSparesCurrentValues:
         _make_ready_artifact(store, artifact_id, "prov-v1")
         rebuild = store.create_artifact(artifact_id, "prov-v2")
 
-        assert store.garbage_collect(max_age_days=0)["deleted_count"] == 0
+        assert store.garbage_collect(max_idle_days=0)["deleted_count"] == 0
         assert store.get_latest_version(artifact_id).version == 1
 
         store.fail_artifact(artifact_id, rebuild)
-        store.garbage_collect(max_age_days=0)
+        store.garbage_collect(max_idle_days=0)
         assert store.get_latest_version(artifact_id).version == 1
 
     def test_collect_latest_opt_in_still_reclaims(self, store):
         _make_ready_artifact(store, "loose", "prov-loose")
-        assert store.garbage_collect(max_age_days=0)["deleted_count"] == 0
-        assert store.garbage_collect(max_age_days=0, collect_latest=True)["deleted_count"] == 1
+        assert store.garbage_collect(max_idle_days=0)["deleted_count"] == 0
+        assert store.garbage_collect(max_idle_days=0, collect_latest=True)["deleted_count"] == 1
 
 
 class TestGcDeletesMetadataBeforeBlobs:
@@ -1643,7 +1643,7 @@ class TestGcDeletesMetadataBeforeBlobs:
 
         monkeypatch.setattr(store.blob_store, "delete_blob", boom)
 
-        result = store.garbage_collect(max_age_days=0)
+        result = store.garbage_collect(max_idle_days=0)
 
         # The run completed and the metadata is gone — no ready row survives
         # pointing at a blob we may or may not have removed.
@@ -1701,7 +1701,7 @@ class TestTenantlessArtifactsAreVisibleToScopedQueries:
         store.write_blob("legacy", 2, _ipc_bytes(1))
         store.finalize_artifact("legacy", 2, "{}", 1, 10)
 
-        store.garbage_collect(max_age_days=0, tenant="team-a")
+        store.garbage_collect(max_idle_days=0, tenant="team-a")
 
         assert store.get_artifact("legacy", 1) is None, (
             "tenant-scoped GC still cannot reach a tenantless artifact"
@@ -1786,5 +1786,5 @@ class TestTwoIdsOneComputation:
         self._both_finalized(store)
         store.create_artifact(self.A, "prov-a-edited")  # A reruns after an edit
 
-        assert store.garbage_collect(max_age_days=0)["deleted_count"] == 0
+        assert store.garbage_collect(max_idle_days=0)["deleted_count"] == 0
         assert store.get_latest_version(self.A).version == 1
