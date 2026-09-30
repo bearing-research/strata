@@ -3044,6 +3044,16 @@ the artifact store is never read by the cell.</p>
 <p>A cell run this way still shares the host's kernel and sees what any local user
 can. A notebook that needs more isolation than that wants a worker on another
 machine.</p>
+<p>SQL cells are different: their queries run inside the server process, not as
+the harness user. A DuckDB SQL cell is confined instead. Once its connection is
+set up, it can reach only its own database, the roots of the mounts it reads,
+and the locations of the catalog tables it reads; file access outside those is
+refused, and the cell cannot turn it back on. So <code>read_text</code> of a server file,
+<code>COPY ... TO</code>, and <code>ATTACH</code> of another path all fail. A catalog table whose data
+files live outside its own location cannot be read this way. A SQLite cell also
+runs in the server process: in a write cell <code>ATTACH</code>, <code>DETACH</code> and <code>VACUUM</code> are
+refused, since they reach other files (a read cell runs only reads already).
+Postgres, Snowflake and BigQuery cells send the query to their database server.</p>
 <h3 id="what-a-cell-is-given-strata_notebook_harness_env_allowlist">What a cell is given: <code>STRATA_NOTEBOOK_HARNESS_ENV_ALLOWLIST</code><a class="headerlink" href="#what-a-cell-is-given-strata_notebook_harness_env_allowlist" title="Permanent link">&para;</a></h3>
 <p>The allowlist narrows the environment a cell receives:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="c1"># Only what cells actually need; everything else stays with the server.</span>
