@@ -413,6 +413,79 @@ class TestTransformInputAclParity:
         finally:
             set_principal(None)
 
+    @pytest.mark.parametrize(
+        ("failure", "hide_as_404"),
+        [
+            ("refused", True),
+            ("refused", False),
+            ("unplannable", True),
+            ("unplannable", False),
+        ],
+    )
+    def test_a_denied_table_is_denied_before_it_is_planned(self, monkeypatch, failure, hide_as_404):
+        """A table Strata refuses to read is a 422 naming its delete files, and
+        one that does not plan is a 400 that materialize answers by building
+        with the raw URI. A denied caller gets neither: the ACL decides on the
+        identity the URI names, before any manifest is read."""
+        from fastapi import HTTPException
+
+        from strata.iceberg_schema import UnsupportedTableFormatError
+
+        server_module = self._patch_state(monkeypatch, namespace="secret", hide_as_404=hide_as_404)
+        server_module._state.planner.plan.side_effect = (
+            UnsupportedTableFormatError(
+                "Table secret.events has an AVRO equality delete file "
+                "(s3://secret-bucket/warehouse/secret/events/data/del-001.avro)."
+            )
+            if failure == "refused"
+            else RuntimeError("catalog unreachable")
+        )
+        set_principal(Principal(id="intruder"))
+        try:
+            with pytest.raises(HTTPException) as exc:
+                server_module._resolve_input_version("file:///wh#secret.events")
+        finally:
+            set_principal(None)
+
+        assert exc.value.status_code == (404 if hide_as_404 else 403)
+        assert "secret-bucket" not in str(exc.value.detail)
+        server_module._state.planner.plan.assert_not_called()
+
+    def test_an_allowed_table_strata_refuses_is_still_a_422(self, monkeypatch):
+        from fastapi import HTTPException
+
+        from strata.iceberg_schema import UnsupportedTableFormatError
+
+        server_module = self._patch_state(monkeypatch, namespace="public")
+        server_module._state.planner.plan.side_effect = UnsupportedTableFormatError(
+            "an Avro delete"
+        )
+        set_principal(Principal(id="analyst"))
+        try:
+            with pytest.raises(HTTPException) as exc:
+                server_module._resolve_input_version("file:///wh#public.events")
+        finally:
+            set_principal(None)
+
+        assert exc.value.status_code == 422
+
+    def test_a_table_uri_the_acl_cannot_name_is_denied(self, monkeypatch):
+        """Deny-first: no identity, so no rule allows it. The planner names a
+        table the same way, so it could not have planned it either."""
+        from fastapi import HTTPException
+
+        server_module = self._patch_state(monkeypatch, namespace="public")
+        monkeypatch.setattr(server_module, "_table_identity_from_uri", lambda uri: None)
+        set_principal(Principal(id="analyst"))
+        try:
+            with pytest.raises(HTTPException) as exc:
+                server_module._resolve_input_version("file:///wh#public.events")
+        finally:
+            set_principal(None)
+
+        assert exc.value.status_code == 403
+        server_module._state.planner.plan.assert_not_called()
+
     def test_scan_and_transform_share_one_gate(self, monkeypatch):
         # Both the scan path and the transform-input path call this one helper.
         from fastapi import HTTPException
