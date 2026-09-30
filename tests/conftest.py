@@ -48,6 +48,24 @@ from strata.config import StrataConfig
 
 
 @pytest.fixture(autouse=True)
+def _home_is_a_temp_dir(tmp_path_factory, monkeypatch):
+    """Every Strata default under ``~/.strata`` lands in this test's temp dir.
+
+    A personal-mode ``StrataConfig`` with no ``artifact_dir`` uses
+    ``~/.strata/artifacts``, and the same goes for ``cache_dir``,
+    ``metadata_db``, the notebook storage dir, worker envs and the mount
+    cache. Dozens of tests build a config with only the fields they care
+    about, and the developer's real store had 45,000 rows of their leftovers.
+    Each default is computed from ``Path.home()``, so this is the one seam
+    that catches all of them, now and for the next config a test writes.
+    """
+    # Its own directory, not under ``tmp_path``: some tests assert that
+    # ``tmp_path`` is left empty.
+    home = tmp_path_factory.mktemp("home")
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
+
+
+@pytest.fixture(autouse=True)
 def _never_publish_into_the_real_store(monkeypatch):
     """Keep ``strata artifact publish`` away from the developer's own store.
 
