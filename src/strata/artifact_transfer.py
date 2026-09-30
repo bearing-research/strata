@@ -424,7 +424,7 @@ def promote_artifact(
             target.set_tag(written_id, int(written_version), PROMOTION_TAG, name)
         target.set_name(name, landed_id, version)
     alias_pending = False
-    if alias:
+    if alias and name:  # always both: an alias without a name was refused above
         alias_pending = not target.set_alias(name, alias, landed_id, version)
     for key, value in (tags or {}).items():
         # An ``nb_`` stamp records where a row came from. On a row this
