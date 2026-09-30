@@ -9,6 +9,7 @@ This module provides:
 
 import io
 import os
+import shlex
 import socket
 import sys
 import threading
@@ -62,7 +63,11 @@ def prepared_venv(notebook_dir: Path) -> None:
     python = notebook_dir / ".venv" / "bin" / "python"
     python.parent.mkdir(parents=True, exist_ok=True)
     if not python.exists():
-        python.symlink_to(sys.executable)
+        # A wrapper, not a symlink: Python started through a symlink looks
+        # for pyvenv.cfg beside the symlink, finds none, and comes up as the
+        # base interpreter without this venv's packages.
+        python.write_text(f'#!/bin/sh\nexec {shlex.quote(sys.executable)} "$@"\n')
+        python.chmod(0o755)
 
 
 @pytest.fixture(autouse=True)
