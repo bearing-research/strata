@@ -418,8 +418,9 @@ def test_table_with_a_literal_names_its_table():
 
 
 def test_snowflake_names_are_the_ones_it_stores():
-    """Snowflake stores an unquoted identifier uppercased and a quoted one as
-    written; other dialects keep the name as typed."""
+    """Snowflake stores an unquoted identifier uppercased and Postgres
+    lowercased; a quoted one is stored as written. Other dialects keep the name
+    as typed."""
     src = '# @sql connection=db\nSELECT * FROM mydb.public.events JOIN "MixedCase" USING (id)'
     result = analyze_sql_cell(src, dialect="snowflake")
     assert result.tables == [
@@ -427,8 +428,16 @@ def test_snowflake_names_are_the_ones_it_stores():
         QualifiedTable(catalog=None, schema=None, name="MixedCase"),
     ]
 
+    src = '# @sql connection=db\nSELECT * FROM MyDb.Public.Events JOIN "MixedCase" USING (id)'
     result = analyze_sql_cell(src, dialect="postgres")
-    assert [t.name for t in result.tables] == ["events", "MixedCase"]
+    assert result.tables == [
+        QualifiedTable(catalog="mydb", schema="public", name="events"),
+        QualifiedTable(catalog=None, schema=None, name="MixedCase"),
+    ]
+
+    for dialect in ("duckdb", "bigquery", "sqlite"):
+        result = analyze_sql_cell(src, dialect=dialect)
+        assert [t.name for t in result.tables] == ["Events", "MixedCase"], dialect
 
 
 # --- result type ----------------------------------------------------------

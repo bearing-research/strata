@@ -485,6 +485,7 @@ def _stored_name(identifier: Any, dialect: str) -> str | None:
     ``INFORMATION_SCHEMA`` compares names exactly: ``events`` is ``EVENTS``
     there, while ``"events"`` stays as written. A probe that asked for the name
     as typed found nothing, and "missing" is the same answer on every run.
+    Postgres folds the other way: ``Events`` is stored as ``events``.
     """
     from sqlglot import exp
 
@@ -492,8 +493,12 @@ def _stored_name(identifier: Any, dialect: str) -> str | None:
         return identifier or None  # absent: ``None``, or ``""`` for ``db..t``
     if not identifier.name:
         return None
-    if dialect == "snowflake" and not identifier.args.get("quoted"):
+    if identifier.args.get("quoted"):
+        return identifier.name
+    if dialect == "snowflake":
         return identifier.name.upper()
+    if dialect == "postgres":
+        return identifier.name.lower()
     return identifier.name
 
 
