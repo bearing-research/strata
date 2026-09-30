@@ -53,7 +53,7 @@ class HarnessUser:
     home: str
 
 
-def _running_server_config() -> Any | None:
+def running_server_config() -> Any | None:
     """The live server's config, or ``None`` outside a server.
 
     Deliberately not ``StrataConfig.load()`` as a fallback: its default mode is
@@ -76,7 +76,7 @@ def resolve_harness_user(config: Any | None = None) -> HarnessUser | None:
             configured user cannot be switched to here.
     """
     if config is None:
-        config = _running_server_config()
+        config = running_server_config()
     if config is None:
         return None
 

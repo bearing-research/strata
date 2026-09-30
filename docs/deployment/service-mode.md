@@ -616,6 +616,14 @@ runs in the server process: in a write cell `ATTACH`, `DETACH` and `VACUUM` are
 refused, since they reach other files (a read cell runs only reads already).
 Postgres, Snowflake and BigQuery cells send the query to their database server.
 
+Installing a notebook's packages runs as the server's user too, and building
+a package from a source distribution runs that package's build backend, code
+from wherever the package came from, with the server's environment. In service mode every `uv` command
+a notebook runs (`sync`, `add`, `lock`, the `uv run` that starts a cell)
+installs wheels only: a dependency with no wheel for the notebook's Python
+fails to resolve, and uv's message says a wheel is required. Personal mode
+still builds from source.
+
 ### What a cell is given: `STRATA_NOTEBOOK_HARNESS_ENV_ALLOWLIST`
 
 The allowlist narrows the environment a cell receives:

@@ -1484,3 +1484,74 @@ class TestUvCommandsIgnoreTheServersEnvironment:
 
         await executor._run_harness(manifest, tmp_path / ".venv" / "bin" / "python", 30.0)
         self._assert_notebook_environment(recorded())
+
+
+# ============================================================================
+# Service mode installs wheels only
+# ============================================================================
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="the recording uv is a shell script")
+class TestServiceModeInstallsWheelsOnly:
+    """Building a source distribution runs its build backend as the server's
+    user, with the server's environment: the notebook's ``uv`` commands in
+    service mode tell uv to install wheels only (``UV_NO_BUILD``)."""
+
+    @pytest.fixture
+    def recorded(self, tmp_path, monkeypatch):
+        bin_dir = tmp_path / "bin"
+        bin_dir.mkdir()
+        record = tmp_path / "uv-env.txt"
+        fake_uv = bin_dir / "uv"
+        fake_uv.write_text(f"#!/bin/sh\nenv > {shlex.quote(str(record))}\n")
+        fake_uv.chmod(0o755)
+        monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
+        monkeypatch.delenv("UV_NO_BUILD", raising=False)
+
+        def read() -> dict[str, str]:
+            lines = record.read_text().splitlines()
+            return dict(line.split("=", 1) for line in lines if "=" in line)
+
+        return read
+
+    @staticmethod
+    def _server_in(mode: str, monkeypatch) -> None:
+        from strata.notebook import dependencies
+
+        monkeypatch.setattr(
+            dependencies, "running_server_config", lambda: SimpleNamespace(deployment_mode=mode)
+        )
+
+    def test_a_service_mode_sync_installs_wheels_only(self, tmp_path, recorded, monkeypatch):
+        from strata.notebook.dependencies import _run_uv_command
+
+        self._server_in("service", monkeypatch)
+        _run_uv_command(tmp_path, ["sync"], timeout=30, display_name="uv sync")
+        assert recorded()["UV_NO_BUILD"] == "1"
+
+    async def test_the_uv_run_that_starts_a_cell(self, tmp_path, recorded, monkeypatch):
+        self._server_in("service", monkeypatch)
+        executor = CellExecutor.__new__(CellExecutor)
+        executor.harness_path = tmp_path / "harness.py"
+        executor.session = SimpleNamespace(path=tmp_path)  # type: ignore[assignment]
+        manifest = tmp_path / "run" / "manifest.json"
+        manifest.parent.mkdir()
+        manifest.write_text("{}")
+
+        await executor._run_harness(manifest, tmp_path / ".venv" / "bin" / "python", 30.0)
+        assert recorded()["UV_NO_BUILD"] == "1"
+
+    def test_personal_mode_still_builds(self, tmp_path, recorded, monkeypatch):
+        from strata.notebook.dependencies import _run_uv_command
+
+        self._server_in("personal", monkeypatch)
+        _run_uv_command(tmp_path, ["sync"], timeout=30, display_name="uv sync")
+        assert "UV_NO_BUILD" not in recorded()
+
+    def test_outside_a_server_still_builds(self, tmp_path, recorded, monkeypatch):
+        """The CLI on a laptop has no server, and no reason to refuse a build."""
+        from strata.notebook import dependencies
+
+        monkeypatch.setattr(dependencies, "running_server_config", lambda: None)
+        dependencies._run_uv_command(tmp_path, ["sync"], timeout=30, display_name="uv sync")
+        assert "UV_NO_BUILD" not in recorded()
