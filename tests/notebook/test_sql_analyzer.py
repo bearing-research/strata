@@ -299,6 +299,12 @@ def test_identifier_named_at_run_time_is_reported_not_guessed(reference):
         ("duckdb", "QUERY_TABLE(GETVARIABLE('t'))"),
         ("duckdb", "READ_PARQUET('events.parquet')"),
         ("duckdb", "'events.parquet'"),
+        ("duckdb", '"events.parquet"'),
+        ("duckdb", "events.parquet"),
+        ("duckdb", "events.csv.gz"),
+        ("duckdb", '"data/events.json"'),
+        ("duckdb", '"data/*.parquet"'),
+        ("duckdb", '"s3://bucket/events"'),
         ("postgres", "MY_FUNC()"),
     ],
 )
@@ -311,6 +317,15 @@ def test_a_table_no_probe_can_name_is_reported_not_tracked(dialect, reference):
     result = analyze_sql_cell(src, dialect=dialect)
     assert [t.name.lower() for t in result.tables] == ["orders"]
     assert result.unresolved_tables == [reference]
+
+
+def test_a_file_looking_name_is_a_table_outside_duckdb():
+    """Only DuckDB reads a file where a table name goes. Elsewhere
+    ``events.parquet`` is the table ``parquet`` in the schema ``events``."""
+    src = "# @sql connection=db\nSELECT * FROM events.parquet"
+    result = analyze_sql_cell(src, dialect="postgres")
+    assert result.tables == [QualifiedTable(catalog=None, schema="events", name="parquet")]
+    assert result.unresolved_tables == []
 
 
 @pytest.mark.parametrize(

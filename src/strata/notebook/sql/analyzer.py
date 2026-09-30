@@ -543,9 +543,11 @@ def _table_reference(table_node: Any, sql: str, dialect: str) -> QualifiedTable 
     whatever they read.
 
     So is DuckDB's ``FROM 'events.parquet'``: a string where a table goes is a
-    file read, not a table, and nothing fingerprints the file. A mount on a
-    lake connection is the way to read files the cache can see, since each
-    mount's fingerprint is folded into the cell's provenance.
+    file read, not a table, and nothing fingerprints the file. DuckDB reads a
+    name that looks like a file the same way, quoted or not: ``"events.parquet"``,
+    ``events.parquet``, ``"data/*.csv"``. A mount on a lake connection is the
+    way to read files the cache can see, since each mount's fingerprint is
+    folded into the cell's provenance.
     """
     from sqlglot import exp
 
@@ -557,7 +559,22 @@ def _table_reference(table_node: Any, sql: str, dialect: str) -> QualifiedTable 
     start = this.meta.get("start")
     if start is not None and sql[start] == "'":
         return None
+    if dialect == "duckdb" and _names_a_file(".".join(part.name for part in table_node.parts)):
+        return None
     return _qualified(table_node, dialect)
+
+
+# What DuckDB reads as a file when it sits where a table name goes (its
+# replacement scans), optionally compressed.
+_FILE_NAME_RE = re.compile(
+    r"\.(parquet|csv|tsv|json|jsonl|ndjson|arrow|orc)(\.(gz|zst|zstd|bz2|xz|lz4))?$",
+    re.IGNORECASE,
+)
+
+
+def _names_a_file(name: str) -> bool:
+    """Whether DuckDB reads *name*, a table reference's dotted text, as a file."""
+    return "/" in name or "*" in name or _FILE_NAME_RE.search(name) is not None
 
 
 def _unresolved_text(table_node: Any, sql: str, dialect: str) -> str:
