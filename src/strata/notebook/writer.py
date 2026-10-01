@@ -12,7 +12,7 @@ import tempfile
 import time
 import tomllib
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
 from importlib.metadata import PackageNotFoundError, metadata
 from pathlib import Path
@@ -146,6 +146,15 @@ def _env_has_meaningful_content(env: dict[str, str]) -> bool:
             continue
         return True
     return False
+
+
+def drop_blanked_secrets(env: Mapping[str, str]) -> dict[str, str]:
+    """Drop empty sensitive entries so they do not mask the server's own value.
+
+    The writer blanks sensitive values on disk, so an empty one is a placeholder
+    for re-entry, not an intentional override. Empty non-sensitive values stay.
+    """
+    return {key: value for key, value in env.items() if value or not _is_sensitive_env_key(key)}
 
 
 _AUTH_INDIRECTION_RE = re.compile(r"^\$\{[A-Za-z_][A-Za-z0-9_]*\}$")

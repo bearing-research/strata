@@ -188,7 +188,9 @@ re-run, a Strata notebook is just a directory of plain text:
   `PASSWORD`/`CREDENTIAL` are blanked before persisting, so the writer
   can't accidentally commit an API key. The name survives only when the
   block also holds a non-sensitive value; an `[env]` with nothing but
-  blanked secrets is not written at all.
+  blanked secrets is not written at all. An empty value for such a key is
+  a placeholder, not an override: until you re-enter it, cells see the
+  server's own value for that variable.
 - **uv lockfile in committed config.** `pyproject.toml` + `uv.lock` pin
   the Python environment exactly the same way the rest of your repo
   does; collaborators get a reproducible environment from a fresh clone.

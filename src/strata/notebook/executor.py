@@ -110,6 +110,7 @@ from strata.notebook.workers import (
     worker_supports_notebook_execution,
     worker_transport,
 )
+from strata.notebook.writer import drop_blanked_secrets
 from strata.tracing import current_trace_context, trace_span
 from strata.transforms.build_store import get_build_store
 from strata.types import EXECUTOR_PROTOCOL_HEADER, EXECUTOR_PROTOCOL_VERSION
@@ -941,7 +942,7 @@ class CellExecutor:
     ) -> dict[str, str]:
         """Resolve the effective runtime env with annotation precedence."""
         cell = self.session.notebook_state.get_cell(cell_id)
-        runtime_env = dict(cell.env) if cell is not None else {}
+        runtime_env = drop_blanked_secrets(cell.env) if cell is not None else {}
         runtime_env.update(annotation_env)
         return runtime_env
 

@@ -19,6 +19,8 @@ import os
 from collections.abc import Mapping
 from typing import Any
 
+from strata.notebook.writer import drop_blanked_secrets
+
 
 class CredentialError(ValueError):
     """A credential name, or a reference inside one, cannot be resolved."""
@@ -53,7 +55,7 @@ class CredentialResolver:
     ):
         self._registry = dict(registry or {})
         self._scheme_defaults = dict(scheme_defaults or {})
-        self._env = dict(env or {})
+        self._env = drop_blanked_secrets(env or {})
 
     @classmethod
     def from_config(cls, config: Any, env: Mapping[str, str] | None = None) -> CredentialResolver:
