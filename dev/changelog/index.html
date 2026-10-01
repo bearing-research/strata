@@ -3618,6 +3618,13 @@ exhaustive commit history.</p>
   under its old name, and a projection naming the new one failed partway
   through the stream. A schema change makes no snapshot, so the row-group
   cache and a scan's provenance now name the schema as well as the snapshot.</li>
+<li><strong>Tag lookups on a server pointed at a team store answer from that store.</strong>
+  <code>GET /v1/registry/artifacts</code> read the local store; every other registry
+  route already forwarded.</li>
+<li><strong>The metadata store closes its SQLite connections.</strong> Reads left them open
+  until garbage collection.</li>
+<li><strong><code>/health/ready</code> no longer reports <code>stuck_scans</code>.</strong> Nothing recorded scan
+  progress, so the check could never fail readiness.</li>
 </ul>
 <h2 id="080-2026-09-27">0.8.0 - 2026-09-27<a class="headerlink" href="#080-2026-09-27" title="Permanent link">&para;</a></h2>
 <p>A notebook stops being one person's machine. This release is about the three
