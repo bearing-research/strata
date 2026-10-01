@@ -3625,6 +3625,8 @@ exhaustive commit history.</p>
   until garbage collection.</li>
 <li><strong><code>/health/ready</code> no longer reports <code>stuck_scans</code>.</strong> Nothing recorded scan
   progress, so the check could never fail readiness.</li>
+<li><strong><code>AsyncStrataClient.materialize</code> honors <code>poll_interval</code>.</strong> It polled a
+  build every 0.5 s whatever was passed.</li>
 </ul>
 <h2 id="080-2026-09-27">0.8.0 - 2026-09-27<a class="headerlink" href="#080-2026-09-27" title="Permanent link">&para;</a></h2>
 <p>A notebook stops being one person's machine. This release is about the three
