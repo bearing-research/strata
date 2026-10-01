@@ -1,12 +1,14 @@
 # Privacy & Sharing Model
 
-Strata's notebook sharing model is **URL-based**, similar to Google
-Docs: notebook IDs are unguessable, and without per-user scoping
-anyone who can reach the server and has the ID can open and execute
-the notebook. Personal mode's per-user header gates every notebook
-route on the owner; service mode gates them by scope, not by owner.
-This page lays out the model honestly so you can pick the deployment
-shape that matches your trust boundary.
+How notebook access works depends on whether personal mode's
+per-user header (`STRATA_PERSONAL_MODE_USER_HEADER`) is set. With it
+unset, access is **URL-based**, similar to Google Docs: notebook IDs
+are unguessable, and anyone who can reach the server and has the ID
+can open and execute the notebook. With it set, every notebook route
+checks the notebook's owner and answers `404` to anyone else, so a
+shared link works only for its owner. Service mode gates the routes
+by scope, not by owner. This page lays out the model honestly so you
+can pick the deployment shape that matches your trust boundary.
 
 ## What's shared, what isn't
 
@@ -39,7 +41,7 @@ is opt-in: the [team cache](service-mode.md#the-team-cache-sharing-results-nobod
 store by provenance, so identical cells in different notebooks hit
 each other there.
 
-### Notebook access, URL-based
+### Notebook access
 
 Notebook IDs are full UUIDs (8-char prefix for display, full UUID
 for the actual ID). They're not in any global enumeration and
@@ -159,14 +161,14 @@ any other notebook tool: hard-private = separate instances.
 ## Future direction: per-notebook ACLs
 
 Real per-notebook permissions (a `read_principals` / `write_principals`
-list in `notebook.toml` checked on every endpoint) would close the
-"anyone-with-URL" gap. It's not implemented today; the URL boundary
-is the deliberate choice because:
+list in `notebook.toml` checked on every endpoint) would sit between
+the two shapes that exist today. With per-user scoping an owned
+notebook is its owner's alone; without it, or in service mode, anyone
+who can reach the server and has the ID (and, in service mode, the
+scope) can open it. Nothing in between is implemented:
 
-- Collaboration via shared URLs is the dominant pattern in
-  notebook workflows.
-- Locking down opens / cell execution introduces friction that
-  doesn't match how teams typically share work.
+- [Publishing](../notebook/publishing.md) already hands a result to
+  someone without handing them the notebook.
 - The handful of users who need stronger isolation already have
   the "separate instance" escape hatch.
 

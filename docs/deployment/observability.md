@@ -190,17 +190,24 @@ the compose stack.
 ## Generating load
 
 A fresh stack is idle, so the Grafana panels and Jaeger are empty
-until the server does some work. The repo ships a small capacity
-sweep that hammers it with realistic Iceberg scans:
+until the server scans a table. The compose file mounts
+`./demo-warehouse` read-only at `/data/warehouse` for that. Put an
+Iceberg warehouse there whose catalog records paths under
+`/data/warehouse` (a warehouse built on the host, such as the one
+`examples/setup_demo.py` writes, records host paths that do not exist
+in the container). Then run a few `scan@v1` materializes against
+`http://localhost:8765` with the
+[Python client](../getting-started/core.md#3-materialize-a-result),
+using `file:///data/warehouse#<namespace>.<table>` as the input.
 
-```bash
-uv run python benchmarks/capacity_sweep.py \
-  --dry-run \
-  --no-server \
-  --base-url http://localhost:8765
-```
+`benchmarks/capacity_sweep.py --no-server` is not a load source for
+this stack. It has no option for table URIs, so it sends placeholder
+table names, every request fails before any data is read, and the
+scan, cache and QoS panels stay flat. Without `--no-server`
+the sweep starts its own server on a free port and loads that one
+instead.
 
-After it runs:
+After a few scans:
 
 - **Grafana** ([:3000](http://localhost:3000)) - the scan-rate,
   cache, and QoS panels move within a scrape interval or two.

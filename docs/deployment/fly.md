@@ -27,17 +27,21 @@ Strata's hosted preview runs on [Fly.io](https://fly.io) at [strata-notebook.fly
 
 - [Fly CLI](https://fly.io/docs/flyctl/install/) installed (`brew install flyctl` on macOS).
 - `fly auth login` completed (opens a browser; one-time).
-- A Fly.io account with a payment method on file. The default
-  `shared-cpu-4x` VM costs roughly $5/mo always-on, which is what the
-  shipped `fly.toml` configures: it suspends idle machines but keeps one
-  running, so it does not scale to zero unless you change
-  `min_machines_running`.
+- A Fly.io account with a payment method on file. The shipped
+  `fly.toml` runs one `shared-cpu-4x` VM with 2 GB of memory. It
+  suspends idle machines but keeps one running, so it does not scale to
+  zero unless you change `min_machines_running`. See
+  [Fly pricing](https://fly.io/docs/about/pricing/) for what that costs.
 
 ## Deploy
 
+App names are global on Fly, and the `app` in the shipped `fly.toml`
+is this project's own. Pick a name, set `app = "<your-app-name>"` in
+`fly.toml`, then:
+
 ```bash
 # First time
-fly apps create strata-notebook
+fly apps create <your-app-name>
 fly deploy
 
 # Subsequent deploys
