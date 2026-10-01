@@ -1,11 +1,7 @@
-"""Run Impact Preview — shows upstream + downstream consequences before execution.
+"""Run impact preview: what running a cell will cost and invalidate.
 
-When a user is about to run a cell, the impact preview tells them:
-1. Which upstream cells need to run first (reuses CascadePlanner)
-2. Which downstream cells will become stale (forward walk from target)
-3. Estimated total execution time
-
-This extends the existing cascade prompt with downstream analysis.
+Lists the upstream cells that must run first (via ``CascadePlanner``), the
+downstream cells that will go stale, and the estimated upstream run time.
 """
 
 from __future__ import annotations
@@ -23,18 +19,9 @@ if TYPE_CHECKING:
 
 @dataclass
 class DownstreamImpact:
-    """A downstream cell that will be invalidated.
+    """A downstream cell that running the target will invalidate.
 
-    Attributes
-    ----------
-    cell_id : str
-        ID of the affected cell.
-    cell_name : str
-        Display name of the affected cell.
-    current_status : str
-        Cell's current status (a ``CellStatus`` value).
-    new_status : str
-        Status after the target cell runs (always ``"stale:upstream"``).
+    ``new_status`` is always ``"stale:upstream"``.
     """
 
     cell_id: str
@@ -47,16 +34,7 @@ class DownstreamImpact:
 class ImpactPreview:
     """Full impact preview for running a cell.
 
-    Attributes
-    ----------
-    target_cell_id : str
-        The cell the user wants to run.
-    upstream : list of CascadeStep
-        Cells that need to run first (from the cascade planner).
-    downstream : list of DownstreamImpact
-        Cells that will become stale once the target runs.
-    estimated_ms : int
-        Total estimated execution time across upstream cells.
+    ``estimated_ms`` sums the upstream steps that are not skipped.
     """
 
     target_cell_id: str
@@ -66,38 +44,19 @@ class ImpactPreview:
 
     @property
     def has_impact(self) -> bool:
-        """Whether there is any upstream or downstream impact.
-
-        If False, the UI should skip the preview and just run the cell.
-        """
+        """Whether there is any upstream or downstream impact; if not, the UI skips the preview."""
         upstream_non_target = [s for s in self.upstream if s.cell_id != self.target_cell_id]
         return len(upstream_non_target) > 0 or len(self.downstream) > 0
 
 
 class ImpactAnalyzer:
-    """Analyzes the impact of running a cell.
-
-    Combines upstream cascade analysis with downstream invalidation
-    analysis to produce a complete picture of what will happen.
-    """
+    """Combines upstream cascade planning with downstream invalidation."""
 
     def __init__(self, session: NotebookSession):
-        """Initialize analyzer for a session.
-
-        Args:
-            session: NotebookSession instance
-        """
         self.session = session
 
     def preview(self, cell_id: str) -> ImpactPreview:
-        """Compute the impact of running a cell.
-
-        Args:
-            cell_id: ID of the cell to run
-
-        Returns:
-            ImpactPreview with upstream and downstream effects
-        """
+        """Compute the impact of running a cell."""
         upstream_steps = self._compute_upstream(cell_id)
 
         downstream = self._compute_downstream(cell_id)
@@ -112,14 +71,7 @@ class ImpactAnalyzer:
         )
 
     def _compute_upstream(self, cell_id: str) -> list[CascadeStep]:
-        """Compute upstream cells that need to run.
-
-        Args:
-            cell_id: Target cell ID
-
-        Returns:
-            List of CascadeStep in topological order
-        """
+        """Upstream cells that need to run, in topological order."""
         planner = CascadePlanner(self.session)
         plan = planner.plan(cell_id)
         if plan is None:
@@ -127,17 +79,7 @@ class ImpactAnalyzer:
         return plan.steps
 
     def _compute_downstream(self, cell_id: str) -> list[DownstreamImpact]:
-        """Compute downstream cells that will become stale.
-
-        Performs a forward BFS from the target cell through the DAG,
-        collecting all cells that will be invalidated.
-
-        Args:
-            cell_id: Target cell ID
-
-        Returns:
-            List of DownstreamImpact for affected cells
-        """
+        """Cells that will become stale, found by a forward BFS from the target."""
         if not self.session.dag:
             return []
 

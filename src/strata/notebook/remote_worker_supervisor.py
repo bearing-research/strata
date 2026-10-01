@@ -1,18 +1,10 @@
-"""Server-side lifecycle for SSH-tunneled remote workers (P2 of the SSH path).
+"""Server-side lifecycle for SSH-tunneled remote workers.
 
-Cell dispatch runs *inside* the notebook server process, so the local end of an
-``ssh -L`` tunnel must be reachable from that process — which means the tunnel
-subprocess has to be owned and supervised where the server lives, not by a
-transient CLI. :class:`RemoteWorkerSupervisor` is that owner: given an SSH target
-it provisions a ``strata-worker`` on the box (via :mod:`strata.notebook.ssh_worker`),
-opens a forward to the worker's remote-localhost port, health-checks through it,
-and hands back the local ``/v1/execute`` URL a ``[[workers]]`` entry points at.
-
-Everything external is a seam — the tunnel launcher, the health probe, the port
-picker, the SSH runner — so the supervisor is unit-testable without a real host,
-a real ``ssh``, or a live socket. Wiring it into the server lifespan and the REST
-surface (and persisting tunnel intent for re-establish on restart) is a separate
-follow-up; this module is the supervisor core.
+Cells dispatch from inside the server process, so the ``ssh -L`` tunnel must be
+owned there, not by a transient CLI. :class:`RemoteWorkerSupervisor` provisions
+a ``strata-worker`` on the box (via :mod:`strata.notebook.ssh_worker`), forwards
+to its remote-localhost port, health-checks through the tunnel, and returns the
+local ``/v1/execute`` URL a ``[[workers]]`` entry points at.
 """
 
 from __future__ import annotations
@@ -149,12 +141,10 @@ class _ActiveTunnel:
 
 @dataclass
 class RemoteWorkerSupervisor:
-    """Owns the ``ssh -L`` tunnels + remote workers for a running server.
+    """Owns the ``ssh -L`` tunnels and remote workers for a running server.
 
-    All external effects are injected so the supervisor is testable without a
-    host: ``tunnel_launcher`` opens the forward, ``health_probe`` checks the
-    worker through it, ``port_picker`` chooses the local port, and
-    ``runner_factory`` builds the SSH runner for provisioning.
+    All external effects (``tunnel_launcher``, ``health_probe``, ``port_picker``,
+    ``runner_factory``) are injected so it is testable without a host.
     """
 
     tunnel_launcher: TunnelLauncher = field(default_factory=SubprocessTunnelLauncher)
@@ -183,12 +173,11 @@ class RemoteWorkerSupervisor:
         install: bool = True,
         health_timeout: float = 10.0,
     ) -> TunnelRecord:
-        """Provision + tunnel + health-check a remote worker; return its record.
+        """Provision, tunnel and health-check a remote worker; return its record.
 
-        Idempotent per ``name``: re-establishing tears the previous tunnel down
-        first. Raises :class:`SshWorkerError` if any step fails (the tunnel is
-        cleaned up before the error propagates). A concurrent establish for the
-        same ``name`` is rejected rather than double-launched.
+        Re-establishing a ``name`` tears its previous tunnel down first; a concurrent
+        establish for the same ``name`` is rejected. Raises :class:`SshWorkerError` if
+        any step fails, after cleaning up the tunnel.
         """
         with self._lock:
             if name in self._pending:
@@ -223,8 +212,10 @@ class RemoteWorkerSupervisor:
         install: bool,
         health_timeout: float,
     ) -> TunnelRecord:
-        """The slow body of :meth:`establish`, run with ``name`` reserved in
-        ``_pending`` (never holding ``_lock`` across ssh round-trips)."""
+        """The slow body of :meth:`establish`, run with ``name`` reserved in ``_pending``.
+
+        Never holds ``_lock`` across ssh round-trips.
+        """
         if self.get(name) is not None:
             self.teardown(name)
 
@@ -298,9 +289,8 @@ class RemoteWorkerSupervisor:
     def reconcile(self) -> list[TunnelRecord]:
         """Health-check every tunnel; respawn any whose forward or worker is down.
 
-        The synchronous heartbeat: call it from the server's health loop. A dead
-        ``ssh -L`` (or an unresponsive worker behind a live forward) is torn down
-        and re-opened on the same ports; ``healthy`` reflects the result.
+        Called from the server's health loop. A dead tunnel is re-opened on the same
+        ports; ``healthy`` reflects the result.
         """
         with self._lock:
             actives = list(self._tunnels.items())
@@ -328,10 +318,10 @@ class RemoteWorkerSupervisor:
         return records
 
     def teardown(self, name: str, *, stop_remote: bool = False) -> bool:
-        """Close *name*'s tunnel (and optionally stop the remote worker).
+        """Close *name*'s tunnel; return whether one was present.
 
-        Returns whether a tunnel was present. ``stop_remote`` also kills the
-        ``strata-worker`` on the box; by default it's left running for reuse.
+        ``stop_remote`` also kills the ``strata-worker`` on the box; by default it is
+        left running for reuse.
         """
         with self._lock:
             active = self._tunnels.pop(name, None)
@@ -347,10 +337,9 @@ class RemoteWorkerSupervisor:
         return True
 
     def shutdown(self) -> None:
-        """Tear down every tunnel (leaving remote workers running for reuse).
+        """Tear down every tunnel, leaving remote workers running for reuse.
 
-        Wired to the server lifespan's shutdown so no ``ssh -L`` children outlive
-        the server.
+        Runs at server shutdown so no ``ssh -L`` children outlive the server.
         """
         with self._lock:
             actives = list(self._tunnels.items())

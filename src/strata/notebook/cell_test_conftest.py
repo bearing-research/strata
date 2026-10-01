@@ -1,23 +1,10 @@
-"""Generated pytest plugin for per-cell unit tests (design: design-cell-unit-tests.md).
+"""Template pytest plugin for per-cell unit tests.
 
-This module is the TEMPLATE for the ``conftest.py`` Strata writes into an
-isolated run dir when running a cell's tests. It is named ``cell_test_conftest``
-(not ``conftest``) precisely so the project's own pytest run does NOT auto-load
-it; the cell-test runner copies it to ``<rundir>/conftest.py`` at run time.
-
-At run time the run dir contains, as siblings of this conftest:
-- ``inputs.pkl``     — the cell's upstream inputs (``{var_name: value}``), pickled.
-- ``cell_source.py`` — a copy of the cell's source.
-- ``test_<cell>.py`` — the user's test file, staged under a ``test_*.py`` name so
-  pytest collects it natively AND rewrites its assertions (rewriting only fires
-  for modules matching ``python_files``).
-- ``results.json``   — written here on session finish.
-
-The plugin does three Strata-specific jobs: (1) build the cell's namespace once
-(deserialize inputs + exec the cell source), (2) expose it via the ``cell``
-fixture, (3) report structured per-test outcomes to ``results.json`` (no junit).
-Hooks/fixtures are defined inline (no ``pytest_plugins`` — deprecated in
-non-root conftests).
+Named ``cell_test_conftest`` so the project's own pytest run does not load it;
+the cell-test runner copies it to ``<rundir>/conftest.py``. The run dir also
+holds ``inputs.pkl`` (pickled ``{var_name: value}``), ``cell_source.py``, the
+user's tests staged as ``test_<cell>.py`` (so pytest rewrites their asserts),
+and the ``results.json`` this plugin writes on session finish.
 """
 
 from __future__ import annotations
@@ -36,11 +23,8 @@ _RUNDIR = Path(__file__).resolve().parent
 def cell():
     """The cell's executed namespace, attribute-accessible.
 
-    ``cell.X`` is whatever ``X`` is after the cell ran — a function/class it
-    defines, an upstream input, or a module-level constant. The cell body runs
-    once here (test runs re-execute the cell). A failure in the cell source
-    surfaces as a clear setup error on every test that requests ``cell`` rather
-    than an opaque collection error.
+    The cell body runs once per test run. A failure in the cell source surfaces
+    as a setup error on every test that requests ``cell``, not a collection error.
     """
     namespace: dict[str, object] = {}
     inputs = pickle.loads((_RUNDIR / "inputs.pkl").read_bytes())
@@ -76,10 +60,9 @@ def pytest_runtest_logreport(report) -> None:  # noqa: ANN001 - pytest Report
 def pytest_collectreport(report) -> None:  # noqa: ANN001 - pytest CollectReport
     """Record collection failures (e.g. a syntax error in the test file).
 
-    Without this, a module that fails to import never produces a runtest
-    report, so ``pytest_sessionfinish`` would write an all-zero ``results.json``
-    and the failure would read as "no tests" instead of an error. We file it as
-    a failed ``setup`` phase so ``_final_outcome`` collapses it to ``error``.
+    A module that fails to import never produces a runtest report, so without
+    this ``results.json`` would read as "no tests". Filed as a failed ``setup``
+    phase so ``_final_outcome`` reports ``error``.
     """
     if report.failed:
         nodeid = report.nodeid or "<collection>"
@@ -88,10 +71,10 @@ def pytest_collectreport(report) -> None:  # noqa: ANN001 - pytest CollectReport
 
 
 def _final_outcome(phases: dict[str, tuple[str, str]]) -> tuple[str, str]:
-    """Collapse a test's setup/call/teardown phases into one outcome + message.
+    """Collapse a test's setup/call/teardown phases into one outcome and message.
 
-    setup failure ⇒ error; a skip ⇒ skipped; call failure ⇒ failed (the
-    assertion); teardown failure on an otherwise-passing test ⇒ error.
+    Setup failure is error, a skip is skipped, call failure is failed, and a
+    teardown failure on an otherwise-passing test is error.
     """
     setup_outcome, setup_text = phases.get("setup", ("passed", ""))
     call = phases.get("call")

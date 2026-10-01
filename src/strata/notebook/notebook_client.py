@@ -1,16 +1,8 @@
 """Lightweight ``strata`` client for the notebook venv.
 
-This module is **path-loaded** by the harness / warm pool (like
-``serializer.py``) and runs in the notebook's venv, which has only
-``pyarrow`` + stdlib — NOT ``strata`` or ``httpx``. So it cannot
-``import strata``; it re-implements the slice of ``StrataClient`` a cell
-needs directly over ``urllib`` + ``pyarrow``, faithful to the same REST
-wire protocol as ``strata.client.StrataClient``.
-
-Kept deliberately small: the data ops a cell reaches for (``materialize``,
-``put``) and the registry ops (``set_alias`` / ``set_tag`` / ``resolve_*``).
-Surface drift from the real client is the maintenance cost of avoiding a
-notebook-venv dependency; keep the two in sync when endpoints change.
+Path-loaded by the harness and warm pool into a venv with only ``pyarrow`` and
+the stdlib, so it re-implements the slice of ``strata.client.StrataClient`` a
+cell needs over ``urllib``. Keep the two in sync when endpoints change.
 """
 
 from __future__ import annotations
@@ -93,7 +85,7 @@ def _parse_artifact_uri(uri: str) -> tuple[str, int]:
 
 
 class Artifact:
-    """Minimal artifact handle — mirrors the fields/methods cells use."""
+    """Minimal artifact handle with the fields and methods cells use."""
 
     def __init__(
         self,
@@ -156,10 +148,7 @@ class StrataClient:
         self._inputs = dict(inputs or {})
 
     def _stamp_cell(self, artifact: Artifact, name: str | None) -> None:
-        """Tag a *named* artifact with the originating notebook cell so the
-        per-cell registry strip can show "what this cell published". Only
-        named artifacts (registry-bound) are stamped; failures are swallowed
-        — the stamp is a convenience, not part of the publish."""
+        """Tag a named artifact with the originating cell; best effort, errors swallowed."""
         if not name or not self._cell_id:
             return
         try:
@@ -342,14 +331,9 @@ class StrataClient:
     ) -> dict:
         """Send an upstream result, and the chain behind it, to the team store.
 
-        ``ref`` is one of this cell's input variables, or an explicit
-        ``<id>@v=<n>``. A variable is the useful form: the cell reads ``rows``,
-        so it promotes ``rows``, and never has to learn the artifact id the
-        notebook minted for it.
-
-        Only *upstream* results can be promoted from inside a cell. This cell's
-        own outputs do not exist yet — they are stored after it returns — so
-        promoting one is a job for the strip or the CLI, once it has run.
+        ``ref`` is one of this cell's input variable names, or an explicit
+        ``<id>@v=<n>``. Only upstream results can be promoted from a cell: its own
+        outputs are stored after it returns.
         """
         if self._promote_url is None:
             raise RuntimeError(

@@ -1,11 +1,9 @@
-"""Harness script that runs inside the notebook subprocess.
+"""Harness script that runs a cell inside the notebook subprocess.
 
-This script receives a manifest JSON file (path as argv[1]), executes cell source,
-captures stdout/stderr, and serializes outputs.
-
-It runs in the notebook's venv, so it only has access to the notebook's dependencies.
-It cannot ``import strata`` — instead it loads ``serializer.py`` from the same
-directory via ``importlib.util``.
+Takes a manifest JSON path as argv[1], executes the cell source, captures
+stdout/stderr and serializes outputs. Runs in the notebook's venv and cannot
+``import strata``; ``serializer.py`` in the same directory is loaded via
+``importlib.util``.
 """
 
 from __future__ import annotations
@@ -58,11 +56,7 @@ def load_manifest(manifest_path: str) -> dict:
 
 
 def _deserialize_one(var_name: str, spec: dict, output_dir: Path) -> Any:
-    """Deserialize a single ``{content_type, file}`` spec into a value.
-
-    Raises ``KeyError``-style ``_Skip`` via returning the sentinel ``_MISSING``
-    when the file path is absent/missing (caller decides what to do).
-    """
+    """Deserialize one ``{content_type, file}`` spec, or ``_MISSING`` if the file is absent."""
     file_name = spec.get("file", "")
     if not file_name:
         print(f"Warning: no file path for input {var_name}", file=sys.stderr)
@@ -156,11 +150,9 @@ def _exec_with_display(source: str, namespace: dict) -> Any | None:
 
 
 def inject_mounts(manifest: dict, namespace: dict) -> None:
-    """Inject mount paths as Path variables into the cell namespace.
+    """Bind each mount as a ``pathlib.Path`` in the cell namespace.
 
-    Each mount becomes a ``pathlib.Path`` bound to the mount's local path.
-    Read-only mounts are verified to exist; read-write mounts are created
-    if missing.
+    Read-only mounts must exist; read-write mounts are created if missing.
     """
     mounts = manifest.get("mounts", {})
     for mount_name, spec in mounts.items():
@@ -178,13 +170,7 @@ def inject_mounts(manifest: dict, namespace: dict) -> None:
 
 
 def inject_tables(manifest: dict, namespace: dict) -> None:
-    """Inject lake table inputs into the cell namespace.
-
-    Each ``@table`` declaration becomes two variables: ``<name>`` — the
-    table URI string — and ``<name>_snapshot`` — the snapshot id the
-    executor resolved at provenance time, so the cell can scan exactly the
-    snapshot its provenance recorded.
-    """
+    """Inject ``@table`` inputs: ``<name>`` (the URI) and ``<name>_snapshot`` (the resolved id)."""
     tables = manifest.get("tables", {})
     for table_name, spec in tables.items():
         namespace[table_name] = spec.get("uri", "")
@@ -194,11 +180,9 @@ def inject_tables(manifest: dict, namespace: dict) -> None:
 def inject_client(manifest: dict, namespace: dict) -> Any:
     """Inject an ambient ``strata`` client bound to the server URL.
 
-    Returns the client so the caller can close it after the cell runs —
-    the warm pool reuses the process, so a leaked ``httpx.Client`` would
-    accumulate sockets. Returns ``None`` when no ``strata_url`` is set.
-    Must be called before the namespace is snapshotted for output capture
-    so ``strata`` is treated as an injected input, not a cell output.
+    Returns the client so the caller can close it, or ``None`` when no
+    ``strata_url`` is set. Call before the namespace is snapshotted, so
+    ``strata`` counts as an injected input rather than a cell output.
     """
     url = manifest.get("strata_url")
     if not url:
@@ -258,24 +242,14 @@ def execute_cell(
     stdout_capture: io.StringIO | None = None,
     stderr_capture: io.StringIO | None = None,
 ) -> tuple[dict, list[Any], str, str, list[dict], dict[str, Any] | None]:
-    """Execute a cell and return its outputs, displays, captured streams, mutations, and loop state.
+    """Execute a cell; return outputs, displays, captured streams, mutations and loop state.
 
-    ``mutation_defines`` lists variable names that the analyzer marked as
-    in-place mutations (``df["col"] = ...``). These are always serialized
-    as outputs even when the cell's execution preserved ``id()`` — the
-    identity check alone would miss them and downstream cells would get
-    the stale pre-mutation artifact.
-
-    ``loop_until_expr``, when supplied, is a Python expression evaluated
-    in the cell namespace after the body runs. The returned ``loop_state``
-    dict carries ``until_reached`` (truthy result of the expression) and,
-    on failure to compile/evaluate, an ``error`` field. When the caller
-    passes ``None``, ``loop_state`` is ``None`` and no loop work happens.
-
-    ``stdout_capture`` / ``stderr_capture`` let the caller own the buffers. The
-    return value only carries the captured text on success, so a caller that
-    wants the print trail of a cell that *raised* has to hold the buffers
-    itself — which is what the batch and pool paths already do.
+    ``mutation_defines`` (in-place mutations such as ``df["col"] = ...``) are always
+    serialized, even when ``id()`` is unchanged. With ``loop_until_expr`` set, the
+    expression is evaluated after the body and ``loop_state`` carries
+    ``until_reached`` (or ``error``); otherwise ``loop_state`` is ``None``.
+    Captured text is returned only on success, so a caller that needs the output of
+    a cell that raised passes its own ``stdout_capture`` / ``stderr_capture``.
     """
     namespace = dict(inputs)
     display_capture = _display.DisplayCapture()
@@ -342,10 +316,9 @@ def execute_cell(
 def _eval_loop_until(expr: str, namespace: dict[str, Any]) -> dict[str, Any]:
     """Evaluate ``@loop_until`` in the cell namespace.
 
-    Returns a dict with ``until_reached`` (bool) and, on any failure to
-    compile or evaluate, an ``error`` field carrying a short message.
-    Evaluation failures do not abort cell execution — they bubble up as
-    a termination signal the executor can surface to the user.
+    Returns ``until_reached`` (bool) and, if compiling or evaluating fails, an
+    ``error`` message. A failure does not abort the cell; it surfaces as a
+    termination signal.
     """
     try:
         code = compile(expr, "<loop_until>", "eval")
@@ -381,20 +354,10 @@ _MISSING = object()
 def build_env_identity() -> str:
     """Which interpreter, on which machine, produced these bytes.
 
-    Recorded on every artifact so a *shared* cache can say where a result came
-    from. It is not part of the provenance hash and deliberately so: teams run
-    Macs locally and Linux in CI, and folding the platform into the key would
-    drop cross-machine hit rate to roughly zero — deleting the feature in order
-    to protect it. What is not acceptable is sharing across platforms while
-    recording nothing, which is what happened before this.
-
-    Computed here rather than in ``strata`` because this is the process that
-    actually ran the cell: the notebook venv locally, or a remote worker's
-    interpreter on someone else's hardware. Anything the server computed about
-    itself would be a guess about a machine it is not on.
-
-    Not normalised. macOS reports ``arm64`` where Linux reports ``aarch64``;
-    calling those the same is a portability claim nothing here can back.
+    Recorded on every artifact, not hashed: folding the platform into the key would
+    kill cross-machine (Mac locally, Linux in CI) cache hits. Computed here because
+    this is the process that ran the cell. Not normalised: ``arm64`` and
+    ``aarch64`` stay distinct, since nothing here can vouch they are portable.
     """
     version = f"{sys.version_info.major}.{sys.version_info.minor}"
     return (
@@ -424,10 +387,10 @@ def _run_one_batched_cell(
     frame_out: Any,
     resp_in: Any,
 ) -> tuple[str, str | None]:
-    """Execute one cell within a batch. Returns (status, failed_reason).
+    """Execute one cell within a batch; return ``(status, failed_reason)``.
 
-    status ∈ {"ok", "cell_error", "persist_failed"}. failed_reason names
-    the trigger when status != "ok" (matches batch_end's "reason" field).
+    ``status`` is ``"ok"``, ``"cell_error"`` or ``"persist_failed"``;
+    ``failed_reason`` matches ``batch_end``'s ``reason`` field.
     """
     cell_id = cell["cell_id"]
     source = cell["source"]
@@ -618,11 +581,9 @@ def _seed_upstream_namespace(
 ) -> None:
     """Load a batch's non-batched upstream artifacts into the shared namespace.
 
-    Done inline (rather than via ``deserialize_inputs``) so a single R-only
-    artifact doesn't abort the whole subprocess pre-``cell_start`` — the parent
-    would then see ``subprocess_died`` instead of the actionable
-    ``StrataRArtifactError``. Per-variable failures are stashed and surfaced as
-    a ``cell_error`` on the first cell that references the tainted variable.
+    Done inline (not via ``deserialize_inputs``) so one unreadable artifact (e.g.
+    R-only) does not kill the subprocess before ``cell_start``. Per-variable
+    failures surface as a ``cell_error`` on the first cell that references them.
     """
     for var_name, spec in (upstream_inputs or {}).items():
         content_type = spec.get("content_type", "")
@@ -657,15 +618,11 @@ def execute_batch(
 ) -> None:
     """Execute a sequence of cells in one Python process.
 
-    ``cells`` is the per-cell list ``[{cell_id, source, consumed_vars,
-    env, mount_manifest, source_hash, env_hash}, ...]`` in notebook order.
-    ``upstream_inputs`` seeds the shared namespace from artifacts of
-    non-batched upstream cells (same ``{var: {content_type, file}}``
-    shape ``deserialize_inputs`` reads).
-
-    Streams frames over ``frame_out`` and reads responses from
-    ``resp_in``. Returns after emitting ``batch_end``; the caller is
-    responsible for closing the pipes.
+    ``cells`` is ``[{cell_id, source, consumed_vars, env, mount_manifest,
+    source_hash, env_hash}, ...]`` in notebook order. ``upstream_inputs`` seeds the
+    shared namespace (same shape ``deserialize_inputs`` reads). Streams frames to
+    ``frame_out``, reads responses from ``resp_in``, and returns after
+    ``batch_end``; the caller closes the pipes.
     """
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -716,14 +673,8 @@ def _first_tainted_reference(
 ) -> Exception | None:
     """Return the first tainted-upstream error that a cell's source references.
 
-    The error is whatever made the variable unusable — an R-only artifact, or a
-    dtype the reading process would narrow.
-
-    Word-boundary match — keeps ``fit`` from spuriously triggering on
-    ``unfit_data`` or string literals like ``"fit_score"``. AST-walk
-    would be more precise, but a single regex pass over the source
-    catches the cases the reviewer cares about (the consumer using
-    the bare name as an identifier).
+    A word-boundary regex (not an AST walk), so ``fit`` does not match
+    ``unfit_data``.
     """
     if not tainted_inputs:
         return None
@@ -740,11 +691,9 @@ def _emit_tainted_cell_error(
     exc: _ser.StrataRArtifactError,
     frame_out: Any,
 ) -> None:
-    """Emit cell_start + cell_error for a cell blocked on a tainted upstream.
+    """Emit ``cell_start`` + ``cell_error`` for a cell blocked on a tainted upstream.
 
-    Mirrors the frame shape ``_run_one_batched_cell`` would emit on a
-    body-level exception, so consumers of the frame protocol don't
-    need a separate branch for this case.
+    Same frame shape as a body-level exception in ``_run_one_batched_cell``.
     """
     _send_frame(frame_out, "cell_start", {"cell_id": cell_id})
     _send_frame(
@@ -764,12 +713,10 @@ def _emit_tainted_cell_error(
 
 
 def batch_main() -> None:
-    """Batch-mode CLI entry. Invoked as ``python harness.py --batch <manifest>``.
+    """Batch-mode entry: ``python harness.py --batch <manifest>``.
 
-    Reads the cell list and upstream inputs from the manifest. Pipe file
-    descriptors come via ``STRATA_BATCH_FRAME_FD`` (write) and
-    ``STRATA_BATCH_RESP_FD`` (read); output dir from
-    ``STRATA_BATCH_OUTPUT_DIR``. Calls ``execute_batch`` and exits.
+    Pipe fds come from ``STRATA_BATCH_FRAME_FD`` (write) and
+    ``STRATA_BATCH_RESP_FD`` (read); the output dir from ``STRATA_BATCH_OUTPUT_DIR``.
     """
     if len(sys.argv) < 3:
         print("Usage: harness.py --batch <manifest_path>", file=sys.stderr)
@@ -799,18 +746,11 @@ def batch_main() -> None:
 
 
 class _Tee(io.StringIO):
-    """Captures the cell's output *and* lets it out of the process.
+    """Captures the cell's output and also writes it through to the wrapped stream.
 
-    A cell's print goes to whatever ``sys.stdout`` is while it runs, and that
-    is this buffer: the result manifest needs the whole text, so capturing it
-    is not optional. But a worker streams a running cell's console by reading
-    this process's stdout pipe, and a buffer nothing writes through leaves
-    that pipe empty for the cell's whole life -- an hour of training with a
-    console that stays blank until the bundle lands, which is the opposite of
-    what streaming it is for.
-
-    Flushed per write because the point is to be seen now; a console that
-    arrives 8 KiB at a time is the buffering this exists to defeat.
+    The result manifest needs the full text, and a worker streams a running cell's
+    console by reading this process's stdout pipe. Flushed on every write so the
+    console is live.
     """
 
     def __init__(self, stream: Any) -> None:

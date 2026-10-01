@@ -1,29 +1,16 @@
 """One environment per lockfile, shared by every notebook with that lock.
 
 Selected with ``notebook_env_backend = "shared"``. Environments live under
-``notebook_shared_env_dir`` (default: ``envs`` beside the notebook storage
-directory), one directory per **key**, and a notebook's ``.venv`` is a symlink
-to its key's directory. A second notebook with the same lock does not install
-anything: its sync is the link.
+``notebook_shared_env_dir``, one directory per key, and a notebook's ``.venv``
+is a symlink to its key's directory (POSIX only). The key hashes the raw
+``uv.lock`` bytes with the exact interpreter build and platform tag; not the
+provenance env hash, which omits the dev group.
 
-The key is ``sha256`` of the raw ``uv.lock`` bytes together with the exact
-interpreter build and platform tag. It is deliberately not the provenance
-environment hash, which leaves the dev group out and so would put two different
-installed environments under one key.
-
-A shared environment is never changed in place. ``add`` and ``remove`` change
-the notebook's ``pyproject.toml`` and ``uv.lock`` without syncing, then sync,
-which lands in another key and moves only that notebook's link.
-
-Each key keeps a reference file per notebook linked to it, and ``collect``
-removes a key no notebook links to once it has gone unused for
-``notebook_shared_env_ttl_days``. A reference whose notebook now links
-elsewhere, or no longer exists, does not keep a key alive.
-
-R libraries are shared the same way, one per ``renv.lock`` (see the R section
-below).
-
-POSIX only: the link is a symlink.
+A shared environment is never changed in place: ``add``/``remove`` edit the
+notebook's files, then sync into another key and move only that link.
+``collect`` removes a key no notebook links to after
+``notebook_shared_env_ttl_days`` unused. R libraries are shared the same way,
+one per ``renv.lock``.
 """
 
 from __future__ import annotations
@@ -87,10 +74,9 @@ def _combined(results: list[_UvCommandResult]) -> _UvCommandResult:
 def _key_lock(root: Path, key: str) -> filelock.FileLock:
     """Held while a key's environment is installed, linked or removed.
 
-    Not thread-local, and with a finite timeout: the streaming sync acquires it
-    on a worker thread and releases it on the event loop's, and filelock's
-    same-thread deadlock check misreads that as a second holder once the
-    worker thread is reused. An hour is longer than any install is allowed.
+    Not thread-local, with a finite timeout: the streaming sync acquires it on a
+    worker thread and releases it on the event loop's, which filelock's
+    same-thread check misreads once the worker thread is reused.
     """
     return filelock.FileLock(str(root / f"{key}.lock"), thread_local=False, timeout=3600)
 
@@ -189,9 +175,8 @@ class SharedEnvBackend:
         return {"UV_PROJECT_ENVIRONMENT": str(self.root / key)}
 
     def _detached(self) -> dict[str, str]:
-        """For commands that change only the notebook's files: point uv at an
-        environment that does not exist, so it neither reads nor touches the
-        one .venv links to."""
+        """Point uv at a nonexistent environment, for commands that change only the
+        notebook's files, so it never touches the shared one."""
         return {"UV_PROJECT_ENVIRONMENT": str(self.root / ".no-environment")}
 
     def _is_complete(self, key: str) -> bool:
@@ -426,9 +411,8 @@ def restore_r_library(
 ) -> bool:
     """Link the notebook to the library for its ``renv.lock``, restoring it once.
 
-    *restore* runs ``renv::restore()`` in the notebook with the environment it
-    is given; it writes through the link into the keyed directory. A second
-    notebook with the same lock and R build only links.
+    *restore* runs ``renv::restore()``, writing through the link into the keyed
+    directory. A second notebook with the same lock and R build only links.
     """
     notebook_dir = Path(notebook_dir)
     r_root = Path(root).resolve() / R_DIR
@@ -465,9 +449,8 @@ def restore_r_library(
 def link_r_library_if_built(notebook_dir: Path, root: Path) -> bool:
     """Link the notebook to the built library for its lock, if there is one.
 
-    For a mutation that failed: the notebook goes back to the shared library it
-    was using, and when there is none its private one is left alone rather than
-    removed — it holds whatever the restore before the failure had installed.
+    For a failed mutation. With no built library the private one is kept, as it
+    holds what the earlier restore installed.
     """
     notebook_dir = Path(notebook_dir)
     build = r_build()
@@ -501,8 +484,8 @@ def detach_r_library(notebook_dir: Path, root: Path) -> bool:
 
 
 def adopt_r_library(notebook_dir: Path, root: Path) -> bool:
-    """Move a private library under the key of the ``renv.lock`` it was built
-    for, or drop it for the one already there, and link the notebook to it."""
+    """Move a private library under its ``renv.lock`` key (or drop it for the one
+    already there), and link the notebook to it."""
     notebook_dir = Path(notebook_dir)
     library = _r_library(notebook_dir)
     build = r_build()
@@ -532,11 +515,9 @@ class Collection:
 
 
 def collect(root: Path, *, ttl_days: float, now: float | None = None) -> Collection:
-    """Remove environments no notebook links to that have gone unused for
-    *ttl_days*. A key some notebook still links to is never removed.
+    """Remove Python envs and R libraries (``r/<key>``) unlinked and unused for *ttl_days*.
 
-    Python environments and R libraries alike; an R key is reported as
-    ``r/<key>``.
+    A key some notebook still links to is never removed.
     """
     root = Path(root).resolve()
     now = time.time() if now is None else now

@@ -1,8 +1,4 @@
-"""Cascade execution planner for notebooks.
-
-When a user runs a cell with stale upstream inputs, we offer to run
-the required upstream cells automatically (cascade execution).
-"""
+"""Cascade planner: which upstream cells must run before a target cell."""
 
 from __future__ import annotations
 
@@ -27,15 +23,7 @@ class CascadeReason(StrEnum):
 
 @dataclass
 class CascadeStep:
-    """A single cell in a cascade plan.
-
-    Attributes:
-        cell_id: ID of the cell to run
-        cell_name: Display name of the cell (for the UI)
-        reason: Why this cell needs to run (stale, missing, or target)
-        skip: If True, cell can be skipped (e.g., cache hit)
-        estimated_ms: Estimated execution time
-    """
+    """A single cell in a cascade plan; ``skip`` marks one that can be skipped."""
 
     cell_id: str
     cell_name: str
@@ -46,14 +34,7 @@ class CascadeStep:
 
 @dataclass
 class CascadePlan:
-    """Plan for cascading execution.
-
-    Attributes:
-        plan_id: Unique ID for this plan
-        target_cell_id: The cell the user wants to run
-        steps: Cells to run, in topological order
-        estimated_duration_ms: Total estimated duration
-    """
+    """Plan for cascading execution; ``steps`` are in topological order."""
 
     plan_id: str
     target_cell_id: str
@@ -67,30 +48,14 @@ class CascadePlan:
 
 
 class CascadePlanner:
-    """Plans and executes cascades.
-
-    A cascade is triggered when a user tries to run a cell whose inputs
-    are not all ready (some are stale or missing). The planner determines
-    which upstream cells need to run first.
-    """
+    """Plans the upstream cells to run before a cell whose inputs are not all ready."""
 
     def __init__(self, session: NotebookSession):
-        """Initialize planner for a session.
-
-        Args:
-            session: NotebookSession instance
-        """
+        """Initialize planner for a session."""
         self.session = session
 
     def plan(self, cell_id: str) -> CascadePlan | None:
-        """Check if a cell needs upstream execution.
-
-        Args:
-            cell_id: ID of the cell to run
-
-        Returns:
-            CascadePlan if upstream cells need to run, None if cell can run immediately
-        """
+        """Return the cascade plan for *cell_id*, or None if it can run immediately."""
         if not self.session.dag:
             return None
 
@@ -119,14 +84,7 @@ class CascadePlanner:
         return plan
 
     def _build_plan(self, target_cell_id: str) -> CascadePlan | None:
-        """Build a cascade plan for a target cell.
-
-        Args:
-            target_cell_id: The cell the user wants to run
-
-        Returns:
-            CascadePlan or None if no cascade needed
-        """
+        """Build a cascade plan for *target_cell_id*, or None if none is needed."""
         if not self.session.dag:
             return None
 

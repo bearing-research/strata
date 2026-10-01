@@ -1,13 +1,8 @@
-"""View model for the notebook TUI — the pure, UI-free state core.
+"""View model for the notebook TUI: the pure, UI-free state core.
 
-The TUI is a read-only spectator: it seeds state from a ``notebook_state``
-snapshot and then folds live WS frames into a per-cell view. Keeping this
-logic free of Textual / sockets makes it directly unit-testable with a
-fake-frame feed (the WS portal can't be driven from ``TestClient`` on
-py3.12/macOS — see project memory), and keeps the app a thin renderer.
-
-Frame shapes are parsed as plain dicts per ``docs/reference/notebook-protocol.md``
-(typed payloads, #44, are optional and not required here).
+The TUI is a read-only spectator: it seeds from a ``notebook_state`` snapshot
+and folds live WS frames (plain dicts, per ``docs/reference/notebook-protocol.md``)
+into per-cell views. No Textual or sockets here, so it is testable with fake frames.
 """
 
 from __future__ import annotations
@@ -70,10 +65,8 @@ class NotebookViewModel:
     def apply_notebook_state(self, payload: dict[str, Any]) -> None:
         """Seed (or re-seed) all cells from a ``notebook_state`` snapshot.
 
-        Live-only fields a snapshot doesn't carry (console buffer, streamed
-        deltas, the last live ``cell_output``) are preserved across a manual
-        resync for cells that still exist, so re-syncing doesn't wipe what the
-        spectator already saw.
+        Live-only fields the snapshot lacks (console, streamed deltas, last live
+        ``cell_output``) are kept for cells that still exist.
         """
         self.notebook_name = str(payload.get("name") or "")
         raw_cells = payload.get("cells") or []
@@ -118,15 +111,11 @@ class NotebookViewModel:
     # --- incremental frames ---
 
     def apply_frame(self, msg_type: str, payload: dict[str, Any]) -> set[str]:
-        """Fold one live frame in; return the set of affected cell ids.
+        """Fold one live frame in; return the affected cell ids (empty for unknown types).
 
-        Unknown frame types are no-ops here and return an empty set.
-        ``notebook_state`` is handled by :meth:`apply_notebook_state`, not here.
-
-        ``impact_preview`` / ``profiling_summary`` / ``inspect_result`` are
-        intentionally *not* handled: the server sends them point-to-point to the
-        client that requested them (not via ``_broadcast_message``), so a
-        read-only spectator never receives them — there is nothing to surface.
+        ``notebook_state`` goes through :meth:`apply_notebook_state`.
+        ``impact_preview``, ``profiling_summary`` and ``inspect_result`` are sent
+        only to the requesting client, so a spectator never receives them.
         """
         if msg_type == "dag_update":
             self.edges = _parse_edges(payload)

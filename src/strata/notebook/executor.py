@@ -1,42 +1,14 @@
-"""Cell executor — materialize a notebook cell.
+"""Cell executor: materialize a notebook cell.
 
-Each ``execute_cell`` call materializes one cell: ensure upstream inputs
-exist, compute provenance, cache-check, execute on miss, persist outputs.
+``execute_cell`` recursively materializes upstream inputs, computes provenance
+(``sha256(sorted_input_hashes + source_hash + env_hash)``), returns a cache hit
+if one exists, and otherwise runs the harness and stores every consumed variable.
+It works on any cell; the cascade planner only previews what will run.
 
-1. **Materialize upstream inputs** — for every upstream variable this cell
-   needs, look in the artifact store.  Cache hit → done.  Cache miss →
-   recursively ``execute_cell`` on the upstream so it produces the artifact.
-2. **Compute provenance** — now that all upstream artifacts exist we can
-   build the deterministic hash ``sha256(sorted_input_hashes + source_hash
-   + env_hash)``.
-3. **Cache check** — if an artifact with matching provenance already exists,
-   return immediately (cache hit).
-4. **Execute** — spawn the harness subprocess, passing resolved input blobs.
-5. **Store outputs** — persist every consumed variable as an artifact.
-
-The cascade planner (``cascade.py``) is a *UI-level* optimisation that
-previews which cells will run.  The executor itself is self-contained: you
-can call ``execute_cell`` on *any* cell and it will recursively materialise
-the full upstream DAG.
-
-Relationship to Strata Core's ``materialize`` SDK
--------------------------------------------------
-
-Strata Core exposes a separate ``materialize(inputs, transform) → artifact``
-primitive (``client.materialize`` / ``POST /v1/materialize``) for materializing
-*transforms* — server-registered executors like ``scan@v1`` keyed by
-``(table_identity, snapshot_id, columns, filters)``.
-
-This module is a parallel pipeline for materializing *cells* — ad-hoc Python
-source executed in a subprocess harness, keyed by ``(source_hash, env_hash,
-mount_fingerprints, input_hashes)``, with multi-output fan-out (one artifact
-per consumed variable via ``derive_subkey``).
-
-The two pipelines deliberately do not share the materialize entry point —
-the SDK shape (HTTP, single-output, registered transforms) does not fit
-the notebook shape (in-process, multi-output, source-as-transform). They
-share the substrate: ``artifact_store.find_by_provenance`` / ``put`` and the
-``derive_subkey`` helper in ``notebook.provenance``.
+This is deliberately a separate pipeline from Core's ``materialize`` SDK
+(``POST /v1/materialize``): cells are in-process, multi-output and
+source-as-transform. The two share only the artifact store
+(``find_by_provenance`` / ``put``) and ``notebook.provenance.derive_subkey``.
 """
 
 from __future__ import annotations
@@ -158,9 +130,8 @@ DEFAULT_CELL_TIMEOUT_SECONDS = 300.0
 def cell_timeout_message(timeout_seconds: float) -> str:
     """A timed-out-cell error that names the remedy.
 
-    A bare "timed out after Ns" is undiscoverable — the user has no way to know
-    the limit is configurable. Point at all three levers (per-cell annotation,
-    notebook default, one-off CLI flag).
+    Points at all three levers (per-cell annotation, notebook default, CLI flag),
+    since a bare "timed out" does not say the limit is configurable.
     """
     return (
         f"Cell execution timed out after {timeout_seconds}s. Raise the limit with a "
@@ -187,17 +158,9 @@ _MODULE_TO_PACKAGE: dict[str, str] = {
 def _resolve_worker_token(worker_spec: Any) -> str | None:
     """Look up the shared-secret token for an HTTP executor worker.
 
-    Two config shapes, in priority order:
-
-    1. ``config.token_env``: name of an env var holding the token. Preferred
-       — keeps the secret out of committed notebook.toml files. Common
-       pattern: ``token_env = "STRATA_GPU_WORKER_TOKEN"``, the operator
-       exports the env var when running the Strata server.
-    2. ``config.token``: literal token string. Convenient for local dev,
-       never commit a real one.
-
-    Returns ``None`` if neither is set (worker is reached without auth,
-    backward-compatible with deployments that don't enforce a token).
+    In order: the env var named by ``config.token_env`` (keeps secrets out of
+    notebook.toml), the literal ``config.token``, then the runtime registry
+    (SSH-provisioned workers). ``None`` means the worker is reached without auth.
     """
     config = getattr(worker_spec, "config", None)
     if config is None:
@@ -223,32 +186,12 @@ def _resolve_worker_token(worker_spec: Any) -> str | None:
 
 
 def _detect_missing_module(error: str, stderr: str) -> tuple[str, str] | None:
-    """Detect a missing package from a cell-execution failure message.
+    """Detect a missing package in a cell failure: ``(language, package)`` or None.
 
-    Returns ``(language, package_name)`` where ``language`` is
-    ``"python"`` or ``"r"`` so callers know which package manager
-    can resolve the suggestion (uv vs ``install.packages()``).
-    Returns ``None`` when no recognisable missing-package error is
-    present.
-
-    Recognised error shapes:
-
-    * Python — ``ModuleNotFoundError: No module named 'pkg'`` (full
-      form) and the short form ``No module named 'pkg'`` that the
-      harness emits. Top-level module is extracted, then mapped to
-      its PyPI distribution name via ``_MODULE_TO_PACKAGE`` for the
-      well-known import-vs-package divergences (cv2 → opencv-python,
-      PIL → Pillow, ...).
-
-    * R — ``Error in library(arrow) : there is no package called
-      'arrow'`` and its ``requireNamespace`` variant. The R name
-      maps 1:1 to the CRAN package name; no alias table needed.
-      Returned as ``("r", "arrow")``.
-
-    Frontend uses the language tag to decide which install
-    endpoint to dispatch to — ``uv add`` for Python, eventually
-    ``install.packages()`` for R. Until the R install action is
-    wired, the cell-level "Install" button is hidden for R cells.
+    ``language`` is ``"python"`` or ``"r"`` so the caller picks the installer.
+    Python matches ``No module named 'pkg'`` and maps the top-level module to its
+    PyPI name via ``_MODULE_TO_PACKAGE`` (cv2 to opencv-python). R matches
+    ``there is no package called 'pkg'``; the name is the CRAN name.
     """
     import re
 
@@ -289,17 +232,12 @@ def _add_harness_params(
     mutation_defines: list[str] | None,
     tables: dict[str, dict[str, Any]] | None,
 ) -> None:
-    """Carry to a worker the two harness inputs only a local run used to get.
+    """Add ``mutation_defines`` and ``tables`` to a worker's harness params.
 
-    ``mutation_defines`` names the variables a cell changes in place without
-    rebinding -- the harness re-serializes exactly those, and without the list
-    it sees an unchanged ``id()`` and stores nothing. ``tables`` carries each
-    ``@table``'s uri and the snapshot the executor resolved, which the harness
-    injects as ``<name>`` and ``<name>_snapshot``; no catalog is needed at the
-    far end to read them.
-
-    Added only when the cell has them, so a cell with neither sends the bytes
-    it always sent.
+    Without ``mutation_defines`` the harness sees an unchanged ``id()`` for an
+    in-place mutation and stores nothing. ``tables`` carries each ``@table``'s
+    uri and resolved snapshot, so the worker needs no catalog. Added only when
+    present, so other cells send the same bytes as before.
     """
     if mutation_defines:
         params["mutation_defines"] = list(mutation_defines)
@@ -312,12 +250,9 @@ def _add_fetch_inputs(
 ) -> None:
     """Put each ``@fetch``'s bytes in *output_dir* as an input a worker receives.
 
-    Every transport already ships ``{content_type, file}`` specs from this
-    directory, uploaded or staged for a signed URL, so a fetch rides along like
-    an upstream value; ``file/path`` tells the harness to inject the path
-    rather than load it. The name keeps the URL's file name for a cell that
-    looks at the extension, behind an index, since two fetch names can differ
-    only in case.
+    It rides every transport like an upstream value; ``file/path`` tells the
+    harness to inject the path rather than load it. Files keep the URL's file
+    name behind an index, since two fetch names can differ only in case.
     """
     for index, (name, path) in enumerate(sorted(fetched.items())):
         file_name = f"__fetch_{index}_{path.name}"
@@ -331,15 +266,11 @@ def _add_fetch_inputs(
 
 @dataclass(kw_only=True, frozen=True)
 class _CellProvenance:
-    """Inputs and outputs of the standard cell-provenance computation.
+    """Inputs and result of the standard cell-provenance computation.
 
-    Every cell-kind path (default, prompt, sql, loop) must produce the
-    *same* provenance hash for a given (source, env, inputs, mounts)
-    tuple — that hash is what ``compute_staleness`` recomputes on cell
-    re-open to decide whether to re-run. The fields here are the
-    ingredients plus the resulting hash, kept together so callers can
-    re-use intermediate values (env_hash for record_successful_execution,
-    annotations for downstream dispatch) without re-deriving them.
+    Every cell kind (default, prompt, sql, loop) must produce the same hash for
+    the same inputs, since ``compute_staleness`` recomputes it on reopen. The
+    intermediates are kept so callers can reuse them.
     """
 
     annotations: CellAnnotations
@@ -370,20 +301,8 @@ class _CellProvenance:
 class CellExecutionResult:
     """Result from executing a cell.
 
-    Attributes:
-        cell_id: ID of the executed cell
-        success: Whether execution succeeded
-        stdout: Captured standard output
-        stderr: Captured standard error
-        outputs: Dict of output variable name -> metadata
-        display_outputs: Ordered visible display output metadata
-        display_output: Primary visible display output metadata (legacy last-item shim)
-        duration_ms: Execution duration in milliseconds
-        error: Error message if execution failed
-        cache_hit: Whether execution was skipped due to cache hit
-        artifact_uri: URI of stored artifact (if any)
-        execution_method: How the cell was executed (cached, warm, cold)
-        mutation_warnings: List of mutation warnings (M6)
+    ``display_output`` is a legacy shim for the last of ``display_outputs``;
+    the two are kept consistent. ``execution_method`` is ``cold``, ``warm`` or ``cached``.
     """
 
     cell_id: str
@@ -463,8 +382,8 @@ class CellExecutionResult:
     def to_dict(self) -> dict[str, Any]:
         """Convert to the REST ``/agent`` execution-result wire shape.
 
-        The WebSocket execution-finished frame uses a slimmer, different
-        shape — see ``_execution_result_payload`` in ws.py.
+        The WebSocket frame uses a different, slimmer shape
+        (``_execution_result_payload`` in ws.py).
         """
         payload = asdict(self)
         # Wire rename: success: bool -> status: "ready" | "error".
@@ -507,12 +426,7 @@ class BatchCellResult:
 
 @dataclass(kw_only=True)
 class BatchExecutionResult:
-    """Outcome of one ``CellExecutor.execute_batch`` invocation.
-
-    The dispatcher (``ws._execute_run_all``) uses this to decide which
-    cells still need to run via single-cell mode after the batch
-    completes or terminates early.
-    """
+    """Outcome of one ``CellExecutor.execute_batch``: which cells still need single-cell runs."""
 
     cell_results: list[BatchCellResult]
     completed: bool  # True if batch_end with reason=complete
@@ -545,9 +459,8 @@ class RemoteExecutionError(RuntimeError):
 def _team_cache_publish_policy(config: Any) -> str:
     """What the team cache offers outward: ``all``, ``promoted`` or ``off``.
 
-    Read defensively because ``_lake_config`` may hand back a config object
-    from an older deployment, and a missing setting means the behaviour that
-    existed before it did.
+    Read defensively: ``_lake_config`` may return an older config object, and a
+    missing setting means the pre-existing behaviour.
     """
     return str(getattr(config, "notebook_team_cache_publish", "all") or "all")
 
@@ -555,17 +468,8 @@ def _team_cache_publish_policy(config: Any) -> str:
 class CellExecutor:
     """Materialize notebook cells (cache-or-build per cell).
 
-    Each ``execute_cell`` call ensures all upstream artifacts exist
-    (recursively materialising them on cache miss), then checks the
-    cache for this cell, and finally executes + stores on a miss.
-
-    This is the notebook-side parallel to Strata Core's transform
-    ``materialize`` SDK — see the module docstring for the seam.
-
-    Attributes:
-        session: NotebookSession for the notebook
-        harness_path: Path to the harness script
-        pool: Optional WarmProcessPool for fast execution (M6)
+    ``execute_cell`` ensures upstream artifacts exist (recursively on a miss),
+    checks this cell's cache, and executes and stores on a miss.
     """
 
     def __init__(
@@ -619,22 +523,13 @@ class CellExecutor:
         *,
         skip_upstream_materialization: bool = False,
     ) -> CellExecutionResult:
-        """Materialise a cell: ensure inputs → cache check → execute → store.
+        """Materialise a cell: ensure inputs, check cache, execute, store.
 
-        Single public entry point for cell materialization. See the module
-        docstring for how this relates to Strata Core's transform
-        ``materialize`` SDK (they are deliberately separate pipelines that
-        share the artifact-store substrate).
-
-        ``skip_upstream_materialization`` is the seam used by batch
-        continuation (``execute_batch`` → fall-back loop after a batched
-        cell errors). When ``True``, the cell trusts whatever artifacts
-        are already persisted and does not recursively re-execute its
-        upstreams. Direct-dependency-on-failed-upstream cells will hit
-        clean missing-artifact errors rather than re-running the cell
-        that already failed once. Cache lookup for the target cell is
-        unchanged — that's what differentiates this from
-        ``execute_cell_force``.
+        ``skip_upstream_materialization=True`` trusts already-persisted
+        artifacts instead of re-executing upstreams (batch continuation after a
+        failure), so a cell downstream of a failed one gets a clean
+        missing-artifact error. The target's own cache lookup still applies,
+        unlike ``execute_cell_force``.
         """
         return await self._execute_cell(
             cell_id,
@@ -647,11 +542,9 @@ class CellExecutor:
     async def execute_cell_force(
         self, cell_id: str, source: str, timeout_seconds: float = DEFAULT_CELL_TIMEOUT_SECONDS
     ) -> CellExecutionResult:
-        """Execute a cell using the currently available upstream artifacts only.
+        """Execute a cell against whatever upstream artifacts exist now ("Run this only").
 
-        This bypasses recursive upstream materialization and skips the target
-        cell cache lookup so "Run this only" performs a real execution against
-        whatever inputs are currently present.
+        Skips upstream materialization and the target's cache lookup.
         """
         return await self._execute_cell(
             cell_id,
@@ -664,12 +557,7 @@ class CellExecutor:
     async def execute_cell_rerun(
         self, cell_id: str, source: str, timeout_seconds: float = DEFAULT_CELL_TIMEOUT_SECONDS
     ) -> CellExecutionResult:
-        """Force re-execution of a cell while still materializing upstreams.
-
-        Upstreams are resolved through the normal cache (stale upstreams are
-        re-materialized from the artifact store on cache hit); only the target
-        cell's cache is bypassed so a real execution happens.
-        """
+        """Re-execute a cell, bypassing only its own cache; upstreams materialize normally."""
         return await self._execute_cell(
             cell_id,
             source,
@@ -681,19 +569,10 @@ class CellExecutor:
     async def run_cell_tests(self, cell_id: str, test_source: str) -> CellTestResult:
         """Run a Python cell's unit tests and persist the result.
 
-        Tests target the functions/classes the cell *defines*, which the
-        notebook never stores as artifacts (only consumed variables are). So
-        the run re-executes the cell source — with its upstream inputs injected
-        — and runs ``pytest`` against it via the generated conftest plugin.
-
-        Steps: materialize upstreams (so inputs exist) → stage input blobs and
-        deserialize them to Python values → fingerprint the
-        ``(cell_source, test_source, inputs)`` triple → shell to pytest in the
-        notebook venv → persist + return the structured result.
-
-        Distinct from ``execute_cell``: it never touches the artifact cache or
-        the cell's status, and it doesn't go through the harness — it's a pure
-        read-side check against a re-executed copy of the cell.
+        Tests target the functions/classes the cell defines, which are never
+        stored as artifacts, so this re-executes the source with its upstream
+        inputs injected and runs ``pytest`` in the notebook venv. It does not go
+        through the harness and never touches the artifact cache or cell status.
         """
         # Lazy: the serializer needs the [notebook] extra, which executor.py must not import
         # at module load. cell_test_runner is stdlib-only, kept beside its single caller.
@@ -838,24 +717,10 @@ class CellExecutor:
     ) -> BatchExecutionResult:
         """Execute a sequence of cells in one harness subprocess.
 
-        ``cell_specs`` is the list of cells in notebook order, each a dict
-        with keys ``cell_id``, ``source``, ``env``, ``mount_manifest``
-        (already resolved). Caller (``ws._execute_run_all``) is
-        responsible for partitioning the notebook into batchable runs;
-        this method just executes whatever it's given.
-
-        Returns a ``BatchExecutionResult`` so the caller can decide which
-        cells still need to run via single-cell mode (workers, post-batch-
-        failure continuation, etc.). See issue #26 for the full design.
-
-        ``use_cache=False`` bypasses the per-cell cache check (rerun-all
-        semantics).
-
-        ``on_cell_event`` is an optional async callback fired as each
-        per-cell ``BatchCellResult`` is recorded — lets the dispatcher
-        stream cell_output / cell_error frames in real time rather than
-        waiting for batch end. Default ``None`` keeps the method usable
-        in non-WS contexts (tests, REPL).
+        ``cell_specs`` are in notebook order, each with ``cell_id``, ``source``,
+        ``env`` and a resolved ``mount_manifest``; the caller partitions the
+        notebook. ``use_cache=False`` is rerun-all. ``on_cell_event`` is awaited
+        as each ``BatchCellResult`` is recorded, so frames stream in real time.
         """
         return await self._run_batch(
             cell_specs,
@@ -869,29 +734,15 @@ class CellExecutor:
     def one_run(self) -> Iterator[None]:
         """Treat every execution inside the block as one run of the notebook.
 
-        A single-cell execution materialises its upstreams by asking each to
-        execute, which is a cache hit for a producer whose value its provenance
-        determines, and a fresh execution for a ``# @nocache`` one. A driver
-        that executes many cells in turn (headless ``strata run``, the
-        browser's cascade, Run All) hit that once per downstream: one run of a
-        producer with two consumers executed it three times, repeated its side
-        effects, and gave the two consumers different values in the same run.
+        Inside it each cell executes at most once; a repeat request returns the
+        first result. Otherwise a driver running many cells (``strata run``,
+        the cascade, Run All) re-executes a ``# @nocache`` producer once per
+        consumer, repeating side effects and giving consumers different values.
+        Upstream materialization is itself a request, so it is covered too.
 
-        Inside this block each cell executes at most once: a request for a
-        cell the run has already executed returns that execution's result.
-        That covers both ways a cell gets asked for, because materialising an
-        upstream is itself a request through ``_execute_cell``. The direct kind
-        matters too: Run All walks display order, so a consumer above its
-        producer materialises the producer before Run All reaches the
-        producer's row, and executing it again there would give the producer a
-        newer value than the one its consumer already read. Anything the run
-        has not reached yet is still materialised as before.
-
-        One exception keeps rerun-all honest: a request that bypasses the cache
-        is not satisfied by an earlier *cache hit*, only by an earlier real
-        execution.
-
-        Re-entrant: a nested block belongs to the run already open.
+        A cache-bypassing request is satisfied only by an earlier real
+        execution, not a cache hit, so rerun-all stays honest. Re-entrant: a
+        nested block joins the open run.
         """
         if self._run_scope is not None:
             yield
@@ -913,18 +764,9 @@ class CellExecutor:
     ) -> CellExecutionResult:
         """Shared execution entrypoint with explicit cache/materialization policy.
 
-        One choke point for every mode and language, so a run scope records a
-        cell however it executed and whichever branch returned.
-
-        A request made with no run open is a run of its own: its whole
-        recursive materialisation shares one scope. Without that, a single
-        target over a diamond (a ``# @nocache`` producer read through two
-        branches that the target joins) executed the producer once per
-        branch, and the target joined two different reads of it. Every
-        single-cell path (WebSocket, REST, MCP, the CLI) comes through here,
-        so none of them has to remember to open one; the scope closes when
-        the request returns, so the next independent request still refreshes
-        the producer.
+        Every mode and language comes through here, so a run scope records each
+        cell. A request with no run open becomes its own run, so a diamond over a
+        ``# @nocache`` producer reads it once; the scope closes on return.
         """
         if self._run_scope is None:
             with self.one_run():
@@ -1128,16 +970,10 @@ class CellExecutor:
     ) -> _CellProvenance:
         """Compute the standard provenance triplet for a cell.
 
-        Every cell-kind path (default, prompt, sql, loop) feeds its
-        artifact-store writes the *same* hash so ``compute_staleness``
-        recognises the cell as ready on re-open. Drifting any of the
-        ingredients (runtime_env, worker identity, mount fingerprints,
-        env-key narrowing) makes the cell appear stale forever.
-
-        Optional precomputed arguments let callers reuse work — the
-        non-loop ``_materialize_cell`` path resolves mounts before the cache
-        check, the loop path resolves them once per iteration, so it
-        passes them in instead of paying the cost again.
+        Every cell kind must feed the store the same hash ``compute_staleness``
+        recomputes; drifting any ingredient (runtime env, worker identity, mount
+        fingerprints, env-key narrowing) leaves the cell stale forever. Optional
+        precomputed arguments let callers skip resolving mounts again.
         """
         if annotations is None:
             annotations = parse_annotations(source)
@@ -1225,13 +1061,7 @@ class CellExecutor:
         materialize_upstreams: bool,
         use_cache: bool,
     ) -> CellExecutionResult:
-        """Dispatch a cell to the right language executor.
-
-        Per-language behaviour (subprocess vs LLM vs ADBC vs no-op) lives
-        in adapters under ``strata.notebook.languages``. Missing cells
-        default to the Python pipeline — historical behaviour for cells
-        that have been removed from state mid-execution.
-        """
+        """Dispatch a cell to its language executor; a missing cell uses the Python one."""
         from strata.notebook.languages import get_language_executor
 
         cell = self.session.notebook_state.get_cell(cell_id)
@@ -1263,20 +1093,12 @@ class CellExecutor:
         fanout_group: str | None = None,
         fanout_variant: str | None = None,
     ) -> CellExecutionResult:
-        """Python cell pipeline: provenance → upstream → cache check →
-        subprocess harness → persist.
+        """Python cell pipeline: provenance, upstreams, cache check, harness, persist.
 
-        Sweep v2: a top-level call (``fanout_variant is None``) on a
-        ``# @per_variant`` cell is redirected to :meth:`_execute_fanout_cell`,
-        which invokes this pipeline once per variant with ``fanout_variant``
-        set. In a per-variant run the provenance, cache lookup, input binding,
-        and stored artifacts are all scoped to that variant.
-
-        Extracted from the previous ``_materialize_cell`` body so the
-        dispatch surface stays small. The body is unchanged — the only
-        difference vs the pre-#54 method is the absence of the
-        prompt/sql/markdown branches at the top (those now route via
-        the language registry).
+        A top-level call on a ``# @per_variant`` cell redirects to
+        :meth:`_execute_fanout_cell`, which calls back once per variant with
+        ``fanout_variant`` set; provenance, cache, inputs and artifacts are then
+        scoped to that variant.
         """
         remote_metadata: dict[str, str] = {}
         try:
@@ -1862,8 +1684,7 @@ class CellExecutor:
     def _recorded_display_count(
         self, cell_id: str, provenance_hash: str, variant: str | None
     ) -> int | None:
-        """How many display outputs the run cached under ``provenance_hash``
-        produced, as its first display recorded; ``None`` if it recorded none."""
+        """Display-output count recorded by the run cached under ``provenance_hash``, or None."""
         from strata.notebook.session import stored_display
 
         store = self.session.get_artifact_manager().artifact_store
@@ -1883,11 +1704,9 @@ class CellExecutor:
         return described[1] if described is not None else None
 
     def _fanout_info(self, cell_id: str) -> tuple[str, tuple[str, ...]] | None:
-        """Return ``(group, variant_names)`` if ``cell_id`` is a @per_variant
-        fan-out cell, else ``None``.
+        """``(group, variant_names)`` if ``cell_id`` is a ``@per_variant`` fan-out cell, else None.
 
-        A fan-out cell is one whose outputs the DAG resolved to a
-        ``SweepProducer`` with ``fanout_cell == cell_id`` (see sweep-v2 phase 2).
+        That is, its outputs resolve to a ``SweepProducer`` with ``fanout_cell == cell_id``.
         """
         dag = self.session.dag
         if dag is None:
@@ -1911,16 +1730,10 @@ class CellExecutor:
     ) -> CellExecutionResult:
         """Run a ``# @per_variant`` cell once per variant of its fan-out group.
 
-        Each instance re-enters :meth:`_execute_python_cell` with
-        ``fanout_variant`` set, so its inputs bind the scalar for that variant,
-        its provenance/cache are variant-scoped, and its outputs are stored
-        under ``@variant={name}`` artifacts. A downstream (non-fan-out) consumer
-        then collapses those per-variant artifacts back into a ``{variant:
-        value}`` dict via the existing v1 machinery.
-
-        The aggregate result is success iff every variant succeeded; failures
-        are surfaced with the offending variant's error. Upstreams are
-        materialised once up front, not per variant.
+        Each instance binds that variant's scalar and stores ``@variant={name}``
+        artifacts, which a downstream consumer collapses back to a
+        ``{variant: value}`` dict. Succeeds iff every variant succeeds.
+        Upstreams are materialised once, not per variant.
         """
         if materialize_upstreams:
             await self._materialize_upstreams(cell_id)
@@ -2009,15 +1822,11 @@ class CellExecutor:
         materialize_upstreams: bool,
         use_cache: bool,
     ) -> CellExecutionResult:
-        """R cell pipeline: provenance → upstream → cache check →
-        Rscript harness → persist.
+        """R cell pipeline: provenance, upstreams, cache check, ``Rscript`` harness, persist.
 
-        The harness runs here (warm pool first, then a cold ``Rscript``) or, for
-        a cell whose worker is an HTTP executor, on that worker, which runs
-        ``harness.R`` under its own ``Rscript``. The cache / mount / storage
-        layers are reused unchanged because they are language-agnostic: they
-        key off provenance hashes and on-disk file extensions, both of which
-        the R harness produces in exactly the same shape as the Python one.
+        Runs locally (warm pool, then cold ``Rscript``) or on an HTTP executor
+        worker. Cache, mounts and storage are shared with Python: they key off
+        provenance hashes and file extensions, which the R harness produces identically.
         """
         remote_metadata: dict[str, str] = {}
         try:
@@ -2496,7 +2305,7 @@ class CellExecutor:
         tables: dict[str, dict[str, Any]] | None = None,
         cell_id: str | None = None,
     ) -> tuple[dict[str, Any], Path, str, dict[str, ResolvedMount]]:
-        """Run the existing direct local execution path."""
+        """Run the direct local execution path."""
         result = None
         execution_method = "cold"
         resolved_mounts = await self._prepare_mounts(mount_specs)
@@ -2577,15 +2386,9 @@ class CellExecutor:
         """The notebook's lock, for a worker that runs cells in it.
 
         Only a worker whose ``/health`` advertises ``locked_environments`` gets
-        one; a worker that answers and does not have it runs the cell in its
-        own environment, as before.
-
-        A worker that could not be *asked* is a different thing, and for a
-        notebook that has a lock it is refused rather than guessed at. Guessing
-        meant the cell ran against whatever the worker's image happens to hold
-        while its provenance recorded the lock's hash -- a result stored under
-        a key describing an environment it never ran in, then served from the
-        cache and offered to the team as if it had.
+        it; one that answers without it uses its own environment. A worker that
+        cannot be asked is refused for a locked notebook: otherwise the result
+        would be cached under the lock's hash for an environment it never ran in.
         """
         from strata.notebook.python_versions import read_requested_python_minor
         from strata.notebook.worker_env import environment_spec
@@ -3184,15 +2987,9 @@ class CellExecutor:
     ) -> None:
         """Ask a worker to stop an execution we have stopped waiting for.
 
-        Best effort by construction. The build is already marked failed and
-        both finalize and upload refuse anything outside the active states, so
-        the result could never land either way — what this reclaims is the
-        machine, which would otherwise spend its remaining minutes, or GPU
-        hours, computing an answer with nowhere to go.
-
-        Every failure is swallowed and logged. This runs while a cancellation
-        is propagating, and raising here would replace the reason the cell
-        stopped with a worker that could not be reached.
+        The result could never land (the build is already failed), but this
+        frees the machine. Every failure is logged and swallowed, since raising
+        during cancellation would replace the reason the cell stopped.
         """
         headers = {"Authorization": f"Bearer {worker_token}"} if worker_token else None
         try:
@@ -3222,18 +3019,12 @@ class CellExecutor:
     ) -> httpx.Response:
         """Follow a job a worker accepted with 202 until it finishes.
 
-        A synchronous answer spends the cell's timeout on queueing, booting and
-        pulling an environment as well as on the cell. Here those count against
-        ``worker_provisioning_timeout_seconds`` instead, and the cell's own
-        timeout starts when the job reports ``running``. Whichever deadline
-        passes first cancels the job, since otherwise the machine keeps
-        computing for a caller that has left.
-
-        The job URL answers ``{"state": ...}``: ``queued``, ``provisioning`` or
-        ``starting`` before the cell runs; ``running``; then ``finished`` or
-        ``failed``, with ``status_code`` and ``result`` (or ``error``) standing
-        for the response a synchronous worker would have given. That response
-        is returned, and handled exactly as a synchronous one.
+        Queueing, booting and env pulls count against
+        ``worker_provisioning_timeout_seconds``; the cell's timeout starts when
+        the job reports ``running``. Either deadline cancels the job. The job URL
+        answers ``{"state": ...}`` (``queued``/``provisioning``/``starting``,
+        ``running``, then ``finished``/``failed`` with ``status_code`` and
+        ``result`` or ``error``); that response is handled as a synchronous one.
         """
         try:
             body = accepted.json()
@@ -3325,8 +3116,7 @@ class CellExecutor:
     ) -> None:
         """Move the cell's badge between ``starting`` (provisioning) and ``running``.
 
-        Best effort: a notebook with nobody watching, or a broadcast that fails,
-        must not fail the run.
+        Best effort: a failed broadcast must not fail the run.
         """
         if not cell_id:
             return
@@ -3488,10 +3278,7 @@ class CellExecutor:
         cell_id: str,
         source: str,
     ) -> list[MountSpec]:
-        """Resolve all mount declarations for a cell.
-
-        Priority: annotation > cell-meta > notebook-level.
-        """
+        """Resolve a cell's mount declarations: annotation, then cell meta, then notebook."""
         cell = self.session.notebook_state.get_cell(cell_id)
 
         # Cell-level mounts already include notebook defaults from parser.py.
@@ -3527,9 +3314,8 @@ class CellExecutor:
     def _credential_resolver(self) -> CredentialResolver:
         """Named credentials as this notebook sees them right now.
 
-        Rebuilt per use rather than once: a secret manager fills the notebook's
-        environment after the session opens, and a rotated value has to be the
-        one the next run reads.
+        Rebuilt per use: a secret manager fills the env after the session opens,
+        and a rotated value must reach the next run.
         """
         return CredentialResolver.from_config(
             self._lake_config(), env=dict(self.session.notebook_state.env)
@@ -3550,10 +3336,9 @@ class CellExecutor:
     ) -> tuple[list[str], dict[str, Path], dict[str, str], str | None]:
         """Check every ``@fetch`` right before a run and fingerprint its bytes.
 
-        Always checked here (``max_age=0``), whatever staleness last saw: what a
-        run records has to be what the URL served when it ran. Returns the
-        fingerprints, a path per name, the lineage input per URL, and the first
-        failure, if any.
+        Always rechecked (``max_age=0``) so the run records what the URL served
+        when it ran. Returns fingerprints, a path per name, the lineage input per
+        URL, and the first failure, if any.
         """
         if not fetch_specs:
             return [], {}, {}, None
@@ -3583,12 +3368,11 @@ class CellExecutor:
     async def _resolve_datasets(
         self, dataset_specs: list[DatasetSpec]
     ) -> tuple[list[str], dict[str, DatasetInput], str | None]:
-        """Resolve every ``@dataset`` right before a run and copy what it names
-        into the notebook's store.
+        """Resolve every ``@dataset`` before a run and copy it into the notebook's store.
 
-        Always resolved here, whatever staleness last saw, and the answer is
-        handed to the session so staleness agrees with what the run recorded.
-        Returns the fingerprints, the input per variable, and the first failure.
+        The answer is handed to the session so staleness agrees with what the
+        run recorded. Returns fingerprints, the input per variable, and the
+        first failure.
         """
         if not dataset_specs:
             return [], {}, None
@@ -3624,8 +3408,7 @@ class CellExecutor:
         datasets: dict[str, DatasetInput],
         output_dir: Path,
     ) -> None:
-        """Write each dataset's bytes into *output_dir* as an input the harness
-        binds, from the copy in the notebook's store."""
+        """Write each dataset's bytes from the notebook's store into *output_dir* as an input."""
         store = self.session.get_artifact_manager().artifact_store
         for name, dataset in sorted(datasets.items()):
             artifact_id, _, version = dataset.local_ref.partition("@v=")
@@ -3642,13 +3425,10 @@ class CellExecutor:
             }
 
     def _input_refs(self, cell_id: str, variant: str | None = None) -> dict[str, str]:
-        """What an artifact of *cell_id* records as its inputs: upstream
-        artifacts, each fetched URL with the digest of the bytes read, and each
-        dataset with the version it resolved to.
+        """Inputs an artifact of *cell_id* records: upstreams, fetch digests, dataset versions.
 
-        ``variant`` is the fan-out instance being stored, so a chained
-        ``# @per_variant`` cell records the upstream instance it zipped to
-        rather than every variant of the group.
+        With ``variant`` set, a chained ``# @per_variant`` cell records only the
+        upstream instance it zipped to.
         """
         return {
             **self.session._collect_input_refs(cell_id, variant=variant),
@@ -3662,9 +3442,9 @@ class CellExecutor:
     ) -> tuple[list[str], dict[str, int]]:
         """Resolve table snapshots for provenance hashing (see tables.py).
 
-        Catalog I/O runs off the event loop; an unreachable catalog yields
-        a random fingerprint (cell shows stale, error surfaces at run time)
-        rather than raising — provenance is also computed on notebook open.
+        Catalog I/O runs off the event loop. An unreachable catalog yields a
+        random fingerprint (cell shows stale) rather than raising, since this
+        also runs on notebook open.
         """
         if not table_specs:
             return [], {}
@@ -3688,15 +3468,9 @@ class CellExecutor:
     def _ambient_strata_url(self) -> str:
         """Server URL the harness binds the injected ``strata`` client to.
 
-        Defaults to this server's own dispatch base URL
-        (``state.config.server_url``), but a ``notebook_remote_store_url`` points
-        the ambient client at a REMOTE shared store instead — so a team can
-        publish/consume against one central deployment. Injected into every cell
-        manifest; not part of provenance (an ambient tool, not an input).
-
-        Defensive: the ambient client is an optional convenience, so a config
-        that can't supply a URL yields ``""`` (the harness then injects no
-        ``strata``) rather than failing cell execution.
+        This server's ``server_url``, unless ``notebook_remote_store_url`` points
+        at a shared remote store. Not part of provenance. A config with no URL
+        yields ``""`` and the harness injects no ``strata``.
         """
         config = self._lake_config()
         remote = getattr(config, "notebook_remote_store_url", None)
@@ -3707,9 +3481,7 @@ class CellExecutor:
     def _harness_env(self, extra: dict[str, str] | None = None) -> dict[str, str] | None:
         """The environment to spawn a cell subprocess with.
 
-        ``None`` when nothing is filtered and there is nothing extra to add —
-        which lets the spawn omit ``env=`` entirely and inherit, exactly as it
-        did before this setting existed.
+        ``None`` when nothing is filtered or added, so the spawn inherits.
         """
         from strata.notebook.harness_env import harness_env
 
@@ -3721,12 +3493,9 @@ class CellExecutor:
     def _ambient_promote_url(self) -> str:
         """Where a cell's ``strata.promote`` posts, or ``""`` when it cannot.
 
-        Not the ambient client's own base URL. With a team store configured
-        that URL points at the team store, and the route that copies a chain
-        into it runs here — this notebook server is the only process that can
-        read the notebook's own artifacts. Empty without a team store, which is
-        also the case where promoting means nothing, so the cell gets a
-        straight answer instead of a round trip that 409s.
+        Always this server, even with a team store, because only this process
+        can read the notebook's artifacts. Empty without a team store, where
+        promoting means nothing.
         """
         config = self._lake_config()
         if not getattr(config, "notebook_remote_store_url", None):
@@ -3737,24 +3506,16 @@ class CellExecutor:
         return f"{server_url}/v1/notebooks/{self.session.id}"
 
     def _cell_strata_url(self) -> str:
-        """Where a *cell's* ambient client points -- this server, never the
-        team store.
+        """Where a cell's ambient client points: this server, never the team store.
 
-        Reaching the team store takes the operator's credential, and a
-        manifest is a file the cell can read: the run directory is handed to
-        the harness user precisely so the cell can write into it. A token in
-        the manifest is a token the cell has, and that token is what makes
-        ``X-Strata-Principal`` believable, so a cell holding it can act as
-        anyone. Promotion already goes through this server for the neighbouring
-        reason -- only this process can read the notebook's own artifacts -- and
-        the run-all path never sent a credential at all.
+        The manifest is readable by the cell, and a team-store token there would
+        let the cell assert any ``X-Strata-Principal``.
         """
         config = self._lake_config()
         return str(getattr(config, "server_url", "") or "")
 
     def _ambient_strata_headers(self) -> dict[str, str]:
-        """Auth headers the ambient client attaches when pointed at a remote
-        store (e.g. trusted-proxy identity/token). Empty for the local server."""
+        """Auth headers the ambient client sends to a remote store; empty for the local server."""
         config = self._lake_config()
         if not getattr(config, "notebook_remote_store_url", None):
             return {}
@@ -3776,15 +3537,9 @@ class CellExecutor:
     ) -> TeamPull | None:
         """Try to serve this cell from a colleague's result.
 
-        Runs only after the *local* store has missed, so the common path pays
-        nothing. Returns ``None`` whenever the feature is off, no store is
-        configured, or the store cannot supply every consumed variable — the
-        caller then runs the cell exactly as it would have.
-
-        The client is created and closed per pull rather than kept on the
-        executor. It only happens on a miss, immediately before spawning a
-        subprocess that costs orders of magnitude more, so the connection
-        setup is free in context and there is no lifetime to leak.
+        Runs only after a local miss. ``None`` when the feature is off, no store
+        is configured, or the store lacks any consumed variable; the caller then
+        runs the cell. The client is per pull: setup is cheap next to the run.
         """
         config = self._lake_config()
         if not getattr(config, "notebook_team_cache_enabled", False):
@@ -3820,16 +3575,11 @@ class CellExecutor:
         cell_id: str,
         variant: str | None = None,
     ) -> None:
-        """Offer this cell's fresh outputs to the team, so nobody runs it again.
+        """Offer this cell's fresh outputs to the team store.
 
-        Runs only after the cell succeeded *and* its artifacts were stored, so
-        the outputs it reads back are the same ones a pull will have to
-        reproduce. Failures are swallowed by design: the cell is already done,
-        and a shared-cache problem must not retroactively fail it.
-
-        Gated on the same switch as the pull. Someone who is willing to consume
-        the team cache is willing to contribute to it — a store where everyone
-        reads and nobody writes stays empty forever.
+        Runs only after the cell succeeded and stored its artifacts. Failures
+        are swallowed: a shared-cache problem must not fail a finished cell.
+        Gated on the same switch as the pull.
         """
         config = self._lake_config()
         if not getattr(config, "notebook_team_cache_enabled", False):
@@ -3881,9 +3631,8 @@ class CellExecutor:
         """Build the manifest ``tables`` block from resolved snapshots.
 
         Raises:
-            RuntimeError: If two ``@table`` declarations share a name, or if any
-                declared table's snapshot could not be resolved — the cell needs
-                one concrete snapshot per name to run.
+            RuntimeError: If two ``@table`` declarations share a name, or a
+                declared table's snapshot could not be resolved.
         """
         # Snapshots are keyed by name, so duplicates collapse: one wins injection while both
         # feed provenance. Reject first.
@@ -4145,12 +3894,11 @@ class CellExecutor:
         materialize_upstreams: bool,
         use_cache: bool,
     ) -> CellExecutionResult:
-        """Execute a widget cell — materialize each control's value artifact.
+        """Execute a widget cell: materialize each control's value artifact.
 
-        Widgets have no upstream (``materialize_upstreams`` is a no-op here),
-        no subprocess, and use the per-value cache scheme; like prompt/SQL we
-        persist the generic provenance triplet so ``compute_staleness`` keeps
-        the cell READY when its values are unchanged.
+        No upstreams and no subprocess. Like prompt/SQL it persists the generic
+        provenance triplet so ``compute_staleness`` keeps it READY when values
+        are unchanged.
         """
         del materialize_upstreams  # widgets have no upstream inputs
 
@@ -4197,15 +3945,11 @@ class CellExecutor:
     async def _materialize_upstreams_or_failure(
         self, cell_id: str, start_time: float, execution_method: str
     ) -> CellExecutionResult | None:
-        """Materialize the upstreams, or hand the failure back as this cell's result.
+        """Materialize the upstreams, or return the failure as this cell's result.
 
-        The Python and R paths already turn a broken upstream into a failed
-        result, through the same ``except`` that catches everything else they
-        can raise. SQL, prompt and loop cells let the error out instead, and an
-        escaping exception skips the bookkeeping a returned result goes
-        through: the cell was left unrecorded, so a chain broken through one of
-        them announced neither that cell nor the one further up that actually
-        broke.
+        SQL, prompt and loop cells would otherwise let the error escape and skip
+        the bookkeeping a returned result gets, so neither this cell nor the
+        upstream that broke would be announced.
         """
         try:
             await self._materialize_upstreams(cell_id)
@@ -4222,16 +3966,11 @@ class CellExecutor:
         return None
 
     async def _materialize_upstreams(self, cell_id: str) -> None:
-        """Ensure every upstream variable has a *current* artifact.
+        """Ensure every upstream variable has a current artifact.
 
-        Always recursively calls ``execute_cell`` on each upstream.
-        This is correct because ``execute_cell`` has its own provenance-
-        based cache check — an unchanged upstream returns instantly as a
-        cache hit, while a stale upstream (e.g. source edited) re-executes.
-
-        The previous approach only checked artifact *existence*, which
-        missed the case where an upstream's source changed but its old
-        artifact still existed in the store.
+        Always calls ``execute_cell`` on each upstream: its provenance check
+        makes an unchanged upstream a cache hit, while an edited one re-executes
+        (an existence check would miss that).
         """
         cell = self.session.notebook_state.get_cell(cell_id)
         if cell is None or not cell.upstream_ids:
@@ -4284,12 +4023,10 @@ class CellExecutor:
     # ------------------------------------------------------------------
 
     def _collect_input_hashes(self, cell_id: str) -> list[str]:
-        """Provenance hashes from upstream artifacts (called after
-        ``_materialize_upstreams``).
+        """Provenance hashes from upstream artifacts, after ``_materialize_upstreams``.
 
-        Delegates to ``session._collect_input_hashes`` — the single source of
-        truth — so the hash stored here matches the one ``compute_staleness``
-        recomputes later (sweep refs are grouped identically on both sides).
+        Delegates to ``session._collect_input_hashes`` so the hash matches what
+        ``compute_staleness`` recomputes.
         """
         return self.session._collect_input_hashes(cell_id)
 
@@ -4305,20 +4042,12 @@ class CellExecutor:
         fanout_group: str | None = None,
         fanout_variant: str | None = None,
     ) -> dict[str, Any]:
-        """Load upstream variable blobs from the artifact store.
+        """Write upstream variable blobs from the artifact store into *output_dir*.
 
-        All upstream artifacts are guaranteed to exist because
-        ``_materialize_upstreams`` has already run.  This method simply
-        reads blobs and writes them to *output_dir* for the harness.
-
-        Sweep v2: when ``fanout_variant`` is set, this call builds the inputs
-        for one instance of a ``# @per_variant`` cell — a reference sourced
-        from the cell's own fan-out group (``fanout_group``) binds only that
-        variant's member as a *scalar* rather than the whole ``{variant:
-        value}`` dict. Other sweep groups still collapse to a dict. A reference
-        sourced from an upstream fan-out cell (a ``SweepProducer`` with
-        ``fanout_cell`` set) is always collapsed to a dict via its
-        ``@variant=`` artifacts.
+        Upstreams must already be materialized. With ``fanout_variant`` set, a
+        reference from the cell's own ``fanout_group`` binds only that variant's
+        scalar; other sweep groups, and upstream fan-out cells, collapse to a
+        ``{variant: value}`` dict.
         """
         cell = self.session.notebook_state.get_cell(cell_id)
         if cell is None:
@@ -4332,8 +4061,7 @@ class CellExecutor:
         dag = self.session.dag
 
         def _load_artifact_spec(artifact_id: str, file_stem: str) -> dict[str, str] | None:
-            """Write one artifact's blob to *file_stem* and return its manifest
-            spec, or ``None`` if the artifact doesn't exist."""
+            """Write one artifact's blob to *file_stem*; return its spec, or None if absent."""
             artifact = artifact_mgr.artifact_store.get_latest_version(artifact_id)
             if artifact is None:
                 return None
@@ -4382,8 +4110,7 @@ class CellExecutor:
             return {"content_type": content_type, "file": f"{safe_filename_stem(file_stem)}{ext}"}
 
         def _attach_injected(var_name: str, spec: dict[str, Any]) -> None:
-            """For a module/cell spec, resolve its injected upstream values to
-            files so the harness can hydrate the synthetic module before exec."""
+            """Resolve a module/cell spec's injected upstream values to files for the harness."""
             if spec.get("content_type") != "module/cell":
                 return
             try:
@@ -4539,11 +4266,10 @@ class CellExecutor:
         build_duration_ms: float = 0.0,
         hardware: dict[str, Any] | None = None,
     ) -> bool:
-        """Persist consumed output variables as artifacts.
+        """Persist consumed output variables as artifacts; True iff all were stored.
 
-        Returns True if every consumed variable was stored, False otherwise.
-        When ``variant`` is set (sweep-v2 fan-out), each artifact id is suffixed
-        with ``@variant={name}`` so per-variant instances don't collide.
+        With ``variant`` set, ids get an ``@variant={name}`` suffix so fan-out
+        instances do not collide.
         """
         cell = self.session.notebook_state.get_cell(cell_id)
         if cell is None or self.session.dag is None:
@@ -4682,9 +4408,7 @@ class CellExecutor:
     ) -> None:
         """Persist a leaf cell's console output as a provenance-keyed artifact.
 
-        Mirrors :meth:`_store_display_outputs` but for stdout/stderr, so a leaf
-        cell that only ``print``s (no display value, no downstream consumer) can
-        still cache-hit and replay its output on an unchanged re-run.
+        So a cell that only prints can still cache-hit and replay its output.
         """
         if not stdout and not stderr:
             return
@@ -4713,14 +4437,11 @@ class CellExecutor:
         source: str = "",
         env_hash: str = "",
     ) -> list[dict[str, Any]]:
-        """Persist displays a cell built in memory, rather than as output files.
+        """Persist displays a cell built in memory rather than as output files.
 
-        The Python harness writes each display to a file and
-        ``_store_display_outputs`` reads it back; a SQL cell renders its result
-        table as markdown in this process and has no output directory. Same
-        artifacts either way: keyed on the cell's generic provenance under
-        ``__display__{i}``, carrying their own description, so a cache hit, a
-        reopen, an export and ``save_cell_output`` all find them.
+        For SQL cells, which render markdown in-process and have no output
+        directory. The artifacts match ``_store_display_outputs``: keyed on the
+        generic provenance under ``__display__{i}`` with their own description.
         """
         if not display_outputs:
             return []
@@ -4829,7 +4550,7 @@ class CellExecutor:
         """Write synthetic module artifacts for cross-cell defs/classes.
 
         Returns an error string when a downstream-consumed definition cannot be
-        exported safely under the current V1 rules.
+        exported safely.
         """
         if self.session.dag is None:
             return None
@@ -4944,13 +4665,10 @@ class CellExecutor:
         provenance_hash: str,
         source: str,
     ) -> str | None:
-        """Persist a same-cell runtime value an exported def closes over, and
-        return its pinned artifact URI (or None if it can't be stored).
+        """Store a same-cell value an exported def closes over; return its pinned URI or None.
 
-        The harness serializes every new top-level variable, so the value's blob
-        is already in *output_dir*; we just store it as an artifact keyed to
-        this cell. ``store_cell_output`` dedups by provenance, so a later
-        ``_store_outputs`` pass over the same variable is a no-op.
+        The harness already wrote its blob to *output_dir*. ``store_cell_output``
+        dedups by provenance, so a later ``_store_outputs`` of it is a no-op.
         """
         spec = outputs.get(var_name)
         if not isinstance(spec, dict) or "file" not in spec or "error" in spec:
@@ -4979,9 +4697,8 @@ class CellExecutor:
     ) -> list[str] | None:
         """The argv that starts the cold Python harness; ``None`` without uv.
 
-        Its own method so a test can skip ``uv run`` without replacing the spawn
-        around it — the environment, the user and the refusal are the parts a
-        test must not route around.
+        A separate method so a test can skip ``uv run`` without replacing the
+        spawn's environment, user and refusal logic.
         """
         if harness_user is not None:
             # Straight to the venv interpreter: ``uv run`` wants a writable uv cache a separate
@@ -5006,11 +4723,7 @@ class CellExecutor:
         venv_python: Path | None,
         timeout_seconds: float,
     ) -> dict[str, Any]:
-        """Run the harness script via uv, or as the harness user.
-
-        ``venv_python`` is None when the session has no interpreter, and then
-        nothing runs.
-        """
+        """Run the harness via uv, or as the harness user; no-op if ``venv_python`` is None."""
         if venv_python is None:
             return {
                 "success": False,
@@ -5099,14 +4812,10 @@ class CellExecutor:
         manifest_path: Path,
         timeout_seconds: float,
     ) -> dict[str, Any]:
-        """Run the R harness script via Rscript.
+        """Run the R harness via ``Rscript``, mirroring ``_run_harness``.
 
-        Mirrors ``_run_harness`` shape — process-group teardown,
-        timeout handling, harness-result.json fallback — but swaps the
-        ``uv run python harness.py`` command for ``Rscript harness.R``.
-        ``cwd`` is the notebook directory so ``.Rprofile`` activates
-        the project's renv library (Phase 1: renv per notebook from
-        ``_renv_sync`` in #55).
+        ``cwd`` is the notebook directory so ``.Rprofile`` activates the
+        project's renv library.
         """
         try:
             harness_user = resolve_harness_user()
@@ -5202,10 +4911,8 @@ class CellExecutor:
     ) -> CellExecutionResult | None:
         """The loop's own result from a previous identical run, or None.
 
-        The same two-part check the non-loop path makes: the store holds this
-        provenance, and the cell's canonical artifact is the row that has it —
-        so a hit is this cell's own result, not a duplicate of somebody else's
-        computation of the same thing.
+        A hit needs the provenance in the store and the cell's canonical artifact
+        to be that row, so it is this cell's result, not a duplicate.
         """
         artifact_mgr = self.session.get_artifact_manager()
         if artifact_mgr.find_cached(carry_var_provenance) is None:
@@ -5246,12 +4953,9 @@ class CellExecutor:
     ) -> CellExecutionResult:
         """Execute a loop cell by running the body up to ``loop.max_iter`` times.
 
-        Phase 1 constraints: local worker only, no RW mounts, no cache
-        reuse across iterations on re-run (cache resumption is Phase 2).
-        Every iteration spawns a fresh harness subprocess; the carry
-        variable is passed in as a regular named input and read back as a
-        regular named output. Iter k's new carry is stored as an artifact
-        with an ``@iter=k`` suffix on its id.
+        Local worker only, no rw mounts. Each iteration is a fresh harness
+        subprocess; the carry passes in as a named input and out as a named
+        output, stored with an ``@iter=k`` suffix.
         """
         annotations = parse_annotations(source)
         effective_worker = self._resolve_effective_worker(cell_id, annotations.worker)
@@ -5635,10 +5339,8 @@ class CellExecutor:
     ) -> tuple[bytes, str]:
         """Resolve the iter-0 carry seed as ``(blob_bytes, content_type)``.
 
-        Either a ``# @loop start_from=<cell>@iter=<k>`` reference is used,
-        or an upstream cell in the DAG defines the carry variable and its
-        latest artifact seeds iter 0. Raises ``ValueError`` when neither
-        path yields a blob.
+        From ``# @loop start_from=<cell>@iter=<k>``, else the latest artifact of
+        the upstream cell defining the carry. Raises ``ValueError`` if neither exists.
         """
         artifact_mgr = self.session.get_artifact_manager()
 
@@ -5756,11 +5458,9 @@ class CellExecutor:
         cell_timeout_seconds: float = DEFAULT_CELL_TIMEOUT_SECONDS,
         on_cell_event: Callable[[BatchCellResult], Awaitable[None]] | None = None,
     ) -> BatchExecutionResult:
-        """Run a sequence of cells in one harness subprocess.
+        """Run a sequence of cells in one harness subprocess (see ``execute_batch``).
 
-        See ``execute_batch`` for public docs. This handles all the
-        subprocess + pipe wiring + frame protocol service + per-cell
-        watchdog. Stdout/stderr per-cell attribution is still deferred.
+        Per-cell stdout/stderr attribution is not implemented.
         """
         # As in single-cell: no interpreter, no run.
         venv_python = self.session.venv_python
@@ -5954,12 +5654,10 @@ class CellExecutor:
         on_cell_event: Callable[[BatchCellResult], Awaitable[None]] | None = None,
         watchdog_state: dict[str, Any] | None = None,
     ) -> tuple[str, str | None]:
-        """Read frames and dispatch service requests until ``batch_end``.
+        """Read frames and service requests until ``batch_end``.
 
-        Returns (end_reason, failed_cell_id). When ``on_cell_event`` is
-        provided, it's awaited after each per-cell ``BatchCellResult`` is
-        recorded — enables the dispatcher to stream cell_output / cell_error
-        broadcasts in real time instead of waiting for batch end.
+        Returns ``(end_reason, failed_cell_id)``. ``on_cell_event`` is awaited
+        after each ``BatchCellResult`` is recorded.
         """
         active_cell_id: str | None = None
         end_reason = "subprocess_died"
@@ -5973,10 +5671,9 @@ class CellExecutor:
         async def _serviced[T](request: Awaitable[T]) -> T:
             """Await the parent's answer to a harness request off the cell's clock.
 
-            The harness is blocked on the answer, so the time is the parent's
-            (a cache lookup, a store write), not the cell's: move the window's
-            start forward by it. Under load a slow cache check used to time out
-            a cell whose own code had not started.
+            The time is the parent's (cache lookup, store write), so the window
+            start moves forward by it; otherwise a slow cache check under load
+            times out a cell whose code has not started.
             """
             began = time.time()
             try:
@@ -6153,9 +5850,8 @@ class CellExecutor:
     ) -> dict[str, dict[str, str]]:
         """Materialize artifacts of cells upstream of the batch into batch_tmpdir.
 
-        The harness seeds its namespace from these on entry. Variables
-        whose producing cell is also inside the batch are handled by the
-        in-batch flow and shouldn't be in this dict.
+        The harness seeds its namespace from these. Variables produced inside
+        the batch must not be included.
         """
         batch_cell_ids = {spec["cell_id"] for spec in cell_specs}
         inputs: dict[str, dict[str, str]] = {}
@@ -6196,10 +5892,7 @@ class CellExecutor:
         target_dir: Path,
         var_name: str,
     ) -> dict[str, str] | None:
-        """Read an artifact by URI and write its blob to ``target_dir/<var><ext>``.
-
-        Returns ``{content_type, file}`` or None on failure.
-        """
+        """Write an artifact's blob to ``target_dir/<var><ext>``; return the spec or None."""
         artifact_id, version = self._parse_artifact_uri(uri)
         if not artifact_id:
             return None
@@ -6217,14 +5910,11 @@ class CellExecutor:
         return {"content_type": content_type, "file": file_name}
 
     def _upstream_artifact_uris(self, cell_id: str) -> dict[str, dict[str, str]]:
-        """The inputs this cell reads, in the shape the manifest uses.
+        """The inputs this cell reads, as the manifest's ``{variable: {"uri": ...}}``.
 
-        ``{variable: {"uri": ...}}`` -- what ``strata.promote("rows")`` needs
-        to name an input the way the cell names it rather than by an id the
-        cell never sees. A single-cell run reads this out of its manifest's
-        ``inputs``; a batch has no per-cell manifest, but by the time a cell
-        asks about its cache its in-batch upstreams have already persisted,
-        so the same map can be built here.
+        ``strata.promote`` needs inputs named as the cell names them. A batch has
+        no per-cell manifest, but in-batch upstreams have persisted by the time a
+        cell checks its cache, so the map is built here.
         """
         cell = self.session.notebook_state.get_cell(cell_id)
         if cell is None:
@@ -6250,11 +5940,8 @@ class CellExecutor:
     ) -> dict[str, dict[str, str]] | None:
         """Write every consumed variable's cached bytes where the harness reads.
 
-        ``None`` the moment one is missing or does not match this cell's hash:
-        a partial hit is a miss, since the cell would come back with some of
-        its values and not others. Separate from its caller so it can be asked
-        twice -- once against what is here, and again after a team pull has
-        written a colleague's results under the same canonical ids.
+        ``None`` as soon as one is missing or does not match this cell's hash: a
+        partial hit is a miss. Separate so it can be retried after a team pull.
         """
         artifact_mgr = self.session.get_artifact_manager()
         notebook_id = self.session.notebook_state.id
@@ -6293,10 +5980,8 @@ class CellExecutor:
     ) -> dict[str, Any]:
         """Service a ``cache_check`` request from the batch harness.
 
-        Computes provenance via the existing single-cell helpers and
-        checks the artifact store. On hit, materializes cached blobs to
-        ``batch_tmpdir/<cell_id>/{var}{ext}`` AND mirrors single-cell
-        L823-844 (populates ``cell.artifact_uris`` + ``display_outputs``).
+        On a hit, writes cached blobs to ``batch_tmpdir/<cell_id>/{var}{ext}`` and
+        sets ``cell.artifact_uris`` and ``display_outputs`` as single-cell does.
         """
         cell = self.session.notebook_state.get_cell(cell_id)
         if cell is None:
@@ -6401,10 +6086,8 @@ class CellExecutor:
     ) -> dict[str, Any]:
         """Service a ``persist`` request from the batch harness.
 
-        Calls the existing single-cell persistence chain:
-        ``_write_module_export_outputs`` → ``_store_outputs`` →
-        ``_store_display_outputs``. Same code paths single-cell uses
-        post-L924; keeps ``cell.artifact_uris`` compatible.
+        Uses the single-cell chain (``_write_module_export_outputs``,
+        ``_store_outputs``, ``_store_display_outputs``).
         """
         cell_id = payload.get("cell_id", "")
         cell = self.session.notebook_state.get_cell(cell_id)
@@ -6514,16 +6197,9 @@ _DISPLAY_TRANSIENT_KEYS = frozenset({"file", "inline_data_url", "markdown_text",
 def display_metadata_params(display_output: dict[str, Any], count: int) -> dict[str, str]:
     """What a display artifact records about itself, as transform params.
 
-    A display output's bytes were stored and its description was not: the
-    preview an agent reads, the rows and columns of a table. Serving one from
-    cache borrowed that description from whatever the cell showed at the time,
-    so a reverted cell reported the later value's preview over the earlier
-    value's bytes, and a cell whose last run failed (showing nothing) had
-    nothing to borrow and came back without its display.
-
-    ``count`` is how many display outputs the run produced, so whoever
-    restores the set restores all of it rather than as many as the cell
-    happens to be showing now.
+    Stored with the bytes so a cache hit serves this value's own preview, not
+    whatever the cell shows now. ``count`` is how many displays the run
+    produced, so a restore brings back the whole set.
     """
     metadata = {k: v for k, v in display_output.items() if k not in _DISPLAY_TRANSIENT_KEYS}
     return {
@@ -6563,9 +6239,8 @@ def _refused_batch(cell_specs: list[dict[str, Any]], error: str) -> BatchExecuti
 def _no_interpreter_message(session: NotebookSession) -> str:
     """Why cell code did not run: the session has no interpreter.
 
-    It is not run with ``python`` from PATH instead. That is some other
-    environment, and its result would be stored under this notebook's
-    provenance as if the notebook's own environment had produced it.
+    PATH ``python`` is never used instead: its result would be stored under
+    this notebook's provenance.
     """
     return session.environment_execution_block_message() or (
         "Notebook environment is not ready: it has no Python interpreter."
@@ -6573,12 +6248,7 @@ def _no_interpreter_message(session: NotebookSession) -> str:
 
 
 async def _drain_stream(stream: asyncio.StreamReader) -> None:
-    """Read and discard everything from ``stream`` until EOF.
-
-    PR-b2 sinks raw stdout/stderr to /dev/null to prevent kernel pipe
-    buffer deadlocks on chatty native code. PR-b3 will attribute reads
-    to the currently-active cell via the most-recent ``cell_start`` frame.
-    """
+    """Read and discard ``stream`` until EOF, so chatty native code cannot fill the pipe."""
     while True:
         chunk = await stream.read(4096)
         if not chunk:
@@ -6593,16 +6263,10 @@ async def _drain_stream(stream: asyncio.StreamReader) -> None:
 def is_cell_batchable(executor: CellExecutor, cell: Any) -> bool:
     """Return whether ``cell`` is eligible for run-all batching.
 
-    Delegates to the language executor's ``is_batchable`` — PYTHON's
-    adapter runs the full check (worker resolution, no ``# @loop``,
-    no explicit timeout at any level, no rw mount at any level); other
-    languages return ``False`` unconditionally.
-
-    Sweep cells are never batchable: in a batch's shared namespace, sibling
-    variants overwrite each other, and the ``{variant: value}`` dict — built
-    per-cell from artifacts — never forms. A sweep-group member and any cell
-    consuming a sweep variable run single-cell instead, where the dict is built
-    correctly.
+    Delegates to the language executor's ``is_batchable`` (only Python can be).
+    Sweep members and sweep consumers never batch: in a shared namespace
+    sibling variants overwrite each other and the ``{variant: value}`` dict
+    never forms.
     """
     from strata.notebook.dag import SweepProducer
     from strata.notebook.languages import get_language_executor
@@ -6630,13 +6294,10 @@ def is_cell_batchable(executor: CellExecutor, cell: Any) -> bool:
 def partition_batchable_runs(
     executor: CellExecutor, cells: list[Any]
 ) -> list[tuple[str, list[Any]]]:
-    """Walk cells in notebook order, group consecutive batchable cells.
+    """Group consecutive batchable cells, in notebook order.
 
-    Returns ``[(kind, [cell, ...]), ...]`` where ``kind`` is
-    ``"batch"`` or ``"single"``. ``"single"`` runs always have one
-    cell; ``"batch"`` runs have one or more. Caller decides whether a
-    batch of size 1 is worth the subprocess overhead; partitioner stays
-    pure.
+    Returns ``[(kind, [cell, ...]), ...]`` with ``kind`` ``"batch"`` (one or more
+    cells) or ``"single"`` (exactly one).
     """
     runs: list[tuple[str, list[Any]]] = []
     current: list[Any] = []

@@ -1,20 +1,8 @@
-"""Glue code between ``SessionManager`` and the secret-provider layer.
+"""Glue between ``SessionManager`` and the secret-provider layer.
 
-Two public helpers:
-
-* :func:`fetch_configured_secrets` — read the ``[secret_manager]`` config
-  off a ``NotebookState``, pick a provider, and return a
-  :class:`SecretFetchResult`. Never raises — errors land in
-  ``result.error``.
-
-* :func:`apply_secrets_to_notebook_state` — call the above, merge the
-  fetched secrets into ``state.env`` (values typed in the Runtime
-  panel win), and write ``env_sources`` / ``env_fetch_error`` /
-  ``env_fetched_at`` so the UI can label each key's origin.
-
-Keeping the merge policy in one place means the session code never has
-to reason about precedence directly — it just calls this on open and
-on refresh.
+Keeps the merge precedence between fetched secrets and user-typed env values in
+one place, so session code only calls :func:`apply_secrets_to_notebook_state`
+on open and on refresh.
 """
 
 from __future__ import annotations
@@ -34,11 +22,9 @@ MANUAL_SOURCE = "manual"
 def fetch_configured_secrets(state: NotebookState) -> SecretFetchResult | None:
     """Return the fetch result for ``state``'s configured provider.
 
-    Returns ``None`` when the notebook has no ``[secret_manager]`` block
-    at all — callers can distinguish "no provider" from "provider
-    errored" that way. When a provider is configured but the name is
-    unknown or the provider constructor raises, returns a
-    ``SecretFetchResult`` with an error message so the UI can display it.
+    ``None`` when the notebook has no ``[secret_manager]`` block. Never raises: an
+    unknown provider name or a failing constructor yields a ``SecretFetchResult``
+    with ``error`` set.
     """
     config = state.secret_manager_config
     if not config:
@@ -63,18 +49,12 @@ def fetch_configured_secrets(state: NotebookState) -> SecretFetchResult | None:
 
 
 def apply_secrets_to_notebook_state(state: NotebookState) -> SecretFetchResult | None:
-    """Fetch + merge secrets into ``state.env`` in-place.
+    """Fetch secrets and merge them into ``state.env`` in place.
 
-    Merge policy: fetched secrets populate env where the key isn't
-    already present, where the existing value is an empty / blanked
-    placeholder (sensitive-key blanking writes ``""`` on disk), OR where the
-    provider filled it last time, so a refresh picks up a rotated secret.
-    Non-empty values already in ``state.env`` — the ones the user
-    actively set via the Runtime panel this session — override the
-    provider. This keeps "override for a single session" working.
-
-    Always stamps ``env_sources`` so every key in ``state.env`` has a
-    provenance label the UI can render.
+    A fetched secret fills a key that is absent, blank (sensitive values are
+    blanked on disk), or was filled by the provider last time (so rotation is
+    picked up). A non-empty value the user set this session wins. Always stamps
+    ``env_sources`` so every key has an origin label for the UI.
     """
     result = fetch_configured_secrets(state)
 

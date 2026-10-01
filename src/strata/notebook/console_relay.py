@@ -1,19 +1,9 @@
 """Route console chunks from a running remote build to the notebook watching it.
 
-A cell dispatched to a worker used to be silent until it finished: output
-arrived in the result bundle, and the only live signal was the ``cell_status``
-frame naming the machine. For a training loop that is most of an hour with
-nothing on screen, and for one that dies at hour three the tail is the whole
-diagnostic.
-
-The worker posts chunks to a signed log URL as they are produced. This is the
-piece in the middle: the dispatching executor registers which notebook and
-cell a build belongs to, and the log route asks here where a chunk should go.
-
-Process-local on purpose. The registration and the WebSocket it feeds live in
-the same process, because the server dispatching the cell is the one holding
-the session's socket. A chunk for a build this process is not running is
-dropped rather than guessed at — console is advisory, the bundle stays the
+The worker posts chunks to a signed log URL; the dispatching executor registers
+which notebook and cell a build belongs to, and the log route asks here.
+Process-local on purpose: the dispatching server holds the session's socket. A
+chunk for a build this process is not running is dropped: the bundle stays the
 record, and a wrong cell's console is worse than none.
 """
 
@@ -58,8 +48,8 @@ def clear_streamed(notebook_id: str, cell_id: str) -> None:
 async def deliver(build_id: str, stream: str, text: str) -> bool:
     """Broadcast one console chunk to the notebook running *build_id*.
 
-    Returns whether it was delivered. False means this process is not running
-    that build — a stale worker, or a replica that did not dispatch it.
+    Returns False when this process is not running that build (a stale worker, or
+    a replica that did not dispatch it).
     """
     route = _routes.get(build_id)
     if route is None or not text:

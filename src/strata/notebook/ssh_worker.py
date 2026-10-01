@@ -1,24 +1,12 @@
-"""SSH provisioning for remote notebook workers (P1 of the SSH remote-worker path).
+"""SSH provisioning for remote notebook workers.
 
-Bring up a ``strata-worker`` on a box reachable over SSH: preflight the
-connection, detect what's installed, install it if missing, and launch / stop it.
-Everything runs through a small :class:`SshRunner` seam, so the provisioning
-*logic* is unit-testable without a real host — a fake runner asserts the exact
-command sequence. The local ``ssh -L`` tunnel and ``notebook.toml`` registration
-build on this in later phases.
+Brings up a ``strata-worker`` on a box reachable over SSH: preflight, detect,
+install if missing, launch and stop. Commands go through :class:`SshRunner`,
+so the logic is testable with a fake runner.
 
-Two deliberate defaults for the open questions in the design doc
-(``docs/internal/design-ssh-remote-worker.md``):
-
-- **No silent uv bootstrap.** :meth:`RemoteWorker.ensure_installed` installs via
-  ``uv tool install`` when ``uv`` is present, and otherwise raises with a clear
-  message rather than fetching an installer over the network unprompted.
-- **Portable supervision.** :meth:`RemoteWorker.launch` starts the worker with
-  ``nohup`` and records a JSON pidfile under ``~/.strata`` for adoption / stop,
-  rather than assuming ``systemd``.
-
-The worker always binds remote-localhost (never a public port); it is reached
-only through the authenticated SSH channel a later phase forwards.
+There is no silent uv bootstrap (install needs ``uv`` on the box), and
+supervision is ``nohup`` plus a JSON pidfile under ``~/.strata``, not systemd.
+The worker binds remote-localhost only and is reached over the SSH tunnel.
 """
 
 from __future__ import annotations
@@ -85,21 +73,15 @@ class RunningWorker:
 
 
 class SshRunner(Protocol):
-    """Runs one shell command on the remote host and returns its result.
-
-    The single seam between provisioning logic and real ``ssh``; tests swap in a
-    fake to assert the command sequence without a live host.
-    """
+    """Runs one shell command on the remote host; the seam tests replace with a fake."""
 
     def run(
         self, command: str, *, timeout: float | None = None, stdin_data: str | None = None
     ) -> CommandResult:
         """Execute *command* on the remote host.
 
-        ``stdin_data`` is fed to the remote command's stdin — the channel for
-        secrets (the worker token), which must never appear in *command* (it
-        would land in the local ``ssh`` argv, visible in ``ps``, and in error
-        messages that echo the command).
+        Secrets (the worker token) go in ``stdin_data``, never in *command*,
+        which would show in the local ``ssh`` argv (``ps``) and in error messages.
         """
         ...
 
@@ -156,14 +138,8 @@ class SshTarget:
 class RemoteWorker:
     """Lifecycle of a ``strata-worker`` process on a remote box, over SSH.
 
-    Parameters
-    ----------
-    name : str
-        The worker's name; namespaces its pidfile / log so several notebooks can
-        each run their own worker on one box.
-    runner : SshRunner
-        Executes commands on the box (a :class:`SubprocessSshRunner` in
-        production, a fake in tests).
+    ``name`` namespaces the pidfile and log, so several notebooks can each run
+    a worker on one box.
     """
 
     def __init__(self, name: str, runner: SshRunner) -> None:
@@ -173,11 +149,7 @@ class RemoteWorker:
     # -- connection ----------------------------------------------------------
 
     def preflight(self) -> None:
-        """Verify non-interactive (key-based) SSH works, or raise.
-
-        Runs a trivial remote ``true``; a nonzero exit means auth would prompt
-        or the host is unreachable — we never handle SSH passwords.
-        """
+        """Verify non-interactive (key-based) SSH works, or raise; passwords are never handled."""
         res = self.runner.run("true", timeout=DEFAULT_CONNECT_TIMEOUT + 5)
         if not res.ok:
             raise SshWorkerError(
@@ -217,8 +189,8 @@ class RemoteWorker:
     ) -> None:
         """Install ``strata-worker`` via ``uv tool install`` if it's missing.
 
-        A no-op when the worker is already present. Raises when neither the
-        worker nor ``uv`` is available — we don't fetch a uv installer unprompted.
+        Raises when neither the worker nor ``uv`` is present; no uv installer is
+        fetched.
         """
         if info.has_worker:
             return
@@ -258,17 +230,11 @@ class RemoteWorker:
     ) -> RunningWorker:
         """Start the worker detached (``nohup``), recording a pidfile; return it.
 
-        With ``adopt`` (the default), a re-run that finds a live recorded worker
-        on the same ``port`` returns it instead of starting a second. The worker
-        binds ``host`` (remote-localhost by default) so it's reachable only over
-        the SSH channel.
-
-        A worker enforces the token it was *started* with, and that token isn't
-        recorded anywhere we can read back. So a live worker is only adopted
-        when no token has to apply: otherwise it is stopped and replaced, since
-        adopting it would mean publishing a token the worker rejects — and
-        ``/health`` is unauthenticated, so nothing would notice until the first
-        cell dispatch came back 401.
+        With ``adopt``, a live recorded worker on the same ``port`` is returned
+        instead, but only when no token applies: the token a worker started with
+        cannot be read back, and ``/health`` is unauthenticated, so a mismatch
+        would surface only as a 401 on first dispatch. Otherwise it is replaced.
+        The worker binds ``host`` (remote-localhost by default).
         """
         if adopt:
             existing = self.is_running()

@@ -1,26 +1,9 @@
-"""SQL cell executor — coordinator for the language=='sql' path.
+"""SQL cell executor: the entry point ``CellExecutor`` calls for SQL cells.
 
-Mirrors the structure of ``prompt_executor.execute_prompt_cell``: a
-single entry point ``execute_sql_cell`` that ``CellExecutor`` calls
-when it dispatches a SQL cell. The function:
-
-1. Parses annotations and resolves the connection / adapter.
-2. Runs the analyzer with the adapter's dialect.
-3. Loads upstream variables and resolves bind parameters.
-4. Resolves the ``# @cache`` policy and runs probes if required.
-5. Computes the SQL provenance hash via the helpers in
-   ``strata.notebook.sql.provenance``.
-6. Checks the artifact store for a cache hit; on hit, returns the
-   cached Arrow Table.
-7. On miss, opens an enforced read-only ADBC connection, executes
-   the query with positional binds, and stores the result as an
-   ``arrow/ipc`` artifact.
-
-Failure modes (missing connection, unknown driver, parse error,
-read-only-enforcement failure, cache-policy error, bind error) all
-surface as a populated ``error`` field in the result dict — same
-shape the prompt executor uses — so the caller can render them in
-the cell's output panel without special handling.
+Resolves the connection and ``# @cache`` policy, binds upstream variables,
+checks the artifact store by SQL provenance, and on a miss runs the query on an
+enforced read-only ADBC connection and stores an ``arrow/ipc`` artifact. Every
+failure surfaces as the result dict's ``error``, as in the prompt executor.
 """
 
 from __future__ import annotations
@@ -76,12 +59,10 @@ async def execute_sql_cell(
     *,
     use_cache: bool = True,
 ) -> dict[str, Any]:
-    """Execute a SQL cell. Return shape mirrors ``execute_prompt_cell``.
+    """Execute a SQL cell; returns the same dict shape as ``execute_prompt_cell``.
 
-    Returns a dict with ``success``, ``outputs``, ``stdout``,
-    ``stderr``, ``error``, ``cache_hit``, ``duration_ms``,
-    ``execution_method``, ``artifact_uri``. The notebook executor
-    lifts these into a ``CellExecutionResult``.
+    Keys: ``success``, ``outputs``, ``stdout``, ``stderr``, ``error``,
+    ``cache_hit``, ``duration_ms``, ``execution_method``, ``artifact_uri``.
     """
     start_time = time.time()
 
@@ -357,27 +338,12 @@ async def _execute_write_cell(
     start_time: float,
     use_cache: bool,
 ) -> dict[str, Any]:
-    """Run a ``# @sql connection=… write=true`` cell.
+    """Run a ``# @sql connection=... write=true`` cell.
 
-    Differs from the read path in three ways:
-
-    1. The adapter opens the connection writable. SQLite drops the
-       ``mode=ro`` URI override and the ``PRAGMA query_only=ON``;
-       Postgres skips ``SET default_transaction_read_only=on``.
-    2. The body may be multi-statement. ADBC's cursor.execute()
-       runs only the first statement on most drivers, so we split
-       via sqlglot (dialect-aware) and execute each in sequence.
-    3. The cache key is source-only — no freshness probe, no
-       schema fingerprint. Default policy is ``session`` so a
-       seed cell runs once per session and dedupes subsequent
-       runs within the same session. Users opt into other policies
-       via ``# @cache``.
-
-    The cell still produces an Arrow artifact: one row per
-    statement with ``stmt`` (1-indexed), ``kind`` (CREATE TABLE /
-    INSERT / etc), and ``rows_affected`` (nullable; None when the
-    driver doesn't report — typically DDL). Downstream cells with
-    ``# @after seed`` find the artifact via ``cell.artifact_uris``.
+    Unlike reads: the connection is writable, the body may be multi-statement
+    (run one by one), and the cache key is source-only with default policy
+    ``session``. The artifact has one row per statement: ``stmt`` (1-indexed),
+    ``kind`` and nullable ``rows_affected``.
     """
     from strata.notebook.annotations import CachePolicy
 
@@ -520,8 +486,8 @@ async def _execute_write_cell(
 def _fetch_arrow_table(cursor: Any) -> Any:
     """The result as an Arrow table, from a DuckDB or an ADBC cursor.
 
-    DuckDB (1.5+) calls it ``to_arrow_table`` and deprecates
-    ``fetch_arrow_table``; ADBC's DB-API cursor has only ``fetch_arrow_table``.
+    DuckDB 1.5+ deprecates ``fetch_arrow_table`` for ``to_arrow_table``; ADBC
+    has only ``fetch_arrow_table``.
     """
     to_arrow_table = getattr(cursor, "to_arrow_table", None)
     if to_arrow_table is not None:
@@ -532,16 +498,10 @@ def _fetch_arrow_table(cursor: Any) -> Any:
 def _split_statements(body: str, dialect: str) -> list[str] | None:
     """The body's statements, sliced out of the text the cell declares.
 
-    Split on the tokenizer's semicolons rather than regenerated from the parse
-    tree. sqlglot's generator does not round-trip every construct: a named
-    recursive CTE came back as ``WITH RECURSIVE counter AS (VALUES (0) ...)``,
-    with the ``(n)`` column list dropped, and SQLite then refused the statement
-    with "no such column: n". A rewritten statement is not the one the cell
-    declares, and for a write cell that difference lands in the database.
-
-    Returns ``None`` when the body cannot be tokenized, which the caller reads
-    as "run it whole"; an empty list means it tokenized and holds nothing to
-    run, which is not the same thing.
+    Split on tokenizer semicolons, not regenerated from the parse tree: sqlglot
+    does not round-trip every construct (it dropped a recursive CTE's column
+    list), and a write cell must run what it declares. ``None`` means the body
+    could not be tokenized (run it whole); ``[]`` means nothing to run.
     """
     import sqlglot
     from sqlglot.tokens import TokenType
@@ -575,34 +535,13 @@ def _execute_write_statements(
     body: str,
     namespace: dict[str, Any],
 ) -> dict[str, Any]:
-    """Open writable, split into statements, execute each with binds.
+    """Open writable and execute each statement with its own bind pass.
 
-    Each split statement gets its own placeholder pass — the bind
-    layer's allowlist still gates upstream values, and the
-    statement is rewritten to the dialect's positional form before
-    execute. This means ``INSERT INTO t VALUES (:n)`` works the
-    same way in a write cell as it would in a read cell, just with
-    the cell's mutating semantics.
-
-    Returns ``{"statements": [{"kind": str, "rows_affected": int|None}, ...]}``.
-    One entry per statement, in source order. ``rows_affected`` is
-    None when the driver couldn't report a row count for that
-    statement (DDL via PEP-249's ``cursor.rowcount = -1`` convention,
-    or no rowcount reported at all). DML statements produce an
-    integer; a 0 there is genuine ("UPDATE matched no rows"), not a
-    sentinel.
-
-    A failed statement aborts the run; partial state on disk is
-    the user's problem (DDL/DML in SQLite isn't transactional by
-    default, and Postgres' transaction semantics are driver-specific).
-
-    Commit failures propagate. Earlier the implementation silenced
-    all commit-time exceptions to paper over autocommit-mode
-    "nothing to commit" warnings — that also hid real
-    deferred-constraint, transaction, and transport failures.
-    Surfacing the raw error means a failed commit produces a
-    visible cell error instead of a misleading "success" with
-    nothing actually persisted.
+    Returns ``{"statements": [{"kind": str, "rows_affected": int | None}, ...]}``
+    in source order. ``rows_affected`` is None when the driver reports no count
+    (typically DDL); 0 is a real count. A failed statement aborts with partial
+    state left in place. Commit failures propagate rather than reporting a
+    success that persisted nothing.
     """
     import sqlglot
 
@@ -688,14 +627,9 @@ def _is_dml_kind(kind: str) -> bool:
 
 
 def _sqlite_last_changes(conn: Any) -> int | None:
-    """Run ``SELECT changes()`` to recover the last DML's row count.
+    """Recover the last DML's row count via ``SELECT changes()``.
 
-    ADBC's SQLite driver doesn't populate ``cursor.rowcount`` (always
-    returns -1). SQLite's own ``changes()`` returns the number of
-    rows modified by the most recent INSERT / UPDATE / DELETE on the
-    connection, which is exactly what we need. Errors surface as
-    None so the display gracefully degrades to "—" instead of
-    crashing the cell.
+    ADBC's SQLite driver always reports ``rowcount`` -1. Errors return None.
     """
     try:
         cur = conn.cursor()
@@ -716,13 +650,7 @@ def _sqlite_last_changes(conn: Any) -> int | None:
 
 
 def _statement_kind_from_expr(expr: Any) -> str:
-    """Best-effort label for a parsed sqlglot statement.
-
-    Returns strings like ``CREATE TABLE`` / ``DROP TABLE`` /
-    ``INSERT`` / ``UPDATE`` / ``ALTER TABLE``. The label is what
-    the synthesized result table surfaces in its ``kind`` column,
-    so it should be self-explanatory at a glance.
-    """
+    """Best-effort ``kind`` label for a parsed statement, e.g. ``CREATE TABLE`` or ``INSERT``."""
     if expr is None:
         return "UNKNOWN"
     cls_name = type(expr).__name__.upper()
@@ -736,12 +664,7 @@ def _statement_kind_from_expr(expr: Any) -> str:
 
 
 def _statement_kind_from_text(text: str) -> str:
-    """Fallback kind extractor when sqlglot can't parse the body.
-
-    Strips leading comments / whitespace and returns the first
-    keyword (uppercased). Better than ``UNKNOWN`` for vendor-
-    specific or pragmatic SQL the parser doesn't fully understand.
-    """
+    """Fallback kind when sqlglot can't parse: the first keyword after comments, uppercased."""
     cleaned = text.lstrip()
     while cleaned.startswith("--"):
         nl = cleaned.find("\n")
@@ -756,13 +679,7 @@ def _statement_kind_from_text(text: str) -> str:
 
 
 def _synthesize_write_result_table(stats: dict[str, Any]) -> Any:
-    """Per-statement Arrow table summarizing a write cell's execution.
-
-    Schema: one row per statement, in source order, with
-    ``stmt`` (1-indexed), ``kind`` (CREATE TABLE / INSERT / …),
-    and ``rows_affected`` (nullable; None when the driver didn't
-    report — typically DDL).
-    """
+    """Per-statement Arrow table for a write cell: ``stmt``, ``kind``, ``rows_affected``."""
     import pyarrow as pa
 
     statements = stats.get("statements") or []
@@ -792,20 +709,12 @@ def _credentials(session: NotebookSession) -> CredentialResolver:
 
 
 def sql_reopen_identity(cell: Any, session: Any) -> str | None:
-    """What a reopened SQL cell's cached rows depend on, beyond its query.
+    """What a reopened SQL cell's cached rows depend on beyond its query.
 
-    The connection is the answer's other half: the same ``SELECT`` against a
-    different database is a different result, and the generic provenance
-    triplet sees neither the connection nor the policy the cell caches under.
-
-    ``None`` whenever the policy wants a probe. ``fingerprint`` and
-    ``snapshot`` say, in the cell's own annotation, that the cached rows are
-    good only while the source agrees -- and asking the source is a query, not
-    something to do while opening a notebook. A cell that declares
-    ``forever``, ``session`` or ``ttl`` has already said what it depends on,
-    and each of those is settled here: the session salt is this session's, and
-    the ttl bucket is this moment's, so a cell whose window has passed no
-    longer matches what it recorded.
+    The connection and cache policy, which the generic triplet does not see.
+    ``None`` for ``fingerprint`` and ``snapshot`` policies, which need a query
+    to the source. ``forever``, ``session`` and ``ttl`` settle here (this
+    session's salt, this moment's ttl bucket).
     """
     annotations = parse_annotations(cell.source)
     if annotations.sql is None or not annotations.sql.connection:
@@ -843,11 +752,9 @@ def sql_reopen_identity(cell: Any, session: Any) -> str | None:
 def _confined(session: Any, spec: ConnectionSpec, lake: Any) -> ConnectionSpec:
     """In service mode, a connection confined to its own database and lake.
 
-    SQL cells run inside the server process. A DuckDB connection is confined by
-    the engine (``duckdb._confine``) to its lake's locations; one with no
-    catalog or mounts reaches nothing outside its own database. A SQLite write
-    cell is refused the statements that reach other files
-    (``confined_write_violation``); its read cells already run only reads.
+    SQL cells run in the server process. DuckDB is confined by
+    ``duckdb._confine`` to its lake's locations; a SQLite write cell is refused
+    statements that reach other files (``confined_write_violation``).
     """
     if spec.driver not in ("duckdb", "sqlite"):
         return spec
@@ -859,9 +766,8 @@ def _confined(session: Any, spec: ConnectionSpec, lake: Any) -> ConnectionSpec:
 def _with_credential(connection_id: str, spec: ConnectionSpec) -> str:
     """Fold the credential's name into the connection's identity.
 
-    A connection that reads through a different credential can see different
-    objects, so its cache entries must not be shared. The values stay out, so a
-    rotated secret keeps every entry.
+    Different credentials can see different objects, so cache entries are not
+    shared; values stay out, so rotating a secret keeps every entry.
     """
     identity = credential_identity(spec.credential)
     if not identity:
@@ -874,27 +780,13 @@ def _resolve_runtime_spec(
     notebook_dir: Any,
     credentials: CredentialResolver | None = None,
 ) -> ConnectionSpec:
-    """Return a spec copy with relative file paths resolved.
+    """Return a spec copy with relative file paths and the credential resolved.
 
-    A ``credential`` is resolved here too, into ``auth`` underneath the block's
-    own entries, so the adapter receives ready values and never learns names.
-    ``CredentialError`` names the credential when it cannot be resolved.
-
-    The on-disk ``[connections.<name>]`` block is round-tripped
-    verbatim — relative paths stay relative so a notebook can move
-    between machines without notebook.toml needing edits. The
-    runtime view (handed to the adapter) needs an absolute path
-    because the server's process CWD is unrelated to the notebook
-    directory.
-
-    The same rule applies to driver-specific path-shaped fields
-    that point at notebook-local files — currently
-    ``credentials_path`` and ``write_credentials_path`` for the
-    BigQuery driver. Without rebasing, a relative
-    ``credentials_path = "creds/ro.json"`` resolves against the
-    server's process CWD instead of the notebook directory and
-    fails to open. ``uri`` round-trips as-is because SQLite's URI
-    form already has well-defined absolute / relative semantics.
+    The credential is resolved into ``auth`` beneath the block's own entries,
+    so adapters never see names; ``CredentialError`` names it on failure.
+    Relative paths (and BigQuery's ``credentials_path`` /
+    ``write_credentials_path``) are rebased on the notebook directory, since the
+    server's CWD is unrelated. ``uri`` passes through as-is.
     """
     from pathlib import Path
 
@@ -937,16 +829,12 @@ def _load_upstream_variables(
     cell_id: str,
     references: list[str],
 ) -> tuple[dict[str, Any], dict[str, str], dict[str, str]]:
-    """Load upstream variable values, their artifact hashes, and their refs.
+    """Load upstream values, their artifact hashes, and their refs.
 
-    Returns (namespace, upstream_input_hashes, input_refs). The hashes feed
-    into the provenance hash so a change in any referenced variable's artifact
-    invalidates this cell's cache. The refs are the same artifacts in the
-    ``{strata://artifact/<id>@v=<n>: <id>@v=<n>}`` form the lineage walk
-    follows: a hash identifies no artifact, so recording only hashes left a
-    bound variable out of the chain behind the result. A query reading
-    ``:minimum_amount`` from a widget came back as a single step, naming
-    nothing about the value it was run at.
+    Returns ``(namespace, upstream_input_hashes, input_refs)``. Hashes feed
+    provenance. Refs (``{strata://artifact/<id>@v=<n>: <id>@v=<n>}``) feed
+    lineage, since a hash names no artifact and a bound variable would
+    otherwise be missing from the chain.
     """
     namespace: dict[str, Any] = {}
     hashes: dict[str, str] = {}
@@ -995,13 +883,7 @@ def _content_type_of(artifact: Any) -> str:
 
 
 def _deserialize_blob(blob: bytes, content_type: str) -> Any:
-    """Pull just enough out of an artifact for SQL bind use.
-
-    SQL binds want primitive values (int / str / bytes / etc.). The
-    full ``serializer.deserialize`` round-trip handles every shape
-    the notebook supports — for SQL we only need the scalar / Arrow
-    paths, which simplifies the imports.
-    """
+    """Decode just enough of an artifact for a SQL bind: the scalar and Arrow paths."""
     if content_type == "json/object":
         try:
             return json.loads(blob)
@@ -1032,12 +914,10 @@ def _run_probes(
     tables: list[Any],
     policy: Any,
 ) -> tuple[Any, Any]:
-    """Run freshness + schema probes per the resolved policy.
+    """Run freshness and schema probes per the resolved policy.
 
-    ``needs_separate_probe_conn=True`` (Postgres) gets its own
-    connection because per-transaction stats are frozen inside the
-    query connection's open transaction. Other adapters share the
-    probe connection across both calls.
+    Adapters with ``needs_separate_probe_conn`` (Postgres) get their own
+    connection, since stats are frozen inside the query connection's transaction.
     """
     freshness = None
     schema_fp = None
@@ -1127,12 +1007,8 @@ def _execute_query(
 def _exception_message(exc: BaseException) -> str:
     """Walk the exception chain so ADBC's wrapped errors stay visible.
 
-    ADBC's Python driver often surfaces a generic ``InternalError``
-    or ``OperationalError`` whose top-level message is
-    ``"INTERNAL: (unknown error)"`` while the actually-useful
-    "Failed to finalize statement: attempt to write a readonly
-    database" lives in a chained exception. Without walking the
-    chain, the user sees a useless message.
+    ADBC often raises a generic ``"INTERNAL: (unknown error)"`` with the useful
+    message in a chained exception.
     """
     parts: list[str] = []
     seen: set[str] = set()
@@ -1176,17 +1052,9 @@ _WRITE_STATUS_COLUMNS = ("stmt", "kind", "rows_affected")
 def _table_display(table: Any, *, max_rows: int = 5) -> dict[str, Any]:
     """Build a small markdown preview for the cell's display panel.
 
-    ``max_rows`` caps the inline body. Read cells default to 5
-    (query results can be huge, the user can ``LIMIT`` for more).
-    Write-cell status tables pass a higher cap because the rows
-    are status entries, not data — truncating "5 of 6 statements"
-    is more confusing than helpful.
-
-    Status tables are auto-detected by their canonical schema
-    (``stmt, kind, rows_affected``) so a cache-hit display path —
-    which doesn't know whether the cell was a write or read —
-    still avoids truncation when re-rendering a cached write
-    artifact.
+    ``max_rows`` defaults to 5. Write-cell status tables (detected by their
+    ``stmt, kind, rows_affected`` schema, so cache hits match too) are not
+    truncated, since their rows are statements rather than data.
     """
     rows = table.num_rows
     cols = table.num_columns
@@ -1215,12 +1083,7 @@ def _table_display(table: Any, *, max_rows: int = 5) -> dict[str, Any]:
 
 
 def _format_cell(value: Any) -> str:
-    """Render a row-cell value for the markdown preview.
-
-    ``None`` becomes an em-dash so a status table with nullable
-    ``rows_affected`` reads as "no count reported" instead of the
-    literal Python ``None`` repr.
-    """
+    """Render a value for the markdown preview; ``None`` shows as a dash, not ``None``."""
     if value is None:
         return "—"
     return str(value)

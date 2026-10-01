@@ -1,8 +1,7 @@
-"""Provider registry — string → SecretProvider instance lookup.
+"""Provider registry: name to cached ``SecretProvider`` instance.
 
-Instances are cached per process since providers are stateless aside
-from the HTTP client they hold (and they construct that on demand).
-Adding a new provider is a one-line change in ``_build``.
+Instances are cached per process; providers hold no state beyond an HTTP
+client they build on demand.
 """
 
 from __future__ import annotations
@@ -15,8 +14,8 @@ _cache: dict[str, SecretProvider] = {}
 def get_provider(name: str) -> SecretProvider:
     """Return the provider named ``name``, constructing on first use.
 
-    Raises ``SecretProviderError`` for unknown names so ``notebook.toml``
-    typos surface at session open rather than as a silent empty fetch.
+    Raises ``SecretProviderError`` for unknown names, so a ``notebook.toml`` typo
+    surfaces at session open rather than as a silent empty fetch.
     """
     if name in _cache:
         return _cache[name]
@@ -34,5 +33,5 @@ def _build(name: str) -> SecretProvider:
 
 
 def _reset_for_tests() -> None:
-    """Test-only hook to clear the cache between tests that install mocks."""
+    """Clear the provider cache (tests that install mocks)."""
     _cache.clear()

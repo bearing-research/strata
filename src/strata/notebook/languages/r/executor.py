@@ -1,13 +1,7 @@
 """R cell executor adapter.
 
-Counterpart of ``analyzer.py`` for the execution side. Delegates to
-``CellExecutor._execute_r_cell``, which runs the cell via the R harness
-(``harness.R`` in this same package) under Rscript with renv-activated
-``.Rprofile``.
-
-Phase 1 (#57) is local-only — no warm pool, no HTTP executor, no remote
-workers, no batching. Those follow once the basic single-cell path is
-proven; see #53 for the broader R roadmap.
+Delegates to ``CellExecutor._execute_r_cell``, which runs the cell through
+``harness.R`` under Rscript with the renv-activated ``.Rprofile``.
 """
 
 from __future__ import annotations
@@ -25,15 +19,8 @@ if TYPE_CHECKING:
 class _RExecutor:
     """Adapter that delegates to ``CellExecutor._execute_r_cell``.
 
-    Behaviour flags mirror ``_PythonExecutor`` — R cells go through the
-    standard provenance/cache pipeline, no per-language alternate cache
-    scheme, and execution provenance is always computed.
-
-    ``is_batchable`` returns ``False`` for Phase 1 — R cells run one
-    Rscript invocation per execute and don't share a process with the
-    Python warm pool. Batching across R cells is a future optimization
-    once the single-cell path is proven; see #26 for the Python-side
-    batching protocol that any R batching would need to mirror.
+    Uses the standard provenance/cache pipeline. Not batchable: each R cell runs in
+    its own Rscript invocation.
     """
 
     skips_execution_provenance = False

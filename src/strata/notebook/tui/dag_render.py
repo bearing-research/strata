@@ -1,16 +1,9 @@
 """Render a notebook DAG as a layered, boxed ASCII graph.
 
-Pure (no Textual, no sockets) so it unit-tests with fixed inputs: given the cell
-ids/labels/statuses and the edges, return a multi-line string with one box per
-cell, laid out top-to-bottom in dependency layers and connected by lines.
-
-Layout uses ``grandalf`` (pure-Python Sugiyama layered layout): it assigns each
-cell a layer + a crossing-minimized horizontal position, and routes long edges
-through *dummy* waypoints that it keeps clear of the boxes (``sug.ctrls``). This
-module rasterizes that onto a character grid — boxes at each cell's x, edges as
-orthogonal polylines through their waypoints. When grandalf is unavailable or the
-layout fails (e.g. a cycle), it falls back to a simple longest-path layering with
-even spacing so the view degrades rather than crashes.
+Pure (no Textual, no sockets). ``grandalf`` (Sugiyama layout) assigns layers,
+crossing-minimized x positions, and waypoints for long edges; this module
+rasterizes that onto a character grid. If the layout fails (e.g. a cycle), it
+falls back to longest-path layering with even spacing.
 """
 
 from __future__ import annotations
@@ -58,7 +51,9 @@ def render_dag(
     *,
     selected: str | None = None,
 ) -> str:
-    """Render the DAG. ``order`` is cell ids in topological order; ``edges`` are
+    """Render the DAG.
+
+    ``order`` is cell ids in topological order; ``edges`` are
     ``(from_cell_id, to_cell_id)`` pairs; ``selected`` highlights one box.
     """
     if not order:
@@ -364,10 +359,10 @@ def _draw_box(grid: _Grid, box: _Placed, *, selected: bool) -> None:
 
 
 def _accumulate_edge(grid: _Grid, pts: list[tuple[int, int]], *, lane: int) -> None:
-    """Walk an edge's full orthogonal cell path and record each step's directions.
+    """Record each step's directions along an edge's orthogonal cell path.
 
     Horizontal jogs sit on a per-edge ``lane`` row inside the inter-layer gap so
-    parallel edges don't pile onto the same row.
+    parallel edges don't share a row.
     """
     cells = _edge_cells(pts, lane)
     for prev, cur in zip(cells, cells[1:]):

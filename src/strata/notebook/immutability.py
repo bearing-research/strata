@@ -1,13 +1,9 @@
 """Runtime mutation detection for notebook cell inputs.
 
-Heuristic, best-effort detection that a cell mutated one of its inputs in place
-(rather than reassigning it) — the residual cases the static analyzer can't see
-(aliases, helper-function mutation, bare method mutators). Each input gets an
-identity check plus a cheap, sampled content fingerprint; a same-identity value
-whose fingerprint changed is reported as a mutation. Fingerprints come from an
-extensible registry (pandas / numpy / mappings / sequences / sized containers);
-unknown types fall back to identity-only. Detection is warn-only — see
-``docs/internal/design-mutation-fingerprint-registry.md``.
+Best-effort and warn-only: catches in-place mutation the static analyzer cannot
+see (aliases, helper functions, bare method mutators). Each input gets an
+identity check plus a sampled content fingerprint from an extensible registry;
+see ``docs/internal/design-mutation-fingerprint-registry.md``.
 """
 
 from __future__ import annotations
@@ -37,10 +33,8 @@ class InputSnapshot:
 class MutationWarning(TypedDict):
     """Warning about a detected mutation.
 
-    TypedDict rather than a dataclass because the only consumers
-    are JSON writers (manifest.json, WS cell_output payloads), so
-    keeping the wire format identical to the detection format
-    eliminates a round of serialization.
+    A TypedDict because its only consumers are JSON writers (manifest.json, WS
+    ``cell_output`` payloads).
     """
 
     var_name: str
@@ -49,25 +43,10 @@ class MutationWarning(TypedDict):
 
 
 def snapshot_inputs(namespace: dict[str, Any], input_names: list[str]) -> list[InputSnapshot]:
-    """Take snapshots of input variables before cell execution.
+    """Snapshot identity and content fingerprint of each input present in *namespace*.
 
-    Captures ``id(value)`` for every input, plus a sample content fingerprint
-    for the types the fingerprint registry recognizes (pandas / numpy /
-    mappings / sequences / other sized containers). Types with no fingerprint
-    get identity-only tracking — reassignment is still detected, in-place
-    mutation isn't.
-
-    Parameters
-    ----------
-    namespace : dict
-        The namespace dict containing variables.
-    input_names : list of str
-        Input variable names to snapshot.
-
-    Returns
-    -------
-    list of InputSnapshot
-        One snapshot per input present in *namespace*.
+    A value with no fingerprint gets identity-only tracking: reassignment is still
+    detected, in-place mutation is not.
     """
     snapshots = []
 
@@ -92,31 +71,11 @@ def detect_mutations(
     snapshots: list[InputSnapshot],
     exported_names: set[str] | None = None,
 ) -> list[MutationWarning]:
-    """Detect mutations by comparing current state against snapshots.
+    """Compare *namespace* after execution against *snapshots* and report mutations.
 
-    Detection is best-effort and limited to what :func:`snapshot_inputs`
-    captured:
-
-    - **Deletion** — the variable is gone from *namespace*.
-    - **Reassignment** — ``id(current) != id(original)``; treated as *not* a
-      mutation (the input object itself was untouched), so it is skipped.
-    - **In-place DataFrame/Series mutation** — same identity but a different
-      sample hash.
-
-    Other types (dict, list, opaque objects) carry no snapshot state, so their
-    in-place mutations are not detected.
-
-    Parameters
-    ----------
-    namespace : dict
-        The namespace dict after execution.
-    snapshots : list of InputSnapshot
-        Snapshots taken before execution.
-
-    Returns
-    -------
-    list of MutationWarning
-        One warning per detected mutation (empty if none).
+    A deleted input is reported; a reassigned one is not, since the input object was
+    untouched. A same-identity value is reported when its fingerprint changed.
+    Inputs in *exported_names* are skipped: downstream receives them as published.
     """
     warnings = []
 
@@ -160,23 +119,9 @@ def detect_mutations(
 
 
 def _check_object_mutation(value: Any, snapshot: InputSnapshot) -> tuple[str, str | None] | None:
-    """Check whether a same-identity object was mutated in place.
+    """Return ``(message, suggestion)`` if a same-identity *value* changed, else None.
 
-    Compares the value's current content fingerprint against the one captured
-    at snapshot time. A value with no fingerprint at snapshot time (unknown
-    type) can't be checked and returns ``None``.
-
-    Parameters
-    ----------
-    value : Any
-        The current value (same ``id`` as at snapshot time).
-    snapshot : InputSnapshot
-        The pre-execution snapshot.
-
-    Returns
-    -------
-    tuple of (str, str or None), or None
-        ``(message, suggestion)`` when a mutation is detected, else ``None``.
+    A value that had no fingerprint at snapshot time cannot be checked.
     """
     if snapshot.content_hash is None:
         return None
@@ -204,9 +149,8 @@ def _check_object_mutation(value: Any, snapshot: InputSnapshot) -> tuple[str, st
 class _FingerprintRule(NamedTuple):
     """One entry in the content-fingerprint registry.
 
-    ``matches`` is a cheap, side-effect-free predicate; ``fingerprint`` returns
-    a sampled hex digest or ``None`` when the value can't be hashed. NamedTuple
-    (not ``@dataclass``) mirrors the serializer's registry tuples.
+    ``matches`` is a cheap, side-effect-free predicate; ``fingerprint`` returns a
+    sampled hex digest or ``None`` when the value cannot be hashed.
     """
 
     matches: collections.abc.Callable[[Any], bool]
@@ -218,14 +162,11 @@ _IMMUTABLE_SCALARS = (str, bytes, int, float, bool, complex, type(None))
 
 
 def _general_fingerprint(value: Any) -> str | None:
-    """Serializer-based fallback fingerprint for any picklable object.
+    """Fallback fingerprint: a hash of the bytes Strata would store *value* as.
 
-    The :data:`_FINGERPRINT_RULES` above are *performance* optimizations for hot
-    types (sampled digests). This is the *general* path that makes mutation
-    detection cover arbitrary objects — ``torch.nn.Module``, sklearn estimators,
-    custom classes — with **no per-type rule**, by hashing the same bytes Strata
-    would store the value as. Immutable scalars are skipped; an unpicklable value
-    falls back to identity-only (``None``).
+    Covers arbitrary objects (modules, estimators, custom classes) with no per-type
+    rule. Immutable scalars are skipped; an unpicklable value returns None
+    (identity-only).
     """
     if isinstance(value, _IMMUTABLE_SCALARS):
         return None
@@ -239,12 +180,10 @@ def _general_fingerprint(value: Any) -> str | None:
 
 
 def _content_fingerprint(value: Any) -> str | None:
-    """Return a content digest for *value*, or ``None`` if it can't be checked.
+    """Return a content digest for *value*, or ``None`` if it cannot be checked.
 
-    Walks :data:`_FINGERPRINT_RULES` (fast sampled digests for hot types) in
-    order; the first match wins. Anything else falls back to a general
-    serializer-based hash — so mutation detection isn't limited to a
-    hand-written type registry.
+    The first matching :data:`_FINGERPRINT_RULES` entry wins; anything else falls
+    back to :func:`_general_fingerprint`.
     """
     for rule in _FINGERPRINT_RULES:
         if rule.matches(value):
@@ -314,12 +253,10 @@ def _is_torch(value: Any) -> bool:
 
 
 def _hash_torch_sample(value: Any) -> str | None:
-    """Digest a torch tensor from shape/dtype/device + a detached element sample.
+    """Digest a torch tensor from shape/dtype/device and a detached element sample.
 
-    Slices the sample in torch *before* converting to numpy, so huge tensors
-    aren't fully materialized. Exotic dtypes that ``.numpy()`` refuses (bf16,
-    quantized) fall back to identity-only by returning ``None``. Catches the
-    trailing-underscore in-place ops (``x.add_()``, ``x.zero_()``, …).
+    Slices in torch before converting to numpy so huge tensors are not materialized.
+    Dtypes ``.numpy()`` refuses (bf16, quantized) return None (identity-only).
     """
     h = hashlib.sha256()
     h.update(str(tuple(value.shape)).encode())
@@ -343,9 +280,8 @@ def _is_mapping(value: Any) -> bool:
 def _hash_mapping_sample(value: Any) -> str | None:
     """Digest a mapping from its length and a sorted sample of key reprs.
 
-    Keys are hashable (so repr is safe and cheap); values are not hashed — a
-    same-key value edit is the subscript form the static analyzer already
-    recaptures (``d[k] = v``). This catches add / remove / clear / pop / update.
+    Values are not hashed: a same-key edit (``d[k] = v``) is already recaptured by
+    the static analyzer.
     """
     h = hashlib.sha256()
     try:
@@ -363,13 +299,10 @@ def _is_sequence(value: Any) -> bool:
 
 
 def _hash_sequence_sample(value: Any) -> str | None:
-    """Digest a list/tuple from its length and the identities of a head/tail
-    sample of elements.
+    """Digest a list/tuple from its length and the ids of a head/tail element sample.
 
-    ``id()`` (not ``repr``) keeps this crash-proof for arbitrary elements and
-    is stable within the snapshot→detect window (same process). It catches
-    append / extend / insert / remove / pop / sort / reverse; an in-place edit
-    of an element object isn't a mutation of the sequence itself.
+    ``id()`` rather than ``repr`` cannot raise and is stable within one process. An
+    in-place edit of an element is not a mutation of the sequence.
     """
     h = hashlib.sha256()
     try:
@@ -392,7 +325,7 @@ def _is_sized(value: Any) -> bool:
 
 
 def _hash_len_only(value: Any) -> str | None:
-    """Length-only digest — catches add/remove on otherwise-opaque containers."""
+    """Length-only digest: catches add/remove on otherwise-opaque containers."""
     try:
         return hashlib.sha256(str(len(value)).encode()).hexdigest()
     except (TypeError, ValueError):
@@ -412,31 +345,12 @@ _FINGERPRINT_RULES: tuple[_FingerprintRule, ...] = (
 
 
 def apply_defensive_copy(value: Any, content_type: str) -> Any:
-    """Return a defensive copy of an input value, chosen by content-type tier.
+    """Return a defensive copy of *value*, chosen by content type.
 
-    Not currently wired into the execution path (inputs are re-read from the
-    artifact store each run); kept as the building block for opt-in input
-    isolation. Content-type strings are the literal serializer wire values —
-    this module is loaded inside the notebook venv and can't import
-    ``ContentType``.
-
-    Tiers
-    -----
-    - ``arrow/ipc`` — no copy (deserialization already yields a fresh object).
-    - ``json/object`` — shallow ``copy.copy``.
-    - ``pickle/object`` — ``copy.deepcopy`` (safer for nested structures).
-
-    Parameters
-    ----------
-    value : Any
-        The value to copy.
-    content_type : str
-        The content type from the input spec.
-
-    Returns
-    -------
-    Any
-        A defensive copy, or the original when no copy is needed.
+    Not wired into execution (inputs are re-read from the store each run); kept for
+    opt-in input isolation. Content types are literal strings because this module
+    runs in the notebook venv and cannot import ``ContentType``. ``arrow/ipc`` is not
+    copied, ``json/object`` is shallow-copied, ``pickle/object`` is deep-copied.
     """
     if content_type == "json/object":
         return copy.copy(value)
@@ -477,10 +391,9 @@ def _reachable_mutable_ids(
 ) -> dict[int, type]:
     """Map ``id -> type`` for mutable objects reachable from *root* (bounded).
 
-    Immutable scalars are ignored; immutable containers (tuple/frozenset) are
-    traversed but not recorded; arrays/tensors are recorded but not traversed
-    into. Only ``__dict__`` is followed on custom objects — never ``__slots__``
-    descriptors, which could trigger side effects.
+    Immutable containers are traversed but not recorded; arrays/tensors are recorded
+    but not traversed. Only ``__dict__`` is followed on custom objects, never
+    ``__slots__`` descriptors, which could have side effects.
     """
     found: dict[int, type] = {}
     visited: set[int] = set()
@@ -522,9 +435,8 @@ def _reachable_mutable_ids(
 def detect_shared_mutable_outputs(outputs: dict[str, Any]) -> list[MutationWarning]:
     """Warn when two of a cell's outputs share a mutable object by identity.
 
-    Such outputs decouple once stored as separate artifacts (see the module
-    note above). General — no per-type rule — it walks each output's object
-    graph and reports the first shared mutable object per output pair.
+    Such outputs become independent copies once stored as separate artifacts.
+    Reports the first shared object per output pair.
     """
     owners: dict[int, str] = {}
     reported: set[frozenset[str]] = set()

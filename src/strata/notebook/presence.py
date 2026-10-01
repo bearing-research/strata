@@ -1,22 +1,13 @@
 """Who has a notebook session open, which cell each is on, and soft edit locks.
 
-Every socket on a session receives every frame, and ``cell_source_update`` was
-last flush wins: two people editing one cell overwrote each other without
-either knowing. This module keeps two small tables on the session.
+Presence: one entry per identity (the principal under ``trusted_proxy`` or
+``api_key``, else the author a client declares, else ``local``). A socket
+contributes its last-focused cell; a REST edit contributes its author on the
+edited cell for ``API_PRESENCE_SECONDS``.
 
-**Presence.** One entry per identity: the principal under ``trusted_proxy`` or
-``api_key``, otherwise the author a client declares (``strata agent`` and MCP
-clients name themselves) and ``local`` when it declares none. Each socket
-contributes its identity and the cell it last focused; an API edit (an agent
-driving the notebook over REST, which has no socket) contributes its author on
-the cell it edited, for ``API_PRESENCE_SECONDS``. Two tabs of one person are
-one entry.
-
-**Soft locks.** The identity that last changed a cell holds it for
-``notebook_cell_lock_seconds``. A different identity's edit inside that window
-is refused with the holder's name unless it says ``force``. One person, however
-many tabs, never contends with themselves, so a single-user session behaves as
-it did before.
+Soft locks: the identity that last changed a cell holds it for
+``notebook_cell_lock_seconds``; another identity's edit in that window is
+refused unless it says ``force``. One identity never contends with itself.
 """
 
 from __future__ import annotations
@@ -68,8 +59,7 @@ class SessionPresence:
         return self._sockets.pop(key, None) is not None
 
     def focus(self, key: object, principal: str, cell_id: str | None) -> bool:
-        """Record that the socket *key* is on *cell_id*; return whether that
-        changed what presence shows."""
+        """Record that socket *key* is on *cell_id*; return whether presence changed."""
         seat = self._sockets.get(key)
         if seat is None:
             return False
@@ -82,8 +72,7 @@ class SessionPresence:
         self._api[principal] = _Seat(principal, cell_id, self._wall(), self._clock())
 
     def snapshot(self) -> list[dict[str, object]]:
-        """``[{principal, focused_cell_id, since}]``, one per identity, the
-        most recent focus winning when an identity has several seats."""
+        """``[{principal, focused_cell_id, since}]``, one per identity, latest focus wins."""
         now = self._clock()
         for principal, seat in list(self._api.items()):
             if now - seat.touched >= API_PRESENCE_SECONDS:

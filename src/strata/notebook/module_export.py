@@ -1,75 +1,21 @@
 """Source-backed export of reusable top-level notebook code.
 
-Decides whether a cell can be treated as a synthetic Python module for
-cross-cell reuse of top-level ``def``/``class`` definitions.
+Decides whether a cell's top-level ``def``/``class`` definitions can be shared
+across cells as a synthetic module. The source is sliced to nodes that are safe
+to re-execute in a clean namespace, and a ``symtable`` free-variable pass checks
+that each shared definition resolves inside the slice.
 
-The cell source is sliced before validation: nodes that aren't safe to
-re-execute in a clean namespace (calls, control flow, runtime
-assignments) are dropped, and only the kept slice is what we propose to
-re-execute. A def/class still needs all the names it references to
-resolve inside the slice (or in builtins), so we run a free-variable
-pass with the stdlib ``symtable`` module to detect closures over
-runtime-only names.
+Limitations:
 
-This lifts the older "the *whole cell* must be pure" rule to "the
-*defs/classes you want to share* must be self-contained." Cells that
-mix runtime work and library code can now export the library code
-cleanly; runtime values that downstream cells consume continue through
-the regular artifact path.
-
-Limitations
------------
-
-The slice has *single-cell scope*. The synthetic module is built from
-exactly one cell's source — there is no transitive composition across
-cells. Concretely:
-
-* A def can't reference a name imported in a different cell.
-  ``import math`` in cell 1 doesn't make ``math`` visible to a def
-  exported from cell 2 — the def has to live in the same cell as the
-  import. (Tested:
-  ``test_def_referencing_cross_cell_import_blocks_export``.)
-
-* A def can't call a helper function defined in a different cell.
-  Move the helper into the same cell as its caller, or duplicate it.
-  (Tested: ``test_def_referencing_cross_cell_helper_blocks_export``.)
-
-* Type annotations participate in the free-variable check by
-  default — ``def f(x: SomeType): ...`` blocks export when
-  ``SomeType`` isn't bound in the slice. Adding
-  ``from __future__ import annotations`` to the cell relaxes this:
-  PEP 563 stringifies annotations and they're never evaluated.
-
-  This check runs as an explicit AST walk over annotation
-  expressions rather than relying on ``symtable``'s free-variable
-  report, which would otherwise produce different verdicts across
-  Python versions: pre-3.14 symtable reports annotation refs as
-  free vars (annotations evaluated at def-time); on 3.14+ PEP 749
-  makes annotations lazily-evaluated by default and symtable
-  stops reporting them. The dedicated AST walk keeps the safety
-  check identical across versions — if your annotation references
-  a name the slice doesn't bind, you get blocked even on 3.14
-  where Python would only crash lazily when the annotation is
-  later accessed. (Tested:
-  ``test_annotation_reference_blocks_without_future_import`` and
-  ``test_future_annotations_relaxes_annotation_check``.)
-
-* Slicing reformats the source via ``ast.unparse``. Sliced cells lose
-  comments and exact whitespace in the *synthetic module*; the cell's
-  source on disk is untouched. Pure module cells — those that pass
-  through unsliced — keep their bytes verbatim. (Tested:
-  ``test_pure_cell_keeps_original_source_bytes`` and
-  ``test_sliced_source_loses_comments_in_synthetic_module``.)
-
-* Lambda assignments are blocked even though ``cloudpickle`` could
-  serialize a lambda value. The synthetic-module path is for
-  source-backed library code; lambdas express runtime behavior and
-  would surprise downstream consumers if they rode that path
-  silently. (Tested: ``test_top_level_lambda_assignment_is_blocking``.)
-
-* Star imports (``from foo import *``) are dropped from the slice and
-  surfaced as a reason. The slice can't validate the names they would
-  bind. (Tested: ``test_star_import_is_blocked``.)
+* Single-cell scope: a def cannot use a name imported, or a helper defined,
+  in another cell.
+* Annotations count as references unless the cell has
+  ``from __future__ import annotations``. This is an explicit AST walk, since
+  symtable stops reporting annotation refs on 3.14 (PEP 749).
+* Sliced cells go through ``ast.unparse`` and lose comments in the synthetic
+  module; unsliced cells keep their bytes.
+* Lambda assignments block export: they are runtime behavior, not library code.
+* Star imports are dropped and reported, since their names cannot be validated.
 """
 
 from __future__ import annotations
@@ -131,30 +77,14 @@ def build_module_export_plan(
 ) -> ModuleExportPlan:
     """Validate a cell source and produce an export plan.
 
-    ``injectable`` names — variables produced upstream that this cell references
-    — are not treated as blockers when a shared def/class closes over them.
-    Instead they are recorded in ``injected_inputs`` and later hydrated into the
-    synthetic module's namespace from the artifact store. Left empty (the
-    default), every unresolved free name blocks, preserving the source-only
-    contract for callers that don't hydrate.
+    The slice keeps the docstring, imports, defs, classes and literal-constant
+    assignments. A def/class referencing a name not bound there (or builtin)
+    moves to ``blocking_symbols`` with a reason, as do lambda assignments.
+    Benign dropped runtime state (``df = load()``) keeps ``is_exportable``.
 
-    Slices ``source`` to keep only nodes that re-execute safely in a
-    clean module namespace (docstring, imports, defs, async defs,
-    classes, literal-constant assignments). Everything else is dropped.
-
-    The slice is then validated with ``symtable``: any def/class whose
-    body, decorators, default values, base classes, or class-body
-    statements reference names not bound in the slice (and not Python
-    builtins) is moved out of ``exported_symbols`` into
-    ``blocking_symbols`` with a precise reason. Lambda assignments to
-    names also act as hard blockers — cloudpickle can serialize a
-    lambda value, but treating ``f = lambda x: ...`` as cross-cell
-    library code would be misleading.
-
-    Cells whose only "drop" is benign runtime state (``df = load()``)
-    keep ``is_exportable = True``; the runtime variable just flows
-    through the regular artifact path and the slice carries the
-    library code.
+    ``injectable`` names (upstream variables) do not block; they are recorded in
+    ``injected_inputs`` and hydrated from the artifact store later. Empty, every
+    unresolved free name blocks.
     """
     try:
         tree = ast.parse(source)
@@ -338,12 +268,9 @@ def build_module_export_plan(
 
 
 def runtime_binding_names(source: str) -> frozenset[str]:
-    """Names a cell binds at module scope via *runtime* code — i.e. everything
-    the export slicer drops (not imports, defs, classes, or literal constants).
+    """Names a cell binds at module scope via runtime code (what the slicer drops).
 
-    These are candidates for same-cell hydration: a def in the cell that closes
-    over one of them can be shared if the value is stored and injected, since
-    the cell itself produces it. Callers pass this set (union with cross-cell
+    Candidates for same-cell hydration: callers pass them (with cross-cell
     producers) as ``injectable`` to :func:`build_module_export_plan`.
     """
     try:
@@ -360,13 +287,7 @@ def runtime_binding_names(source: str) -> frozenset[str]:
 
 
 def _emit_slice_source(keep_nodes: list[ast.stmt], *, original: str) -> str:
-    """Return the slice as runnable Python source.
-
-    Falls back to the original source when no slicing happened — this
-    preserves the user's exact bytes (comments, formatting) for the
-    common pure-cell case where ``ast.unparse`` would otherwise reformat
-    them.
-    """
+    """Return the slice as runnable Python source; the original bytes when nothing was sliced."""
     if not keep_nodes:
         return ""
     try:
@@ -384,17 +305,10 @@ def _emit_slice_source(keep_nodes: list[ast.stmt], *, original: str) -> str:
 
 
 def _scope_unresolved(scope: symtable.SymbolTable, module_locals: set[str]) -> set[str]:
-    """Return names referenced in *scope* that resolve via module
-    globals but aren't bound in the slice's module locals.
+    """Names in *scope* that resolve via module globals but are not bound in the slice.
 
-    For function scopes this represents call-time NameErrors; for class
-    scopes it represents module-load-time NameErrors when the class
-    body executes.
-
-    Skips ``is_free()`` symbols — those are closure variables that
-    Python has already resolved to an enclosing scope's binding, so
-    they're guaranteed to exist at runtime even though they're not in
-    module_locals.
+    These would raise NameError at call time (functions) or load time (classes).
+    ``is_free()`` closure variables are skipped.
     """
     missing: set[str] = set()
     for sym in scope.get_symbols():
@@ -496,12 +410,10 @@ def _kept_bindings(keep_nodes: list[ast.stmt]) -> set[str]:
 
 
 def _has_future_annotations(tree: ast.Module) -> bool:
-    """True if the module source has ``from __future__ import annotations``.
+    """True if the source has ``from __future__ import annotations`` in effective position.
 
-    PEP 563 only takes effect when the future import appears before any
-    other statement except module docstrings and other future imports.
-    We mirror that ordering rule conservatively — stop walking at the
-    first non-``__future__`` statement.
+    Walking stops at the first non-``__future__`` statement after any docstring,
+    matching PEP 563's rule.
     """
     for node in tree.body:
         if isinstance(node, ast.Expr) and isinstance(node.value, ast.Constant):
@@ -518,19 +430,11 @@ def _has_future_annotations(tree: ast.Module) -> bool:
 
 
 def _collect_annotation_names(nodes: list[ast.stmt]) -> set[str]:
-    """Names referenced inside type-annotation expressions in *nodes*.
+    """Names referenced inside type-annotation expressions in *nodes*, including nested defs.
 
-    Walks function argument annotations, return annotations, and
-    variable annotations across the kept slice (recursing into nested
-    defs/classes — their annotations also evaluate at outer-def-time
-    on pre-3.14 Python, and PEP 749's lazy-eval doesn't make a stale
-    reference any less buggy).
-
-    Returns the bare ``Name.id`` set without attempting to attribute
-    each reference back to its annotation site — the safety check
-    treats any unresolved annotation as a module-load failure, and a
-    module-load failure poisons every symbol the slice would have
-    exported. Caller filters against module locals and builtins.
+    Not attributed per symbol: an unresolved annotation is a module-load
+    failure, which blocks every exported symbol. The caller filters against
+    module locals and builtins.
     """
     names: set[str] = set()
 
@@ -564,9 +468,9 @@ def _collect_annotation_names(nodes: list[ast.stmt]) -> set[str]:
 
 
 def _module_bindings_in(node: ast.stmt) -> set[str]:
-    """Names bound at module scope by *node* (a dropped top-level
-    statement). Recurses into control-flow bodies but stops at function
-    and class scopes — those bind locally, not at module scope.
+    """Names a dropped top-level statement binds at module scope.
+
+    Recurses into control-flow bodies but not into function or class scopes.
     """
     bindings: set[str] = set()
     if isinstance(node, ast.Assign):

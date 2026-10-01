@@ -1,22 +1,9 @@
 """Import .ipynb files into Strata notebook directories.
 
-Public entry: :func:`import_notebook` takes a path to a Jupyter
-notebook file and produces a runnable Strata notebook directory.
-
-PR 1 scope: parse + convert markdown / code cells, ``;``-suppression.
-PR 2 adds: line-magic and cell-magic translation, ``!shell`` handling,
-dependency capture from sibling ``requirements.txt`` / ``pyproject.toml``
-and ``pip install`` lines extracted from cells.
-PR 3 adds: a human-readable import report saved as
-``<notebook_dir>/import_report.md`` and returned on the
-:class:`ImportResult` so the REST endpoint can serve it directly.
-
-The conversion is intentionally light. Most Jupyter notebooks that
-run top-to-bottom and don't depend on magics produce a valid Strata
-notebook with no further intervention — variable rebinding
-(``df = transform(df)``) flows through the DAG via the existing
-defines/references analysis, and the harness already auto-displays
-the last bare expression so no ``display(...)`` wrapping is needed.
+:func:`import_notebook` converts markdown and code cells, translates magics and
+``!shell`` lines, captures dependencies, and writes ``import_report.md``. The
+conversion is light: rebinding such as ``df = transform(df)`` already flows
+through the DAG, and the harness auto-displays a final bare expression.
 
 Design doc: ``docs/internal/design-jupyter-import.md``.
 """
@@ -76,12 +63,7 @@ class _CellConversion:
 
 @dataclass
 class ImportResult:
-    """Outcome of an ``.ipynb`` import.
-
-    Surfaced through the CLI and (in a later PR) the REST endpoint so
-    the user knows what landed in the new notebook directory, what
-    we elided, and what they may want to fix by hand.
-    """
+    """Outcome of an ``.ipynb`` import: what landed, what was elided, what to fix by hand."""
 
     notebook_dir: Path
     markdown_cells: int = 0
@@ -112,31 +94,18 @@ def import_notebook(
 
     Args:
         ipynb_path: Path to the source ``.ipynb`` file.
-        out_dir: Target notebook directory. If ``None``, a sibling
-            directory named after the ``.ipynb`` stem is created next
-            to the source file.
-        owner: Caller identity to stamp into ``notebook.toml``. The CLI
-            doesn't pass this (single-user); the REST endpoint does so
-            multi-user / per-user-scoped deployments don't lose owner
-            attribution on imported notebooks.
-        check_deps: If True, run ``uv lock`` after writing dependencies
-            to verify they resolve. Failures land in ``result.warnings``
-            (the import itself still succeeds; the user can fix the
-            offending pin by hand). Off by default because it requires
-            uv on PATH and is seconds-slow / networked on cold caches.
+        out_dir: Target directory; ``None`` creates a sibling named after the stem.
+        owner: Identity stamped into ``notebook.toml`` (passed by the REST endpoint).
+        check_deps: Run ``uv lock`` to verify the captured dependencies resolve;
+            failures become warnings. Off by default: it needs uv and the network.
 
     Returns:
-        An :class:`ImportResult` describing what got converted. The
-        converted notebook is *always* sanity-checked for openability
-        (parse → per-cell analyze → DAG build); any failure lands in
-        ``result.warnings`` rather than raising, so partial conversions
-        stay inspectable.
+        An :class:`ImportResult`. The converted notebook is always checked for
+        openability; failures land in ``result.warnings`` rather than raising.
 
     Raises:
         FileNotFoundError: if ``ipynb_path`` doesn't exist.
-        ValueError: if the file isn't a valid nbformat object (top-level
-            JSON must be a dict; anything else — a list, scalar, null —
-            isn't a notebook).
+        ValueError: if the file isn't a valid nbformat object.
     """
     ipynb_path = Path(ipynb_path)
     if not ipynb_path.is_file():
@@ -247,11 +216,10 @@ def import_notebook(
 
 
 def _check_openable(notebook_dir: Path, result: ImportResult) -> None:
-    """Run parse → analyze → DAG-build over the converted notebook.
+    """Parse, analyze and DAG-build the converted notebook; warn on the first failure.
 
-    Appends a warning to ``result`` for the first failure encountered.
-    Doesn't raise — the notebook is already on disk and a partial
-    success is more useful than a refused import.
+    Never raises: the notebook is already on disk, and a partial success is more
+    useful than a refused import.
     """
     # Local: these modules import this one transitively through parser test fixtures.
     from strata.notebook.analyzer import analyze_cell
@@ -288,11 +256,9 @@ def _check_openable(notebook_dir: Path, result: ImportResult) -> None:
 
 
 def _check_resolvable(notebook_dir: Path, result: ImportResult) -> None:
-    """Run ``uv lock`` to verify the captured dependencies resolve.
+    """Run ``uv lock`` to verify the captured dependencies resolve; warn on failure.
 
-    Appends a warning with the stderr tail on failure. ``uv lock``
-    writes ``uv.lock`` as a side effect when successful, which seeds
-    the notebook's first real ``uv sync`` with a cached resolution.
+    On success the written ``uv.lock`` seeds the notebook's first ``uv sync``.
     """
     import subprocess
 
@@ -325,18 +291,11 @@ def _check_resolvable(notebook_dir: Path, result: ImportResult) -> None:
 
 
 def _validate_nbformat_structure(nb: object) -> None:
-    """Reject obvious nbformat violations before we materialize anything.
+    """Reject nbformat shapes that would crash the converter mid-loop.
 
-    Catches:
-      - Top-level value isn't a JSON object (a list, a scalar, null).
-      - ``cells`` is present but isn't a list.
-      - Individual entries inside ``cells`` aren't JSON objects.
-
-    Anything more nuanced (missing nbformat version, unknown cell_type)
-    we accept and convert as best we can — those don't crash the
-    converter, they just produce no-op cells or warnings on the result.
-    The point of this check is just to fail fast on shapes that would
-    raise AttributeError mid-loop.
+    Fails on a non-object top level, a non-list ``cells``, or a non-object cell
+    entry. Subtler problems (missing version, unknown ``cell_type``) are converted
+    as best as possible.
     """
     if not isinstance(nb, dict):
         raise ValueError(
@@ -361,9 +320,7 @@ def _validate_nbformat_structure(nb: object) -> None:
 def format_import_report(result: ImportResult, ipynb_path: Path | str) -> str:
     """Build the human-readable conversion report for one import.
 
-    Same content the CLI surfaces and the REST endpoint will return.
-    Sections only appear when they have content — a clean notebook
-    with no magics produces a short report.
+    Sections appear only when they have content.
     """
     ipynb_path = Path(ipynb_path)
     lines: list[str] = [
@@ -450,16 +407,10 @@ def format_import_report(result: ImportResult, ipynb_path: Path | str) -> str:
 
 
 def _source_to_text(source: Any) -> str:
-    """nbformat allows ``source`` as either a string or a list of lines.
+    """Join an nbformat ``source`` (string or list of lines) into stripped text.
 
-    The list form is the canonical on-disk shape; the string form
-    appears in hand-edited notebooks and in some exporters. Some
-    hand-edited notebooks contain cells whose source has a leading
-    space (the JSON looks like ``" Image(...)"``) which would fail
-    Python's parser as a module-level indent error. ``dedent`` (in
-    a single-line sense) is safe here: we're just normalizing the
-    cell envelope, not changing intended indentation inside a
-    function body.
+    Stripping fixes hand-edited cells with a leading space (``" Image(...)"``) that
+    would otherwise be an indent error.
     """
     if isinstance(source, list):
         text = "".join(source)
@@ -473,7 +424,7 @@ def _source_to_text(source: Any) -> str:
 
 
 def _new_cell_id(prefix: str) -> str:
-    """Cell IDs follow the existing 8-char UUID-prefix convention."""
+    """A new cell id (8-char UUID prefix)."""
     return f"{prefix}-{uuid.uuid4().hex[:8]}"
 
 
@@ -486,14 +437,9 @@ def _ensure_final_newline(text: str) -> str:
 def _convert_code_source(source: str) -> _CellConversion:
     """Convert one Jupyter code cell to runnable Python.
 
-    Order of operations:
-      1. Cell magic (first line is ``%%name``) — applies to the whole
-         body and is dispatched to a single handler.
-      2. Otherwise, walk lines: translate line magics (``%name``) and
-         shell escapes (``!cmd``) per the table.
-      3. Apply ``;``-display-suppression rewriting after magics have
-         been translated — a translated magic might have left the
-         body's last expression as the new suppression target.
+    A ``%%`` cell magic dispatches the whole body to one handler; otherwise line
+    magics and ``!cmd`` lines are translated line by line. ``;`` suppression is
+    applied last, since a translated magic can change the final expression.
     """
     if not source:
         return _CellConversion(source="")
@@ -549,19 +495,12 @@ def _convert_code_source(source: str) -> _CellConversion:
 
 
 def _ends_with_display_suppression(source: str) -> bool:
-    """True if the source ends in Jupyter's ``;`` suppression idiom.
-
-    Both bare (``df;``) and commented (``df;  # quiet``) forms count.
-    """
+    """True if the source ends in Jupyter's ``;`` suppression (``df;`` or ``df;  # quiet``)."""
     return _SUPPRESSION_TAIL_RE.search(source) is not None
 
 
 def _suppress_last_expression(source: str) -> str:
-    """Rewrite a ``;``-suppressed cell so Strata won't auto-display its last expr.
-
-    The harness auto-displays the value of a final ``ast.Expr`` node.
-    Append ``pass`` so the last node becomes a ``Pass`` instead.
-    """
+    """Append ``pass`` so the harness does not auto-display a ``;``-suppressed last expression."""
     match = _SUPPRESSION_TAIL_RE.search(source)
     if match is None:
         return source
@@ -588,10 +527,9 @@ def _translate_line_magic(
     indent: str,
     conv: _CellConversion,
 ) -> list[str]:
-    """Dispatch a ``%name args`` line magic.
+    """Dispatch a ``%name args`` line magic; return the replacement lines.
 
-    Returns the lines to substitute (may be empty). Mutates ``conv``
-    in place to record metadata.
+    Records metadata on ``conv`` in place.
     """
     handler = _LINE_MAGIC_TABLE.get(name)
     if handler is None:
@@ -627,12 +565,7 @@ def _lm_strip(name: str, args: str, indent: str, conv: _CellConversion) -> list[
 
 
 def _lm_pip(name: str, args: str, indent: str, conv: _CellConversion) -> list[str]:
-    """``%pip install pkg`` captures packages; other subcommands are dropped.
-
-    Only the ``install`` subcommand contributes deps — ``%pip list``,
-    ``%pip uninstall``, ``%pip show``, etc. are not useful at import
-    time and would just leak noise into the captured-deps list.
-    """
+    """``%pip install pkg`` captures packages; other subcommands are dropped."""
     parts = args.strip().split(None, 1)
     subcommand = parts[0] if parts else ""
     if subcommand != "install":
@@ -657,10 +590,9 @@ def _lm_env(name: str, args: str, indent: str, conv: _CellConversion) -> list[st
 
 
 def _lm_run(name: str, args: str, indent: str, conv: _CellConversion) -> list[str]:
-    """``%run script.py`` → ``exec`` of the script's text (best effort).
+    """``%run script.py`` becomes an ``exec`` of the script's text (best effort).
 
-    Uses an aliased ``pathlib.Path`` import so the generated code
-    works even if the cell hasn't imported ``Path`` itself.
+    Imports ``pathlib.Path`` under an alias, so the cell need not import it.
     """
     target = args.strip()
     if not target:
@@ -729,15 +661,11 @@ def _cm_drop(name: str, args: str, body: str) -> _CellConversion:
 
 
 def _cm_bash(name: str, args: str, body: str) -> _CellConversion:
-    """``%%bash``/``%%sh``/``%%script`` — dropped; body preserved as comments.
+    """``%%bash``/``%%sh``/``%%script``: dropped, body kept as comments.
 
-    Same policy as ``!cmd`` lines: auto-running arbitrary shell from an
-    imported notebook is a real hazard (untrusted-corpus imports are a
-    primary use case), and translating the whole-cell forms to a live
-    ``subprocess.run(..., shell=True)`` while stubbing the single-line
-    forms was an inconsistent threat model. The body is kept as comments
-    so re-enabling is a deliberate uncomment in the cell, not a paste
-    from the import report.
+    Same policy as ``!cmd`` lines: running arbitrary shell from an imported
+    (possibly untrusted) notebook is a hazard, so re-enabling it is a deliberate
+    uncomment.
     """
     commented = "".join(f"# {line}\n" for line in body.splitlines())
     return _CellConversion(
@@ -818,17 +746,10 @@ def _translate_shell_assignment(
     indent: str,
     conv: _CellConversion,
 ) -> list[str]:
-    """``target = !cmd`` — IPython binds ``target`` to stdout lines.
+    """``target = !cmd``: drop the command and bind ``target`` to ``[]``.
 
-    Auto-running arbitrary shell from an imported notebook is a real
-    hazard (untrusted-corpus stress tests are a primary use case), so
-    we don't translate to a live subprocess call. Instead we drop the
-    command and stub the binding with ``[]`` so downstream Python
-    still parses and references to ``target`` resolve. The user can
-    swap in a real ``subprocess.run`` if the shell escape matters.
-
-    ``!pip install`` in this form is rare but still captures the
-    package — the lhs gets the same empty-list stub.
+    Not run, for the same safety reason as ``!cmd``; the stub keeps later
+    references to ``target`` valid. ``!pip install`` here still captures the package.
     """
     pip = _PIP_INSTALL_RE.match(cmd)
     if pip:
@@ -853,11 +774,8 @@ def _translate_shell_assignment(
 def _parse_pip_install(args: str) -> list[str]:
     """Extract package specifiers from a ``pip install ...`` argument string.
 
-    Drops flag tokens (``-U``, ``--upgrade``, ``-q``, etc.) and flag-args
-    pairs that consume a following positional (``-r req.txt``,
-    ``--index-url ...``). Keeps version specifiers attached to their
-    package name (``foo==1.2``), URL specs (``git+https://…``), and
-    extras (``foo[bar]``).
+    Drops flags and flag arguments (``-r req.txt``, ``--index-url ...``); keeps
+    version specifiers, URL specs and extras attached to their package.
     """
     try:
         tokens = shlex.split(args)
@@ -900,8 +818,7 @@ def _parse_pip_install(args: str) -> list[str]:
 def _capture_sibling_deps(parent: Path) -> list[str]:
     """Read ``requirements.txt`` / ``pyproject.toml`` next to the ``.ipynb``.
 
-    Best-effort: errors collapse to "no deps captured from this source".
-    Most Kaggle / GitHub notebooks ship one or the other.
+    Best effort: an unreadable source contributes no deps.
     """
     deps: list[str] = []
     req = parent / "requirements.txt"
@@ -974,12 +891,9 @@ _IMPORT_TO_PIP: dict[str, str] = {
 
 
 def _scan_imports(source: str) -> set[str]:
-    """Collect top-level module names imported by a cell.
+    """Collect top-level, non-stdlib module names a cell imports.
 
-    Walks the AST for ``Import`` and ``ImportFrom`` nodes, takes the
-    first dotted-path component, filters out stdlib names. Returns
-    an empty set on syntax errors — those surface separately when
-    the harness tries to execute the cell.
+    Returns an empty set on a syntax error; that surfaces when the cell runs.
     """
     try:
         tree = ast.parse(source)
@@ -999,11 +913,10 @@ def _scan_imports(source: str) -> set[str]:
 
 
 def _local_module_names(parent_dir: Path) -> set[str]:
-    """Names that would resolve to local files / packages, not PyPI.
+    """Names that resolve to local files or packages, not PyPI.
 
-    Without this, a notebook that does ``import my_helpers`` next to
-    a ``my_helpers.py`` file would end up with a fabricated PyPI dep
-    that fails confusingly on ``uv sync``.
+    Keeps ``import my_helpers`` next to ``my_helpers.py`` from becoming a bogus
+    dependency that breaks ``uv sync``.
     """
     names: set[str] = set()
     if not parent_dir.is_dir():
@@ -1021,11 +934,7 @@ def _local_module_names(parent_dir: Path) -> set[str]:
 
 
 def _imports_to_deps(imports: set[str], local_modules: set[str]) -> list[str]:
-    """Map a set of import names to pip package specifiers.
-
-    Skips anything that names a local module. Returns sorted output
-    for stable, hashable results across runs.
-    """
+    """Map import names to sorted pip package specifiers, skipping local modules."""
     deps: list[str] = []
     for name in sorted(imports):
         if name in local_modules:
@@ -1035,12 +944,10 @@ def _imports_to_deps(imports: set[str], local_modules: set[str]) -> list[str]:
 
 
 def _normalize_pep503(name: str) -> str:
-    """Canonical comparison key for PEP 508 specifiers.
+    """Canonical comparison key for a PEP 508 specifier (PEP 503 name normalization).
 
-    Strips version markers / extras / markers, lowercases, replaces
-    ``_``/``.`` with ``-`` (PEP 503 normalization). ``scikit_learn``,
-    ``scikit-learn``, and ``Scikit-Learn`` all map to the same key,
-    so version-pinned siblings shadow bare scan-derived names.
+    Strips version, extras and markers; ``scikit_learn`` and ``Scikit-Learn`` map
+    to the same key, so a pinned sibling dep shadows a bare scanned name.
     """
     head = re.match(r"^([A-Za-z0-9][A-Za-z0-9._-]*)", name.strip())
     if not head:
@@ -1049,11 +956,7 @@ def _normalize_pep503(name: str) -> str:
 
 
 def _dedupe_by_package(specs: list[str]) -> list[str]:
-    """Dedupe in order, keying by the PEP 503-normalized package name.
-
-    Ensures ``pandas==2.0.1`` (explicit, earlier) shadows a bare
-    ``pandas`` (inferred from imports, later) — the version pin wins.
-    """
+    """Dedupe in order by normalized package name, so an earlier pin beats a later bare name."""
     seen: set[str] = set()
     out: list[str] = []
     for spec in specs:
@@ -1066,13 +969,10 @@ def _dedupe_by_package(specs: list[str]) -> list[str]:
 
 
 def _is_valid_pep508_dep(spec: str) -> bool:
-    """Filter out specifiers that pyproject.toml ``dependencies`` won't accept.
+    """Whether ``spec`` is a PEP 508 specifier ``project.dependencies`` accepts.
 
-    pyproject.toml's ``project.dependencies`` requires PEP 508
-    specifiers — ``name``, ``name==1.2``, ``name[extras]``, ``name @ url``,
-    optionally with a marker. Pip-only forms (editable installs,
-    bare URLs, local paths) are rejected here so they don't get
-    serialized into invalid TOML or get rejected later by uv.
+    Rejects pip-only forms (editable installs, bare URLs, local paths), which would
+    produce invalid TOML or fail in uv.
     """
     spec = spec.strip()
     if not spec or spec.startswith("-"):
@@ -1086,19 +986,11 @@ def _is_valid_pep508_dep(spec: str) -> bool:
 
 
 def _merge_pyproject_deps(notebook_dir: Path, new_deps: list[str]) -> list[str]:
-    """Add captured deps to the new notebook's ``pyproject.toml``.
+    """Add captured deps to the new notebook's ``pyproject.toml``; return those added.
 
-    Round-trips through ``tomllib`` + ``tomli_w`` so any string with
-    embedded quotes / backslashes / etc. (e.g. environment markers like
-    ``importlib-metadata; python_version < "3.10"``) is properly escaped
-    by the serializer — manual string interpolation would emit invalid
-    TOML.
-
-    The notebook venv hasn't been created yet, so first ``uv sync``
-    will resolve the deps. We deliberately don't run ``uv add`` here —
-    that's slow, networked, and partial-failure-prone.
-
-    Returns the deps actually added (skipping ones already present).
+    Round-trips through ``tomllib`` + ``tomli_w`` so markers with quotes are
+    escaped correctly. Does not run ``uv add`` (slow, networked); the first
+    ``uv sync`` resolves them.
     """
     pyproject = notebook_dir / "pyproject.toml"
     if not pyproject.is_file():

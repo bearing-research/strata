@@ -1,16 +1,7 @@
-"""``LanguageAnalyzer`` protocol + registry + built-in adapters.
+"""``LanguageAnalyzer`` protocol, registry and built-in adapters.
 
-The four built-in languages (Python, prompt, SQL, markdown) used to
-branch via ``if cell.language == CellLanguage.X`` in two near-identical
-copies inside ``session.py`` — once in ``_analyze_and_build_dag`` and
-once in ``re_analyze_cell``. Both copies extracted ``defines`` and
-``references`` from a per-language analyzer, plus ``mutation_defines``
-for Python.
-
-This module collapses both call sites onto a registry.
-``register_language_analyzer(language, analyzer)`` is the extension
-point; adding R (or Lean) means a new adapter module + one
-``register_language_analyzer`` call — no edits to ``session.py``.
+``register_language_analyzer(language, analyzer)`` is the extension point; the
+session dispatches every cell's defines/references extraction through it.
 """
 
 from __future__ import annotations
@@ -27,14 +18,7 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True)
 class AnalyzedCell:
-    """Uniform analyzer result across languages.
-
-    Each language's native analyzer returns its own dataclass
-    (``CellAnalysis`` for Python, ``PromptAnalysis``, ``SqlAnalysis``);
-    the dispatch sites only ever needed ``defines`` + ``references``
-    plus Python's ``mutation_defines``. Coalescing here lets the
-    dispatch site treat all languages uniformly.
-    """
+    """Uniform analyzer result across languages; only Python sets ``mutation_defines``."""
 
     defines: list[str] = field(default_factory=list)
     references: list[str] = field(default_factory=list)
@@ -47,10 +31,7 @@ class AnalyzedCell:
 class LanguageAnalyzer(Protocol):
     """Extract DAG inputs/outputs from a cell's source.
 
-    The session passed in is the read-only context an analyzer may need;
-    the built-in languages read only the cell and ignore the arg. A flat
-    parameter rather than a side-channel keeps the protocol surface small
-    and explicit.
+    ``session`` is read-only context; the built-in languages ignore it.
     """
 
     def analyze(self, cell: CellState, session: NotebookSession) -> AnalyzedCell:
@@ -61,8 +42,8 @@ class LanguageAnalyzer(Protocol):
 class UnknownLanguageError(LookupError):
     """Raised when a cell's language has no registered analyzer.
 
-    Distinct from ``KeyError`` so callers can ``except`` it specifically
-    without catching unrelated dict misses inside the analyzer chain.
+    Distinct from ``KeyError`` so callers can catch it without catching
+    unrelated dict misses.
     """
 
 
@@ -70,22 +51,15 @@ _REGISTRY: dict[CellLanguage, LanguageAnalyzer] = {}
 
 
 def register_language_analyzer(language: CellLanguage, analyzer: LanguageAnalyzer) -> None:
-    """Bind ``analyzer`` to ``language`` in the global registry.
-
-    Idempotent on a same-instance re-register; later registrations
-    silently overwrite earlier ones (matches the SQL ``DriverAdapter``
-    registry's behaviour at ``src/strata/notebook/sql/registry.py``).
-    """
+    """Bind ``analyzer`` to ``language`` in the global registry; later registrations overwrite."""
     _REGISTRY[language] = analyzer
 
 
 def get_language_analyzer(language: CellLanguage) -> LanguageAnalyzer:
     """Look up the analyzer for ``language``.
 
-    Raises ``UnknownLanguageError`` rather than returning a default so a
-    missing registration surfaces immediately at the dispatch site
-    instead of producing an empty ``AnalyzedCell`` that would silently
-    drop every reference in the cell and break DAG construction.
+    Raises ``UnknownLanguageError`` rather than returning an empty result,
+    which would silently drop every reference and break the DAG.
     """
     try:
         return _REGISTRY[language]
@@ -94,11 +68,7 @@ def get_language_analyzer(language: CellLanguage) -> LanguageAnalyzer:
 
 
 def analyze_cell_by_language(cell: CellState, session: NotebookSession) -> AnalyzedCell:
-    """Dispatch helper: look up the analyzer and run it.
-
-    Convenience over ``get_language_analyzer(...).analyze(cell, session)``
-    for the common dispatch path.
-    """
+    """Look up the analyzer for ``cell``'s language and run it."""
     return get_language_analyzer(cell.language).analyze(cell, session)
 
 
@@ -106,12 +76,7 @@ def analyze_cell_by_language(cell: CellState, session: NotebookSession) -> Analy
 
 
 class _PythonAnalyzer:
-    """Adapter over ``strata.notebook.analyzer.analyze_cell``.
-
-    Returns the only ``mutation_defines`` payload of the four languages —
-    Python tracks subscript-assign style mutations so downstream cells
-    that consume the mutated value know to invalidate.
-    """
+    """Adapter over ``strata.notebook.analyzer.analyze_cell``; sets ``mutation_defines``."""
 
     def analyze(self, cell: CellState, session: NotebookSession) -> AnalyzedCell:
         from strata.notebook.analyzer import analyze_cell
@@ -141,11 +106,9 @@ class _PromptAnalyzer:
 class _SqlAnalyzer:
     """Adapter over ``strata.notebook.sql.analyzer.analyze_sql_cell``.
 
-    The DAG needs the output name and the ``:name`` bind placeholders,
-    neither of which depends on the connection's dialect, so no dialect is
-    passed and sqlglot never parses the body here. Table extraction is the
-    executor's and the annotation validator's; a query sqlglot cannot read
-    must not keep the notebook from opening.
+    The DAG needs only the output name and ``:name`` placeholders, so no
+    dialect is passed and sqlglot never parses the body: a query sqlglot
+    cannot read must not keep the notebook from opening.
     """
 
     def analyze(self, cell: CellState, session: NotebookSession) -> AnalyzedCell:
@@ -159,13 +122,7 @@ class _SqlAnalyzer:
 
 
 class _MarkdownAnalyzer:
-    """No-op analyzer.
-
-    Markdown cells are pure prose — no identifiers in or out of the DAG,
-    so they sit isolated with no edges. Empty ``AnalyzedCell`` is the
-    correct answer; not raising ``UnknownLanguageError`` is the
-    correct shape (the language IS known, it just has no analysis).
-    """
+    """No-op analyzer: markdown cells have no DAG edges (the language is known, so no error)."""
 
     def analyze(self, cell: CellState, session: NotebookSession) -> AnalyzedCell:
         return AnalyzedCell()
@@ -174,9 +131,8 @@ class _MarkdownAnalyzer:
 class _WidgetAnalyzer:
     """Adapter over ``strata.notebook.widget_analyzer.analyze_widget_cell``.
 
-    A widget cell is a pure producer: each declared control is a
-    ``defines`` variable downstream cells consume, and it has no upstream
-    (``references`` is always empty).
+    A widget cell is a pure producer: each control is a define, and
+    ``references`` is always empty.
     """
 
     def analyze(self, cell: CellState, session: NotebookSession) -> AnalyzedCell:

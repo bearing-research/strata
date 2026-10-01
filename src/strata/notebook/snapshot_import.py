@@ -1,26 +1,11 @@
-"""Turn a snapshot bundle back into a notebook.
+"""Turn a snapshot bundle back into a notebook (the reverse of ``snapshot``).
 
-The other half of :mod:`strata.notebook.snapshot`. A bundle carries the
-committed files, the per-cell runtime state, an index of every ready cell's
-artifacts, and the records and bytes of whichever of those the exporter
-included. Importing it yields a notebook directory whose carried cells are
-cache hits before anything runs, and whose other cells are IDLE — nothing here
-to serve them, and with a team store configured, running one is a pull rather
-than a recompute, because the provenance the bundle recorded is the provenance
-the notebook computes locally.
-
-**Identity.** A notebook keeps its id unless another notebook the caller can
-see already has it. Each notebook directory has its own artifact store, so an
-import never collides with anything locally; what a shared id breaks is the
-moment both notebooks publish or promote into one shared store, where their
-artifact ids — ``nb_<notebook id>_cell_…`` — would name each other's rows. So
-a taken id is replaced, and every artifact id, lineage edge and display output
-URI that embeds it is rewritten to match. Provenance hashes are not rewritten:
-they contain no notebook id, which is what keeps an imported artifact
-deduplicating against the same computation wherever it came from.
-
-**Order.** Bytes before rows before state, so an interruption leaves something
-a retry can finish rather than a notebook that looks complete and is not.
+Carried cells are cache hits before anything runs; the rest are IDLE. A notebook
+keeps its id unless the caller can already see one with it; a taken id is
+replaced, and every artifact id, lineage edge and display URI embedding it is
+rewritten, so two notebooks never name each other's rows in a shared store.
+Provenance hashes hold no notebook id and are not rewritten. Writes go bytes,
+then rows, then state, so an interrupted import can be retried.
 """
 
 from __future__ import annotations
@@ -48,12 +33,9 @@ _SAFE_SEGMENT = re.compile(r"^[A-Za-z0-9._-]+$")
 def _member_target(dest: Path, name: str) -> Path:
     """Where a bundle member may be written under *dest*.
 
-    A bundle is a file somebody sends you, and its member names are its own.
-    ``dest / name`` for a member called ``cells/../../../.ssh/authorized_keys``
-    writes there, as the server's user: the route's careful notebook-name
-    handling is beside the point if the archive's interior names are trusted.
-    Each segment is checked rather than the joined path, so a name that only
-    resolves outside after symlinks still cannot be written.
+    Member names come from an untrusted archive (``cells/../../.ssh/...``). Each
+    segment is checked rather than the joined path, so a name that resolves outside
+    only through symlinks still cannot be written.
     """
     parts = PurePosixPath(name).parts
     if not parts or PurePosixPath(name).is_absolute():
@@ -88,13 +70,9 @@ def import_snapshot(
 ) -> ImportedSnapshot:
     """Unpack *bundle* into the new notebook directory *dest*.
 
-    ``taken_ids`` are notebook ids already in use where the caller will look
-    for notebooks. The bundle's id is kept unless it is among them.
-
-    ``owner`` replaces the owner the bundle's notebook.toml names. The bundle
-    carries whoever exported it, and on a server scoping notebooks per user,
-    discovery lists by owner — so an import left under the original owner would
-    vanish from the importer's own list the moment it landed.
+    ``taken_ids`` are notebook ids already in use where the caller looks for
+    notebooks; the bundle's id is kept unless it is among them. ``owner`` replaces
+    the bundle's owner, or a per-user server would hide the import from its importer.
 
     Raises:
         NotASnapshotError: The file is not a snapshot, predates the records a
@@ -199,12 +177,10 @@ def _validate(archive: zipfile.ZipFile) -> tuple[dict[str, Any], dict[str, Any]]
 
 
 def _renamer(old_id: str, new_id: str):
-    """Artifact id → the id it has in the imported notebook.
+    """Map an artifact id to its id in the imported notebook.
 
-    Notebook-derived artifact ids start ``nb_<notebook id>_`` (cell outputs,
-    iterations, variants, display and console artifacts) or
-    ``nb_remote_<notebook id>_`` (remote builds). Anything else is not this
-    notebook's to rename.
+    Only ``nb_<notebook id>_`` and ``nb_remote_<notebook id>_`` ids belong to this
+    notebook; anything else is left alone.
     """
     prefixes = (f"nb_{old_id}_", f"nb_remote_{old_id}_")
 
@@ -233,11 +209,10 @@ def _import_records(
     records: dict[str, dict[str, Any]],
     rename,
 ) -> dict[str, str]:
-    """Import every carried record, ancestors first. Return old ref → landed ref.
+    """Import every carried record, ancestors first; return old ref to landed ref.
 
-    Ancestors first so a descendant is imported with edges naming where its
-    ancestors actually landed, which is not always the renamed ref: a store
-    that already holds a computation resolves an import of it onto that row.
+    A store that already holds a computation resolves its import onto that row, so
+    descendants must name where their ancestors actually landed.
     """
     remap: dict[str, str] = {}
     for old_ref in _ancestors_first(records):
@@ -264,9 +239,8 @@ def _import_records(
 def _record_from(data: dict[str, Any]) -> ArtifactVersion:
     """A bundle record back into an artifact version.
 
-    Every :data:`RECORD_FIELDS` key is read, so a field added there and to the
-    exporter reaches here too. The tenant is left unset: a local store takes
-    whoever is importing, never what the bundle claims.
+    Reads every :data:`RECORD_FIELDS` key. The tenant is left unset: a local store
+    takes the importer, never what the bundle claims.
     """
     missing = [key for key in RECORD_FIELDS if key not in data]
     if missing:
@@ -365,11 +339,9 @@ def _write_runtime_state(
     landed: dict[str, str],
     rename,
 ) -> None:
-    """Provenance, timings, display outputs and console, as the bundle had them.
+    """Write provenance, timings, display outputs and console as the bundle had them.
 
-    This is what lets an imported notebook show its outputs before anything
-    runs: the notebook resolves cached display outputs from these entries, index
-    by index, against the artifacts step 1 imported.
+    This is what lets an imported notebook show its outputs before anything runs.
     """
     from strata.notebook.runtime_state import load_runtime_state, save_runtime_state
     from strata.notebook.writer import update_cell_console_output

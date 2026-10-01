@@ -1,9 +1,8 @@
 """LLM provider configuration and resolution.
 
-Resolves a notebook's LLM config by merging server defaults, notebook env
-vars, and the optional ``[ai]`` section in ``notebook.toml``. Process-level
-env vars are deliberately *not* consulted so a key exported in the shell
-that started the server doesn't leak into every notebook.
+Merges server defaults, notebook env vars and the ``[ai]`` section of
+``notebook.toml``. Process env vars are deliberately not consulted, so a key
+exported in the server's shell does not leak into every notebook.
 """
 
 from __future__ import annotations
@@ -44,9 +43,9 @@ class LlmConfig:
 class LlmCompletionResult:
     """Result from a chat completion request.
 
-    ``degraded`` is True when the provider rejected the structured-output
-    request extensions and the call fell back to prompt-guided JSON —
-    schema conformance then rests entirely on client-side validation.
+    ``degraded`` is True when the provider rejected the structured-output extensions
+    and the call fell back to prompt-guided JSON, so schema conformance rests on
+    client-side validation.
     """
 
     content: str
@@ -61,19 +60,11 @@ def resolve_llm_config(
     server_config: Any | None = None,
     notebook_env: dict[str, str] | None = None,
 ) -> LlmConfig | None:
-    """Merge notebook [ai] config, server config, and notebook env vars.
+    """Merge notebook ``[ai]`` config, notebook env vars and server config.
 
-    Resolution order (highest priority wins):
-    1. notebook.toml ``[ai]`` section
-    2. Notebook-level env vars (set via the Runtime panel)
-    3. Server config (``STRATA_AI_*`` env vars read at server startup)
-
-    Process-level environment variables are **not** consulted, so a key
-    accidentally exported in the shell that started the server does not
-    leak into every notebook. An admin deploying a shared server can still
-    provide a default via the explicit ``STRATA_AI_*`` server config.
-
-    Returns ``None`` if no API key can be found.
+    Priority, highest first: notebook.toml ``[ai]``, notebook env vars (Runtime
+    panel), server config (``STRATA_AI_*`` read at startup). Process env vars are
+    not consulted. Returns ``None`` if no API key can be found.
     """
     base_url: str | None = None
     api_key: str | None = None
@@ -138,13 +129,11 @@ def resolve_llm_config(
 def _base_url_guard(notebook_base_url: str | None, server_config: Any) -> tuple[str, ...] | None:
     """The ``guard_hosts`` for a base_url ``notebook.toml`` set, if it needs one.
 
-    A prompt cell posts to its base_url from the server process and shows the
-    author the answer, error bodies included, so on a service-mode server a
-    base_url the notebook chose is a read of whatever that server can reach:
-    the cloud metadata address, an internal service. It gets the ``@fetch``
-    rule and allowlist. Naming the operator's own ``ai_base_url`` or a
-    provider's default chooses nothing new, and keeps a proxy the environment
-    sets (a guarded client connects directly).
+    A prompt cell posts to its base_url from the server and shows the answer, error
+    bodies included, so on a service-mode server a notebook-chosen base_url could
+    read the metadata address or an internal service; it gets the ``@fetch`` rule
+    and allowlist. The operator's ``ai_base_url`` or a provider default needs no
+    guard, which also keeps an environment proxy (a guarded client connects directly).
     """
     if notebook_base_url is None:
         return None
@@ -160,12 +149,10 @@ def _base_url_guard(notebook_base_url: str | None, server_config: Any) -> tuple[
 
 
 def max_output_tokens_param(base_url: str) -> str:
-    """Return the correct max-output-tokens field name for this provider.
+    """Return the max-output-tokens field name for this provider.
 
-    OpenAI's gpt-5 / o-series / gpt-4o reject ``max_tokens`` with
-    "unsupported_parameter" and require ``max_completion_tokens``. Other
-    OpenAI-compatible providers (Anthropic, Google, Mistral, local
-    servers) still accept ``max_tokens``, so we only switch for openai.
+    OpenAI's gpt-5 / o-series / gpt-4o reject ``max_tokens`` and need
+    ``max_completion_tokens``; other OpenAI-compatible providers accept ``max_tokens``.
     """
     if "openai" in base_url.lower():
         return "max_completion_tokens"
@@ -175,9 +162,8 @@ def max_output_tokens_param(base_url: str) -> str:
 class LlmHttpError(RuntimeError):
     """Provider HTTP error carrying the status code and response body.
 
-    Subclasses RuntimeError so existing broad handlers keep working;
-    the typed fields let callers make decisions (e.g. degrade a
-    structured-output request) without parsing the message string.
+    Subclasses RuntimeError so broad handlers still catch it; the typed fields let
+    callers decide (e.g. degrade a structured-output request) without parsing text.
     """
 
     def __init__(self, status_code: int, body: str, model: str):
@@ -187,11 +173,10 @@ class LlmHttpError(RuntimeError):
 
 
 def raise_for_llm_status(resp: httpx.Response, model: str) -> None:
-    """Like ``resp.raise_for_status()`` but surface the provider's error body.
+    """Like ``resp.raise_for_status()`` but include the provider's error body.
 
-    The default httpx error only includes URL + status; when a provider
-    returns 400 with "model not found" or "invalid parameter", the
-    message is in the body — which users need to debug.
+    httpx's error has only URL and status; the reason ("model not found") is in the
+    body.
     """
     if resp.is_success:
         return

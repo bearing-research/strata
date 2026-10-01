@@ -1,15 +1,8 @@
-"""Persistent per-notebook runtime state.
+"""Persistent per-notebook runtime state in ``.strata/runtime.json`` (gitignored).
 
-``notebook.toml`` holds stable notebook configuration — cell list,
-worker config, notebook-level env, mounts. Anything that changes on
-every execution or background sync (display outputs, per-cell
-provenance hashes, the last ``uv sync`` timestamp) lives here
-instead. Storing it separately keeps ``notebook.toml`` diff-friendly
-for version control and means example notebooks don't churn under
-Git every time someone runs them.
-
-The file is ``.strata/runtime.json`` and is gitignored alongside the
-rest of ``.strata/``.
+Anything that changes on every run or sync (display outputs, per-cell
+provenance, the last ``uv sync``) lives here so ``notebook.toml`` stays stable
+under version control.
 """
 
 from __future__ import annotations
@@ -33,7 +26,7 @@ MAX_EXECUTION_SAMPLES = 50
 
 @dataclass
 class CellRuntime:
-    """Per-cell runtime state — execution provenance and display outputs."""
+    """Per-cell runtime state: execution provenance and display outputs."""
 
     last_provenance_hash: str | None = None
     last_source_hash: str | None = None
@@ -57,10 +50,7 @@ class CellRuntime:
     execution_samples: list[dict[str, Any]] = field(default_factory=list)
 
     def is_empty(self) -> bool:
-        """Whether this entry carries no useful state.
-
-        Empty entries are stripped on save so the file stays tidy.
-        """
+        """Whether this entry carries no state; empty entries are stripped on save."""
         return not (
             self.last_provenance_hash
             or self.last_source_hash
@@ -79,9 +69,7 @@ class CellRuntime:
 class EnvironmentRuntime:
     """Snapshot of the notebook's runtime environment after a ``uv sync``.
 
-    All fields default to empty / zero so missing keys on the disk read
-    side and partial migrations resolve to a well-formed dataclass
-    without manual ``setdefault`` calls.
+    All fields default to empty, so missing keys read back as a well-formed value.
     """
 
     requested_python_version: str = ""
@@ -102,26 +90,12 @@ class EnvironmentRuntime:
 
 @dataclass
 class RRuntime:
-    """Snapshot of the notebook's R-side runtime after ``renv::restore()``.
+    """Snapshot of the notebook's R runtime after ``renv::restore()``.
 
-    Mirror of ``EnvironmentRuntime`` for R. Lives in ``.strata/runtime.json``
-    rather than the committed ``notebook.toml`` so the per-session
-    ``last_synced_at`` doesn't churn the on-disk notebook definition.
-
-    Fields:
-
-    * ``lock_hash`` / ``r_version`` / ``last_synced_at`` — the *last
-      successful* sync. A failed re-sync leaves these alone so the UI
-      can still show "last good state was X".
-    * ``sync_error`` — error message from the most recent sync attempt.
-      Cleared on success. Non-empty value means the latest attempt
-      failed; the rest of the fields may still reflect a prior good
-      sync (or all be empty if no sync has ever succeeded).
-
-    All fields default to empty / zero. ``has_lockfile`` is NOT
-    cached here — it's a current-disk fact (``renv.lock`` exists)
-    derived at serialization time, not a "did we successfully sync
-    once" historical claim.
+    ``lock_hash`` / ``r_version`` / ``last_synced_at`` describe the last
+    successful sync and survive a failed re-sync. ``sync_error`` is the latest
+    attempt's error, cleared on success. ``has_lockfile`` is not stored: it is
+    derived from disk at serialization time.
     """
 
     lock_hash: str = ""
@@ -132,7 +106,7 @@ class RRuntime:
 
 @dataclass
 class RuntimeState:
-    """Root of ``.strata/runtime.json`` — keyed cells + environment snapshot."""
+    """Root of ``.strata/runtime.json``: keyed cells plus environment snapshots."""
 
     schema_version: int = SCHEMA_VERSION
     cells: dict[str, CellRuntime] = field(default_factory=dict)
@@ -146,7 +120,7 @@ class RuntimeState:
         return self.cells[cell_id]
 
     def prune_cell(self, cell_id: str) -> None:
-        """Remove a per-cell entry — callers do this when the cell is deleted."""
+        """Remove a per-cell entry (when the cell is deleted)."""
         self.cells.pop(cell_id, None)
 
 
@@ -155,14 +129,11 @@ def runtime_state_path(notebook_dir: Path) -> Path:
 
 
 def load_runtime_state(notebook_dir: Path) -> RuntimeState:
-    """Return the runtime-state document, or a fresh empty shell.
+    """Return the runtime-state document, or a fresh empty one.
 
-    A missing or unparseable file produces an empty ``RuntimeState`` —
-    runtime data is augmenting state, not authoritative, so a corrupt
-    ``runtime.json`` must not prevent a notebook from opening.
-    Schema-level mismatches (e.g. a hand-edited file with stray fields)
-    raise from the dataclass constructor; the on-disk shape is
-    Strata-written and trusted to match.
+    A missing or unparseable file yields an empty ``RuntimeState``: runtime data
+    is not authoritative and must not stop a notebook opening. A schema mismatch
+    raises from the dataclass constructor.
     """
     path = runtime_state_path(notebook_dir)
     if not path.exists():
@@ -209,11 +180,8 @@ def persist_cell_provenance(
 ) -> None:
     """Persist the last successful execution provenance for a cell.
 
-    These hashes let ``compute_staleness`` tell ``STALE`` from
-    ``IDLE`` for cells whose canonical artifact has been evicted — a
-    must-have for loop cells and long-lived notebooks re-opened after
-    a GC pass. They live in ``.strata/runtime.json`` so they survive
-    reopens without polluting the committed ``notebook.toml``.
+    Lets ``compute_staleness`` tell ``STALE`` from ``IDLE`` after the cell's
+    canonical artifact has been evicted.
     """
     state = load_runtime_state(notebook_dir)
     entry = state.get_or_create_cell(cell_id)
@@ -233,9 +201,8 @@ def persist_cell_error(
 ) -> None:
     """Record (or clear) what a cell's last run failed with.
 
-    Paired with the source hash it happened at: a cell whose source has since
-    changed has an error about code nobody is running any more, and claiming
-    it would be worse than saying nothing.
+    Stored with the source hash it happened at, so the error is dropped once the
+    source changes.
     """
     state = load_runtime_state(notebook_dir)
     entry = state.get_or_create_cell(cell_id)
@@ -245,14 +212,11 @@ def persist_cell_error(
 
 
 def persist_environment_synced_lockfile_hash(notebook_dir: Path, lockfile_hash: str) -> None:
-    """Record the lockfile a ``uv sync`` actually realized.
+    """Record the lockfile a successful ``uv sync`` actually installed.
 
-    Written only on success, and separately from the rest of the environment
-    snapshot, because the rest is written unconditionally: the snapshot
-    records what is *declared* on disk, while this records what was
-    *installed*. Keeping them apart is the whole point — when they disagree,
-    the venv does not match the lockfile that provenance is being computed
-    from.
+    Kept apart from the rest of the environment snapshot, which records what is
+    declared on disk and is written unconditionally: when the two disagree, the
+    venv does not match the lockfile provenance is computed from.
     """
     state = load_runtime_state(notebook_dir)
     if state.environment.synced_lockfile_hash == lockfile_hash:
@@ -276,21 +240,11 @@ def persist_cell_execution_sample(
 ) -> None:
     """Append one execution timing to a cell's persisted history.
 
-    The profiling summary's cache-savings figure is derived from these, and
-    they used to live only on the ``Session`` — so restarting the server reset
-    "you skipped N minutes of recomputation" to zero while the cells were
-    still happily serving from cache.
-
-    Trimmed to the newest ``MAX_EXECUTION_SAMPLES``: this file is rewritten on
-    every execution, so an unbounded list would make each run cost more than
-    the last.
-
-    ``team_principal`` / ``team_saved_ms`` are set only when the result came
-    from the shared store. They have to be stored rather than derived: the
-    estimator prices a local hit against the last local run of the same cell,
-    and someone served a teammate's result never made one — so without the
-    publisher's cost riding along, the shared cache would report saving nothing
-    in exactly the case it saved the most.
+    Feeds the profiling summary's cache-savings figure across restarts. Trimmed
+    to the newest ``MAX_EXECUTION_SAMPLES`` since the file is rewritten every run.
+    ``team_principal`` / ``team_saved_ms`` are set only for shared-store hits and
+    must be stored: the reader never ran the cell, so there is no local run to
+    price the hit against.
     """
     state = load_runtime_state(notebook_dir)
     entry = state.get_or_create_cell(cell_id)
@@ -313,12 +267,9 @@ def persist_cell_widget_values(
     cell_id: str,
     values: dict[str, Any],
 ) -> dict[str, Any]:
-    """Merge *values* into a widget cell's persisted control values.
+    """Merge *values* into a widget cell's persisted control values; return the merged map.
 
-    Partial updates are allowed — only the named controls change. The current
-    value of a widget control is runtime state (a slider drag must not churn
-    ``notebook.toml``), keyed off the committed declaration + default. Returns
-    the merged value map.
+    Only the named controls change.
     """
     state = load_runtime_state(notebook_dir)
     entry = state.get_or_create_cell(cell_id)
@@ -332,13 +283,7 @@ def persist_cell_test_result(
     cell_id: str,
     test_result: dict[str, Any] | None,
 ) -> None:
-    """Persist (or clear) a cell's last unit-test result.
-
-    Results live in ``.strata/runtime.json`` — they're runtime state, not
-    committed config, so re-running a cell's tests never churns
-    ``notebook.toml``. Passing ``None`` clears a prior result (the entry is
-    pruned on save if it carries nothing else).
-    """
+    """Persist a cell's last unit-test result; ``None`` clears it."""
     state = load_runtime_state(notebook_dir)
     entry = state.get_or_create_cell(cell_id)
     entry.test_result = test_result or None
@@ -349,20 +294,11 @@ def migrate_from_legacy_notebook_toml(
     notebook_dir: Path,
     toml_data: dict[str, Any],
 ) -> bool:
-    """One-time migration of runtime fields out of notebook.toml.
+    """Move legacy runtime fields out of notebook.toml into ``runtime.json``.
 
-    Returns ``True`` when at least one field was migrated so callers
-    know to rewrite notebook.toml without the legacy sections.
-
-    Scope for this migration step:
-
-    * ``artifacts.<cell_id>.display_outputs`` / ``display`` →
-      ``runtime.json`` ``cells.<cell_id>.display_outputs`` / ``display``.
-    * The ``[cache]`` section is dropped because it's never been used.
-
-    Migrations for environment metadata and per-cell provenance hashes
-    land in later commits; this helper is additive and re-entrant, so
-    running it twice is harmless.
+    Migrates per-cell ``display_outputs`` / ``display`` and the ``[environment]``
+    section. Returns ``True`` when anything moved, so the caller rewrites
+    notebook.toml. Idempotent.
     """
     state = load_runtime_state(notebook_dir)
     migrated = False

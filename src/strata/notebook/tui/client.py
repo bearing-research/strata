@@ -1,9 +1,7 @@
-"""REST + WS plumbing for the notebook TUI spectator.
+"""REST plumbing for the notebook TUI spectator.
 
-Thin async client over the notebook server's HTTP surface: list the caller's
-running sessions, open/reuse a notebook by path, and derive the WS URL. Kept
-separate from the Textual app so the bootstrap flow is easy to read and the app
-stays a renderer.
+Lists the caller's sessions, opens or reuses a notebook by path and derives the
+WS URL, keeping the Textual app a renderer.
 """
 
 from __future__ import annotations
@@ -31,7 +29,7 @@ class TuiClient:
         return sessions if isinstance(sessions, list) else []
 
     async def open_notebook(self, path: str) -> dict[str, Any]:
-        """``POST /v1/notebooks/open`` — resolve/reuse a session for *path*."""
+        """``POST /v1/notebooks/open``: resolve or reuse a session for *path*."""
         return await self._post("/v1/notebooks/open", {"path": path})
 
     def ws_url(self, session_id: str) -> str:
@@ -110,12 +108,7 @@ class TuiClient:
 
 
 def _json_or_error(response: httpx.Response) -> dict[str, Any]:
-    """Return the JSON body, or raise with the server's ``detail`` surfaced.
-
-    Without surfacing ``detail`` the user sees a bare "400 Bad Request" and has
-    to dig through server logs for e.g. "personal mode only" or "Notebook not
-    found".
-    """
+    """Return the JSON body, or raise with the server's ``detail`` surfaced, not a bare status."""
     if response.is_error:
         detail = ""
         try:

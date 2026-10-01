@@ -1,13 +1,7 @@
 """Provenance hash and ``# @cache`` policy resolution for SQL cells.
 
-Strata's whole architecture rests on stable cache identity. For SQL
-cells the hash needs to capture not just query text and bind values,
-but also "what database state did this query see" to the strongest
-degree the backend can expose. This module computes that hash and
-implements the ``# @cache`` policy that controls how DB-side state
-factors in.
-
-Hash composition::
+The hash captures the query, its binds, and, as strongly as the backend allows,
+the database state the query saw::
 
     provenance_hash = H(
         query_normalized,         # sqlglot pretty-print, dialect-aware
@@ -19,24 +13,14 @@ Hash composition::
         schema_fingerprint,       # touched-table column structure (or None)
     )
 
-Note this differs from ``docs/internal/design-sql-cells.md``'s
-original sketch by *omitting* a generic ``source_hash``. For Python
-cells, ``compute_source_hash`` AST-normalizes the body so cosmetic
-edits don't churn the cache. For SQL bodies ``ast.parse`` fails and
-that helper falls back to a line-strip — which would re-introduce
-exactly the whitespace / comment churn that ``normalize_query``
-already strips. ``query_normalized`` *is* the SQL equivalent of an
-AST-normalized form; folding a separate weak-normalization hash on
-top would defeat the cosmetic-edit goal. The non-body parts of a
-SQL cell source (``# @sql connection=...``, ``# @cache ...``, the
-``# @name`` override) are captured by ``connection_id`` and
-``cache_salt`` already; ``# @name`` doesn't affect data identity
-(rename creates a new artifact-name pointer to the same hash).
+There is no generic ``source_hash``: on SQL it falls back to a line strip and
+would reintroduce the whitespace/comment churn ``normalize_query`` removes.
+The annotations are covered by ``connection_id`` and ``cache_salt``; ``# @name``
+does not affect data identity.
 
-Policy resolution lives here too because the policy decides which
-slots get filled how — ``forever`` skips the freshness/schema probe
-entirely, ``snapshot`` requires the token to be ``is_snapshot=True``,
-``ttl`` adds a time bucket to the salt instead of probing, etc.
+Policy resolution lives here because the policy decides how slots are filled:
+``forever`` skips the probes, ``snapshot`` requires ``is_snapshot=True``,
+``ttl`` adds a time bucket to the salt instead of probing.
 """
 
 from __future__ import annotations
@@ -66,38 +50,26 @@ from strata.notebook.sql.adapter import (
 class CachePolicyError(ValueError):
     """``# @cache`` annotation can't be honored by the resolved adapter.
 
-    Raised by ``resolve_cache_policy`` for static problems the
-    executor can surface before any probe runs — most commonly,
-    ``# @cache snapshot`` against a driver that doesn't expose a
-    durable snapshot identity (``capabilities.supports_snapshot``
-    is False).
+    Raised by ``resolve_cache_policy`` before any probe runs, typically for
+    ``# @cache snapshot`` on a driver without ``capabilities.supports_snapshot``.
     """
 
 
 @dataclass(frozen=True)
 class ResolvedCachePolicy:
-    """The decision the resolver makes for a cell's cache identity.
+    """The resolver's decision for a cell's cache identity.
 
     Attributes:
-        kind: One of ``fingerprint`` / ``forever`` / ``session`` /
-            ``ttl`` / ``snapshot``. Mirrors ``CachePolicy.kind``
-            unless static fallback applied.
-        salt: Bytes folded into the provenance hash. ``forever``
-            and ``fingerprint`` use a constant; ``session`` /
-            ``ttl`` carry per-session / per-bucket variability.
-        freshness_required: Whether the executor must call
-            ``adapter.probe_freshness`` and fold the result. False
-            for ``forever`` / ``session`` / ``ttl`` (the salt alone
-            controls invalidation).
-        schema_required: Whether ``adapter.probe_schema`` runs.
-            Mirrors ``freshness_required`` — a fingerprint without
-            the schema fingerprint would miss metadata-only
-            ADD COLUMN / type-change invalidations.
-        snapshot_required: True only for ``# @cache snapshot``. The
-            executor must reject a freshness token whose
-            ``is_snapshot`` flag is False — i.e. the adapter
-            advertised support but the per-call probe couldn't
-            return a durable snapshot ID.
+        kind: ``fingerprint`` / ``forever`` / ``session`` / ``ttl`` / ``snapshot``.
+        salt: Bytes folded into the hash; constant for ``forever`` and
+            ``fingerprint``, per session / per time bucket for ``session`` / ``ttl``.
+        freshness_required: Whether ``adapter.probe_freshness`` runs and is folded.
+            False for ``forever`` / ``session`` / ``ttl``.
+        schema_required: Whether ``adapter.probe_schema`` runs. Same as
+            ``freshness_required``: without it, ADD COLUMN or a type change
+            would not invalidate.
+        snapshot_required: Only for ``# @cache snapshot``: a freshness token with
+            ``is_snapshot`` False must be rejected.
     """
 
     kind: str
@@ -123,24 +95,12 @@ def resolve_cache_policy(
 ) -> ResolvedCachePolicy:
     """Apply ``# @cache`` semantics to produce a ``ResolvedCachePolicy``.
 
-    ``session_id`` is the executor's session identifier. ``now`` is
-    optional; left None it reads ``time.time()`` at call time.
-    Tests pin it to a specific epoch second so the bucket math is
-    deterministic.
+    ``now`` defaults to ``time.time()``; tests pin it. Probe-time fallbacks
+    happen in the executor; this view is static.
 
-    Raises ``CachePolicyError`` for static problems:
-
-    - Unknown ``kind``.
-    - ``ttl`` without a positive ``ttl_seconds`` (the parser already
-      rejects this in normal flows; this is a safety net for
-      directly-constructed policies).
-    - ``snapshot`` against a driver whose
-      ``AdapterCapabilities.supports_snapshot`` is False.
-
-    Per-call probe-time fallbacks (e.g. fingerprint against a
-    backend that returns ``is_session_only=True``) happen in the
-    executor, not here — the resolver's view is intentionally
-    static.
+    Raises ``CachePolicyError`` for an unknown ``kind``, ``ttl`` without a
+    positive ``ttl_seconds``, or ``snapshot`` on a driver whose
+    ``AdapterCapabilities.supports_snapshot`` is False.
     """
     kind = policy.kind
     if kind == "forever":
@@ -201,18 +161,9 @@ def resolve_cache_policy(
 def normalize_query(sql: str, dialect: str | None) -> str:
     """Return a canonical, whitespace/comment-insensitive form of ``sql``.
 
-    Uses sqlglot's pretty-printer in the driver's dialect so cosmetic
-    edits (whitespace runs, line breaks, lowercase keywords, leading
-    or trailing comments) don't churn the cache. Same property
-    ``compute_source_hash`` provides for Python cells.
-
-    On parse failure we return ``sql.strip()`` unchanged. The
-    analyzer already records the parse error and the validator
-    surfaces it as ``sql_parse_error``; the executor will refuse to
-    run the cell. The hash never reaches a comparison in that case,
-    so the fallback string is just a stable input for unit tests
-    that want a deterministic answer regardless of sqlglot's
-    behavior.
+    Uses sqlglot's pretty-printer in the driver's dialect, so cosmetic edits do not
+    churn the cache. On parse failure returns ``sql.strip()``; the executor refuses
+    to run such a cell, so the hash is never compared.
     """
     if not sql.strip():
         return ""
@@ -227,30 +178,12 @@ def normalize_query(sql: str, dialect: str | None) -> str:
 
 
 def serialize_bind_params(params: Sequence[Any]) -> list[list[Any]]:
-    """Tag each bind value with its concrete type for stable hashing.
+    """Tag each bind value with its exact type name for stable hashing.
 
-    Returns a list of ``[type_tag, encoded_value]`` pairs. The type
-    tag is the value's exact Python type name (``"bool"``, ``"int"``,
-    ``"datetime"`` etc.); the encoded value is whatever JSON-safe
-    representation preserves the value's identity for comparison.
-
-    Why type-tag? ``True`` and ``1`` compare equal in Python and
-    serialize to the same JSON, but they're different inputs to a
-    SQL parameter binding (``WHERE flag = 1`` matches ``flag =
-    TRUE`` only on backends with implicit bool↔int coercion). The
-    cache key has to treat them as distinct.
-
-    Encoding choices:
-
-    - ``bytes`` → base64 (JSON can't carry raw bytes).
-    - ``Decimal`` → ``str(d)`` (preserves precision; JSON floats
-      can't).
-    - ``UUID`` → canonical string form.
-    - ``datetime`` / ``date`` / ``time`` → ``isoformat()`` so naive
-      vs aware datetimes stay distinct (aware carries the tz
-      suffix).
-    - ``float`` → ``repr(x)`` so denormals and ``NaN`` round-trip
-      identically across CPython versions and platforms.
+    Returns ``[type_tag, encoded_value]`` pairs. The tag keeps ``True`` and ``1``
+    distinct (they bind differently on backends without bool/int coercion).
+    ``bytes`` encode as base64, ``Decimal`` as ``str`` (precision), date/time types
+    as ``isoformat()`` (naive and aware stay distinct), ``float`` as ``repr``.
     """
     out: list[list[Any]] = []
     for v in params:
@@ -302,20 +235,9 @@ def compute_sql_provenance_hash(
 ) -> str:
     """Compute the SHA-256 hash that identifies a SQL cell artifact.
 
-    All inputs are folded into a JSON object with sorted keys so the
-    output is stable across Python versions and dict-ordering
-    differences. The freshness/schema slots are explicit-None when
-    the policy doesn't require a probe (``forever`` / ``session`` /
-    ``ttl``) — same hash shape, no missing-key ambiguity.
-
-    The freshness token's ``is_session_only`` and ``is_snapshot``
-    flags are folded too. They reflect a real semantic difference
-    (a session-only token *was* in the hash; the cell's identity
-    depends on it not being treated as a per-table fingerprint).
-
-    There is no separate ``source_hash`` parameter — see this
-    module's docstring for the rationale. ``query_normalized`` is
-    the SQL equivalent of an AST-normalized source.
+    Inputs are folded into sorted-key JSON. Freshness/schema slots are explicit
+    ``None`` when the policy needs no probe. The token's ``is_session_only`` and
+    ``is_snapshot`` flags are folded too, as they change what the token means.
     """
     payload: dict[str, Any] = {
         "query": query_normalized,

@@ -1,15 +1,9 @@
-"""What hardware this process is running on, as the machine itself reports it.
+"""What hardware this process runs on, as the machine itself reports it.
 
-A machine type names a class ("a100-80gb"); the provider decides what actually
-boots. The class is part of a cell's identity, and the hardware that computed
-it is recorded beside it, not hashed, so identical machines of a class share a
-cache while the record still says which accelerator, driver and CUDA version
-ran the cell.
-
-Every field comes from the driver or the OS. A field that could not be read is
-left out, and an absent field means unknown, never "none": a worker whose
-``nvidia-smi`` is missing from ``PATH`` does not report that it has no GPU.
-Standard library only, so the worker needs nothing extra to answer.
+The machine type (a class like "a100-80gb") is part of a cell's identity; the
+hardware is recorded beside it, not hashed, so machines of a class share a cache.
+A field that could not be read is left out: absent means unknown, never "none".
+Standard library only.
 """
 
 from __future__ import annotations

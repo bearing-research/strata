@@ -1,10 +1,7 @@
 """Notebook client wire protocol.
 
-The names and shapes a non-Vue client (TUI, scripts, integrations) needs
-to talk to the notebook backend, with no dependency on FastAPI / Starlette
-internals. Lives in its own module so importing the enum doesn't drag the
-WS handler tree along, and so ``session.py`` / ``routes.py`` can reference
-the same symbols without circular-import gymnastics.
+Names and shapes a non-Vue client (TUI, scripts) needs, with no FastAPI or
+Starlette dependency, so importing it does not pull in the WS handlers.
 """
 
 from __future__ import annotations
@@ -15,11 +12,8 @@ from enum import StrEnum
 class MessageType(StrEnum):
     """Notebook WebSocket protocol message types.
 
-    StrEnum so the dispatch keys and emit-site type fields stay in sync;
-    a typo at any send site becomes an import-time error instead of a
-    silent protocol drift the frontend would have to discover at
-    runtime. StrEnum values remain plain ``str``, so existing tests and
-    JSON serialization continue to interop.
+    A StrEnum, so a typo at a send site fails at import time; values are still
+    plain ``str`` for JSON.
     """
 
     # Client → Server

@@ -1,13 +1,8 @@
 """Which notebook scope each operation needs, for every way into a notebook.
 
-``notebook:read`` / ``notebook:write`` / ``notebook:execute`` are the scopes the
-service-mode proxy config and the deployment docs advertise. One table serves
-the WebSocket frames and the REST routes, so a viewer is a viewer however it
-reaches the server; a second table kept beside one of them would drift the way
-the REST routes did, which checked nothing while the frames checked all three.
-
-Both default to ``notebook:execute``: an operation nobody classified is
-privileged until someone does.
+One table serves the WebSocket frames and the REST routes, so a viewer is a
+viewer however it reaches the server. Both default to ``notebook:execute``: an
+unclassified operation is privileged until someone classifies it.
 """
 
 from __future__ import annotations
@@ -123,8 +118,8 @@ _WRITE_ROUTES = frozenset(
 def required_scope_for_route(method: str, path: str) -> str:
     """Return the notebook scope a REST route requires (fail-closed default).
 
-    ``path`` is the route's template (``/v1/notebooks/{notebook_id}/…``), not
-    the request URL, so a notebook id can never match a table entry by accident.
+    *path* is the route template (``/v1/notebooks/{notebook_id}/...``), not the
+    request URL, so a notebook id can never match a table entry by accident.
     """
     method = method.upper()
     if method in ("GET", "HEAD") or (method, path) in _READ_POST_ROUTES:

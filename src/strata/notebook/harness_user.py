@@ -1,27 +1,12 @@
 """Who a cell subprocess runs as, and whether it may run on this host at all.
 
-``notebook_harness_env_allowlist`` filters what a cell is *given*. It does not
-change who the cell *is*: the harness ran as the server's own OS user, so a cell
-on a server with the allowlist set could still read every secret from
-``/proc/<server pid>/environ`` — mode 0400, owned by the process owner, and the
-cell was the process owner — along with the server's config and every other
-notebook on disk.
-
-So a service-mode server refuses to run cell code on its own host unless the
-operator has said how that is safe:
-
-1. Run cells somewhere else: a server-managed worker on another machine. That is
-   isolation which already exists, and the recommended answer.
-2. Drop privileges: ``notebook_harness_user`` names an OS user the harness runs
-   as. Dropping privileges requires having them, so the server runs as root.
-
-Personal mode is unaffected. One person on their own machine has nothing to
-isolate a cell from.
-
-The refusal is made where cell code would start, not at startup: which worker a
-cell uses is decided per cell, from its annotation, then ``notebook.toml``, and a
-server cannot know at boot which notebooks will ask for the local one. A cache
-hit starts nothing, so it is never refused.
+The env allowlist filters what a cell is given, not who it is: as the server's
+own user it could read ``/proc/<server pid>/environ``, the config and every
+notebook on disk. So a service-mode server refuses to run cell code locally
+unless cells go to a worker on another machine or ``notebook_harness_user``
+names a user to drop to (the server then runs as root). Personal mode is
+unaffected. The refusal happens where cell code would start, since the worker is
+chosen per cell; a cache hit starts nothing and is never refused.
 """
 
 from __future__ import annotations
@@ -56,9 +41,8 @@ class HarnessUser:
 def running_server_config() -> Any | None:
     """The live server's config, or ``None`` outside a server.
 
-    Deliberately not ``StrataConfig.load()`` as a fallback: its default mode is
-    service, and a CLI run or a test with no server has no server credentials
-    for a cell to read.
+    Not ``StrataConfig.load()`` as a fallback: its default mode is service, and a
+    CLI run or test has no server credentials for a cell to read.
     """
     try:
         from strata.server import get_state
@@ -113,10 +97,9 @@ def resolve_harness_user(config: Any | None = None) -> HarnessUser | None:
 def spawn_kwargs(user: HarnessUser | None) -> dict[str, Any]:
     """``user=`` / ``group=`` for ``create_subprocess_exec`` or ``subprocess.run``.
 
-    Supplementary groups are cleared too when the server is root, or the cell
-    would keep root's groups and whatever files they open. Clearing them needs
-    the privilege, which only root has, and a server switching to its own user
-    has no other groups to shed.
+    When the server is root, supplementary groups are cleared too, or the cell would
+    keep root's groups. Only root can clear them, and a server switching to its own
+    user has none to shed.
     """
     if user is None:
         return {}
@@ -129,9 +112,8 @@ def spawn_kwargs(user: HarnessUser | None) -> dict[str, Any]:
 def identity_env(env: dict[str, str] | None, user: HarnessUser | None) -> dict[str, str] | None:
     """The spawn environment with ``HOME`` / ``USER`` / ``LOGNAME`` naming the user.
 
-    ``Popen(user=)`` changes the uid and nothing else, so a cell would otherwise
-    be told its home is root's: every library that caches under ``~`` fails to
-    write there, and the names disagree with ``os.getuid()``.
+    ``Popen(user=)`` changes only the uid, so a cell would otherwise be told its home
+    is root's.
     """
     if user is None:
         return env
@@ -143,10 +125,8 @@ def identity_env(env: dict[str, str] | None, user: HarnessUser | None) -> dict[s
 def hand_over(path: Path, user: HarnessUser | None) -> None:
     """Give the harness user a per-run directory it has to write into.
 
-    Run directories are made with ``mkdtemp`` / ``TemporaryDirectory``, which
-    are private to their creator — right for the server, and unwritable for a
-    cell running as someone else. The server keeps access either way: it is
-    root.
+    ``mkdtemp`` / ``TemporaryDirectory`` are private to their creator; the server
+    keeps access either way because it is root.
     """
     if user is None or user.uid == os.geteuid():
         return

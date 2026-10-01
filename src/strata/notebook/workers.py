@@ -164,13 +164,10 @@ def get_server_managed_workers() -> list[WorkerSpec]:
 
 
 def prune_worker_health_cache() -> int:
-    """Drop cached health for workers the registry no longer lists.
+    """Drop cached health for workers the registry no longer lists; return the count.
 
-    Entries are keyed by health URL, so a worker whose URL changed already
-    misses rather than inheriting a verdict about a machine that moved. What
-    lingers is the entry for a URL nobody asks about any more — harmless to
-    correctness and unbounded over a long-lived server whose catalogue turns
-    over. Returns how many were dropped.
+    Entries are keyed by health URL, so a moved worker already misses; this bounds
+    the entries for URLs nobody asks about any more.
     """
     live = {_health_url_for_worker(record.worker) for record in get_server_managed_worker_records()}
     stale = [url for url in _worker_health_cache if url not in live]
@@ -182,13 +179,9 @@ def prune_worker_health_cache() -> int:
 def get_server_managed_worker_records() -> list[ManagedWorkerRecord]:
     """Return the server-managed notebook worker registry.
 
-    The persisted file wins over the configured ``[tool.strata.transforms]``
-    table, because it is the later statement: an admin who added a machine
-    type through the API said so after whoever wrote the config. The
-    consequence is worth stating plainly — once anything has been changed
-    through the admin routes, editing the config table and restarting has no
-    effect. ``strata_notebook_workers_source`` on the state says which one is
-    in force.
+    The persisted file wins over the ``[tool.strata.transforms]`` table, so once
+    the admin routes change anything, editing the config and restarting has no
+    effect. ``strata_notebook_workers_source`` on the state says which is in force.
     """
     persisted = load_persisted_managed_worker_records()
     if persisted is not None:
@@ -230,10 +223,7 @@ def update_server_managed_worker_record(
     worker_name: str,
     record: ManagedWorkerRecord,
 ) -> list[ManagedWorkerRecord]:
-    """Replace one service-managed worker entry in place.
-
-    Allows renaming the worker as long as the new name does not collide with
-    another configured worker.
+    """Replace one service-managed worker entry in place, possibly renaming it.
 
     Raises:
         KeyError: If the referenced worker does not exist.
@@ -266,11 +256,8 @@ def update_server_managed_worker_record(
 def managed_worker_registry_path() -> Path | None:
     """Where the server-managed worker registry is persisted.
 
-    Beside the artifact store, because that is the directory a deployment
-    already treats as the server's own state and already backs up. ``None``
-    when no artifact directory is configured — there is nowhere durable to put
-    it, and inventing a location would hide the registry somewhere nobody
-    looks.
+    Beside the artifact store, the directory a deployment already treats as server
+    state. ``None`` without an artifact directory, rather than an invented location.
     """
     try:
         from strata.server import get_state
@@ -284,13 +271,9 @@ def managed_worker_registry_path() -> Path | None:
 def _persist_managed_worker_records(records: list[ManagedWorkerRecord]) -> None:
     """Write the registry so an admin change survives a restart.
 
-    Every admin mutation funnels through ``replace_server_managed_worker_records``,
-    so this is the one place it has to happen. Before this, the routes edited an
-    in-memory dict and the next restart silently reverted every change.
-
-    Written to a sibling and renamed: this file is rewritten on each mutation,
-    and a half-written one at boot means a server that starts with no workers
-    at all and no obvious reason why.
+    Every admin mutation goes through ``replace_server_managed_worker_records``.
+    Written to a sibling and renamed, since a half-written file at boot would start
+    a server with no workers.
     """
     path = managed_worker_registry_path()
     if path is None:
@@ -315,9 +298,8 @@ def _persist_managed_worker_records(records: list[ManagedWorkerRecord]) -> None:
 def load_persisted_managed_worker_records() -> list[ManagedWorkerRecord] | None:
     """The registry as last persisted, or ``None`` if there is no file.
 
-    ``None`` and "an empty registry" are different answers: the first means
-    fall back to the configured table, the second means an operator deleted
-    every worker and that is what they meant.
+    ``None`` means fall back to the configured table; an empty registry means an
+    operator deleted every worker.
     """
     path = managed_worker_registry_path()
     if path is None or not path.exists():
@@ -384,12 +366,10 @@ def validate_worker_assignment(
     notebook_state: NotebookState,
     worker_name: str | None,
 ) -> str | None:
-    """Validate a requested worker assignment against deployment policy.
+    """Validate a worker assignment against deployment policy; ``None`` if allowed.
 
-    Returns ``None`` when the assignment is allowed. In personal mode, worker
-    assignments remain permissive so notebooks can reference future workers.
-    In service mode, assignments must resolve against the server-managed
-    worker registry.
+    Personal mode is permissive so notebooks can name future workers; service mode
+    requires a server-managed registry entry.
     """
     normalized_name = (worker_name or "").strip()
     if not normalized_name or normalized_name == "local":
@@ -433,9 +413,8 @@ def resolve_worker_spec(
 ) -> WorkerSpec | None:
     """Resolve a worker name against the effective worker policy.
 
-    ``None`` and ``"local"`` map to the implicit built-in local worker.
-    In personal mode, notebook-scoped worker definitions are visible here.
-    In service mode, only the server-managed registry is visible.
+    ``None`` and ``"local"`` are the built-in local worker. Personal mode sees
+    notebook-scoped definitions; service mode sees only the server-managed registry.
     """
     normalized_name = (worker_name or "").strip()
     if not normalized_name or normalized_name == "local":
@@ -512,9 +491,8 @@ def worker_transport(worker: WorkerSpec) -> str:
 def build_worker_catalog(notebook_state: NotebookState) -> list[dict[str, Any]]:
     """Build a UI-facing worker catalog for a notebook.
 
-    The catalog always includes the built-in ``local`` worker, notebook-scoped
-    worker definitions, and synthetic unavailable entries for any referenced
-    worker names that no longer exist in the configured registry.
+    Always includes ``local``, the notebook-scoped definitions, and an unavailable
+    entry for each referenced worker name no longer in the registry.
     """
     policy = _load_worker_policy(notebook_state)
     catalog: list[dict[str, Any]] = []
@@ -645,15 +623,10 @@ _advertised_features: dict[str, tuple[float, dict[str, Any]]] = {}
 async def worker_advertises(worker: WorkerSpec, feature: str) -> bool | None:
     """Whether *worker*'s ``/health`` lists *feature* as true.
 
-    ``None`` means the worker could not be asked -- unreachable, timed out, or
-    answering something that is not a health document. That is not the same as
-    a worker that answered and does not have the feature, which is an older
-    worker and gets what every worker got before the feature existed. The
-    caller decides what an unanswered question is worth; for a feature that
-    changes *what the cell computes*, it is not worth a guess.
-
-    Only an answer is cached. Caching a failure gave one timed-out probe a
-    minute of authority over every cell dispatched in it.
+    ``None`` means the worker could not be asked (unreachable, timed out, or not a
+    health document), unlike ``False`` from an older worker without the feature;
+    the caller decides what that is worth. Only answers are cached, so one timed-out
+    probe does not decide for every cell dispatched in the cache window.
     """
     health_url = _health_url_for_worker(worker)
     if health_url is None:
@@ -829,14 +802,9 @@ async def probe_worker_health(
 ) -> WorkerHealthSnapshot:
     """Probe a worker health endpoint and return a cached health snapshot.
 
-    The 8-second default accommodates serverless cold starts (Modal,
-    Fly scale-to-zero). Locally-running workers respond in a few
-    milliseconds; the timeout only kicks in when a remote backend is
-    waking up. Callers that iterate over multiple workers should do
-    so via ``asyncio.gather`` so the timeouts overlap rather than
-    compound. GPU cold boots >8 s will still show "unavailable"
-    briefly but recover on the next probe cycle once the container
-    is warm.
+    The 8s default covers serverless cold starts (Modal, Fly scale-to-zero). Probe
+    several workers with ``asyncio.gather`` so timeouts overlap. A GPU cold boot
+    over 8s shows unavailable until the next probe cycle.
     """
     """Probe a worker health endpoint and return a cached health snapshot."""
     now = time.time()

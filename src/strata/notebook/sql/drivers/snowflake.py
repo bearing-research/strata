@@ -1,24 +1,12 @@
-"""Snowflake driver adapter.
+"""Snowflake driver adapter, backed by ``adbc-driver-snowflake``.
 
-Backed by ``adbc-driver-snowflake``. The freshness probe reads
-``LAST_ALTERED`` from each touched database's per-DB
-``INFORMATION_SCHEMA.TABLES`` view (Snowflake scopes
-``INFORMATION_SCHEMA`` per database, so probing tables in
-multiple databases means one query per database). The schema
-fingerprint walks ``INFORMATION_SCHEMA.COLUMNS``.
+Freshness reads ``LAST_ALTERED`` from each touched database's own
+``INFORMATION_SCHEMA.TABLES`` (one query per database); the schema fingerprint
+reads ``INFORMATION_SCHEMA.COLUMNS``.
 
-Read-only enforcement is **role-based**, not session-flag-based.
-Snowflake has no equivalent of Postgres's
-``SET default_transaction_read_only = on`` — the security
-boundary lives in the role's grants. Strata trusts the role
-specified on the connection: a connection that should only be
-used for read cells should reference a role with USAGE +
-SELECT grants, no DML. Write cells should reference a role
-that includes the necessary INSERT/UPDATE/DELETE grants.
-
-See ``docs/internal/design-sql-cells.md`` for the full design
-rationale and the gotcha list (cloud-services-credit cost,
-``LAST_ALTERED`` updates on 0-row DML).
+Read-only enforcement is role-based: Snowflake has no session read-only flag,
+so the boundary is the grants of the connection's role. A read connection
+should use a SELECT-only role; write cells need a role with DML grants.
 """
 
 from __future__ import annotations
@@ -60,13 +48,8 @@ _IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_$]*$")
 def _spec_attr(spec: Any, key: str) -> Any:
     """Read a top-level field off a ``ConnectionSpec`` safely.
 
-    Pydantic v2's ``BaseModel`` reserves a few attribute names —
-    ``schema`` is the most painful one for SQL drivers because
-    ``BaseModel.schema()`` is a bound method that shadows
-    user-provided extras. Reading via ``model_extra`` (where
-    ``extra='allow'`` stashes unknown fields) and falling back to
-    ``getattr`` correctly recovers user-supplied values without
-    confusing them with Pydantic-internal methods.
+    Pydantic reserves names such as ``schema`` (a bound method), so this reads
+    ``model_extra`` first and falls back to ``getattr``.
     """
     extras = getattr(spec, "model_extra", None) or {}
     if key in extras:
@@ -79,14 +62,10 @@ def _spec_attr(spec: Any, key: str) -> Any:
 
 
 def _resolve_session_defaults(cursor: Any) -> tuple[str | None, str | None]:
-    """Read ``CURRENT_DATABASE()`` and ``CURRENT_SCHEMA()``.
+    """Return ``(CURRENT_DATABASE(), CURRENT_SCHEMA())``; either may be None.
 
-    Returns ``(database, schema)`` — either may be None if the
-    role/warehouse has no defaults configured. Used by the
-    freshness and schema probes to resolve unqualified table
-    names against the same defaults the executor's query
-    connection would use, instead of hardcoding ``PUBLIC`` and
-    risking a probe that fingerprints the wrong schema.
+    Probes resolve unqualified names against these defaults, as the query
+    connection does, rather than assume ``PUBLIC``.
     """
     cursor.execute("SELECT CURRENT_DATABASE(), CURRENT_SCHEMA()")
     row = cursor.fetchone()
@@ -101,12 +80,8 @@ def _parse_snowflake_uri(uri: str) -> dict[str, Any]:
     """Pull identity-shaping fields out of a gosnowflake URI.
 
     Shape: ``snowflake://<user>:<password>@<account>/<database>/<schema>?warehouse=…&role=…``.
-
-    Returns a dict with whichever of ``account`` / ``user`` /
-    ``database`` / ``schema`` / ``warehouse`` / ``role`` were
-    present. Password is intentionally not extracted (secret).
-    Empty strings are dropped so a bare ``snowflake://account/``
-    doesn't introduce phantom keys.
+    Returns whichever of ``account``, ``user``, ``database``, ``schema``,
+    ``warehouse`` and ``role`` are non-empty; never the password.
     """
     out: dict[str, Any] = {}
     try:
@@ -150,9 +125,8 @@ def _parse_snowflake_uri(uri: str) -> dict[str, Any]:
 def _resolve_var(value: str) -> str:
     """Resolve a single ``${VAR}`` indirection to its env-var value.
 
-    Literals pass through unchanged. The writer scrubs literal
-    secrets before notebook.toml is saved, but in-memory specs
-    can still carry literals between edit + save.
+    Literals pass through: the writer scrubs them on save, so one can only come
+    from unsaved in-memory state.
     """
     import os
 
@@ -185,21 +159,11 @@ class SnowflakeAdapter:
     # --- identity ---------------------------------------------------------
 
     def canonicalize_connection_id(self, spec: Any, *, read_only: bool = True) -> str:
-        """Hash identity-shaping fields, excluding secrets.
+        """Hash identity-shaping fields: account, user, role, warehouse, database, schema.
 
-        Identity-shaping for Snowflake: account, user, role
-        (when ``read_only=True``) or write_role (when
-        ``read_only=False``), warehouse, default database,
-        default schema.
-
-        ``read_only`` controls which role joins the identity:
-        read cells fold ``role`` only, so swapping ``write_role``
-        on a connection used by both read and write cells doesn't
-        churn read-cell caches. Write cells fold ``write_role``
-        (or ``role`` as the fallback) since that's the role
-        actually applied at open time.
-
-        Excluded: password / private_key (secret).
+        Read cells fold ``role`` only, so changing ``write_role`` does not churn
+        their caches; write cells fold ``write_role`` (falling back to ``role``),
+        the role actually applied at open. Secrets are excluded.
         """
         return hash_connection_identity(
             self.name, self._extract_identity(spec, read_only=read_only)
@@ -252,28 +216,11 @@ class SnowflakeAdapter:
     def open(self, spec: Any, *, read_only: bool) -> Any:
         """Open an ADBC Snowflake connection.
 
-        Read-only enforcement for Snowflake is **role-based**:
-        Snowflake has no session-level read-only flag like
-        Postgres's ``default_transaction_read_only``, so the
-        security boundary lives in the role's grants. The adapter
-        wires ``read_only`` through to which role gets applied:
-
-        - ``read_only=True`` (read cells): apply the spec's
-          ``role``. The user is responsible for picking a role
-          whose grants are SELECT-only on the touched objects.
-        - ``read_only=False`` (write cells, ``# @sql write=true``):
-          apply ``write_role`` if the spec sets it; otherwise
-          fall back to ``role``. ``write_role`` is the per-cell
-          handle to a DML-capable role; without it, write cells
-          inherit the same role as read cells (which the user's
-          warehouse access policy then decides whether to allow).
-
-        After role selection, applies the spec's warehouse,
-        default database, and default schema (each via the
-        corresponding ``USE …`` statement). All identifiers are
-        validated against ``_IDENTIFIER_RE`` before splicing —
-        Snowflake's ``USE`` statements don't accept bind
-        parameters.
+        Read-only is role-based: ``read_only=True`` applies the spec's ``role``
+        (the user must make it SELECT-only); ``read_only=False`` applies
+        ``write_role``, falling back to ``role``. Then ``USE`` sets warehouse,
+        database and schema; ``USE`` takes no bind parameters, so identifiers
+        are validated against ``_IDENTIFIER_RE`` first.
         """
         uri = self._build_uri(spec)
         conn = self._invoke_connect(uri)
@@ -326,15 +273,10 @@ class SnowflakeAdapter:
         return adbc_snowflake.connect(uri)
 
     def _build_uri(self, spec: Any) -> str:
-        """Construct the ADBC connection URI from the spec.
+        """Construct the gosnowflake connection URI from the spec.
 
-        Snowflake's gosnowflake URI shape:
-        ``<user>:<password>@<account>/<database>/<schema>?warehouse=…&role=…``.
-
-        Honors ``${VAR}`` indirection in ``auth.user`` /
-        ``auth.password`` (env vars). Either an explicit
-        ``spec.uri`` or the discrete fields can be the source —
-        explicit URI wins when both are set.
+        An explicit ``spec.uri`` wins over the discrete fields. ``${VAR}`` in
+        ``auth.user`` / ``auth.password`` is resolved from the environment.
         """
         existing = _spec_attr(spec, "uri")
         if existing:
@@ -387,20 +329,10 @@ class SnowflakeAdapter:
     ) -> FreshnessToken:
         """Per-table freshness via ``INFORMATION_SCHEMA.TABLES.LAST_ALTERED``.
 
-        Snowflake scopes ``INFORMATION_SCHEMA`` per-database, so
-        tables grouped by their catalog (database) get one
-        round-trip per database. Tables without a catalog fall
-        back to the connection's current database via
-        ``CURRENT_DATABASE()``.
-
-        ``LAST_ALTERED`` updates on any DML touching the table,
-        even a 0-row update — this is the safe direction
-        (potentially over-invalidating, never under-).
-
-        Tables not found in any of the queried databases
-        contribute a sentinel "missing" entry so two probes
-        agree on "table doesn't exist" but disagree from a
-        successfully-found table.
+        One round-trip per database; tables without a catalog use
+        ``CURRENT_DATABASE()``. ``LAST_ALTERED`` moves even on 0-row DML, which
+        over-invalidates but never under-. A missing table contributes a
+        sentinel, distinct from any found table.
         """
         if not tables:
             return FreshnessToken(value=b"")
@@ -517,13 +449,8 @@ class SnowflakeAdapter:
     ) -> SchemaFingerprint:
         """Per-table schema fingerprint via ``INFORMATION_SCHEMA.COLUMNS``.
 
-        Same per-database scoping as ``probe_freshness``. Catches
-        ADD COLUMN / type changes / nullability flips that
-        ``LAST_ALTERED`` would also catch — the schema fingerprint
-        is finer-grained but redundant most of the time.
-        ``LAST_ALTERED`` does cover schema changes, so this is
-        belt-and-suspenders for the rare case where a metadata-
-        only event might not bump it.
+        Mostly redundant with ``LAST_ALTERED``; kept for a metadata-only change
+        that might not bump it.
         """
         if not tables:
             return SchemaFingerprint(value=b"")
@@ -589,13 +516,10 @@ class SnowflakeAdapter:
         return SchemaFingerprint(value=h.digest())
 
     def list_schema(self, conn: Any) -> list[TableSchema]:
-        """Enumerate tables and views in the connection's database.
+        """Enumerate tables and views in the connection's default database only.
 
-        Scopes to the connection's default database — schema
-        discovery across multiple databases would mean one
-        ``INFORMATION_SCHEMA`` query per database, which is
-        cloud-services-credit-billed; we keep the surface tight
-        for v1.
+        Each extra database would cost an ``INFORMATION_SCHEMA`` query billed in
+        cloud-services credits.
         """
         with conn.cursor() as cursor:
             cursor.execute("SELECT CURRENT_DATABASE()")
@@ -654,13 +578,7 @@ _ADAPTER = SnowflakeAdapter()
 
 
 def register() -> None:
-    """Idempotent registration entry point.
-
-    Module imports are cached, so import side effects don't fire
-    twice — but the registry's caller (drivers/__init__.py) calls
-    each driver's ``register()`` explicitly to make the wiring
-    visible. Mirrors the pattern in postgresql.py / sqlite.py.
-    """
+    """Register this adapter; re-registering replaces the entry, so it is idempotent."""
     register_adapter(_ADAPTER)
 
 

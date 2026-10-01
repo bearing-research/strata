@@ -1,21 +1,16 @@
 """A notebook's locked environment on a worker (the manifest's ``environment``).
 
-A worker used to run every cell with its own interpreter, so a cell that
-imported something the image lacked failed, and a cell that imported something
-at another version than the notebook's lock computed something else. A server
-that knows the worker can do better sends the notebook's lock with the cell:
+A server sends the notebook's lock with the cell::
 
     {"key": "<sha256 of uv.lock>", "python": "3.13",
      "lockfile": "<uv.lock>", "pyproject": "<pyproject.toml>"}
 
 and the worker runs the cell in that exact environment, built once per lock and
-interpreter build under ``STRATA_WORKER_ENV_ROOT`` and reused by every later
-cell with the same key. With ``STRATA_WORKER_ENV_REGISTRY_URL`` set, a missing
-environment is fetched from ``<registry>/<key>`` as a ``.tar.gz`` of the
-environment directory instead of installed.
-
-A worker says it can do this in ``/health`` (``locked_environments``); the
-server sends ``environment`` only to workers that do.
+interpreter build under ``STRATA_WORKER_ENV_ROOT`` and reused for the same key.
+With ``STRATA_WORKER_ENV_REGISTRY_URL`` set, a missing environment is fetched
+from ``<registry>/<key>`` as a ``.tar.gz`` instead of installed. Workers
+advertise support in ``/health`` (``locked_environments``); the server sends
+``environment`` only to those.
 """
 
 from __future__ import annotations

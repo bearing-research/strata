@@ -1,4 +1,4 @@
-"""Strata Notebook — materialization and persistence layer for Python notebooks."""
+"""Strata Notebook: materialization and persistence layer for Python notebooks."""
 
 from strata.notebook.display import Markdown
 from strata.notebook.models import CellMeta, CellState, NotebookState, NotebookToml

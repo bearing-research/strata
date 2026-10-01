@@ -54,8 +54,7 @@ _INPUT_CHUNK_BYTES = 1024 * 1024
 
 
 def _input_path(output_dir: Path, file_name: str) -> Path:
-    """Where an input named by the request is written, refused unless it is a
-    file directly in the run directory.
+    """Path for a request-named input, refused unless directly in the run directory.
 
     The name is already reduced to its last component, and ``..`` is one.
     """
@@ -82,12 +81,9 @@ def _max_input_bytes() -> int:
 
 
 def _allow_local_hosts() -> bool:
-    """Whether to bypass the host-IP SSRF check.
+    """Whether to bypass the host-IP SSRF check (``STRATA_WORKER_ALLOW_LOCAL_HOSTS=1``).
 
-    Default off. Tests and local development that need to fetch from
-    127.0.0.1 / 192.168.x.x / docker-bridge addresses set
-    ``STRATA_WORKER_ALLOW_LOCAL_HOSTS=1``. Production worker
-    deployments should leave it unset so the SSRF defense is active.
+    For tests and local development only; production workers leave it unset.
     """
     return os.environ.get("STRATA_WORKER_ALLOW_LOCAL_HOSTS", "").strip().lower() in (
         "1",
@@ -100,8 +96,7 @@ def _allowed_hosts() -> tuple[str, ...]:
     """Hostnames and suffixes that pass regardless of the address they resolve to.
 
     ``STRATA_WORKER_ALLOWED_HOSTS``, comma-separated. A leading dot is a suffix
-    (``.internal`` matches ``build.internal``); anything else must match the
-    host exactly.
+    (``.internal`` matches ``build.internal``); anything else must match exactly.
     """
     raw = os.environ.get("STRATA_WORKER_ALLOWED_HOSTS", "")
     return tuple(entry.strip().lower() for entry in raw.split(",") if entry.strip())
@@ -125,7 +120,7 @@ def _guarded_transport() -> httpx.AsyncHTTPTransport | None:
     """A transport that connects manifest URLs only to addresses the guard passed.
 
     ``_assert_url_safe`` checks a URL when the manifest arrives; this holds the
-    connection, made later, to the same rule (see ``url_safety``).
+    later connection to the same rule (see ``url_safety``).
     """
     return guarded_async_transport(allowed_hosts=_allowed_hosts(), allow_local=_allow_local_hosts())
 
@@ -135,11 +130,10 @@ _LOG_QUEUE_CHUNKS = 64
 
 
 async def _post_log_chunk(client: httpx.AsyncClient, log_url: str, stream: str, text: str) -> None:
-    """Forward one console chunk, and never let doing so affect the cell.
+    """Forward one console chunk; never let doing so slow or fail the cell.
 
-    Console is advisory: the bundle is the record. A server that is slow,
-    unreachable, or has already given up on this build must not slow the cell
-    down or fail it, so this has a short timeout and swallows everything.
+    Console is advisory and the bundle is the record, so this has a short timeout
+    and swallows everything.
     """
     separator = "&" if "?" in log_url else "?"
     try:
@@ -152,22 +146,13 @@ async def _post_log_chunk(client: httpx.AsyncClient, log_url: str, stream: str, 
 
 
 async def _drain(proc: Any, log_url: str | None) -> tuple[bytes, bytes]:
-    """Read both pipes to completion, forwarding as we go when asked to.
+    """Read both pipes to completion, forwarding chunks as they arrive when asked to.
 
-    Replaces ``communicate()``, which returns only once the process has exited
-    — correct, and the reason a remote cell was silent for its whole run.
-
-    Both pipes are read concurrently for the same reason ``communicate()``
-    does: a process that fills one pipe's buffer blocks forever if the reader
-    is busy waiting on the other. Chunks for a single stream are posted in
-    order, one at a time, because the notebook appends them in arrival order
-    and has no way to reorder what it is shown.
-
-    Forwarding happens on its own task, over one connection, with a bounded
-    queue: a cell that prints faster than the link to the server carries used
-    to be charged the whole round trip per 8 KiB — the cell's own timeout paid
-    for the console — and now runs at its own speed while the oldest waiting
-    chunks are dropped.
+    Used instead of ``communicate()``, which returns only at exit. Both pipes are
+    read concurrently so a full buffer on one cannot block the process. Chunks per
+    stream are posted in order (the notebook cannot reorder them) from their own
+    task over one connection with a bounded queue, so a cell that prints faster
+    than the link runs at its own speed and the oldest waiting chunks are dropped.
     """
     queue: asyncio.Queue[tuple[str, str]] | None = None
     forwarder: asyncio.Task[None] | None = None
@@ -233,17 +218,10 @@ async def _run_harness(
     """Run the notebook harness with one manifest file.
 
     With *interpreter*, the harness runs under it rather than the worker's own
-    Python: the notebook's locked environment (``worker_env``), or ``Rscript``
-    for ``harness.R``.
-
-    Registers the process in *in_flight* under *build_id* for the duration, so
-    the cancel route can reach it. Both are optional: a caller with no build id
-    simply cannot be cancelled, which is the behaviour every caller had before.
-
-    With *log_url*, output is forwarded to the dispatching server as the cell
-    produces it, so a notebook watching a remote cell sees it happen instead of
-    waiting for the bundle. Without it, output is still collected in full and
-    the bundle is unchanged either way.
+    Python: the notebook's locked environment (``worker_env``), or ``Rscript`` for
+    ``harness.R``. With *build_id* and *in_flight*, the process is registered so the
+    cancel route can reach it. With *log_url*, output is also forwarded live to the
+    dispatching server; the bundle is the same either way.
     """
     from strata.notebook.process_tree import (
         subprocess_kwargs_for_new_group,
@@ -312,11 +290,9 @@ _CAPTURED_SECRETS: dict[str, str] = {}
 def capture_worker_secrets() -> None:
     """Take the worker's secrets out of the process environment, into memory.
 
-    Scrubbing the harness's own copy is not a boundary on its own: the harness
-    is a child of this process under the same uid, so a cell can read
-    ``/proc/<ppid>/environ`` and find the token there. Reading them once here
-    and deleting them means there is nothing left to read. Called by the worker
-    entry point, so an in-process app in a test keeps reading the environment.
+    A cell runs as a child under the same uid and could read them from
+    ``/proc/<ppid>/environ``; deleting them leaves nothing to read. Called by the
+    worker entry point, so an in-process app in a test still reads the environment.
     """
     for name in _WORKER_SECRETS:
         value = os.environ.pop(name, None)
@@ -332,10 +308,8 @@ def worker_secret(name: str) -> str:
 def _cell_env(extra: dict[str, str] | None = None) -> dict[str, str]:
     """The environment a cell's harness runs with on a worker.
 
-    ``STRATA_NOTEBOOK_HARNESS_ENV_ALLOWLIST`` narrows it the way it narrows a
-    cell on the server. Whatever it says, the worker's own secrets are dropped:
-    unset, an operator gets the server's environment on the server and the
-    worker's here, and neither should hand a cell its credentials.
+    ``STRATA_NOTEBOOK_HARNESS_ENV_ALLOWLIST`` narrows it as on the server, and the
+    worker's own secrets are dropped whatever it says.
     """
     from strata.notebook.harness_env import harness_env
 
@@ -349,9 +323,8 @@ def _cell_env(extra: dict[str, str] | None = None) -> dict[str, str]:
 def _configured_allowlist() -> list[str]:
     """``STRATA_NOTEBOOK_HARNESS_ENV_ALLOWLIST``, in either form the server takes.
 
-    A comma-separated list or a JSON array — the setting's own validator accepts
-    both, and a worker that read only one of them would silently narrow a cell's
-    environment to nothing.
+    A comma-separated list or a JSON array; reading only one form would silently
+    narrow a cell's environment to nothing.
     """
     raw = (os.environ.get("STRATA_NOTEBOOK_HARNESS_ENV_ALLOWLIST") or "").strip()
     if not raw:
@@ -368,9 +341,8 @@ def _configured_allowlist() -> list[str]:
 def _worker_credentials() -> CredentialResolver:
     """Named credentials from the worker's environment.
 
-    Read from ``STRATA_NOTEBOOK_CREDENTIALS`` and
-    ``STRATA_NOTEBOOK_MOUNT_CREDENTIALS`` directly rather than a full server
-    config: a worker is not a Strata server and has none of its other settings.
+    Read from ``STRATA_NOTEBOOK_CREDENTIALS`` and ``STRATA_NOTEBOOK_MOUNT_CREDENTIALS``
+    directly: a worker is not a Strata server and has no server config.
     """
     return CredentialResolver(
         json.loads(worker_secret("STRATA_NOTEBOOK_CREDENTIALS") or "{}"),
@@ -384,24 +356,18 @@ def create_notebook_executor_app(
 ) -> FastAPI:
     """Create a standalone notebook executor HTTP app.
 
-    Optional bearer-token auth via ``STRATA_WORKER_TOKEN`` env var. When
-    set, the ``/v1/*`` execution endpoints require
-    ``Authorization: Bearer <token>``. ``/health`` stays open so platform
-    health probes (Fly, Cloudflare, k8s liveness) don't need the secret.
-    Unset = no auth, backward-compatible with existing deployments.
+    With ``STRATA_WORKER_TOKEN`` set, the ``/v1/*`` endpoints require
+    ``Authorization: Bearer <token>``; ``/health`` stays open for platform probes.
+    Unset means no auth.
 
     Args:
-        max_concurrent: Executions this worker runs at once; one more is
-            refused with 503 and ``Retry-After``. ``None`` is unlimited, as
-            before. Enforced here rather than trusted to a dispatcher, so a
-            shared machine cannot be overcommitted by a caller that skips it.
-            Falls back to ``STRATA_WORKER_MAX_CONCURRENT``.
-        gpu_slots: GPUs to hand out, one per execution. The worker picks a
-            free index and sets ``CUDA_VISIBLE_DEVICES`` for the cell,
-            overriding whatever the caller sent, so two concurrent cells never
-            share a GPU on the caller's say-so. When all are taken the request
-            is refused like any other full worker. Falls back to
-            ``STRATA_WORKER_GPU_SLOTS``.
+        max_concurrent: Executions run at once; one more gets 503 with
+            ``Retry-After``. ``None`` is unlimited. Enforced here so a caller that
+            skips the dispatcher cannot overcommit the machine. Falls back to
+            ``STRATA_WORKER_MAX_CONCURRENT``.
+        gpu_slots: GPUs handed out one per execution via ``CUDA_VISIBLE_DEVICES``,
+            overriding the caller's value so concurrent cells never share a GPU.
+            Falls back to ``STRATA_WORKER_GPU_SLOTS``.
     """
     started_at = time.time()
     active_executions = 0
@@ -414,8 +380,8 @@ def create_notebook_executor_app(
     def _admit() -> int | None:
         """Reserve a slot for one execution, or refuse; returns its GPU, if any.
 
-        No ``await`` between the check and the reservation, so two requests
-        arriving together cannot both take the last slot.
+        No ``await`` between the check and the reservation, so two requests arriving
+        together cannot both take the last slot.
         """
         nonlocal active_executions
         if max_concurrent is not None and active_executions >= max_concurrent:
@@ -509,10 +475,9 @@ def create_notebook_executor_app(
     ) -> tuple[Path, Path] | JSONResponse:
         """Execute a cell and pack outputs into a bundle file.
 
-        On success, returns ``(bundle_path, tmpdir)`` — the caller is
-        responsible for deleting ``tmpdir`` after the bundle bytes have
-        been consumed. On failure, returns a ``JSONResponse`` with the
-        tmpdir already cleaned up.
+        On success returns ``(bundle_path, tmpdir)`` and the caller deletes ``tmpdir``
+        once the bundle is consumed. On failure returns a ``JSONResponse`` with the
+        tmpdir already removed.
         """
         if not isinstance(raw_inputs, dict):
             raise HTTPException(status_code=400, detail="inputs must be an object")
@@ -830,15 +795,9 @@ def create_notebook_executor_app(
     async def cancel_execution(build_id: str) -> dict[str, Any]:
         """Stop the harness running *build_id*, if it is still running.
 
-        A cancelled cell used to leave the worker computing a result nothing
-        would accept: the server marks the build failed, and both finalize and
-        upload refuse anything outside the active states, so the machine spent
-        its remaining minutes — or GPU-hours — on an answer with nowhere to go.
-
-        ``cancelled: false`` is a normal answer, not an error. The execution
-        may have finished between the server deciding to cancel and this
-        request landing, and a caller that treats "already gone" as a failure
-        would retire a machine that is in fact healthy and idle.
+        A cancelled build's result would be refused anyway, so this frees the machine.
+        ``cancelled: false`` is a normal answer: the execution may have just finished,
+        and a caller treating it as a failure would retire a healthy worker.
         """
         proc = in_flight.get(build_id)
         if proc is None:
@@ -1206,17 +1165,11 @@ def create_notebook_executor_app(
 
     @app.post("/execute", dependencies=[Depends(require_worker_token)])
     async def execute_pool_contract(http_request: Request) -> Response:
-        """The worker-pool contract path.
+        """The worker-pool contract path: an alias of ``/v1/execute-manifest``.
 
-        ``strata-pool`` dispatches to ``POST {endpoint}/execute`` and forwards
-        the job payload verbatim, setting no content type. That rules out the
-        multipart ``/v1/*`` endpoints and makes the body self-describing by
-        necessity — which is exactly a build manifest, so this delegates to the
-        same handler ``/v1/execute-manifest`` uses.
-
-        An alias rather than a second implementation: a manifest that arrives
-        via the pool and one the server pushes directly must not be able to
-        diverge in what they validate or accept.
+        ``strata-pool`` posts the job payload verbatim with no content type, which rules
+        out the multipart ``/v1/*`` endpoints. Sharing one handler keeps a pooled
+        manifest and a pushed one from diverging in what they accept.
         """
         return await execute_manifest(http_request)
 
@@ -1226,9 +1179,8 @@ def create_notebook_executor_app(
 def main(argv: list[str] | None = None) -> int:
     """Standalone entry point: run the notebook executor HTTP app.
 
-    Used by ``python -m strata.notebook.remote_executor --port 9000`` and
-    by deployment images that run a single executor process. For local
-    multi-worker testing, launch multiple instances on different ports.
+    Used by ``python -m strata.notebook.remote_executor --port 9000`` and by
+    single-process deployment images.
     """
     import argparse
 

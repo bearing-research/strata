@@ -1,25 +1,9 @@
-"""Typed payload models for notebook WebSocket frames (#44).
+"""Typed payload models for notebook WebSocket frames.
 
-WS frame payloads were inline dicts assembled at the emit site, with the shape
-documented only by the Vue client's TypeScript types and whatever test happened
-to assert a field. This module promotes them to ``pydantic`` models so the
-protocol is self-describing and a second client (the TUI, #37) can share one
-source of truth instead of re-deriving each shape.
-
-Models are constructed and validated at the **emit site in ``ws.py``** — the
-protocol boundary — and serialized with ``.model_dump(mode="json")``. Payloads
-that originate in the executor (loop-iteration progress, prompt-cell deltas) are
-validated here as they cross into the protocol layer, so the executor keeps
-emitting plain dicts and stays decoupled from the wire contract.
-
-``extra="forbid"`` makes an unmodeled field a loud construction error rather than
-a silently-shipped one — the point of typing the protocol is to catch drift.
-
-This is the **incremental first phase** (#44 is explicitly phase-by-phase): the
-during/after-execution streaming + test frames, which have small, stable shapes.
-Later phases cover ``cell_status`` / ``cell_output`` / ``cell_error`` (the big
-trio with many optional fields), the ``notebook_state`` aggregate frame, the
-``inspect_result`` frame, and the client→server frames.
+Built and validated at the emit site in ``ws.py`` and serialized with
+``.model_dump(mode="json")``; executor-originated dicts are validated as they
+cross into the protocol layer. ``extra="forbid"`` turns an unmodeled field into
+a construction error instead of silent protocol drift.
 """
 
 from __future__ import annotations
@@ -33,31 +17,18 @@ from strata.notebook.protocol import MessageType
 
 
 class WsPayload(BaseModel):
-    """Base for typed WS frame payloads.
-
-    ``extra="forbid"`` rejects any field the emit site adds but the model
-    doesn't declare, turning protocol drift into an immediate error at the
-    boundary instead of an undocumented field on the wire.
-    """
+    """Base for typed WS frame payloads; ``extra="forbid"`` rejects undeclared fields."""
 
     model_config = ConfigDict(extra="forbid")
 
 
 class CellStatusPayload(WsPayload):
-    """``cell_status`` — a cell's execution status changed.
+    """``cell_status``: a cell's execution status changed.
 
-    The most-emitted notebook frame, with three shapes that share one model:
-
-    - a bare status change (``cell_id`` + ``status``);
-    - a *running* broadcast that, for a remote cell, adds ``remote_worker`` +
-      ``remote_transport`` so the UI can show a "dispatching → X" badge;
-    - a staleness update that adds ``staleness_reasons`` (and ``causality`` when
-      the backend tracked why).
-
-    The optional fields default to ``None`` and are dropped on the wire via
-    ``exclude_none=True`` (see :func:`cell_status_payload`), so each emit site
-    keeps its exact historical shape. ``status`` is a ``CellStatus`` value
-    (``idle`` / ``running`` / ``ready`` / ``error`` / ``stale``).
+    One model for three shapes: a bare status change; a ``running`` broadcast that
+    adds ``remote_worker`` / ``remote_transport`` for a remote cell; and a staleness
+    update with ``staleness_reasons`` (and ``causality`` when known). Unset optional
+    fields are dropped on the wire (see :func:`cell_status_payload`).
     """
 
     cell_id: str
@@ -83,10 +54,8 @@ def cell_status_payload(
 ) -> dict[str, Any]:
     """Build a validated ``cell_status`` wire payload.
 
-    Shared by every emit site (in ``ws.py`` and ``session.py``) so the frame
-    has one construction point. ``status`` accepts a ``CellStatus`` enum or a
-    plain string and is coerced to the enum's string value. Absent optional
-    fields are omitted (``exclude_none``), preserving each site's exact shape.
+    *status* may be a ``CellStatus`` or a plain string. Absent optional fields are
+    omitted (``exclude_none``).
     """
     return CellStatusPayload(
         cell_id=cell_id,
@@ -108,12 +77,11 @@ class CellConsolePayload(WsPayload):
 
 
 class CellOutputDeltaPayload(WsPayload):
-    """``cell_output_delta`` — streamed partial output (prompt cells today).
+    """``cell_output_delta``: streamed partial output (prompt cells).
 
-    ``kind`` is ``"delta"`` (append ``text`` to the per-cell buffer), ``"retry"``
-    (schema validation failed — clear the buffer, ``attempt`` is the new attempt,
-    ``text`` is the first validator error), or ``"notice"`` (provider-degradation
-    announcement shown on the stream without polluting accumulated content).
+    ``kind`` is ``"delta"`` (append ``text``), ``"retry"`` (validation failed: clear
+    the buffer; ``attempt`` is the new attempt and ``text`` the first error) or
+    ``"notice"`` (a provider-degradation note kept out of the accumulated content).
     """
 
     cell_id: str
@@ -135,8 +103,7 @@ class CellIterationProgressPayload(WsPayload):
 
 
 class CellVariantProgressPayload(WsPayload):
-    """``cell_variant_progress`` — one completed variant of a ``# @per_variant``
-    fan-out cell."""
+    """``cell_variant_progress``: one completed variant of a ``# @per_variant`` cell."""
 
     cell_id: str
     variant: str
@@ -148,10 +115,9 @@ class CellVariantProgressPayload(WsPayload):
 
 
 class CascadePromptPayload(WsPayload):
-    """``cascade_prompt`` — upstream cells must run before the requested cell.
+    """``cascade_prompt``: upstream cells must run before the requested cell.
 
-    Sent when a cell's upstreams are stale/idle; the client confirms by sending
-    ``cell_execute_cascade`` with the ``plan_id``.
+    The client confirms by sending ``cell_execute_cascade`` with the ``plan_id``.
     """
 
     cell_id: str
@@ -177,13 +143,10 @@ class CellTestStatusPayload(WsPayload):
 
 
 class CellTestResultsPayload(WsPayload):
-    """``cell_test_results`` — per-test outcomes + totals from a test run.
+    """``cell_test_results``: per-test outcomes and totals from a test run.
 
-    A flat mirror of the client-facing fields of ``CellTestResult`` plus the
-    cell id and the ``stale`` flag computed at emit time. The internal staleness
-    hashes (``cell_source_hash`` / ``test_source_hash`` / ``input_fingerprint``)
-    are deliberately *not* on the wire — they were only ever an incidental
-    ``**model_dump()`` leak; the client never read them.
+    The client-facing fields of ``CellTestResult`` plus the cell id and an emit-time
+    ``stale`` flag. The internal staleness hashes are deliberately not sent.
     """
 
     cell_id: str
@@ -199,13 +162,10 @@ class CellTestResultsPayload(WsPayload):
 
 
 class EnvironmentJobModel(WsPayload):
-    """One background environment operation (uv sync / add / remove / import /
-    change-python / R renv), mirroring ``session.EnvironmentJobSnapshot``.
+    """One background environment operation, mirroring ``session.EnvironmentJobSnapshot``.
 
-    This is the per-job state the ``environment_job_started`` and
-    ``environment_job_progress`` frames carry. The fields match the snapshot
-    dataclass one-for-one; ``extra="forbid"`` (inherited) turns a field added to
-    the snapshot but not here into a loud test failure — the drift signal.
+    Fields match the snapshot one-for-one; ``extra="forbid"`` makes a field added to
+    the snapshot but not here fail loudly.
     """
 
     id: str
@@ -228,23 +188,17 @@ class EnvironmentJobModel(WsPayload):
 
 
 class EnvironmentJobEventPayload(WsPayload):
-    """``environment_job_started`` / ``environment_job_progress`` — a job snapshot.
+    """``environment_job_started`` / ``environment_job_progress``: one job snapshot.
 
-    Both frames carry the same shape: a single ``environment_job``. (The
-    terminal ``environment_job_finished`` and the ``dependency_changed`` alias
-    carry heavier aggregate payloads — serialized cells + environment state +
-    dependency lists — and are typed with the notebook-state phase, not here.)
+    ``environment_job_finished`` and ``dependency_changed`` carry heavier aggregate
+    payloads and are not typed here.
     """
 
     environment_job: EnvironmentJobModel
 
 
 def environment_job_event_payload(job: dict[str, Any]) -> dict[str, Any]:
-    """Build a validated ``environment_job_started`` / ``_progress`` payload.
-
-    ``job`` is ``dataclasses.asdict(EnvironmentJobSnapshot)``; this validates it
-    through :class:`EnvironmentJobModel` and returns the wire dict.
-    """
+    """Validate ``dataclasses.asdict(EnvironmentJobSnapshot)`` into the wire dict."""
     return EnvironmentJobEventPayload.model_validate({"environment_job": job}).model_dump(
         mode="json"
     )
@@ -270,10 +224,9 @@ class DownstreamImpactModel(WsPayload):
 
 
 class ImpactPreviewPayload(WsPayload):
-    """``impact_preview`` — upstream/downstream effects of running a cell.
+    """``impact_preview``: upstream/downstream effects of running a cell.
 
-    Mirrors ``impact.ImpactPreview`` (``asdict``-serialized). ``upstream`` reuses
-    the cascade-step shape; ``downstream`` lists the cells that go stale.
+    Mirrors ``impact.ImpactPreview``; ``downstream`` lists the cells that go stale.
     """
 
     target_cell_id: str
@@ -339,9 +292,8 @@ class ModuleExportModel(WsPayload):
 class CellAnalysisModel(WsPayload):
     """Per-cell DAG analysis carried on ``dag_update``.
 
-    The frontend merges authoritative defines / references / edges from this
-    without a REST round-trip. ``is_module_cell`` / ``module_exports`` are only
-    present for Python cells that export code symbols (default absent otherwise).
+    ``is_module_cell`` / ``module_exports`` are present only for Python cells that
+    export code symbols.
     """
 
     id: str
@@ -363,11 +315,10 @@ class CellAnalysisModel(WsPayload):
 
 
 class DagUpdatePayload(WsPayload):
-    """``dag_update`` — the DAG changed.
+    """``dag_update``: the DAG changed.
 
-    Carries the edge list, roots/leaves/topological order, per-cell analysis,
-    and the active variant groups, so the client re-renders the graph and merges
-    authoritative cell relationships without a REST round-trip.
+    Carries edges, roots/leaves/topological order, per-cell analysis and active
+    variant groups, so the client re-renders without a REST round-trip.
     """
 
     edges: list[DagEdgeModel] = Field(default_factory=list)
@@ -394,11 +345,10 @@ class PresenceEntryModel(WsPayload):
 
 
 class PresencePayload(WsPayload):
-    """``presence`` — who is on the session, sent on join, leave and focus change.
+    """``presence``: who is on the session, sent on join, leave and focus change.
 
     One entry per identity (a principal, or a declared author where nobody is
-    authenticated), not per socket. ``you`` is the receiving connection's own
-    identity, so a client can leave itself out of what it shows.
+    authenticated), not per socket. ``you`` is the receiving connection's identity.
     """
 
     principals: list[PresenceEntryModel]
@@ -412,19 +362,13 @@ ErrorCode = Literal[
 
 
 class ErrorPayload(WsPayload):
-    """``error`` — a request could not be served.
+    """``error``: a request could not be served.
 
-    ``code`` is a live part of the contract, not decoration: the frontend
-    branches on ``ENVIRONMENT_BUSY`` to show its environment-busy banner
-    (``stores/notebook.ts``). It is absent on the plain errors that carry no
-    machine-readable class, which is why it is optional here and why the
-    builder drops unset fields rather than sending nulls -- every site keeps
-    the exact shape it sends today.
-
+    ``code`` is part of the contract: the frontend branches on ``ENVIRONMENT_BUSY``.
     Known codes: ``ENVIRONMENT_BUSY`` (an environment job holds the notebook),
-    ``cell_busy`` (edit refused while the cell runs), ``cell_locked`` (edit
-    refused because someone else just changed the cell), ``read_only``
-    (message not allowed in app view), ``insufficient_scope`` (auth).
+    ``cell_busy`` (edit refused while the cell runs), ``cell_locked`` (someone else
+    just changed the cell), ``read_only`` (not allowed in app view),
+    ``insufficient_scope`` (auth).
     """
 
     error: str
@@ -441,11 +385,9 @@ def error_payload(
     cell_id: str | None = None,
     held_by: str | None = None,
 ) -> dict[str, Any]:
-    """Build the wire dict for an ``error`` frame.
+    """Build the wire dict for an ``error`` frame, omitting unset fields.
 
-    ``exclude_none`` so a plain error stays ``{"error": ...}`` on the wire, as
-    it has always been, rather than gaining null ``code`` / ``cell_id`` keys
-    that clients would have to learn to ignore.
+    A plain error stays ``{"error": ...}`` rather than gaining null keys.
     """
     return ErrorPayload(error=error, code=code, cell_id=cell_id, held_by=held_by).model_dump(
         mode="json", exclude_none=True

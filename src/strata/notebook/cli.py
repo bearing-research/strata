@@ -1,15 +1,8 @@
-"""Headless notebook runner.
+"""Headless notebook commands, including ``strata run <notebook_dir>``.
 
-Implements ``strata run <notebook_dir>`` — parse a notebook directory,
-optionally sync its uv-managed venv, execute every cell in topological
-order, and report success/failure. Reuses ``NotebookSession`` and
-``CellExecutor`` directly so the CLI takes the same code path the UI
-does, without an intervening HTTP server.
-
-Exit codes:
-    0  all cells succeeded
-    1  one or more cells failed
-    2  invocation / setup error (bad path, env sync failed, etc.)
+Runs through ``NotebookSession`` and ``CellExecutor`` directly, the same path as
+the UI, with no HTTP server. Exit codes: 0 all cells succeeded, 1 a cell failed,
+2 invocation or setup error.
 """
 
 from __future__ import annotations
@@ -55,12 +48,7 @@ def _yellow(text: str) -> str:
 
 
 def _cell_label(source: str, max_len: int = 32) -> str:
-    """Human-readable short label for a cell.
-
-    Uses the first non-blank, non-comment line of source, truncated.
-    Falls back to "(empty)" for blank cells. This is a cosmetic field;
-    cells are always uniquely identified by their ID.
-    """
+    """Short display label for a cell: its first non-blank, non-comment line, or "(empty)"."""
     for raw in source.splitlines():
         line = raw.strip()
         if not line or line.startswith("#"):
@@ -138,11 +126,10 @@ def _print_summary(results: list[dict[str, Any]], total_ms: int) -> None:
 
 
 def _use_existing_environment(session: Any) -> tuple[bool, str | None]:
-    """Take the notebook's prepared ``.venv`` as its interpreter (``--no-sync``).
+    """Use the notebook's prepared ``.venv`` as its interpreter (``--no-sync``).
 
-    Returns ``(ok, error_message)``. The check is for the interpreter, not the
-    directory: a venv whose ``bin/python`` points nowhere would otherwise pass
-    and cells would run with whatever ``python`` is on PATH.
+    Returns ``(ok, error_message)``. Checks ``bin/python`` resolves, not just the
+    directory, so cells never silently run on whatever ``python`` is on PATH.
     """
     venv_python = session.path / ".venv" / "bin" / "python"
     if not venv_python.exists():
@@ -158,10 +145,7 @@ def _use_existing_environment(session: Any) -> tuple[bool, str | None]:
 
 
 async def _sync_environment(session: Any) -> tuple[bool, str | None]:
-    """Run `uv sync` via the session's environment job machinery.
-
-    Returns ``(ok, error_message)``.
-    """
+    """Run ``uv sync`` through the session's environment jobs; return ``(ok, error_message)``."""
     try:
         job = await session.submit_environment_job(action="sync")
     except Exception as exc:
@@ -182,11 +166,7 @@ async def _sync_environment(session: Any) -> tuple[bool, str | None]:
 
 
 async def _drain_warm_pool(session: Any) -> None:
-    """Release the warm process pool if one was initialized.
-
-    Safe to call regardless of whether a pool exists; silently swallows
-    any drain errors since we're on the shutdown path anyway.
-    """
+    """Release the warm process pool if one exists; drain errors are swallowed."""
     pool = getattr(session, "warm_pool", None)
     if pool is None:
         return
@@ -419,10 +399,8 @@ async def _run_async(args: argparse.Namespace) -> int:
 def _cell_identity(session, cell, cell_id: str) -> dict[str, Any]:
     """The cell's provenance hash and its outputs' digests, for the report.
 
-    Both are best-effort: a notebook whose store predates content digests, or
-    a cell that produced nothing a downstream cell reads, contributes what it
-    has. An absent digest is reported as ``null`` rather than omitted, so a
-    diff of two reports shows a missing digest instead of a missing output.
+    Best-effort. An absent digest is reported as ``null`` rather than omitted, so
+    a diff of two reports shows the missing digest, not a missing output.
     """
     identity: dict[str, Any] = {}
     if cell.last_provenance_hash:
@@ -484,11 +462,7 @@ def add_run_arguments(parser: argparse.ArgumentParser) -> None:
 
 
 def run_main(argv: list[str] | None = None) -> int:
-    """Entry point for ``strata run``.
-
-    Can be called directly (``run_main(["./my-notebook"])``) or as a
-    subcommand dispatched from :mod:`strata.cli`.
-    """
+    """Entry point for ``strata run``; also callable as ``run_main(["./my-notebook"])``."""
     parser = argparse.ArgumentParser(
         prog="strata run",
         description="Execute every cell in a Strata notebook directory.",
@@ -515,18 +489,9 @@ def add_validate_arguments(parser: argparse.ArgumentParser) -> None:
 def validate_main(args: argparse.Namespace) -> int:
     """Entry point for ``strata validate``.
 
-    Static checks only — nothing executes, no environment is synced:
-
-    * ``notebook.toml`` parses and the cell files load
-    * the DAG builds without cycles
-    * per-cell annotation diagnostics (the same validation the server
-      runs on open / reload)
-
-    Exit codes mirror ``strata run``: 0 valid (warnings allowed),
-    1 invalid (parse failure, DAG cycle, or any error-severity
-    diagnostic), 2 invocation error (bad path). Built for the
-    agent feedback loop (issue #114): write files → validate → fix →
-    run.
+    Static checks only (nothing executes, nothing syncs): ``notebook.toml``
+    parses, cell files load, the DAG has no cycle, and per-cell annotation
+    diagnostics. Exit 0 valid (warnings allowed), 1 invalid, 2 invocation error.
     """
     notebook_dir = Path(args.path).expanduser().resolve()
 
@@ -691,10 +656,8 @@ def add_new_arguments(parser: argparse.ArgumentParser) -> None:
 def new_main(args: argparse.Namespace) -> int:
     """Entry point for ``strata new``.
 
-    Scaffolds a notebook directory (notebook.toml + pyproject.toml +
-    cells/) so external tools and coding agents don't hand-roll the
-    TOML (issue #114). Idempotent on an existing notebook directory: the
-    notebook is left as it is, and only missing scaffolding is added.
+    Scaffolds notebook.toml, pyproject.toml and cells/. On an existing notebook
+    directory, only missing scaffolding is added.
     """
     from strata.notebook.writer import create_notebook
 
@@ -868,12 +831,7 @@ def _import_snapshot_bundle(path: Path, args: argparse.Namespace) -> int:
 
 
 def import_main(args: argparse.Namespace) -> int:
-    """Entry point for ``strata import``.
-
-    Loads a Jupyter ``.ipynb`` file, converts cells, and writes a
-    Strata notebook directory ready to be opened with the server or
-    executed with ``strata run``.
-    """
+    """Entry point for ``strata import``: convert a Jupyter ``.ipynb`` into a notebook directory."""
     from strata.notebook.jupyter_import import import_notebook
 
     path = Path(args.path)
@@ -928,10 +886,8 @@ def import_main(args: argparse.Namespace) -> int:
 def _write_snapshot_bundle(path: Path, args: argparse.Namespace) -> int:
     """``strata export --to snapshot``: the same bundle the route serves.
 
-    Opened offline rather than through a session manager — the CLI's whole
-    point is working on a notebook directory with no server running — but the
-    members come from :func:`write_snapshot`, so the two cannot describe a
-    notebook differently.
+    Opened offline (no server), but the members come from
+    :func:`write_snapshot`, so the CLI and the route cannot disagree.
     """
     import zipfile
 
@@ -972,12 +928,7 @@ def _write_snapshot_bundle(path: Path, args: argparse.Namespace) -> int:
 
 
 def export_main(args: argparse.Namespace) -> int:
-    """Entry point for ``strata export``.
-
-    Loads the notebook directory, renders it via
-    :func:`strata.notebook.export.export_notebook`, and writes the
-    result to stdout (default) or to the ``--out`` path.
-    """
+    """Entry point for ``strata export``: write the rendered notebook to stdout or ``--out``."""
     from strata.notebook.export import ExportFormat, ExportOptions, export_notebook
 
     path = Path(args.path)
@@ -1015,7 +966,7 @@ def export_main(args: argparse.Namespace) -> int:
 def _open_local_ops(notebook_dir_arg: str, author: str | None = None):
     """Open a :class:`LocalNotebookOps` for *notebook_dir_arg*, or None on error.
 
-    Prints the error to stderr; callers return exit 2 on None.
+    The error is printed to stderr; callers return exit 2 on None.
     """
     notebook_dir = Path(notebook_dir_arg).expanduser().resolve()
     if not (notebook_dir / "notebook.toml").is_file():
@@ -1034,11 +985,7 @@ def _open_local_ops(notebook_dir_arg: str, author: str | None = None):
 
 
 def _add_target_args(parser: argparse.ArgumentParser) -> None:
-    """Register the read-command target: a local dir *or* a remote session.
-
-    A read command names its notebook either by directory (local, offline) or by
-    ``--server URL --session ID`` (a live session on a running ``strata-notebook``).
-    """
+    """Register a read command's target: a local dir or ``--server URL --session ID``."""
     parser.add_argument(
         "notebook_dir", nargs="?", help="Path to the notebook directory (local backend)"
     )
@@ -1059,11 +1006,9 @@ def _add_target_args(parser: argparse.ArgumentParser) -> None:
 
 
 def _open_read_ops(args: argparse.Namespace):
-    """Open the ops backend for *args* — remote when ``--server`` is set, else local.
+    """Open the ops backend for *args*: remote when ``--server`` is set, else local.
 
-    Used by the read commands and by ``cell run`` / ``cell test``. Returns the
-    ops object, or None on a usage error (message already printed to stderr;
-    callers return exit 2).
+    Returns None on a usage error (already printed to stderr; callers exit 2).
     """
     if args.server:
         if not args.session:
@@ -1087,11 +1032,7 @@ def _close_ops(ops: object) -> None:
 
 @contextmanager
 def _read_ops(args: argparse.Namespace):
-    """Open the ops backend and guarantee a remote client is closed on exit.
-
-    Yields ``None`` on a usage error (the sync commands return exit 2). Mirrors
-    the ``finally: ops.close()`` the async run/test/dep paths already do.
-    """
+    """Open the ops backend and close a remote client on exit; yields None on a usage error."""
     ops = _open_read_ops(args)
     try:
         yield ops
@@ -1105,7 +1046,7 @@ def _emit_json(data: object) -> None:
 
 
 def add_cell_arguments(parser: argparse.ArgumentParser) -> None:
-    """Register the ``strata cell <action>`` group (P0: list, show)."""
+    """Register the ``strata cell <action>`` group."""
     sub = parser.add_subparsers(dest="cell_command", metavar="<action>")
 
     list_p = sub.add_parser("list", help="List cells (id, name, status)")
@@ -1335,9 +1276,7 @@ def cell_show_main(args: argparse.Namespace) -> int:
 
 
 def _cell_show_var(ops: Any, var: str, fmt: str) -> int:
-    """Show the cell that defines variable *var* — the agent's "do I already
-    have this?" lookup. Composes ``dag`` (the variable→producer map) + ``get_cell``.
-    """
+    """Show the cell that defines *var*, via ``dag`` plus ``get_cell``."""
     from strata.notebook.ops import NotebookOpsError
 
     try:
@@ -1428,11 +1367,10 @@ def cell_add_main(args: argparse.Namespace) -> int:
 
 
 async def _cell_add_run_async(args: argparse.Namespace, source: str) -> int:
-    """Add a cell and immediately run it in one call, folding in the run outcome.
+    """Add a cell and run it in one call; the run result is nested under ``run``.
 
-    Mirrors ``cell run``'s backend handling: the local backend syncs its venv
-    first; a remote server owns its own. The JSON payload is the new cell view
-    with the run result nested under ``run``.
+    As in ``cell run``, the local backend syncs its venv first; a remote server
+    owns its own.
     """
     from strata.notebook.ops import NotebookOpsError
 
@@ -1539,10 +1477,10 @@ def _valid_annotation_key(key: str) -> bool:
 
 
 def cell_annotate_main(args: argparse.Namespace) -> int:
-    """Splice `# @key` directives into a cell's source, preserving the body.
+    """Splice ``# @key`` directives into a cell's source, preserving the body.
 
-    Composes `get_cell` + `edit_cell`, so it works against a local directory or
-    a live `--server/--session` with no backend-specific code.
+    Built on ``get_cell`` + ``edit_cell``, so it works locally or against
+    ``--server/--session``.
     """
     if not args.set_ and not args.unset:
         print("error: provide at least one --set KEY=VALUE or --unset KEY", file=sys.stderr)
@@ -1837,10 +1775,9 @@ async def _dep_async(args: argparse.Namespace, action: str) -> int:
 
 
 async def _prepare_env_for_ops(ops: object, args: argparse.Namespace) -> int:
-    """Sync or verify the notebook venv. Returns ``0`` ok, ``2`` setup failure.
+    """Sync or (``--no-sync``) verify the notebook venv; return 0 ok, 2 setup failure.
 
-    Mirrors ``strata run``: sync by default, or (``--no-sync``) require an
-    existing ``.venv``. Setup failures print to stderr and map to exit 2.
+    Setup failures print to stderr.
     """
     from strata.notebook.ops import LocalNotebookOps, NotebookOpsError
 

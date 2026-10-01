@@ -1,34 +1,17 @@
-"""BigQuery driver adapter.
+"""BigQuery driver adapter, backed by ``adbc-driver-bigquery``.
 
-Backed by ``adbc-driver-bigquery``. The freshness probe reads
-``last_modified_time`` from each touched dataset's per-dataset
-``__TABLES__`` legacy view (BigQuery's
-``INFORMATION_SCHEMA.TABLES`` doesn't expose a last-modified
-column; ``__TABLES__`` is the documented fast path despite its
-"legacy" label). The schema fingerprint walks
-``INFORMATION_SCHEMA.COLUMNS``.
+Freshness reads ``last_modified_time`` from each dataset's legacy ``__TABLES__``
+view (``INFORMATION_SCHEMA.TABLES`` has no such column); the schema fingerprint
+reads ``INFORMATION_SCHEMA.COLUMNS``.
 
-Read-only enforcement is **credentials-based**, not session-flag-
-based — BigQuery has no equivalent of Postgres's
-``SET default_transaction_read_only = on``. The security boundary
-lives in the service account's IAM role grants. Read cells should
-reference a connection whose ``credentials_path`` points at a
-service account with ``roles/bigquery.dataViewer`` +
-``roles/bigquery.jobUser``; write cells (``# @sql write=true``)
-should reference ``write_credentials_path`` pointing at a service
-account with ``roles/bigquery.dataEditor``. Without
-``write_credentials_path``, write cells inherit the same
-credentials as read cells.
+Read-only is enforced by credentials, since BigQuery has no session read-only
+flag: read cells should use a ``credentials_path`` service account with
+``roles/bigquery.dataViewer`` + ``roles/bigquery.jobUser``, write cells a
+``write_credentials_path`` one with ``roles/bigquery.dataEditor`` (without it,
+writes use the read credentials).
 
-**Streaming-buffer caveat.** Tables receiving streaming inserts
-have ``last_modified_time`` lag by minutes-to-90-min until the
-buffer flushes. Strata's freshness probe will *underestimate*
-freshness for those tables — cells against streaming targets
-should pin ``# @cache session`` to dodge the issue. Detecting
-streaming buffers via ``tables.get → streamingBuffer`` is a
-follow-up; v1 documents the limitation.
-
-See ``docs/internal/design-sql-cells.md`` for the full design.
+Streaming inserts make ``last_modified_time`` lag by up to about 90 minutes, so
+freshness is underestimated; such cells should use ``# @cache session``.
 """
 
 from __future__ import annotations
@@ -83,9 +66,8 @@ def _is_valid_dataset_id(value: str) -> bool:
 def _spec_attr(spec: Any, key: str) -> Any:
     """Read a top-level field off a ``ConnectionSpec`` safely.
 
-    Same Pydantic-bound-method workaround as the Snowflake adapter:
-    ``BaseModel.schema`` shadows extras, so prefer ``model_extra``
-    and reject bound-method shadows.
+    ``BaseModel.schema`` shadows extras, so prefer ``model_extra`` and reject
+    bound-method shadows (as in the Snowflake adapter).
     """
     extras = getattr(spec, "model_extra", None) or {}
     if key in extras:
@@ -97,19 +79,10 @@ def _spec_attr(spec: Any, key: str) -> Any:
 
 
 def _credentials_principal(path_value: Any) -> str | None:
-    """Read ``client_email`` from a service-account JSON file.
+    """Read ``client_email`` from a service-account JSON file, or None if unreadable.
 
-    The principal (the SA's email) is what BigQuery actually keys
-    visibility on — different SA files for the same role-set give
-    the same view, while different SAs give different views.
-    Including the principal in the cache identity makes "swap to
-    a different SA, see different objects" invalidate the cache
-    correctly.
-
-    Returns None when the file can't be read (e.g. relative path
-    that hasn't been resolved yet, file moved between machines).
-    The path itself still folds into the identity below as a
-    fallback.
+    BigQuery keys visibility on the principal, so it goes into the cache
+    identity; when it cannot be read, the path is folded instead.
     """
     if not isinstance(path_value, str) or not path_value:
         return None
@@ -144,29 +117,15 @@ class BigQueryAdapter:
     def canonicalize_connection_id(self, spec: Any, *, read_only: bool = True) -> str:
         """Hash identity-shaping fields, excluding secrets.
 
-        Identity-shaping for BigQuery: project_id, dataset_id, and
-        the service account's principal (extracted from the
-        credentials JSON when readable). ``read_only`` decides
-        which credentials principal joins the hash — read cells
-        fold only ``credentials_path``'s principal; write cells
-        fold ``write_credentials_path``'s principal (falling back
-        to ``credentials_path``). Without the read_only branch,
-        swapping the write SA would churn read-cell caches even
-        though read execution never uses it.
+        Folds project_id, dataset_id and the service account principal: read
+        cells use ``credentials_path``'s, write cells ``write_credentials_path``'s
+        (else ``credentials_path``'s), so swapping the write SA leaves read caches
+        alone. A path stands in when the principal cannot be read.
 
-        When neither credentials path is configured, the adapter
-        falls back to ambient Application Default Credentials at
-        execute time. The principal is unknown at canonicalize
-        time without a network call, so the identity carries an
-        ``ambient_adc`` sentinel — two notebooks with no creds
-        configured stay segregated from notebooks with explicit
-        creds, but the cache may leak across machines that share
-        a notebook spec but use different ambient principals.
-        Users who want stable cache identity across machines
-        should set an explicit ``credentials_path``.
-
-        Excluded: the credentials file's *contents* (the signing
-        key); paths fall back when principal extraction fails.
+        With no credentials path the adapter uses ambient ADC, whose principal is
+        unknown without a network call, so an ``ambient_adc`` sentinel is folded;
+        the cache can then be shared across machines with different ambient
+        principals. Set ``credentials_path`` for a stable identity.
         """
         return hash_connection_identity(
             self.name, self._extract_identity(spec, read_only=read_only)
@@ -209,17 +168,10 @@ class BigQueryAdapter:
     def open(self, spec: Any, *, read_only: bool) -> Any:
         """Open an ADBC BigQuery connection.
 
-        Read-only enforcement is **credentials-based**: if
-        ``write_credentials_path`` is set, ``open(read_only=False)``
-        uses it; otherwise both read and write paths use
-        ``credentials_path``. The user's IAM role grants on the
-        service account decide whether DML is permitted —
-        BigQuery has no session-level read-only flag.
-
-        The ADBC BigQuery driver doesn't take a URI; it takes
-        keyword arguments (``adbc.bigquery.sql.project_id``,
-        ``adbc.bigquery.sql.auth_credentials``, etc.). The
-        connect_fn test seam mirrors this with a dict.
+        ``open(read_only=False)`` uses ``write_credentials_path`` when set, else
+        ``credentials_path``; the account's IAM grants decide whether DML runs.
+        The driver takes keyword arguments, not a URI, and the connect_fn test
+        seam mirrors that with a dict.
         """
         ro_creds = _spec_attr(spec, "credentials_path")
         rw_creds = _spec_attr(spec, "write_credentials_path") or ro_creds
@@ -255,15 +207,10 @@ class BigQueryAdapter:
     # --- helpers ---------------------------------------------------------
 
     def _resolve_session_defaults(self, cursor: Any) -> tuple[str | None, str | None]:
-        """Read the session's effective project + dataset.
+        """Read the session's default ``(project, dataset)``, either possibly None.
 
-        BigQuery exposes ``@@dataset_id`` and ``@@project_id`` as
-        session variables; both are session-scoped reads. Used to
-        resolve unqualified tables in probes against whatever the
-        connection's current default is — same idea as Snowflake's
-        ``CURRENT_SCHEMA()`` resolution, just driver-specific.
-        Returns ``(project, dataset)``; either may be None when
-        the connection has no default set.
+        From ``@@project_id`` and ``@@dataset_id``; used to resolve unqualified
+        tables in probes.
         """
         try:
             cursor.execute("SELECT @@project_id, @@dataset_id")
@@ -288,10 +235,9 @@ class BigQueryAdapter:
     def retention_until(self, conn: Any, tables: list[QualifiedTable], at: str) -> str | None:
         """``at`` plus BigQuery's guaranteed time-travel window.
 
-        A dataset's window (``max_time_travel_hours``) is configurable from
-        two to seven days and lives in a region-scoped view this adapter has
-        no region for, so the horizon stated is the minimum every dataset
-        guarantees rather than a guess at this one's setting.
+        A dataset's window is configurable (two to seven days) and lives in a
+        region-scoped view this adapter cannot query without a region, so this
+        uses the minimum every dataset guarantees.
         """
         return plus(at, _GUARANTEED_TIME_TRAVEL)
 
@@ -308,17 +254,10 @@ class BigQueryAdapter:
         probe_conn: Any,
         tables: list[QualifiedTable],
     ) -> FreshnessToken:
-        """Per-table freshness via ``__TABLES__.last_modified_time``.
+        """Per-table freshness via ``__TABLES__.last_modified_time`` (unix millis).
 
-        ``__TABLES__`` is the legacy-but-stable per-dataset view
-        that exposes ``last_modified_time`` (a unix-millis
-        timestamp); ``INFORMATION_SCHEMA.TABLES`` doesn't. Tables
-        are grouped by (project, dataset) so each touched dataset
-        gets one ``__TABLES__`` query.
-
-        Streaming-buffer caveat (see module docstring): tables
-        receiving streaming inserts have lag here. Documented;
-        users should pin ``# @cache session`` for those.
+        One ``__TABLES__`` query per touched (project, dataset). Lags for
+        tables receiving streaming inserts (see the module docstring).
         """
         if not tables:
             return FreshnessToken(value=b"")
@@ -384,9 +323,7 @@ class BigQueryAdapter:
     ) -> SchemaFingerprint:
         """Per-table schema fingerprint via ``INFORMATION_SCHEMA.COLUMNS``.
 
-        Catches schema evolution that ``last_modified_time``
-        already covers (BigQuery DDL touches the timestamp); the
-        explicit fingerprint is belt-and-suspenders.
+        Redundant with ``last_modified_time`` (BigQuery DDL bumps it), kept as a backstop.
         """
         if not tables:
             return SchemaFingerprint(value=b"")
@@ -447,12 +384,7 @@ class BigQueryAdapter:
         return SchemaFingerprint(value=h.digest())
 
     def list_schema(self, conn: Any) -> list[TableSchema]:
-        """Enumerate tables and views in the connection's default dataset.
-
-        Scopes to ``(project_id, dataset_id)`` from the spec — schema
-        discovery across multiple datasets would mean one query per
-        dataset, which we keep tight for v1.
-        """
+        """Enumerate tables and views in the spec's ``(project_id, dataset_id)`` only."""
         with conn.cursor() as cursor:
             project, dataset = self._resolve_session_defaults(cursor)
             if not project or not dataset:
@@ -505,7 +437,7 @@ _ADAPTER = BigQueryAdapter()
 
 
 def register() -> None:
-    """Idempotent registration entry point — see drivers/__init__.py."""
+    """Register the adapter (idempotent); see drivers/__init__.py."""
     register_adapter(_ADAPTER)
 
 

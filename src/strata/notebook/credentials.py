@@ -1,26 +1,16 @@
 """Named credentials: data sources configured once, referenced by name.
 
-A mount or a connection in ``notebook.toml`` says ``credential = "lab-bucket"``
-and never carries a secret. The server defines what the name means, in
-``notebook_credentials``: a map of fields — fsspec ``storage_options`` for a
-mount, driver ``auth`` for a connection — whose values are ``${VAR}``
-indirections::
+A mount or connection says ``credential = "lab-bucket"`` and never carries a
+secret. ``notebook_credentials`` maps each name to fields (fsspec
+``storage_options`` or driver ``auth``) whose values are ``${VAR}`` references::
 
     STRATA_NOTEBOOK_CREDENTIALS='{"lab-bucket": {"key": "${LAB_AWS_KEY}",
                                                  "secret": "${LAB_AWS_SECRET}"}}'
 
-A reference resolves against the notebook's environment first, which is where a
-configured secret manager puts what it fetches, and then the server's. So the
-secret lives in the vault or the server environment, and a rotation changes the
-value behind the name without changing anything a notebook or its cache holds.
-
-The name is part of a cell's identity: which credential a mount or connection
-reads through can change what it sees, so it is folded into provenance. The
-values never are, which is why rotating a secret invalidates nothing.
-
-``notebook_mount_credentials`` names a server-wide default per URI scheme
-(``{"s3": "org-bucket"}``), so a mount with no ``credential`` still reaches the
-organization's primary store without any notebook change.
+References resolve against the notebook's environment (where a secret manager
+puts what it fetches), then the server's. The name is folded into provenance;
+the values are not, so rotating a secret invalidates nothing.
+``notebook_mount_credentials`` names a default per URI scheme (``{"s3": "org-bucket"}``).
 """
 
 from __future__ import annotations
@@ -35,11 +25,10 @@ class CredentialError(ValueError):
 
 
 def resolve_reference(value: str, env: Mapping[str, str]) -> str:
-    """``${VAR}`` → its value from *env*, then the process environment.
+    """``${VAR}`` to its value from *env*, then the process environment.
 
-    Anything else is a literal and passes through: the registry is server
-    configuration, not a committed file, so a literal there is the operator's
-    decision.
+    Anything else is a literal and passes through: the registry is operator
+    config, not a committed file.
     """
     if not (value.startswith("${") and value.endswith("}")):
         return value
@@ -78,8 +67,7 @@ class CredentialResolver:
         """The fields behind *name*, with every reference resolved.
 
         Raises:
-            CredentialError: naming the credential, so a cell that fails says
-                which one to define rather than which variable was empty.
+            CredentialError: naming the credential, so the failure says which one to define.
         """
         fields = self._registry.get(name)
         if fields is None:
@@ -96,8 +84,8 @@ class CredentialResolver:
     ) -> dict[str, Any]:
         """fsspec options for a mount: scheme default, then its credential, then its options.
 
-        The mount's own ``options`` win, as they always have, so a notebook can
-        still set a non-secret like ``endpoint_url`` on top of a credential.
+        The mount's own ``options`` win, so a notebook can set a non-secret like
+        ``endpoint_url`` on top of a credential.
         """
         merged: dict[str, Any] = {}
         default = self._scheme_defaults.get(scheme)

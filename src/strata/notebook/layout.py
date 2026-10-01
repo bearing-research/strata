@@ -1,13 +1,7 @@
-"""What belongs in version control, and what does not.
+"""What in a notebook directory belongs in version control, and what does not.
 
-The split is real and load-bearing: ``notebook.toml`` is committed config,
-``.strata/`` is runtime state. Until now it was documented and nowhere else —
-no function returned the set, and nothing wrote a ``.gitignore``, so a new
-notebook directory had none and ``git add -A`` swept in a virtualenv, a
-SQLite artifact store, and every blob it held.
-
-Stating it once, in code, means the docs page can be a rendering of these
-rules rather than a second source that drifts from them.
+``notebook.toml`` is committed config and ``.strata/`` is runtime state; this
+module is the single statement of that split, which the docs page renders.
 """
 
 from __future__ import annotations
@@ -40,15 +34,9 @@ def gitignore_contents() -> str:
 
 
 def committed_paths(notebook_dir: Path) -> list[Path]:
-    """Files under *notebook_dir* that belong in version control, sorted.
+    """Existing files under *notebook_dir* that belong in version control, sorted.
 
-    Paths are relative to *notebook_dir*, and only what exists is returned:
-    this answers "what should be committed from this directory as it stands",
-    which is the question both ``export`` and a git status check are asking.
-
-    Cell sources include their tests — a cell's tests are as much a part of
-    the notebook as the cell — and the lockfile is included because an
-    environment nobody can reproduce makes the rest of it decorative.
+    Paths are relative to *notebook_dir*. Includes cell tests and the lockfile.
     """
     notebook_dir = Path(notebook_dir)
     found: list[Path] = []
@@ -70,11 +58,9 @@ def committed_paths(notebook_dir: Path) -> list[Path]:
 
 
 def write_gitignore(notebook_dir: Path) -> bool:
-    """Write the notebook's ``.gitignore``, unless one is already there.
+    """Write the notebook's ``.gitignore`` unless one exists; return whether it wrote.
 
-    Never overwrites: a directory that already has one may be inside a project
-    with its own rules, and silently replacing them would be a worse failure
-    than not writing at all. Returns whether it wrote.
+    Never overwrites: an existing one may carry an enclosing project's rules.
     """
     target = Path(notebook_dir) / ".gitignore"
     if target.exists():

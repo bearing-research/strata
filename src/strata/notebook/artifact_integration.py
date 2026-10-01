@@ -1,16 +1,12 @@
-"""Bridge between notebook execution and Strata artifact store.
+"""Bridge between notebook execution and the Strata artifact store.
 
-This module manages artifact storage and retrieval for notebook cells,
-using the existing ArtifactStore and BlobStore classes.
+Artifact ids::
 
-Artifact ID scheme:
     Regular cell output: nb_{notebook_id}_cell_{cell_id}_var_{variable_name}
     Loop iteration:      nb_{notebook_id}_cell_{cell_id}_var_{variable_name}@iter={k}
 
-The ``@iter={k}`` suffix keeps each iteration of a loop cell addressable
-as its own artifact, so downstream cells, the inspector, and forking
-(``@loop start_from=<cell>@iter=<k>``) can all refer to a specific
-iteration by name.
+The ``@iter={k}`` suffix lets downstream cells, the inspector and
+``@loop start_from=<cell>@iter=<k>`` address one iteration by name.
 """
 
 from __future__ import annotations
@@ -29,22 +25,16 @@ if TYPE_CHECKING:
 
 
 class NotebookArtifactManager:
-    """Manages artifacts for a notebook session.
-
-    Wraps the existing ArtifactStore + BlobStore to provide
-    notebook-specific operations.
-    """
+    """Notebook-specific operations over ``ArtifactStore`` and ``BlobStore``."""
 
     def __init__(
         self,
         notebook_id: str,
         artifact_dir: Path | None = None,
     ):
-        """Initialize the artifact manager for a notebook.
+        """Open the notebook's artifact store.
 
-        Args:
-            notebook_id: ID of the notebook
-            artifact_dir: Directory for artifacts. If None, uses ~/.strata/notebook_artifacts
+        *artifact_dir* defaults to ``~/.strata/notebook_artifacts``.
         """
         self.notebook_id = notebook_id
 
@@ -60,8 +50,7 @@ class NotebookArtifactManager:
     def prune(self, keep_superseded: int, min_idle_seconds: float) -> dict:
         """Drop each cell output's values older than its newest *keep_superseded*.
 
-        The current value of every output is kept (its id is the notebook's
-        own, never minted), as is anything named, pinned or published and
+        Keeps every output's current value, anything named, pinned or published, and
         anything used in the last *min_idle_seconds*.
 
         Raises:
@@ -76,14 +65,7 @@ class NotebookArtifactManager:
         )
 
     def find_cached(self, provenance_hash: str) -> ArtifactVersion | None:
-        """Find a cached artifact by provenance hash.
-
-        Args:
-            provenance_hash: The provenance hash to search for
-
-        Returns:
-            ArtifactVersion if found, None otherwise
-        """
+        """Find a cached artifact by provenance hash, or None."""
         return self.artifact_store.find_by_provenance(provenance_hash)
 
     def cell_artifact_id(
@@ -95,18 +77,9 @@ class NotebookArtifactManager:
     ) -> str:
         """Canonical artifact id for a notebook cell's variable.
 
-        Args:
-            cell_id: Cell ID.
-            variable_name: Variable name.
-            iteration: Optional iteration index. When supplied, the id is
-                suffixed with ``@iter={k}`` so loop iterations can be
-                stored and retrieved independently.
-            variant: Optional sweep-v2 fan-out variant name. When supplied,
-                the id is suffixed with ``@variant={name}`` so each
-                ``# @per_variant`` instance is stored independently. A cell is
-                never both a loop and a fan-out cell, so the two suffixes do
-                not co-occur in practice; if both are given, ``@iter`` precedes
-                ``@variant`` for a stable ordering.
+        ``iteration`` appends ``@iter={k}``; ``variant`` (a ``# @per_variant`` instance)
+        appends ``@variant={name}``. They do not co-occur in practice; if both are
+        given, ``@iter`` comes first.
         """
         base = f"nb_{self.notebook_id}_cell_{cell_id}_var_{variable_name}"
         if iteration is not None:
@@ -121,10 +94,7 @@ class NotebookArtifactManager:
         variable_name: str,
         iteration: int,
     ) -> bytes | None:
-        """Load the latest blob bytes for a specific loop iteration.
-
-        Returns ``None`` if no artifact exists for that iteration.
-        """
+        """Load the latest blob bytes for one loop iteration, or ``None`` if absent."""
         artifact_id = self.cell_artifact_id(cell_id, variable_name, iteration)
         latest = self.artifact_store.get_latest_version(artifact_id)
         if latest is None or latest.state not in ("ready", "superseded"):
@@ -149,13 +119,7 @@ class NotebookArtifactManager:
         cell_id: str,
         variable_name: str,
     ) -> list[tuple[int, ArtifactVersion]]:
-        """Return ``(iteration, ArtifactVersion)`` for every stored iteration
-        of ``cell_id``'s ``variable_name``, sorted ascending by iteration.
-
-        Powers the iteration picker in the inspect panel: the caller can
-        build a dropdown of (k, artifact metadata) without needing to
-        probe the store for each possible index.
-        """
+        """Return ``(iteration, ArtifactVersion)`` for every stored iteration, ascending."""
         prefix = self.cell_artifact_id(cell_id, variable_name) + "@iter="
         artifacts = self.artifact_store.list_latest_by_id_prefix(prefix)
         results: list[tuple[int, ArtifactVersion]] = []
@@ -174,15 +138,7 @@ class NotebookArtifactManager:
         cell_id: str,
         variable_name: str,
     ) -> list[tuple[str, ArtifactVersion]]:
-        """Return ``(variant_name, ArtifactVersion)`` for every stored fan-out
-        instance of ``cell_id``'s ``variable_name``, sorted by variant name.
-
-        The sweep-v2 counterpart of :meth:`list_iterations`: a
-        ``# @per_variant`` cell stores one artifact per variant under the
-        ``@variant={name}`` suffix. A collapse consumer (or the frontend
-        per-variant panel) uses this to enumerate the produced variants
-        without probing each name.
-        """
+        """Return ``(variant_name, ArtifactVersion)`` for every stored fan-out instance, by name."""
         prefix = self.cell_artifact_id(cell_id, variable_name) + "@variant="
         artifacts = self.artifact_store.list_latest_by_id_prefix(prefix)
         results: list[tuple[str, ArtifactVersion]] = []
@@ -217,63 +173,22 @@ class NotebookArtifactManager:
         """Store a cell output as an artifact.
 
         Args:
-            cell_id: ID of the cell
-            variable_name: Name of the output variable
-            blob_data: Serialized blob (Arrow IPC bytes, JSON bytes, pickle bytes)
-            content_type: Content type (arrow/ipc, json/object, pickle/object)
-            schema_json: Arrow schema as JSON (for arrow/ipc only)
-            row_count: Number of rows (for tables)
-            provenance_hash: Provenance hash for deduplication
-            input_versions: Mapping of input URI -> version
-            source_hash: SHA-256 of cell source code (for causality tracking)
+            input_versions: Mapping of input URI to version.
             source: The cell source that produced these bytes. Recorded, never
-                hashed — ``source_hash`` already carries it into the provenance
-                key, and folding the text in too would change nothing but the
-                cost.
-
-                Stored because a hash is not an explanation: a reader outside
-                this notebook has no ``cells/{id}.py`` to compare a digest
-                against, so a lineage view could only ever show them
-                ``source_hash: 3f2a…``. Captured here, at execution, rather
-                than read back from the cell later — the cell can be edited
-                after the fact, and pairing a cached artifact with source that
-                did not produce it is the one failure a provenance record must
-                not have.
-            env_hash: SHA-256 of lockfile (for causality tracking)
-            iteration: Optional loop iteration index. When set, the artifact
-                id is suffixed with ``@iter={k}`` so each loop iteration is
-                stored as its own artifact.
-            variant: Optional sweep-v2 fan-out variant name. When set, the
-                artifact id is suffixed with ``@variant={name}`` so each
-                ``# @per_variant`` instance is stored as its own artifact.
-            build_env: Interpreter + platform that produced the bytes, as
-                reported by the process that ran the cell (see
-                ``harness.build_env_identity``). Recorded, never hashed: it
-                exists so a shared cache can say *where* a result came from,
-                and folding it into the provenance key would drop cross-machine
-                hit rate to nothing. Empty when the producer did not report one
-                — every artifact written before this existed.
-            build_duration_ms: How long the run that produced these bytes
-                took. Recorded because it is the only way a *shared* cache can
-                say what a hit saved: the person hitting it never ran the cell,
-                so their own history holds no comparable duration and the
-                savings estimate would credit zero for exactly the case worth
-                counting. Zero when unrecorded.
-            hardware: The machine a worker reported running the cell on
-                (``strata.notebook.hardware``). Recorded, never hashed, for
-                the same reason as ``build_env``: identical machines of a
-                class should share a cache, and the record should still say
-                which accelerator and driver computed the bytes. Absent for a
-                local run.
-            principal: Who computed these bytes, when that is known. A locally
-                run cell has no authenticated identity to record, so this is
-                normally ``None``; a result *pulled* from a shared store does,
-                and without persisting it the lineage view would show a blank
-                author for exactly the steps someone else produced — the case
-                the column exists for.
-
-        Returns:
-            The created ArtifactVersion
+                hashed (``source_hash`` already keys it). Captured at execution, not
+                read back later, because the cell may have been edited since.
+            iteration: Loop iteration; suffixes the id with ``@iter={k}``.
+            variant: ``# @per_variant`` instance; suffixes the id with
+                ``@variant={name}``.
+            build_env: Interpreter and platform that produced the bytes (see
+                ``harness.build_env_identity``). Recorded, never hashed, so
+                cross-machine cache hits still work. Empty when not reported.
+            build_duration_ms: How long the producing run took; lets a shared
+                cache say what a hit saved. Zero when unrecorded.
+            hardware: The machine a worker reported (``strata.notebook.hardware``).
+                Recorded, never hashed, like ``build_env``. Absent for a local run.
+            principal: Who computed the bytes, when known: normally ``None`` for a
+                local run, set for a result pulled from a shared store.
         """
         # Artifacts live under the notebook dir: a write during a copy would
         # leave the copy's runtime.json and artifacts out of step.
@@ -351,17 +266,10 @@ class NotebookArtifactManager:
         return artifact_version
 
     def load_artifact_data(self, artifact_id: str, version: int) -> bytes:
-        """Load artifact blob data.
-
-        Args:
-            artifact_id: Artifact ID
-            version: Version number
-
-        Returns:
-            Blob data (bytes)
+        """Load an artifact version's blob bytes.
 
         Raises:
-            ValueError: If artifact not found or not ready
+            ValueError: If the artifact is not found or not ready.
         """
         artifact = self.artifact_store.get_artifact(artifact_id, version)
         if artifact is None or artifact.state not in ("ready", "superseded"):
@@ -375,15 +283,11 @@ class NotebookArtifactManager:
     def get_artifact_preview(self, artifact_id: str, version: int) -> dict[str, Any]:
         """Get artifact metadata and a data preview.
 
-        Args:
-            artifact_id: Artifact ID
-            version: Version number
-
-        Returns:
-            Dict with: id, version, content_type, rows, bytes, preview
+        Returns a dict with ``id``, ``version``, ``content_type``, ``rows``,
+        ``bytes`` and ``preview``.
 
         Raises:
-            ValueError: If artifact not found
+            ValueError: If the artifact is not found.
         """
         artifact = self.artifact_store.get_artifact(artifact_id, version)
         if artifact is None:
@@ -407,12 +311,9 @@ class NotebookArtifactManager:
         }
 
     def list_cell_artifacts(self, cell_id: str) -> list[tuple[str, ArtifactVersion]]:
-        """List canonical artifacts for a cell — one per variable, latest version.
+        """List a cell's canonical artifacts: one ``(variable_name, latest version)`` per variable.
 
-        Returns ``(variable_name, ArtifactVersion)`` for each canonical
-        ``nb_{notebook_id}_cell_{cell_id}_var_<name>`` artifact. Loop-
-        iteration suffixed ids (``...@iter=k``) are excluded — use
-        ``list_iterations`` when iteration-level granularity is wanted.
+        Loop-iteration ids (``...@iter=k``) are excluded; use ``list_iterations``.
         """
         prefix = f"nb_{self.notebook_id}_cell_{cell_id}_var_"
         artifacts = self.artifact_store.list_latest_by_id_prefix(prefix)

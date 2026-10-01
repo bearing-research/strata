@@ -1,10 +1,8 @@
-"""Read-only Textual spectator app for a live notebook session (TUI Phase 1, M1).
+"""Read-only Textual spectator app for a live notebook session.
 
 Resolves a session (flag, path, or interactive picker), opens the WS, sends
-``notebook_sync``, and renders the resulting ``notebook_state`` plus the live
-``cell_status`` / ``cell_console`` / ``cell_output`` stream. No editing, no run
-keybindings — a spectator. The cascade/dag/env frames (M2) and the agent panel
-(M3) build on this same dispatch loop.
+``notebook_sync``, and renders ``notebook_state`` plus the live cell status,
+console and output stream. No editing and no run keybindings.
 """
 
 from __future__ import annotations
@@ -67,14 +65,10 @@ def _glyph(status: str) -> str:
 def _literal(value: Any) -> Any:
     """Wrap a bare string so Rich/Textual render it verbatim.
 
-    Everything the TUI shows — console text, tracebacks, previews, cell source,
-    data values — is arbitrary user content, and a bare ``str`` handed to a
-    ``Static`` or a table cell is parsed as console markup. That is not
-    cosmetic: the traceback line ``print(data[key])`` renders as ``print(data)``
-    (``key`` is read as a style name), and a path such as ``counts[/tmp/x]``
-    raises ``MarkupError`` and takes the whole panel down. Renderables (Syntax,
-    Text, Markdown, tables, images) already carry their own styling and pass
-    through untouched.
+    Everything shown is user content, and a bare ``str`` is parsed as console
+    markup: ``print(data[key])`` would render as ``print(data)`` and
+    ``counts[/tmp/x]`` raises ``MarkupError``, taking the panel down. Renderables
+    pass through untouched.
     """
     return Text(value) if isinstance(value, str) else value
 
@@ -82,9 +76,8 @@ def _literal(value: Any) -> Any:
 def _source_preview(source: str) -> str:
     """First line of actual code for the cell-list label.
 
-    Skips the leading ``#``-comment/annotation block (e.g. ``# @name load``) so a
-    named cell shows its code, not a redundant repeat of its name. Falls back to
-    the first non-blank line (a comment-only cell) or ``(empty)``.
+    Skips the leading ``#`` annotation block so a named cell shows its code; falls
+    back to the first non-blank line, or ``(empty)``.
     """
     lines = source.splitlines()
     for line in lines:
@@ -147,7 +140,7 @@ class DagScreen(ModalScreen[None]):
 
 
 class ImageScreen(ModalScreen[None]):
-    """Full-screen view of a cell's image output — renders larger than the panel."""
+    """Full-screen view of a cell's image output, larger than the panel."""
 
     BINDINGS = [Binding("escape,i,q", "dismiss", "Close")]
 
@@ -818,12 +811,10 @@ def _render_tests(cell: CellView):
 
 
 def _single_markdown(cell: CellView) -> str | None:
-    """Return the markdown text to render with Rich in the Output tab, else None.
+    """Return markdown to render in the Output tab, else None.
 
-    Two cases: a markdown-*language* cell renders its own source (it produces no
-    execution outputs — the Source tab shows the raw text, Output shows it
-    rendered), or any cell whose single display output is one rendered markdown
-    block. Otherwise None → the plain-text output path.
+    Either a markdown-language cell's own source, or a cell whose single display
+    output is one markdown block.
     """
     if cell.error or cell.stream_text or cell.outputs:
         return None
@@ -874,9 +865,8 @@ def _time_str(cell: CellView) -> str:
 class _TableView:
     """Live state for the interactive data viewer (the #output-table DataTable).
 
-    A windowed view over the full cached artifact: paging and sorting are
-    server-side, so each move refetches. ``columns`` mirrors the last page so
-    the sort action can name the focused column.
+    Paging and sorting are server-side, so each move refetches. ``columns`` mirrors
+    the last page so the sort action can name the focused column.
     """
 
     cell_id: str
@@ -900,9 +890,7 @@ def _is_table(output: dict[str, Any]) -> bool:
 
 
 def _single_table(cell: CellView) -> tuple[list[str], list[Any], int | None] | None:
-    """Return (columns, preview-rows, total-rows) when the cell has exactly one
-    tabular output (so it renders as a real table), else None for the text path.
-    """
+    """Return ``(columns, preview_rows, total_rows)`` for a single tabular output, else None."""
     if cell.error or cell.stream_text:
         return None
     candidates = [o for o in (*cell.display_outputs, *cell.outputs) if isinstance(o, dict)]
@@ -918,12 +906,10 @@ def _single_table(cell: CellView) -> tuple[list[str], list[Any], int | None] | N
 
 
 def _single_table_uri(cell: CellView) -> str | None:
-    """The backing ``artifact_uri`` of the cell's single tabular output, if any.
+    """The ``artifact_uri`` of the cell's single tabular output, if any.
 
-    Mirrors ``_single_table``'s candidate selection so the interactive viewer
-    pages the same output the static preview would have shown. ``None`` when
-    there's no single table or the output carries no artifact URI (e.g. an
-    in-memory preview with nothing to page).
+    Selects the same output as ``_single_table``. ``None`` when there is no single
+    table or it has no artifact URI to page.
     """
     if cell.error or cell.stream_text:
         return None
@@ -939,10 +925,9 @@ _MAX_TABLE_COLS = 8
 
 
 def _render_table(columns: list[str], preview: list[Any], total: int | None) -> Table:
-    """Build a Rich table from a serialized preview (≤20 rows × ≤8 columns).
+    """Build a Rich table from a serialized preview (at most 20 rows by 8 columns).
 
-    Values truncate with an ellipsis (one line each) rather than folding into tall
-    rows; extra rows and columns are noted in the caption.
+    Values truncate to one line; extra rows and columns are noted in the caption.
     """
     table = Table(show_header=True, header_style="bold", expand=False)
     shown = columns[:_MAX_TABLE_COLS]
@@ -1005,8 +990,7 @@ def _single_image(cell: CellView) -> str | None:
 def _image_renderable(cell: CellView) -> Any | None:
     """A terminal-image renderable for a single-image cell, or None to fall back.
 
-    ``TerminalImage`` picks the terminal's best graphics protocol (kitty / iTerm /
-    Sixel) and degrades to Unicode half-blocks when none is available.
+    ``TerminalImage`` picks kitty / iTerm / Sixel, else Unicode half-blocks.
     """
     url = _single_image(cell)
     if url is None:

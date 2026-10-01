@@ -81,13 +81,9 @@ _worker_supervisor: RemoteWorkerSupervisor | None = None
 def _require_notebook_scope(request: Request) -> None:
     """Router-level gate: the caller must hold the scope this route needs.
 
-    The same ``notebook:read`` / ``notebook:write`` / ``notebook:execute`` table
-    the WebSocket frames are checked against (``strata.notebook.scopes``), so a
-    principal that cannot run a cell over the socket cannot run it over REST
-    either. Keyed on the matched route's path template rather than a decorator
-    on each route, so a route added later is covered without anyone remembering
-    to gate it. No principal auth means no principal to check, as with
-    ``require_scope``.
+    Uses the same ``notebook:*`` table as the WebSocket frames, so REST cannot do
+    what the socket forbids. Keyed on the route's path template, so a new route is
+    covered without a per-route decorator. No principal auth means nothing to check.
     """
     from strata.auth import get_principal
     from strata.server import get_state
@@ -139,17 +135,9 @@ def shutdown_worker_supervisor() -> None:
 def get_notebook_session(notebook_id: str, request: Request) -> NotebookSession:
     """FastAPI dependency: resolve ``notebook_id`` to an open session.
 
-    Raises ``HTTPException(404)`` when the notebook is not known to the
-    session manager *or* when the caller doesn't own it. Used as
-    ``session: SessionDep`` on every route that targets a specific
-    notebook so individual handlers don't re-implement the lookup-and-
-    404 dance.
-
-    The owner gate matches the WS upgrade behavior in ``ws.py`` — a
-    leaked ``session_id`` is no longer a bearer capability for these
-    routes. Generic 404 instead of 403 so probes can't enumerate
-    notebook owners. Unowned notebooks and single-user deployments
-    (``personal_mode_user_header`` unset) pass through unchanged.
+    Raises 404 when the session is unknown or the caller does not own it (404, not
+    403, so probes cannot enumerate owners), matching the WS upgrade gate. Unowned
+    notebooks and single-user deployments pass through.
     """
     session = _session_manager.get_session(notebook_id)
     if session is None:
@@ -164,9 +152,8 @@ SessionDep = Annotated[NotebookSession, Depends(get_notebook_session)]
 def _require_personal_mode_session_api() -> None:
     """Restrict session discovery/reconnect APIs to personal mode.
 
-    These endpoints expose in-memory session IDs and notebook filesystem paths.
-    They are intended as a local UX helper for page refresh/reconnect, not as a
-    multi-user service-mode surface.
+    They expose in-memory session IDs and notebook paths: a local reconnect helper,
+    not a multi-user surface.
     """
     try:
         from strata.server import get_state
@@ -218,10 +205,8 @@ _USER_DIR_SAFE_RE = re.compile(r"[^A-Za-z0-9._@\-]")
 def _sanitize_user_dir_name(identity: str) -> str | None:
     """Map a caller identity (typically email) to a filesystem-safe dir name.
 
-    Returns ``None`` for empty inputs or values that sanitize to empty,
-    so the caller can fall back to "no per-user scoping" behavior. The
-    transform is deterministic — same identity always produces the same
-    directory — which keeps each user's notebooks pinned to one path.
+    Deterministic, so a user's notebooks stay under one path. ``None`` when the
+    input is empty or sanitizes to empty (the caller falls back to no scoping).
     """
     if not identity:
         return None
@@ -233,16 +218,9 @@ def _sanitize_user_dir_name(identity: str) -> str | None:
 def _get_user_storage_root(request: Request | None) -> Path | None:
     """Return the storage root scoped to the calling user.
 
-    * No server state → ``None`` (caller should treat as no scoping).
-    * No request, or no header configured, or no caller identity →
-      base storage root, single-user behavior preserved.
-    * Otherwise → ``<base>/<sanitized_identity>/``, auto-created on
-      first call so the rest of the request flow doesn't need to
-      worry about whether the user dir exists yet.
-
-    The auto-creation also gives us a natural hook for future
-    onboarding: seeding a template notebook into the new user's dir
-    would happen here, immediately after ``mkdir``.
+    ``None`` without server state. The base root when there is no request, no
+    header configured, or no identity. Otherwise ``<base>/<sanitized_identity>/``,
+    created on first call.
     """
     base = _get_notebook_storage_root()
     if base is None:
@@ -283,14 +261,10 @@ def _require_personal_mode_notebook_delete() -> None:
 
 
 def _user_scoping_enabled() -> bool:
-    """Return whether the server is configured to read a per-request identity header.
+    """Return whether a per-request identity header is configured.
 
-    Distinguishes single-user mode (no ``personal_mode_user_header``
-    configured — all callers act as a global user) from per-user mode
-    (header configured — every owned notebook must see a matching
-    caller). Without this distinction ``_caller_identity`` returning
-    ``None`` is ambiguous and an owned notebook would accept a request
-    that simply omits the configured header.
+    Separates single-user mode from per-user mode, where a ``None`` from
+    ``_caller_identity`` must deny access to owned notebooks rather than allow it.
     """
     try:
         from strata.server import get_state
@@ -304,18 +278,10 @@ def _user_scoping_enabled() -> bool:
 def _caller_identity(request: Request) -> str | None:
     """Resolve the calling user's identity for personal-mode scoping.
 
-    Personal-mode deployments fronted by an authenticating proxy
-    (Cloudflare Access, Pomerium, etc.) inject the user's identity in a
-    request header. ``personal_mode_user_header`` names which header to
-    read; when it's unset the deployment behaves as single-user and this
-    function returns ``None`` for every request — no scoping kicks in.
-
-    Returns ``None`` both when the header isn't configured *and* when it
-    is configured but missing from a particular request. Callers that
-    care about that distinction (notably ``_require_owner``) must
-    consult ``_user_scoping_enabled`` separately — treating a missing
-    header as "no identity" would let any caller bypass owner gating on
-    an owned notebook by simply omitting the configured header.
+    Read from the header named by ``personal_mode_user_header`` (set by an
+    authenticating proxy). ``None`` both when the header is not configured and when
+    the request lacks it; owner checks must also consult ``_user_scoping_enabled``,
+    or omitting the header would bypass them.
     """
     try:
         from strata.server import get_state
@@ -338,18 +304,10 @@ def _caller_identity(request: Request) -> str | None:
 def _require_owner(notebook_owner: str | None, caller: str | None) -> None:
     """Reject the request if a non-owner is touching an owned notebook.
 
-    - Unowned notebooks (``notebook_owner is None``) remain accessible to any
-      caller — they're either legacy notebooks created before scoping was
-      enabled, or notebooks created by services that don't carry a header.
-    - When ``personal_mode_user_header`` is unset, scoping is off and every
-      notebook acts as if unowned. Single-user behavior on local
-      deployments is preserved.
-    - When ``personal_mode_user_header`` *is* configured and the request
-      didn't carry it, deny — otherwise a leaked ``session_id`` could be
-      used to drive an owned notebook by simply omitting the identity
-      header. The gate must close on both "wrong user" and "no user".
-    - When the notebook is owned and the caller's identity differs, deny.
-      Use a generic "not found" body so probes can't enumerate owners.
+    Unowned notebooks, and every notebook when ``personal_mode_user_header`` is
+    unset, are open to any caller. With the header configured, a request that omits
+    it is denied, so a leaked ``session_id`` cannot drive an owned notebook. Denials
+    are a generic 404 so probes cannot enumerate owners.
     """
     if notebook_owner is None:
         return
@@ -384,10 +342,7 @@ def _timed_json_response(
 
 
 def validate_package_name(package: str) -> str:
-    """Validate and sanitize a package specifier.
-
-    Rejects shell metacharacters. Used by both REST and WS handlers.
-    """
+    """Validate and sanitize a package specifier; rejects shell metacharacters."""
     if len(package) > 200:
         raise ValueError("Package specifier too long")
     if any(c in package for c in ";&|`$(){}!<>\"'\n\r\t"):
@@ -402,11 +357,9 @@ def _validate_notebook_path(
 ) -> Path:
     """Validate that a notebook path is safe and confined to the storage root.
 
-    When ``request`` is provided and per-user scoping is configured, the
-    path must lie inside the **caller's** subdir, not just the base
-    storage root. This is the security-critical boundary that prevents
-    user A from passing user B's path in ``parent_path`` / ``notebook_path``
-    fields and reaching B's notebooks.
+    With ``request`` and per-user scoping, the path must lie inside the caller's
+    subdir. This is the security boundary that stops one user passing another
+    user's path in ``parent_path`` / ``notebook_path``.
     """
     path = Path(user_path)
     if ".." in path.parts:
@@ -484,9 +437,8 @@ def _serialize_environment_change(session: NotebookSession, staleness_map: dict)
 def _serialize_notebook_runtime_config(request: Request | None = None) -> dict:
     """Serialize frontend-relevant notebook runtime defaults.
 
-    When ``request`` is supplied and per-user scoping is configured,
-    ``default_parent_path`` is the caller's subdir so the frontend's
-    "Create notebook" flow lands the new notebook under the right user.
+    With ``request`` and per-user scoping, ``default_parent_path`` is the caller's
+    subdir, so new notebooks land under the right user.
     """
     deployment_mode = "service"
     default_parent_path = Path.home() / ".strata" / "notebooks"
@@ -543,13 +495,9 @@ def _serialize_dependency_info_list(dependencies: list) -> list[dict]:
 def _serialize_environment_payload(session: NotebookSession) -> dict:
     """Serialize the current environment plus direct and resolved dependencies.
 
-    ``r_environment`` is always present — even on Python-only
-    notebooks it serialises to a stable shape (``has_lockfile: false``,
-    ``sync_state: "absent"``). The frontend store's
-    ``syncEnvironmentPayloadFromBackend`` relies on this field being
-    present in *every* env-related payload (GET /environment, env
-    job responses, sync/add/remove dependency updates) so R UI
-    state can refresh without a full notebook reopen.
+    ``r_environment`` is always present (Python-only notebooks get
+    ``has_lockfile: false``, ``sync_state: "absent"``): the frontend refreshes R UI
+    state from every env-related payload.
     """
     return {
         "environment": session.serialize_environment_state(),
@@ -688,12 +636,9 @@ class MountConfigRequest(BaseModel):
 class ConnectionConfigRequest(BaseModel):
     """Request to replace the full ``[connections.<name>]`` set.
 
-    The list is the canonical state — sending an empty list deletes
-    every connection. The route handler scrubs auth literals at the
-    serializer boundary, same as a hand-edited notebook.toml save,
-    so a UI form that includes a literal secret keeps the key as a
-    placeholder on disk while the running session keeps the value
-    in memory until reload.
+    The list is canonical: an empty list deletes every connection. Auth literals
+    are scrubbed on write (placeholders on disk); the running session keeps the
+    values in memory until reload.
     """
 
     connections: list[ConnectionSpec] = Field(default_factory=list)
@@ -741,9 +686,7 @@ class TimeoutConfigRequest(BaseModel):
 class VariantActiveRequest(BaseModel):
     """Request to switch the active variant and/or the mode of a group.
 
-    Both fields are optional so a caller can change just the mode
-    (``{"mode": "sweep"}``) or just the active variant. At least one must be
-    present.
+    Both fields are optional; at least one must be present.
     """
 
     active: str | None = Field(None, pattern=r"^([a-zA-Z_][a-zA-Z0-9_]*)?$")
@@ -864,8 +807,7 @@ class PreviewEnvironmentYamlRequest(BaseModel):
 
 
 class PromoteArtifactRequest(BaseModel):
-    """Send a cell's result to the team store, under a name or, without one,
-    only its chain (``promote_artifact``)."""
+    """Send a cell's result to the team store, under a name or only its chain."""
 
     name: str | None = Field(default=None, min_length=1, max_length=512)
     alias: str | None = Field(default=None, max_length=128)
@@ -879,15 +821,9 @@ class PromoteArtifactRequest(BaseModel):
 
 @router.post("/open")
 async def open_notebook(req: OpenNotebookRequest, request: Request) -> JSONResponse:
-    """Open a notebook directory.
+    """Open a notebook directory and return its state, session ID and DAG.
 
-    Args:
-        req: OpenNotebookRequest with path
-        request: FastAPI request — used to resolve the calling identity
-            for per-user path validation when scoping is enabled.
-
-    Returns:
-        Notebook state, session ID, and DAG as JSON
+    With per-user scoping, the path must lie in the caller's storage subdir.
     """
     timing = NotebookTimingRecorder()
 
@@ -935,15 +871,9 @@ async def open_notebook(req: OpenNotebookRequest, request: Request) -> JSONRespo
 
 @router.post("/create")
 async def create_new_notebook(req: CreateNotebookRequest, request: Request) -> JSONResponse:
-    """Create a new notebook.
+    """Create a new notebook and return its state.
 
-    Args:
-        req: CreateNotebookRequest with parent_path and name
-        request: FastAPI request — used to resolve the calling identity when
-            personal-mode user-scoping is enabled.
-
-    Returns:
-        Notebook state as JSON
+    With per-user scoping, ``parent_path`` must lie in the caller's storage subdir.
     """
     timing = NotebookTimingRecorder()
     try:
@@ -1039,10 +969,8 @@ def _resolve_import_target(
 ) -> tuple[Path, str, Path]:
     """Where an imported notebook lands: ``(parent, name, directory)``.
 
-    Shared by every route that turns an upload into a notebook directory. The
-    name flows into a filesystem path, so it passes the same traversal checks
-    whichever kind of file it came from — two copies of these checks is two
-    chances for one to miss an escape the other catches.
+    Shared by every import route so the name, which becomes a path, passes one set
+    of traversal checks whatever the upload format.
 
     Raises:
         HTTPException: 400 for an unconfigured root or a name that escapes it,
@@ -1116,13 +1044,10 @@ async def import_jupyter_notebook(
         ),
     ),
 ) -> JSONResponse:
-    """Convert an uploaded ``.ipynb`` into a Strata notebook directory.
+    """Convert an uploaded ``.ipynb`` into a Strata notebook and open it.
 
-    Wraps :func:`strata.notebook.jupyter_import.import_notebook` and
-    opens a session on the result so the frontend can navigate to it
-    immediately. The import report (sources, magic translation,
-    captured deps, warnings) is returned inline so the caller doesn't
-    need a second round-trip to fetch it.
+    The import report (sources, magic translation, captured deps, warnings) is
+    returned inline.
     """
     from strata.notebook.jupyter_import import import_notebook
 
@@ -1555,9 +1480,7 @@ _DISCOVER_SKIP_DIRS = frozenset(
 def _read_notebook_metadata(notebook_toml_path: Path) -> dict[str, Any] | None:
     """Cheaply read a notebook.toml's summary fields (name, id, updated_at, owner).
 
-    Returns None if the file is unreadable; intentionally does not parse
-    cells — discovery should stay fast even on a directory with hundreds
-    of notebooks.
+    Returns None if unreadable. Skips cells so discovery stays fast on large trees.
     """
     try:
         raw = tomllib.loads(notebook_toml_path.read_text(encoding="utf-8"))
@@ -1578,12 +1501,11 @@ def _read_notebook_metadata(notebook_toml_path: Path) -> dict[str, Any] | None:
 def _discover_notebooks(
     root: Path, *, max_depth: int = 4, max_results: int = 500
 ) -> list[dict[str, Any]]:
-    """Walk ``root`` looking for directories containing ``notebook.toml``.
+    """Walk ``root`` for directories containing ``notebook.toml``.
 
-    Stops descending into any matched directory (notebooks don't nest) or
-    any name in ``_DISCOVER_SKIP_DIRS``. Bounded by ``max_depth`` and
-    ``max_results`` so a misconfigured storage root can't stall the
-    server scanning a huge tree.
+    Does not descend into a match (notebooks don't nest) or ``_DISCOVER_SKIP_DIRS``.
+    ``max_depth`` and ``max_results`` keep a misconfigured root from stalling the
+    server.
     """
     results: list[dict[str, Any]] = []
     if not root.exists() or not root.is_dir():
@@ -1626,18 +1548,11 @@ def _discover_notebooks(
 
 @router.get("/discover")
 async def discover_notebooks(request: Request) -> dict:
-    """List notebook directories found under the caller's storage root.
+    """List notebook directories under the caller's storage root, newest first.
 
-    Used by the "Open existing" UI so users pick from a list instead of
-    typing a filesystem path. Returns ``{"root", "notebooks"}`` where
-    ``root`` is the scan root (for display) and ``notebooks`` is a
-    ``[{path, name, notebook_id, updated_at, owner}]`` list sorted newest first.
-
-    When ``personal_mode_user_header`` is configured the scan root is the
-    caller's per-user subdir, so users physically cannot see each other's
-    notebooks. The owner-field filter is kept as defense-in-depth in case
-    a notebook ever lands outside the user dir (it shouldn't — the path
-    validator rejects that case at the boundary).
+    Returns ``{"root", "notebooks"}``; each notebook is
+    ``{path, name, notebook_id, updated_at, owner}``. With per-user scoping the scan
+    root is the caller's subdir, and notebooks owned by others are filtered out too.
     """
     root = _get_user_storage_root(request)
     if root is None:
@@ -1653,10 +1568,7 @@ async def discover_notebooks(request: Request) -> dict:
 class ValidateRecentsRequest(BaseModel):
     """Request body for the recents-validation endpoint.
 
-    The frontend keeps the "recent notebooks" list in browser
-    localStorage, which survives notebook deletion. Calling this on
-    home-page load lets the client drop stale entries pointing at
-    directories that no longer exist on disk.
+    The frontend's recents list lives in localStorage and outlives deleted notebooks.
     """
 
     paths: list[str] = Field(
@@ -1670,11 +1582,8 @@ class ValidateRecentsRequest(BaseModel):
 async def validate_recent_notebooks(req: ValidateRecentsRequest) -> dict:
     """Return the subset of supplied paths that still contain a notebook.
 
-    Pure existence check — does ``<path>/notebook.toml`` exist as a
-    regular file? Ownership / scope / storage-root membership are
-    deliberately out of scope here: the localStorage recents list is
-    already per-user-per-browser, and any actual open / delete the
-    client follows up with runs its own ACL pass at that boundary.
+    Existence check only (``<path>/notebook.toml`` is a file). No ownership or root
+    check: the list is per-browser, and any follow-up open or delete runs its own.
     """
     valid: list[str] = []
     for raw_path in req.paths:
@@ -1697,12 +1606,9 @@ class DeleteNotebookByPathRequest(BaseModel):
 
 @router.post("/delete-by-path")
 async def delete_notebook_by_path(req: DeleteNotebookByPathRequest, request: Request) -> dict:
-    """Delete a notebook directory identified by path.
+    """Delete a notebook directory by path, without an open session.
 
-    Unlike ``DELETE /{notebook_id}`` this does not require the notebook to
-    be open in a session — it's for deleting notebooks from the home page
-    list. If a session happens to be open against the same directory it
-    is closed first so the subsequent ``rmtree`` is safe.
+    An open session on the same directory is closed first.
     """
     _require_personal_mode_notebook_delete()
 
@@ -1758,29 +1664,10 @@ async def get_environment_status(notebook_id: str, session: SessionDep) -> dict:
 async def get_r_packages(notebook_id: str, session: SessionDep) -> dict:
     """Return the R packages installed in the notebook's renv project library.
 
-    Separate endpoint from ``GET /environment`` so the synchronous
-    Rscript spawn (~1-2s) doesn't block every state sync /
-    dependency mutation / env refresh response. The env panel
-    calls this on mount + manual refresh; nothing else hits it.
-
-    Response shape:
-
-    .. code-block:: json
-
-        {
-          "packages": [{"name": "arrow", "version": "14.0.0"}, ...],
-          "packages_status": "ok",
-          "packages_error": null
-        }
-
-    ``packages_status`` values:
-    - ``ok``                — listing succeeded.
-    - ``absent``            — notebook has no ``renv.lock``.
-    - ``rscript_missing``   — Rscript not on PATH; install R.
-    - ``renv_not_active``   — Rscript ran but renv hasn't activated
-                              (pre-init notebooks).
-    - ``failed``            — subprocess error; ``packages_error``
-                              has a short message.
+    Separate from ``GET /environment`` because the Rscript call takes ~1-2s.
+    Returns ``{"packages": [{name, version}], "packages_status", "packages_error"}``;
+    ``packages_status`` is ``ok``, ``absent`` (no ``renv.lock``), ``rscript_missing``,
+    ``renv_not_active``, or ``failed`` (see ``packages_error``).
     """
     r_state = session.serialize_r_environment_state(include_packages=True)
     return {
@@ -2049,14 +1936,8 @@ async def preview_environment_yaml(
 async def list_sessions(request: Request) -> dict:
     """List active notebook sessions visible to the calling user.
 
-    With per-user scoping enabled, only sessions whose notebook lives
-    under the caller's storage subdir are returned — open sessions for
-    other users stay invisible. Without scoping, all sessions are
-    listed (single-user behavior).
-
-    Returns:
-        Dictionary with a ``sessions`` array, each entry containing
-        session_id, notebook name, filesystem path, and timestamps.
+    With per-user scoping, only sessions under the caller's storage subdir are
+    returned. Each entry has session_id, name, path and timestamps.
     """
     _require_personal_mode_session_api()
     user_root = _get_user_storage_root(request)
@@ -2095,18 +1976,9 @@ async def list_sessions(request: Request) -> dict:
 
 @router.get("/sessions/{session_id}")
 async def get_session(session_id: str, request: Request) -> JSONResponse:
-    """Get full state for an existing session.
+    """Get full state for an existing session, to reconnect after a page refresh.
 
-    This allows the frontend to reconnect to a session after a page
-    refresh without re-opening the notebook from disk.
-
-    Args:
-        session_id: UUID session identifier
-        request: FastAPI request — used for per-user runtime config.
-
-    Returns:
-        Notebook state, session ID, and DAG as JSON (same shape as
-        the ``open`` endpoint response).
+    Same shape as the ``open`` response.
     """
     timing = NotebookTimingRecorder()
     _require_personal_mode_session_api()
@@ -2136,10 +2008,8 @@ async def get_session(session_id: str, request: Request) -> JSONResponse:
 async def _broadcast_state(notebook_id: str, session: Any) -> None:
     """Push a full ``notebook_state`` to WS spectators after a REST mutation.
 
-    Mirrors a structural edit (add / edit / delete / reorder) to every watcher
-    (the TUI) so an agent driving the notebook over the CLI / MCP shows up live,
-    not just on the next resync poll. The driver gets the same frame Vue does on
-    its own REST mutations — idempotent and authoritative.
+    So an agent editing over the CLI / MCP shows up live in the TUI, not only on
+    the next resync poll.
     """
     from strata.notebook.ws import broadcast_notebook_sync
 
@@ -2175,14 +2045,7 @@ async def reorder_notebook_cells(
 
 @router.get("/{notebook_id}/cells")
 async def list_cells(notebook_id: str, session: SessionDep) -> dict:
-    """List cells in a notebook.
-
-    Args:
-        notebook_id: Notebook/session ID
-
-    Returns:
-        List of cells with source
-    """
+    """List cells in a notebook, with source."""
 
     return {
         "notebook_id": session.notebook_state.id,
@@ -2194,16 +2057,7 @@ async def list_cells(notebook_id: str, session: SessionDep) -> dict:
 async def update_cell_source(
     notebook_id: str, session: SessionDep, cell_id: str, req: UpdateCellSourceRequest
 ) -> dict:
-    """Update cell source code.
-
-    Args:
-        notebook_id: Notebook/session ID
-        cell_id: Cell ID
-        req: UpdateCellSourceRequest with source
-
-    Returns:
-        Updated cell state and DAG
-    """
+    """Update cell source code; returns the updated cell state and DAG."""
 
     from strata.notebook.presence import lock_window_seconds
     from strata.notebook.ws import broadcast_presence
@@ -2293,11 +2147,7 @@ async def update_notebook_mounts_endpoint(
 
 @router.get("/{notebook_id}/connections")
 async def list_notebook_connections(notebook_id: str, session: SessionDep) -> dict:
-    """List the notebook's declared connections.
-
-    Returns the same shape used by ``serialize_notebook_state`` so the
-    UI can stay in sync with what the parser already exposes.
-    """
+    """List the notebook's declared connections, shaped as in ``serialize_notebook_state``."""
     return {
         "connections": [conn.model_dump() for conn in session.notebook_state.connections],
     }
@@ -2311,11 +2161,9 @@ async def update_notebook_connections_endpoint(
 ) -> dict:
     """Replace the notebook's ``[connections.<name>]`` blocks.
 
-    The whole list is canonical — sending ``connections=[]`` deletes
-    every connection. Auth literals are scrubbed at write time; the
-    response reflects the on-disk state after the round-trip so the
-    UI immediately sees blanked secrets and can prompt the user to
-    move them to ``${VAR}`` indirections.
+    The list is canonical: ``connections=[]`` deletes every connection. Auth
+    literals are scrubbed on write, and the response reflects disk, so the UI sees
+    the blanked secrets.
     """
 
     seen: set[str] = set()
@@ -2358,14 +2206,9 @@ async def update_notebook_connections_endpoint(
 
 @router.get("/{notebook_id}/connections/{name}/schema")
 async def get_connection_schema(notebook_id: str, session: SessionDep, name: str) -> dict:
-    """Enumerate tables (and columns) on a connection.
+    """Enumerate tables (and columns) on a connection, opened read-only.
 
-    Powers the schema-discovery sidebar so users can see what's
-    available before writing SQL. Opens the connection in
-    enforced read-only mode, runs the adapter's ``list_schema``,
-    closes. Errors surface verbatim so a missing-driver / auth
-    failure / unreachable host is visible to the user instead of
-    a confusing 500.
+    Open and enumeration failures return 502 with the driver's message.
     """
     from strata.notebook.sql.cell_executor import (
         _resolve_runtime_spec,
@@ -2596,17 +2439,10 @@ async def update_notebook_python_version(
 ) -> JSONResponse:
     """Change the notebook's requested Python minor.
 
-    Atomically rewrites ``pyproject.toml``'s ``requires-python``,
-    wipes ``.venv/``, and dispatches a background ``uv sync`` job
-    against the new interpreter. Rolls back to the previous version
-    if the new-minor sync fails (eg. a declared dep doesn't support
-    it). Returns 202 immediately with the job started — the
-    frontend follows the existing ``environment_job_progress`` WS
-    stream for live output.
-
-    No-op short circuit: if the requested version equals the
-    current ``requires-python`` minor, returns 200 without touching
-    disk.
+    Rewrites ``requires-python``, wipes ``.venv/`` and starts a background
+    ``uv sync`` (rolled back if it fails); returns 202, with progress on the
+    ``environment_job_progress`` WS stream. Returns 200 without touching disk when
+    the version is unchanged.
     """
 
     runtime_config = _serialize_notebook_runtime_config(request)
@@ -2687,10 +2523,8 @@ async def add_variant_endpoint(
 ) -> dict:
     """Add a sibling variant to an existing group.
 
-    Clones the active variant's body and rewrites the ``# @variant``
-    annotation to a fresh auto-generated name. The new variant becomes
-    active on creation so the user can immediately edit it; renaming
-    happens by editing the annotation line in source.
+    Clones the active variant's body under a fresh ``# @variant`` name and makes it
+    active. Rename by editing the annotation.
     """
 
     try:
@@ -2723,14 +2557,10 @@ async def set_variant_active_endpoint(
     group_id: str,
     req: VariantActiveRequest,
 ) -> dict:
-    """Switch the active variant for a group.
+    """Switch the active variant for a group (the pointer in notebook.toml).
 
-    The group itself must be declared by ``# @variant`` annotations in
-    cell source — this endpoint only updates the persisted active-variant
-    pointer in notebook.toml. Picking a name that no cell provides is
-    accepted (write succeeds), but ``annotation_validation`` will surface
-    a ``variant_active_unknown`` diagnostic and the DAG falls back to
-    the first variant in source order.
+    An unknown name is accepted: validation reports ``variant_active_unknown`` and
+    the DAG falls back to the first variant in source order.
     """
 
     if req.mode is None and not req.active:
@@ -2809,9 +2639,8 @@ def _serialize_env_response(session) -> dict:
 class SecretManagerConfigRequest(BaseModel):
     """Payload for the secret-manager config PUT endpoint.
 
-    Field set matches exactly what update_notebook_secret_manager accepts —
-    anything else gets dropped on the writer side so arbitrary runtime
-    state can't sneak into the committed TOML via this path.
+    Fields match what ``update_notebook_secret_manager`` accepts, so arbitrary
+    runtime state cannot reach the committed TOML.
     """
 
     provider: str | None = None
@@ -2829,9 +2658,7 @@ async def update_notebook_secret_manager_config(
 ) -> dict:
     """Persist the [secret_manager] block to notebook.toml and refetch.
 
-    Empty payload (all fields None / empty) removes the block —
-    "disconnect from secret manager". A refresh is triggered after the
-    write so the Runtime panel immediately reflects the new values.
+    An empty payload removes the block (disconnects the secret manager).
     """
     from strata.notebook.writer import update_notebook_secret_manager
 
@@ -2863,10 +2690,8 @@ async def update_notebook_secret_manager_config(
 async def refresh_notebook_secret_manager(notebook_id: str, session: SessionDep) -> dict:
     """Re-fetch secrets from the configured manager and merge into env.
 
-    Returns the same shape as the env endpoint so the frontend can
-    swap the panel state in place. Never 500s on fetch error — the
-    error message comes back in ``env_fetch_error`` so the UI can
-    display it next to the Refresh button.
+    Same shape as the env endpoint. Never 500s on a fetch error; the message is in
+    ``env_fetch_error``.
     """
     try:
         session.refresh_secrets()
@@ -2891,15 +2716,7 @@ async def refresh_notebook_secret_manager(notebook_id: str, session: SessionDep)
 
 @router.post("/{notebook_id}/cells")
 async def add_cell(notebook_id: str, session: SessionDep, req: AddCellRequest) -> dict:
-    """Add a new cell to the notebook.
-
-    Args:
-        notebook_id: Notebook/session ID
-        req: AddCellRequest with optional after_cell_id
-
-    Returns:
-        New cell state
-    """
+    """Add a new cell to the notebook and return its state."""
 
     # Before the try, so the 400 isn't masked as a 500 by the catch-all
     # (as in LocalNotebookOps.add_cell).
@@ -2944,15 +2761,7 @@ async def add_cell(notebook_id: str, session: SessionDep, req: AddCellRequest) -
 
 @router.delete("/{notebook_id}/cells/{cell_id}")
 async def delete_cell(notebook_id: str, session: SessionDep, cell_id: str) -> dict:
-    """Delete a cell from the notebook.
-
-    Args:
-        notebook_id: Notebook/session ID
-        cell_id: Cell ID to delete
-
-    Returns:
-        Success message
-    """
+    """Delete a cell from the notebook."""
 
     try:
         if not any(c.id == cell_id for c in session.notebook_state.cells):
@@ -2997,15 +2806,7 @@ async def delete_cell(notebook_id: str, session: SessionDep, cell_id: str) -> di
 async def rename_notebook_endpoint(
     notebook_id: str, session: SessionDep, req: RenameNotebookRequest
 ) -> dict:
-    """Rename the notebook.
-
-    Args:
-        notebook_id: Notebook/session ID
-        req: RenameNotebookRequest with name
-
-    Returns:
-        Updated notebook state
-    """
+    """Rename the notebook and return its updated state."""
 
     try:
         rename_notebook(session.path, req.name)
@@ -3033,29 +2834,18 @@ async def rename_notebook_endpoint(
 
 @router.get("/{notebook_id}/dag")
 async def get_notebook_dag(notebook_id: str, session: SessionDep) -> dict:
-    """Get the DAG for a notebook.
-
-    Args:
-        notebook_id: Notebook/session ID
-
-    Returns:
-        DAG edges, topological order, leaves, roots, and per-cell metadata
-    """
+    """Get the notebook's DAG: edges, topological order, leaves, roots, per-cell metadata."""
 
     return _format_dag(session)
 
 
 @router.get("/{notebook_id}/artifacts")
 async def list_notebook_published_artifacts(notebook_id: str, session: SessionDep) -> dict:
-    """Per cell, the registry artifacts the cell published via the ambient
-    ``strata`` client (``put``/``materialize`` with ``name=``, stamped
-    ``nb_cell=<id>``). Powers the per-cell registry strip.
+    """Per cell, the registry artifacts it published via the ambient ``strata`` client.
 
-    Answered by whichever store the cells write to. With
-    ``notebook_remote_store_url`` set that is the team's store, and reading the
-    local one here would report an empty strip on exactly the deployment where
-    a cell's ``put(name=...)`` is most likely to have gone somewhere worth
-    showing.
+    These are ``put``/``materialize`` calls with ``name=``, stamped ``nb_cell=<id>``.
+    Read from whichever store the cells write to: the team store when
+    ``notebook_remote_store_url`` is set.
     """
     from strata.api.remote_registry import forward, remote_registry
     from strata.services.registry import registry_service
@@ -3095,15 +2885,10 @@ async def promote_notebook_artifact(
 ) -> dict:
     """Send one of this notebook's results to the team store, under a name.
 
-    A cell's outputs live in the notebook's own ``.strata/artifacts``, which
-    nobody else can read. Promoting copies the artifact and everything behind
-    it into the store the team shares, and names it there — so a colleague can
-    ask for it by name, and so their cells get a team-cache hit on every step
-    behind it rather than recomputing the chain.
-
-    This is the deliberate half of ``notebook_team_cache_publish``: under
-    ``promoted`` nothing reaches the team on its own, and this route is how
-    something does.
+    Copies the artifact and its whole chain from the notebook's private store into
+    the shared one, so colleagues can fetch it by name and get team-cache hits on
+    every step behind it. Under the ``promoted`` publish policy, this is the only
+    way a result reaches the team.
     """
     from strata.artifact_transfer import RemoteStore, promote_artifact
     from strata.server import get_state
@@ -3173,10 +2958,8 @@ async def get_cell_iterations(
 ) -> dict:
     """List stored iteration artifacts for a loop cell.
 
-    The carry variable is read from the cell's ``@loop`` annotation when
-    the ``variable`` query parameter is not supplied. Non-loop cells and
-    loops with no completed iterations return an empty list — the
-    endpoint is a safe poll target for the inspect panel.
+    ``variable`` defaults to the ``@loop`` carry. Non-loop cells and loops with no
+    completed iterations return an empty list.
     """
     from strata.notebook.annotations import parse_annotations
 
@@ -3224,8 +3007,7 @@ async def get_cell_iterations(
 def _load_cell_data_blob(session, cell_id: str, artifact_uri: str) -> bytes:
     """Resolve ``strata://artifact/{id}@v={version}`` to its blob for a cell.
 
-    Shared by the data page / summary / export endpoints. Raises
-    ``HTTPException`` for an unknown cell, a malformed URI, or a missing
+    Raises ``HTTPException`` for an unknown cell, a malformed URI, or a missing
     artifact.
     """
     cell = session.notebook_state.get_cell(cell_id)
@@ -3271,15 +3053,11 @@ async def get_cell_data_page(
     search: str | None = None,
     filters: str | None = None,
 ) -> dict:
-    """Return a paginated window of a cell output's cached DataFrame, with
-    optional global search, per-column filters, and sort.
+    """Return a page of a cell output's cached DataFrame, with search, filters and sort.
 
-    The inline cell preview is capped at 20 rows; this endpoint reads the
-    full Arrow artifact named by ``artifact_uri`` (the ``strata://artifact/
-    {id}@v={version}`` URI the frontend already carries on the display
-    output). ``filters`` is a JSON array of ``{col, op, value, value2}``.
-    Only table-shaped Arrow outputs are pageable — for anything else
-    ``pageable`` is ``False`` and the frontend keeps the inline preview.
+    Reads the full Arrow artifact at ``artifact_uri`` (the inline preview stops at
+    20 rows). ``filters`` is a JSON array of ``{col, op, value, value2}``. Non-table
+    outputs return ``pageable: False``.
     """
     from strata.notebook.serializer import read_table_page
 
@@ -3329,8 +3107,7 @@ async def get_cell_data_summary(
     cell_id: str,
     artifact_uri: str,
 ) -> dict:
-    """Per-column summary (dtype, nulls, distinct, min/max) of a cell's
-    cached DataFrame, for the viewer's column headers."""
+    """Per-column summary (dtype, nulls, distinct, min/max) of a cell's cached DataFrame."""
     from strata.notebook.serializer import read_table_summary
 
     blob = _load_cell_data_blob(session, cell_id, artifact_uri)
@@ -3401,12 +3178,10 @@ async def get_cell_output_blob(
     cell_id: str,
     index: int,
 ):
-    """Return one display output's stored bytes, as itself.
+    """Return one display output's stored bytes under its own content type.
 
-    The curated cell view describes an image but cannot show it, and the
-    hydrated frontend payload carries a base64 data URL because that is what a
-    browser renders. A client that wants a file wants the bytes, so this
-    serves the blob under its own content type and nothing else.
+    The frontend payload carries a base64 data URL; this serves the raw file for
+    clients that want one.
     """
     from fastapi import Response
 
@@ -3433,11 +3208,7 @@ async def get_cell_output_blob(
 
 @router.get("/{notebook_id}/dependencies")
 async def get_dependencies(notebook_id: str, session: SessionDep) -> dict:
-    """List current dependencies for a notebook.
-
-    Returns:
-        List of dependencies from pyproject.toml
-    """
+    """List current dependencies from the notebook's pyproject.toml."""
 
     return _serialize_environment_payload(session)
 
@@ -3529,14 +3300,7 @@ async def remove_notebook_dependency(
 
 
 def _format_dag(session) -> dict:
-    """Format the DAG for API response.
-
-    Args:
-        session: NotebookSession
-
-    Returns:
-        DAG data as dict
-    """
+    """Format the DAG for an API response."""
     from strata.notebook.dag import producer_cell_label
 
     if not session.dag:
@@ -3572,18 +3336,11 @@ def _format_dag(session) -> dict:
 async def execute_cell(
     notebook_id: str, session: SessionDep, cell_id: str, mode: str = "normal"
 ) -> dict:
-    """Execute a cell and return results.
+    """Execute a cell and return its outputs and stdout/stderr.
 
-    Args:
-        notebook_id: Notebook/session ID
-        cell_id: Cell ID to execute
-        mode: ``normal`` (cache on, cascade stale upstreams), ``rerun`` (bypass
-            the target's cache, still cascade), or ``force`` (run against
-            existing upstream artifacts). Mirrors the three WS run modes so the
-            CLI / MCP remote backend has run / rerun / force parity with local.
-
-    Returns:
-        Execution result with outputs and stdout/stderr
+    ``mode`` mirrors the WS run modes: ``normal`` (cache on, cascade stale
+    upstreams), ``rerun`` (bypass the target's cache, still cascade), or ``force``
+    (run against existing upstream artifacts).
     """
 
     if mode not in ("normal", "rerun", "force"):
@@ -3633,10 +3390,8 @@ async def set_cell_tests_endpoint(
 ) -> dict:
     """Set a Python cell's unit-test source (the committed ``cells/{id}.test.py``).
 
-    The authoring twin of ``POST .../tests`` (which *runs* them): writes the test
-    file, updates the in-memory session so a subsequent run sees it, and mirrors
-    the change to WS spectators. Lets the CLI / MCP author tests on a live session
-    — previously tests could only be run, not set, over the wire.
+    Writes the file, updates the in-memory session so the next run sees it, and
+    mirrors the change to WS spectators.
     """
     cell = session.notebook_state.get_cell(cell_id)
     if not cell:
@@ -3659,13 +3414,10 @@ async def set_cell_tests_endpoint(
 
 @router.post("/{notebook_id}/cells/{cell_id}/tests")
 async def run_cell_tests_endpoint(notebook_id: str, session: SessionDep, cell_id: str) -> dict:
-    """Run a Python cell's unit tests and return the result.
+    """Run a Python cell's unit tests and return the per-test outcomes.
 
-    The REST twin of the WS ``cell_run_tests`` message: runs the committed
-    ``cells/{cell_id}.test.py`` via pytest against a re-executed copy of the
-    cell, persists the result (so a client watching over WS sees it on its next
-    state sync), and returns the per-test outcomes. Used by the CLI's remote
-    backend and the MCP server, which don't drive WebSockets.
+    REST twin of the WS ``cell_run_tests`` message: pytest against a re-executed
+    copy of the cell; the result is persisted so WS clients see it on next sync.
     """
     cell = session.notebook_state.get_cell(cell_id)
     if not cell:
@@ -3722,11 +3474,9 @@ def _render_notebook_export(
     include_inactive_variants: bool,
     app_view: bool = False,
 ):
-    """Render a notebook to a single shareable markdown/HTML file.
+    """Render a notebook to one markdown/HTML file, as ``strata export`` does.
 
-    Mirrors ``strata export`` (the CLI). Response is the rendered body
-    plus a ``Content-Disposition: attachment`` header so the browser
-    triggers a download rather than displaying inline.
+    Served as ``Content-Disposition: attachment`` so the browser downloads it.
     """
     from fastapi.responses import Response
 
@@ -3771,34 +3521,19 @@ async def export_notebook(
     include: str = "selected",
     cells: str | None = None,
 ):
-    """Export the notebook in the requested format.
+    """Export the notebook as ``zip`` (default), ``snapshot``, ``markdown`` or ``html``.
 
-    Default (``fmt=zip``): a reproducible bundle containing
-    ``notebook.toml``, ``pyproject.toml``, ``uv.lock`` (if present),
-    every cell source file, and ``provenance.json`` (DAG + per-cell
-    provenance hashes). This is the original endpoint behavior — kept
-    as the default so callers and tooling that didn't specify a format
-    continue to receive a ZIP.
+    ``zip``: notebook.toml, pyproject.toml, uv.lock (if present), cell sources and
+    ``provenance.json`` (DAG and per-cell provenance hashes).
 
-    ``fmt=snapshot``: the ZIP's members plus ``outputs/<cell id>/`` (each
-    display output as a file, and ``console.json``), the per-cell provenance
-    and timings from ``.strata/runtime.json``, an ``artifacts.json`` naming
-    every ready cell's artifacts with their digests, and ``artifacts/<id>@v=<n>``
-    for the bytes the caller includes. ``include`` chooses: ``all`` (every
-    artifact — the form a move between servers uses), ``selected`` (the cells
-    named in ``cells``, the rest by reference — the form a review snapshot
-    uses), or ``none``.
+    ``snapshot``: the zip plus ``outputs/<cell id>/`` (display outputs and
+    ``console.json``), per-cell provenance and timings, ``artifacts.json`` naming
+    every ready cell's artifacts with digests, and ``artifacts/<id>@v=<n>`` for the
+    bytes chosen by ``include``: ``all`` (a move between servers), ``selected``
+    (cells named in ``cells``, the rest by reference), or ``none``.
 
-    ``fmt=markdown`` and ``fmt=html`` return a rendered single-file
-    export of the notebook produced by
-    :func:`strata.notebook.export.export_notebook`. Prompt cell
-    responses are intentionally excluded; see
-    ``docs/internal/design-notebook-export.md``.
-
-    Query parameters:
-        fmt: one of ``zip`` (default), ``markdown``, ``html``.
-        include_inactive_variants: only relevant for markdown/html
-            renderings; stacks all variants of every group when true.
+    ``markdown`` / ``html``: a rendered single file without prompt cell responses;
+    ``include_inactive_variants`` stacks every variant of each group.
     """
     if fmt not in {"zip", "markdown", "html", "snapshot"}:
         raise HTTPException(

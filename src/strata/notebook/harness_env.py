@@ -1,23 +1,10 @@
-"""What a cell subprocess is allowed to see of the server's environment.
+"""What a cell subprocess may see of the server's environment.
 
-A cell is arbitrary Python, and it has always been spawned with the server's
-whole environment. On one's own laptop that is the right default and there is
-nothing to protect. On a shared server it means every member who can run a cell
-can read ``STRATA_NOTEBOOK_REMOTE_STORE_HEADERS``, ``STRATA_PROXY_TOKEN``,
-worker tokens and every data-source credential the server holds — from
-``os.environ``, or from ``/proc/<pid>/environ``, or from any file the server
-process can open.
-
-``notebook_harness_env_allowlist`` narrows it. Unset, nothing changes; set, the
-harness receives the names it lists plus the handful without which no
-subprocess runs at all, and ``STRATA_*`` is dropped unless named exactly — an
-operator who writes the name means it, while a prefix rule that happened to
-match should not sweep the server's secrets along with it.
-
-A cell's own configuration does not come through here. ``[env]`` in
-``notebook.toml`` and mount credentials travel in the manifest and are applied
-inside the harness, so an allowlist can be short without taking anything away
-from the notebook.
+Unset, ``notebook_harness_env_allowlist`` passes the whole environment through
+(right for a laptop). Set, the harness gets only the listed names plus a few
+that any subprocess needs; ``STRATA_*`` names (proxy token, remote-store
+headers, worker tokens) pass only when listed exactly, never by prefix.
+``[env]`` and mount credentials travel in the manifest, so they are unaffected.
 """
 
 from __future__ import annotations
@@ -78,13 +65,9 @@ def _allowed(name: str, allowlist: list[str]) -> bool:
 def harness_env(allowlist: list[str] | None, extra: dict[str, str] | None = None) -> dict[str, str]:
     """The environment to spawn a cell subprocess with.
 
-    ``allowlist`` empty or ``None`` returns the server's environment unchanged,
-    which is what every deployment got before this existed and what a personal
-    one should keep getting.
-
-    ``extra`` is set after filtering: the batch harness is told which file
-    descriptors to use through the environment, and those are this code
-    talking to itself rather than anything the allowlist is about.
+    An empty or ``None`` ``allowlist`` returns the server's environment unchanged.
+    ``extra`` is applied after filtering (internal fd hand-offs to the batch
+    harness, not subject to the allowlist).
     """
     if not allowlist:
         return {**os.environ, **(extra or {})}
@@ -97,10 +80,8 @@ def harness_env(allowlist: list[str] | None, extra: dict[str, str] | None = None
 def configured_allowlist() -> list[str]:
     """The allowlist from the running server, or from a freshly loaded config.
 
-    The warm pool has no executor and no session to read config through, and it
-    spawns the process that runs the cell on the default WebSocket path — so it
-    has to reach the setting itself or be the one place the filter does not
-    apply.
+    The warm pool has no executor or session to read config through, so it
+    reads the setting here rather than skip the filter.
     """
     try:
         from strata.server import get_state

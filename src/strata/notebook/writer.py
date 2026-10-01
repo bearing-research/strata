@@ -52,12 +52,7 @@ if TYPE_CHECKING:
 
 
 def _serialize_mounts(mounts: list[MountSpec]) -> list[dict[str, Any]]:
-    """Convert mount specs into TOML-friendly dicts.
-
-    Omits empty ``options`` so notebooks without backend options stay
-    free of ``options = {}`` noise (parser defaults missing ``options``
-    to ``{}``, so round-trips).
-    """
+    """Convert mount specs into TOML-friendly dicts, omitting empty ``options``."""
     result: list[dict[str, Any]] = []
     for mount in mounts:
         data = mount.model_dump(mode="json", exclude_none=True)
@@ -75,10 +70,9 @@ _ARRAY_OF_TABLES_SECTIONS = ("workers", "mounts", "variant_group")
 def _dump_notebook_toml(data: dict[str, Any], fp: Any) -> None:
     """Serialize a notebook.toml dict, forcing array-of-tables sections.
 
-    Lifts the ``[[workers]]``, ``[[mounts]]`` and ``[[variant_group]]``
-    sections out of ``data``, writes the rest with ``tomli_w.dump``, then
-    appends each item as a manually-formatted ``[[name]]`` block so the
-    on-disk shape matches what the example notebooks were committed in.
+    ``[[workers]]``, ``[[mounts]]`` and ``[[variant_group]]`` are written as
+    hand-formatted blocks after the ``tomli_w`` output, matching the committed
+    example notebooks.
     """
     aot: dict[str, list[dict[str, Any]]] = {}
     for key in _ARRAY_OF_TABLES_SECTIONS:
@@ -104,13 +98,8 @@ def _dump_notebook_toml(data: dict[str, Any], fp: Any) -> None:
 def _write_notebook_toml_atomic(notebook_toml_path: Path, toml_data: dict[str, Any]) -> None:
     """Serialize *toml_data* and atomically replace ``notebook.toml``.
 
-    ``open(path, "wb")`` truncates the target before the dump starts, so
-    a crash / SIGKILL / full disk mid-write would leave the file empty
-    or torn — destroying the committed cell list and worker config, and
-    orphaning every artifact keyed to the notebook id. Dump to a temp
-    sibling in the same directory and ``os.replace`` it over the target
-    (atomic on POSIX and Windows), so a reader only ever sees the old
-    or the new complete file.
+    Writes a temp sibling and ``os.replace``s it, so a crash mid-write cannot
+    leave a truncated file (losing the cell list and orphaning artifacts).
     """
     fd, tmp_path = tempfile.mkstemp(
         dir=str(notebook_toml_path.parent), prefix=".notebook.toml.", suffix=".tmp"
@@ -135,12 +124,10 @@ def _is_sensitive_env_key(key: str) -> bool:
 
 
 def _serialize_env(env: dict[str, str]) -> dict[str, str]:
-    """Convert env vars into a TOML-friendly dict.
+    """Convert env vars into a TOML-friendly dict, blanking sensitive values.
 
-    Values for sensitive-looking keys (API keys, tokens, passwords) are
-    stripped so they never reach disk. The key names are preserved so
-    the notebook remembers *which* vars are configured — the user
-    re-enters values via the Runtime panel on next open.
+    Key names are kept so the notebook remembers which vars are configured;
+    the user re-enters the values.
     """
     return {
         key: ("" if _is_sensitive_env_key(key) else value) for key, value in sorted(env.items())
@@ -148,12 +135,9 @@ def _serialize_env(env: dict[str, str]) -> dict[str, str]:
 
 
 def _env_has_meaningful_content(env: dict[str, str]) -> bool:
-    """Return True if the env dict has any non-empty, non-sensitive value.
+    """True if the env dict has any non-empty, non-sensitive value.
 
-    An ``[env]`` block where every entry is either empty or a blanked
-    sensitive-key placeholder carries no real configuration — just
-    noise that pollutes committed notebooks. This predicate lets the
-    writer skip persisting such blocks entirely.
+    Lets the writer skip an ``[env]`` block that holds only empty or blanked entries.
     """
     for key, value in env.items():
         if not value:
@@ -170,25 +154,16 @@ _AUTH_INDIRECTION_RE = re.compile(r"^\$\{[A-Za-z_][A-Za-z0-9_]*\}$")
 def is_auth_indirection(value: object) -> bool:
     """Return True for ``${VAR}`` env-var indirections.
 
-    Used by both the writer (to scrub literals before disk) and the
-    annotation_validation layer (to warn about literals before they
-    get scrubbed). The regex matches ASCII identifiers wrapped in
-    ``${…}`` — empty braces, lowercase-only names, and shell-style
-    ``$VAR`` forms are all rejected on purpose to keep the contract
-    narrow and unambiguous.
+    Shared by the writer and annotation validation. Deliberately narrow: empty
+    braces, lowercase-only names and bare ``$VAR`` are rejected.
     """
     return isinstance(value, str) and bool(_AUTH_INDIRECTION_RE.match(value))
 
 
 def _scrub_auth_for_disk(auth: dict[str, Any]) -> dict[str, Any]:
-    """Replace literal auth values with empty strings before writing.
+    """Blank literal auth values before writing; only ``${VAR}`` indirections pass.
 
-    Mirrors the existing ``_serialize_env`` behavior for sensitive env
-    keys: the key name is preserved so the notebook remembers *which*
-    credentials are configured, but the literal value is dropped so
-    secrets never reach disk. Only ``${VAR}`` indirections pass
-    through unchanged. Non-string values (a typo writing
-    ``password = 1234``) are coerced to empty string.
+    Key names are kept, like ``_serialize_env``. Non-string values become ``""``.
     """
     return {k: (v if is_auth_indirection(v) else "") for k, v in auth.items()}
 
@@ -199,11 +174,8 @@ def _serialize_connections(
 ) -> dict[str, dict[str, Any]]:
     """Convert connection specs into the ``[connections.<name>]`` TOML shape.
 
-    Round-trips both valid and malformed blocks so an unrelated save
-    (cell add/remove, worker change) doesn't erase a hand-edited
-    typo. ``auth`` values that aren't ``${VAR}`` indirections are
-    blanked here so secrets never reach disk; the validation layer
-    surfaces the corresponding diagnostic before the user saves.
+    Malformed blocks round-trip too, so an unrelated save keeps a hand-edited
+    typo. ``auth`` values other than ``${VAR}`` indirections are blanked.
     """
     out: dict[str, dict[str, Any]] = {}
     for conn in connections:
@@ -254,9 +226,7 @@ def _sanitize_display_output_for_toml(
 ) -> dict[str, object] | None:
     """Strip transient fields before persisting cell display metadata.
 
-    Uses ``to_serialization_safe`` from the serializer module as the
-    single boundary for TOML/JSON compatibility — no separate None
-    stripping needed.
+    ``to_serialization_safe`` is the single TOML/JSON compatibility boundary.
     """
     from strata.notebook.serializer import to_serialization_safe
 
@@ -290,20 +260,12 @@ def _sanitize_display_outputs_for_toml(
 def write_cell(notebook_dir: Path, cell_id: str, source: str, author: str | None = None) -> None:
     """Write cell source to disk.
 
-    Args:
-        notebook_dir: Path to notebook directory
-        cell_id: Cell ID
-        source: Cell source code
-        author: Who is making the edit. Recorded on the cell **only when it
-            differs from what is already there**, so a person editing their own
-            cell all afternoon writes ``notebook.toml`` exactly zero times and
-            the first edit by someone else writes it once. Source updates are
-            otherwise a runtime concern that never touches committed config,
-            and this must not turn every debounced flush into a commit-worthy
-            diff.
+    ``author`` is recorded on the cell only when it differs from the current
+    one, so a person editing their own cell never rewrites ``notebook.toml``
+    and debounced flushes do not produce commit-worthy diffs.
 
     Raises:
-        ValueError: If cell not found in notebook.toml
+        ValueError: If the cell is not in notebook.toml.
     """
     notebook_dir = Path(notebook_dir)
     notebook_toml_path = notebook_dir / "notebook.toml"
@@ -347,12 +309,9 @@ def write_cell(notebook_dir: Path, cell_id: str, source: str, author: str | None
 
 @refuses_while_held
 def write_cell_tests(notebook_dir: Path, cell_id: str, test_source: str) -> None:
-    """Write (or clear) a cell's unit-test source.
+    """Write (or clear) a cell's unit-test source in ``cells/{cell_id}.test.py``.
 
-    Test source is a committed sibling ``cells/{cell_id}.test.py`` — versioned
-    next to the cell body, no ``notebook.toml`` schema change. Empty/whitespace
-    test source removes the file rather than committing an empty one, so a cell
-    with no tests carries no ``.test.py``.
+    Empty or whitespace source removes the file instead.
 
     Raises:
         FileNotFoundError: If the cell is not in notebook.toml.
@@ -383,17 +342,9 @@ def write_cell_tests(notebook_dir: Path, cell_id: str, test_source: str) -> None
 def write_notebook_toml(notebook_dir: Path, toml: NotebookToml) -> None:
     """Write notebook.toml to disk.
 
-    ``notebook.toml`` holds stable notebook configuration only — cell
-    list, workers, env, mounts, timeout, ai. Anything that changes on
-    every execution or background sync (display outputs, console, per-
-    cell provenance hashes, the last ``uv sync`` timestamp) lives in
-    ``.strata/runtime.json`` via ``runtime_state.py``. Callers that
-    only need to persist runtime state must not touch this file — that
-    keeps ``updated_at`` meaningful as a structural-change signal.
-
-    Args:
-        notebook_dir: Path to notebook directory
-        toml: NotebookToml model to write
+    It holds stable configuration only; per-execution state lives in
+    ``.strata/runtime.json`` (``runtime_state.py``). Runtime-only callers must
+    not touch it, so ``updated_at`` stays a structural-change signal.
     """
     notebook_dir = Path(notebook_dir)
     notebook_toml_path = notebook_dir / "notebook.toml"
@@ -475,9 +426,7 @@ _NOTEBOOK_RUNTIME_PACKAGES: tuple[str, ...] = ("pyarrow", "orjson", "cloudpickle
 
 
 def _notebook_runtime_specifiers() -> list[str]:
-    """Return PEP 508 specifiers for the notebook venv runtime deps,
-    sourced from this distribution's installed metadata.
-    """
+    """PEP 508 specifiers for the notebook venv's runtime deps, from installed metadata."""
     try:
         reqs = metadata("strata-notebook").get_all("Requires-Dist") or []
     except PackageNotFoundError as exc:
@@ -516,30 +465,19 @@ def create_notebook(
 ) -> Path:
     """Create a new notebook directory with notebook.toml and pyproject.toml.
 
-    On a directory that already holds a notebook this changes nothing but
-    missing scaffolding (``cells/``, a ``.gitignore``): its configuration,
-    dependencies and environment are left as they are, and ``owner`` and
-    ``project_mount`` do not apply.
+    On an existing notebook only missing scaffolding (``cells/``,
+    ``.gitignore``) is added; ``owner`` and ``project_mount`` do not apply.
 
     Args:
-        parent_dir: Parent directory for the notebook
-        name: Notebook name (used for folder and notebook name)
-        python_version: Requested notebook Python major.minor version
-        initialize_environment: Whether to create the notebook venv immediately
-        write_gitignore_file: Write a .gitignore covering runtime state. An
-            existing one is never replaced.
-        owner: Opaque identity string stamped into notebook.toml. None means
-            unowned (the default for non-shared deployments). Set by callers
-            that have resolved a caller identity from a request header.
-        project_mount: When set, add a notebook-level read-only mount of
-            *parent_dir* (the project) under this variable name, so cells can
-            read project files as ``open(<name> / "file")`` without absolute
-            paths. The mount is ``pin``-ed so it never contributes staleness
-            (no directory hashing, no churn from the project's own changes) —
-            the scratchpad-friendly default. See the notebook scratchpad skill.
+        write_gitignore_file: Write a runtime-state .gitignore; an existing one
+            is never replaced.
+        owner: Identity stamped into notebook.toml; None means unowned.
+        project_mount: Variable name for a pinned read-only mount of
+            *parent_dir*, so cells read project files without absolute paths.
+            Pinned, so it never makes cells stale.
 
     Returns:
-        Path to created notebook directory
+        Path to the created notebook directory.
     """
     parent_dir = Path(parent_dir)
     parent_dir.mkdir(parents=True, exist_ok=True)
@@ -634,10 +572,7 @@ _logger = logging.getLogger(__name__)
 
 
 def _uv_sync(notebook_dir: Path, *, timeout: int = 60, python_version: str | None = None) -> bool:
-    """Run ``uv sync`` in *notebook_dir*.
-
-    Returns True on success, False on failure (logged, never raised).
-    """
+    """Run ``uv sync`` in *notebook_dir*; False on failure (logged, never raised)."""
     command = ["uv", "sync"]
     if python_version is not None:
         command.extend(["--python", normalize_python_minor(python_version)])
@@ -666,24 +601,11 @@ def _uv_sync(notebook_dir: Path, *, timeout: int = 60, python_version: str | Non
 
 
 def _renv_sync(notebook_dir: Path, *, timeout: int = 600) -> bool:
-    """Run ``renv::restore()`` in *notebook_dir*.
+    """Run ``renv::restore()`` in *notebook_dir* so its library matches ``renv.lock``.
 
-    R counterpart of ``_uv_sync``: ensures the notebook's renv library
-    matches its ``renv.lock`` on session open. Returns ``True`` on
-    success, ``False`` on failure (logged, never raised) so a missing
-    R install or a stale lockfile doesn't crash notebook open.
-
-    The default timeout is 10 minutes — first install of a notebook's R
-    dependencies can mean compiling CRAN sources, which is slow on
-    binary-deprived platforms (macOS arm64 still hits source builds for
-    a handful of packages as of 2026). ``_uv_sync``'s 60s default is
-    fine because uv ships pre-built wheels for almost everything;
-    renv::restore() doesn't have that luxury.
-
-    Pre-#57: callers wire this in once they need a populated R
-    library. Session-open auto-sync lands with the R harness so the
-    cost is paid once the notebook actually wants to run an R cell,
-    not on every notebook open.
+    Returns False on failure (logged, never raised), so a missing R install or
+    stale lockfile does not crash the caller. The 10-minute default (vs uv's 60s)
+    covers compiling CRAN sources on platforms without binaries.
     """
     # Before the Rscript lookup: R cells with no ``renv.lock`` yet is the normal
     # pre-init state and must succeed whether or not R is installed.
@@ -750,9 +672,9 @@ def _renv_restore_locked(
 ) -> bool:
     """Run ``renv::restore()`` with the cross-process lock already held.
 
-    As *harness_user* when there is one, which is handed what the restore
-    writes: the notebook's ``renv/`` directory, the shared library it links
-    to, and the package cache *env* names.
+    Runs as *harness_user* when set, who is given what the restore writes: the
+    notebook's ``renv/``, the shared library it links to, and the package
+    cache *env* names.
     """
     rscript = shutil.which("Rscript")
     if rscript is None:
@@ -809,14 +731,11 @@ def _renv_restore_locked(
 
 
 def _update_environment_metadata(notebook_dir: Path) -> None:
-    """Persist the environment-metadata snapshot for a notebook.
+    """Persist the environment snapshot in ``.strata/runtime.json`` under ``environment``.
 
-    Records lockfile_hash, python_version, package counts, and the
-    last ``uv sync`` timestamp so clients can detect environment
-    changes without recomputing hashes themselves. Lives in
-    ``.strata/runtime.json`` under ``environment`` — these values
-    change on every sync and don't belong in the committed
-    ``notebook.toml``.
+    Lockfile hash, python version, package counts and the last ``uv sync`` time,
+    so clients can detect environment changes without hashing. Not in
+    ``notebook.toml``, since it changes on every sync.
     """
     from strata.notebook.dependencies import list_dependencies
     from strata.notebook.env import compute_lockfile_hash
@@ -893,10 +812,7 @@ def _update_environment_metadata(notebook_dir: Path) -> None:
 
 @refuses_while_held
 def update_environment_metadata(notebook_dir: Path) -> None:
-    """Public API: refresh ``[environment]`` in ``notebook.toml``.
-
-    Called after ``uv add`` / ``uv remove`` to persist the new lockfile hash.
-    """
+    """Refresh the environment snapshot in ``.strata/runtime.json`` after ``uv add``/``remove``."""
     _update_environment_metadata(notebook_dir)
 
 
@@ -911,13 +827,8 @@ def add_cell_to_notebook(
     """Add a new cell to the notebook.
 
     Args:
-        notebook_dir: Path to notebook directory
-        cell_id: New cell ID
-        after_cell_id: Cell ID to add after (None = at end)
-        language: Cell language ("python", "prompt", "markdown", or "sql")
-        author: Who is adding it. ``None`` records nobody, which is what every
-            cell added before this has and what a caller with no opinion should
-            leave alone.
+        after_cell_id: Cell to insert after; None appends.
+        author: Who is adding it; None records nobody.
     """
     notebook_dir = Path(notebook_dir)
     notebook_toml_path = notebook_dir / "notebook.toml"
@@ -982,12 +893,8 @@ def add_cell_to_notebook(
 def remove_cell_from_notebook(notebook_dir: Path, cell_id: str) -> None:
     """Remove a cell from the notebook.
 
-    Args:
-        notebook_dir: Path to notebook directory
-        cell_id: Cell ID to remove
-
     Raises:
-        ValueError: If cell not found
+        ValueError: If the cell is not found.
     """
     notebook_dir = Path(notebook_dir)
     notebook_toml_path = notebook_dir / "notebook.toml"
@@ -1023,12 +930,7 @@ def remove_cell_from_notebook(notebook_dir: Path, cell_id: str) -> None:
 
 @refuses_while_held
 def reorder_cells(notebook_dir: Path, cell_ids: list[str]) -> None:
-    """Reorder cells in the notebook.
-
-    Args:
-        notebook_dir: Path to notebook directory
-        cell_ids: Ordered list of cell IDs
-    """
+    """Reorder cells in the notebook to match *cell_ids*."""
     notebook_dir = Path(notebook_dir)
     notebook_toml_path = notebook_dir / "notebook.toml"
 
@@ -1062,17 +964,10 @@ def reorder_cells(notebook_dir: Path, cell_ids: list[str]) -> None:
 
 @refuses_while_held
 def update_requires_python(notebook_dir: Path, new_minor: str) -> str:
-    """Rewrite ``requires-python`` in a notebook's pyproject.toml.
+    """Rewrite ``requires-python`` in pyproject.toml as ``==X.Y.*``; return the previous value.
 
-    Returns the *previous* requires-python value so the caller can
-    roll back (eg. when the subsequent ``uv sync`` fails on the new
-    minor). ``new_minor`` is normalized via
-    ``format_requires_python`` so the on-disk form is always the
-    canonical ``==X.Y.*`` spec.
-
-    The pyproject is rewritten in place — uv.lock and .venv are NOT
-    touched here; the caller orchestrates the rest of the version-
-    change pipeline.
+    The previous value lets the caller roll back if the next ``uv sync`` fails.
+    uv.lock and .venv are not touched.
     """
     pyproject_path = Path(notebook_dir) / "pyproject.toml"
     if not pyproject_path.exists():
@@ -1102,12 +997,7 @@ def update_requires_python(notebook_dir: Path, new_minor: str) -> str:
 
 @refuses_while_held
 def rename_notebook(notebook_dir: Path, new_name: str) -> None:
-    """Rename the notebook.
-
-    Args:
-        notebook_dir: Path to notebook directory
-        new_name: New notebook name
-    """
+    """Rename the notebook."""
     normalized_name = new_name.strip()
 
     if not normalized_name:
@@ -1154,18 +1044,12 @@ def _apply_notebook_toml_update(
     *,
     bump_updated_at: bool = True,
 ) -> None:
-    """Load ``notebook.toml``, apply ``mutate``, rewrite only when the
-    mutator reports a real change.
+    """Load ``notebook.toml``, apply ``mutate``, and rewrite only if it reports a change.
 
-    ``mutate`` receives the loaded dict and returns ``True`` iff it
-    modified something worth persisting. When it returns ``False`` the
-    file is left untouched — no rewrite, no ``updated_at`` bump — so
-    ``updated_at`` keeps tracking actual structural edits.
-
-    ``bump_updated_at=False`` is for a change that belongs in committed
-    config but is not structural — recording who last edited a cell. The
-    discover list sorts by ``updated_at``, so bumping it there would reorder
-    notebooks every time two authors take turns on one cell.
+    ``mutate`` returns True iff it changed something; otherwise nothing is
+    written and ``updated_at`` is not bumped. ``bump_updated_at=False`` is for
+    committed but non-structural changes (who last edited a cell), since the
+    discover list sorts by ``updated_at``.
     """
     notebook_dir = Path(notebook_dir)
     notebook_toml_path = notebook_dir / "notebook.toml"
@@ -1203,15 +1087,8 @@ def update_notebook_connections(
 ) -> None:
     """Persist notebook-level ``[connections.<name>]`` blocks.
 
-    Round-trips both valid and malformed connections (same as the
-    full-notebook writer) so a transient parse error in one entry
-    doesn't get erased by an unrelated edit elsewhere. Auth values
-    are scrubbed at the serializer boundary — literal secrets are
-    blanked before they reach disk; ``${VAR}`` indirections survive.
-
-    The ``[connections]`` table is dropped when the resulting dict
-    is empty so a notebook with no connections doesn't carry a
-    stub block.
+    Malformed entries round-trip and literal auth secrets are blanked, as in
+    the full writer. An empty ``[connections]`` table is dropped.
     """
     new_connections = _serialize_connections(connections, malformed)
 
@@ -1282,12 +1159,8 @@ def update_notebook_timeout(notebook_dir: Path, timeout: float | None) -> None:
 def update_notebook_env(notebook_dir: Path, env: dict[str, str]) -> None:
     """Persist notebook-level default environment variables.
 
-    The persistable env block drops any entry that has no meaningful
-    content (empty values and blanked sensitive keys). If that block
-    is byte-identical to what's already on disk, the call is a no-op —
-    we skip the rewrite so ``updated_at`` keeps tracking genuine
-    structural edits. Typing an API key in the Runtime panel therefore
-    doesn't churn the committed notebook.toml.
+    Entries with no meaningful content are dropped, and the call is a no-op if
+    the result matches disk, so typing an API key does not churn notebook.toml.
     """
     notebook_dir = Path(notebook_dir)
     notebook_toml_path = notebook_dir / "notebook.toml"
@@ -1318,13 +1191,7 @@ def update_cell_display_outputs(
     cell_id: str,
     display_outputs: list[dict[str, object]] | None,
 ) -> None:
-    """Persist or clear ordered display output metadata for a cell.
-
-    Stored in ``.strata/runtime.json`` — display outputs change every
-    execution, so they'd churn ``notebook.toml`` under Git if kept
-    there. The same file also holds per-cell provenance hashes and
-    the last ``uv sync`` timestamp; see ``runtime_state.py``.
-    """
+    """Persist or clear a cell's ordered display output metadata in ``.strata/runtime.json``."""
     from strata.notebook.runtime_state import load_runtime_state, save_runtime_state
 
     notebook_dir = Path(notebook_dir)
@@ -1351,17 +1218,11 @@ def set_variant_active(
     group: str,
     variant_name: str,
 ) -> None:
-    """Set the active variant for ``group`` in notebook.toml.
+    """Set the active variant for ``group`` in notebook.toml; bumps ``updated_at``.
 
-    Updates the matching ``[[variant_group]]`` entry, or appends one if
-    none exists. Bumps ``updated_at`` (variant selection is a structural
-    change — it changes which cells participate in the executable graph).
-
-    Group membership itself is declared by ``# @variant`` annotations in
-    cell source; this function only persists the active-variant pointer.
-    Validation that ``variant_name`` actually matches a member of the
-    group is left to ``annotation_validation`` (``variant_active_unknown``
-    surfaces the drift if the user picks a name no cell provides).
+    Updates or appends the ``[[variant_group]]`` entry. Membership comes from
+    ``# @variant`` annotations; an unknown name is reported by annotation
+    validation, not checked here.
     """
 
     def mutate(toml_data: dict[str, Any]) -> bool:
@@ -1384,14 +1245,10 @@ def set_variant_active(
 
 @refuses_while_held
 def set_variant_mode(notebook_dir: Path, group: str, mode: str) -> None:
-    """Set the execution ``mode`` ('switch' | 'sweep') for ``group``.
+    """Set the execution ``mode`` (``switch`` or ``sweep``) for ``group``; bumps ``updated_at``.
 
-    Mirrors :func:`set_variant_active` — updates the matching
-    ``[[variant_group]]`` entry or appends one. ``"switch"`` is the default,
-    so it's written by *removing* the ``mode`` key (keeps switch notebooks
-    clean); ``"sweep"`` is written explicitly. A freshly-created entry carries
-    an empty ``active`` ("first variant in source order"), which sweep ignores
-    anyway. Bumps ``updated_at`` (mode is a structural change).
+    ``switch`` is the default and is written by removing the key; a new entry
+    gets an empty ``active`` (first variant in source order).
     """
 
     def mutate(toml_data: dict[str, Any]) -> bool:
@@ -1421,11 +1278,7 @@ def set_variant_mode(notebook_dir: Path, group: str, mode: str) -> None:
 
 @refuses_while_held
 def remove_variant_group_entry(notebook_dir: Path, group: str) -> None:
-    """Drop the ``[[variant_group]]`` entry for ``group``, if any.
-
-    Used when the last member of a variant group is removed — there's
-    no group left to point at, so the toml entry is no longer meaningful.
-    """
+    """Drop the ``[[variant_group]]`` entry for ``group``, if any (its last member was removed)."""
 
     def mutate(toml_data: dict[str, Any]) -> bool:
         entries = toml_data.get("variant_group")
@@ -1449,11 +1302,10 @@ def remove_variant_group_entry(notebook_dir: Path, group: str) -> None:
 
 @refuses_while_held
 def update_notebook_secret_manager(notebook_dir: Path, config: dict[str, Any]) -> None:
-    """Persist the [secret_manager] block in notebook.toml.
+    """Persist the ``[secret_manager]`` block in notebook.toml.
 
-    Accepts only a fixed whitelist of keys so arbitrary runtime state
-    can't leak into the committed TOML via this path. Passing an empty
-    dict removes the block entirely — the UI "disconnect" action.
+    Only whitelisted keys are written. An empty dict removes the block (the UI's
+    "disconnect").
     """
     cleaned: dict[str, Any] = {}
     for key in _SECRET_MANAGER_CONFIG_KEYS:
@@ -1489,11 +1341,9 @@ def update_cell_console_output(
     stdout: str,
     stderr: str,
 ) -> None:
-    """Persist stdout/stderr for a cell so they survive notebook reopens.
+    """Persist a cell's stdout/stderr to ``.strata/console/{cell_id}.json``.
 
-    Written to ``.strata/console/{cell_id}.json`` — separate from
-    notebook.toml to keep configuration and runtime state apart.
-    Truncated to 10 KB per stream.
+    Truncated to 10,000 characters per stream; both empty removes the file.
     """
     max_len = 10_000
     console_dir = Path(notebook_dir) / ".strata" / "console"
@@ -1513,10 +1363,7 @@ def update_cell_console_output(
 
 
 def load_cell_console_output(notebook_dir: Path, cell_id: str) -> tuple[str, str]:
-    """Load persisted stdout/stderr for a cell.
-
-    Returns ``(stdout, stderr)`` — empty strings if nothing is persisted.
-    """
+    """Load persisted ``(stdout, stderr)`` for a cell; empty strings if none."""
     console_file = Path(notebook_dir) / ".strata" / "console" / f"{cell_id}.json"
     if not console_file.exists():
         return "", ""

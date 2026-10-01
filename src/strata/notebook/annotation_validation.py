@@ -1,8 +1,7 @@
 """Cross-reference validation for cell source annotations.
 
-Runs on notebook open, reload, and after WS source flush — never
-during active typing.  Diagnostics are advisory and never block
-execution.
+Runs on notebook open, reload and after a WS source flush, never while typing.
+Diagnostics are advisory and never block execution.
 """
 
 from __future__ import annotations
@@ -216,13 +215,10 @@ def validate_cell_annotations(
 
 
 def _validate_recorded_inputs(cell: CellState) -> list[AnnotationDiagnostic]:
-    """Say so when a ``@fetch`` or ``@dataset`` could not be read.
+    """Report a ``@fetch`` or ``@dataset`` line that did not parse.
 
-    Both are dropped when they do not parse, so the cell runs without the
-    variable they promised and dies on a ``NameError`` naming it -- with
-    nothing anywhere pointing at the line that was ignored. Every other
-    directive with a shape to get wrong already reports one; these two shipped
-    without.
+    Both are dropped when unparseable, so the cell would otherwise die on a
+    ``NameError`` with nothing pointing at the ignored line.
     """
     hints = {
         "fetch": "expected `@fetch <name> <url> [sha256=<hex>] [refetch=never|stale|always]`",
@@ -247,25 +243,13 @@ def _validate_module_export(
     cell: CellState,
     notebook_state: NotebookState,
 ) -> list[AnnotationDiagnostic]:
-    """Warn when a Python cell defines reusable code (def / class) but
-    the slice we'd re-execute in the synthetic module isn't safe.
+    """Warn when a cell's defs and classes are not safe to re-execute as a module.
 
-    The slicer keeps imports, defs, classes, and literal constants and
-    drops everything else. After slicing we still block when:
-      - a kept def/class references a name that isn't imported or
-        defined as a literal in this cell (the synthetic module would
-        NameError on import or call);
-      - a kept name is also rebound by dropped runtime code (the
-        synthetic module's value would diverge from the cell's runtime
-        value);
-      - the cell has a lambda assignment to a downstream-consumed name
-        (lambdas don't ride the source-backed module path).
-
-    Suppressed when no other cell in the notebook references the
-    affected names — small private helpers used only inside a single
-    cell are a common, safe pattern. The warning is for users who are
-    *trying* to share defs across cells and hit one of the failure
-    modes above.
+    The slicer keeps imports, defs, classes and literal constants. Warns when a kept
+    def/class references a name not imported or defined as a literal here, when a
+    kept name is rebound by dropped runtime code, or when a lambda is assigned to a
+    downstream-consumed name. Silent unless another cell references the affected
+    names: private single-cell helpers are a common, safe pattern.
     """
     from strata.notebook.module_export import build_module_export_plan, runtime_binding_names
 
@@ -317,11 +301,7 @@ def _validate_module_export(
 
 
 def _validate_prompt_cell_annotations(cell: CellState) -> list[AnnotationDiagnostic]:
-    """Surface prompt-cell annotation errors (e.g. malformed ``@output_schema``).
-
-    Called only for ``language == "prompt"`` cells. Python-cell validators
-    (worker/mount/timeout/env/loop) don't apply here.
-    """
+    """Surface prompt-cell annotation errors (e.g. malformed ``@output_schema``)."""
     from strata.notebook.prompt_analyzer import analyze_prompt_cell
 
     analysis = analyze_prompt_cell(cell.source)
@@ -339,11 +319,10 @@ def _validate_prompt_cell_annotations(cell: CellState) -> list[AnnotationDiagnos
 
 
 def _validate_widget_cell_annotations(cell: CellState) -> list[AnnotationDiagnostic]:
-    """Surface widget-cell errors: structural (unknown control, non-literal
-    argument, duplicate variable) plus semantic (slider range, default bounds).
+    """Surface structural and semantic widget-cell errors.
 
-    Called only for ``language == "widget"`` cells. Advisory only — like every
-    diagnostic here, these never block execution.
+    Structural: unknown control, non-literal argument, duplicate variable.
+    Semantic: slider range, default out of bounds.
     """
     from strata.notebook.widget_analyzer import analyze_widget_cell
 
@@ -434,17 +413,11 @@ def _validate_referenced_connection(
     conn,
     line: int | None,
 ) -> list[AnnotationDiagnostic]:
-    """Emit diagnostics for a connection that a SQL cell references.
+    """Diagnose the connection a SQL cell references.
 
-    Two checks:
-
-    1. ``connection_driver_unknown`` — the chosen ``driver`` isn't in
-       the SQL-adapter registry. The runtime would fail later with a
-       harder-to-diagnose error.
-    2. ``connection_auth_literal_secret`` — an ``auth.*`` value is a
-       literal string instead of a ``${VAR}`` indirection. The writer
-       will blank it on next save, breaking the connection silently
-       unless the user is told.
+    Reports an unknown ``driver`` (``connection_driver_unknown``) and an ``auth.*``
+    literal instead of a ``${VAR}`` (``connection_auth_literal_secret``); the writer
+    blanks such literals on the next save, silently breaking the connection.
     """
     diagnostics: list[AnnotationDiagnostic] = []
 
@@ -501,13 +474,7 @@ def _validate_sql_cell_annotations(
     cell: CellState,
     notebook_state: NotebookState,
 ) -> list[AnnotationDiagnostic]:
-    """Surface SQL-cell annotation issues.
-
-    Checks the cell's ``# @sql`` / ``# @cache`` directives, plus the
-    referenced connection itself: malformed body, unknown driver, or
-    auth values written as literals (which the writer will scrub on
-    next save).
-    """
+    """Surface SQL-cell directive issues and problems with its referenced connection."""
     diagnostics: list[AnnotationDiagnostic] = []
     annotations = parse_annotations(cell.source)
 
@@ -784,15 +751,12 @@ def _validate_variant_annotation(
     annotations,
     notebook_state: NotebookState,
 ) -> list[AnnotationDiagnostic]:
-    """Validate ``# @variant`` membership against siblings and toml.
+    """Validate ``# @variant`` membership against siblings and notebook.toml.
 
-    - ``variant_contract_mismatch`` — this variant's defines diverge from
-      the union of its siblings (computed against active members so the
-      diagnostic surfaces on the *outlier*, not on the rest).
-    - ``variant_active_unknown`` — notebook.toml selects a variant name
-      that no cell in the group provides.
-    - ``variant_malformed`` — the ``@variant`` line is present but didn't
-      parse into a (group, name) pair.
+    - ``variant_contract_mismatch``: defines diverge from the union of the active
+      siblings, so the diagnostic lands on the outlier.
+    - ``variant_active_unknown``: notebook.toml selects a variant no cell provides.
+    - ``variant_malformed``: the line did not parse into a (group, name) pair.
     """
     diagnostics: list[AnnotationDiagnostic] = []
     variant_line = _find_annotation_line(cell.source, "variant")
@@ -912,12 +876,10 @@ def _sweep_groups_read_by(
     cell: CellState,
     notebook_state: NotebookState,
 ) -> dict[str, int]:
-    """Return ``{group: member_count}`` for sweep groups this cell reads from.
+    """Return ``{group: member_count}`` for the sweep groups this cell reads from.
 
-    A variable is *sweep-sourced* when it's defined by a cell whose variant
-    group is in sweep mode. This mirrors the DAG's producer resolution using
-    only ``notebook_state`` (defines/references + variant_modes), so validation
-    stays independent of a rebuilt DAG.
+    Resolves producers from ``notebook_state`` alone, so validation does not need a
+    rebuilt DAG.
     """
     refs = set(cell.references) | set(cell.builtin_references)
     groups: dict[str, int] = {}
@@ -941,16 +903,11 @@ def _validate_per_variant_annotation(
 ) -> list[AnnotationDiagnostic]:
     """Validate ``# @per_variant [group]`` fan-out membership.
 
-    - ``per_variant_on_variant_member`` — a cell can't both *be* a variant and
-      fan *out* over one.
-    - ``per_variant_no_sweep_source`` — the cell references no sweep-sourced
-      variable, so there's nothing to fan out over.
-    - ``per_variant_ambiguous_group`` — bare ``@per_variant`` but the cell reads
-      from ≥2 sweep groups; the user must name one.
-    - ``per_variant_unknown_group`` — a named group the cell doesn't read as a
-      sweep source.
-    - ``per_variant_group_of_one`` — the fan-out group has a single variant, so
-      the annotation runs the cell once (info; harmless).
+    - ``per_variant_on_variant_member``: the cell is itself a variant.
+    - ``per_variant_no_sweep_source``: it reads no sweep-sourced variable.
+    - ``per_variant_ambiguous_group``: bare ``@per_variant`` but 2+ sweep groups.
+    - ``per_variant_unknown_group``: the named group is not a sweep source it reads.
+    - ``per_variant_group_of_one``: the group has one variant (info only).
     """
     if not annotations.per_variant:
         return []

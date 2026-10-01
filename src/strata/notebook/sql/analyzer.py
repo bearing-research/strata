@@ -1,19 +1,9 @@
 """Analyzer for SQL-type notebook cells.
 
-Extracts the cell's metadata (``# @sql connection=``, ``# @cache``,
-``# @name``), the SQL body, ``:name`` bind placeholders, and — when a
-dialect is supplied — the set of tables the query touches via sqlglot.
-
-Bind placeholders use ``:name`` syntax universally, regardless of the
-backend dialect. Strata maps them to the correct ADBC binding form at
-execute time (``?`` for SQLite, ``$1`` for Postgres, etc.). The
-analyzer doesn't need to know the dialect to find them.
-
-Table extraction does need a dialect — same SQL parses to different
-trees in different dialects. When the connection isn't declared yet
-(or the chosen driver isn't registered), table extraction is skipped
-and ``parse_error`` stays None; the executor will pick this up later
-with the resolved dialect.
+Extracts the cell's directives, SQL body, ``:name`` bind placeholders and, given
+a dialect, the tables the query reads (via sqlglot). Placeholders are ``:name``
+on every backend and found without a dialect; table extraction needs one, and is
+skipped (``parse_error`` stays None) until the connection's dialect is known.
 """
 
 from __future__ import annotations
@@ -35,26 +25,12 @@ _BIND_PLACEHOLDER_RE = re.compile(r"(?<![:\w]):([a-zA-Z_]\w*)")
 class SqlAnalysis:
     """Analysis result for a SQL cell.
 
-    ``parse_error`` carries any sqlglot exception message; ``tables``
-    is empty when ``parse_error`` is set. Both stay empty when no
-    dialect was supplied (the analyzer can't pick the right grammar
-    without one).
-
-    ``unresolved_tables`` holds the table references named only when the
-    query runs, such as Snowflake's ``IDENTIFIER($var)`` or
-    ``IDENTIFIER(?)``, as their SQL text. They are not in ``tables``: a
-    freshness probe cannot ask about a table it cannot name.
-
-    Two placeholder views, populated together:
-
-    - ``references`` — deduplicated, source-order. The DAG layer
-      consumes this; one cell shouldn't claim the same upstream
-      variable twice in its edges.
-    - ``placeholder_positions`` — every ``:name`` occurrence in
-      source order, duplicates included. The executor rewrites
-      ``:name`` to the driver's positional syntax (``?`` for SQLite,
-      ``$1`` / ``$2`` for Postgres) in this exact order, and the
-      bind layer's tuple lines up position-for-position.
+    ``tables`` is empty when ``parse_error`` is set, and both stay empty without a
+    dialect. ``unresolved_tables`` holds the SQL text of references named only at
+    run time (Snowflake ``IDENTIFIER($var)``), kept out of ``tables`` because a
+    freshness probe cannot ask about them. ``references`` is the deduplicated
+    placeholder list for the DAG; ``placeholder_positions`` keeps every occurrence in
+    source order, which the executor's positional binds must match.
     """
 
     name: str = "result"
@@ -72,20 +48,9 @@ class SqlAnalysis:
 def analyze_sql_cell(source: str, *, dialect: str | None = None) -> SqlAnalysis:
     """Analyze a SQL cell.
 
-    Pipeline:
-
-    1. Parse the leading comment block via the shared
-       ``parse_annotations`` helper. Pulls out ``# @sql``, ``# @cache``,
-       and any ``# @name`` override.
-    2. Strip annotations from the source to leave the SQL body.
-    3. Find ``:name`` placeholders in the body — dialect-independent
-       since this is Strata's binding surface, not the backend's. The
-       extractor strips strings and comments first so ``'foo :bar'``
-       and ``-- :bar`` don't false-match.
-    4. If ``dialect`` is provided, parse the body with sqlglot and
-       walk ``find_all_in_scope(parsed, exp.Table)`` — the scope-aware
-       walker that excludes CTE / derived-table references (the naive
-       ``find_all`` would surface those as if they were base tables).
+    Placeholders are found after blanking strings and comments, so ``'foo :bar'``
+    and ``-- :bar`` do not match. Tables come from a scope-aware walk that excludes
+    CTE and derived-table references.
     """
     annotations = parse_annotations(source)
     sql_body = strip_leading_annotations(source).strip()
@@ -160,11 +125,9 @@ _ANALYZE = re.compile(
 def read_only_violation(sql: str, dialect: str | None) -> str | None:
     """The first statement in *sql* a read cell may not run, or None.
 
-    A read cell's connection is opened read-only, but that is a transaction the
-    body can end: ``COMMIT; ATTACH '/db' AS w (READ_WRITE); CREATE TABLE ...``
-    runs as three statements, and the second and third are no longer inside it.
-    What a read cell reads is the boundary, so it is checked before anything is
-    sent to the driver.
+    The connection's read-only transaction is one the body can end
+    (``COMMIT; ATTACH '/db' AS w (READ_WRITE); ...``), so the statements are checked
+    before anything reaches the driver.
     """
     if dialect is None or not sql.strip():
         return None
@@ -205,12 +168,9 @@ def read_only_violation(sql: str, dialect: str | None) -> str | None:
 def confined_write_violation(sql: str, dialect: str | None) -> str | None:
     """The first statement in *sql* a confined write cell may not run, or None.
 
-    In service mode a SQLite cell runs inside the server process, and SQLite
-    reaches other files through ``ATTACH`` (another notebook's database, the
-    artifact store's metadata) and ``VACUUM INTO`` (a copy written anywhere the
-    server can write). DuckDB is confined by the engine (``duckdb._confine``);
-    SQLite through ADBC has no such control, so these statements are refused,
-    and SQL that does not parse is refused rather than guessed at.
+    In service mode a SQLite cell runs in the server process, where ``ATTACH`` and
+    ``VACUUM INTO`` reach other files; ADBC SQLite has no engine-level confinement
+    (DuckDB does, ``duckdb._confine``). SQL that does not parse is refused too.
     """
     if dialect is None or not sql.strip():
         return None
@@ -236,28 +196,15 @@ def confined_write_violation(sql: str, dialect: str | None) -> str | None:
 def _extract_placeholder_positions(sql: str) -> list[str]:
     """Return ``:name`` placeholders in source order, duplicates kept.
 
-    Strings and comments are blanked before the regex runs so embedded
-    ``:foo`` inside ``'literal :foo'`` or ``-- :foo`` doesn't surface
-    as a bind reference. Duplicates are preserved here because the
-    executor rewrites ``:name`` to positional binds (``?`` for SQLite,
-    ``$1`` for Postgres) in this exact order; the bind layer must
-    produce one tuple slot per occurrence to keep positions aligned.
-
-    Use ``_extract_placeholders`` (or ``SqlAnalysis.references``)
-    when you want the deduplicated DAG-facing view.
+    Strings and comments are blanked first. Duplicates stay because the executor
+    rewrites each occurrence to a positional bind in this order.
     """
     cleaned = _blank_strings_and_comments(sql)
     return [m.group(1) for m in _BIND_PLACEHOLDER_RE.finditer(cleaned)]
 
 
 def _extract_placeholders(sql: str) -> list[str]:
-    """Return ``:name`` placeholders in source order, deduplicated.
-
-    Thin wrapper over ``_extract_placeholder_positions`` for callers
-    that only need the DAG-facing (deduplicated) view. The cell's DAG
-    references list shouldn't carry duplicates — one cell can't claim
-    the same upstream variable twice.
-    """
+    """Return ``:name`` placeholders in source order, deduplicated, for the DAG."""
     return _dedupe_preserve_order(_extract_placeholder_positions(sql))
 
 
@@ -272,30 +219,12 @@ def _dedupe_preserve_order(items: list[str]) -> list[str]:
 
 
 def _blank_strings_and_comments(sql: str) -> str:
-    """Replace string literals and comments with spaces in-place.
+    """Replace string literals and comments with spaces, preserving length.
 
-    Length-preserving so byte offsets in error messages stay aligned
-    with the original source. Recognizes:
-
-    - ``'string'`` with ``''`` doubled-quote escaping
-    - ``-- line comment`` (to end of line)
-    - ``/* block comment */``
-    - ``$tag$ ... $tag$`` Postgres dollar-quoted strings (including
-      empty-tag ``$$ ... $$``)
-
-    Dollar-quoting matters for placeholder extraction because the body
-    is treated literally — including any ``:name`` patterns. Without
-    blanking, ``SELECT $$:foo$$ AS x`` produces a bogus ``foo``
-    reference. ``$1`` / ``$2`` (Postgres positional bind syntax) is
-    NOT a dollar quote and falls through unchanged: my recognizer
-    only triggers when ``$`` is followed by either another ``$`` or an
-    identifier-start character followed by a closing ``$``.
-
-    Doesn't try to parse double-quoted identifiers or
-    backtick-quoted MySQL identifiers — those are dialect-specific
-    edge cases. False positives there surface as bogus placeholder
-    references that the executor rejects with a clear "no upstream
-    variable :foo" error.
+    Recognizes ``'...'`` (``''`` escapes), ``-- ...``, ``/* ... */`` and Postgres
+    ``$tag$ ... $tag$`` / ``$$ ... $$``; ``$1`` is not a dollar quote. Double-quoted
+    and backtick identifiers are not handled; a false placeholder there is rejected
+    by the executor as an unknown upstream variable.
     """
     out: list[str] = []
     i = 0
@@ -375,25 +304,10 @@ def _blank_strings_and_comments(sql: str) -> str:
 def rewrite_named_to_positional(sql: str, dialect: str | None) -> str:
     """Rewrite ``:name`` placeholders to the dialect's positional form.
 
-    ADBC's parameter-binding API takes positional values, and each
-    backend uses its own placeholder syntax — Postgres expects
-    ``$1`` / ``$2`` / ..., SQLite expects ``?``, and other ADBC
-    drivers default to the qmark form. Strata's surface is uniform
-    ``:name``; this function bridges to the wire form just before
-    we hand the SQL to the cursor.
-
-    The rewriter uses ``_blank_strings_and_comments`` to find
-    placeholder positions on a string-and-comment-blanked copy, so
-    a ``:foo`` inside ``'literal :foo'`` or ``-- :foo`` survives
-    untouched in the output. Position-by-position substitution then
-    emits the positional form into the *original* text — keeping
-    comments and string contents byte-exact for any backend that
-    cares (Postgres' query log, SQLite's prepared-statement cache).
-
-    The caller is responsible for keeping the bind tuple in
-    ``placeholder_positions`` order (the analyzer's
-    duplicate-preserving view), so position N in the rewritten SQL
-    matches position N in the bind tuple.
+    ``$1``, ``$2``, ... for Postgres; ``?`` for SQLite and other ADBC drivers.
+    Positions come from a blanked copy, so placeholders in strings and comments are
+    left alone, and the original text is otherwise byte-exact. The caller binds
+    values in ``placeholder_positions`` order.
     """
     if dialect == "postgres":
 
@@ -418,14 +332,10 @@ def rewrite_named_to_positional(sql: str, dialect: str | None) -> str:
 
 
 def _scan_dollar_quote_open(sql: str, start: int) -> int | None:
-    """If ``sql[start:]`` opens a dollar-quote, return the index of
-    its closing ``$`` (so ``sql[start : ret + 1]`` is the full
-    ``$tag$`` opening). Otherwise return None.
+    """Return the index of the closing ``$`` if ``sql[start:]`` opens a dollar-quote.
 
-    Treats ``$$`` (empty tag) and ``$<ident>$`` (tag matches
-    ``[a-zA-Z_][a-zA-Z0-9_]*``) as opens. Anything else — ``$1``,
-    ``$ word``, end-of-string — returns None so the caller emits the
-    ``$`` verbatim.
+    ``$$`` and ``$<ident>$`` open one; anything else (``$1``, ``$ word``, end of
+    string) returns None so the caller emits the ``$`` verbatim.
     """
     n = len(sql)
     if start >= n or sql[start] != "$":
@@ -445,8 +355,7 @@ def _scan_dollar_quote_open(sql: str, start: int) -> int | None:
 def base_table_nodes(tree: Any, dialect: str) -> list[Any]:
     """The ``exp.Table`` nodes in *tree* that are base tables, scope by scope.
 
-    The same rule ``_extract_tables`` reports a cell's inputs by, returning the
-    nodes so a caller can rewrite them.
+    Same rule as ``_extract_tables``, returning nodes so a caller can rewrite them.
     """
     from sqlglot import exp
     from sqlglot.optimizer.scope import Scope, traverse_scope
@@ -464,11 +373,9 @@ def base_table_nodes(tree: Any, dialect: str) -> list[Any]:
 def _stored_name(identifier: Any, dialect: str) -> str | None:
     """*identifier*'s name as the database stores it, or ``None`` when absent.
 
-    Snowflake stores an unquoted identifier uppercased, and its
-    ``INFORMATION_SCHEMA`` compares names exactly: ``events`` is ``EVENTS``
-    there, while ``"events"`` stays as written. A probe that asked for the name
-    as typed found nothing, and "missing" is the same answer on every run.
-    Postgres folds the other way: ``Events`` is stored as ``events``.
+    Snowflake uppercases unquoted identifiers and compares exactly in
+    ``INFORMATION_SCHEMA`` (``events`` is ``EVENTS``, ``"events"`` stays);
+    Postgres folds to lowercase.
     """
     from sqlglot import exp
 
@@ -522,23 +429,13 @@ def _named_by_literal(node: Any, dialect: str) -> QualifiedTable | None:
 def _table_reference(table_node: Any, sql: str, dialect: str) -> QualifiedTable | None:
     """The table *table_node* names, or ``None`` when no probe can name it.
 
-    A base table is a name, qualified or not. Anything else in its place is
-    resolved only when the query runs, and a freshness probe cannot ask about
-    it: Snowflake's ``IDENTIFIER($var)`` or ``IDENTIFIER(?)`` (a string literal
-    inside ``IDENTIFIER`` is a static name, and is tracked), a session variable
-    (``$tbl``), and a table function such as DuckDB's ``query_table(...)`` or
-    ``read_parquet(...)`` or a Postgres set-returning function, which read
-    whatever they read.
-
-    So is DuckDB's ``FROM 'events.parquet'``: a string where a table goes is a
-    file read, not a table, and nothing fingerprints the file. DuckDB reads a
-    name that looks like a file the same way, quoted or not: ``"events.parquet"``,
-    ``events.parquet``, ``"data/*.csv"``. A mount on a lake connection is the
-    way to read files the cache can see, since each mount's fingerprint is
-    folded into the cell's provenance.
-
-    BigQuery's wildcard tables (``events_*``) and ``INFORMATION_SCHEMA`` views
-    are names, but not tables its probe can find: ``__TABLES__`` lists neither.
+    ``None`` for anything resolved only at run time: ``IDENTIFIER($var)`` or
+    ``IDENTIFIER(?)`` (a string literal inside is a static name), a session variable
+    (``$tbl``), and table functions (``read_parquet(...)``, set-returning
+    functions). Also for DuckDB file reads (``FROM 'events.parquet'``, or a name
+    that looks like a file, quoted or not): nothing fingerprints the file, so a
+    mount on a lake connection is the way to read files the cache can see. BigQuery
+    wildcard tables and ``INFORMATION_SCHEMA`` views are names its probe cannot find.
     """
     from sqlglot import exp
 
@@ -585,19 +482,9 @@ def _unresolved_text(table_node: Any, sql: str, dialect: str) -> str:
 def _extract_tables(sql: str, dialect: str) -> tuple[list[QualifiedTable], list[str]]:
     """Walk parsed SQL for base-table references, deduplicated and ordered.
 
-    Uses ``sqlglot.optimizer.scope.traverse_scope`` to visit every
-    scope (root, CTEs, derived tables, subqueries) and collects
-    ``exp.Table`` nodes whose ``scope.sources[name]`` is an
-    ``exp.Table`` — the source-of-truth signal for "this is a base
-    table reference, not a binding to another scope."
-
-    Filtering by ``scope.sources`` correctly drops CTE references
-    in the outer scope (where ``WITH foo AS (...) SELECT * FROM foo``
-    binds ``foo`` to a Scope, not a Table) while still surfacing the
-    base tables inside the CTE body.
-
-    Returns the tables and, separately, the SQL text of references named only
-    at run time (see ``_table_reference``).
+    Keeps ``exp.Table`` nodes whose ``scope.sources`` entry is a table, so a CTE
+    name in an outer scope is dropped while the base tables in its body surface.
+    Also returns the SQL text of references named only at run time.
     """
     import sqlglot
     from sqlglot import exp

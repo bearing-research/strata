@@ -1,9 +1,7 @@
-"""Variable-to-text rendering and ``{{ var }}`` template expansion.
+"""Variable-to-text rendering and ``{{ var }}`` template expansion for prompt cells.
 
-Used by prompt cells (``prompt_executor``) to surface Python values to
-the model. The template language is
-deliberately tiny — only attribute access plus a handful of zero-arg
-methods — so we can evaluate it via AST without ``eval``.
+The template language is only attribute access plus a few zero-arg methods,
+so it is evaluated via AST without ``eval``.
 """
 
 from __future__ import annotations
@@ -20,12 +18,8 @@ def estimate_tokens(text: str) -> int:
 def _pd_display_ctx():
     """Disable every pandas truncation knob for LLM rendering.
 
-    pandas' default ``str()`` / ``to_string()`` output collapses the middle
-    of a wide frame to ``...`` once the column count exceeds
-    ``display.max_columns``. For prompt injection that is catastrophic —
-    the LLM literally cannot see the hidden columns and responds with
-    empty fields. We lift every limit, then trim rows ourselves to fit
-    the token budget.
+    Otherwise wide frames collapse middle columns to ``...`` and the model
+    cannot see them; rows are trimmed to the budget separately.
     """
     import pandas as pd
 
@@ -47,12 +41,10 @@ def _fit_rendered_lines(
     data_lines: list[str],
     max_chars: int,
 ) -> str:
-    """Assemble ``preamble`` + pinned lines + as many data lines as fit.
+    """Assemble ``preamble`` plus pinned lines plus as many data lines as fit ``max_chars``.
 
-    ``pinned_lines`` (e.g. a DataFrame's column header row) are always
-    kept; data rows are dropped from the tail until the total length
-    is at or below ``max_chars``. A ``... (N more rows)`` marker is
-    appended when anything is dropped.
+    Pinned lines (e.g. a header row) are always kept; dropped tail rows are
+    replaced by a ``... (N more rows)`` marker.
     """
     full = "\n".join([preamble, *pinned_lines, *data_lines])
     if len(full) <= max_chars:
@@ -76,10 +68,8 @@ def _fit_rendered_lines(
 def _dataframe_to_text(df: Any, max_chars: int) -> str:
     """Render a DataFrame for prompt injection without column ellipsis.
 
-    ``df.to_markdown()`` would give nicer output but requires ``tabulate``
-    (not a dep). We use ``to_string(index=False)`` inside a context that
-    forces every column to render, then preserve the column-header line
-    while trimming data rows to fit the budget.
+    Uses ``to_string`` (``to_markdown`` needs ``tabulate``, not a dep) and keeps
+    the header line while trimming rows to the budget.
     """
     preamble = f"DataFrame shape={df.shape} columns={list(df.columns)}"
     with _pd_display_ctx():
@@ -97,10 +87,7 @@ def _series_to_text(s: Any, max_chars: int) -> str:
 
 
 def variable_to_text(value: Any, max_tokens: int = 2000) -> str:
-    """Convert a Python value to a text representation for prompt injection.
-
-    Applies type-specific formatting with a per-variable token budget.
-    """
+    """Convert a Python value to text for prompt injection, within a per-variable token budget."""
     max_chars = max_tokens * 4
 
     try:

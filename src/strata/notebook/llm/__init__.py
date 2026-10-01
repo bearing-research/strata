@@ -1,13 +1,7 @@
 """LLM provider integration for Strata prompt cells.
 
-Submodule layout:
-* ``config``      — ``LlmConfig``, ``resolve_llm_config``, provider helpers
-* ``structured``  — ``response_format_for`` and Anthropic tool-use builders
-* ``client``      — ``chat_completion`` and ``chat_completion_stream``
-* ``prompts``     — ``variable_to_text``, ``render_prompt_template``
-
-The package re-exports the public surface so callers can import from
-``strata.notebook.llm`` directly (e.g. ``LlmConfig``, ``chat_completion``).
+Re-exports the public surface of ``config``, ``structured``, ``client`` and
+``prompts`` so callers can import from ``strata.notebook.llm`` directly.
 """
 
 from strata.notebook.llm.client import (

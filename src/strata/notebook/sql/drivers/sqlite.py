@@ -1,20 +1,8 @@
-"""SQLite driver adapter.
+"""SQLite driver adapter, backed by ``adbc-driver-sqlite``.
 
-Backed by ``adbc-driver-sqlite``. The freshness probe combines
-``PRAGMA data_version`` (database-wide write counter) with
-``PRAGMA schema_version`` (DDL counter); both are DB-wide rather than
-per-table because SQLite doesn't expose per-table change tracking.
-The schema fingerprint is still per-table — column structure lives
-in ``pragma_table_info``.
-
-Read-only enforcement uses SQLite's URI ``mode=ro`` so the connection
-is opened against an immutable DB handle; any ``INSERT`` / ``UPDATE``
-/ ``DELETE`` is rejected at the engine before reaching disk.
-
-See ``docs/internal/design-sql-cells.md`` for the SQLite-specific
-gotcha list, especially: ``data_version`` only increments on writes
-from *other* connections (Phase 1 SQL cells are read-only, so
-self-writes that would defeat the probe aren't possible from cells).
+SQLite has no per-table change tracking, so freshness is database-wide (file
+state plus pragmas) while the schema fingerprint is per table. Read-only opens
+use ``mode=ro`` plus ``PRAGMA query_only``. See ``docs/internal/design-sql-cells.md``.
 """
 
 from __future__ import annotations
@@ -77,14 +65,10 @@ def _split_query(query: str) -> list[tuple[str, str]]:
 
 
 def _strip_non_identity_params(query: str) -> str:
-    """Return the query string with non-identity params removed.
+    """Return the query string with non-identity params removed, sorted.
 
-    Strips ONLY ``mode=ro|rw|rwc`` and ``immutable=1``. Other params
-    (``cache``, ``mode=memory``, ``vfs``, ``psow``, etc.) stay because
-    they affect either visibility (``cache=shared`` exposes a different
-    object set) or how the file is read at a level that callers
-    treat as identity. Output is sorted so two equivalent inputs
-    produce the same canonical string.
+    Strips only ``mode=ro|rw|rwc`` and ``immutable=1``. Others (``cache``,
+    ``mode=memory``, ``vfs``, ``psow``) stay: they change which objects are visible.
     """
     kept: list[tuple[str, str]] = []
     for key, value in _split_query(query):
@@ -99,18 +83,11 @@ def _strip_non_identity_params(query: str) -> str:
 
 
 def _build_schema_probe_query(table: QualifiedTable) -> tuple[str, tuple[str]]:
-    """Build the schema-probe SQL for ``pragma_table_info`` on ``table``.
+    """Build the ``pragma_table_info`` schema-probe SQL for *table*.
 
-    SQLite's "schema" is the attached-database name (default ``main``).
-    A qualified table — e.g. ``aux.events`` after ``ATTACH DATABASE
-    'aux.db' AS aux`` — must run the pragma against ``aux``, not the
-    default search order, otherwise we'd fingerprint a same-named
-    table in the wrong DB.
-
-    Pragma functions don't accept bind parameters in the schema
-    position, so the schema name is splice-inlined. ``_SQLITE_IDENT_RE``
-    rejects anything that isn't a plain identifier — that's the
-    injection guard.
+    A qualified table's schema is the attached-database name, so ``aux.events``
+    probes ``aux``, not whatever the search order finds. The schema name is inlined
+    (pragmas take no bind there); ``_SQLITE_IDENT_RE`` is the injection guard.
     """
     if not table.schema:
         return _SCHEMA_QUERY_DEFAULT, (table.name,)
@@ -128,13 +105,10 @@ def _build_schema_probe_query(table: QualifiedTable) -> tuple[str, tuple[str]]:
 
 
 def _force_mode_ro_in_uri(uri: str) -> str:
-    """Replace any ``mode=ro|rw|rwc`` with ``mode=ro`` and append it
-    when no ``mode=`` is present, except for ``mode=memory`` URIs.
+    """Force ``mode=ro`` into a SQLite URI, except for ``mode=memory`` URIs.
 
-    ``mode=memory`` is mutually exclusive with the access-mode values
-    in SQLite's URI syntax — combining them would error. Memory DBs
-    rely on the post-open ``PRAGMA query_only = ON`` for read-only
-    enforcement.
+    ``mode=memory`` cannot combine with an access mode; memory DBs rely on
+    ``PRAGMA query_only = ON`` instead.
     """
     if uri == ":memory:":
         return uri
@@ -151,11 +125,7 @@ def _force_mode_ro_in_uri(uri: str) -> str:
 
 
 def _database_path(probe_conn) -> str | None:
-    """The file behind the connection's ``main`` database, or None in memory.
-
-    ``PRAGMA database_list`` answers for whatever connection it is given, so
-    the probe does not need the connection spec to find the file.
-    """
+    """The file behind the connection's ``main`` database, or None in memory."""
     try:
         with probe_conn.cursor() as cursor:
             cursor.execute("PRAGMA database_list")
@@ -238,18 +208,9 @@ class SqliteAdapter:
     def _canonicalize_uri(self, uri: str) -> str:
         """Canonicalize a SQLite URI for identity hashing.
 
-        Three things happen:
-        1. ``mode=ro|rw|rwc`` and ``immutable=1`` are stripped — they
-           change *how* we open, not which objects we see.
-        2. All other query params (``cache``, ``mode=memory``,
-           ``vfs``, ``psow``, named memory DBs) are PRESERVED. They
-           affect visibility, locking, or which physical DB is opened
-           — collapsing them onto the same id would alias distinct
-           connections.
-        3. The path portion of a non-memory ``file:`` URI is
-           canonicalized to absolute. Memory-backed URIs (``mode=memory``)
-           keep their bare name because it's a logical identifier,
-           not a filesystem path.
+        Strips ``mode=ro|rw|rwc`` and ``immutable=1`` (how we open, not what we see);
+        keeps every other param, since they change visibility, locking or which DB opens;
+        makes a non-memory ``file:`` path absolute. Memory names stay as they are.
         """
         if uri == ":memory:":
             return uri
@@ -283,23 +244,10 @@ class SqliteAdapter:
     def open(self, spec: Any, *, read_only: bool) -> Any:
         """Open an ADBC SQLite connection.
 
-        Read-only enforcement is layered:
-
-        1. **File-handle level** — for file-backed connections, the
-           URI carries ``mode=ro`` so the SQLite engine refuses to
-           open a writable handle. Any user-supplied access-mode
-           (``mode=rwc``, ``mode=rw``) is overridden when the
-           executor asks for read-only.
-        2. **Session level** — every read-only open also issues
-           ``PRAGMA query_only = ON``, which the engine consults on
-           every statement. This catches in-memory databases
-           (``:memory:`` and ``mode=memory`` URIs) where ``mode=ro``
-           can't apply, plus any future quirk where ``mode=ro``
-           might not propagate.
-
-        Both layers together mean a SQL cell can't write to the
-        database regardless of how the connection URI was specified.
-        This is the security boundary, not SQL-text keyword filtering.
+        Read-only is enforced in two layers, which together are the security boundary:
+        ``mode=ro`` in the URI for file-backed databases (overriding any user access
+        mode), and ``PRAGMA query_only = ON`` on every read-only open, which also covers
+        in-memory databases.
         """
         uri = self._build_uri(spec, read_only=read_only)
         conn = self._invoke_connect(uri)
@@ -350,22 +298,11 @@ class SqliteAdapter:
     ) -> FreshnessToken:
         """DB-wide freshness: the database file's own state, plus the pragmas.
 
-        ``tables`` is intentionally ignored — SQLite doesn't expose per-table
-        change counters, so every cell against this connection sees the same
-        token.
-
-        ``PRAGMA data_version`` alone is not enough, and the way it fails is
-        silent: it reports whether *this connection* has seen another
-        connection's writes, and the probe opens a new connection every run, so
-        its value is the same baseline every time. A cell would keep serving
-        its first answer however much the database changed underneath it.
-
-        So the file is asked directly: its size, its modification time, the
-        change counter in its header (bytes 24-28, bumped on every commit), and
-        the size and time of the write-ahead log beside it, which is where a
-        commit lands in WAL mode until a checkpoint. A database with no file —
-        ``:memory:`` — has only the pragmas, and each cell opens its own, so
-        there is nothing there to go stale.
+        *tables* is ignored; SQLite has no per-table change counters. ``PRAGMA
+        data_version`` alone is silently useless: it tracks other connections' writes
+        as seen by this one, and the probe opens a new connection each run. So the file
+        is asked directly: size, mtime, the header change counter, and the WAL's size
+        and mtime. ``:memory:`` has only the pragmas, and nothing there can go stale.
         """
         h = hashlib.sha256()
         with probe_conn.cursor() as cursor:
@@ -394,21 +331,9 @@ class SqliteAdapter:
     ) -> SchemaFingerprint:
         """Per-table schema fingerprint via ``pragma_table_info``.
 
-        Each ``QualifiedTable.schema`` (when set) is treated as the
-        attached-database name. ``main`` is implicit when schema is
-        None. This matters for queries against ``ATTACH DATABASE``
-        targets — without the qualified pragma form, a probe of
-        ``aux.events`` would silently fingerprint ``main.events``
-        (or whatever the search-order resolution turns up).
-
-        Pragma functions don't accept bind parameters in the schema
-        position, so the schema name is splice-inlined and validated
-        against the SQLite identifier pattern; an unsafe value raises
-        before any SQL hits the connection.
-
-        Per-table schema fingerprint catches metadata-only changes
-        (ADD COLUMN, type changes, nullability flips) that the
-        DB-wide freshness probe would miss.
+        ``QualifiedTable.schema`` is the attached-database name (``main`` when None);
+        an unsafe name raises before any SQL runs. Catches metadata-only changes (ADD
+        COLUMN, type or nullability) the DB-wide freshness probe misses.
         """
         if not tables:
             return SchemaFingerprint(value=b"")
@@ -436,12 +361,8 @@ class SqliteAdapter:
     def list_schema(self, conn: Any) -> list[TableSchema]:
         """Enumerate tables and views via ``sqlite_master`` + ``pragma_table_info``.
 
-        SQLite has a single namespace per attached database; we
-        report the implicit ``main`` schema only (attached
-        databases would need an extra pass per attachment, deferred
-        until users hit it). Views surface alongside tables so a
-        notebook author sees the full readable surface; the
-        ``type`` column on the result distinguishes them.
+        Reports only the ``main`` database, not attached ones; the ``type`` column tells
+        tables from views.
         """
         out: list[TableSchema] = []
         with conn.cursor() as cursor:

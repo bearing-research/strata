@@ -37,12 +37,9 @@ DEFAULT_VALIDATE_ATTEMPTS = 3
 
 
 def _validation_errors(content: str, schema: dict[str, Any]) -> list[str]:
-    """Return a list of human-readable, path-addressed validation errors.
+    """Return path-addressed validation errors; empty means valid JSON matching the schema.
 
-    Empty list ⇔ the response is valid JSON *and* matches the schema.
-    A single "not valid JSON" error collapses the JSON-parse failure
-    into the same return type as schema failures so the caller has one
-    thing to handle.
+    A JSON parse failure comes back as a single error in the same list.
     """
     try:
         parsed = json.loads(content)
@@ -65,10 +62,8 @@ def _validation_errors(content: str, schema: dict[str, Any]) -> list[str]:
 def _coerce_json_text(content: str) -> str:
     """Best-effort extraction of a JSON document from model output.
 
-    Providers without server-side schema enforcement often wrap valid
-    JSON in code fences or prose. Returns the extracted JSON string when
-    one parses, else the original content (whose parse error then drives
-    the validation-retry feedback).
+    Unwraps code fences or prose around JSON. Returns the original content when
+    nothing parses, so its parse error drives the retry feedback.
     """
     try:
         json.loads(content)
@@ -101,12 +96,7 @@ def _coerce_json_text(content: str) -> str:
 
 
 def _format_one_error(err: Any) -> str:
-    """Render a jsonschema ValidationError as 'path: message'.
-
-    Uses JSON Pointer style for the path (leading ``/``, empty pointer
-    for the root). Matches what language models respond to best — they
-    trained on JSON Schema docs that use this convention.
-    """
+    """Render a jsonschema ValidationError as ``path: message`` with a JSON Pointer path."""
     pointer = "/" + "/".join(str(part) for part in err.absolute_path) if err.absolute_path else ""
     return f"{pointer or '(root)'}: {err.message}"
 
@@ -114,9 +104,7 @@ def _format_one_error(err: Any) -> str:
 def _format_retry_prompt(errors: list[str]) -> str:
     """Build the user-turn feedback message for a validation retry.
 
-    Kept spare on purpose — the errors themselves are descriptive; any
-    extra framing we add just burns tokens and risks the model
-    over-interpreting our instructions over the schema.
+    Kept spare: extra framing burns tokens and can pull the model away from the schema.
     """
     bullets = "\n".join(f"- {err}" for err in errors)
     return (
@@ -127,15 +115,11 @@ def _format_retry_prompt(errors: list[str]) -> str:
 
 
 def prompt_reopen_identity(cell: Any, session: Any) -> str | None:
-    """What a reopened prompt cell's cached answer depends on, beyond its text.
+    """What a reopened prompt cell's cached answer depends on beyond its text.
 
-    The model, the sampling, the length and the shape asked for: change any of
-    them and the previous answer is the answer to a different question. None of
-    it is in the generic provenance triplet, which sees only the source, the
-    environment and the inputs, so without this a notebook reopened after its
-    ``[ai]`` model changed showed the old model's answer as ready.
-
-    Never ``None``: everything here is settled by the cell and the notebook.
+    Model, sampling, length and output shape are not in the generic provenance
+    (source, env, inputs), so without this a changed ``[ai]`` model would show the
+    old answer as ready. Never ``None``.
     """
     from strata.notebook.llm.config import read_notebook_ai_config
 
@@ -170,18 +154,10 @@ def compute_prompt_provenance_hash(
 ) -> str:
     """Stable cache key for a prompt-cell invocation.
 
-    Includes the schema fingerprint so editing ``@output_schema``
-    invalidates cached responses even when the template body and model
-    params are unchanged — a schema change means the user wants a
-    differently-shaped answer.
-
-    ``input_hashes`` folds each referenced upstream artifact's provenance
-    hash (var name → hash). The rendered template alone is NOT a
-    sufficient input fingerprint: rendering truncates each interpolated
-    variable (``max_tokens_per_var``), so an upstream edit past the cut
-    produced a byte-identical render and silently returned the stale
-    cached answer. ``max_tokens`` is folded for the same reason —
-    lowering ``@max_tokens`` asks for a different-length answer.
+    Folds in the schema fingerprint and ``max_tokens`` (both change the answer
+    asked for) and each upstream's provenance hash: rendering truncates variables
+    at ``max_tokens_per_var``, so the rendered template alone misses edits past
+    the cut.
     """
     schema_fp = (
         json.dumps(output_schema, sort_keys=True, separators=(",", ":"))
@@ -211,17 +187,11 @@ async def execute_prompt_cell(
     use_cache: bool = True,
     on_delta: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
 ) -> dict[str, Any]:
-    """Execute a prompt cell and return the result.
+    """Execute a prompt cell and return a dict of ``CellExecutionResult`` fields.
 
-    Returns a dict compatible with CellExecutionResult fields:
-        success, outputs, stdout, stderr, error, cache_hit,
-        duration_ms, execution_method, artifact_uri, mutation_warnings
-
-    ``on_delta`` receives one ``CELL_OUTPUT_DELTA`` payload dict per
-    streaming event (``{cell_id, attempt, kind, text}``) so the WS
-    layer can surface the response as it generates (issue #110).
-    Cache hits return before any delta fires; callback failures are
-    logged and never fail the cell.
+    ``on_delta`` receives one ``CELL_OUTPUT_DELTA`` payload
+    (``{cell_id, attempt, kind, text}``) per streaming event. Cache hits fire no
+    deltas; callback failures are logged and never fail the cell.
     """
     start_time = time.time()
     analysis = analyze_prompt_cell(source)
@@ -528,10 +498,8 @@ async def _emit_delta(
 ) -> None:
     """Fire the streaming callback, swallowing failures.
 
-    Same policy as ``CellExecutor.on_iteration_complete``: a broken
-    WebSocket (client gone mid-stream) must not fail the cell — the
-    canonical result still lands in the artifact store and the final
-    ``cell_output`` frame.
+    A client gone mid-stream must not fail the cell; the result still reaches
+    the store and the final ``cell_output`` frame.
     """
     if on_delta is None:
         return
@@ -556,10 +524,8 @@ async def _stream_completion(
 ) -> LlmCompletionResult:
     """Stream one completion attempt, forwarding deltas as they arrive.
 
-    Accumulates the streamed text into the same ``LlmCompletionResult``
-    shape the unary path returns, so the validate-and-retry loop is
-    agnostic to which transport produced the content. Usage comes from
-    the stream's final ``done`` event (``stream_options.include_usage``).
+    Returns the same ``LlmCompletionResult`` shape as the unary path; usage
+    comes from the stream's final ``done`` event.
     """
     content_parts: list[str] = []
     model = config.model
@@ -617,13 +583,9 @@ def _load_upstream_variables(
     session: NotebookSession,
     cell_id: str,
 ) -> tuple[dict[str, Any], dict[str, str]]:
-    """Load upstream variable values from artifacts.
+    """Load upstream values and their provenance hashes as ``(variables, input_hashes)``.
 
-    Returns ``(variables, input_hashes)`` — the values for template
-    rendering plus each artifact's provenance hash (var name → hash) for
-    the cell's cache key, mirroring the SQL executor. The hashes matter
-    because rendering truncates long variables, so the rendered text
-    alone can't fingerprint the inputs.
+    The hashes key the cache because rendering truncates long variables.
     """
     variables: dict[str, Any] = {}
     input_hashes: dict[str, str] = {}

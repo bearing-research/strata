@@ -9,17 +9,7 @@ from dataclasses import dataclass, field
 
 @dataclass
 class DagEdge:
-    """An edge in the DAG representing a variable dependency.
-
-    Attributes
-    ----------
-    from_cell_id : str
-        Cell that defines the variable.
-    to_cell_id : str
-        Cell that references the variable.
-    variable : str
-        Variable name that flows along this edge.
-    """
+    """An edge in the DAG: ``variable`` flows from ``from_cell_id`` to ``to_cell_id``."""
 
     from_cell_id: str
     to_cell_id: str
@@ -30,21 +20,9 @@ class DagEdge:
 class VariantGroupResolution:
     """Resolved state for a single variant group.
 
-    ``members`` is in source order; ``active_cell_id`` is the cell whose
-    defines flow into the producer map. Inactive members are tracked here
-    so the frontend can render them as tabs but they are excluded from
-    everything DAG-related (producer map, edges, consumed_variables).
-
-    Attributes
-    ----------
-    group : str
-        Variant group ID parsed from ``# @variant`` annotations.
-    active_name : str
-        Name of the variant currently selected as active.
-    active_cell_id : str
-        Cell ID of the active variant — its defines flow into the producer map.
-    members : list of tuple of (str, str)
-        ``(cell_id, variant_name)`` pairs in source order, including inactive ones.
+    ``members`` is ``(cell_id, variant_name)`` pairs in source order, inactive ones
+    included so the frontend can render tabs. Only ``active_cell_id`` takes part in
+    the DAG (producer map, edges, consumed_variables).
     """
 
     group: str
@@ -60,18 +38,14 @@ class VariantGroupResolution:
 class SweepProducer:
     """Producer-map entry for a variable produced across a set of variants.
 
-    Two shapes share this type:
-
-    - **Sweep group** (``fanout_cell is None``): each variant is a distinct
-      variant-member cell, so ``variants`` maps ``variant_name -> member_cell_id``
-      and a downstream reference fans out to one edge per member.
+    - **Sweep group** (``fanout_cell is None``): ``variants`` maps
+      ``variant_name -> member_cell_id`` and a downstream reference fans out to one
+      edge per member.
     - **Fan-out cell** (``fanout_cell`` set): a ``# @per_variant`` cell runs once
-      per variant of an upstream sweep group. Every instance shares the same
-      producing cell (``fanout_cell``), so all ``variants`` entries point at it;
-      the executor derives per-instance artifacts via an ``@variant=<name>``
-      subkey. Downstream collapse/chaining reuses the same edge machinery.
+      per variant of an upstream sweep, so every entry points at ``fanout_cell``;
+      per-instance artifacts use an ``@variant=<name>`` subkey.
 
-    ``variants`` is sorted so the value is stable/hashable.
+    ``variants`` is sorted so the value is stable and hashable.
     """
 
     group: str
@@ -83,22 +57,8 @@ class SweepProducer:
 class CellAnalysisWithId:
     """Cell analysis result paired with cell ID.
 
-    Attributes
-    ----------
-    id : str
-        Cell ID.
-    defines : list of str
-        Variables defined by this cell.
-    references : list of str
-        Variables referenced by this cell.
-    after : list of str
-        Explicit ordering dependencies (``# @after <cell-id>``). Each entry
-        is an upstream cell ID; the DAG edge is ordering-only (no variable
-        flows along it).
-    variant_group : str or None
-        Variant group ID parsed from ``# @variant``, or ``None``.
-    variant_name : str or None
-        Variant name within the group, or ``None``.
+    ``after`` holds upstream cell IDs from ``# @after``; those edges are
+    ordering-only and carry no variable.
     """
 
     id: str
@@ -119,8 +79,7 @@ class CellAnalysisWithId:
 class VariantNameCollisionError(ValueError):
     """Raised when two cells claim the same (variant_group, variant_name).
 
-    Recovery requires the user to rename one of the variants — there is
-    no defensible default the system can pick.
+    There is no defensible default, so the user must rename one variant.
     """
 
 
@@ -128,30 +87,10 @@ class VariantNameCollisionError(ValueError):
 class NotebookDag:
     """The complete DAG for a notebook.
 
-    Attributes
-    ----------
-    edges : list of DagEdge
-        All variable-level edges in the DAG.
-    cell_upstream : dict of {str : list of str}
-        For each cell, the list of upstream cell IDs it depends on.
-    cell_downstream : dict of {str : list of str}
-        For each cell, the list of downstream cell IDs that depend on it.
-    leaves : set of str
-        Cell IDs with no downstream consumers.
-    roots : set of str
-        Cell IDs with no upstream dependencies.
-    topological_order : list of str
-        Cells in valid execution order.
-    variable_producer : dict of {str : str}
-        For each variable, which cell produces it (last in cell order wins).
-    consumed_variables : dict of {str : set of str}
-        For each cell, the set of variable names consumed by downstream cells.
-    shadow_warnings : dict of {str : list of str}
-        Maps ``cell_id`` to a list of warning messages about shadowed variables.
-    variant_groups : list of VariantGroupResolution
-        Resolved variant groups, in source-order of first member.
-    inactive_cells : set of str
-        Cell IDs that are inactive variants (excluded from edges/producer map).
+    ``variable_producer`` maps a variable to its producing cell (last in cell order
+    wins) or a ``SweepProducer``. ``consumed_variables`` is, per cell, the variables
+    downstream cells reference. Inactive variants appear only in ``variant_groups``
+    and ``inactive_cells``.
     """
 
     edges: list[DagEdge] = field(default_factory=list)
@@ -173,31 +112,17 @@ class NotebookDag:
         variant_active_selections: Mapping[str, str] | None = None,
         variant_modes: Mapping[str, str] | None = None,
     ) -> NotebookDag:
-        """Build the DAG from cell analyses.
+        """Build the DAG from cell analyses given in source order.
 
-        Parameters
-        ----------
-        cells : list of CellAnalysisWithId
-            Cells with their analysis results, in source order.
-        variant_active_selections : Mapping of {str : str}, optional
-            Per-group active variant name from ``notebook.toml``. If a group
-            is missing here, the first variant in source order is implicitly
-            active.
-
-        Returns
-        -------
-        NotebookDag
-            DAG with edges, upstream/downstream relations, and metadata.
-            Inactive variants are entirely shadowed: they are recorded in
-            ``inactive_cells`` and ``variant_groups`` for the frontend, but
-            they do not produce edges or appear in the producer map.
+        A group missing from ``variant_active_selections`` uses its first variant in
+        source order. Inactive variants produce no edges and no producer-map entries.
 
         Raises
         ------
         VariantNameCollisionError
             If two cells share the same ``(group, variant_name)``.
         ValueError
-            If the resulting DAG (over active cells) contains a cycle.
+            If the DAG over active cells contains a cycle.
         """
         dag = cls()
         cell_ids = [c.id for c in cells]
@@ -353,25 +278,7 @@ class NotebookDag:
         return dag
 
     def topological_sort(self, cell_ids: list[str]) -> list[str]:
-        """Return cells in topological (execution) order.
-
-        Uses Kahn's algorithm with cycle detection.
-
-        Parameters
-        ----------
-        cell_ids : list of str
-            Cell IDs to sort (typically active cells only).
-
-        Returns
-        -------
-        list of str
-            Cells in topological order.
-
-        Raises
-        ------
-        ValueError
-            If a cycle is detected.
-        """
+        """Return cells in topological (execution) order; raise ``ValueError`` on a cycle."""
         in_degree = {cell_id: len(self.cell_upstream[cell_id]) for cell_id in cell_ids}
 
         # deque: this runs on every keystroke-driven DAG rebuild, and list.pop(0) is O(n).
@@ -394,18 +301,7 @@ class NotebookDag:
         return result
 
     def detect_cycles(self, cell_ids: list[str]) -> list[list[str]]:
-        """Find all cycles in the DAG using DFS.
-
-        Parameters
-        ----------
-        cell_ids : list of str
-            Cell IDs to scan.
-
-        Returns
-        -------
-        list of list of str
-            One inner list per cycle, each containing the cell IDs along that cycle.
-        """
+        """Return every cycle among ``cell_ids``, each as the list of cell IDs along it."""
         # Colors: 0=white, 1=gray, 2=black
         color = {cell_id: 0 for cell_id in cell_ids}
         cycles: list[list[str]] = []
@@ -429,22 +325,7 @@ class NotebookDag:
         return cycles
 
     def upstream_reachable(self, start: str) -> set[str]:
-        """Return the set of cells reachable upstream from ``start`` (inclusive).
-
-        Uses ``deque.popleft`` (O(1)) rather than ``list.pop(0)`` (O(n)) since
-        this walk runs on every keystroke-driven DAG rebuild and once per
-        impact-preview / cascade-plan request.
-
-        Parameters
-        ----------
-        start : str
-            Cell ID to BFS from over ``cell_upstream``.
-
-        Returns
-        -------
-        set of str
-            All cell IDs reachable upstream from ``start``, including ``start`` itself.
-        """
+        """Return the cells reachable upstream from ``start``, including ``start``."""
         visited: set[str] = set()
         queue: deque[str] = deque([start])
         while queue:
@@ -458,21 +339,9 @@ class NotebookDag:
         return visited
 
     def cascade_plan(self, target_cell_id: str, cell_ids: list[str]) -> list[str]:
-        """Get all upstream cells needed before executing a target cell.
+        """Return the cells, in ``cell_ids`` order, to run before executing the target.
 
-        Parameters
-        ----------
-        target_cell_id : str
-            The cell to execute.
-        cell_ids : list of str
-            All cell IDs in execution order.
-
-        Returns
-        -------
-        list of str
-            Cell IDs in execution order that need to run before the target.
-            If the target is a root cell, includes the target cell itself;
-            otherwise, includes only upstream cells.
+        Includes the target itself only when it is a root.
         """
         visited = self.upstream_reachable(target_cell_id)
         # Target stays in the plan only if it's a root (no upstreams to run).
@@ -481,19 +350,10 @@ class NotebookDag:
         return [cid for cid in cell_ids if cid in visited]
 
     def serialize_edges(self) -> list[dict[str, str]]:
-        """Serialize edges in the wire format the frontend expects.
+        """Serialize edges as ``from_cell_id``/``to_cell_id``/``variable`` dicts.
 
-        The frontend's ``applyBackendDag`` keys off ``from_cell_id`` /
-        ``to_cell_id``; every broadcast site must use this so the field
-        names can't drift apart. (Pre-fix, three near-identical loops
-        diverged and the agent-edit path silently emitted ``from`` /
-        ``to``, stranding every edge until the user hard-refreshed.)
-
-        Returns
-        -------
-        list of dict of {str : str}
-            One entry per edge with ``from_cell_id``, ``to_cell_id``,
-            and ``variable`` keys.
+        Every broadcast site must use this so the field names the frontend's
+        ``applyBackendDag`` reads cannot drift between paths.
         """
         return [
             {
@@ -535,23 +395,9 @@ def _resolve_variant_groups(
 ) -> tuple[list[VariantGroupResolution], set[str]]:
     """Group cells by ``variant_group`` and resolve the active member per group.
 
-    Cells without a variant group always count as active.
-
-    Parameters
-    ----------
-    cells : list of CellAnalysisWithId
-        Cells in source order; only those with both ``variant_group`` and
-        ``variant_name`` set participate in grouping.
-    selections : Mapping of {str : str}
-        Per-group active variant name (e.g. from ``notebook.toml``).
-        Missing groups fall back to the first variant in source order.
-
-    Returns
-    -------
-    resolutions : list of VariantGroupResolution
-        Resolved groups, in source order of their first member.
-    inactive : set of str
-        Cell IDs that are inactive variants.
+    Cells without a variant group always count as active. A group missing from
+    ``selections`` uses its first variant in source order. Returns the resolutions
+    (source order of first member) and the set of inactive cell IDs.
 
     Raises
     ------

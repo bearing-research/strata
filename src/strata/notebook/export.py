@@ -1,24 +1,10 @@
-"""Notebook export to shareable markdown / HTML.
+"""Notebook export to a single self-contained markdown or HTML file.
 
-Public entry: :func:`export_notebook` takes a notebook directory and
-emits a single self-contained file representing the notebook — source
-cells, cached display outputs, console snapshots — with no external
-runtime dependencies on the receiving end.
-
-This is the engine behind ``strata export`` (CLI) and the mkdocs hook
-that auto-renders ``examples/*`` into the docs site.
-
-Design choices captured in
-``docs/internal/design-notebook-export.md``; the noteworthy ones:
-
-- Prompt-cell *responses* are never rendered, regardless of flags.
-  Privacy default — an LLM response can carry sensitive judgments
-  the cell author might not want to share. The cell source template
-  is always shown so the reader still sees what was asked.
-- Variant cells render only the active variant by default;
-  ``include_inactive_variants=True`` opts into a stacked rendering.
-- Loop cells render the body + final iteration's output; per-
-  iteration history is skipped to keep export size bounded.
+Engine behind ``strata export`` and the mkdocs hook that renders ``examples/*``.
+Prompt-cell responses are never rendered (an LLM answer may carry judgments the
+author would not share; the template is shown). Variant cells render only the
+active variant unless ``include_inactive_variants``; loop cells render the
+final iteration only.
 """
 
 from __future__ import annotations
@@ -65,17 +51,8 @@ def export_notebook(
 ) -> str:
     """Render ``notebook_dir`` to a single export string.
 
-    The notebook's existing on-disk state is used as-is — display
-    outputs and console snapshots come from ``.strata/runtime.json``
-    and ``.strata/console/`` respectively. Cells that have never been
-    executed appear with their source only.
-
-    Args:
-        notebook_dir: directory containing ``notebook.toml``.
-        options: format selection + flags; defaults to markdown.
-
-    Returns:
-        The rendered file content. Caller writes it to disk or stdout.
+    Uses the on-disk state as-is (``.strata/runtime.json`` and
+    ``.strata/console/``); never-run cells appear with their source only.
     """
     options = options or ExportOptions()
     notebook_dir = Path(notebook_dir)
@@ -168,9 +145,7 @@ class ImageBlock(Block):
 class TableBlock(Block):
     """A tabular preview rendered as a markdown table.
 
-    ``rows`` is a list of dicts keyed by column name. ``columns`` is
-    the column order; entries missing from a row become an empty
-    string in that cell.
+    ``columns`` is the column order; a column missing from a row renders empty.
     """
 
     columns: list[str]
@@ -184,16 +159,16 @@ class TableBlock(Block):
 
 
 def _is_app_hidden(source: str) -> bool:
-    """Whether a cell carries ``# @app hide`` — mirrors the app view's filter."""
+    """Whether a cell carries ``# @app hide``, as the app view filters."""
     import re
 
     return any(re.match(r"#\s*@app\s+hide\b", line.strip()) for line in source.splitlines())
 
 
 def _is_app_cell(cell: CellState) -> bool:
-    """Cells the app view surfaces: widget panels, markdown prose, and anything
-    with a display output — minus cells marked ``# @app hide``. Mirrors the
-    ``appCells`` filter in ``AppView.vue`` so a snapshot matches the live app.
+    """Cells the app view shows: widget, markdown, or with a display output, minus ``@app hide``.
+
+    Mirrors ``appCells`` in ``AppView.vue`` so a snapshot matches the live app.
     """
     if _is_app_hidden(cell.source):
         return False
@@ -203,10 +178,7 @@ def _is_app_cell(cell: CellState) -> bool:
 
 
 def _render_widget_controls(cell: CellState) -> list[Block]:
-    """Render a widget cell's controls as static ``(name, value)`` chips — the
-    parameter settings that produced the snapshot's outputs. Values come from
-    the persisted ``widget_values``, falling back to each control's default.
-    """
+    """Render a widget cell's controls as ``(name, value)`` chips, value or default."""
     from strata.notebook.widget_analyzer import analyze_widget_cell
 
     descriptors = analyze_widget_cell(cell.source).descriptors
@@ -221,10 +193,9 @@ def _render_app_cell(
     notebook_dir: Path,
     options: ExportOptions,
 ) -> list[Block]:
-    """Render one cell for an app-view snapshot: presentation only — no source,
-    chips, or console. Prompt cells are skipped (their output is the model
-    response, which export never renders — same privacy default as the doc
-    export).
+    """Render one cell for an app-view snapshot: outputs only, no source, chips or console.
+
+    Prompt cells are skipped, as their output is the model response.
     """
     if cell.language == CellLanguage.PROMPT:
         return []
@@ -315,16 +286,10 @@ _SANITIZE_RES: tuple[re.Pattern[str], re.Pattern[str], re.Pattern[str], re.Patte
 def _sanitize_markdown_body(body: str) -> str:
     """Neutralize active-content HTML in user-authored markdown.
 
-    The notebook UI renders markdown through DOMPurify; this is the
-    equivalent guarantee on the export side, where the same markdown
-    is handed to python-markdown / mkdocs and would otherwise reach
-    the published page as live HTML.
-
-    Strategy: HTML-escape the dangerous tag verbatim so the reader
-    sees the literal source text (matching the in-app behavior) while
-    benign inline HTML (``<sub>``, ``<details>``, etc.) still flows
-    through. javascript: / data:text/html link targets are replaced
-    with ``#``.
+    The UI sanitizes with DOMPurify; exported markdown goes to python-markdown /
+    mkdocs and would otherwise publish live HTML. Dangerous tags are HTML-escaped
+    so the reader sees their source; benign inline HTML passes through, and
+    ``javascript:`` / ``data:text/html`` link targets become ``#``.
     """
     global _SANITIZE_RES
     if _SANITIZE_RES is None:
@@ -362,11 +327,9 @@ def _sanitize_markdown_body(body: str) -> str:
 
 
 def _truncate_text(text: str, max_bytes: int) -> str:
-    """Truncate ``text`` to roughly ``max_bytes`` UTF-8 bytes.
+    """Truncate ``text`` to about ``max_bytes`` UTF-8 bytes, with a marker of what was dropped.
 
-    Truncates on a character boundary so the result is valid UTF-8.
-    Appends a marker telling the reader how much was dropped.
-    ``max_bytes <= 0`` disables truncation.
+    Cuts on a character boundary. ``max_bytes <= 0`` disables truncation.
     """
     if max_bytes <= 0:
         return text
@@ -379,14 +342,7 @@ def _truncate_text(text: str, max_bytes: int) -> str:
 
 
 def _strip_ansi(text: str) -> str:
-    """Remove ANSI CSI/OSC escape sequences from terminal output.
-
-    Cells using ``rich``, ``colorama``, ``click.echo(..., color=True)``
-    or progress bars emit escape sequences into stdout. They render as
-    colours in a terminal but as ``\\x1b[31m...`` noise in a markdown or
-    HTML reader. Strip them before persisting into the export so
-    console snapshots stay readable.
-    """
+    """Remove ANSI CSI/OSC escape sequences (colour, progress bars) from terminal output."""
     global _ANSI_ESCAPE_RE
     if _ANSI_ESCAPE_RE is None:
         import re
@@ -419,11 +375,8 @@ def _render_console(cell: CellState, *, max_bytes: int) -> list[Block]:
 def _render_error(cell: CellState, *, max_bytes: int) -> list[Block]:
     """The error the cell's last run ended with, while it still describes it.
 
-    A failed run stores no display output, so the output loop above renders
-    nothing for it, and a reader of the export saw the source and whatever it
-    printed with no sign that it failed. ``current_error`` is empty once the
-    source has changed since the failure, so an edited cell does not carry a
-    traceback for code it no longer contains.
+    A failed run stores no display output, so without this the export shows no
+    sign of failure. ``current_error`` is empty once the source has changed.
     """
     error = cell.current_error()
     if not error:
@@ -444,10 +397,8 @@ def _render_display_output(
 ) -> list[Block]:
     """Per-content-type renderer for one persisted cell output.
 
-    For image/png and text/markdown outputs the inline payload is not
-    persisted in notebook.toml (it's a transient large field). When
-    the artifact_uri points at a stored blob, load it lazily — same
-    approach NotebookSession._hydrate_display_output uses.
+    Image and markdown payloads are not persisted inline; they are loaded from
+    the artifact store when ``artifact_uri`` points at one.
     """
     if output.error:
         return [
@@ -527,16 +478,9 @@ def _normalize_table_preview(
     preview: list,
     columns: list[str],
 ) -> list[dict[str, object]]:
-    """Coerce serialized table-preview rows into dict-keyed rows.
+    """Coerce table-preview rows (positional lists or dicts) into dict-keyed rows.
 
-    The serializer at ``serializer.py`` emits rows as positional lists
-    (one entry per column). Some callers — and our own tests — emit
-    them as dicts already. Accept either shape so the table emitter
-    always works against the same dict-of-cells representation.
-
-    Rows shorter than ``columns`` get missing cells coerced to None;
-    rows longer are truncated. Non-list / non-dict entries are
-    skipped silently.
+    Short rows are padded with None, long rows truncated, other entries dropped.
     """
     out: list[dict[str, object]] = []
     for row in preview:
@@ -562,16 +506,9 @@ def _format_scalar_preview(value: object) -> str:
 
 
 def _hydrate_output(output: CellOutput, *, notebook_dir: Path, notebook_id: str) -> CellOutput:
-    """Re-attach transient inline fields stripped at TOML-save time.
+    """Re-attach the inline image/markdown payload, which is not persisted, from the store.
 
-    ``inline_data_url`` (for image/png) and ``markdown_text`` (for
-    text/markdown) are dropped before persisting because they're
-    large transient fields. When the cell carries an ``artifact_uri``
-    we can re-fetch the blob from the local artifact store.
-
-    Failures are silent — if the artifact store can't be opened or the
-    blob is missing, the output renders as-is (no image / no markdown
-    body, just whatever else the renderer can show).
+    Best effort: if the store or blob is unavailable, the output is returned as-is.
     """
     if output.content_type not in {"image/png", "text/markdown"}:
         return output
@@ -750,11 +687,8 @@ def _emit_markdown_table(block: TableBlock) -> str:
 def _fence_length_for(body: str) -> int:
     """Return the minimum number of backticks needed to fence ``body``.
 
-    CommonMark requires the closing fence to be at least as long as the
-    opening one. If the body contains a run of N backticks, the fence
-    must be longer than N or it'll close early and corrupt the markdown.
-    Prompt cells routinely embed fenced examples inside their templates,
-    so this is a real concern, not a theoretical one.
+    The fence must be longer than any backtick run in the body, or it closes
+    early; prompt templates often embed fenced examples.
     """
     import re
 
@@ -779,15 +713,9 @@ def _format_table_cell(value: object) -> str:
 def _emit_html(blocks: list[Block], *, title: str) -> str:
     """Render the block tree as a standalone HTML document.
 
-    Code blocks are syntax-highlighted via Pygments (server-side, no
-    client JS). Images are inlined as ``data:`` URLs (already produced
-    by the hydration step). Tables become real ``<table>`` elements.
-
-    Markdown content (README intro, markdown cells) is rendered as
-    preformatted text — adding a markdown-to-HTML library to the
-    notebook runtime just for export wasn't worth the dep cost. For
-    the best fidelity on prose-heavy notebooks, use ``--to markdown``
-    and post-process with your tool of choice.
+    Code is highlighted server-side with Pygments; images are inline ``data:``
+    URLs. Markdown content is shown as preformatted source, to avoid a
+    markdown-to-HTML dependency; use ``--to markdown`` for prose fidelity.
     """
     from html import escape
 
@@ -895,12 +823,7 @@ def _render_table_html(block: TableBlock) -> str:
 
 
 def _html_stylesheet() -> str:
-    """Embedded CSS for the standalone HTML export.
-
-    Goals: legible, neutral, prints reasonably. Not a faithful match
-    for the in-product notebook UI; we aim for "looks like a clean
-    document," not "looks like the editor."
-    """
+    """Embedded CSS for the standalone HTML export: a clean document, not the editor look."""
     try:
         from pygments.formatters.html import HtmlFormatter
 

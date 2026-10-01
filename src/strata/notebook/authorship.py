@@ -1,19 +1,10 @@
 """Who changed a cell.
 
-A notebook has an owner; a cell had nobody. Runs are attributed through the
-artifact's ``principal``, but only for remote builds and team-store offers, so
-an edit left no record beyond git — and on a server where an agent and a person
-both write cells, "which of these did the agent write" had no answer at all.
-
-Two sources, because the two deployments answer the question differently. In
-service mode the server authenticates every request and the principal *is* the
-answer; a client that could name itself there would be claiming an identity
-rather than presenting one, so a declared author is ignored. In personal mode
-there is no authentication and nothing to check against, so the client says who
-it is: the browser is ``local``, and an external agent sends its own name on
-each tool call. That is a claim rather than a fact, which is the honest amount
-of trust available on a machine where anyone who can reach the server is
-already its owner.
+In service mode the authenticated principal is the author; a declared author is
+ignored, since a client that could name itself would be claiming an identity
+rather than presenting one. In personal mode there is no authentication, so the
+client's declared name is recorded (the browser is ``local``; an agent sends its
+own name on each tool call). That is a claim, not a fact.
 """
 
 from __future__ import annotations
@@ -28,8 +19,7 @@ MAX_AUTHOR_LENGTH = 128
 def resolve_author(declared: str | None = None) -> str:
     """Who to record for the edit being made now.
 
-    The authenticated principal wherever there is one; otherwise what the
-    client declared, and ``local`` when it declared nothing.
+    The authenticated principal if any; otherwise the declared author, or ``local``.
     """
     principal = _current_principal()
     if principal is not None:
@@ -40,9 +30,8 @@ def resolve_author(declared: str | None = None) -> str:
 def clean_author(declared: str | None) -> str | None:
     """A declared author, trimmed and bounded, or ``None`` if it was empty.
 
-    Control characters are dropped rather than escaped: this ends up in TOML
-    and in a cell view, and a newline in the middle of a byline is never
-    something a caller meant.
+    Control characters are dropped rather than escaped: the value lands in TOML
+    and in a cell view, where a newline in a byline is never intended.
     """
     if not declared:
         return None

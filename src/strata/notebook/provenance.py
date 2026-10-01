@@ -1,13 +1,7 @@
 """Provenance hashing for notebook cells.
 
-Provenance hashing enables cache deduplication by computing a deterministic
-hash of:
-1. The sorted input artifact hashes (from upstream cells)
-2. The cell source code (normalized)
-3. The runtime environment hash (lockfile)
-
-This ensures identical computations always produce the same hash and can
-be cached.
+A cell's hash covers its sorted input artifact hashes, its normalized source
+and its environment hash, so identical computations hash identically.
 """
 
 from __future__ import annotations
@@ -19,18 +13,9 @@ import hashlib
 def _normalize_source_for_hash(source: str) -> str:
     """Return a canonical form of *source* for provenance hashing.
 
-    Normalization must reject cosmetic edits that don't change
-    behavior (blank lines, trailing whitespace, comments, single vs
-    double quotes, ``1+2`` vs ``1 + 2``) while preserving any change
-    that could affect execution. We get that for free by round-tripping
-    through the AST: ``ast.parse`` tolerates all whitespace as long as
-    it's syntactically valid, and ``ast.unparse`` emits a stable
-    canonical form keyed only to the semantic tree.
-
-    If the source can't be parsed (user hit Run on an incomplete
-    edit), fall back to a weaker normalization that still absorbs the
-    most common edits: trailing whitespace per line and leading /
-    trailing blank lines.
+    Round-trips through the AST so cosmetic edits (whitespace, comments, quote
+    style) hash the same. Unparseable source falls back to stripping trailing
+    whitespace per line and leading/trailing blank lines.
     """
     try:
         tree = ast.parse(source)
@@ -41,40 +26,20 @@ def _normalize_source_for_hash(source: str) -> str:
 
 
 def compute_source_hash(source: str) -> str:
-    """Compute SHA-256 hash of a semantically-normalized cell source.
+    """SHA-256 hex digest of the normalized cell source.
 
-    Whitespace, blank lines, and comments do NOT invalidate the cache.
-    Anything that changes the parsed AST does — variable renames,
-    literal value changes, control-flow edits, etc.
-
-    Args:
-        source: Cell source code
-
-    Returns:
-        SHA-256 hex digest
+    Whitespace and comments do not change it; anything that changes the AST does.
     """
     normalized = _normalize_source_for_hash(source)
     return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
 
 
 def derive_subkey(parent_hash: str, *labels: str) -> str:
-    """Derive a sub-hash from a parent provenance hash plus one or more labels.
+    """Derive ``sha256("parent_hash:label1:label2:...")`` from a provenance hash.
 
-    Returns ``sha256("parent_hash:label1:label2:...")``. Used to namespace
-    per-variable, per-display, and per-iteration provenance off a cell's
-    main provenance hash, so two cells that share a provenance hash still
-    produce distinct artifact keys for their distinct outputs.
-
-    The byte format (colon-joined, no separator after the last component)
-    is wire-stable — changing it would invalidate every existing cached
+    Namespaces per-variable, per-display and per-iteration keys off a cell's
+    hash. The byte format is wire-stable: changing it invalidates every cached
     artifact keyed off a derived hash.
-
-    Args:
-        parent_hash: The originating provenance hash (or any seed value).
-        *labels: One or more discriminating labels appended after the parent.
-
-    Returns:
-        SHA-256 hex digest of ``parent_hash:label1:label2:...``.
     """
     pieces = [parent_hash, *labels]
     return hashlib.sha256(":".join(pieces).encode()).hexdigest()
@@ -83,19 +48,10 @@ def derive_subkey(parent_hash: str, *labels: str) -> str:
 def safe_filename_stem(variable_name: str) -> str:
     """Case-collision-proof filename stem for a per-variable blob.
 
-    Two variables that differ only in case — the idiomatic ``Widget`` class +
-    ``widget`` instance, or ``from pkg import Tikhonov`` + ``tikhonov =
-    Tikhonov(...)`` — otherwise map to the same on-disk filename on a
-    case-insensitive filesystem (macOS/APFS, Windows). The harness then writes one
-    variable's blob over the other's, and every downstream read of either name
-    gets the last-written value. Appending a short hash of the exact-case name
-    keeps distinct-case names on distinct files; all-lowercase names (the common
-    case, including the ``__display__N`` convention) are returned unchanged so
-    their filenames stay stable across upgrades.
-
-    Every code path that turns a variable name into a blob filename — the
-    serializer (write), the executor's input staging and output reads — must use
-    this so writer and reader agree.
+    Names that differ only in case (``Widget`` and ``widget``) would share a file
+    on a case-insensitive filesystem, so a mixed-case name gets a short hash of
+    itself appended; all-lowercase names are returned unchanged. Every writer
+    and reader of per-variable blob filenames must use this.
     """
     if variable_name != variable_name.lower():
         return f"{variable_name}-{hashlib.sha256(variable_name.encode()).hexdigest()[:8]}"
@@ -107,22 +63,7 @@ def compute_provenance_hash(
     source_hash: str,
     env_hash: str,
 ) -> str:
-    """Compute the provenance hash for a cell execution.
-
-    The hash uniquely identifies a computation based on:
-    1. Content hashes of all input artifacts (sorted for determinism)
-    2. The cell source code hash
-    3. The runtime environment hash (lockfile)
-
-    Args:
-        input_hashes: Hashes of upstream artifacts this cell consumes.
-                     Will be sorted for deterministic ordering.
-        source_hash: SHA-256 of cell source code
-        env_hash: SHA-256 of runtime lockfile dependencies
-
-    Returns:
-        SHA-256 hex digest of the combined provenance
-    """
+    """SHA-256 hex digest over sorted ``input_hashes``, ``source_hash`` and ``env_hash``."""
     sorted_inputs = sorted(input_hashes)
 
     hasher = hashlib.sha256()

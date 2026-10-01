@@ -1,7 +1,7 @@
 """A DuckDB connection over the organization's lake: its catalog and mounts.
 
-A DuckDB connection in ``notebook.toml`` can name a catalog configured on the
-server (``[tool.strata] catalogs``) and the mounts it reads::
+A DuckDB connection can name a server-configured catalog
+(``[tool.strata] catalogs``) and the mounts it reads::
 
     [connections.lake]
     driver = "duckdb"
@@ -9,11 +9,10 @@ server (``[tool.strata] catalogs``) and the mounts it reads::
     catalog = "lake"
     mounts = ["raw"]
 
-A cell on it queries ``lake.<namespace>.<table>`` and each mount as a view by
-its name. Every catalog table the query reads is an input the way an ``@table``
-declaration is: its current snapshot is folded into the cell's provenance, the
-query reads that snapshot (``AT (VERSION => id)``), and a new snapshot makes the
-cell stale. Each mount's fingerprint is folded too.
+Cells query ``lake.<namespace>.<table>`` and each mount as a view. Every catalog
+table read is an input like an ``@table``: its snapshot is folded into
+provenance and pinned in the query (``AT (VERSION => id)``), so a new snapshot
+makes the cell stale. Mount fingerprints are folded too.
 """
 
 from __future__ import annotations
@@ -69,10 +68,9 @@ def _table_spec(catalog: str, table: QualifiedTable) -> TableSpec:
 def catalog_table(catalog: str, table: QualifiedTable) -> tuple[str, str] | None:
     """The ``(namespace, table)`` *table* names in *catalog*, or None.
 
-    A database and a schema are case-insensitive in DuckDB and may be written
-    either way round: ``lake.taxi.trips``, ``LAKE.taxi.trips``, and — with the
-    catalog's default schema — ``lake.trips``. Each is the same table, and one
-    this misses is read live and never goes stale.
+    DuckDB names are case-insensitive and the default schema may be omitted
+    (``lake.taxi.trips``, ``LAKE.taxi.trips``, ``lake.trips``). A form this
+    misses is read live and never goes stale.
     """
     name = catalog.lower()
     if (table.catalog or "").lower() == name:
@@ -100,8 +98,8 @@ def _namespaced(catalog: str, table: QualifiedTable) -> TableSpec | None:
 def lake_tables(notebook_state: NotebookState, source: str) -> list[TableSpec]:
     """The catalog tables a SQL cell reads, as ``@table`` declarations.
 
-    Staleness and the executor's generic provenance both fold these alongside a
-    cell's own ``@table`` declarations, so the lake moving makes the cell stale.
+    Staleness and generic provenance fold these with the cell's own ``@table``
+    declarations.
     """
     annotations = parse_annotations(source)
     if annotations.sql is None or not annotations.sql.connection or annotations.sql.write:
@@ -129,8 +127,7 @@ def resolve_lake(
     """Resolve the catalog, the mounts and the snapshot of every table read.
 
     Raises:
-        LakeError: naming what could not be resolved, so the cell fails saying
-            so rather than reading something else.
+        LakeError: naming what could not be resolved, rather than reading something else.
     """
     catalog, mount_names = lake_options(spec)
     lake = Lake(spec=spec)
@@ -176,9 +173,8 @@ def resolve_lake(
 def _table_location(table_spec: TableSpec, config: Any) -> str:
     """Where a catalog table's metadata and data files live, as a directory.
 
-    A table whose files live outside its own location (a ``write.data.path``
-    elsewhere) cannot be read by a confined handle; the query fails naming the
-    file it was refused.
+    Files outside it (a ``write.data.path`` elsewhere) are refused to a
+    confined handle, and the query fails naming the file.
     """
     from strata.iceberg import PyIcebergCatalog
 
@@ -208,14 +204,11 @@ _SYSTEM_TREES = (Path("/proc"), Path("/sys"), Path("/dev"))
 def local_mount_root_problem(uri: str, config: Any) -> str | None:
     """Why a confined SQL cell may not mount the local root *uri*, or ``None``.
 
-    A confined handle may read everything under a mount's root (see
-    ``duckdb._confine``), as the server, so the root is how much of the
-    server's disk the notebook reads: ``file:///`` is all of it. Refused, after
-    following links: a root with fewer than two path components; one that
-    holds the server's state (the artifact store, the cache, the metadata
-    database, the notebook storage directory, the server's home); and one in
-    the server's home or in ``/proc``, ``/sys`` or ``/dev``, where credentials
-    and the process's own environment live. Remote mounts are not local files.
+    A confined handle reads everything under the root as the server, so after
+    following links this refuses a root with fewer than two path components,
+    one holding server state (artifact store, cache, metadata DB, notebook
+    storage, the server's home), or one under the home, ``/proc``, ``/sys`` or
+    ``/dev``. Remote mounts are not checked.
     """
     from strata.notebook.mounts import parse_mount_uri
 

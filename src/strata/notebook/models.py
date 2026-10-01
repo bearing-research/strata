@@ -20,12 +20,8 @@ class MountMode(StrEnum):
 class MountSpec(BaseModel):
     """A filesystem mount declaration.
 
-    Mounts give cells transparent access to local and remote directories
-    via standard ``pathlib.Path`` operations.  The mount ``name`` becomes
-    a variable in the cell namespace bound to a local ``Path`` that the
-    executor resolves before execution.
-
-    Supported URI schemes: ``file://``, ``s3://``, ``gs://``, ``az://``.
+    ``name`` becomes a cell variable bound to a local ``Path`` the executor
+    resolves before execution. Schemes: ``file://``, ``s3://``, ``gs://``, ``az://``.
     """
 
     name: str = Field(
@@ -63,18 +59,11 @@ class MountSpec(BaseModel):
 
 
 class TableSpec(BaseModel):
-    """An Iceberg table input declaration.
+    """An Iceberg table input declaration (``@table``).
 
-    Tables connect a cell to the lake with snapshot-level staleness: the
-    table's current snapshot id is folded into the cell's provenance, so
-    new data landing in the table makes the cell stale and the normal
-    cascade machinery re-runs it. The executor injects two variables into
-    the cell namespace: ``<name>`` (the table URI string) and
-    ``<name>_snapshot`` (the resolved snapshot id) so the cell can scan
-    deterministically at that snapshot.
-
-    URI format: ``<warehouse>#<namespace>.<table>`` — e.g.
-    ``file:///data/warehouse#nyc.trips`` or ``s3://bucket/wh#db.events``.
+    The table's snapshot id joins the cell's provenance, so new data makes the cell
+    stale; the cell gets ``<name>`` (the URI) and ``<name>_snapshot``. URI format:
+    ``<warehouse>#<namespace>.<table>``, e.g. ``s3://bucket/wh#db.events``.
     """
 
     name: str = Field(
@@ -150,15 +139,9 @@ class DatasetSpec(BaseModel):
 class ConnectionSpec(BaseModel):
     """A named database connection from ``[connections.<name>]``.
 
-    SQL cells reference connections by name via ``# @sql connection=<name>``.
-    Driver-specific top-level keys (``uri``, ``host``, ``account``,
-    ``database``, ``role``, ``path``, ...) are preserved as-is; the
-    ``DriverAdapter`` for the chosen ``driver`` interprets them.
-
-    The ``auth`` block is intentionally separate so secret values (typed
-    with ``${VAR}`` indirection) live in one well-known place; ``options``
-    is for runtime tunables that don't change which objects the connection
-    sees (e.g. ``application_name``, ``connect_timeout``).
+    Driver-specific top-level keys are kept as-is for the ``DriverAdapter``.
+    ``auth`` holds secrets (``${VAR}`` indirection) in one known place; ``options``
+    holds runtime tunables that do not change which objects the connection sees.
     """
 
     model_config = ConfigDict(extra="allow")
@@ -198,11 +181,8 @@ class ConnectionSpec(BaseModel):
 class MalformedConnection(BaseModel):
     """A ``[connections.<name>]`` block that failed to parse.
 
-    Preserved across notebook saves so a hand-edited mistake (typo,
-    missing ``driver``, bad name pattern) doesn't get silently erased
-    by an unrelated rewrite (cell add, worker change, etc.). The
-    annotation_validation layer reads ``error`` to surface a
-    user-visible diagnostic.
+    Preserved across saves so an unrelated rewrite does not erase a hand-edited
+    mistake; ``error`` feeds a user-visible diagnostic.
     """
 
     name: str = Field(..., description="Connection name as written in TOML")
@@ -223,10 +203,9 @@ class WorkerBackendType(StrEnum):
 class WorkerConfig(BaseModel):
     """Backend-specific worker configuration.
 
-    The known keys are typed for validation + discoverability; backend-specific
-    extras pass through (``extra='allow'``) so a new backend can carry its own
-    settings without a schema change. The ``executor`` backend uses ``url`` /
-    ``transport`` / ``strata_url``; ``local`` carries none.
+    Known keys are typed; extras pass through (``extra='allow'``) so a new backend
+    needs no schema change. ``executor`` uses ``url`` / ``transport`` /
+    ``strata_url``; ``local`` uses none.
     """
 
     model_config = ConfigDict(extra="allow")
@@ -392,9 +371,7 @@ class VariantMember(BaseModel):
 class VariantGroupState(BaseModel):
     """Resolved variant-group state attached to NotebookState.
 
-    ``members`` is in source order (matches the order the cells appear in
-    ``notebook.toml``'s ``cells`` list); the frontend uses this for
-    variant-tab ordering.
+    ``members`` is in ``notebook.toml`` cell order, which the frontend uses for tabs.
     """
 
     group: str = Field(..., description="Variant group identifier")
@@ -589,9 +566,8 @@ class CellTestCase(BaseModel):
 class CellTestResult(BaseModel):
     """Result of running a cell's unit tests, persisted in runtime state.
 
-    Keyed by the ``(cell_source_hash, test_source_hash, input_fingerprint)``
-    triple so the UI can mark the last result *stale* when the cell source,
-    the test source, or the upstream inputs change since the run.
+    Keyed by ``(cell_source_hash, test_source_hash, input_fingerprint)`` so the UI
+    can mark it stale when any of them changes.
     """
 
     passed: int = Field(default=0, description="Number of passing tests")
@@ -822,13 +798,9 @@ class CellState(BaseModel):
     )
 
     def current_error(self) -> str | None:
-        """The recorded error, but only while it is about this source.
+        """The recorded error, but only while it describes the current source.
 
-        An error describes one version of a cell. Edit the cell and the
-        traceback still sitting on it is about code that is no longer there,
-        so reporting it would attribute a failure to source that never
-        produced one. The pair (``error``, ``error_source_hash``) is what the
-        cell stores; this is what anyone asking is entitled to read.
+        Once the cell is edited, the old traceback is about code that is gone.
         """
         if self.error is None or self.error_source_hash is None:
             return None
@@ -839,12 +811,9 @@ class CellState(BaseModel):
     def serialize(self) -> dict[str, Any]:
         """Return the cell-only wire view of this cell.
 
-        Combines ``model_dump()`` with the cell-derived overlays the
-        frontend expects: flattened ``staleness_reasons``, the curated
-        ``annotations`` payload from the source-comment block, and
-        module-export classification for Python cells. Session-coupled
-        overlays (display-output hydration, causality, shadow warnings)
-        are added separately by ``NotebookSession.serialize_cell``.
+        Adds flattened ``staleness_reasons``, the ``annotations`` payload and module
+        export classification to ``model_dump()``. Session-coupled overlays come from
+        ``NotebookSession.serialize_cell``.
         """
         # Local imports: annotations.py and module_export.py import this module.
         from strata.notebook.annotations import parse_annotations
@@ -1009,17 +978,7 @@ class NotebookState(BaseModel):
     updated_at: datetime | None = Field(default=None)
 
     def get_cell(self, cell_id: str) -> CellState | None:
-        """Return the cell with the given id, or None if not present.
-
-        Single accessor used everywhere a cell needs to be looked up
-        by id — routes/ws/executor/session/cascade previously inlined
-        the same ``next(c for c in ... if c.id == cell_id)`` generator
-        in 60+ places, which made the basic state-container access
-        pattern invisible and drift-prone. Linear scan is fine: cell
-        lists are typically dozens, not thousands, and this is a hot
-        path only on per-keystroke DAG rebuilds where the lookup is
-        already dwarfed by the analysis cost.
-        """
+        """Return the cell with the given id, or None (linear scan)."""
         for cell in self.cells:
             if cell.id == cell_id:
                 return cell

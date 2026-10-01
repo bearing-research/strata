@@ -1,10 +1,8 @@
-"""Establish / tear down SSH-tunneled workers for a notebook session.
+"""Establish and tear down SSH-tunneled workers for a notebook session.
 
-The request-shaping logic behind the ``/workers/ssh`` routes, factored out so it
-is unit-testable with a fake supervisor and a real local session — no FastAPI, no
-network. ``establish_ssh_worker`` provisions + tunnels via the supervisor, then
-registers the result as a ``[[workers]]`` entry through the shared ops so it
-routes like any other worker; ``teardown_ssh_worker`` reverses both.
+The logic behind the ``/workers/ssh`` routes, testable without FastAPI or a
+network. A worker is provisioned and tunneled via the supervisor, then
+registered as a ``[[workers]]`` entry so it routes like any other.
 """
 
 from __future__ import annotations
@@ -37,12 +35,10 @@ def establish_ssh_worker(
     install: bool = True,
     set_default: bool = False,
 ) -> TunnelRecord:
-    """Provision + tunnel a remote worker and register it in ``notebook.toml``.
+    """Provision and tunnel a remote worker, register it in ``notebook.toml``; return the tunnel.
 
-    Returns the tunnel record. Raises :class:`PermissionError` if worker
-    definitions aren't editable (service mode) — checked *before* provisioning so
-    a doomed request never opens an SSH connection. If provisioning succeeds but
-    registration fails, the tunnel is torn back down so nothing dangles.
+    Raises :class:`PermissionError` before provisioning if worker definitions
+    are not editable (service mode). A failed registration tears the tunnel down.
     """
     from strata.notebook.ops import LocalNotebookOps, NotebookOpsError
     from strata.notebook.workers import notebook_worker_definitions_editable
@@ -85,9 +81,7 @@ def teardown_ssh_worker(
 ) -> bool:
     """Close the tunnel for *name* and remove its ``[[workers]]`` entry.
 
-    Returns whether a tunnel was present. Removing the notebook entry is a no-op
-    when it isn't registered (a tunnel can outlive its registration if a user
-    hand-edited the TOML).
+    Returns whether a tunnel was present; a missing entry is a no-op.
     """
     from strata.notebook.ops import LocalNotebookOps
 

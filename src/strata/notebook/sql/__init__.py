@@ -1,16 +1,8 @@
 """SQL cell support for Strata notebooks.
 
-Public surface:
-- ``DriverAdapter`` — protocol every backend implements
-- ``AdapterCapabilities`` — capability flags (per-table fingerprint,
-  snapshot support, separate probe-conn requirement)
-- ``QualifiedTable`` — fully qualified table reference (catalog.schema.name)
-- ``FreshnessToken`` / ``SchemaFingerprint`` — opaque equality tokens
-  folded into the SQL cell provenance hash
-- ``register_adapter`` / ``get_adapter`` — driver registry
-
-Per-driver implementations live in ``strata.notebook.sql.drivers.*``.
-Each driver module registers its adapter at import time.
+Exports the ``DriverAdapter`` protocol, capability flags, table and freshness
+types folded into SQL cell provenance, and the driver registry. Each module in
+``strata.notebook.sql.drivers`` registers its adapter at import time.
 """
 
 from strata.notebook.sql.adapter import (
