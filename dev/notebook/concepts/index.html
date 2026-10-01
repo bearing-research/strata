@@ -2481,8 +2481,9 @@ files, which co-mingle source, outputs, and execution counts in one
 JSON blob and produce a multi-kilobyte diff every time a cell is
 re-run, a Strata notebook is just a directory of plain text:</p>
 <ul>
-<li><strong>Cells are <code>.py</code> files.</strong> Normal <code>git diff</code>, <code>git blame</code>, code review
-  on a pull request, syntax highlighting in every IDE. Reordering a cell
+<li><strong>Cells are plain text files.</strong> Python, prompt and SQL cells are <code>.py</code>,
+  R cells <code>.r</code>, markdown cells <code>.md</code> and widget cells <code>.widget</code>. Normal
+  <code>git diff</code>, <code>git blame</code>, code review on a pull request, syntax highlighting in every IDE. Reordering a cell
   edits one number in <code>notebook.toml</code>, not a giant JSON re-serialize.</li>
 <li><strong><code>notebook.toml</code> is the manifest.</strong> Stable config only: cell list,
   workers, mounts, env, AI defaults, and the active variant per group
@@ -2498,8 +2499,9 @@ re-run, a Strata notebook is just a directory of plain text:</p>
   those bump the timestamp. Editing source or running cells does not.</li>
 <li><strong>Secrets stay off disk.</strong> Env keys matching <code>KEY</code>/<code>SECRET</code>/<code>TOKEN</code>/
   <code>PASSWORD</code>/<code>CREDENTIAL</code> are blanked before persisting, so the writer
-  can't accidentally commit an API key. The name survives (so the
-  Runtime panel still knows the slot exists), the value doesn't.</li>
+  can't accidentally commit an API key. The name survives only when the
+  block also holds a non-sensitive value; an <code>[env]</code> with nothing but
+  blanked secrets is not written at all.</li>
 <li><strong>uv lockfile in committed config.</strong> <code>pyproject.toml</code> + <code>uv.lock</code> pin
   the Python environment exactly the same way the rest of your repo
   does; collaborators get a reproducible environment from a fresh clone.</li>
@@ -2702,14 +2704,14 @@ per artifact.</p>
 <li>The environment (<code>uv.lock</code>, or an <code>@env</code> it declares) changed</li>
 <li>A declared outside input moved: a mounted file, an <code>@table</code> snapshot, an <code>@fetch</code> URL's bytes, an <code>@dataset</code> alias</li>
 </ul>
-<p>A cell that still has a result and whose upstream moved reads <strong>stale · upstream changed</strong>. A cell whose own source or environment changed has nothing that matches, so it reads <strong>idle</strong> until it runs. The <code>@fetch</code> and <code>@dataset</code> checks run at most once a minute while you edit, and always right before the cell runs; these lookups and the <code>@table</code> catalog read happen outside the lock that serializes the staleness walk, so one slow host does not stall the server.</p>
+<p>A cell that still has a result and whose upstream moved reads <strong>stale · upstream changed</strong>. A cell whose own source, environment or declared outside input changed has nothing that matches, so it reads <strong>idle</strong> until it runs, and the cells downstream of it read stale. The <code>@fetch</code> and <code>@dataset</code> checks run at most once a minute while you edit, and always right before the cell runs; these lookups and the <code>@table</code> catalog read happen outside the lock that serializes the staleness walk, so one slow host does not stall the server.</p>
 <p>The <strong>causality chain</strong> explains why a cell is stale, tracing the change back to its root cause (e.g., "upstream cell X changed its source").</p>
 <h2 id="cell-status-lifecycle">Cell Status Lifecycle<a class="headerlink" href="#cell-status-lifecycle" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>idle ──→ running ──→ ready ──→ stale
 <a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>              └───→ error
 </code></pre></div>
 <ul>
-<li><strong>idle</strong>: no current result: never executed, or its own source or environment changed since it ran</li>
+<li><strong>idle</strong>: no current result: never executed, or its own source, environment or a declared outside input changed since it ran</li>
 <li><strong>running</strong>: currently executing. If an upstream cell is edited while it runs, it stays running and finishes <strong>stale</strong>, since it read the old value.</li>
 <li><strong>ready</strong>: last execution succeeded (or was a cache hit), artifact is current</li>
 <li><strong>stale</strong>: it has a result, but something upstream has moved, or Run All skipped it because a cell it reads from failed</li>
