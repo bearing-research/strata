@@ -2268,6 +2268,7 @@
 <p>A cell sent to a <a href="../workers/">remote worker</a> runs in this same locked environment when the worker supports it, so the lock describes what the cell ran against there too.</p>
 <h2 id="python-version">Python Version<a class="headerlink" href="#python-version" title="Permanent link">&para;</a></h2>
 <p>At notebook creation time, you can select a Python version from the versions configured on the server. The first one listed is the default.</p>
+<p>To change it later, click <strong>Requested Python</strong> in the Environment panel. Strata rewrites <code>requires-python</code>, rebuilds <code>.venv/</code> with <code>uv sync</code>, and restores the old version if the sync fails.</p>
 <div class="admonition note">
 <p class="admonition-title">Note</p>
 <p>The available versions come from the server's <code>STRATA_NOTEBOOK_PYTHON_VERSIONS</code>. Unset, they are the Python versions <code>uv</code> reports as installed on the server that Strata supports, with the server's own version included.</p>
@@ -2280,7 +2281,7 @@
 <a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>matplotlib
 </code></pre></div>
 <p>The operation runs asynchronously, you can continue editing cells while it installs.</p>
-<p>On a server in service mode, packages install from wheels only: a package with no wheel for the notebook's Python fails to resolve, and the message says a wheel is required. R packages are not added from the notebook there: the server restores the notebook's committed <code>renv.lock</code> as the harness user when the notebook opens. See <a href="../../deployment/service-mode/">Service mode</a>.</p>
+<p>On a server in service mode, packages install from wheels only: a package with no wheel for the notebook's Python fails to resolve, and the message says a wheel is required. R packages are not added from the notebook there, nor on a personal-mode server with <code>STRATA_NOTEBOOK_HARNESS_USER</code> set: the server restores the notebook's committed <code>renv.lock</code> as the harness user when the notebook opens. See <a href="../../deployment/service-mode/">Service mode</a>.</p>
 <h3 id="import-from-requirementstxt">Import from requirements.txt<a class="headerlink" href="#import-from-requirementstxt" title="Permanent link">&para;</a></h3>
 <p>In the Environment panel, click <strong>Import</strong> and paste a <code>requirements.txt</code>:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>pandas&gt;=2.0
@@ -2291,11 +2292,11 @@
 </code></pre></div>
 <p>Strata previews the changes (additions, removals, unchanged) before applying.</p>
 <h3 id="import-from-environmentyaml">Import from environment.yaml<a class="headerlink" href="#import-from-environmentyaml" title="Permanent link">&para;</a></h3>
-<p>Conda-style <code>environment.yaml</code> files are supported on a best-effort basis. Strata extracts <code>pip</code> dependencies and ignores conda-specific packages.</p>
+<p>Conda-style <code>environment.yaml</code> files are supported on a best-effort basis. Strata translates each conda spec to a pip requirement (<code>numpy=2.1</code> becomes <code>numpy==2.1</code>, a <code>conda-forge::</code> prefix is dropped) and adds the entries of the <code>pip:</code> list as they are. It ignores <code>channels</code>, the <code>python</code> pin and the <code>pip</code> entry itself, and the preview lists what it ignored.</p>
 <h3 id="export">Export<a class="headerlink" href="#export" title="Permanent link">&para;</a></h3>
 <p>Click <strong>Export</strong> to download the current dependencies as <code>requirements.txt</code>.</p>
 <h2 id="environment-operations">Environment Operations<a class="headerlink" href="#environment-operations" title="Permanent link">&para;</a></h2>
-<p>All environment mutations run as <strong>async jobs</strong> with four actions:</p>
+<p>All environment mutations run as <strong>async jobs</strong> with seven actions:</p>
 <table>
 <thead>
 <tr>
@@ -2319,6 +2320,18 @@
 <tr>
 <td><code>import</code></td>
 <td>Bulk import from requirements.txt or environment.yaml</td>
+</tr>
+<tr>
+<td><code>change_python</code></td>
+<td>Switch the notebook's Python version</td>
+</tr>
+<tr>
+<td><code>r_init</code></td>
+<td>Set up renv for R cells</td>
+</tr>
+<tr>
+<td><code>r_add</code></td>
+<td>Install an R package with renv</td>
 </tr>
 </tbody>
 </table>
@@ -2356,7 +2369,9 @@
 <p>On a server with many notebooks built from the same few lockfiles, a <code>.venv</code>
 per notebook installs the same packages again and again. With
 <code>STRATA_NOTEBOOK_ENV_BACKEND=shared</code>, notebooks share one environment per
-lockfile instead:</p>
+lockfile instead. They live under <code>STRATA_NOTEBOOK_SHARED_ENV_DIR</code>, by default
+<code>envs</code> beside the notebook storage directory (<code>~/.strata/envs</code> unless
+<code>STRATA_NOTEBOOK_STORAGE_DIR</code> is set):</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>~/.strata/envs/
 <a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>├── 3f9c…/            # one environment per uv.lock + interpreter build
 <a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>├── 3f9c….lock        # held while that environment is installed

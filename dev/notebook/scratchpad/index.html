@@ -2294,6 +2294,9 @@ the pin exists for.</p>
 <p>You don't have to, and usually won't. When you want to, the simplest way is:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>strata<span class="w"> </span>agent<span class="w"> </span>./scratch<span class="w">        </span><span class="c1"># starts a server scoped to it, then attaches the viewer</span>
 </code></pre></div>
+<p>It also writes <code>.mcp.json</code> and a <code>CLAUDE.md</code> working agreement into
+<code>./scratch</code>, so an agent started there connects to the session. In an existing
+<code>CLAUDE.md</code> it rewrites only its own marked block.</p>
 <div class="admonition warning">
 <p class="admonition-title"><code>strata watch ./scratch</code> on its own usually won't work</p>
 <p>A server only opens notebooks inside its configured storage root, which
@@ -2302,8 +2305,10 @@ Pointed at a default server, opening it is rejected with <em>"Invalid notebook
 path: must be inside configured notebook storage"</em>, and the viewer sits at
 <code>connecting…</code> rather than saying so.</p>
 <p><code>strata agent</code> avoids this because it starts a server scoped to the
-notebook's parent directory. If you would rather use a server you already
-run, start it with its root over your project:</p>
+notebook's parent directory. It does so only when nothing answers on
+<code>:8765</code> (or its <code>--server</code>): a server already running there is reused, and
+then the storage-root rule above applies to it. If you would rather use a
+server you already run, start it with its root over your project:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="nv">STRATA_NOTEBOOK_STORAGE_DIR</span><span class="o">=</span>.<span class="w"> </span>strata-notebook<span class="w"> </span><span class="p">&amp;</span>
 <a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>strata<span class="w"> </span>watch<span class="w"> </span>./scratch
 </code></pre></div>

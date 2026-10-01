@@ -2288,8 +2288,11 @@ bound to the server. The <code>@table</code> annotation injects two variables: <
 </code></pre></div>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>uv<span class="w"> </span>run<span class="w"> </span>python<span class="w"> </span>append_month2.py
 </code></pre></div>
-<p>Back in the notebook, the <code>@table</code> cell now shows <strong>stale</strong> - its snapshot id
-moved from S1 to S2, so its provenance changed. A plain <strong>Run</strong> (no force)
+<p>Back in the notebook, the <code>@table</code> cell is now <strong>stale</strong> - its snapshot id
+moved from S1 to S2, so its provenance changed. The badge does not update live:
+the notebook looks up the current snapshot only when it recomputes staleness,
+which happens when you reopen the notebook, edit a cell, or run one. Refreshing
+the browser tab alone keeps the old badge. A plain <strong>Run</strong> (no force)
 recomputes the scan against S2 and <strong>cascades</strong> the rebuild to every
 downstream cell. Nothing changed in your code; the data moved, and Strata
 treated that exactly like a code change.</p>
@@ -2323,6 +2326,11 @@ inputs change; <code>@table</code> adds the lake snapshot to the mix.</p>
   you need as a real assignment (<code>orders_snapshot_value = orders_snapshot</code>),
   exactly as in Step 2. This mirrors how mount variables behave.</li>
 <li><strong>The name must be a valid Python identifier.</strong></li>
+<li><strong>Schema-only changes do not restale the cell.</strong> The fingerprint is the
+  snapshot id, and changing a table's schema (adding or renaming a column)
+  commits no new snapshot. The cell stays a cache hit, and a scan that passes
+  <code>orders_snapshot</code> keeps reading that snapshot's schema. The new schema shows
+  up once new data lands in a new snapshot.</li>
 <li><strong>Unreachable catalog → conservatively stale.</strong> If the catalog can't be
   reached when provenance is computed (which also happens on notebook open),
   the cell is treated as stale rather than crashing; if it's still unreachable

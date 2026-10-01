@@ -1191,6 +1191,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#pyprojecttoml-required-for-strata-run" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        pyproject.toml - required for strata run
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#how-variables-flow-between-cells" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2125,6 +2136,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#pyprojecttoml-required-for-strata-run" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        pyproject.toml - required for strata run
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#how-variables-flow-between-cells" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2307,6 +2329,23 @@ when writing it by hand:</p>
 <li><strong><code>language</code></strong> - one of <code>python</code>, <code>r</code>, <code>sql</code>, <code>prompt</code>, <code>markdown</code>,
   <code>widget</code>.</li>
 </ul>
+<h2 id="pyprojecttoml-required-for-strata-run">pyproject.toml - required for <code>strata run</code><a class="headerlink" href="#pyprojecttoml-required-for-strata-run" title="Permanent link">&para;</a></h2>
+<p><code>strata run</code> builds the notebook's environment with <code>uv sync</code>, which needs a
+<code>pyproject.toml</code>; without one the run stops with exit code <code>2</code>. <code>strata validate</code>
+does not read it. Declare the packages the cell harness uses to hand values
+between cells, plus your own:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="k">[project]</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="n">name</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"my-analysis"</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="n">version</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"0.1.0"</span>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="n">requires-python</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"&gt;=3.12"</span>
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="n">dependencies</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span>
+<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="w">    </span><span class="s2">"pyarrow&gt;=18.0.0"</span><span class="p">,</span>
+<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a><span class="w">    </span><span class="s2">"orjson&gt;=3.10.0"</span><span class="p">,</span>
+<a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a><span class="w">    </span><span class="s2">"cloudpickle&gt;=3.0.0"</span><span class="p">,</span>
+<a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a><span class="p">]</span>
+</code></pre></div>
+<p><code>strata new</code> writes the same list, with <code>requires-python</code> pinned to one
+Python minor.</p>
 <h2 id="how-variables-flow-between-cells">How variables flow between cells<a class="headerlink" href="#how-variables-flow-between-cells" title="Permanent link">&para;</a></h2>
 <p>Each cell's top-level assignments are its <strong>defines</strong>; the free variables
 in its source are its <strong>references</strong>. A reference binds to the <strong>nearest
@@ -2329,19 +2368,19 @@ value is an immutable, content-addressed artifact.</p>
 <p>Cell-level settings are <code># @</code> comment lines at the top of the cell
 source - they always win over anything persisted elsewhere. The full
 surface is <a href="../annotations/">Cell Annotations</a>; the most common:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="c1"># @name revenue_model     ← stable display name</span>
-<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="c1"># @timeout 120            ← per-cell timeout (seconds)</span>
-<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="c1"># @worker gpu-box         ← run on a named worker</span>
-<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="c1"># @env API_BASE=https://… ← per-cell env var</span>
-<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="c1"># @mount data s3://bucket/path ro   ← injects `data` as a pathlib.Path</span>
-<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="c1"># @table trips file:///wh#nyc.trips ← lake input: injects `trips` (URI) and</span>
-<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a><span class="c1">#                                     `trips_snapshot`; new table data makes</span>
-<a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a><span class="c1">#                                     the cell stale</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="c1"># @name revenue_model     ← stable display name</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="c1"># @timeout 120            ← per-cell timeout (seconds)</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="c1"># @worker gpu-box         ← run on a named worker</span>
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="c1"># @env API_BASE=https://… ← per-cell env var</span>
+<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="c1"># @mount data s3://bucket/path ro   ← injects `data` as a pathlib.Path</span>
+<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="c1"># @table trips file:///wh#nyc.trips ← lake input: injects `trips` (URI) and</span>
+<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a><span class="c1">#                                     `trips_snapshot`; new table data makes</span>
+<a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a><span class="c1">#                                     the cell stale</span>
 </code></pre></div>
 <p>Prompt cells (LLM calls) use the same mechanism:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="c1"># @name summary</span>
-<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="c1"># @output_schema {"type": "object", "properties": {"verdict": {"type": "string"}}, "required": ["verdict"]}</span>
-<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="n">Summarize</span> <span class="p">{{</span> <span class="n">findings</span> <span class="p">}}</span> <span class="k">as</span> <span class="n">a</span> <span class="n">verdict</span><span class="o">.</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="c1"># @name summary</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="c1"># @output_schema {"type": "object", "properties": {"verdict": {"type": "string"}}, "required": ["verdict"]}</span>
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="n">Summarize</span> <span class="p">{{</span> <span class="n">findings</span> <span class="p">}}</span> <span class="k">as</span> <span class="n">a</span> <span class="n">verdict</span><span class="o">.</span>
 </code></pre></div>
 <p><code>{{ var }}</code> interpolates upstream variables. <code>strata validate</code> checks
 annotation syntax (<code>loop_missing_carry</code>, malformed <code>@output_schema</code>,
@@ -2389,12 +2428,12 @@ a cache hit.</p>
 <p>Per-cell <code>stdout</code> / <code>stderr</code> are included in the <code>run --format json</code>
 payload (truncated at 10k chars), so the way to check a result is to
 <strong>print it</strong> and read it back from the JSON:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="c1"># cells/stats.py</span>
-<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="n">total</span> <span class="o">=</span> <span class="nb">sum</span><span class="p">(</span><span class="n">s</span><span class="p">[</span><span class="s2">"revenue"</span><span class="p">]</span> <span class="k">for</span> <span class="n">s</span> <span class="ow">in</span> <span class="n">sales</span><span class="p">)</span>
-<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"total=</span><span class="si">{</span><span class="n">total</span><span class="si">}</span><span class="s2">"</span><span class="p">)</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="c1"># cells/stats.py</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="n">total</span> <span class="o">=</span> <span class="nb">sum</span><span class="p">(</span><span class="n">s</span><span class="p">[</span><span class="s2">"revenue"</span><span class="p">]</span> <span class="k">for</span> <span class="n">s</span> <span class="ow">in</span> <span class="n">sales</span><span class="p">)</span>
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"total=</span><span class="si">{</span><span class="n">total</span><span class="si">}</span><span class="s2">"</span><span class="p">)</span>
 </code></pre></div>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>strata<span class="w"> </span>run<span class="w"> </span>my_analysis<span class="w"> </span>--format<span class="w"> </span>json<span class="w"> </span><span class="p">|</span><span class="w"> </span>jq<span class="w"> </span>-r<span class="w"> </span><span class="s1">'.cells[] | select(.id == "stats").stdout'</span>
-<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="c1"># total=93900</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>strata<span class="w"> </span>run<span class="w"> </span>my_analysis<span class="w"> </span>--format<span class="w"> </span>json<span class="w"> </span><span class="p">|</span><span class="w"> </span>jq<span class="w"> </span>-r<span class="w"> </span><span class="s1">'.cells[] | select(.id == "stats").stdout'</span>
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="c1"># total=93900</span>
 </code></pre></div>
 <p>One caveat: for a cell that produces an output artifact, a <strong>cache hit
 replays the stored artifact without re-running the cell</strong>, so <code>stdout</code> can be
@@ -2406,7 +2445,7 @@ machine-managed runtime state with no stability guarantees.</p>
 <p>A successful cell also reports its <code>provenance_hash</code> and its <code>outputs</code> - one
 entry per variable a downstream cell reads, each with <code>artifact_id</code>, <code>version</code>
 and <code>content_sha256</code>:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>strata<span class="w"> </span>run<span class="w"> </span>my_analysis<span class="w"> </span>--format<span class="w"> </span>json<span class="w"> </span><span class="p">|</span><span class="w"> </span>jq<span class="w"> </span><span class="s1">'.cells[] | {id, provenance_hash, outputs}'</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>strata<span class="w"> </span>run<span class="w"> </span>my_analysis<span class="w"> </span>--format<span class="w"> </span>json<span class="w"> </span><span class="p">|</span><span class="w"> </span>jq<span class="w"> </span><span class="s1">'.cells[] | {id, provenance_hash, outputs}'</span>
 </code></pre></div>
 <p>The digest is what makes two reports comparable. <code>status</code> and <code>duration_ms</code>
 agree between a run that computed the right numbers and one that did not; the
@@ -2433,30 +2472,53 @@ stored.</p>
   unless you mean to commit them; artifacts already persist results.</li>
 </ul>
 <h2 id="worked-example">Worked example<a class="headerlink" href="#worked-example" title="Permanent link">&para;</a></h2>
-<p>This exact notebook is pinned by Strata's test suite
-(<code>TestHandWrittenNotebookContract</code>) - if it ever stops working, CI fails:</p>
+<p>Its <code>notebook.toml</code> and cells are pinned by Strata's test suite
+(<code>TestHandWrittenNotebookContract</code>) - if they ever stop working, CI fails:</p>
 <p><code>notebook.toml</code>:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="n">notebook_id</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"agent-handwritten-001"</span>
-<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="n">name</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"Hand-written by an agent"</span>
-<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="n">cells</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span>
-<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="w">  </span><span class="p">{</span><span class="w"> </span><span class="n">id</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="s2">"load"</span><span class="p">,</span><span class="w">  </span><span class="n">file</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="s2">"load.py"</span><span class="p">,</span><span class="w">  </span><span class="n">language</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="s2">"python"</span><span class="p">,</span><span class="w">   </span><span class="n">order</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="mi">0</span><span class="w"> </span><span class="p">},</span>
-<a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a><span class="w">  </span><span class="p">{</span><span class="w"> </span><span class="n">id</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="s2">"doc"</span><span class="p">,</span><span class="w">   </span><span class="n">file</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="s2">"doc.md"</span><span class="p">,</span><span class="w">   </span><span class="n">language</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="s2">"markdown"</span><span class="p">,</span><span class="w"> </span><span class="n">order</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="mi">1</span><span class="w"> </span><span class="p">},</span>
-<a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a><span class="w">  </span><span class="p">{</span><span class="w"> </span><span class="n">id</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="s2">"stats"</span><span class="p">,</span><span class="w"> </span><span class="n">file</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="s2">"stats.py"</span><span class="p">,</span><span class="w"> </span><span class="n">language</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="s2">"python"</span><span class="p">,</span><span class="w">   </span><span class="n">order</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="mi">2</span><span class="w"> </span><span class="p">},</span>
-<a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a><span class="p">]</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="n">notebook_id</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"agent-handwritten-001"</span>
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="n">name</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"Hand-written by an agent"</span>
+<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="n">cells</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span>
+<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="w">  </span><span class="p">{</span><span class="w"> </span><span class="n">id</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="s2">"load"</span><span class="p">,</span><span class="w">  </span><span class="n">file</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="s2">"load.py"</span><span class="p">,</span><span class="w">  </span><span class="n">language</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="s2">"python"</span><span class="p">,</span><span class="w">   </span><span class="n">order</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="mi">0</span><span class="w"> </span><span class="p">},</span>
+<a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a><span class="w">  </span><span class="p">{</span><span class="w"> </span><span class="n">id</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="s2">"doc"</span><span class="p">,</span><span class="w">   </span><span class="n">file</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="s2">"doc.md"</span><span class="p">,</span><span class="w">   </span><span class="n">language</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="s2">"markdown"</span><span class="p">,</span><span class="w"> </span><span class="n">order</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="mi">1</span><span class="w"> </span><span class="p">},</span>
+<a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a><span class="w">  </span><span class="p">{</span><span class="w"> </span><span class="n">id</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="s2">"stats"</span><span class="p">,</span><span class="w"> </span><span class="n">file</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="s2">"stats.py"</span><span class="p">,</span><span class="w"> </span><span class="n">language</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="s2">"python"</span><span class="p">,</span><span class="w">   </span><span class="n">order</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="mi">2</span><span class="w"> </span><span class="p">},</span>
+<a id="__codelineno-10-7" name="__codelineno-10-7" href="#__codelineno-10-7"></a><span class="p">]</span>
 </code></pre></div>
 <p><code>cells/load.py</code>:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="c1"># @name load</span>
-<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="n">numbers</span> <span class="o">=</span> <span class="p">[</span><span class="mi">1</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="mi">3</span><span class="p">,</span> <span class="mi">4</span><span class="p">]</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="c1"># @name load</span>
+<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="n">numbers</span> <span class="o">=</span> <span class="p">[</span><span class="mi">1</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="mi">3</span><span class="p">,</span> <span class="mi">4</span><span class="p">]</span>
+</code></pre></div>
+<p><code>cells/doc.md</code>:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="gh"># Analysis</span>
+<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a>
+<a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a>plain prose cell
 </code></pre></div>
 <p><code>cells/stats.py</code>:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="n">total</span> <span class="o">=</span> <span class="nb">sum</span><span class="p">(</span><span class="n">numbers</span><span class="p">)</span>
-<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="n">mean</span> <span class="o">=</span> <span class="n">total</span> <span class="o">/</span> <span class="nb">len</span><span class="p">(</span><span class="n">numbers</span><span class="p">)</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="n">total</span> <span class="o">=</span> <span class="nb">sum</span><span class="p">(</span><span class="n">numbers</span><span class="p">)</span>
+<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a><span class="n">mean</span> <span class="o">=</span> <span class="n">total</span> <span class="o">/</span> <span class="nb">len</span><span class="p">(</span><span class="n">numbers</span><span class="p">)</span>
 </code></pre></div>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a>$<span class="w"> </span>strata<span class="w"> </span>validate<span class="w"> </span>./handwritten<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>strata<span class="w"> </span>run<span class="w"> </span>./handwritten
-<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a>✓<span class="w"> </span>valid:<span class="w"> </span><span class="m">3</span><span class="w"> </span>cell<span class="o">(</span>s<span class="o">)</span>
-<a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a>...
-<a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a><span class="m">3</span><span class="w"> </span>ran<span class="w"> </span><span class="k">in</span><span class="w"> </span><span class="m">1</span>.2s
+<p><code>pyproject.toml</code>:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="k">[project]</span>
+<a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a><span class="n">name</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"handwritten"</span>
+<a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a><span class="n">version</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"0.1.0"</span>
+<a id="__codelineno-14-4" name="__codelineno-14-4" href="#__codelineno-14-4"></a><span class="n">requires-python</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"&gt;=3.12"</span>
+<a id="__codelineno-14-5" name="__codelineno-14-5" href="#__codelineno-14-5"></a><span class="n">dependencies</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span>
+<a id="__codelineno-14-6" name="__codelineno-14-6" href="#__codelineno-14-6"></a><span class="w">    </span><span class="s2">"pyarrow&gt;=18.0.0"</span><span class="p">,</span>
+<a id="__codelineno-14-7" name="__codelineno-14-7" href="#__codelineno-14-7"></a><span class="w">    </span><span class="s2">"orjson&gt;=3.10.0"</span><span class="p">,</span>
+<a id="__codelineno-14-8" name="__codelineno-14-8" href="#__codelineno-14-8"></a><span class="w">    </span><span class="s2">"cloudpickle&gt;=3.0.0"</span><span class="p">,</span>
+<a id="__codelineno-14-9" name="__codelineno-14-9" href="#__codelineno-14-9"></a><span class="p">]</span>
 </code></pre></div>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a>$<span class="w"> </span>strata<span class="w"> </span>validate<span class="w"> </span>./handwritten<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>strata<span class="w"> </span>run<span class="w"> </span>./handwritten
+<a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a>...
+<a id="__codelineno-15-3" name="__codelineno-15-3" href="#__codelineno-15-3"></a>✓<span class="w"> </span>valid:<span class="w"> </span><span class="m">3</span><span class="w"> </span>cell<span class="o">(</span>s<span class="o">)</span>
+<a id="__codelineno-15-4" name="__codelineno-15-4" href="#__codelineno-15-4"></a>syncing<span class="w"> </span>environment…
+<a id="__codelineno-15-5" name="__codelineno-15-5" href="#__codelineno-15-5"></a>...
+<a id="__codelineno-15-6" name="__codelineno-15-6" href="#__codelineno-15-6"></a><span class="w">  </span>load<span class="w"> </span><span class="nv">numbers</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="o">[</span><span class="m">1</span>,<span class="w"> </span><span class="m">2</span>,<span class="w"> </span><span class="m">3</span>,<span class="w"> </span><span class="m">4</span><span class="o">]</span><span class="w">           </span>✓<span class="w"> </span><span class="m">1</span>.4s
+<a id="__codelineno-15-7" name="__codelineno-15-7" href="#__codelineno-15-7"></a><span class="w">  </span>doc<span class="w"> </span><span class="o">[</span>markdown<span class="o">]</span><span class="w"> </span>plain<span class="w"> </span>prose<span class="w"> </span>cell<span class="w">      </span>✓<span class="w"> </span>cached
+<a id="__codelineno-15-8" name="__codelineno-15-8" href="#__codelineno-15-8"></a><span class="w">  </span>stats<span class="w"> </span><span class="nv">total</span><span class="w"> </span><span class="o">=</span><span class="w"> </span>sum<span class="o">(</span>numbers<span class="o">)</span><span class="w">             </span>✓<span class="w"> </span><span class="m">1</span>.1s
+<a id="__codelineno-15-9" name="__codelineno-15-9" href="#__codelineno-15-9"></a>
+<a id="__codelineno-15-10" name="__codelineno-15-10" href="#__codelineno-15-10"></a><span class="m">2</span><span class="w"> </span>ran,<span class="w"> </span><span class="m">1</span><span class="w"> </span>cached<span class="w"> </span><span class="k">in</span><span class="w"> </span><span class="m">2</span>.6s
+</code></pre></div>
+<p>A markdown cell never runs, so the summary counts it as cached.</p>
 
 
 

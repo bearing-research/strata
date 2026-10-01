@@ -956,6 +956,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#from-the-cli-rest-and-mcp" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        From the CLI, REST and MCP
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#a-worked-example" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2104,6 +2115,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#from-the-cli-rest-and-mcp" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        From the CLI, REST and MCP
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#a-worked-example" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2197,6 +2219,9 @@ below) shells out to <code>pytest</code> against a temporary run directory holdi
 of the cell source, the upstream inputs, and your test file staged under a
 <code>test_*.py</code> name (which is what gives you native collection <strong>and</strong> assertion
 rewriting).</p>
+<p>Before the run, any stale upstream cell is materialized, exactly as a normal
+run of the cell would (an unchanged upstream is a cache hit), so <code>cell.sales</code>
+is current.</p>
 <p><img alt="A Python cell with its results table above an open Tests panel: the test
 source, a green &quot;2 passed&quot; summary, and a tick beside each test name. The flask
 toggle on the cell's left rail carries a green 2/2
@@ -2253,6 +2278,21 @@ clients and automation can run them too:</p>
 </ul>
 <p>See the <a href="../../reference/websocket/">WebSocket Protocol reference</a> for the frame
 shapes.</p>
+<h2 id="from-the-cli-rest-and-mcp">From the CLI, REST and MCP<a class="headerlink" href="#from-the-cli-rest-and-mcp" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>CLI:</strong> <code>strata cell test &lt;notebook_dir&gt; &lt;cell_id&gt;</code> runs a cell's tests and
+  exits non-zero on a failure. <code>--file tests.py</code> (or <code>-</code> for stdin) sets the
+  test source first. Add <code>--server http://localhost:8765 --session &lt;id&gt;</code> to
+  drive a live session instead.</li>
+<li><strong>REST:</strong> <code>POST /v1/notebooks/{id}/cells/{cell_id}/tests</code> runs them and
+  returns the counts and per-test outcomes. <code>PUT</code> on the same path sets the
+  test source.</li>
+<li><strong>MCP:</strong> the <code>run_tests</code> tool, with the session id and cell id.</li>
+</ul>
+<p>While the notebook's environment is not ready (still being created, a failed
+sync, or an environment job running), the REST route answers <code>409</code> with code
+<code>ENVIRONMENT_BUSY</code> and the WebSocket replies with an <code>error</code> frame carrying the
+same code.</p>
 <h2 id="a-worked-example">A worked example<a class="headerlink" href="#a-worked-example" title="Permanent link">&para;</a></h2>
 <p>The <a href="../../examples/pandas_basics/"><code>pandas_basics</code></a> example ships tests on four
 of its cells - validating a produced DataFrame, a computed column, a filter
