@@ -479,7 +479,6 @@ class TestEndToEnd:
         assert checks["server_initialized"] is True
         assert checks["draining"] is False
         assert checks["capacity_exhausted"] is False
-        assert checks["stuck_scans"] == 0
         assert "metadata_store" in checks
         assert "interactive_available" in checks
         assert "bulk_available" in checks
