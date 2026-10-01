@@ -49,11 +49,10 @@ class AnalyzedCell:
 class LanguageAnalyzer(Protocol):
     """Extract DAG inputs/outputs from a cell's source.
 
-    The session passed in is the read-only context the analyzer needs —
-    currently only the SQL adapter consumes it (to resolve the connection
-    dialect via ``session._resolve_sql_dialect``); other languages
-    ignore the arg. A flat parameter rather than a side-channel keeps
-    the protocol surface small and explicit.
+    The session passed in is the read-only context an analyzer may need;
+    the built-in languages read only the cell and ignore the arg. A flat
+    parameter rather than a side-channel keeps the protocol surface small
+    and explicit.
     """
 
     def analyze(self, cell: CellState, session: NotebookSession) -> AnalyzedCell:
@@ -146,18 +145,17 @@ class _PromptAnalyzer:
 class _SqlAnalyzer:
     """Adapter over ``strata.notebook.sql.analyzer.analyze_sql_cell``.
 
-    SQL needs the connection's dialect to extract table references via
-    sqlglot; the resolver lives on the session. When the dialect can't
-    be resolved (no connection declared yet) the analyzer falls back to
-    a dialect-independent regex path that still gets bind-placeholder
-    references right.
+    The DAG needs the output name and the ``:name`` bind placeholders,
+    neither of which depends on the connection's dialect, so no dialect is
+    passed and sqlglot never parses the body here. Table extraction is the
+    executor's and the annotation validator's; a query sqlglot cannot read
+    must not keep the notebook from opening.
     """
 
     def analyze(self, cell: CellState, session: NotebookSession) -> AnalyzedCell:
         from strata.notebook.sql.analyzer import analyze_sql_cell
 
-        dialect = session._resolve_sql_dialect(cell)
-        result = analyze_sql_cell(cell.source, dialect=dialect)
+        result = analyze_sql_cell(cell.source)
         return AnalyzedCell(
             defines=list(result.defines),
             references=list(result.references),

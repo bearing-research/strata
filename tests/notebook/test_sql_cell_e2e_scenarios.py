@@ -81,7 +81,9 @@ def _session(nb_dir: Path) -> Any:
     from strata.notebook.parser import parse_notebook
     from strata.notebook.session import NotebookSession
 
-    return NotebookSession(parse_notebook(nb_dir), nb_dir)
+    session = NotebookSession(parse_notebook(nb_dir), nb_dir)
+    session.refresh_environment_runtime()
+    return session
 
 
 def _read(nb_dir: Path, cell_id: str) -> str:

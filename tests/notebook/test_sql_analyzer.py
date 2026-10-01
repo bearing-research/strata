@@ -299,6 +299,12 @@ def test_identifier_named_at_run_time_is_reported_not_guessed(reference):
         ("duckdb", "QUERY_TABLE(GETVARIABLE('t'))"),
         ("duckdb", "READ_PARQUET('events.parquet')"),
         ("duckdb", "'events.parquet'"),
+        ("duckdb", '"events.parquet"'),
+        ("duckdb", "events.parquet"),
+        ("duckdb", "events.csv.gz"),
+        ("duckdb", '"data/events.json"'),
+        ("duckdb", '"data/*.parquet"'),
+        ("duckdb", '"s3://bucket/events"'),
         ("postgres", "MY_FUNC()"),
     ],
 )
@@ -313,6 +319,115 @@ def test_a_table_no_probe_can_name_is_reported_not_tracked(dialect, reference):
     assert result.unresolved_tables == [reference]
 
 
+@pytest.mark.parametrize(
+    ("reference", "unresolved"),
+    [
+        ("`proj.ds.events_*`", "`proj`.`ds`.`events_*`"),
+        ("proj.ds.INFORMATION_SCHEMA.TABLES", "proj.ds.`INFORMATION_SCHEMA.TABLES`"),
+        ("`region-us`.INFORMATION_SCHEMA.JOBS", "`region-us`.`INFORMATION_SCHEMA.JOBS`"),
+    ],
+)
+def test_a_bigquery_wildcard_or_metadata_view_is_reported_not_tracked(reference, unresolved):
+    """The BigQuery probe looks each table up in its dataset's ``__TABLES__``,
+    which has no row for a wildcard table or an ``INFORMATION_SCHEMA`` view.
+    "Missing" is the same answer on every run, so the cell was served from its
+    cache however the data changed, and a region-qualified view failed the
+    probe outright."""
+    src = f"# @sql connection=db\nSELECT * FROM {reference} AS x JOIN ds.orders USING (id)"
+    result = analyze_sql_cell(src, dialect="bigquery")
+    assert result.tables == [QualifiedTable(catalog=None, schema="ds", name="orders")]
+    assert result.unresolved_tables == [unresolved]
+
+
+def test_a_file_looking_name_is_a_table_outside_duckdb():
+    """Only DuckDB reads a file where a table name goes. Elsewhere
+    ``events.parquet`` is the table ``parquet`` in the schema ``events``."""
+    src = "# @sql connection=db\nSELECT * FROM events.parquet"
+    result = analyze_sql_cell(src, dialect="postgres")
+    assert result.tables == [QualifiedTable(catalog=None, schema="events", name="parquet")]
+    assert result.unresolved_tables == []
+
+
+@pytest.mark.parametrize(
+    ("dialect", "reference", "unresolved"),
+    [
+        ("postgres", "ROWS FROM (generate_series(1, 3))", ["GENERATE_SERIES(1, 3)"]),
+        (
+            "postgres",
+            "ROWS FROM (generate_series(1, 3), my_func())",
+            ["GENERATE_SERIES(1, 3)", "MY_FUNC()"],
+        ),
+        ("duckdb", "ROWS FROM (range(3))", ["RANGE(0, 3)"]),
+        ("postgres", "json_to_recordset('[]')", ["JSON_TO_RECORDSET('[]')"]),
+    ],
+)
+def test_a_set_returning_function_list_is_reported_not_a_crash(dialect, reference, unresolved):
+    """``ROWS FROM (...)`` is a table with no name of its own, only the
+    functions it calls. The analyzer read the name it does not have and raised,
+    and a notebook holding such a cell did not open."""
+    src = f"# @sql connection=db\nSELECT * FROM {reference} AS x(a) JOIN orders USING (id)"
+    result = analyze_sql_cell(src, dialect=dialect)
+    assert result.parse_error is None
+    assert [t.name for t in result.tables] == ["orders"]
+    assert result.unresolved_tables == unresolved
+
+
+def test_a_notebook_with_a_rows_from_cell_opens(tmp_path):
+    """The server session and the CLI's ops both analyze every cell on open."""
+    from strata.notebook.ops import LocalNotebookOps
+    from strata.notebook.parser import parse_notebook
+    from strata.notebook.session import NotebookSession
+    from strata.notebook.writer import add_cell_to_notebook, create_notebook, write_cell
+
+    nb_dir = create_notebook(tmp_path, "rows_from")
+    add_cell_to_notebook(nb_dir, "sql", language="sql")
+    write_cell(
+        nb_dir,
+        "sql",
+        "# @sql connection=pg\n# @name q\nSELECT * FROM ROWS FROM (generate_series(1, 3))\n",
+    )
+    toml = nb_dir / "notebook.toml"
+    toml.write_text(
+        toml.read_text() + '\n[connections.pg]\ndriver = "postgresql"\nhost = "localhost"\n'
+    )
+
+    session = NotebookSession(parse_notebook(nb_dir), nb_dir)
+    cell = session.notebook_state.get_cell("sql")
+    assert cell.defines == ["q"]
+    assert [d.code for d in cell.annotation_diagnostics] == ["sql_dynamic_table"]
+
+    ops = LocalNotebookOps(nb_dir)
+    assert [c.id for c in ops.list_cells()] == ["sql"]
+
+
+def test_an_analyzer_failure_does_not_stop_a_notebook_opening(tmp_path, monkeypatch):
+    """A bug in table extraction is the analyzer's, not the notebook's: the
+    notebook opens, the cell keeps its defines, and its header says what went
+    wrong."""
+    import strata.notebook.sql.analyzer as analyzer_mod
+    from strata.notebook.parser import parse_notebook
+    from strata.notebook.session import NotebookSession
+    from strata.notebook.writer import add_cell_to_notebook, create_notebook, write_cell
+
+    def boom(_sql, _dialect):
+        raise RuntimeError("analyzer bug")
+
+    monkeypatch.setattr(analyzer_mod, "_extract_tables", boom)
+    nb_dir = create_notebook(tmp_path, "analyzer_bug")
+    add_cell_to_notebook(nb_dir, "sql", language="sql")
+    write_cell(nb_dir, "sql", "# @sql connection=pg\n# @name q\nSELECT * FROM events\n")
+    toml = nb_dir / "notebook.toml"
+    toml.write_text(
+        toml.read_text() + '\n[connections.pg]\ndriver = "postgresql"\nhost = "localhost"\n'
+    )
+
+    session = NotebookSession(parse_notebook(nb_dir), nb_dir)
+    cell = session.notebook_state.get_cell("sql")
+    assert cell.defines == ["q"]
+    messages = {d.code: d.message for d in cell.annotation_diagnostics}
+    assert "analyzer bug" in messages["sql_analysis_failed"]
+
+
 def test_table_with_a_literal_names_its_table():
     """Snowflake's ``TABLE('...')`` with a string names a table, as
     ``IDENTIFIER('...')`` does."""
@@ -323,8 +438,9 @@ def test_table_with_a_literal_names_its_table():
 
 
 def test_snowflake_names_are_the_ones_it_stores():
-    """Snowflake stores an unquoted identifier uppercased and a quoted one as
-    written; other dialects keep the name as typed."""
+    """Snowflake stores an unquoted identifier uppercased and Postgres
+    lowercased; a quoted one is stored as written. Other dialects keep the name
+    as typed."""
     src = '# @sql connection=db\nSELECT * FROM mydb.public.events JOIN "MixedCase" USING (id)'
     result = analyze_sql_cell(src, dialect="snowflake")
     assert result.tables == [
@@ -332,8 +448,16 @@ def test_snowflake_names_are_the_ones_it_stores():
         QualifiedTable(catalog=None, schema=None, name="MixedCase"),
     ]
 
+    src = '# @sql connection=db\nSELECT * FROM MyDb.Public.Events JOIN "MixedCase" USING (id)'
     result = analyze_sql_cell(src, dialect="postgres")
-    assert [t.name for t in result.tables] == ["events", "MixedCase"]
+    assert result.tables == [
+        QualifiedTable(catalog="mydb", schema="public", name="events"),
+        QualifiedTable(catalog=None, schema=None, name="MixedCase"),
+    ]
+
+    for dialect in ("duckdb", "bigquery", "sqlite"):
+        result = analyze_sql_cell(src, dialect=dialect)
+        assert [t.name for t in result.tables] == ["Events", "MixedCase"], dialect
 
 
 # --- result type ----------------------------------------------------------

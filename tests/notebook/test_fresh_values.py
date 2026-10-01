@@ -43,7 +43,9 @@ CONSUMER = "seen = run_count\nseen\n"
 
 
 def _session(notebook_dir: Path) -> NotebookSession:
-    return NotebookSession(parse_notebook(notebook_dir), notebook_dir)
+    session = NotebookSession(parse_notebook(notebook_dir), notebook_dir)
+    session.refresh_environment_runtime()
+    return session
 
 
 def _run(executor: CellExecutor, session: NotebookSession, cell_id: str):

@@ -255,7 +255,9 @@ async def test_a_teammates_result_is_served_instead_of_running_the_cell(
         write_cell(notebook_dir, "up", upstream_source)
         add_cell_to_notebook(notebook_dir, "down", "up")
         write_cell(notebook_dir, "down", downstream_source)
-        return notebook_dir, NotebookSession(parse_notebook(notebook_dir), notebook_dir)
+        session = NotebookSession(parse_notebook(notebook_dir), notebook_dir)
+        session.refresh_environment_runtime()
+        return notebook_dir, session
 
     # --- Alice runs it for real ---
     alice_dir, alice = build("alice")
@@ -489,6 +491,7 @@ async def test_a_store_that_refuses_a_publish_does_not_fail_the_cell(tmp_path, m
     add_cell_to_notebook(notebook_dir, "down", "up")
     write_cell(notebook_dir, "down", "doubled = value * 2")
     session = NotebookSession(parse_notebook(notebook_dir), notebook_dir)
+    session.refresh_environment_runtime()
 
     monkeypatch.setattr(
         CellExecutor,

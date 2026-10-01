@@ -506,6 +506,33 @@ def test_probe_schema_uses_to_regclass():
     assert params == ('"events"',)
 
 
+def test_probes_ask_for_the_names_postgres_stores():
+    """Postgres folds an unquoted identifier to lowercase, so ``FROM
+    Analytics.Events`` reads ``analytics.events``. The probe quotes what it is
+    given, and asking for ``"Analytics"."Events"`` found nothing: the token
+    never moved however the table changed. A quoted name is stored as written."""
+    from strata.notebook.sql.analyzer import analyze_sql_cell
+
+    analysis = analyze_sql_cell(
+        '# @sql connection=db\nSELECT * FROM Analytics.Events JOIN "MixedCase" USING (id)',
+        dialect="postgres",
+    )
+    a = PostgresAdapter()
+    cursor = _FakeCursor(scripts=[("to_regclass", (1, 2, "analytics"))])
+    a.probe_freshness(_FakeConn(cursor), analysis.tables)
+    assert sorted(params for _sql, params in cursor.executions) == [
+        ('"MixedCase"',),
+        ('"analytics"."events"',),
+    ]
+
+    cursor = _FakeCursor(scripts=[("pg_attribute", [])])
+    a.probe_schema(_FakeConn(cursor), analysis.tables)
+    assert sorted(params for _sql, params in cursor.executions) == [
+        ('"MixedCase"',),
+        ('"analytics"."events"',),
+    ]
+
+
 def test_probe_schema_empty_tables_returns_empty_token():
     a = PostgresAdapter()
     token = a.probe_schema(_FakeConn(_FakeCursor(scripts=[])), [])

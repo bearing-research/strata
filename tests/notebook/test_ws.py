@@ -2130,6 +2130,7 @@ async def test_widget_update_persists_value_and_stales_downstream(tmp_path):
     add_cell_to_notebook(nb, "controls", None)
     add_cell_to_notebook(nb, "consume", "controls")
     session = NotebookSession(parse_notebook(nb), nb)
+    session.refresh_environment_runtime()
     session.notebook_state.get_cell("controls").language = CellLanguage.WIDGET
     session.notebook_state.get_cell("controls").source = "alpha = slider(0, 1, default=0.5)"
     session.notebook_state.get_cell("consume").source = "beta = alpha * 2\nbeta"
@@ -2198,6 +2199,7 @@ async def test_live_widget_auto_cascades_cheap_downstream(tmp_path):
     add_cell_to_notebook(nb, "controls", None)
     add_cell_to_notebook(nb, "consume", "controls")
     session = NotebookSession(parse_notebook(nb), nb)
+    session.refresh_environment_runtime()
     session.notebook_state.get_cell("controls").language = CellLanguage.WIDGET
     session.notebook_state.get_cell(
         "controls"
@@ -2240,6 +2242,7 @@ async def test_live_cost_gate_leaves_expensive_downstream_stale(tmp_path):
     add_cell_to_notebook(nb, "controls", None)
     add_cell_to_notebook(nb, "consume", "controls")
     session = NotebookSession(parse_notebook(nb), nb)
+    session.refresh_environment_runtime()
     session.notebook_state.get_cell("controls").language = CellLanguage.WIDGET
     session.notebook_state.get_cell(
         "controls"
@@ -2286,6 +2289,7 @@ async def test_live_widget_reruns_all_downstream_leaves(tmp_path):
     add_cell_to_notebook(nb, "leaf_a", "controls")
     add_cell_to_notebook(nb, "leaf_b", "leaf_a")
     session = NotebookSession(parse_notebook(nb), nb)
+    session.refresh_environment_runtime()
     session.notebook_state.get_cell("controls").language = CellLanguage.WIDGET
     session.notebook_state.get_cell(
         "controls"

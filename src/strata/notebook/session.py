@@ -815,38 +815,6 @@ class NotebookSession:
         # Rebuild full DAG (since one cell changed, downstream may be affected)
         self._analyze_and_build_dag()
 
-    def _resolve_sql_dialect(self, cell) -> str | None:
-        """Look up the sqlglot dialect for a SQL cell's connection.
-
-        Walks: cell source → ``# @sql connection=<name>`` →
-        ``notebook.connections[<name>]`` → ``DriverAdapter.sqlglot_dialect``.
-
-        Returns ``None`` when any step is unresolved — the connection
-        isn't declared, the driver isn't registered, or the cell has
-        no ``# @sql`` annotation. The analyzer treats ``None`` as
-        "skip table extraction"; the executor re-resolves at execute
-        time when the connection MUST exist.
-        """
-        from strata.notebook.annotations import parse_annotations
-
-        annotations = parse_annotations(cell.source)
-        if annotations.sql is None or not annotations.sql.connection:
-            return None
-        connection_name = annotations.sql.connection
-        connection = next(
-            (c for c in self.notebook_state.connections if c.name == connection_name),
-            None,
-        )
-        if connection is None:
-            return None
-        try:
-            from strata.notebook.sql.registry import get_adapter
-
-            adapter = get_adapter(connection.driver)
-        except (KeyError, ImportError):
-            return None
-        return adapter.sqlglot_dialect
-
     def get_artifact_manager(self) -> NotebookArtifactManager:
         """Get the artifact manager for this session.
 
@@ -3978,12 +3946,20 @@ class SessionManager:
                 else:
                     with timing.phase("session_reload"):
                         existing.reload()
+                # A session with no interpreter never got one from a sync (it
+                # raised on open). Refreshing would record whatever .venv holds
+                # and make the cells runnable; syncing again keeps a failure
+                # visible and clears it once the sync succeeds.
+                if existing.venv_python is None:
+                    phase, prepare = "session_env_sync", existing.ensure_venv_synced
+                else:
+                    phase, prepare = "session_env_refresh", existing.refresh_environment_runtime
                 try:
                     if timing is None:
-                        existing.refresh_environment_runtime()
+                        prepare()
                     else:
-                        with timing.phase("session_env_refresh"):
-                            existing.refresh_environment_runtime()
+                        with timing.phase(phase):
+                            prepare()
                 except Exception as e:
                     logger.warning("Failed to refresh existing notebook runtime: %s", e)
                 # Re-check renv.lock on every reopen. The hash short-circuit

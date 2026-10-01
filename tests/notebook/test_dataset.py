@@ -84,7 +84,9 @@ def notebook(tmp_path, notebook_personal_server):
         write_cell(nb, "c2", "doubled = score * 2")
         add_cell_to_notebook(nb, "c3", "c2")
         write_cell(nb, "c3", "shown = doubled")
-        return NotebookSession(parse_notebook(nb), nb)
+        session = NotebookSession(parse_notebook(nb), nb)
+        session.refresh_environment_runtime()
+        return session
 
     return _make
 

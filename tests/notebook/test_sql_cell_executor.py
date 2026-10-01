@@ -317,6 +317,7 @@ async def test_sql_cell_bind_param_from_upstream_python_cell(tmp_path):
         + f'path = "{db_path}"\n'
     )
     session = NotebookSession(parse_notebook(nb_dir), nb_dir)
+    session.refresh_environment_runtime()
 
     # Run the Python cell first so the upstream artifact exists.
     from strata.notebook.executor import CellExecutor
@@ -729,6 +730,7 @@ async def test_sql_write_cell_resolves_bind_placeholders_from_upstream(tmp_path)
     )
 
     session = NotebookSession(parse_notebook(nb_dir), nb_dir)
+    session.refresh_environment_runtime()
     executor = CellExecutor(session)
 
     cfg_src = (nb_dir / "cells" / "cfg.py").read_text()
@@ -780,6 +782,7 @@ async def test_sql_write_cell_invalidates_on_upstream_value_change(tmp_path):
     )
 
     session = NotebookSession(parse_notebook(nb_dir), nb_dir)
+    session.refresh_environment_runtime()
     executor = CellExecutor(session)
     cells = {c.id: c for c in session.notebook_state.cells}
 

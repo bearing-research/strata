@@ -485,6 +485,7 @@ def _stored_name(identifier: Any, dialect: str) -> str | None:
     ``INFORMATION_SCHEMA`` compares names exactly: ``events`` is ``EVENTS``
     there, while ``"events"`` stays as written. A probe that asked for the name
     as typed found nothing, and "missing" is the same answer on every run.
+    Postgres folds the other way: ``Events`` is stored as ``events``.
     """
     from sqlglot import exp
 
@@ -492,8 +493,12 @@ def _stored_name(identifier: Any, dialect: str) -> str | None:
         return identifier or None  # absent: ``None``, or ``""`` for ``db..t``
     if not identifier.name:
         return None
-    if dialect == "snowflake" and not identifier.args.get("quoted"):
+    if identifier.args.get("quoted"):
+        return identifier.name
+    if dialect == "snowflake":
         return identifier.name.upper()
+    if dialect == "postgres":
+        return identifier.name.lower()
     return identifier.name
 
 
@@ -543,26 +548,55 @@ def _table_reference(table_node: Any, sql: str, dialect: str) -> QualifiedTable 
     whatever they read.
 
     So is DuckDB's ``FROM 'events.parquet'``: a string where a table goes is a
-    file read, not a table, and nothing fingerprints the file. A mount on a
-    lake connection is the way to read files the cache can see, since each
-    mount's fingerprint is folded into the cell's provenance.
+    file read, not a table, and nothing fingerprints the file. DuckDB reads a
+    name that looks like a file the same way, quoted or not: ``"events.parquet"``,
+    ``events.parquet``, ``"data/*.csv"``. A mount on a lake connection is the
+    way to read files the cache can see, since each mount's fingerprint is
+    folded into the cell's provenance.
+
+    BigQuery's wildcard tables (``events_*``) and ``INFORMATION_SCHEMA`` views
+    are names, but not tables its probe can find: ``__TABLES__`` lists neither.
     """
     from sqlglot import exp
 
     this = table_node.this
     if isinstance(this, exp.DynamicIdentifier):
         return _named_by_literal(this, dialect)
+    if not isinstance(this, exp.Identifier):
+        return None
     start = this.meta.get("start")
-    if isinstance(this, exp.Identifier) and start is not None and sql[start] == "'":
+    if start is not None and sql[start] == "'":
+        return None
+    name = ".".join(part.name for part in table_node.parts)
+    if dialect == "duckdb" and _names_a_file(name):
+        return None
+    if dialect == "bigquery" and ("*" in name or "INFORMATION_SCHEMA" in name.upper().split(".")):
         return None
     return _qualified(table_node, dialect)
 
 
+# What DuckDB reads as a file when it sits where a table name goes (its
+# replacement scans), optionally compressed.
+_FILE_NAME_RE = re.compile(
+    r"\.(parquet|csv|tsv|json|jsonl|ndjson|arrow|orc)(\.(gz|zst|zstd|bz2|xz|lz4))?$",
+    re.IGNORECASE,
+)
+
+
+def _names_a_file(name: str) -> bool:
+    """Whether DuckDB reads *name*, a table reference's dotted text, as a file."""
+    return "/" in name or "*" in name or _FILE_NAME_RE.search(name) is not None
+
+
 def _unresolved_text(table_node: Any, sql: str, dialect: str) -> str:
     """How a reference no probe can name reads in the cell, for a diagnostic."""
-    start, end = table_node.this.meta.get("start"), table_node.this.meta.get("end")
-    if start is not None and end is not None and sql[start] == "'":
-        return sql[start : end + 1]
+    from sqlglot import exp
+
+    this = table_node.this
+    if isinstance(this, exp.Identifier):
+        start, end = this.meta.get("start"), this.meta.get("end")
+        if start is not None and end is not None and sql[start] == "'":
+            return sql[start : end + 1]
     return ".".join(part.sql(dialect=dialect) for part in table_node.parts)
 
 
@@ -611,6 +645,10 @@ def _extract_tables(sql: str, dialect: str) -> tuple[list[QualifiedTable], list[
                 if isinstance(source, Scope):
                     # Reference to a CTE / derived table, not a
                     # base table.
+                    continue
+                if table_node.args.get("rows_from"):
+                    # ``ROWS FROM (f(), g())`` names nothing itself; each
+                    # function in it is a table node of its own, walked here.
                     continue
                 qt = _table_reference(table_node, sql, dialect)
                 record(qt, "" if qt else _unresolved_text(table_node, sql, dialect))

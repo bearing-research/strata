@@ -13,7 +13,7 @@ import pytest
 import uvicorn
 
 from strata.config import StrataConfig
-from tests.conftest import find_free_port, wait_for_server
+from tests.conftest import find_free_port, prepared_venv, wait_for_server
 
 # ---------------------------------------------------------------------------
 # R availability — central skip markers for integration tests
@@ -420,7 +420,12 @@ def r_notebook(tmp_path: Path):
         by_id = {cid: lang for cid, _after, _src, lang in cells}
         for cell in notebook_state.cells:
             cell.language = _language_map[by_id[cell.id]]
+        # The Python cells among them run in the notebook's interpreter,
+        # never PATH's: give it this one, the way ``--no-sync`` takes a
+        # prepared venv.
+        prepared_venv(notebook_dir)
         session = NotebookSession(notebook_state, notebook_dir)
+        session.refresh_environment_runtime()
         return notebook_dir, session
 
     return _make

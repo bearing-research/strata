@@ -58,6 +58,7 @@ def pipeline_notebook(tmp_path):
 
     notebook_state = parse_notebook(notebook_dir)
     session = NotebookSession(notebook_state, notebook_dir)
+    session.refresh_environment_runtime()
     return session
 
 
@@ -113,6 +114,7 @@ class TestUpstreamInvalidation:
         )
 
         session = NotebookSession(parse_notebook(notebook_dir), notebook_dir)
+        session.refresh_environment_runtime()
         executor = CellExecutor(session)
 
         result = await executor.execute_cell("c2", "result = value.upper()")
@@ -147,6 +149,7 @@ class TestUpstreamInvalidation:
 
         notebook_state = parse_notebook(notebook_dir)
         session = NotebookSession(notebook_state, notebook_dir)
+        session.refresh_environment_runtime()
 
         executor = CellExecutor(session)
         r1 = await executor.execute_cell("c1", "x = 1\ny = 2")
@@ -235,6 +238,7 @@ class TestUpstreamInvalidation:
         )
 
         session = NotebookSession(parse_notebook(notebook_dir), notebook_dir)
+        session.refresh_environment_runtime()
         executor = CellExecutor(session)
 
         first = await executor.execute_cell("c1", "def add(a, b):\n    return a + b")
@@ -278,6 +282,7 @@ class TestUpstreamInvalidation:
         write_cell(notebook_dir, "c2", "y = x + 1")
 
         session = NotebookSession(parse_notebook(notebook_dir), notebook_dir)
+        session.refresh_environment_runtime()
         executor = CellExecutor(session)
 
         assert (await executor.execute_cell("c2", "y = x + 1")).success
@@ -313,6 +318,7 @@ class TestUpstreamInvalidation:
 
         notebook_state = parse_notebook(notebook_dir)
         session = NotebookSession(notebook_state, notebook_dir)
+        session.refresh_environment_runtime()
 
         executor = CellExecutor(session)
         r1 = await executor.execute_cell("c1", "x = 1\ny = 2")

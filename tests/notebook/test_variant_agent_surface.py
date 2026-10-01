@@ -33,6 +33,7 @@ CELLS = [
 def _registered(nb: Path) -> tuple[SessionManager, str]:
     sm = SessionManager()
     session = NotebookSession(parse_notebook(nb), nb)
+    session.refresh_environment_runtime()
     sm._sessions[session.id] = session
     return sm, session.id
 
@@ -141,6 +142,7 @@ def test_a_fanout_consumer_records_every_instance_it_read(tmp_path):
     nb = _build_notebook(tmp_path, cells=CELLS)
     set_variant_mode(nb, "model", "sweep")
     session = NotebookSession(parse_notebook(nb), nb)
+    session.refresh_environment_runtime()
     asyncio.run(
         CellExecutor(session).execute_cell(
             "report", session.notebook_state.get_cell("report").source
@@ -226,6 +228,7 @@ def test_a_chained_instance_records_the_variant_it_zipped_to(tmp_path):
     nb = _build_notebook(tmp_path, cells=cells)
     set_variant_mode(nb, "model", "sweep")
     session = NotebookSession(parse_notebook(nb), nb)
+    session.refresh_environment_runtime()
     asyncio.run(
         CellExecutor(session).execute_cell(
             "report", session.notebook_state.get_cell("report").source

@@ -44,7 +44,9 @@ def build_notebook(parent, name: str) -> NotebookSession:
     write_cell(notebook_dir, "up", SOURCE)
     add_cell_to_notebook(notebook_dir, "down", "up")
     write_cell(notebook_dir, "down", "doubled = value * 2")
-    return NotebookSession(parse_notebook(notebook_dir), notebook_dir)
+    session = NotebookSession(parse_notebook(notebook_dir), notebook_dir)
+    session.refresh_environment_runtime()
+    return session
 
 
 def record_spawns(monkeypatch) -> list[tuple]:

@@ -31,6 +31,7 @@ def _notebook(tmp_path: Path, source: str = FAILING) -> Path:
 
 def _run(notebook_dir: Path, source: str) -> tuple[NotebookSession, object]:
     session = NotebookSession(parse_notebook(notebook_dir), notebook_dir)
+    session.refresh_environment_runtime()
     executor = CellExecutor(session)
     result = asyncio.run(executor.execute_cell("c1", source))
     return session, result
@@ -178,6 +179,7 @@ def test_a_failure_over_an_older_success_survives_a_recompute(tmp_path: Path):
         cells=[("p", producer, None), ("c", consumer, "p"), ("sink", "seen\n", "c")],
     )
     session = NotebookSession(parse_notebook(nb), nb)
+    session.refresh_environment_runtime()
 
     assert asyncio.run(CellExecutor(session).execute_cell("sink", "seen\n")).success
     failed = asyncio.run(CellExecutor(session).execute_cell("c", consumer))

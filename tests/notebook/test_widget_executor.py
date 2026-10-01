@@ -28,6 +28,7 @@ def widget_session(tmp_path):
     add_cell_to_notebook(notebook_dir, "controls", None)
     add_cell_to_notebook(notebook_dir, "consume", "controls")
     session = NotebookSession(parse_notebook(notebook_dir), notebook_dir)
+    session.refresh_environment_runtime()
 
     controls = session.notebook_state.get_cell("controls")
     controls.language = CellLanguage.WIDGET

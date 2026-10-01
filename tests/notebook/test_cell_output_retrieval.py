@@ -47,6 +47,7 @@ def _notebook_with_a_plot(tmp_path: Path) -> tuple[Path, NotebookSession]:
     add_cell_to_notebook(notebook_dir, "p")
     write_cell(notebook_dir, "p", PLOT_CELL)
     session = NotebookSession(parse_notebook(notebook_dir), notebook_dir)
+    session.refresh_environment_runtime()
     result = asyncio.run(CellExecutor(session).execute_cell("p", PLOT_CELL))
     assert result.success is True
     return notebook_dir, session
@@ -236,6 +237,7 @@ def test_local_and_remote_agree_on_a_text_content_type(tmp_path: Path, monkeypat
     add_cell_to_notebook(notebook_dir, "m")
     write_cell(notebook_dir, "m", MARKDOWN_CELL)
     session = NotebookSession(parse_notebook(notebook_dir), notebook_dir)
+    session.refresh_environment_runtime()
     assert asyncio.run(CellExecutor(session).execute_cell("m", MARKDOWN_CELL)).success
 
     app = FastAPI()

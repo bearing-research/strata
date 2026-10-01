@@ -756,6 +756,9 @@ class CellExecutor:
         cell = self.session.notebook_state.get_cell(cell_id)
         if cell is None:
             raise FileNotFoundError(f"Cell {cell_id} not found")
+        venv_python = self.session.venv_python
+        if venv_python is None:
+            raise RuntimeError(_no_interpreter_message(self.session))
 
         source = cell.source
         await self._materialize_upstreams(cell_id)
@@ -766,7 +769,6 @@ class CellExecutor:
         input_fingerprint = hashlib.sha256(
             "|".join(sorted(input_hashes)).encode("utf-8")
         ).hexdigest()
-        venv_python = Path(self.session.venv_python or "python")
 
         # Tests import and run the cell's source, so they start cell code like
         # any harness and are refused or dropped to the harness user the same.
@@ -1756,7 +1758,7 @@ class CellExecutor:
                     _add_fetch_inputs(input_specs, prov.fetched, output_dir)
                 self._add_dataset_inputs(input_specs, prov.datasets, output_dir)
 
-                venv_path = self.session.venv_python or Path("python")
+                venv_path = self.session.venv_python
 
                 (
                     result,
@@ -2529,7 +2531,7 @@ class CellExecutor:
         input_specs: dict[str, dict[str, str]],
         mount_specs: list[MountSpec],
         output_dir: Path,
-        venv_path: Path,
+        venv_path: Path | None,
         runtime_env: dict[str, str],
         timeout_seconds: float,
         remote_build_id: str | None = None,
@@ -2601,7 +2603,7 @@ class CellExecutor:
         input_specs: dict[str, dict[str, str]],
         mount_specs: list[MountSpec],
         output_dir: Path,
-        venv_path: Path,
+        venv_path: Path | None,
         runtime_env: dict[str, str],
         timeout_seconds: float,
         mutation_defines: list[str] | None = None,
@@ -2623,7 +2625,9 @@ class CellExecutor:
             cell_id=cell_id,
         )
 
-        if self.pool is not None:
+        # Without an interpreter nothing runs, not even in a warm process
+        # started before the session lost it: _run_harness refuses below.
+        if self.pool is not None and venv_path is not None:
             from strata.notebook.pool import PooledCellExecutor
 
             pool_result = await PooledCellExecutor.execute_with_pool(
@@ -2655,7 +2659,7 @@ class CellExecutor:
         input_specs: dict[str, dict[str, str]],
         mount_specs: list[MountSpec],
         output_dir: Path,
-        venv_path: Path,
+        venv_path: Path | None,
         runtime_env: dict[str, str],
         timeout_seconds: float,
         mutation_defines: list[str] | None = None,
@@ -5215,10 +5219,22 @@ class CellExecutor:
     async def _run_harness(
         self,
         manifest_path: Path,
-        venv_python: Path,
+        venv_python: Path | None,
         timeout_seconds: float,
     ) -> dict[str, Any]:
-        """Run the harness script via uv, or as the harness user."""
+        """Run the harness script via uv, or as the harness user.
+
+        ``venv_python`` is None when the session has no interpreter, and then
+        nothing runs.
+        """
+        if venv_python is None:
+            return {
+                "success": False,
+                "error": _no_interpreter_message(self.session),
+                "stderr": "",
+                "stdout": "",
+                "variables": {},
+            }
         try:
             harness_user = resolve_harness_user()
         except LocalExecutionRefused as exc:
@@ -5613,7 +5629,7 @@ class CellExecutor:
                     cell_id=cell_id,
                 )
 
-                venv_path = self.session.venv_python or Path("python")
+                venv_path = self.session.venv_python
                 try:
                     result = await self._run_harness(manifest_path, venv_path, timeout_seconds)
                 except TimeoutError:
@@ -6007,10 +6023,10 @@ class CellExecutor:
         subprocess + pipe wiring + frame protocol service + per-cell
         watchdog. Stdout/stderr per-cell attribution is still deferred.
         """
-        # Match single-cell's fallback: venv interpreter if synced,
-        # otherwise PATH python (e.g. test environments that don't go
-        # through the full env-sync flow).
-        venv_python = self.session.venv_python or Path("python")
+        # As in single-cell: no interpreter, no run.
+        venv_python = self.session.venv_python
+        if venv_python is None:
+            return _refused_batch(cell_specs, _no_interpreter_message(self.session))
 
         try:
             harness_user = resolve_harness_user()
@@ -6018,15 +6034,7 @@ class CellExecutor:
             # The run-all dispatcher does not batch on a host that refuses (it
             # sends each cell through single-cell, where a cache hit still
             # serves), so this is reached only by calling the batch directly.
-            return BatchExecutionResult(
-                cell_results=[
-                    BatchCellResult(cell_id=spec["cell_id"], status="cell_error", error=str(exc))
-                    for spec in cell_specs
-                ],
-                completed=False,
-                failed_cell_id=cell_specs[0]["cell_id"] if cell_specs else None,
-                end_reason="cell_error",
-            )
+            return _refused_batch(cell_specs, str(exc))
 
         batch_tmpdir = Path(
             tempfile.mkdtemp(
@@ -6868,6 +6876,31 @@ _ARTIFACT_EXT_BY_CONTENT_TYPE: dict[str, str] = {
 def _refused_result(exc: LocalExecutionRefused) -> dict[str, Any]:
     """A harness result for cell code this host would not start."""
     return {"success": False, "error": str(exc), "stderr": "", "stdout": "", "variables": {}}
+
+
+def _refused_batch(cell_specs: list[dict[str, Any]], error: str) -> BatchExecutionResult:
+    """A batch result for cells this session would not start, each with *error*."""
+    return BatchExecutionResult(
+        cell_results=[
+            BatchCellResult(cell_id=spec["cell_id"], status="cell_error", error=error)
+            for spec in cell_specs
+        ],
+        completed=False,
+        failed_cell_id=cell_specs[0]["cell_id"] if cell_specs else None,
+        end_reason="cell_error",
+    )
+
+
+def _no_interpreter_message(session: NotebookSession) -> str:
+    """Why cell code did not run: the session has no interpreter.
+
+    It is not run with ``python`` from PATH instead. That is some other
+    environment, and its result would be stored under this notebook's
+    provenance as if the notebook's own environment had produced it.
+    """
+    return session.environment_execution_block_message() or (
+        "Notebook environment is not ready: it has no Python interpreter."
+    )
 
 
 async def _drain_stream(stream: asyncio.StreamReader) -> None:
