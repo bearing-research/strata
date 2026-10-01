@@ -56,9 +56,10 @@ def response_format_for(
 ) -> dict[str, Any] | None:
     """Pick the provider-appropriate ``response_format`` payload.
 
-    OpenAI endpoints get ``json_schema`` (strict when the schema allows it). Other
-    providers, and ``output_type == "json"`` without a schema, get ``json_object``.
-    Returns ``None`` when no structured output is requested.
+    With a schema, endpoints that accept strict ``json_schema`` get it (strict when the
+    schema allows it): OpenAI and OpenAI-compatible ones such as Gemini's, matched by
+    "openai" in the base URL. Other endpoints, and ``output_type == "json"`` without a
+    schema, get ``json_object``. Returns ``None`` when no structured output is requested.
     """
     if output_schema is not None:
         if "openai" in base_url.lower():

@@ -68,8 +68,8 @@ async def health_dependencies():
 async def health_ready():
     """Readiness probe; 503 when the server cannot take requests.
 
-    Not ready when draining, when both QoS tiers stay saturated past the threshold, when
-    scans are stuck, or when the metadata store is unreachable.
+    Not ready when draining, when both QoS tiers stay saturated past the threshold, or
+    when the metadata store is unreachable.
     """
     import json
 

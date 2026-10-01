@@ -348,9 +348,9 @@ def agent_main(args: argparse.Namespace) -> int:
             return 2
         if not _mcp_mounted(server_url):
             print(
-                "error: the MCP endpoint did not mount — the [mcp] extra is "
-                "likely missing.\nhint: install it with `uv sync --extra mcp` "
-                "(or `--all-extras`)",
+                "error: the MCP endpoint did not mount; the [mcp] extra is "
+                "likely missing.\nhint: in a checkout, `uv sync --extra mcp`; "
+                "for an installed tool, `uv tool install 'strata-notebook[mcp,tui]'`",
                 file=sys.stderr,
             )
             _terminate(spawned)
