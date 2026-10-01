@@ -1444,7 +1444,7 @@ class AsyncStrataClient:
                     error_msg = build_status.get("error_message", "Unknown error")
                     raise RuntimeError(f"Build failed: {error_msg}")
 
-                await asyncio.sleep(0.5)
+                await asyncio.sleep(poll_interval)
 
         return AsyncArtifact(
             _client=self,
@@ -1455,36 +1455,6 @@ class AsyncStrataClient:
             build_id=build_id or stream_id,
             name=name,
         )
-
-    async def _fetch_stream_with_retry(self, stream_url: str) -> bytes:
-        """Fetch stream data with retry on 429 responses."""
-        last_response = None
-        for attempt in range(self.retry_config.max_retries + 1):
-            response = await self._client.get(stream_url)
-
-            if response.status_code != 429:
-                response.raise_for_status()
-                return response.content
-
-            last_response = response
-
-            if attempt >= self.retry_config.max_retries:
-                break
-
-            retry_after = response.headers.get("Retry-After")
-            if retry_after:
-                try:
-                    delay = float(retry_after) + random.uniform(0, self.retry_config.jitter)
-                except ValueError:
-                    delay = self.retry_config.calculate_delay(attempt)
-            else:
-                delay = self.retry_config.calculate_delay(attempt)
-
-            await asyncio.sleep(delay)
-
-        if last_response is not None:
-            last_response.raise_for_status()
-        raise RuntimeError("Max retries exceeded")
 
     async def clear_cache(self) -> dict:
         """Clear the server's disk cache."""

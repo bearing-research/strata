@@ -79,6 +79,53 @@ def test_fetch_over_mock_transport() -> None:
     client.close()
 
 
+def test_async_materialize_polls_a_build_at_the_requested_interval(monkeypatch) -> None:
+    import asyncio
+
+    import strata_client.client as client_module
+    from strata_client.client import AsyncStrataClient
+
+    states = iter(["building", "building", "ready"])
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/v1/materialize":
+            return httpx.Response(
+                200,
+                json={
+                    "artifact_uri": "strata://artifact/a1@v=1",
+                    "state": "building",
+                    "build_id": "b1",
+                },
+            )
+        return httpx.Response(200, json={"state": next(states)})
+
+    slept: list[float] = []
+
+    async def record_sleep(seconds: float) -> None:
+        slept.append(seconds)
+
+    monkeypatch.setattr(client_module.asyncio, "sleep", record_sleep)
+
+    async def run() -> None:
+        client = AsyncStrataClient(base_url="http://strata.test")
+        await client._client.aclose()
+        client._client = httpx.AsyncClient(
+            base_url="http://strata.test", transport=httpx.MockTransport(handler)
+        )
+        try:
+            await client.materialize(
+                ["file:///w#db.t"],
+                {"executor": "scan@v1", "params": {}},
+                mode="artifact",
+                poll_interval=2.5,
+            )
+        finally:
+            await client.close()
+
+    asyncio.run(run())
+    assert slept == [2.5, 2.5]
+
+
 def test_retry_config_backoff() -> None:
     rc = RetryConfig(max_retries=2, base_delay=1.0, max_delay=30.0, jitter=0.0)
     assert rc.calculate_delay(0) == 1.0
