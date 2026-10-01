@@ -1,8 +1,6 @@
 /** REST client for the Strata server. */
 
-import { ref } from 'vue'
 import type {
-  CellOutput,
   ConnectionSpec,
   DependencyInfo,
   MaterializeRequest,
@@ -289,8 +287,6 @@ function resolveStrataBase(): string {
 
 const STRATA_BASE = resolveStrataBase()
 
-const connected = ref(false)
-
 function isAbortError(error: unknown): boolean {
   return error instanceof Error && error.name === 'AbortError'
 }
@@ -333,43 +329,6 @@ async function fetchWithTimeout(
 
 async function readJson<T>(resp: Response): Promise<T> {
   return (await resp.json()) as T
-}
-
-// --- Mock execution (no server needed) ------------------------------------
-
-function mockExecute(source: string): CellOutput {
-  const lines = source.trim().split('\n')
-
-  // If source looks like it assigns a list/dict, produce mock table
-  if (source.includes('range(') || source.includes('[')) {
-    const n = 10
-    const columns = ['id', 'value', 'name']
-    const rows = Array.from({ length: n }, (_, i) => ({
-      id: i + 1,
-      value: Math.round(Math.random() * 1000),
-      name: `item_${i + 1}`,
-    }))
-    return { contentType: 'json/object', columns, rows, rowCount: n, cacheHit: false }
-  }
-
-  // If it references an upstream variable, pretend we got cached data
-  if (source.includes('filter') || source.includes('query') || source.includes('select')) {
-    const columns = ['id', 'value']
-    const rows = Array.from({ length: 5 }, (_, i) => ({
-      id: i * 10,
-      value: Math.round(Math.random() * 500),
-    }))
-    return { contentType: 'json/object', columns, rows, rowCount: 5, cacheHit: true }
-  }
-
-  // Default: just show the code ran
-  return {
-    contentType: 'json/object',
-    columns: ['result'],
-    rows: [{ result: `Executed ${lines.length} line(s)` }],
-    rowCount: 1,
-    cacheHit: false,
-  }
 }
 
 // --- Strata API calls -----------------------------------------------------
@@ -426,21 +385,6 @@ async function throwApiError(resp: Response, fallback: string): Promise<never> {
   const error: ErrorWithPayload = new Error(`${fallback}: ${resp.status}`)
   error.payload = payload
   throw error
-}
-
-// Probes the server but always returns mock output.
-async function executeCell(source: string, _language: string): Promise<CellOutput> {
-  try {
-    const health = await fetchWithTimeout(`${STRATA_BASE}/health`, { timeoutMs: 500 })
-    if (health.ok) {
-      connected.value = true
-    }
-  } catch {
-    connected.value = false
-  }
-
-  await new Promise((r) => setTimeout(r, 300 + Math.random() * 700))
-  return mockExecute(source)
 }
 
 // --- Notebook API ---------------------------------------------------------
@@ -1596,8 +1540,6 @@ async function getArtifacts(query: ArtifactQuery = {}): Promise<ArtifactListResp
 
 export function useStrata() {
   return {
-    connected,
-    executeCell,
     materialize,
     fetchStream,
     openNotebook,
