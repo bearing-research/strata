@@ -264,6 +264,13 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   under its old name, and a projection naming the new one failed partway
   through the stream. A schema change makes no snapshot, so the row-group
   cache and a scan's provenance now name the schema as well as the snapshot.
+- **Tag lookups on a server pointed at a team store answer from that store.**
+  `GET /v1/registry/artifacts` read the local store; every other registry
+  route already forwarded.
+- **The metadata store closes its SQLite connections.** Reads left them open
+  until garbage collection.
+- **`/health/ready` no longer reports `stuck_scans`.** Nothing recorded scan
+  progress, so the check could never fail readiness.
 
 ## 0.8.0 - 2026-09-27
 
