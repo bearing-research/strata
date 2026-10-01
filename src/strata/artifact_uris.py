@@ -20,8 +20,7 @@ _ARTIFACT_PINNED = re.compile(r"^strata://artifact/([^@]+)@v=(\d+)$")
 _ARTIFACT_LATEST = re.compile(r"^strata://artifact/([^@]+)$")
 _NAME = re.compile(r"^strata://name/(.+)$")
 
-# Sentinel version meaning "resolve to the latest version" — callers that see
-# this must look the concrete version up in the artifact store.
+# Sentinel for "latest": callers must resolve the concrete version in the store.
 LATEST_VERSION = -1
 
 

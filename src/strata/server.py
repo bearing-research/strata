@@ -93,10 +93,8 @@ from strata.types import (
 
 logger = get_logger(__name__)
 
-# Graceful shutdown configuration
 DRAIN_TIMEOUT_SECONDS = 30  # Max time to wait for active scans to complete
 
-# Readiness probe thresholds
 SATURATION_THRESHOLD_SECONDS = 30.0  # Fail readiness if saturated for this long
 STUCK_SCAN_THRESHOLD_SECONDS = 60.0  # Fail readiness if scan makes no progress for this long
 
@@ -122,13 +120,11 @@ def _eager_warmup(config: StrataConfig) -> dict:
     warmup_times = {}
     total_start = time.perf_counter()
 
-    # 0. Install GC pause tracker FIRST (to catch all GC events including during warmup)
-    # This gives us precise pause duration measurements for diagnosing latency stalls.
+    # First, so it catches GC events during warmup too.
     install_gc_tracker()
     warmup_times["gc_tracker"] = True
 
-    # 1. Configure Arrow memory pool BEFORE any Arrow allocations
-    # This must happen before importing pyarrow.parquet which triggers allocations
+    # Before importing pyarrow.parquet, which allocates.
     try:
         pool_name = config.configure_arrow_memory_pool()
         if pool_name:
@@ -136,8 +132,7 @@ def _eager_warmup(config: StrataConfig) -> dict:
     except ValueError as e:
         warmup_times["arrow_memory_pool_error"] = str(e)
 
-    # 1. Pre-import heavy modules (these are already imported at module level,
-    #    but we explicitly touch them to ensure all submodules are loaded)
+    # Load the heavy submodules that module-level imports leave lazy.
     import_start = time.perf_counter()
     import pyarrow.parquet  # noqa: F401 - heavy, loads libparquet
     from pyiceberg.catalog.sql import SqlCatalog  # noqa: F401 - loads SQLAlchemy
@@ -145,13 +140,12 @@ def _eager_warmup(config: StrataConfig) -> dict:
 
     warmup_times["imports_ms"] = (time.perf_counter() - import_start) * 1000
 
-    # 2. Initialize and warm up SQLite metadata store
     sqlite_start = time.perf_counter()
     try:
         from strata.metadata_cache import get_metadata_store
 
         store = get_metadata_store(config.cache_dir)
-        # Run a simple query to warm up SQLite (page cache, WAL)
+        # A cheap query warms the SQLite page cache and WAL.
         stats = store.stats()
         warmup_times["sqlite_ms"] = (time.perf_counter() - sqlite_start) * 1000
         warmup_times["sqlite_entries"] = stats.get("parquet_meta_entries", 0)
@@ -159,7 +153,6 @@ def _eager_warmup(config: StrataConfig) -> dict:
         warmup_times["sqlite_ms"] = (time.perf_counter() - sqlite_start) * 1000
         warmup_times["sqlite_error"] = True
 
-    # 3. Pre-create in-memory caches (backed by SQLite)
     cache_start = time.perf_counter()
     from strata.metadata_cache import get_manifest_cache, get_parquet_cache
 
@@ -182,10 +175,8 @@ class ServerState:
 
         self.config = config
 
-        # Signs pull-model build URLs. Pin the secret from config so signed URLs
-        # survive restarts and match across replicas; fall back to a random
-        # per-process secret when unset (the lifespan warns about that in
-        # service mode).
+        # A configured secret keeps signed URLs valid across restarts and replicas;
+        # unset falls back to a per-process secret (lifespan warns in service mode).
         signing_secret = (
             config.transform_signing_secret.encode("utf-8")
             if config.transform_signing_secret
@@ -193,73 +184,51 @@ class ServerState:
         )
         self.url_signer = URLSigner(signing_secret)
 
-        # Dedicated thread pool for planning operations.
-        # The default executor has only 8-16 workers (min(32, cpu_count + 4)),
-        # which becomes a bottleneck under high concurrency (50+ users).
-        # Planning involves reading Parquet metadata from disk/cache, so we use
-        # a larger pool to handle concurrent planning requests without queueing.
+        # The default executor (min(32, cpu_count + 4)) queues planning under
+        # high concurrency; planning reads Parquet metadata, so give it more.
         self._planning_executor = ThreadPoolExecutor(
             max_workers=64,
             thread_name_prefix="strata-planner",
         )
 
-        # Dedicated thread pool for row group fetch operations.
-        # Capped by max_fetch_workers to bound total I/O concurrency.
-        # Default 32 workers is tuned for typical 8-16 core boxes.
-        # Increase to 64 for high-core-count servers with fast storage.
+        # max_fetch_workers bounds total I/O concurrency.
         self._fetch_executor = ThreadPoolExecutor(
             max_workers=config.max_fetch_workers,
             thread_name_prefix="strata-fetch",
         )
-        # Check if metrics logging is disabled via environment
         metrics_enabled = os.environ.get("STRATA_METRICS_ENABLED", "true").lower() != "false"
         self.metrics = MetricsCollector(enabled=metrics_enabled)
         self.planner = ReadPlanner(config)
         self.fetcher = CachedFetcher(config, metrics=self.metrics)
 
-        # Active scan table + opportunistic prefetch live in ScanBuildManager
-        # (#302), reached as state.scan_builds.{register_scan,get_scan,pop_scan,
-        # start_prefetch,discard_prefetch,consume_prefetched_first,prefetch_metrics}.
         self.scan_builds = ScanBuildManager()
 
-        # QoS: two-tier admission control (#302 phase 3). The per-scan tier/client
-        # tables, active/rejection/queue-wait counters, and per-client fairness
-        # semaphores live on QoSAdmission; the tenant limiters admission actually
-        # acquires live in the tenant registry (per-tenant — the global limiters
-        # were never acquired, #185). The stream handler drives it via
-        # ``state.qos.admit(...)`` → ``Admission.release()``.
+        # Admission acquires the per-tenant limiters in the tenant registry;
+        # QoSAdmission holds the per-scan tables, counters and fairness semaphores.
         self.qos = QoSAdmission(config)
 
-        # Legacy semaphore kept for backwards compatibility in metrics
-        # but no longer used for admission control
+        # Reported in metrics only; not used for admission.
         self._scan_semaphore = asyncio.Semaphore(config.max_concurrent_scans)
 
-        # Graceful shutdown state
-        self._draining = False  # True when server is shutting down
-        self._shutdown_event = asyncio.Event()  # Signaled when shutdown begins
+        self._draining = False
+        self._shutdown_event = asyncio.Event()
 
-        # Readiness tracking for capacity-based health checks
-        # Track when each tier became saturated (no slots available)
+        # When each tier became saturated (no slots available), for readiness.
         self._interactive_saturated_since: float | None = None
         self._bulk_saturated_since: float | None = None
-        # Track scan progress: scan_id -> (start_time, last_bytes_streamed)
+        # scan_id -> (start_time, last_bytes_streamed)
         self._scan_progress: dict[str, tuple[float, int]] = {}
 
-        # Register thread pools for metrics tracking
         pool_tracker = get_pool_tracker()
         pool_tracker.register_pool("planning", self._planning_executor)
         pool_tracker.register_pool("fetch", self._fetch_executor)
 
-        # Cache warmer for background warming jobs (initialized async in lifespan)
+        # Both initialized async in lifespan.
         self._cache_warmer: CacheWarmer | None = None
-
-        # Adaptive concurrency controller (initialized async in lifespan)
         self._adaptive_controller: AdaptiveConcurrencyController | None = None
 
-        # Unified materialize streaming state: the stream table + per-stream TTL
-        # cleanup tasks live in StreamRegistry (#302). The scan table + prefetch
-        # counters stay on ServerState for now; on_expire runs the scan-side
-        # cleanup (prefetch discard + scan pop) when a stream's TTL elapses.
+        # on_expire runs the scan-side cleanup (prefetch discard + scan pop)
+        # when a stream's TTL elapses.
         self.streams = StreamRegistry(
             config.stream_state_ttl_seconds,
             on_expire=self.scan_builds.expire_scan,
@@ -311,10 +280,7 @@ class ServerState:
             logger.warning("stream_ownership_release_failed", stream_id=stream_id, exc_info=True)
 
 
-# ``StreamState`` moved to ``strata.streaming.registry`` (#302); imported above.
-
-
-# Global state (initialized in lifespan)
+# Initialized in lifespan.
 _state: ServerState | None = None
 
 
@@ -361,10 +327,8 @@ def _is_public_publication_request(request: Request) -> bool:
     path = request.url.path
     if path == "/v1/publications":  # the authenticated listing, not one record
         return False
-    # ``/oembed`` belongs here too: it is the endpoint a wiki or CMS calls to
-    # unfurl a pasted link, and it answers only for tokens on this server that
-    # someone deliberately published. Behind the gate it would 401 for exactly
-    # the consumers it exists to serve.
+    # Wikis and CMSs call ``/oembed`` to unfurl a link, unauthenticated; it
+    # answers only for published tokens.
     if path == "/oembed":
         return True
     return path.startswith("/p/") or path.startswith("/v1/publications/")
@@ -544,20 +508,16 @@ def _update_saturation_tracking(state: ServerState) -> None:
     """
     now = time.time()
 
-    # Saturation is measured on the per-tenant admission limiters (what stream
-    # admission actually acquires), not the never-acquired global limiters. A
-    # server with no live limiters yet — no requests served — is idle, not
-    # saturated, so require some in-use slots before flagging it.
+    # Measured on the per-tenant limiters admission acquires. A server with no
+    # live limiters yet is idle, not saturated, so require in-use slots.
     i_in_use, i_avail, b_in_use, b_avail = get_tenant_registry().aggregate_limiter_usage()
 
-    # Check interactive tier saturation
     if i_in_use > 0 and i_avail == 0:
         if state._interactive_saturated_since is None:
             state._interactive_saturated_since = now
     else:
         state._interactive_saturated_since = None
 
-    # Check bulk tier saturation
     if b_in_use > 0 and b_avail == 0:
         if state._bulk_saturated_since is None:
             state._bulk_saturated_since = now
@@ -580,17 +540,14 @@ def _check_readiness(state: ServerState) -> tuple[bool, dict]:
     checks = {}
     issues = []
 
-    # Update saturation tracking
     _update_saturation_tracking(state)
 
-    # Check 1: Not draining
     if state._draining:
         checks["draining"] = True
         issues.append("server is draining (shutting down)")
     else:
         checks["draining"] = False
 
-    # Check 2: Capacity - fail if BOTH tiers saturated for too long
     interactive_saturated_duration = (
         now - state._interactive_saturated_since if state._interactive_saturated_since else 0.0
     )
@@ -601,8 +558,7 @@ def _check_readiness(state: ServerState) -> tuple[bool, dict]:
     checks["interactive_saturated_seconds"] = round(interactive_saturated_duration, 1)
     checks["bulk_saturated_seconds"] = round(bulk_saturated_duration, 1)
 
-    # Only fail if BOTH tiers are saturated beyond threshold
-    # (if one tier has capacity, we can still serve some queries)
+    # Fail only when both tiers are saturated; one tier with capacity still serves.
     both_saturated = (
         interactive_saturated_duration > SATURATION_THRESHOLD_SECONDS
         and bulk_saturated_duration > SATURATION_THRESHOLD_SECONDS
@@ -617,7 +573,6 @@ def _check_readiness(state: ServerState) -> tuple[bool, dict]:
     else:
         checks["capacity_exhausted"] = False
 
-    # Check 3: Stuck scans - find scans with no progress for too long
     stuck_scans = []
     for scan_id, (start_time, last_bytes) in list(state._scan_progress.items()):
         age = now - start_time
@@ -626,17 +581,13 @@ def _check_readiness(state: ServerState) -> tuple[bool, dict]:
 
     checks["stuck_scans"] = len(stuck_scans)
     if stuck_scans:
-        checks["stuck_scan_details"] = stuck_scans[:5]  # Limit to first 5
+        checks["stuck_scan_details"] = stuck_scans[:5]
         issues.append(f"{len(stuck_scans)} scan(s) stuck with no progress")
 
-    # Check 4: Logger queue health
-    # If dropped_logs is increasing rapidly, the logger is overwhelmed
+    # Reported, not failed on: dropped logs are a soft limit.
     dropped_logs = state.metrics.dropped_logs
     checks["dropped_logs"] = dropped_logs
-    # Note: We don't fail on dropped_logs alone since it's a soft limit,
-    # but we report it for observability
 
-    # Overall readiness
     is_ready = len(issues) == 0
     checks["ready"] = is_ready
     if issues:
@@ -658,7 +609,6 @@ async def _graceful_shutdown(state: ServerState) -> None:
             timeout_seconds=DRAIN_TIMEOUT_SECONDS,
         )
 
-        # Wait for active scans to complete (with timeout)
         start = time.perf_counter()
         while _get_active_scan_count() > 0:
             elapsed = time.perf_counter() - start
@@ -679,19 +629,17 @@ async def _graceful_shutdown(state: ServerState) -> None:
         if stream_state.background_task is not None and not stream_state.background_task.done():
             stream_state.background_task.cancel()
 
-    # Shutdown the executors
     state._planning_executor.shutdown(wait=False)
     state._fetch_executor.shutdown(wait=False)
 
-    # Tear down any SSH-tunneled notebook workers so no `ssh -L` children outlive
-    # the server (the remote workers themselves are left running for reuse).
+    # No `ssh -L` children may outlive the server; remote workers stay up for reuse.
     from strata.notebook.routes import shutdown_worker_supervisor
 
     shutdown_worker_supervisor()
 
 
-# The mounted MCP ASGI app, or None when the endpoint is disabled / the [mcp]
-# extra is absent. Set at import by ``_mount_mcp_if_enabled``; read by lifespan.
+# None when the endpoint is disabled or the [mcp] extra is absent.
+# Set at import by ``_mount_mcp_if_enabled``; read by lifespan.
 _mcp_app: Starlette | None = None
 
 
@@ -716,17 +664,15 @@ def _init_configured_artifact_store(config: StrataConfig) -> None:
         blob_store = config.create_blob_store()
         logger.info("artifact_blob_backend_initialized", backend=backend)
 
-    # None keeps SQLite under artifact_dir, which is every existing deployment.
+    # None keeps SQLite under artifact_dir.
     dialect = config.create_metadata_dialect()
     if dialect is not None:
         logger.info("artifact_metadata_backend_initialized", backend=dialect.name)
 
     store = get_artifact_store(config.artifact_dir, blob_store=blob_store, dialect=dialect)
 
-    # API keys live in the same database, so they follow the same backend and
-    # are shared across nodes wherever it is. Initialized here because the
-    # auth middleware runs on every request and must not be the thing that
-    # creates the schema.
+    # API keys share the artifact database and backend. Created here so the
+    # per-request auth middleware never creates the schema.
     if config.auth_mode == "api_key" and config.artifact_dir is not None:
         from strata.api_keys import get_api_key_store
 
@@ -735,9 +681,8 @@ def _init_configured_artifact_store(config: StrataConfig) -> None:
             dialect=store.dialect if store else None,
         )
 
-    # Stream ownership, only for a multi-node deployment. Streams themselves
-    # stay node-local (their plan and task are in-process); this records which
-    # node holds which stream so a sibling can redirect instead of 404ing.
+    # Multi-node only. Streams stay node-local; recording the owner lets a
+    # sibling redirect instead of 404ing.
     if config.node_advertised_url and config.artifact_dir is not None:
         from strata.streaming.ownership import get_stream_ownership_store
 
@@ -765,9 +710,8 @@ def _should_warn_unset_signing_secret(config: StrataConfig) -> bool:
     return not config.transform_signing_secret and config.deployment_mode == "service"
 
 
-# Long enough that startup (migrations, warm pools, the first requests) is not
-# competing with a sweep, short enough that a laptop server that is restarted
-# often still sweeps.
+# Long enough to stay clear of startup work, short enough that a server
+# restarted often still sweeps.
 _FIRST_ARTIFACT_GC_DELAY_SECONDS = 60.0
 
 
@@ -797,8 +741,7 @@ async def _artifact_gc_loop(store, interval_seconds: float, policy: dict[str, An
             )
 
 
-# Shared notebook environments are gigabytes and are removed on a TTL of days,
-# so an hourly look is plenty.
+# Shared envs expire on a TTL of days, so hourly is plenty.
 _SHARED_ENV_GC_INTERVAL_SECONDS = 3600.0
 
 
@@ -822,18 +765,15 @@ async def lifespan(app: FastAPI):
     """Initialize server state on startup, graceful shutdown on exit."""
     global _state
 
-    # Allow tests to pre-configure state before uvicorn starts
-    # If state is already set, use its config instead of loading fresh
+    # Tests may pre-set state before uvicorn starts; reuse its config.
     if _state is not None:
         config = _state.config
     else:
         config = StrataConfig.load()
 
-    # Validate personal mode binding safety before starting
-    # This prevents accidental exposure of write endpoints to the network
+    # Keeps personal-mode write endpoints off the network.
     config.validate_personal_mode_binding()
 
-    # Initialize transform registry from config
     from strata.transforms.registry import TransformRegistry, set_transform_registry
 
     transform_registry = TransformRegistry.from_config(config.transforms_config)
@@ -851,9 +791,7 @@ async def lifespan(app: FastAPI):
             ),
         )
 
-    # Authenticated write-back is a preview feature in this release — re-opening
-    # writes in service mode is security-sensitive. Surface it at startup so an
-    # operator knows the surface is new and may change.
+    # Service-mode writes are security-sensitive and still a preview; say so at boot.
     if config.service_writes_enabled:
         logger.warning(
             "service_writes_enabled_preview",
@@ -865,12 +803,9 @@ async def lifespan(app: FastAPI):
             ),
         )
 
-    # A team cache pointed at a store that authenticates nobody. The pull works
-    # and looks fine, which is the problem: without auth there is no tenant, so
-    # every team shares one flat namespace, and no principal, so every result
-    # arrives authored by nobody. Neither shows up until a second team joins.
-    # Not a hard error — a single-team store on a private network is a real
-    # thing, and the local test setups depend on it — but never silent.
+    # Without auth headers there is no tenant (one flat namespace for every team)
+    # and no principal (no attribution), and nothing looks wrong until a second
+    # team joins. A warning, not an error: a single-team private store is valid.
     if config.notebook_team_cache_enabled and not config.notebook_remote_store_headers:
         logger.warning(
             "team_cache_store_unauthenticated",
@@ -883,10 +818,8 @@ async def lifespan(app: FastAPI):
             ),
         )
 
-    # Said at boot rather than to the first researcher whose cell is refused.
-    # Not an error: a service-mode server whose cells all run on server-managed
-    # workers never needs a harness user, and which workers notebooks will ask
-    # for is not known until they run.
+    # A warning, not an error: cells on server-managed workers never need a
+    # harness user, and which workers notebooks use is unknown until they run.
     if config.deployment_mode == "service" and not config.notebook_harness_user:
         logger.warning(
             "notebook_cells_refused_on_this_host",
@@ -899,39 +832,29 @@ async def lifespan(app: FastAPI):
             ),
         )
 
-    # Configure structured logging first
     configure_logging()
 
-    # Install the in-memory log ring buffer that backs GET /v1/logs (server-side
-    # only, so CLI / harness processes never pay for it).
+    # Backs GET /v1/logs; installed server-side only so CLI and harness skip it.
     from strata.log_buffer import install_ring_buffer
 
     install_ring_buffer()
 
-    # Initialize OpenTelemetry tracing (no-op if not installed/configured)
+    # No-op if OpenTelemetry is not installed or configured.
     tracing_enabled = init_tracing()
 
-    # Eager warmup: pre-initialize expensive resources before accepting requests
-    # This makes the first request as fast as subsequent "warm" requests
+    # So the first request is as fast as warm ones.
     warmup_times = _eager_warmup(config)
 
-    # Create state only if not pre-configured (allows tests to inject custom state)
+    # Tests may inject their own state.
     if _state is None:
         _state = ServerState(config)
 
-    # Initialize the artifact-store singleton with the CONFIGURED blob backend,
-    # before anything else can create it with the default.
-    #
-    # ``ArtifactStore`` falls back to ``LocalBlobStore`` whenever ``blob_store``
-    # is omitted, and every call site omitted it — so ``create_blob_store`` had
-    # no production caller and ``STRATA_ARTIFACT_BLOB_BACKEND=s3`` (documented,
-    # with a full S3/GCS/Azure implementation behind it) silently wrote every
-    # artifact to local disk instead. Nothing errored; the bucket just stayed
-    # empty and blobs vanished with the pod.
+    # Must run before anything else creates the store singleton, or callers
+    # that omit ``blob_store`` pin it to ``LocalBlobStore`` and a configured
+    # S3/GCS/Azure backend is silently ignored.
     if config.artifact_dir is not None:
         _init_configured_artifact_store(config)
 
-    # Initialize rate limiter
     rate_limit_config = RateLimitConfig(
         enabled=config.rate_limit_enabled,
         global_requests_per_second=config.rate_limit_global_rps,
@@ -943,7 +866,6 @@ async def lifespan(app: FastAPI):
     )
     init_rate_limiter(rate_limit_config)
 
-    # Initialize cache warmer for background warming jobs
     _state._cache_warmer = CacheWarmer(
         planner=_state.planner,
         fetcher=_state.fetcher,
@@ -951,13 +873,9 @@ async def lifespan(app: FastAPI):
     )
     await _state._cache_warmer.start()
 
-    # Wire the tenant registry's admission defaults from config so configured
-    # slots actually reach the limiters stream admission acquires (issue #185 —
-    # previously the registry used hard-coded defaults and the configured global
-    # limiters were never acquired). Eagerly materialize the default-tenant
-    # limiters so the adaptive controller and /metrics share a stable handle to
-    # exactly what admission uses; in single-tenant deployments _default is the
-    # only tenant.
+    # Configured slots must reach the per-tenant limiters admission acquires.
+    # Create the default tenant's limiters now so the adaptive controller and
+    # /metrics hold the same handles admission uses.
     init_tenant_registry(
         default_interactive_slots=config.interactive_slots,
         default_bulk_slots=config.bulk_slots,
@@ -968,7 +886,6 @@ async def lifespan(app: FastAPI):
         get_tenant_registry().get_or_create_limiters(DEFAULT_TENANT_ID)
     )
 
-    # Initialize adaptive concurrency controller (if enabled)
     from strata.adaptive_concurrency import AdaptiveConcurrencyController, AdaptiveConfig
 
     adaptive_config = AdaptiveConfig(
@@ -981,20 +898,17 @@ async def lifespan(app: FastAPI):
         max_slots_bulk=config.adaptive_max_bulk,
         hysteresis_count=config.adaptive_hysteresis,
     )
-    # Resize the limiters admission actually acquires (the _default tenant's),
-    # not the orphaned global ones.
+    # Resizes the limiters admission acquires (the _default tenant's).
     _state._adaptive_controller = AdaptiveConcurrencyController(
         config=adaptive_config,
         interactive_limiter=default_interactive_limiter,
         bulk_limiter=default_bulk_limiter,
     )
-    # Stream admission is where both signals are observed. Attaching only when
-    # enabled keeps the recording off the hot path of every other deployment.
+    # Attach only when enabled to keep recording off the admission hot path.
     if config.adaptive_enabled:
         _state.qos.attach_controller(_state._adaptive_controller)
     await _state._adaptive_controller.start()
 
-    # Cleanup stale metadata entries on startup
     stale_removed = 0
     try:
         from strata.metadata_cache import get_metadata_store
@@ -1004,9 +918,8 @@ async def lifespan(app: FastAPI):
     except Exception:
         pass  # Don't fail startup if cleanup fails
 
-    # Sweep zombie builds (#123): artifacts stuck in 'building' — queued into
-    # a mode with no executor, or left by a crashed builder — are demoted to
-    # failed so they surface as failures instead of lingering forever.
+    # Demote artifacts stuck in 'building' (no executor, or a crashed builder)
+    # to failed so they surface instead of lingering forever.
     if config.writes_enabled or config.server_transforms_enabled:
         try:
             from strata.artifact_store import get_artifact_store as _get_store_for_sweep
@@ -1021,8 +934,8 @@ async def lifespan(app: FastAPI):
         except Exception:
             pass  # Don't fail startup if sweep fails
 
-    # Scheduled garbage collection, when configured. The whole store in one
-    # pass: garbage_collect already treats every tenant's roots as roots.
+    # One pass covers the whole store: garbage_collect treats every tenant's
+    # roots as roots.
     gc_task: asyncio.Task | None = None
     if config.artifact_gc_interval_seconds and config.artifact_dir is not None:
         from strata.artifact_store import get_artifact_store as _get_store_for_gc
@@ -1045,7 +958,6 @@ async def lifespan(app: FastAPI):
             _shared_env_gc_loop(shared_env_root(config), config.notebook_shared_env_ttl_days)
         )
 
-    # Initialize build QoS for server-mode transforms (quotas + backpressure)
     build_qos = None
     if config.server_transforms_enabled:
         from strata.transforms.build_qos import BuildQoS, set_build_qos
@@ -1053,15 +965,13 @@ async def lifespan(app: FastAPI):
         build_qos = BuildQoS(config.get_build_qos_config())
         set_build_qos(build_qos)
 
-    # Initialize build metrics collector for observability
     if config.transforms_runtime_enabled:
         from strata.transforms.build_metrics import init_build_metrics
 
         init_build_metrics()
 
-    # Initialize build runner. Service mode requires the explicit
-    # transforms config; personal mode always runs embedded transforms
-    # in-process so the artifact workflow works out of the box.
+    # Service mode needs the explicit transforms config; personal mode always
+    # runs embedded transforms so artifacts work out of the box.
     build_runner = None
     if config.transforms_runtime_enabled:
         from strata.artifact_store import get_artifact_store
@@ -1073,17 +983,14 @@ async def lifespan(app: FastAPI):
             set_build_runner,
         )
 
-        # Determine artifact_dir for server-mode transforms
         artifact_dir = config.artifact_dir
         if artifact_dir is None:
             artifact_dir = Path.home() / ".strata" / "artifacts"
         artifact_dir.mkdir(parents=True, exist_ok=True)
 
-        # Initialize stores
         artifact_store = get_artifact_store(artifact_dir)
-        # Share the artifact store's dialect: build rows live in its
-        # database, so on Postgres they must land there too rather than
-        # in a node-local SQLite file nobody else can see.
+        # Build rows live in the artifact database, so on Postgres they must
+        # land there too, not in a node-local SQLite file.
         artifact_store = get_artifact_store(artifact_dir)
         build_store = get_build_store(
             artifact_dir / "artifacts.sqlite",
@@ -1112,7 +1019,6 @@ async def lifespan(app: FastAPI):
             set_build_runner(build_runner)
             await build_runner.start()
 
-    # Log startup with warmup timing info
     _state.metrics.log_event(
         "server_started",
         host=config.host,
@@ -1130,9 +1036,8 @@ async def lifespan(app: FastAPI):
         build_qos_enabled=build_qos is not None,
     )
 
-    # When the MCP endpoint is mounted, its streamable-HTTP session manager runs
-    # for the life of the server. A mounted sub-app's lifespan is not started by
-    # the parent automatically, so enter it here around the yield.
+    # The parent does not start a mounted sub-app's lifespan, and the MCP
+    # session manager must run for the life of the server.
     if _mcp_app is not None:
         async with _mcp_app.router.lifespan_context(_mcp_app):
             yield
@@ -1145,39 +1050,29 @@ async def lifespan(app: FastAPI):
             with contextlib.suppress(asyncio.CancelledError):
                 await task
 
-    # Reset build QoS
     from strata.transforms.build_qos import reset_build_qos
 
     reset_build_qos()
 
-    # Stop the build runner *this* lifespan started (cancelling pending builds).
-    # Reading the global here instead adopted whatever runner happened to be
-    # registered: a lifespan that started none — service mode without
-    # ``[tool.strata.transforms] enabled`` — would await ``stop()`` on one an
-    # earlier lifespan left behind, whose heartbeat task belongs to an event
-    # loop that is gone ("got Future ... attached to a different loop"). The
-    # registry is cleared either way, so nothing downstream inherits it.
+    # Stop only the runner this lifespan started: one left by an earlier
+    # lifespan belongs to a dead event loop, and stopping it raises.
     from strata.transforms.runner import reset_build_runner
 
     if build_runner is not None:
         await build_runner.stop()
     reset_build_runner()
 
-    # Stop adaptive controller (cancel background loop)
     if _state._adaptive_controller:
         await _state._adaptive_controller.stop()
 
-    # Stop cache warmer (cancel background jobs)
     if _state._cache_warmer:
         await _state._cache_warmer.stop()
 
-    # Graceful shutdown: wait for active scans to complete
     await _graceful_shutdown(_state)
 
     _state.metrics.log_event("server_stopped")
     _state = None
 
-    # Reset transform registry
     from strata.transforms.registry import reset_transform_registry
 
     reset_transform_registry()
@@ -1270,17 +1165,14 @@ async def cors_and_origin_guard(request: Request, call_next):
     return response
 
 
-# Add request context middleware (sets request_id, adds to response headers)
 app.middleware("http")(request_context_middleware)
 
 
-# Connection tracking middleware
 @app.middleware("http")
 async def connection_tracking_middleware(request: Request, call_next):
     """Track HTTP connection metrics."""
     connection_metrics = get_connection_metrics()
 
-    # Check for Connection: keep-alive header
     connection_header = request.headers.get("connection", "").lower()
     has_keepalive = connection_header != "close"
 
@@ -1292,7 +1184,6 @@ async def connection_tracking_middleware(request: Request, call_next):
         connection_metrics.request_completed()
 
 
-# Security headers middleware
 @app.middleware("http")
 async def frame_ancestors_middleware(request: Request, call_next):
     """Set ``Content-Security-Policy: frame-ancestors`` so operators control
@@ -1334,24 +1225,18 @@ def _retry_after_header(seconds: float | None, fallback: float) -> str:
     return str(max(1, math.ceil(fallback if seconds is None else seconds)))
 
 
-# Rate limiting middleware
 @app.middleware("http")
 async def rate_limit_middleware(request: Request, call_next):
     """Apply rate limiting to incoming requests."""
     rate_limiter = get_rate_limiter()
 
-    # Skip rate limiting if not initialized or for health/metrics endpoints
     if rate_limiter is None:
         return await call_next(request)
 
     path = request.url.path
-    # These must never be rate limited: a traffic spike that exhausts the
-    # GLOBAL bucket would otherwise 429 the readiness probe, Kubernetes would
-    # pull the pod out of the load balancer precisely while it is serving, and
-    # the overload would amplify across the fleet. The previous list missed the
-    # real route paths — the registered routes are /health/ready,
-    # /health/dependencies and /metrics/prometheus, none of which it matched
-    # (the tenant and auth middlewares list them correctly).
+    # Never rate limited: a spike that drains the global bucket would 429 the
+    # readiness probe, pull the pod from the load balancer while it is serving,
+    # and amplify the overload across the fleet.
     if path in (
         "/health",
         "/health/ready",
@@ -1364,7 +1249,6 @@ async def rate_limit_middleware(request: Request, call_next):
     ):
         return await call_next(request)
 
-    # Use client IP as identifier (X-Forwarded-For if behind proxy)
     client_ip = request.headers.get("X-Forwarded-For", "").split(",")[0].strip()
     if not client_ip:
         client_ip = request.client.host if request.client else "unknown"
@@ -1384,14 +1268,12 @@ async def rate_limit_middleware(request: Request, call_next):
 
     response = await call_next(request)
 
-    # Add rate limit headers to response
     if result.tokens_remaining is not None:
         response.headers["X-RateLimit-Remaining"] = str(int(result.tokens_remaining))
 
     return response
 
 
-# Tenant context middleware - sets tenant_id for multi-tenancy
 @app.middleware("http")
 async def tenant_context_middleware(request: Request, call_next):
     """Extract tenant ID and set up tenant context for multi-tenancy.
@@ -1403,7 +1285,6 @@ async def tenant_context_middleware(request: Request, call_next):
     Returns 403 if tenant is disabled.
     Skips tenant setup for health/metrics endpoints.
     """
-    # Skip tenant setup for health/metrics endpoints and signed data-plane routes.
     path = request.url.path
     if (
         path
@@ -1422,9 +1303,7 @@ async def tenant_context_middleware(request: Request, call_next):
     state = get_state()
     config = state.config
 
-    # Only apply tenant context if multi-tenancy is enabled
     if not getattr(config, "multi_tenant_enabled", False):
-        # Single-tenant mode: use default tenant
         set_tenant_id(DEFAULT_TENANT_ID)
         try:
             response = await call_next(request)
@@ -1432,21 +1311,17 @@ async def tenant_context_middleware(request: Request, call_next):
         finally:
             clear_tenant_context()
 
-    # Multi-tenant mode: extract tenant from header
     tenant_header = getattr(config, "tenant_header", "X-Tenant-ID")
     tenant_id = request.headers.get(tenant_header)
 
     if not tenant_id:
-        # Check if tenant header is required
         if getattr(config, "require_tenant_header", False):
             return Response(
                 content=f"Missing required header: {tenant_header}",
                 status_code=400,
             )
-        # Use default tenant for backward compatibility
         tenant_id = DEFAULT_TENANT_ID
     else:
-        # Validate tenant ID format (only for explicitly provided headers)
         is_valid, error_msg = validate_tenant_id(tenant_id)
         if not is_valid:
             return Response(
@@ -1454,7 +1329,6 @@ async def tenant_context_middleware(request: Request, call_next):
                 status_code=400,
             )
 
-    # Validate tenant is enabled
     registry = get_tenant_registry()
     if not registry.is_tenant_enabled(tenant_id):
         return Response(
@@ -1462,18 +1336,15 @@ async def tenant_context_middleware(request: Request, call_next):
             status_code=403,
         )
 
-    # Set tenant context for this request
     set_tenant_id(tenant_id)
     try:
         response = await call_next(request)
-        # Echo tenant ID back in response header for debugging
         response.headers["X-Tenant-ID"] = tenant_id
         return response
     finally:
         clear_tenant_context()
 
 
-# Trusted proxy authentication middleware
 @app.middleware("http")
 async def auth_middleware(request: Request, call_next):
     """Verify trusted proxy and parse principal for authorization.
@@ -1489,11 +1360,9 @@ async def auth_middleware(request: Request, call_next):
     state = get_state()
     config = state.config
 
-    # Skip if auth is disabled
     if config.auth_mode == "none":
         return await call_next(request)
 
-    # Skip auth for health/metrics endpoints and signed data-plane routes.
     path = request.url.path
     if (
         path
@@ -1509,10 +1378,9 @@ async def auth_middleware(request: Request, call_next):
     ):
         return await call_next(request)
 
-    # Under api_key auth the key *is* the credential, so there is no proxy in
-    # front and no proxy token to verify. Under trusted_proxy the token is what
-    # establishes that the caller is the proxy, without which anyone who can
-    # reach Strata could assert any principal they liked.
+    # Under api_key the key is the credential and there is no proxy. Under
+    # trusted_proxy the token proves the caller is the proxy; without it anyone
+    # who reaches Strata could assert any principal.
     if config.auth_mode != "api_key":
         proxy_token = request.headers.get(config.proxy_token_header)
         if not verify_proxy_token(proxy_token, config.proxy_token):
@@ -1526,16 +1394,13 @@ async def auth_middleware(request: Request, call_next):
                 content={"detail": "Unauthorized"},
             )
 
-    # Resolve the principal: from a bearer key, or from proxy headers.
     try:
         if config.auth_mode == "api_key":
             principal = parse_api_key_principal(dict(request.headers), config)
         else:
             principal = parse_principal(dict(request.headers), config)
         set_principal(principal)
-        # list[str] would be invariant against the structured-logger's
-        # list[JsonValue] kwargs; cast widens the declared element type
-        # without changing runtime behavior.
+        # list is invariant, so widen list[str] to the logger's list[JsonValue].
         scopes_json: list[JsonValue] = cast(list[JsonValue], list(principal.scopes))
         logger.debug(
             "auth_success",
@@ -1558,13 +1423,12 @@ async def auth_middleware(request: Request, call_next):
         response = await call_next(request)
         return response
     finally:
-        set_principal(None)  # Clear principal context
+        set_principal(None)
 
 
-# Instrument FastAPI with OpenTelemetry (no-op if OTel not installed)
+# No-op if OTel is not installed.
 instrument_fastapi(app)
 
-# Register notebook routes + decomposed api routers (P3, server.py router split)
 from strata.api.routers.admin import router as admin_router  # noqa: E402
 from strata.api.routers.artifacts import router as artifacts_router  # noqa: E402
 from strata.api.routers.builds import router as builds_router  # noqa: E402
@@ -1673,23 +1537,17 @@ def _require_notebook_worker_admin_access() -> ServerState:
 
 
 # =============================================================================
-# API v1 Endpoints (stable contracts)
+# API v1 (stable contracts)
 #
-# v1 API Guarantees:
 # - Response types are stable (MaterializeResponse, error format)
 # - Arrow IPC streams via /v1/streams/{stream_id}
-# - Error codes: 400 (bad request), 404 (not found), 413 (too large),
-#                429 (rate limited, includes Retry-After header),
-#                503 (draining/unhealthy), 504 (timeout)
+# - Error codes: 400, 404, 413 (too large), 429 (with Retry-After),
+#   503 (draining/unhealthy), 504 (timeout)
 # - Cache key format is versioned (CACHE_VERSION in cache.py)
-#
-# Note: /v1/scan endpoints were removed. Use /v1/materialize instead.
 # =============================================================================
 
 
-# ---------------------------------------------------------------------------
-# Artifact Endpoints (Personal Mode Only)
-# ---------------------------------------------------------------------------
+# --- Artifact endpoints ---
 
 
 def _get_artifact_store(
@@ -1716,7 +1574,6 @@ def _get_artifact_store(
 
     state = get_state()
 
-    # Check if access is allowed
     writes_ok = state.config.writes_enabled  # personal mode
     server_transforms_ok = allow_server_mode and state.config.server_transforms_enabled
     service_write_ok = allow_write and state.config.service_writes_enabled
@@ -1736,8 +1593,7 @@ def _get_artifact_store(
 
     store = get_artifact_store(state.config.artifact_dir)
     if store is None:
-        # A service-mode read gateway without an artifact_dir simply has no
-        # persisted artifacts to read.
+        # A service-mode read gateway with no artifact_dir has nothing to read.
         raise HTTPException(
             status_code=404 if allow_read else 500,
             detail="Artifact store not available in this deployment",
@@ -1806,9 +1662,8 @@ def _validate_transform_allowed(executor_ref: str, principal=None):
 
     state = get_state()
 
-    # Personal mode: the embedded runner executes builds in-process, so an
-    # executor the registry can't resolve would otherwise sit in 'building'
-    # forever. Fail fast instead (#123-adjacent: no silent dead-ends).
+    # Personal mode: an executor the embedded runner can't resolve would sit
+    # in 'building' forever, so fail fast.
     if state.config.writes_enabled:
         registry = get_transform_registry()
         defn = registry.get(executor_ref)
@@ -1826,7 +1681,6 @@ def _validate_transform_allowed(executor_ref: str, principal=None):
             )
         return defn
 
-    # Server mode with transforms enabled: validate against registry
     if state.config.server_transforms_enabled:
         registry = get_transform_registry()
         defn = registry.get(executor_ref)
@@ -1863,7 +1717,6 @@ def _validate_transform_allowed(executor_ref: str, principal=None):
 
         return defn
 
-    # Shouldn't reach here if called correctly
     raise HTTPException(
         status_code=403,
         detail={
@@ -1873,13 +1726,8 @@ def _validate_transform_allowed(executor_ref: str, principal=None):
     )
 
 
-# ``_authorize_table_access`` + the table-input resolver moved into
-# ``strata.api.dependencies`` (#295) so the materialize/explain handlers and the
-# names router call one enforced unit (deny-first on every table input) instead
-# of reaching into ``strata.server``. These module-level aliases keep the
-# private names the in-module callers (``_authorize_artifact_read``,
-# ``_handle_identity_materialize``) and the test suite use, and let
-# ``monkeypatch.setattr("strata.server._resolve_input_version", …)`` keep working.
+# Aliases for in-module callers and tests, which monkeypatch
+# ``strata.server._resolve_input_version``.
 _authorize_table_access = authorize_table_access
 _resolve_input_version = resolve_input_version
 
@@ -1927,10 +1775,8 @@ def _table_identity_from_uri(table_uri: str):
     if "#" not in table_uri and ":" not in table_uri and "." not in table_uri:
         return None
     try:
-        # The planner's own helper, so the table is named the same before it
-        # plans and after — a gs:// or named-catalog table used to be named
-        # one way here and another there, and a rule written for it matched
-        # neither.
+        # The planner's helper, so an ACL rule names the table the same way
+        # before and after planning.
         return table_identity_for(table_uri, get_state().config)
     except ValueError:
         return None
@@ -1947,11 +1793,10 @@ def _authorize_artifact_write() -> None:
     """
     state = get_state()
     if state.config.writes_enabled:
-        return  # personal mode — unrestricted
+        return  # personal mode: unrestricted
 
-    # Service-mode authenticated write-back.
     if state.config.auth_mode != "trusted_proxy":
-        # Also prevented by validate_mode_coherence; belt and suspenders.
+        # Also prevented by validate_mode_coherence.
         raise HTTPException(status_code=403, detail="Writes require trusted-proxy auth")
     principal = get_principal()
     if principal is None:
@@ -1990,21 +1835,15 @@ async def materialize_artifact(request: MaterializeRequest):
     from strata.artifact_store import TransformSpec
     from strata.auth import get_principal
 
-    # Get tenant and principal from auth context early for artifact isolation
     principal = get_principal()
     tenant_id = principal.tenant if principal else None
     principal_id = principal.id if principal else None
 
-    # Parse transform spec early so we can validate it
     transform = request.transform
     executor_ref = transform.executor
 
-    # Validate transform is allowed (raises 403 if not)
-    # In personal mode this returns None (no validation needed)
-    # In server mode this returns the TransformDefinition
     transform_defn = _validate_transform_allowed(executor_ref, principal=principal)
 
-    # Get artifact store (allows server mode when transforms are enabled)
     store = _get_artifact_store(allow_server_mode=True)
 
     transform_spec = TransformSpec(
@@ -2013,20 +1852,16 @@ async def materialize_artifact(request: MaterializeRequest):
         inputs=request.inputs,
     )
 
-    # Resolve input versions for both hashing and staleness tracking
-    # If resolution fails, fall back to using the URI as the version (legacy behavior)
+    # Versions feed both the hash and staleness tracking.
     input_versions: dict[str, str] = {}
     for input_uri in request.inputs:
         try:
             input_versions[input_uri] = _resolve_input_version(input_uri, tenant=tenant_id)
         except HTTPException as e:
-            # Authz / not-found failures must propagate: a denied table input
-            # (403 from the table ACL) or a missing name (404) must never fall
-            # back to building anyway, nor may a table Strata refuses to read
-            # (422). Only the "unresolvable URI" 400 (fake or legacy URIs used
-            # in tests) uses the raw URI as its version; a table input has
-            # passed the table ACL before it is planned, so that 400 is not a
-            # way around it.
+            # Denied, missing or unreadable inputs must never fall back to
+            # building. Only an unresolvable URI (400) uses the raw URI as its
+            # version; table inputs pass the ACL before planning, so a 400
+            # cannot bypass it.
             if e.status_code in (401, 403, 404, 422):
                 raise
             input_versions[input_uri] = input_uri
@@ -2035,12 +1870,10 @@ async def materialize_artifact(request: MaterializeRequest):
 
     provenance_hash = materialize_service.compute_provenance(transform_spec, input_versions)
 
-    # Check for existing artifact with same provenance (tenant-scoped)
     existing = store.find_by_provenance(provenance_hash, tenant=tenant_id)
     if existing is not None and not request.refresh:
         artifact_uri = f"strata://artifact/{existing.id}@v={existing.version}"
 
-        # Optionally set name (tenant-scoped)
         if request.name:
             store.set_name(request.name, existing.id, existing.version, tenant=tenant_id)
 
@@ -2051,8 +1884,7 @@ async def materialize_artifact(request: MaterializeRequest):
             state="ready",
         )
 
-    # Cache miss — create a new artifact in building state (tenant-scoped). A
-    # refresh rebuild reuses the existing id (#123); see rebuild_artifact_id.
+    # A refresh rebuild reuses the existing id; see rebuild_artifact_id.
     new_id = str(uuid.uuid4())
     artifact_id = materialize_service.rebuild_artifact_id(
         existing, refresh=request.refresh, new_id=new_id
@@ -2061,7 +1893,7 @@ async def materialize_artifact(request: MaterializeRequest):
         artifact_id=artifact_id,
         provenance_hash=provenance_hash,
         transform_spec=transform_spec,
-        input_versions=input_versions,  # Track for staleness detection
+        input_versions=input_versions,
         tenant=tenant_id,
         principal=principal_id,
         minted=artifact_id == new_id,
@@ -2070,8 +1902,7 @@ async def materialize_artifact(request: MaterializeRequest):
     artifact_uri = f"strata://artifact/{artifact_id}@v={version}"
     state = get_state()
 
-    # Create build record for async execution by the build runner
-    # (service mode with transforms enabled, or personal mode embedded).
+    # Queue a build record for the build runner.
     if state.config.transforms_runtime_enabled:
         from strata.artifact_store import get_artifact_store
         from strata.transforms.build_qos import (
@@ -2083,7 +1914,6 @@ async def materialize_artifact(request: MaterializeRequest):
 
         build_id = str(uuid.uuid4())
 
-        # Get build store (uses same directory as artifact store)
         if state.config.artifact_dir is None:
             raise HTTPException(status_code=500, detail="Artifact directory not configured")
         artifact_store = get_artifact_store(state.config.artifact_dir)
@@ -2097,20 +1927,17 @@ async def materialize_artifact(request: MaterializeRequest):
                 detail="Build store not initialized",
             )
 
-        # Use tenant for build QoS (fallback to __default__ for QoS tracking)
         build_tenant_id = normalized_build_qos_tenant_id(tenant_id)
         estimated_output_bytes = _estimate_transform_output_bytes(
             state,
             transform_defn.max_output_bytes if transform_defn is not None else None,
         )
 
-        # Build QoS admission control
-        # Classify build and check quotas before creating the build
+        # Admission and quotas run before the build record exists.
         build_qos = get_build_qos()
         build_slot = None
 
         if build_qos is not None:
-            # Classify and admit the build using the best available size estimate.
             priority = build_qos.classify_build(
                 estimated_output_bytes=estimated_output_bytes,
                 input_count=len(request.inputs),
@@ -2119,7 +1946,6 @@ async def materialize_artifact(request: MaterializeRequest):
             try:
                 await build_qos.check_quota(build_tenant_id, estimated_output_bytes)
             except BuildQoSError as e:
-                # Quota exceeded - clean up artifact and return 429
                 store.fail_artifact(artifact_id, version)
                 return JSONResponse(
                     status_code=e.status_code,
@@ -2127,11 +1953,9 @@ async def materialize_artifact(request: MaterializeRequest):
                     headers={"Retry-After": _retry_after_header(e.retry_after, 5.0)},
                 )
 
-            # Acquire build slot (early rejection if at capacity)
             try:
                 build_slot = await build_qos.acquire(build_tenant_id, priority)
             except BuildQoSError as e:
-                # At capacity - clean up artifact and return 429
                 store.fail_artifact(artifact_id, version)
                 return JSONResponse(
                     status_code=e.status_code,
@@ -2140,7 +1964,6 @@ async def materialize_artifact(request: MaterializeRequest):
                 )
 
         try:
-            # Create build record
             build_store.create_build(
                 build_id=build_id,
                 artifact_id=artifact_id,
@@ -2154,8 +1977,7 @@ async def materialize_artifact(request: MaterializeRequest):
                 name=request.name,
             )
 
-            # Build is now queued - release the admission slot
-            # The runner has its own concurrency control for execution
+            # Queued now; the runner has its own execution concurrency control.
             if build_slot:
                 await build_slot.release()
 
@@ -2166,12 +1988,11 @@ async def materialize_artifact(request: MaterializeRequest):
                 state="pending",
             )
         except Exception:
-            # Release slot on failure
             if build_slot:
                 await build_slot.release()
             raise
 
-    # Personal mode: return build spec for client-side execution
+    # No build runtime: the client executes the build spec.
     build_spec = BuildSpec(
         artifact_id=artifact_id,
         version=version,
@@ -2213,12 +2034,6 @@ def _require_registry_approver():
 _ACTIVE_BUILD_STATES = ("pending", "building", "running")
 
 
-# ``_build_transport_available`` and ``_get_runtime_build_store`` moved into
-# ``strata.api.dependencies`` (#295) — they gate only the signed-transport build
-# routes (``api/routers/builds.py``), which now import them, and the
-# ``BuildTransportStore`` / ``RequiredBuildStore`` dependencies wrap them.
-
-
 def _resolve_artifact_uri(uri: str) -> tuple[str, int] | None:
     """Resolve URI to artifact (id, version).
 
@@ -2240,19 +2055,16 @@ def _resolve_artifact_uri(uri: str) -> tuple[str, int] | None:
     if store is None:
         return None
 
-    # Try artifact URI
     result = parse_artifact_uri(uri)
     if result is not None:
         artifact_id, version = result
         if version == LATEST_VERSION:
-            # Resolve to latest
             latest = store.get_latest_version(artifact_id)
             if latest is not None:
                 return (artifact_id, latest.version)
             return None
         return result
 
-    # Try name URI
     name = parse_name_uri(uri)
     if name is not None:
         artifact = store.resolve_name(name, tenant=_get_artifact_request_tenant())
@@ -2264,11 +2076,7 @@ def _resolve_artifact_uri(uri: str) -> tuple[str, int] | None:
 
 
 # =============================================================================
-# Unified Materialize API
-# =============================================================================
-# This implements the unified /v1/materialize endpoint that replaces both
-# /v1/scan and /v1/artifacts/materialize. The key insight is that scanning
-# an Iceberg table is a materialize with scan@v1 transform.
+# Unified materialize: an Iceberg scan is a materialize with the scan@v1 transform.
 # =============================================================================
 
 
@@ -2301,19 +2109,15 @@ async def unified_materialize(request: MaterializeRequest):
     state = get_state()
     transform = request.transform
 
-    # Reject new requests during shutdown
     if state._draining:
         raise HTTPException(
             status_code=503,
             detail="Server is shutting down. Not accepting new requests.",
         )
 
-    # Handle scan@v1 transform specially - executed internally
     if transform.executor == "scan@v1":
         return await _handle_identity_materialize(request)
 
-    # For non-identity transforms, delegate to existing materialize flow
-    # This reuses the existing /v1/artifacts/materialize logic
     return await _handle_transform_materialize(request)
 
 
@@ -2343,12 +2147,10 @@ async def _handle_identity_materialize(
 
     state = get_state()
 
-    # Get tenant and principal from auth context
     principal = get_principal()
     tenant_id = principal.tenant if principal else None
     principal_id = principal.id if principal else None
 
-    # Validate inputs: scan@v1 requires exactly one table input
     if len(request.inputs) != 1:
         raise HTTPException(
             status_code=400,
@@ -2357,15 +2159,13 @@ async def _handle_identity_materialize(
 
     table_uri = request.inputs[0]
 
-    # Validate it's a table URI (not an artifact)
     if table_uri.startswith("strata://"):
         raise HTTPException(
             status_code=400,
             detail="scan@v1 transform input must be a table URI, not an artifact",
         )
 
-    # Parse identity params via model_validate so ty doesn't try to
-    # narrow each dict[str, object] value against the typed fields.
+    # model_validate so ty doesn't narrow each dict[str, object] value.
     try:
         identity_params = IdentityParams.model_validate(request.transform.params)
     except Exception as e:
@@ -2374,20 +2174,11 @@ async def _handle_identity_materialize(
             detail=f"Invalid scan@v1 params: {e}",
         )
 
-    # Convert to internal filter format
     filters = identity_params.to_strata_filters()
 
-    # Authorize the table BEFORE planning.
-    #
-    # The ACL check used to run after the planner, the max-tasks 400 and the
-    # pre-flight 413, so a principal denied a table still learned from the
-    # response whether it exists, how many row groups it has, and its exact
-    # estimated size ("Estimated response size (N bytes) exceeds limit") —
-    # defeating the point of ``hide_forbidden_as_not_found``. It also let a
-    # denied caller force unbounded Iceberg manifest reads.
-    #
-    # The identity is parsed from the URI rather than taken from the plan, so
-    # no manifest work happens for a request that is about to be refused.
+    # Authorize before planning: the 400/413 planning errors would tell a denied
+    # caller the table exists and its size, and planning costs manifest reads.
+    # The identity comes from the URI so a refused request does no manifest work.
     if state.config.principal_auth_enabled:
         if principal is None:
             raise HTTPException(status_code=401, detail="Unauthorized")
@@ -2395,7 +2186,6 @@ async def _handle_identity_materialize(
         if early_identity is not None:
             _authorize_table_access(table_uri, early_identity)
 
-    # Plan the scan using existing planner
     plan_timeout = state.config.plan_timeout_seconds
 
     def do_plan():
@@ -2433,7 +2223,6 @@ async def _handle_identity_materialize(
         # pending equality deletes): the message says why and what to do.
         raise HTTPException(status_code=422, detail=str(e)) from e
 
-    # Enforce task limit
     max_tasks = state.config.max_tasks_per_scan
     if len(plan.tasks) > max_tasks:
         raise HTTPException(
@@ -2443,7 +2232,6 @@ async def _handle_identity_materialize(
             ),
         )
 
-    # Pre-flight size check
     max_response = state.config.max_response_bytes
     if plan.estimated_bytes > max_response:
         state.metrics.record_stream_abort_size()
@@ -2452,20 +2240,17 @@ async def _handle_identity_materialize(
             detail=f"Estimated response size ({plan.estimated_bytes:,} bytes) exceeds limit.",
         )
 
-    # Ownership stamping (authorization itself ran before planning, above).
     if state.config.principal_auth_enabled:
         if principal is None:
             raise HTTPException(status_code=401, detail="Unauthorized")
 
-        # Re-check against the identity the planner actually resolved. The
-        # pre-plan gate uses the identity parsed from the URI; this catches any
-        # case where the catalog resolves it to something else.
+        # Re-check against the identity the catalog actually resolved, which
+        # may differ from the one parsed from the URI.
         _authorize_table_access(table_uri, plan.table_identity)
 
         plan.owner_principal = principal.id
         plan.owner_tenant = principal.tenant
 
-    # Compute provenance hash for identity transform
     from strata.services.materialize import materialize_service, table_input_version
 
     provenance_hash = materialize_service.compute_identity_provenance(
@@ -2475,21 +2260,18 @@ async def _handle_identity_materialize(
         filters=filters,
         schema_id=plan.schema_id,
     )
-    # Get artifact store (allow writes for personal mode)
     store = get_artifact_store(state.config.artifact_dir)
 
-    # Input version for staleness tracking: the form name-status compares
-    # against, so a named scan goes stale on a schema change too.
+    # The form name-status compares against, so a named scan goes stale on a
+    # schema change too.
     input_versions = {table_uri: table_input_version(plan)}
 
-    # Check for existing artifact with same provenance
     existing = None
     if store is not None:
         existing = store.find_by_provenance(provenance_hash, tenant=tenant_id)
         if existing is not None and existing.state == "ready" and not request.refresh:
             artifact_uri = f"strata://artifact/{existing.id}@v={existing.version}"
 
-            # Set name if requested
             if request.name:
                 store.set_name(request.name, existing.id, existing.version, tenant=tenant_id)
 
@@ -2500,8 +2282,7 @@ async def _handle_identity_materialize(
                 snapshot_id=plan.snapshot_id,
             )
 
-            # Provide stream_url for cached data access
-            # This allows clients to fetch the data using the same pattern as cache misses
+            # Lets clients fetch a hit the same way as a miss.
             stream_url = f"/v1/artifacts/{existing.id}/v/{existing.version}/data"
 
             return MaterializeResponse(
@@ -2511,19 +2292,15 @@ async def _handle_identity_materialize(
                 stream_url=stream_url if request.mode == "stream" else None,
             )
 
-    # Cache miss (or refresh rebuild) - need to build the artifact. A refresh
-    # rebuild reuses the existing id (#123, see rebuild_artifact_id) so finalize
-    # supersedes the old ready version and provenance lookups resolve to the
-    # rebuild. The stream id stays unique per request (older streams for the same
-    # artifact id may linger in the registry); a fresh miss reuses the artifact
-    # id as the stream id.
+    # A refresh rebuild reuses the existing artifact id (see rebuild_artifact_id)
+    # so finalize supersedes the old version. Its stream id is fresh, since older
+    # streams for that artifact id may linger; a plain miss reuses the artifact id.
     new_id = str(uuid.uuid4())
     artifact_id = materialize_service.rebuild_artifact_id(
         existing, refresh=request.refresh, new_id=new_id
     )
     stream_id = str(uuid.uuid4()) if (request.refresh and existing is not None) else artifact_id
 
-    # Create artifact in building state (if store is available)
     artifact_version = 1
     if store is not None:
         transform_spec = ArtifactTransformSpec(
@@ -2543,7 +2320,6 @@ async def _handle_identity_materialize(
 
     artifact_uri = f"strata://artifact/{artifact_id}@v={artifact_version}"
 
-    # Create stream state for tracking
     stream_state = StreamState(
         stream_id=stream_id,
         plan=plan,
@@ -2580,9 +2356,8 @@ async def _handle_identity_materialize(
             stream_url=f"/v1/streams/{stream_id}",
         )
     else:
-        # Artifact mode persists the result, which requires an artifact store.
-        # Without one the background build would no-op and the returned build_id
-        # would never resolve — reject up front instead of hanging the client.
+        # Without a store the background build no-ops and the build_id never
+        # resolves, so reject rather than hang the client.
         if store is None:
             raise HTTPException(
                 status_code=400,
@@ -2593,7 +2368,6 @@ async def _handle_identity_materialize(
                 ),
             )
 
-        # Artifact mode - admit through build QoS, then build in the background.
         from strata.transforms.build_qos import (
             BuildQoSError,
             get_build_qos,
@@ -2639,7 +2413,6 @@ async def _handle_transform_materialize(request: MaterializeRequest) -> Material
 
     Delegates to the existing /v1/artifacts/materialize flow.
     """
-    # Reuse the existing materialize_artifact logic
     return await materialize_artifact(request)
 
 
@@ -2684,24 +2457,15 @@ async def get_stream(stream_id: str, request: Request):
     """
     state = get_state()
 
-    # Look up stream state
     stream_state = state.streams.get(stream_id)
     if stream_state is None:
-        # Not here. In a multi-node deployment it may be live on a sibling:
-        # a stream cannot move between nodes, because its plan and its task
-        # are in-process, so the request has to go where the stream already
-        # is. Returning a bare 404 makes a routing problem look identical to
-        # an expired stream, which is the failure this resolves.
+        # A stream's plan and task are in-process and cannot move, so in a
+        # multi-node deployment redirect to the sibling that holds it.
         owner_url = _resolve_stream_owner(state, stream_id)
         if owner_url is not None:
             logger.info("stream_redirected", stream_id=stream_id, owner=owner_url)
-            # quote(safe="") because stream_id reaches here from the request
-            # path. The origin cannot be moved by it -- owner_url is operator
-            # config, and the id only ever lands after a fixed prefix -- but
-            # interpolating it raw still lets a '?' or '#' silently turn the
-            # rest of the path into a query or fragment, sending the client
-            # somewhere other than the stream it asked for. Encoding keeps the
-            # id a single path segment, whatever it contains.
+            # stream_id comes from the request path; a raw '?' or '#' would
+            # turn the rest into a query or fragment. Keep it one path segment.
             target = f"{owner_url.rstrip('/')}/v1/streams/{quote(stream_id, safe='')}"
             return RedirectResponse(
                 url=target,
@@ -2711,15 +2475,11 @@ async def get_stream(stream_id: str, request: Request):
         raise HTTPException(status_code=404, detail=f"Stream {stream_id} not found")
 
     plan = stream_state.plan
-
-    # Reuse the scan-based streaming infrastructure
-    # The plan is already registered in the scan-build manager.
     scan_id = plan.scan_id
 
     if scan_id not in state.scan_builds:
         raise HTTPException(status_code=404, detail=f"Stream {stream_id} not found")
 
-    # Ownership check (when auth_mode=trusted_proxy)
     if state.config.principal_auth_enabled:
         from strata.auth import get_principal
 
@@ -2733,15 +2493,11 @@ async def get_stream(stream_id: str, request: Request):
                     raise HTTPException(status_code=404, detail=f"Stream {stream_id} not found")
                 raise HTTPException(status_code=403, detail="Access denied")
 
-    # Mark stream as started
     state.streams.cancel_cleanup(stream_id)
     stream_state.started = True
     stream_state.started_at = time.time()
 
-    # QoS: acquire a tier slot for this scan (per-client semaphore → tenant
-    # limiter, cancel-safe #238). QoSAdmission owns the accounting; the handler
-    # holds the returned token and releases it in whichever exit path runs
-    # (429, build cancelled, build failed, or after the blob finishes).
+    # Every exit path below must release the admission token.
     try:
         admission = await state.qos.admit(plan, request, scan_id)
     except QoSRejected as exc:
@@ -2755,10 +2511,8 @@ async def get_stream(stream_id: str, request: Request):
 
     store = get_artifact_store(state.config.artifact_dir)
 
-    # Service mode (no artifact store): there's nothing to persist, so stream a
-    # bounded pass-through straight from the fetcher. With no artifact to
-    # finalize, none of the decoupling smells apply — a client disconnect simply
-    # ends the generator (the next ``yield`` raises), nothing to poison.
+    # No artifact store: stream a bounded pass-through from the fetcher. With
+    # nothing to finalize, a client disconnect just ends the generator.
     if store is None:
 
         async def serve_passthrough():
@@ -2802,22 +2556,17 @@ async def get_stream(stream_id: str, request: Request):
             media_type="application/vnd.apache.arrow.stream",
         )
 
-    # Personal mode: decouple the artifact build from this client's read. The
-    # background build (bounded write-through, PR #165) scans row-group-by-row-
-    # group straight to the blob and finalizes ready/failed on its own merits —
-    # empty plans included. A slow or dropped reader can no longer poison the
-    # cache entry (the #164 IncompleteRead bug): we wait for the build, then
-    # serve the persisted blob over the same reliable path as GET .../data.
+    # Decouple the build from this client's read so a slow or dropped reader
+    # cannot poison the cache entry: the background build writes row groups
+    # straight to the blob and finalizes on its own, then we serve the blob.
     if stream_state.background_task is None:
         stream_state.background_task = asyncio.create_task(
             state.scan_builds.build_identity_artifact(state, stream_state)
         )
     build_task = stream_state.background_task
 
-    # Wait for the build. It runs as a decoupled background task, shielded so a
-    # client disconnect never cancels it — the artifact finalizes regardless of
-    # who is (or isn't) reading. (A handler-level cancel, e.g. shutdown, frees
-    # the slot but leaves the build running.)
+    # Shielded so a client disconnect never cancels the build. A handler cancel
+    # (e.g. shutdown) frees the slot but leaves the build running.
     try:
         await asyncio.shield(build_task)
     except asyncio.CancelledError:
@@ -2826,11 +2575,8 @@ async def get_stream(stream_id: str, request: Request):
         state.streams.schedule_cleanup(stream_id, scan_id)
         raise
 
-    # The build is done — the scan is what the QoS slot gated, so release it now,
-    # deterministically, in the handler. Serving the already-persisted blob is
-    # cheap bounded I/O that needs no scan slot, and releasing here (rather than
-    # in the response generator's finally) means a client that vanished before
-    # iteration can never strand the slot.
+    # The slot gated the scan, which is done. Release here, not in the
+    # generator's finally, so a client gone before iteration can't strand it.
     artifact = store.get_artifact(stream_state.artifact_id, stream_state.artifact_version)
     await admission.release()
     stream_state.completed = True
@@ -2846,9 +2592,8 @@ async def get_stream(stream_id: str, request: Request):
             },
         )
 
-    # Serve the persisted blob in bounded chunks (no merger, no accumulation, no
-    # is_disconnected coupling). A reader that drops mid-send surfaces here as a
-    # cancel/close — the artifact is already finalized, so we only count it.
+    # A reader that drops mid-send surfaces as a cancel/close; the artifact is
+    # already finalized, so only count it.
     reader_cm = await asyncio.to_thread(
         store.open_blob_reader, stream_state.artifact_id, stream_state.artifact_version
     )
@@ -2906,7 +2651,6 @@ def _mount_frontend(application: FastAPI) -> None:
     if dist_dir is None:
         return
 
-    # Serve static assets (JS, CSS, etc.)
     application.mount(
         "/assets",
         StaticFiles(directory=str(dist_dir / "assets")),
@@ -2916,7 +2660,6 @@ def _mount_frontend(application: FastAPI) -> None:
     # SPA fallback: any non-API GET returns index.html
     @application.get("/{full_path:path}", include_in_schema=False)
     async def spa_fallback(full_path: str):
-        # Don't intercept API or health routes
         if full_path.startswith(("v1/", "health", "docs", "openapi")):
             raise HTTPException(status_code=404)
         file_path = dist_dir / full_path
@@ -2974,20 +2717,15 @@ def main(argv: list[str] | None = None):
     _apply_server_cli_overrides(args)
 
     config = StrataConfig.load()
-    # Make the notebook location obvious — it's a common surprise that new
-    # notebooks land in ~/.strata/notebooks, not the current directory.
+    # Users often expect new notebooks in the current directory.
     print(f"Strata: new notebooks are created in {config.notebook_storage_dir}")
     uvicorn.run(
         "strata.server:app",
         host=config.host,
         port=config.port,
         log_level="info",
-        # Use the modern sans-io WebSocket implementation, not uvicorn's default
-        # ``ws="auto"`` (the deprecated ``websockets`` *legacy* asyncio
-        # protocol). That legacy protocol's ``_drain_helper`` asserts against
-        # asyncio internals that changed in CPython 3.14, so notebook WebSockets
-        # die on data transfer there. ``websockets-sansio`` drives the same
-        # ``websockets`` dependency through its new asyncio API (uvicorn >= 0.35).
+        # The default legacy ``websockets`` protocol asserts on asyncio internals
+        # that changed in CPython 3.14, killing notebook WebSockets there.
         ws="websockets-sansio",
     )
 

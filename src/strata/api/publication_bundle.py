@@ -25,8 +25,7 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from strata.artifact_store import ArtifactStore, ArtifactVersion, Publication
 
-# Extension by content type, for naming the file inside a bundle. A reader
-# should be able to double-click it; ``.bin`` helps nobody.
+# Extension by content type for the file inside a bundle; ``.bin`` helps nobody.
 BUNDLE_EXTENSIONS = {
     "image/png": ".png",
     "text/markdown": ".md",
@@ -91,10 +90,9 @@ def write_bundle(
         while chunk := reader.read(1024 * 1024):
             out.write(chunk)
 
-    # A relative reference, not a data URI: the file is right there, so
-    # embedding it would double the bundle's size for nothing and turn a large
-    # figure into an index.html no browser will open — the one thing a bundle
-    # has to guarantee. (The hosted page inlines because it has no such file.)
+    # A relative reference, not a data URI: embedding doubles the bundle and can
+    # make index.html too large for a browser to open. (The hosted page inlines
+    # because it has no such file.)
     image_src = filename if content_type == "image/png" else None
 
     (dest / "index.html").write_text(
@@ -121,8 +119,7 @@ def write_bundle(
         ),
         encoding="utf-8",
     )
-    # RO-Crate is what a repository ingests. Without it a Zenodo deposit is a
-    # folder a human can read; with it the chain is data the archive can index.
+    # RO-Crate turns the chain into data a repository such as Zenodo can index.
     (dest / "ro-crate-metadata.json").write_text(
         json.dumps(
             build_crate(
@@ -152,10 +149,8 @@ def write_bundle(
     return written
 
 
-# Every member of a zip bundle carries this timestamp and these permissions.
-# ``ZipFile.write`` stamps each file's mtime, and the bundle is written into a
-# fresh directory each time, so two archives of one publication differed in
-# bytes and in the digest a depositor records, though not in any file.
+# Every zip member gets this timestamp and these permissions, so two archives of
+# one publication are byte-identical (``ZipFile.write`` stamps each mtime).
 _ZIP_DATE_TIME = (1980, 1, 1, 0, 0, 0)
 _ZIP_FILE_MODE = 0o644 << 16
 

@@ -31,9 +31,8 @@ import datetime
 from strata.url_safety import web_url_or_none
 
 # The crate context plus one local term. ``sha256`` is not defined in RO-Crate
-# 1.1, and an undefined term is *discarded* on JSON-LD expansion — so the
-# integrity digest this whole feature rests on would look present in the raw
-# JSON and be invisible in RDF, which is the worst of both.
+# 1.1, and JSON-LD expansion discards undefined terms, so without it the
+# integrity digest would vanish from the RDF.
 _CONTEXT = [
     "https://w3id.org/ro/crate/1.1/context",
     {"sha256": "http://pending.schema.org/sha256"},
@@ -110,11 +109,9 @@ def build_crate(
     steps = [
         node for node in lineage.nodes if node.type == "artifact" and node.artifact_id is not None
     ]
-    # Compared with the version, not the id alone. One id can appear at two
-    # versions in a single graph — a stale cell re-run, or a loop carry — and
-    # matching on the id would drop a genuine ancestor while still mapping it
-    # onto the payload, producing an action whose result is someone else's
-    # output.
+    # Match (id, version), not id: one id can appear at two versions in a graph
+    # (a stale re-run, a loop carry), and id-only matching would drop a real
+    # ancestor yet still map it onto the payload.
     upstream = [
         node
         for node in steps
@@ -132,12 +129,11 @@ def build_crate(
                     "environment recorded when it was produced."
                 ),
                 "datePublished": _iso(publication.published_at),
-                # A DOI is what a repository indexes on, so it goes on the root
-                # as the resolvable URL rather than the bare identifier string.
+                # A repository indexes on the DOI, so the root carries it as a
+                # resolvable URL.
                 "identifier": _identifier_of(publication),
-                # Declared authors, in the order given, because author order
-                # carries meaning. Falling back to ``published_by`` keeps every
-                # publication made before authors existed saying what it said.
+                # Author order carries meaning. ``published_by`` is the fallback
+                # for publications made before authors existed.
                 "author": _authors_of(publication),
                 "hasPart": [{"@id": payload_id}],
                 "mainEntity": {"@id": payload_id},
@@ -173,16 +169,14 @@ def build_crate(
             )
         )
 
-    # Table inputs and unresolved leaves are referenced by ``_inputs_for`` and
-    # would otherwise be named by nothing — a dangling @id, which is exactly
-    # the invariant this module claims to hold. They are Datasets rather than
-    # Files: a table lives in a lake, not in this crate.
+    # Table inputs and unresolved leaves are referenced by ``_inputs_for``, so
+    # they need nodes or the @id dangles. Datasets, not Files: a table lives in
+    # a lake, not in this crate.
     for node in lineage.nodes:
         if node.type == "fetch":
-            # Unlike an upstream step, these bytes can be had: a web-based data
-            # entity is a File whose @id is its URL, which RO-Crate 1.1 allows
-            # outside the crate. The digest is what was read, not a promise
-            # about what the URL serves now.
+            # A web data entity is a File whose @id is its URL (RO-Crate 1.1
+            # allows this outside the crate). The digest is what was read, not
+            # what the URL serves now.
             graph.append(
                 _prune(
                     {
@@ -244,17 +238,15 @@ def build_crate(
                     "object": [{"@id": ref} for ref in inputs],
                     "result": {"@id": produced},
                     "agent": ({"@id": _agent_id(node.principal)} if node.principal else None),
-                    # Recorded rather than asserted: it says where these bytes
-                    # were made, not that they would be made again there.
+                    # Where these bytes were made, not a claim they'd be made
+                    # again there.
                     "description": (f"Ran under {node.build_env}" if node.build_env else None),
                 }
             )
         )
 
     for author in publication.authors:
-        # An ORCID is a persistent identifier for a person, which is exactly
-        # what an ``@id`` is for — with one, two crates naming the same
-        # researcher say so; without, the name is all there is to go on.
+        # An ORCID ``@id`` lets two crates say they name the same researcher.
         node_id = (
             f"https://orcid.org/{author['orcid']}"
             if author.get("orcid")
@@ -301,9 +293,8 @@ def _identifier_of(publication) -> str | None:
     ):
         value = by_scheme.get(scheme)
         if value:
-            # An identifier a record holds is whatever was written into it, and
-            # ``url`` takes it verbatim. A crate's identifier is a URL or it is
-            # not this field's business.
+            # A stored identifier is whatever was written; only a web URL is
+            # emitted.
             url = web_url_or_none(value) or web_url_or_none(template.format(value))
             if url:
                 return url
@@ -337,9 +328,8 @@ def _inputs_for(node, lineage, artifact, payload_id: str) -> list[str]:
     for uri in consumed:
         source = by_uri.get(uri)
         if source is None or source.artifact_id is None:
-            # A table or an unresolved input: name it by its URI, which is the
-            # only handle there is, rather than dropping an input from the
-            # record because it is not an artifact in this store.
+            # A table or unresolved input: its URI is the only handle, and the
+            # input must not drop out of the record.
             ids.append(uri)
             continue
         if source.artifact_id == artifact.id:

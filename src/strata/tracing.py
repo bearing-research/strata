@@ -28,7 +28,6 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any
 
-# Check if OpenTelemetry is available
 _OTEL_AVAILABLE = False
 try:
     from opentelemetry.trace import Span, Tracer  # noqa: F401
@@ -40,7 +39,6 @@ except ImportError:
 if TYPE_CHECKING:
     from opentelemetry.trace import Span, Tracer
 
-# Module-level state
 _tracer: "Tracer | None" = None
 _initialized = False
 
@@ -54,7 +52,6 @@ def is_tracing_enabled() -> bool:
     """Check if tracing is both available and enabled."""
     if not _OTEL_AVAILABLE:
         return False
-    # Check explicit disable
     if os.environ.get("STRATA_TRACING_ENABLED", "true").lower() == "false":
         return False
     return True
@@ -86,7 +83,6 @@ def init_tracing(
     if not is_tracing_enabled():
         return False
 
-    # Get endpoint from env if not provided
     endpoint = otlp_endpoint or os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT")
 
     try:
@@ -98,7 +94,6 @@ def init_tracing(
 
         from strata.health import _package_version
 
-        # Create resource with service name
         resource = Resource.create(
             {
                 "service.name": os.environ.get("OTEL_SERVICE_NAME", service_name),
@@ -106,22 +101,19 @@ def init_tracing(
             }
         )
 
-        # Create tracer provider
         provider = TracerProvider(resource=resource)
 
-        # Add OTLP exporter if endpoint is configured
         if endpoint:
             exporter = OTLPSpanExporter(endpoint=endpoint)
             provider.add_span_processor(BatchSpanProcessor(exporter))
 
-        # Set as global tracer provider
         trace.set_tracer_provider(provider)
         _tracer = trace.get_tracer("strata", _package_version())
 
         return True
 
     except Exception:
-        # Silently fail - tracing is optional
+        # Tracing is optional; never fail the caller.
         return False
 
 
@@ -133,7 +125,6 @@ def get_tracer() -> "Tracer | None":
         return None
 
     if _tracer is None and not _initialized:
-        # Auto-initialize on first use
         init_tracing()
 
     return _tracer
@@ -186,7 +177,6 @@ def trace_span(
     from opentelemetry.trace import Status, StatusCode
 
     with tracer.start_as_current_span(name) as span:
-        # Set initial attributes
         for key, value in attributes.items():
             if value is not None:
                 span.set_attribute(key, value)
@@ -218,11 +208,11 @@ def instrument_fastapi(app: Any) -> None:
 
         FastAPIInstrumentor.instrument_app(app)
     except Exception:
-        # Silently fail - tracing is optional
+        # Tracing is optional; never fail the caller.
         pass
 
 
-# W3C trace context, carried across process boundaries -----------------------
+# W3C trace context, carried across process boundaries.
 
 TRACE_CONTEXT_KEYS = ("traceparent", "tracestate")
 

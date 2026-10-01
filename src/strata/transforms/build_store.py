@@ -29,7 +29,6 @@ if TYPE_CHECKING:
     pass
 
 
-# SQL schema for build state tracking
 _BUILD_SCHEMA_SQL = """
 -- Build state: tracks async build lifecycle
 CREATE TABLE IF NOT EXISTS artifact_builds (
@@ -70,11 +69,10 @@ CREATE INDEX IF NOT EXISTS idx_build_artifact ON artifact_builds(artifact_id, ve
 CREATE INDEX IF NOT EXISTS idx_build_lease_expires ON artifact_builds(state, lease_expires_at);
 """
 
-# Every blob key a build attempt may write. The blob stores cannot list keys,
-# so this is the only way to find the bytes of an attempt that is never
-# promoted: one that lost its lease, or whose executor uploaded and never
-# finalized. Created apart from artifact_builds so an existing database gains
-# it too.
+# Every blob key a build attempt may write. Blob stores cannot list keys, so
+# this is the only way to find an attempt that is never promoted (lost its lease,
+# or uploaded and never finalized). Kept apart from artifact_builds so existing
+# databases gain it too.
 _ATTEMPT_SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS build_attempts (
     build_id TEXT NOT NULL,
@@ -137,7 +135,7 @@ class BuildState:
     name: str | None = None
     logs: str | None = None
 
-    # Alias for tenant_id (used by auth checks)
+    # Used by auth checks.
     @property
     def tenant(self) -> str | None:
         """Alias for tenant_id."""
@@ -170,12 +168,11 @@ def _row_to_build_state(row: Any) -> BuildState:
     Returns:
         BuildState instance
     """
-    # Parse JSON fields (may be None if column doesn't exist or is null)
+    # Columns may be absent on older rows or null.
     input_uris = None
     params = None
     name = None
 
-    # Handle optional columns gracefully
     try:
         if row["input_uris"]:
             input_uris = json.loads(row["input_uris"])
@@ -271,12 +268,9 @@ class BuildStore:
         """Initialize build state schema with migrations for lease columns."""
         conn = self._get_connection()
         try:
-            # The migration below upgrades databases written by older Strata
-            # versions and speaks SQLite's introspection vocabulary. A backend
-            # added after those versions has no such history. The schema lock
-            # matters for the same reason it does in the artifact store:
-            # CREATE TABLE IF NOT EXISTS races in Postgres, and every node runs
-            # this at startup.
+            # Only SQLite has older databases to migrate. Other backends create the schema
+            # under the schema lock: CREATE TABLE IF NOT EXISTS races in Postgres, and every
+            # node runs this at startup.
             if not self._dialect.supports_legacy_migration:
                 if not self._dialect.schema_exists(conn, "artifact_builds"):
                     self._dialect.begin_write(conn, "__build_schema__")
@@ -288,19 +282,16 @@ class BuildStore:
                     conn.commit()
                 return
 
-            # Check if table exists and needs migration
             cursor = conn.execute(
                 "SELECT name FROM sqlite_master WHERE type='table' AND name='artifact_builds'"
             )
             table_exists = cursor.fetchone() is not None
 
             if table_exists:
-                # Check if lease columns exist
                 cursor = conn.execute("PRAGMA table_info(artifact_builds)")
                 columns = {row["name"] for row in cursor.fetchall()}
 
                 if "lease_owner" not in columns:
-                    # Add lease columns
                     conn.execute("ALTER TABLE artifact_builds ADD COLUMN lease_owner TEXT")
                     conn.execute("ALTER TABLE artifact_builds ADD COLUMN lease_expires_at REAL")
                     conn.execute(
@@ -309,19 +300,17 @@ class BuildStore:
                     )
                     conn.commit()
 
-                # Check for pull model columns (added for Stage 2)
+                # Pull-model columns.
                 if "input_uris" not in columns:
                     conn.execute("ALTER TABLE artifact_builds ADD COLUMN input_uris TEXT")
                     conn.execute("ALTER TABLE artifact_builds ADD COLUMN params TEXT")
                     conn.execute("ALTER TABLE artifact_builds ADD COLUMN name TEXT")
                     conn.commit()
 
-                # Check for logs column (added for observability)
                 if "logs" not in columns:
                     conn.execute("ALTER TABLE artifact_builds ADD COLUMN logs TEXT")
                     conn.commit()
             else:
-                # Fresh database: create schema
                 conn.executescript(_BUILD_SCHEMA_SQL)
                 conn.commit()
 
@@ -363,7 +352,6 @@ class BuildStore:
         conn = self._get_connection()
         try:
             created_at = self._clock()
-            # Serialize input_uris and params to JSON
             input_uris_json = json.dumps(input_uris) if input_uris else None
             params_json = json.dumps(params) if params else None
 
@@ -994,10 +982,6 @@ class BuildStore:
         finally:
             conn.close()
 
-
-# ---------------------------------------------------------------------------
-# Module-level singleton
-# ---------------------------------------------------------------------------
 
 _build_store: BuildStore | None = None
 

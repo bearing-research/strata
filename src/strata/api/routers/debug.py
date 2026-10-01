@@ -46,7 +46,6 @@ async def get_latency_histograms_v1():
     """
     stats = get_latency_stats()
 
-    # Add percentile estimates for key stages
     from strata.slow_ops import get_latency_percentiles
 
     result = {"histograms": stats}
@@ -223,16 +222,10 @@ async def inspect_cache_v1(
             "truncated": False,
         }
 
-    # If prefix is provided, narrow the search
     if prefix:
-        # Normalize to lowercase
         prefix = prefix.lower()
-        # Build search paths based on prefix length
-        # The on-disk layout is versioned_dir/{tenant_prefix}/hash[:2]/hash[2:4]
-        # (see DiskCache._data_path). Searching versioned_dir/hash[:2]/... skipped
-        # the tenant level, so every prefix of 2+ chars hit a path that cannot
-        # exist and this endpoint always returned zero entries. Glob across the
-        # tenant prefixes instead.
+        # On-disk layout is versioned_dir/{tenant_prefix}/hash[:2]/hash[2:4] (see
+        # DiskCache._data_path), so glob across the tenant prefixes.
         if len(prefix) >= 4:
             search_paths = [
                 d for d in versioned_dir.glob(f"*/{prefix[:2]}/{prefix[2:4]}") if d.is_dir()
@@ -258,7 +251,7 @@ async def inspect_cache_v1(
                     "truncated": False,
                 }
         else:
-            # Search everything but filter by prefix
+            # Too short to narrow the path; filtered per entry below.
             search_paths = [versioned_dir]
     else:
         search_paths = [versioned_dir]
@@ -268,21 +261,17 @@ async def inspect_cache_v1(
 
     for search_path in search_paths:
         for meta_path in search_path.rglob(f"*{CACHE_META_EXTENSION}"):
-            # Extract hash from filename
             cache_hash = meta_path.stem.replace(".meta", "")
 
-            # Apply prefix filter
             if prefix and not cache_hash.startswith(prefix):
                 continue
 
             try:
                 meta_data = json_module.loads(meta_path.read_text())
 
-                # Apply table_id filter
                 if table_id and meta_data.get("table_id") != table_id:
                     continue
 
-                # Apply snapshot_id filter
                 if snapshot_id is not None and meta_data.get("snapshot_id") != snapshot_id:
                     continue
 
@@ -292,7 +281,6 @@ async def inspect_cache_v1(
                     truncated = True
                     continue  # Keep counting but don't add more
 
-                # Get data file info
                 data_path = meta_path.with_suffix(CACHE_FILE_EXTENSION)
                 file_size = data_path.stat().st_size if data_path.exists() else None
                 file_exists = data_path.exists()
@@ -320,7 +308,6 @@ async def inspect_cache_v1(
                 )
                 matched_count += 1
 
-    # Sort by hash for consistent output
     results.sort(key=lambda x: x.get("hash", ""))
 
     response = {

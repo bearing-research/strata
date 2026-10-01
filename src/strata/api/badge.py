@@ -16,10 +16,8 @@ from __future__ import annotations
 
 from html import escape
 
-# Approximate advance widths for 11px DejaVu Sans, which is what renders in
-# practice. Exactness does not matter because every run is drawn with
-# ``textLength``: the estimate sets the pill's width, and the text is then made
-# to fit it. A bad estimate looks slightly loose or tight, never overflowing.
+# Approximate advance widths for 11px DejaVu Sans. Exactness does not matter: every run is drawn
+# with ``textLength``, so a bad estimate looks loose or tight but never overflows.
 _NARROW = set("iljtfrI.,:;'|!()[]{} ")
 _WIDE = set("mwMW@")
 
@@ -55,10 +53,9 @@ def render_badge(*, label: str, value: str, title: str) -> str:
     value_bg = _WITHDRAWN_BG if value == "withdrawn" else _VALUE_BG
 
     def run(text: str, x: float, width: float) -> str:
-        # Drawn twice: a dark copy one pixel down for the engraved look every
-        # badge has, then the real one. `textLength` pins the run to the width
-        # the layout was computed from, so a font this server cannot know about
-        # cannot push text past the edge of its own pill.
+        # Drawn twice: a dark copy one pixel down for the engraved look, then the real one.
+        # `textLength` pins the run to the computed width so an unknown font cannot overflow the
+        # pill.
         content = escape(text)
         length = width - _PAD * 2
         return (

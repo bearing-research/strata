@@ -134,19 +134,14 @@ def url_safety_problem(
     if not host:
         return f"{field} URL is missing a host: {url!r}"
 
-    # After the host check, not before it. The bypass used to return here and
-    # skipped both, so a URL with no host at all was accepted whenever it was
-    # set — which is on every managed worker, since that is the documented way
-    # to reach a server on a private address. Only the address rule is meant
-    # to be relaxed.
+    # After the host check: the bypass relaxes only the address rule, and it is
+    # set on every managed worker, so a hostless URL must still be refused.
     if allow_local:
         return None
 
     if host_is_allowlisted(host, allowed_hosts):
-        # Named, therefore trusted. This is a statement about names the
-        # operator controls, not a general relaxation: the resolve-then-fetch
-        # race below stops mattering for these hosts, because whoever controls
-        # their resolution was already trusted by being listed.
+        # Listed hosts are trusted: whoever controls their resolution was
+        # trusted by being listed, so the resolve-then-fetch race doesn't matter.
         return None
 
     try:

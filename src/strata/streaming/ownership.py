@@ -57,8 +57,7 @@ class StreamOwnershipStore:
         conn = self._get_connection()
         try:
             if not self._dialect.supports_legacy_migration:
-                # Same reasoning as the other stores: CREATE TABLE IF NOT
-                # EXISTS races in Postgres and every node runs this at startup.
+                # CREATE TABLE IF NOT EXISTS races in Postgres, and every node runs this at startup.
                 if not self._dialect.schema_exists(conn, "stream_owners"):
                     self._dialect.begin_write(conn, "__stream_owner_schema__")
                     conn.executescript(self._dialect.adapt_ddl(_OWNERSHIP_SCHEMA_SQL))

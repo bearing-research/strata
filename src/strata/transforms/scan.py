@@ -94,8 +94,7 @@ class ScanTransform(Transform[ScanParams]):
 
         Note: This is only used for parameter validation, not execution.
         """
-        # scan@v1 requires exactly one input (the table URI)
-        # But when called here, inputs are already resolved tables
+        # Inputs here are already resolved tables, so there is nothing to check.
         pass
 
     def execute(self, inputs: list[pa.Table], params: ScanParams) -> pa.Table:
@@ -113,7 +112,6 @@ class ScanTransform(Transform[ScanParams]):
         )
 
 
-# Convenience function for building scan transform specs
 def build_scan_transform(
     columns: list[str] | None = None,
     filters: list[dict[str, Any]] | None = None,

@@ -147,9 +147,8 @@ class ApiKeyStore:
         conn = self._get_connection()
         try:
             if not self._dialect.supports_legacy_migration:
-                # Same reasoning as the artifact and build stores: CREATE TABLE
-                # IF NOT EXISTS races in Postgres and every node runs this at
-                # startup, so creation is serialized and then skipped.
+                # CREATE TABLE IF NOT EXISTS races in Postgres when every node
+                # runs this at startup, so creation is serialized, then skipped.
                 if not self._dialect.schema_exists(conn, "api_keys"):
                     self._dialect.begin_write(conn, "__api_key_schema__")
                     conn.executescript(self._dialect.adapt_ddl(_API_KEY_SCHEMA_SQL))

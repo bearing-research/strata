@@ -20,11 +20,10 @@ from typing import Any
 
 from strata.logging import StructuredFormatter
 
-# Ring-buffer retention. 10k entries is plenty for a live viewer; older entries
-# remain on the stderr stream / disk (design open-question #3).
+# Older entries remain on stderr / disk.
 DEFAULT_CAPACITY = 10_000
 
-# Numeric level thresholds for the ``?level=`` minimum-level filter.
+# Thresholds for the ``?level=`` minimum-level filter.
 _LEVELS = {"debug": 10, "info": 20, "warning": 30, "error": 40, "critical": 50}
 
 # Loggers the buffer attaches to (mirrors ``configure_logging``).

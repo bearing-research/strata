@@ -18,15 +18,14 @@ if TYPE_CHECKING:
     from strata.adaptive_concurrency import ResizableLimiter
     from strata.rate_limiter import TokenBucket
 
-# Context variable for tenant-scoped data (request-scoped via middleware)
+# Request-scoped; set by middleware.
 _tenant_context: contextvars.ContextVar[str | None] = contextvars.ContextVar(
     "tenant_id", default=None
 )
 
-# Default tenant for backward compatibility (single-tenant mode)
+# Tenant used in single-tenant mode.
 DEFAULT_TENANT_ID = "_default"
 
-# Tenant ID validation constraints
 MAX_TENANT_ID_LENGTH = 64
 TENANT_ID_PATTERN = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_-]*$")
 

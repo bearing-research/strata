@@ -27,11 +27,9 @@ from strata.artifact_store import (
     Publication,
 )
 
-# What another store needs to reconstruct an artifact version: everything but
-# the tenant, which the destination takes from whoever is authenticated rather
-# than from the record. One list, because the HTTP transfer and the snapshot
-# bundle both describe an artifact and must describe it the same way — a field
-# one of them forgot is a field the other's importer silently loses.
+# What another store needs to rebuild an artifact version: everything but the tenant, which the
+# destination takes from the authenticated caller. One list shared by the HTTP transfer and the
+# snapshot bundle, so neither importer silently loses a field the other carries.
 RECORD_FIELDS = (
     "id",
     "version",
@@ -354,9 +352,8 @@ class Promotion:
     ref: str
     copied: int
     alias: str | None = None
-    # A protected alias lands in the pending queue instead of moving, which is
-    # the point of protecting it. The caller has to say so: a promotion that
-    # reported plain success would leave someone believing the champion moved.
+    # A protected alias lands in the pending queue instead of moving. The caller has to say so:
+    # plain success would leave someone believing the champion moved.
     alias_pending: bool = False
     # The Iceberg table it was also written to, and the snapshot that holds it.
     table: str | None = None
@@ -409,15 +406,10 @@ def promote_artifact(
     landed_id, _, landed_version = landed_ref.partition("@v=")
     version = int(landed_version)
 
-    # Stamp what this promotion brought, so a colleague's team-cache hit on any
-    # of it can say which promotion it came from. Only what it wrote: a row the
-    # store already held arrived some other way (a cache publish, an earlier
-    # promotion), and restamping it would claim this one put it there. Before
-    # naming, because only this call knows what it wrote: if the name is then
-    # refused and the promotion retried, every row already exists and a retry
-    # would have nothing left to stamp.
-    # The stamp's value is the name, so an unnamed copy stamps nothing: a
-    # team-cache hit on it names no promotion, which is what happened.
+    # Stamp only what this promotion wrote, so a team-cache hit can name the promotion it came from;
+    # a row the store already held arrived some other way. Stamp before naming: a retry after a
+    # refused name finds every row present and has nothing left to stamp.
+    # The stamp's value is the name, so an unnamed copy stamps nothing.
     if name:
         for ref in written:
             written_id, _, written_version = ref.partition("@v=")
@@ -427,10 +419,9 @@ def promote_artifact(
     if alias and name:  # always both: an alias without a name was refused above
         alias_pending = not target.set_alias(name, alias, landed_id, version)
     for key, value in (tags or {}).items():
-        # An ``nb_`` stamp records where a row came from. On a row this
-        # promotion deduplicated onto, it already says that about someone
-        # else's notebook, and overwriting it would move their result off
-        # their cell's strip and onto this one.
+        # An ``nb_`` stamp records where a row came from. On a row this promotion deduplicated onto,
+        # it describes someone else's notebook; overwriting it would move their result onto this
+        # cell's strip.
         if key.startswith("nb_") and landed_ref not in written:
             continue
         target.set_tag(landed_id, version, key, value)

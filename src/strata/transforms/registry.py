@@ -72,8 +72,7 @@ class TransformDefinition:
         Returns:
             True if this definition matches the reference
         """
-        # Extract just the executor type and version from full URI
-        # e.g., "local://duckdb_sql@v1" -> "duckdb_sql@v1"
+        # Strip a scheme: "local://duckdb_sql@v1" -> "duckdb_sql@v1".
         if "://" in executor_ref:
             executor_ref = executor_ref.split("://", 1)[1]
 
@@ -90,10 +89,8 @@ class TransformRegistry:
     Thread-safe: all operations are read-only after initialization.
     """
 
-    # Whether server-mode transforms are enabled
     enabled: bool = False
 
-    # List of approved transform definitions
     definitions: list[TransformDefinition] = field(default_factory=list)
 
     def get(self, executor_ref: str) -> TransformDefinition | None:
@@ -136,13 +133,13 @@ class TransformRegistry:
         Returns:
             TransformRegistry with embedded executor definitions
         """
-        # Transforms that can run embedded (no external HTTP calls)
+        # Transforms that can run in-process (no external HTTP calls).
         embedded_transforms = ["duckdb_sql@v1"]
 
         definitions = [
             TransformDefinition(
                 ref=ref,
-                executor_url="embedded://local",  # Special URL for embedded execution
+                executor_url="embedded://local",
                 timeout_seconds=300.0,
                 max_output_bytes=1024 * 1024 * 1024,  # 1GB
                 max_input_bytes=1024 * 1024 * 1024,  # 1GB
@@ -182,7 +179,6 @@ class TransformRegistry:
         """
         if not config:
             if embedded_mode:
-                # Local mode with embedded executors for common transforms
                 return cls.create_embedded_registry()
             return cls(enabled=False, definitions=[])
 
@@ -207,10 +203,6 @@ class TransformRegistry:
 
         return cls(enabled=enabled, definitions=definitions)
 
-
-# ---------------------------------------------------------------------------
-# Module-level singleton
-# ---------------------------------------------------------------------------
 
 _registry: TransformRegistry | None = None
 

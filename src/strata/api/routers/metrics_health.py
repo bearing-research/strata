@@ -113,7 +113,6 @@ async def health_ready():
     from strata.metadata_cache import get_metadata_store
     from strata.server import _check_readiness, _get_active_scan_count, _get_qos_metrics, get_state
 
-    # Check server initialized
     try:
         state = get_state()
     except RuntimeError:
@@ -123,11 +122,9 @@ async def health_ready():
             media_type="application/json",
         )
 
-    # Run comprehensive readiness checks
     is_ready, checks = _check_readiness(state)
     checks["server_initialized"] = True
 
-    # Also check metadata store accessibility
     try:
         store = get_metadata_store()
         store.stats()  # Quick sanity check
@@ -140,7 +137,6 @@ async def health_ready():
             checks["issues"] = []
         checks["issues"].append(f"metadata store error: {e}")
 
-    # Add QoS capacity info for observability
     qos = _get_qos_metrics(state)
     checks["interactive_available"] = qos["interactive_available"]
     checks["bulk_available"] = qos["bulk_available"]
@@ -172,7 +168,6 @@ async def metrics():
     state = get_state()
     stats = state.metrics.get_aggregate_stats()
 
-    # Add Arrow memory pool info
     pool = pa.default_memory_pool()
     stats["arrow_memory"] = {
         "pool_backend": pool.backend_name,
@@ -180,11 +175,9 @@ async def metrics():
         "max_memory": pool.max_memory(),
     }
 
-    # Add GC stats for diagnosing periodic stalls
-    # Include both gc.get_stats() (collection counts) and gc_tracker (pause durations)
+    # For diagnosing periodic stalls: counts from gc.get_stats(), pauses from gc_tracker.
     gc_builtin = gc.get_stats()
     stats["gc"] = {
-        # Built-in GC stats (counts only)
         "gen0_collections": gc_builtin[0]["collections"],
         "gen1_collections": gc_builtin[1]["collections"],
         "gen2_collections": gc_builtin[2]["collections"],
@@ -196,11 +189,9 @@ async def metrics():
         "gen2_uncollectable": gc_builtin[2]["uncollectable"],
     }
 
-    # Add GC pause duration tracking (from gc.callbacks)
     gc_pause_stats = get_gc_stats()
     if gc_pause_stats:
         stats["gc_pauses"] = gc_pause_stats
-    # Add resource utilization info
     stats["resource_limits"] = {
         "max_concurrent_scans": state.config.max_concurrent_scans,
         "active_scans": state.qos.active_scans,
@@ -209,17 +200,14 @@ async def metrics():
         "scan_timeout_seconds": state.config.scan_timeout_seconds,
         "max_response_bytes": state.config.max_response_bytes,
     }
-    # Add prefetch metrics for observability
     stats["prefetch"] = state.scan_builds.prefetch_metrics()
-    # Add QoS tier metrics
     stats["qos"] = _get_qos_metrics(state)
-    # Get cache size and entry count in thread pool to avoid blocking (involves filesystem ops)
+    # Walks the filesystem, so run it off the event loop.
     loop = asyncio.get_event_loop()
     cache_bytes, cache_entries = await asyncio.gather(
         loop.run_in_executor(None, _get_cache_size_bytes, state),
         loop.run_in_executor(None, _get_cache_entry_count, state),
     )
-    # Add disk cache metrics
     stats["disk_cache"] = {
         "bytes_current": cache_bytes,
         "entries_current": cache_entries,
@@ -228,19 +216,15 @@ async def metrics():
         "evicted_bytes": stats.get("cache_evicted_bytes", 0),
     }
 
-    # Add thread pool metrics
     pool_tracker = get_pool_tracker()
     stats["thread_pools"] = {name: s.to_dict() for name, s in pool_tracker.get_all_stats().items()}
 
-    # Add connection metrics
     connection_metrics = get_connection_metrics()
     stats["connections"] = connection_metrics.get_stats()
 
-    # Add adaptive concurrency control metrics
     if state._adaptive_controller is not None:
         stats["adaptive_concurrency"] = state._adaptive_controller.get_metrics()
 
-    # Add build QoS metrics (server-mode transforms)
     if state.config.server_transforms_enabled:
         from strata.transforms.build_qos import get_build_qos
 
@@ -316,13 +300,8 @@ async def metrics_prometheus():
     stats = state.metrics.get_aggregate_stats()
     prefetch = state.scan_builds.prefetch_metrics()
 
-    # Both of these walk the whole cache directory — get_size_bytes rglobs and
-    # stats every file, get_entry_count rglobs and read_text()s every .meta
-    # sidecar. Called inline from this async handler they blocked the event
-    # loop for the duration on every scrape (Prometheus polls every ~15s), so a
-    # large cache stalled in-flight Arrow streams and could time out
-    # /health/ready. The sibling /metrics handler already offloads exactly
-    # these two calls for this reason.
+    # Both walk the whole cache directory; inline, they block the event loop on
+    # every scrape, stalling Arrow streams and timing out /health/ready.
     loop = asyncio.get_event_loop()
     cache_bytes, cache_entries = await asyncio.gather(
         loop.run_in_executor(None, _get_cache_size_bytes, state),
@@ -427,7 +406,6 @@ async def metrics_prometheus():
         f"strata_prefetch_in_flight {prefetch['in_flight']}",
     ]
 
-    # Add GC stats for diagnosing periodic stalls
     import gc
 
     gc_stats = gc.get_stats()
@@ -448,7 +426,6 @@ async def metrics_prometheus():
         ]
     )
 
-    # Add GC pause duration metrics (from gc.callbacks tracker)
     gc_pause_stats = get_gc_stats()
     if gc_pause_stats:
         lines.extend(
@@ -467,7 +444,6 @@ async def metrics_prometheus():
                 f"strata_gc_pauses_total {gc_pause_stats.get('total_pauses', 0)}",
             ]
         )
-        # Per-generation pause stats
         for gen in ["gen0", "gen1", "gen2"]:
             gen_stats = gc_pause_stats.get(gen, {})
             gen_num = gen[-1]  # "0", "1", or "2"
@@ -488,7 +464,6 @@ async def metrics_prometheus():
                 ]
             )
 
-    # Add metadata store stats if available
     try:
         store = get_metadata_store()
         store_stats = store.stats()
@@ -520,7 +495,6 @@ async def metrics_prometheus():
     except Exception:
         pass  # Metadata store not available
 
-    # Add in-memory cache stats
     pq_cache_stats = state.planner.parquet_cache.stats()
     manifest_cache_stats = state.planner.manifest_cache.stats()
 
@@ -553,7 +527,6 @@ async def metrics_prometheus():
         ]
     )
 
-    # Add QoS tier metrics
     qos = _get_qos_metrics(state)
     lines.extend(
         [
@@ -605,7 +578,6 @@ async def metrics_prometheus():
         ]
     )
 
-    # Add fetch parallelism metrics
     lines.extend(
         [
             "",
@@ -619,7 +591,6 @@ async def metrics_prometheus():
         ]
     )
 
-    # Add timeout configuration metrics
     lines.extend(
         [
             "",
@@ -650,7 +621,6 @@ async def metrics_prometheus():
         ]
     )
 
-    # Add rate limiter metrics
     rate_limiter = get_rate_limiter()
     if rate_limiter is not None:
         rl_stats = rate_limiter.get_stats()
@@ -680,7 +650,6 @@ async def metrics_prometheus():
             ]
         )
 
-    # Add cache eviction metrics
     eviction_tracker = get_eviction_tracker()
     eviction_stats = eviction_tracker.get_stats()
     pressure_map = {"low": 0, "medium": 1, "high": 2, "critical": 3}
@@ -710,12 +679,11 @@ async def metrics_prometheus():
         ]
     )
 
-    # Add thread pool metrics
     pool_tracker = get_pool_tracker()
     for pool_name, pool_stats in pool_tracker.get_all_stats().items():
         active = pool_stats.active_workers
         max_w = pool_stats.max_workers
-        util = pool_stats.utilization_pct / 100.0  # Convert percentage to ratio
+        util = pool_stats.utilization_pct / 100.0
         lines.extend(
             [
                 "",
@@ -731,7 +699,6 @@ async def metrics_prometheus():
             ]
         )
 
-    # Add connection metrics
     conn_metrics = get_connection_metrics()
     conn_stats = conn_metrics.get_stats()
     lines.extend(
@@ -751,7 +718,6 @@ async def metrics_prometheus():
         ]
     )
 
-    # Add Arrow memory metrics
     pool = pa.default_memory_pool()
     lines.extend(
         [
@@ -766,7 +732,6 @@ async def metrics_prometheus():
         ]
     )
 
-    # Add per-table metrics (top 20 most accessed tables)
     table_metrics = state.metrics.get_top_tables(20)
     if table_metrics:
         lines.extend(
@@ -804,7 +769,6 @@ async def metrics_prometheus():
                 f'strata_table_cache_hit_rate{{table="{table_id}"}} {tm["cache_hit_rate"]}'
             )
 
-    # Add per-tenant metrics (multi-tenancy support)
     tenant_registry = get_tenant_registry()
     tenant_metrics = tenant_registry.get_all_tenant_metrics()
     if tenant_metrics:
@@ -863,13 +827,11 @@ async def metrics_prometheus():
                 )
                 lines.append(f"{name}{{{labels}}} {getattr(row, field)}")
 
-    # Add build metrics (if server transforms are enabled)
     try:
         from strata.transforms.build_metrics import get_build_metrics
 
         build_metrics = get_build_metrics()
         if build_metrics is not None:
-            # Append build-specific metrics
             build_prom = build_metrics.get_prometheus_metrics()
             if build_prom:
                 lines.append("")

@@ -21,7 +21,6 @@ from fastapi.responses import StreamingResponse
 
 router = APIRouter(tags=["logs"])
 
-# How often the SSE tail polls the ring buffer for new entries.
 _STREAM_POLL_SECONDS = 0.5
 
 
@@ -68,8 +67,7 @@ async def stream_logs(
     Emits each new entry as an SSE ``data:`` frame. Reconnect with
     ``?since=<last cursor>`` to resume without gaps.
     """
-    # Validate the regex once up front so a bad pattern fails fast with 400
-    # rather than inside the stream (where it would just close the connection).
+    # Validate the regex up front so a bad pattern is a 400, not a silently closed stream.
     if regex is not None:
         try:
             re.compile(regex)

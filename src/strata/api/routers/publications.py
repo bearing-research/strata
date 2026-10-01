@@ -55,10 +55,8 @@ from strata.services.artifact import ArtifactService
 router = APIRouter(tags=["publications"])
 
 
-# Schemes a reader can be expected to resolve. Anything else is better refused
-# than stored: a record that accepts arbitrary scheme names produces citation
-# lines nobody can follow, and the caller finds out from a reader rather than
-# from the API.
+# Schemes a reader can resolve. Anything else is refused rather than stored as a citation line
+# nobody can follow.
 EXTERNAL_ID_SCHEMES = ("doi", "zenodo", "arxiv", "url")
 
 
@@ -243,9 +241,7 @@ async def revoke_publication(
     return {"revoked": True, "token": token}
 
 
-# ---------------------------------------------------------------------------
-# Public routes — no authentication. The token is the credential.
-# ---------------------------------------------------------------------------
+# --- Public routes: no authentication; the token is the credential ---
 
 
 def _load_published(store, token: str, *, require_active: bool):
@@ -327,9 +323,7 @@ async def publication_page(token: str, store: ReadStore, http_request: Request):
             image_src=inline_png,
             oembed_url=f"{base}/oembed?url={page_url}",
             json_ld=json.dumps(crate),
-            # Nobody assembles a linked badge by hand, and a snippet that has
-            # to be reconstructed from three route names is a snippet nobody
-            # uses.
+            # Nobody assembles a linked badge by hand from three route names.
             share=[
                 (
                     "A badge for a README, linking here:",
@@ -346,10 +340,8 @@ async def publication_page(token: str, store: ReadStore, http_request: Request):
     )
 
 
-# A figure is the case this feature exists for, so it is embedded rather than
-# linked — a page that renders the plot immediately is the difference between
-# a reader seeing the result and a reader downloading a file. Bounded: past
-# this, the page links to the bytes instead of carrying them.
+# A figure is embedded rather than linked, so a reader sees the plot instead of downloading a file.
+# Bounded: past this, the page links to the bytes.
 _MAX_INLINE_PNG_BYTES = 4 * 1024 * 1024
 
 
@@ -462,9 +454,7 @@ async def verify_publication(token: str, store: ReadStore):
     }
 
 
-# ---------------------------------------------------------------------------
-# Embedding — the card, and the oEmbed endpoint that unfurls a pasted link
-# ---------------------------------------------------------------------------
+# --- Embedding: the card, and the oEmbed endpoint that unfurls a pasted link ---
 
 # The card's natural size. oEmbed consumers use these to reserve space before
 # the iframe loads; the card itself is fluid and fills whatever it is given.
@@ -621,10 +611,9 @@ async def publication_ro_crate(token: str, store: ReadStore, http_request: Reque
             lineage=lineage,
             content_type=content_type_of(artifact),
             payload_id=f"{base}/p/{token}/data",
-            # Unlike the inline block, this response *is* the crate document,
-            # so it carries the descriptor. Without it there is no
-            # ``conformsTo`` and a harvester cannot tell an RO-Crate from any
-            # other JSON-LD — which is the whole reason to fetch this endpoint.
+            # Unlike the inline block, this response is the crate document, so it carries the
+            # descriptor; without ``conformsTo`` a harvester cannot tell an RO-Crate from any other
+            # JSON-LD.
             include_descriptor=True,
         ),
         media_type="application/ld+json",

@@ -37,17 +37,15 @@ logger = logging.getLogger(__name__)
 # inserts explicit values into one, its generator has to be moved past them.
 _AUTOINCREMENT_COLUMNS: dict[str, str] = {"registry_audit": "seq"}
 
-# Ordered by foreign-key dependency: artifact_versions must exist before the
-# tables that reference it. SQLite never enforced these (Strata does not enable
-# PRAGMA foreign_keys) but Postgres does, so the order is load-bearing now.
+# Ordered by foreign-key dependency: artifact_versions must exist before the tables that reference
+# it. SQLite never enforced these (no PRAGMA foreign_keys) but Postgres does.
 #
-# stream_owners is deliberately absent: it describes live streams on live
-# nodes, and none of those survive the migration. So is import_staging: an
-# upload waits seconds for the import that names it, and a caller retrying
+# stream_owners is deliberately absent: it describes live streams on live nodes, and none survive
+# the migration. So is import_staging: an upload waits seconds for its import, and a caller retrying
 # after the move uploads again.
 #
-# Each entry pairs a table with its primary key, which is what makes the copy
-# idempotent -- a row already present in the target is skipped, not rewritten.
+# Each entry pairs a table with its primary key, which makes the copy idempotent: a row already in
+# the target is skipped, not rewritten.
 MIGRATED_TABLES: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("artifact_versions", ("id", "version")),
     ("artifact_names", ("tenant", "name")),
@@ -303,11 +301,9 @@ def _copy_table(
                 skipped += 1
                 continue
 
-            # One savepoint per row. Without it, a rejected row rolls back the
-            # whole uncommitted batch -- every good row inserted since the last
-            # commit -- while `copied` has already counted them, so the run
-            # reports success having silently dropped up to _BATCH_ROWS rows.
-            # Measured at 99 lost out of 100 before this.
+            # One savepoint per row. Without it, a rejected row rolls back every good row inserted
+            # since the last commit while `copied` has already counted them, so the run reports
+            # success having silently dropped up to _BATCH_ROWS rows.
             tgt_conn.execute(f"SAVEPOINT {_ROW_SAVEPOINT}")
             try:
                 tgt_conn.execute(statement, tuple(row[c] for c in columns))

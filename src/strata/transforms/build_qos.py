@@ -204,7 +204,6 @@ class TenantQuota:
     def reset_if_new_day(self) -> None:
         """Reset quota if we've crossed midnight UTC."""
         now = time.time()
-        # Calculate days since epoch
         current_day = int(now // 86400)
         last_day = int(self.last_reset // 86400)
         if current_day > last_day:
@@ -249,15 +248,13 @@ class BuildQoS:
     def __init__(self, config: BuildQoSConfig):
         self.config = config
 
-        # Global limiters (shared across all tenants)
+        # Shared across all tenants.
         self._interactive_limiter = ResizableLimiter(config.interactive_slots)
         self._bulk_limiter = ResizableLimiter(config.bulk_slots)
 
-        # Per-tenant limiters (lazy created)
         self._tenant_limiters: dict[str, TenantLimiters] = {}
         self._tenant_lock = asyncio.Lock()
 
-        # Metrics
         self._lock = threading.Lock()
         self._interactive_rejected = 0
         self._bulk_rejected = 0
@@ -304,12 +301,11 @@ class BuildQoS:
         if explicit_priority is not None:
             return explicit_priority
 
-        # Large outputs are bulk
         if estimated_output_bytes is not None:
             if estimated_output_bytes > self.config.classify_by_estimated_bytes:
                 return BuildPriority.BULK
 
-        # Many inputs are bulk (likely joins/aggregations)
+        # Many inputs suggest joins / aggregations.
         if input_count > self.config.classify_by_input_count:
             return BuildPriority.BULK
 
@@ -331,10 +327,8 @@ class BuildQoS:
         limiters = await self._get_tenant_limiters(tenant_id)
         quota = limiters.quota
 
-        # Reset if new day
         quota.reset_if_new_day()
 
-        # Check if adding this build would exceed quota
         if quota.bytes_today + estimated_bytes > self.config.bytes_per_day_limit:
             with self._lock:
                 self._quota_rejected += 1
@@ -383,7 +377,6 @@ class BuildQoS:
         """
         limiters = await self._get_tenant_limiters(tenant_id)
 
-        # Select limiters based on priority
         if priority == BuildPriority.INTERACTIVE:
             tenant_limiter = limiters.interactive
             global_limiter = self._interactive_limiter
@@ -395,7 +388,7 @@ class BuildQoS:
             queue_timeout = self.config.bulk_queue_timeout
             tier_name = "bulk"
 
-        # Step 1: Try per-tenant slot (short timeout - fail fast)
+        # Per-tenant slot first, with a short timeout to fail fast.
         if not await tenant_limiter.acquire(timeout=self.config.per_tenant_timeout):
             with self._lock:
                 self._tenant_rejected += 1
@@ -411,14 +404,12 @@ class BuildQoS:
                 retry_after=self.config.per_tenant_timeout,
             )
 
-        # Step 2: Try global tier slot (with queue wait tracking)
         queue_start = time.time()
         tenant_slot_released = False
         try:
             acquired = await global_limiter.acquire(timeout=queue_timeout)
             queue_wait_ms = (time.time() - queue_start) * 1000
 
-            # Track queue wait metrics
             with self._lock:
                 if priority == BuildPriority.INTERACTIVE:
                     self._interactive_queue_wait_total_ms += queue_wait_ms
@@ -428,7 +419,6 @@ class BuildQoS:
                     self._bulk_queue_wait_count += 1
 
             if not acquired:
-                # Release tenant slot since we failed to get global slot
                 await tenant_limiter.release()
                 tenant_slot_released = True
                 with self._lock:
@@ -453,14 +443,9 @@ class BuildQoS:
             )
 
         except BaseException:
-            # Release the tenant slot on ANY exit (if not already released),
-            # including asyncio.CancelledError — a BaseException, not Exception.
-            # The global-slot acquire above is a cancellation point (client
-            # disconnect / shutdown while queued), and `except Exception` let a
-            # cancel escape without releasing the per-tenant slot grabbed at
-            # step 1 — a permanent per-tenant slot leak that bleeds into
-            # TenantAtCapacityError for every later build (effectively a
-            # per-tenant DoS). ResizableLimiter has no timeout-based reclaim.
+            # BaseException, not Exception: the global acquire is a cancellation point,
+            # and missing CancelledError leaks the tenant slot permanently (ResizableLimiter
+            # has no timeout-based reclaim), so every later build gets TenantAtCapacityError.
             if not tenant_slot_released:
                 await tenant_limiter.release()
             raise
@@ -559,7 +544,7 @@ class BuildSlot:
             return
         self._released = True
 
-        # Release in reverse order (global first, then tenant)
+        # Reverse acquisition order.
         await self._global_limiter.release()
         await self._tenant_limiter.release()
 
@@ -569,10 +554,6 @@ class BuildSlot:
     async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
         await self.release()
 
-
-# ---------------------------------------------------------------------------
-# Module-level singleton
-# ---------------------------------------------------------------------------
 
 _build_qos: BuildQoS | None = None
 

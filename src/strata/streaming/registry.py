@@ -35,17 +35,17 @@ class StreamState:
     """
 
     stream_id: str
-    plan: ReadPlan  # The underlying scan plan
-    artifact_id: str  # Artifact being built
+    plan: ReadPlan
+    artifact_id: str  # Being built
     artifact_version: int
     created_at: float  # Unix timestamp
     mode: str = "stream"  # "stream" for client streaming, "artifact" for background build
     name: str | None = None
     tenant: str | None = None
     executor_ref: str = "scan@v1"
-    started: bool = False  # True once streaming has begun
-    completed: bool = False  # True once streaming finished
-    bytes_streamed: int = 0  # Bytes streamed to client so far
+    started: bool = False
+    completed: bool = False
+    bytes_streamed: int = 0
     started_at: float | None = None
     completed_at: float | None = None
     error_message: str | None = None
@@ -75,13 +75,10 @@ class StreamRegistry:
         self._cleanup_tasks: dict[str, asyncio.Task[None]] = {}
         self._ttl_seconds = ttl_seconds
         self._on_expire = on_expire
-        # Injected the same way as on_expire, so this module stays unaware of
-        # where ownership is recorded. Both are None in a single-node
-        # deployment, which is what keeps that case free.
+        # Injected so this module stays unaware of where ownership is recorded; both None
+        # (and free) on a single node.
         self._on_claim = on_claim
         self._on_release = on_release
-
-    # --- lookup -------------------------------------------------------------
 
     def get(self, stream_id: str) -> StreamState | None:
         return self._streams.get(stream_id)
@@ -93,8 +90,6 @@ class StreamRegistry:
         """Snapshot of the live streams (for graceful-shutdown cancellation)."""
         return list(self._streams.values())
 
-    # --- mutation -----------------------------------------------------------
-
     def register(self, stream_state: StreamState) -> None:
         self._streams[stream_state.stream_id] = stream_state
         if self._on_claim is not None:
@@ -105,8 +100,6 @@ class StreamRegistry:
         if popped is not None and self._on_release is not None:
             self._on_release(stream_id)
         return popped
-
-    # --- cleanup lifecycle --------------------------------------------------
 
     def cancel_cleanup(self, stream_id: str) -> None:
         """Cancel any pending cleanup task for a stream."""
@@ -145,10 +138,8 @@ class StreamRegistry:
             if scan_id is not None and self._on_expire is not None:
                 self._on_expire(scan_id)
             if self._streams.pop(stream_id, None) is not None and self._on_release is not None:
-                # This path pops the dict directly rather than through pop(),
-                # so the claim has to be dropped here as well or an expired
-                # stream would keep advertising this node until its row's own
-                # expiry caught up.
+                # Bypasses pop(), so release the claim here or an expired stream keeps
+                # advertising this node until its row expires.
                 self._on_release(stream_id)
 
         self._cleanup_tasks[stream_id] = asyncio.create_task(_cleanup())

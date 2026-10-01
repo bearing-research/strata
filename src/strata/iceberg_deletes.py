@@ -46,9 +46,8 @@ def _read(io: FileIO, delete_file: DeleteFileEntry) -> dict[str, pa.ChunkedArray
             "file_path",
             paths.cast(paths.type.value_type),
         )
-    # One stable sort, then a slice per run of equal paths. Filtering the whole
-    # table once per path was quadratic: a Spark delete file of 2M rows over
-    # 2000 data files took longer to parse than the plan timeout.
+    # One stable sort, then a slice per run of equal paths. Filtering once per
+    # path is quadratic: a 2M-row Spark delete file can outrun the plan timeout.
     table = table.sort_by("file_path")
     runs = pc.run_end_encode(table.column("file_path").combine_chunks())
     positions = table.column("pos")

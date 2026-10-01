@@ -398,7 +398,6 @@ class S3BlobStore(BlobStore):
         self._secret_key = secret_key
         self._anonymous = anonymous
 
-        # Build S3FileSystem
         kwargs = {}
         if region:
             kwargs["region"] = region
@@ -587,9 +586,8 @@ class S3BlobStore(BlobStore):
             info = self._fs.get_file_info(key)
             return info.type == pafs.FileType.File
         except Exception:
-            # A backend error is not the same as "absent", but callers treat
-            # this as a boolean fact — so at minimum make the difference
-            # visible rather than reporting a confident False.
+            # A backend error is not "absent"; log it rather than report a
+            # confident False.
             logger.exception(
                 "blob_exists failed for %s@v=%d; reporting absent", artifact_id, version
             )
@@ -620,9 +618,8 @@ class S3BlobStore(BlobStore):
             self._fs.delete_file(key)
             return True
         except Exception:
-            # The caller (GC / delete_artifact) removes the metadata row
-            # regardless, so a silent False here orphans the object with no
-            # row left to ever retry it.
+            # The caller removes the metadata row regardless, so a silent False
+            # would orphan the object with nothing left to retry it.
             logger.exception(
                 "delete_blob failed for %s@v=%d; object orphaned", artifact_id, version
             )
@@ -690,9 +687,8 @@ def _resolve_gcs_credentials(credentials: str) -> str:
 
     digest = hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
     path = Path(tempfile.gettempdir()) / f"strata_gcs_{digest}.json"
-    # Opened by descriptor with an explicit mode: writing through Path would
-    # leave the key world-readable for the moment before a chmod lands, and
-    # would not fix the mode of a file left behind by a previous run.
+    # Created with mode 0o600 so the key is never world-readable; the chmod
+    # below fixes a file left behind by a previous run.
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(fd, "w", encoding="utf-8") as handle:
         handle.write(text)
@@ -738,18 +734,14 @@ class GCSBlobStore(BlobStore):
         self.bucket = bucket
         self.prefix = prefix.strip("/")
 
-        # Build GcsFileSystem
         kwargs = {}
         if default_bucket_location:
             kwargs["default_bucket_location"] = default_bucket_location
         if credentials_json:
             kwargs["access_token"] = None  # Disable token auth
-            # GcsFileSystem reads GOOGLE_APPLICATION_CREDENTIALS, which the
-            # Google client resolves strictly as a filesystem path. The setting
-            # is named ...CREDENTIALS_JSON, so operators paste key material
-            # into it -- and a container deployment usually has the credential
-            # as an env var rather than a mounted file. Spill that to a private
-            # file so both readings work.
+            # GOOGLE_APPLICATION_CREDENTIALS must be a file path, but operators
+            # paste key material into ...CREDENTIALS_JSON (an env var in most
+            # containers). Spill it to a private file so both readings work.
             import os
 
             os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = _resolve_gcs_credentials(
@@ -841,9 +833,8 @@ class GCSBlobStore(BlobStore):
             self._fs.delete_file(key)
             return True
         except Exception:
-            # The caller (GC / delete_artifact) removes the metadata row
-            # regardless, so a silent False here orphans the object with no
-            # row left to ever retry it.
+            # The caller removes the metadata row regardless, so a silent False
+            # would orphan the object with nothing left to retry it.
             logger.exception(
                 "delete_blob failed for %s@v=%d; object orphaned", artifact_id, version
             )
@@ -883,9 +874,8 @@ class _AzureDownloadReader(io.RawIOBase):
 
     def __init__(self, downloader: StorageStreamDownloader) -> None:
         self._chunks: Iterator[bytes] = iter(downloader.chunks())
-        # The unread rest of the current chunk. A memoryview, so taking bytes
-        # off the front is a new view rather than a copy of what remains:
-        # re-slicing bytes copied a 32 MiB chunk once per 128 KiB read.
+        # The unread rest of the current chunk. A memoryview, so consuming the
+        # front makes a view rather than copying the rest of a 32 MiB chunk.
         self._buffer = memoryview(b"")
 
     def readable(self) -> bool:
@@ -962,7 +952,6 @@ class AzureBlobStore(BlobStore):
         self.container_name = container_name
         self.prefix = prefix.strip("/")
 
-        # Build the container client based on auth method
         if connection_string:
             self._client = ContainerClient.from_connection_string(
                 conn_str=connection_string,
@@ -1151,7 +1140,6 @@ def create_blob_store(config: StrataConfig) -> BlobStore:
     Raises:
         ValueError: If required configuration is missing
     """
-    # Check environment variables first
     backend = os.environ.get("STRATA_ARTIFACT_BLOB_BACKEND", "local").lower()
 
     if backend == "s3":
@@ -1181,7 +1169,6 @@ def create_blob_store(config: StrataConfig) -> BlobStore:
         prefix = os.environ.get("STRATA_ARTIFACT_AZURE_PREFIX", "artifacts")
         return AzureBlobStore.from_config(config, container_name=container, prefix=prefix)
 
-    # Default: local filesystem
     if config.artifact_dir is None:
         raise ValueError("Local blob store requires artifact_dir in configuration")
     blobs_dir = config.artifact_dir / "blobs"

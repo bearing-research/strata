@@ -29,11 +29,9 @@ class PersistedRowGroupMeta:
 
     num_rows: int
     total_byte_size: int
-    # Column statistics: {col_name: {min: val, max: val, null_count: int}}
+    # {col_name: {min: val, max: val, null_count: int}}
     column_stats: dict[str, dict]
-    # Per-column uncompressed sizes: {col_name: bytes}. Empty for entries
-    # written before this field existed; readers must treat a missing column
-    # as unknown rather than as zero bytes.
+    # Uncompressed {col_name: bytes}; a missing column means unknown, not zero.
     column_sizes: dict[str, int] = field(default_factory=dict)
 
 
@@ -41,7 +39,7 @@ class PersistedRowGroupMeta:
 class PersistedParquetMeta:
     """Serializable Parquet file metadata."""
 
-    arrow_schema_bytes: bytes  # Serialized Arrow schema
+    arrow_schema_bytes: bytes
     num_row_groups: int
     row_groups: list[PersistedRowGroupMeta]
     column_names: list[str]
@@ -54,8 +52,7 @@ def _local_path_for_stat(file_path: str) -> Path | None:
     because ``urlparse`` treats single letters followed by ``:`` as a
     scheme. Detect that pattern first and treat it as a local path.
     """
-    # Windows drive letter, e.g. "C:\..." — a real URI scheme is always
-    # >= 2 chars, so a 1-char "scheme" can only be a Windows drive.
+    # A 1-char "scheme" can only be a Windows drive letter ("C:\..."); URI schemes are longer.
     if len(file_path) >= 2 and file_path[1] == ":" and file_path[0].isalpha():
         return Path(file_path)
     parsed = urlparse(file_path)
@@ -75,12 +72,9 @@ def _stat_identity(file_path: str) -> tuple[float | None, int | None]:
     return stat.st_mtime, stat.st_size
 
 
-# Bump when a table's layout or a stored value's meaning changes; a store in
-# another version is discarded.
-#   1: manifest entries record each data file's delete files (0.8.0 wrote
-#      rows without them, and pyiceberg < 0.12 could lose a table's deletes)
-#   2: and its equality deletes
-#   3: and its identity-partition values
+# Bump when a table's layout or a stored value's meaning changes; a store in another
+# version is discarded. Manifest entries carry delete files (1), equality deletes (2),
+# identity-partition values (3).
 METADATA_STORE_VERSION = 3
 
 
@@ -101,7 +95,6 @@ class MetadataStore:
 
     def __init__(self, db_path: Path) -> None:
         self.db_path = db_path
-        # Counters for observability
         self.manifest_hits = 0
         self.manifest_misses = 0
         self.parquet_meta_hits = 0
@@ -121,11 +114,10 @@ class MetadataStore:
         """
         conn = sqlite3.connect(str(self.db_path))
         conn.row_factory = sqlite3.Row
-        # Performance and concurrency pragmas
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("PRAGMA synchronous=NORMAL")
         conn.execute("PRAGMA temp_store=MEMORY")
-        conn.execute("PRAGMA busy_timeout=30000")  # 30s timeout
+        conn.execute("PRAGMA busy_timeout=30000")
         return conn
 
     def _init_db(self) -> None:
@@ -234,8 +226,7 @@ class MetadataStore:
                 self.parquet_meta_misses += 1
                 return None
 
-            # Check if file has been modified using (mtime, size) tuple
-            # This handles: mtime going backwards, same mtime with different content
+            # (mtime, size) catches mtime going backwards and same-mtime rewrites
             local_path = _local_path_for_stat(file_path)
             if local_path is not None:
                 try:
@@ -246,18 +237,17 @@ class MetadataStore:
                     stored_size = row["file_size"]
                     if stored_mtime is not None and stored_size is not None:
                         if current_mtime != stored_mtime or current_size != stored_size:
-                            # Stale entry - return None, let put() overwrite later
+                            # Stale: put() overwrites it later
                             self.stale_invalidations += 1
                             self.parquet_meta_misses += 1
                             return None
                 except OSError:
-                    # File doesn't exist - return None, cleanup will handle it
+                    # File gone: cleanup removes the entry
                     self.stale_invalidations += 1
                     self.parquet_meta_misses += 1
                     return None
 
             self.parquet_meta_hits += 1
-            # Deserialize row groups
             row_groups_data = json.loads(row["row_groups_json"])
             row_groups = [
                 PersistedRowGroupMeta(
@@ -328,7 +318,6 @@ class MetadataStore:
 
         result: dict[str, PersistedParquetMeta] = {}
         with self._get_conn() as conn:
-            # Use WHERE IN with placeholders
             placeholders = ",".join("?" * len(file_paths))
             rows = conn.execute(
                 f"SELECT * FROM parquet_meta WHERE file_path IN ({placeholders})",
@@ -356,7 +345,6 @@ class MetadataStore:
                         continue
 
                 self.parquet_meta_hits += 1
-                # Deserialize
                 row_groups_data = json.loads(row["row_groups_json"])
                 row_groups = [
                     PersistedRowGroupMeta(
@@ -374,7 +362,6 @@ class MetadataStore:
                     column_names=json.loads(row["column_names_json"]),
                 )
 
-        # Count misses for paths not found
         self.parquet_meta_misses += len(file_paths) - len(result)
         return result
 
@@ -485,7 +472,6 @@ class MetadataStore:
                         if stat.st_mtime != stored_mtime or stat.st_size != stored_size:
                             stale_paths.append(file_path)
                 except OSError:
-                    # File doesn't exist
                     stale_paths.append(file_path)
 
             if stale_paths:
@@ -503,7 +489,7 @@ class MetadataStore:
 def serialize_arrow_schema(schema: pa.Schema) -> bytes:
     """Serialize Arrow schema to IPC format bytes."""
     sink = pa.BufferOutputStream()
-    # Write empty batch to capture schema
+    # An empty batch carries the schema
     batch = pa.RecordBatch.from_pydict({name: [] for name in schema.names}, schema=schema)
     writer = pa.ipc.new_stream(sink, schema)
     writer.write_batch(batch)
@@ -529,23 +515,20 @@ def extract_parquet_meta(
     Returns:
         PersistedParquetMeta containing serializable metadata
     """
-    # Handle S3 paths
     if file_path.startswith("s3://"):
         if s3_filesystem is None:
             import pyarrow.fs as pafs
 
             s3_filesystem = pafs.S3FileSystem()
-        # Strip s3:// prefix for PyArrow filesystem
+        # PyArrow filesystems take no scheme
         s3_path = file_path[5:]
         pq_file = pq.ParquetFile(s3_path, filesystem=s3_filesystem)
     else:
         pq_file = pq.ParquetFile(file_path)
     metadata = pq_file.metadata
 
-    # Serialize schema
     schema_bytes = serialize_arrow_schema(pq_file.schema_arrow)
 
-    # Extract row group metadata
     row_groups = []
     for i in range(metadata.num_row_groups):
         rg = metadata.row_group(i)
@@ -553,16 +536,14 @@ def extract_parquet_meta(
 
         for j in range(rg.num_columns):
             col = rg.column(j)
-            # Key stats by the column's dotted PATH, not its leaf name: a
-            # struct field ``user.id`` has leaf name ``id``, which collides
-            # with a top-level ``id`` and silently overwrote its stats.
+            # Dotted path, not leaf name: struct field ``user.id`` would collide with a
+            # top-level ``id``.
             col_name = metadata.schema.column(j).path
 
             if col.is_stats_set:
                 stats = col.statistics
                 stat_dict = {}
                 if stats.has_min_max:
-                    # Convert to Python types for JSON serialization
                     min_val = stats.min
                     max_val = stats.max
                     if hasattr(min_val, "as_py"):
@@ -570,7 +551,6 @@ def extract_parquet_meta(
                     if hasattr(max_val, "as_py"):
                         max_val = max_val.as_py()
 
-                    # Handle non-JSON-serializable types
                     try:
                         json.dumps(min_val)
                         stat_dict["min"] = min_val
@@ -601,14 +581,12 @@ def extract_parquet_meta(
         arrow_schema_bytes=schema_bytes,
         num_row_groups=metadata.num_row_groups,
         row_groups=row_groups,
-        # Dotted paths (unique per physical column), not leaf names — see
-        # the column_stats comment above.
+        # Dotted paths, unique per physical column (see column_stats above)
         column_names=[metadata.schema.column(i).path for i in range(len(metadata.schema))],
     )
 
 
-# Global singleton store - moved to metadata_cache.py to avoid duplicate singletons
-# Use get_metadata_store from metadata_cache.py instead
+# The process-wide store is metadata_cache.get_metadata_store.
 
 
 def reset_metadata_store() -> None:

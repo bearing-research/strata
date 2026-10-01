@@ -44,9 +44,7 @@ from starlette.datastructures import UploadFile
 logger = logging.getLogger(__name__)
 
 
-# ---------------------------------------------------------------------------
-# Executor Interface (Abstract Base Class)
-# ---------------------------------------------------------------------------
+# --- Executor interface ---
 
 
 @dataclass
@@ -150,9 +148,7 @@ class BaseExecutor(ABC):
         }
 
 
-# ---------------------------------------------------------------------------
-# DuckDB SQL Executor (Reference Implementation)
-# ---------------------------------------------------------------------------
+# --- DuckDB SQL executor (reference implementation) ---
 
 
 class DuckDBExecutor(BaseExecutor):
@@ -212,7 +208,6 @@ class DuckDBExecutor(BaseExecutor):
             )
 
         try:
-            # Extract SQL from params
             sql = params.get("sql")
             if not sql:
                 return ExecutionResult(
@@ -223,14 +218,12 @@ class DuckDBExecutor(BaseExecutor):
 
             logs_buffer.write(f"Executing SQL: {sql[:100]}...\n")
 
-            # Create DuckDB connection with memory limit
             conn = duckdb.connect(":memory:")
             conn.execute(f"SET memory_limit='{self.max_memory_mb}MB'")
 
-            # Sort inputs by name to ensure consistent ordering
+            # Sort by name for a stable input order.
             sorted_inputs = sorted(inputs, key=lambda x: x.name)
 
-            # Register each input as a table
             for inp in sorted_inputs:
                 reader = ipc.open_stream(io.BytesIO(inp.data))
                 table = reader.read_all()
@@ -239,11 +232,9 @@ class DuckDBExecutor(BaseExecutor):
                     f"Registered {inp.name}: {table.num_rows} rows, {table.num_columns} columns\n"
                 )
 
-            # Execute query
             result = conn.execute(sql).to_arrow_table()
             logs_buffer.write(f"Result: {result.num_rows} rows\n")
 
-            # Serialize to Arrow IPC stream
             output_buffer = io.BytesIO()
             with ipc.new_stream(output_buffer, result.schema) as writer:
                 writer.write_table(result)
@@ -271,9 +262,7 @@ class DuckDBExecutor(BaseExecutor):
             )
 
 
-# ---------------------------------------------------------------------------
-# FastAPI Application (Standalone Server)
-# ---------------------------------------------------------------------------
+# --- FastAPI application (standalone server) ---
 
 
 def create_executor_app(executor: BaseExecutor | None = None):
@@ -326,22 +315,18 @@ def create_executor_app(executor: BaseExecutor | None = None):
         """
         import json
 
-        # Parse multipart form data
         form = await http_request.form()
 
-        # Get metadata
         metadata_file = form.get("metadata")
         if not isinstance(metadata_file, UploadFile):
             raise HTTPException(status_code=400, detail="Missing metadata")
 
-        # Parse metadata
         try:
             metadata_bytes = await metadata_file.read()
             meta = json.loads(metadata_bytes)
         except Exception as e:
             raise HTTPException(status_code=400, detail=f"Invalid metadata: {e}")
 
-        # Validate protocol version
         protocol_version = meta.get("protocol_version", "v1")
         if protocol_version != EXECUTOR_PROTOCOL_VERSION:
             raise HTTPException(
@@ -350,12 +335,10 @@ def create_executor_app(executor: BaseExecutor | None = None):
                 f"Expected: {EXECUTOR_PROTOCOL_VERSION}",
             )
 
-        # Extract transform info
         transform = meta.get("transform", {})
         transform_ref = transform.get("ref", "")
         params = transform.get("params", {})
 
-        # Validate transform reference
         supported_refs = executor.get_transform_refs()
         if not any(transform_ref.startswith(ref.split("@")[0]) for ref in supported_refs):
             raise HTTPException(
@@ -363,7 +346,6 @@ def create_executor_app(executor: BaseExecutor | None = None):
                 detail=f"Unsupported transform: {transform_ref}. Supported: {supported_refs}",
             )
 
-        # Collect inputs from form data
         inputs: list[ExecutorInput] = []
         for name in ["input0", "input1", "input2", "input3", "input4"]:
             upload = form.get(name)
@@ -372,11 +354,9 @@ def create_executor_app(executor: BaseExecutor | None = None):
                 if data:
                     inputs.append(ExecutorInput(name=name, data=data))
 
-        # Execute transform
         result = executor.execute(transform_ref, params, inputs)
 
         if not result.success:
-            # Return error as JSON
             return Response(
                 content=json.dumps(
                     {
@@ -391,12 +371,10 @@ def create_executor_app(executor: BaseExecutor | None = None):
                 media_type="application/json",
             )
 
-        # Build response headers
         headers = {
             EXECUTOR_PROTOCOL_HEADER: EXECUTOR_PROTOCOL_VERSION,
         }
 
-        # Add logs as base64-encoded header if present
         if result.logs:
             headers[EXECUTOR_LOGS_HEADER] = base64.b64encode(result.logs.encode("utf-8")).decode(
                 "ascii"
@@ -411,20 +389,16 @@ def create_executor_app(executor: BaseExecutor | None = None):
     return app
 
 
-# Lazy app creation for uvicorn (only when running as main)
-# Don't create at import time to avoid dependency issues in tests
+# Lazy so that importing this module (e.g. in tests) does not build the app.
 def get_app():
     """Get the default executor app (lazy initialization)."""
     return create_executor_app()
 
 
-# For uvicorn: use `uvicorn strata.transforms.reference_executor:get_app --factory`
-# Or use the create_executor_app() function directly
+# For uvicorn: `uvicorn strata.transforms.reference_executor:get_app --factory`
 
 
-# ---------------------------------------------------------------------------
-# Utility Functions for Building Executors
-# ---------------------------------------------------------------------------
+# --- Utilities for building executors ---
 
 
 def parse_arrow_inputs(

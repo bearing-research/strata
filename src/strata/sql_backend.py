@@ -59,33 +59,26 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any, Protocol
 
-# Mirrors ``sqlite3.connect(timeout=30.0)``: a contended writer gives up after
-# the same interval rather than blocking forever.
+# Mirrors ``sqlite3.connect(timeout=30.0)``: a contended writer gives up, not blocks forever.
 _LOCK_TIMEOUT_MS = 30_000
 _CONNECT_TIMEOUT_SECONDS = 10
 
-# Pool defaults. max_size is per process, and the store nests connection
-# acquisition two deep in places, so re-entrant sharing (see
-# ``PostgresDialect.connect``) is what keeps this from having to be sized at
-# twice the concurrency.
+# max_size is per process. The store nests acquisition two deep, so re-entrant sharing
+# (``PostgresDialect.connect``) keeps this from needing twice the concurrency.
 _POOL_MIN_SIZE = 0
 _POOL_MAX_SIZE = 16
-# Bounds the wait for a free connection. Without it an exhausted pool blocks
-# forever, which is the failure this whole class exists to avoid.
+# Without it an exhausted pool blocks forever.
 _POOL_TIMEOUT_SECONDS = 30.0
 
 
-# Characters that open a region where ``?`` is data, not a placeholder.
 logger = logging.getLogger(__name__)
 
+# Characters that open a region where ``?`` is data, not a placeholder.
 _SINGLE_QUOTE = "'"
 _DOUBLE_QUOTE = '"'
 
-# Column-type tokens that mean different things to different engines. Applied
-# only to this package's own DDL constants, never to arbitrary SQL.
-#
-# Order matters: the autoincrement rewrite has to consume its own INTEGER
-# before the bare-INTEGER rule runs, or it would never match.
+# Column-type tokens that differ by engine; applied only to this package's own DDL.
+# Order matters: the autoincrement rule must consume its INTEGER before the bare-INTEGER one.
 _DDL_TYPE_REWRITES = (
     ("INTEGER PRIMARY KEY AUTOINCREMENT", "autoincrement_pk"),
     (r"\bREAL\b", "float_type"),
@@ -201,8 +194,7 @@ class StoreConnection(Protocol):
     103 ``conn.execute`` call sites unchanged.
     """
 
-    # Positional-only, as sqlite3.Connection's are: every call site passes them
-    # positionally, and a keyword-capable protocol would not match sqlite3.
+    # Positional-only so sqlite3.Connection matches the protocol.
     def execute(self, sql: str, params: Sequence[Any] = (), /) -> Any: ...
 
     def executescript(self, sql: str, /) -> Any: ...
@@ -379,7 +371,6 @@ class SqliteDialect:
         return conn
 
     def adapt_ddl(self, sql: str) -> str:
-        # The DDL is already written in this dialect.
         return sql
 
     @property
@@ -413,8 +404,7 @@ class SqliteDialect:
         return True
 
     def column_exists(self, conn: StoreConnection, table: str, column: str) -> bool:
-        # PRAGMA takes no bind parameters, so the table name is interpolated.
-        # Every caller is a migration in this module naming a literal.
+        # PRAGMA takes no bind parameters; every caller passes a literal table name.
         rows = conn.execute(f"PRAGMA table_info({table})").fetchall()
         return any(row["name"] == column for row in rows)
 
@@ -425,17 +415,15 @@ class SqliteDialect:
         return row is not None
 
     def close(self) -> None:
-        # Nothing pooled: each connection is a file handle closed by its caller.
+        # Nothing pooled: callers close their own connections.
         return
 
     def resync_autoincrement(self, conn: StoreConnection, table: str, column: str) -> None:
-        # SQLite derives the next rowid from the table, so there is nothing
-        # standing beside it to fall out of step.
+        # SQLite derives the next rowid from the table; no sequence to drift.
         return
 
     def begin_write(self, conn: StoreConnection, key: str) -> None:
-        # SQLite locks the whole database file, so the key is not needed: any
-        # writer excludes any other regardless of what it intends to touch.
+        # SQLite locks the whole file, so the key is unused.
         conn.execute("BEGIN IMMEDIATE")
 
 
@@ -461,9 +449,7 @@ class _Row(Mapping):
         try:
             return self._values[self._columns.index(key)]
         except ValueError:
-            # Mapping's mixin get() and __contains__ catch KeyError only, so
-            # letting list.index's ValueError escape would make row.get("x")
-            # raise instead of returning the default.
+            # Mapping's get() and __contains__ catch only KeyError.
             raise KeyError(key) from None
 
     def __iter__(self):
@@ -505,8 +491,7 @@ class _PostgresConnection:
         return self._inner.execute(translate_placeholders(sql), params)
 
     def executescript(self, sql: str) -> Any:
-        # No parameters, so the percent-escaping in translate_placeholders
-        # would be the only effect; the DDL contains none. Sent as-is.
+        # No parameters, so skip translate_placeholders' percent-escaping.
         return self._inner.execute(sql)
 
     def commit(self) -> None:
@@ -562,17 +547,10 @@ class PostgresDialect:
                 if self._pool is None:
                     from psycopg_pool import ConnectionPool
 
-                    # Timeouts, because the SQLite dialect had them and this
-                    # one inherited none. ``sqlite3.connect(timeout=30.0)``
-                    # made a contended writer fail loudly after 30s;
-                    # ``pg_advisory_xact_lock`` waits forever, so a node that
-                    # stalls while holding a lock -- a paused container, a
-                    # partition leaving the backend "idle in transaction" --
-                    # would hang every other node behind it with no bound.
-                    #
-                    # Deliberately no ``statement_timeout``: the hazard is
-                    # waiting on a lock, not running a long query, and a query
-                    # cap would break slow maintenance like ``garbage_collect``.
+                    # ``pg_advisory_xact_lock`` waits forever, so a node stalled holding a
+                    # lock (paused container, "idle in transaction") would hang every other
+                    # node. No ``statement_timeout``: it would break slow maintenance like
+                    # ``garbage_collect``.
                     self._pool = ConnectionPool(
                         self.dsn,
                         min_size=_POOL_MIN_SIZE,
@@ -625,12 +603,9 @@ class PostgresDialect:
     def _release(self) -> None:
         state = self._local
         if getattr(state, "conn", None) is None:
-            # A release from a thread that is not the one holding this
-            # connection: a cross-thread close, or a double release that got
-            # past the wrapper's own guard. Returning here keeps the failure
-            # from compounding -- decrementing blindly would drive depth
-            # negative and then call putconn(None), which psycopg_pool rejects
-            # while the real connection stays lost from a bounded pool.
+            # Release from a non-owning thread (cross-thread close or double release).
+            # Decrementing would drive depth negative and putconn(None), losing the real
+            # connection from a bounded pool.
             logger.warning("ignoring artifact-store connection release from a non-owning thread")
             return
 
@@ -643,14 +618,12 @@ class PostgresDialect:
 
         pool = self._pool
         if self._closed or pool is None:
-            # The pool was disposed while this connection was checked out.
-            # putconn would rebuild a pool and then reject the connection as
-            # foreign, so dispose it directly instead.
+            # Pool disposed while checked out: putconn would rebuild a pool and reject this
+            # connection as foreign.
             raw.close()
             return
 
-        # putconn rolls back anything still open, so a caller that raised
-        # before committing cannot leak a transaction into the next borrower.
+        # putconn rolls back an open transaction so it cannot leak to the next borrower.
         pool.putconn(raw)
 
     def close(self) -> None:
@@ -688,14 +661,12 @@ class PostgresDialect:
 
     @property
     def float_type(self) -> str:
-        # Postgres REAL is single precision (~7 significant digits), which
-        # cannot represent a time.time() value to sub-second resolution.
+        # Postgres REAL is single precision: too coarse for sub-second time.time() values.
         return "DOUBLE PRECISION"
 
     @property
     def integer_type(self) -> str:
-        # Postgres INTEGER is int4, capped at 2147483647 -- smaller than
-        # byte_size for any artifact at or above 2 GiB.
+        # Postgres INTEGER is int4; byte_size reaches 2 GiB.
         return "BIGINT"
 
     @property
@@ -721,9 +692,8 @@ class PostgresDialect:
         return False
 
     def resync_autoincrement(self, conn: StoreConnection, table: str, column: str) -> None:
-        # setval with is_called=false so the next nextval() returns exactly
-        # this value; coalesce covers an empty table, where the sequence must
-        # start at 1 rather than 0.
+        # is_called=false so the next nextval() returns exactly this value; coalesce starts an
+        # empty table at 1.
         conn.execute(
             f"SELECT setval(pg_get_serial_sequence('{table}', '{column}'), "  # noqa: S608
             f"COALESCE((SELECT MAX({column}) FROM {table}), 0) + 1, false)"  # noqa: S608

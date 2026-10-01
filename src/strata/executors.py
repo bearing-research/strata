@@ -24,7 +24,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-# Import transforms to register them
 import strata.transforms  # noqa: F401 - registers transforms
 from strata.transforms.base import _run_transform, get_transform, list_transforms
 
@@ -64,7 +63,6 @@ def _run_local(
     params = build_spec.get("params", {})
     input_uris = build_spec.get("input_uris", [])
 
-    # Build inputs list in order
     inputs: list[pa.Table] = []
     for uri in input_uris:
         table = input_tables.get(uri)
@@ -72,18 +70,15 @@ def _run_local(
             raise ValueError(f"Missing input table for URI: {uri}")
         inputs.append(table)
 
-    # Run via transform registry
     return _run_transform(executor, inputs, params)
 
 
-# Backward compatibility alias (deprecated)
 run_local = _run_local
 
 
-# Re-export for convenience
 __all__ = [
     "_run_local",  # Internal: for embedded executor use
-    "run_local",  # Deprecated: kept for backward compatibility
+    "run_local",  # Deprecated alias
     "get_transform",
     "list_transforms",
 ]

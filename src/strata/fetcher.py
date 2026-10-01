@@ -25,7 +25,6 @@ if TYPE_CHECKING:
 # members like ``is_in``. Cast through Any.
 pc = cast(Any, _pc)
 
-# Maximum number of ParquetFile handles to cache
 _MAX_FILE_CACHE_SIZE = 128
 
 
@@ -77,14 +76,10 @@ class PyArrowFetcher:
         self._max_file_cache_size = max_file_cache_size
         self._s3_filesystem = s3_filesystem
         self._equality_deletes = EqualityDeleteSets(s3_filesystem, max_equality_delete_rows)
-        # Each file's parsed footer, least recently used first. Footers are
-        # cached rather than open handles: one Fetcher serves the whole fetch
-        # thread pool (``max_fetch_workers``, 32 by default), which reads row
-        # groups of one file in parallel, and pyarrow does not promise that a
-        # ParquetFile is safe to read from two threads at once. pyarrow 25
-        # segfaults when it is. A FileMetaData is immutable, so it can be
-        # shared, and a read opens its own handle with it, skipping the footer
-        # read, and closes the handle when it is done.
+        # Parsed footers, least recently used first. Footers, not open handles:
+        # the fetch pool reads row groups of one file in parallel, and a
+        # ParquetFile is not thread-safe (pyarrow 25 segfaults). An immutable
+        # FileMetaData is shared; each read opens its own handle with it.
         self._file_cache: OrderedDict[str, pq.FileMetaData] = OrderedDict()
         self._file_cache_lock = threading.Lock()
 
@@ -119,8 +114,6 @@ class PyArrowFetcher:
         """Fetch a single row group as a RecordBatch."""
         start_time = time.perf_counter()
 
-        # Read the specific row group with optional column projection, on a
-        # handle no other thread holds.
         columns = task.columns
         if task.file_columns is not None:
             columns = source_columns(task.file_columns, task.columns)
@@ -160,16 +153,12 @@ class PyArrowFetcher:
         if task.file_columns is not None:
             table = read_as_snapshot(table, task.file_columns, task.columns)
 
-        # Convert to a single RecordBatch
-        # combine_chunks() is more efficient than manual concat_arrays
         if table.num_rows == 0:
             batch = pa.RecordBatch.from_pylist([], schema=table.schema)
         else:
-            # Combine chunked arrays, then get single batch
             table = table.combine_chunks()
             batch = table.to_batches()[0]
 
-        # Track metrics
         elapsed_ms = (time.perf_counter() - start_time) * 1000
         bytes_read = batch.nbytes
         task.bytes_read = bytes_read
