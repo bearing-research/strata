@@ -72,10 +72,8 @@ class RunPodBackend:
         # leave the other's connection pool unreleased.
         self._owns_api = api is None
         self._owns_probe = probe is None
-        # Sent per request rather than baked into the client, so that handing
-        # in a client — for retries, a proxy, or a test — cannot silently drop
-        # authentication and leave every call failing for a reason nobody
-        # would look for.
+        # Sent per request, not baked into the client, so an injected client (retries,
+        # a proxy, a test) cannot silently drop authentication.
         self._auth = {"Authorization": f"Bearer {api_key}"}
         self._api = api or httpx.AsyncClient(base_url=base_url, timeout=60.0)
         self._probe = probe or httpx.AsyncClient()
@@ -96,18 +94,12 @@ class RunPodBackend:
         if created.status_code >= 400:
             raise RunPodError(f"could not create a {spec.name} pod: {_message(created)}")
 
-        # Past this line a pod exists and is billing. Every failure below is
-        # an orphan: the pool catches it as a failed start and deletes the row
-        # that would have held the id, so nothing can terminate it. Converting
-        # the exception type does not change that — naming the pod does. The
-        # generated name is the only handle left.
+        # Past this line a pod exists and is billing. A failure below deletes the pool row
+        # that would hold its id, so the generated name is the only handle left: every
+        # error from here carries it.
         name = body["name"]
 
-        # Everything below runs with a pod already created and already
-        # billing. A parse that raises here is caught upstream as a failed
-        # start, which deletes the row holding the backend_id — so nothing
-        # could ever terminate the pod. Read the body once, and assume
-        # nothing about its shape.
+        # Read the body once and assume nothing about its shape.
         try:
             payload = created.json()
         except ValueError as exc:
@@ -119,13 +111,11 @@ class RunPodBackend:
 
         pod_id = payload.get("id")
         if not pod_id:
-            # Better to fail loudly than to hand back an endpoint built from
-            # None and let it surface later as an unreachable worker.
+            # Fail loudly rather than build an endpoint from None.
             raise _orphaned(name, f"RunPod created a pod without an id: {created.text[:200]}")
 
-        # `machine` is null until the pod is placed on a host, which is the
-        # normal shape immediately after create — `.get("machine", {})` would
-        # return None for it, not the default.
+        # `machine` is null until the pod is placed on a host, and `.get("machine", {})`
+        # returns None for a null, not the default.
         machine = payload.get("machine") or {}
         region = machine.get("dataCenterId") if isinstance(machine, dict) else None
 
@@ -178,9 +168,8 @@ def _create_body(spec: MachineType, env: dict[str, str] | None, worker_port: int
     test, so a shape that turns out to be wrong is one edit and one test line.
     """
     body: dict[str, object] = {
-        # RunPod names are not unique, but a name that identifies the pool
-        # makes an orphaned pod findable in the console, which is the only
-        # backstop we have until the backend can list its own machines.
+        # Names are not unique, but one that identifies the pool makes an orphaned pod
+        # findable in the console, our only backstop until the backend can list machines.
         "name": f"strata-{spec.name}-{uuid.uuid4().hex[:8]}",
         "imageName": spec.image,
         "ports": [f"{worker_port}/http"],
@@ -191,8 +180,7 @@ def _create_body(spec: MachineType, env: dict[str, str] | None, worker_port: int
         body["gpuCount"] = spec.gpu_count
     if spec.disk_gb is not None:
         body["containerDiskInGb"] = spec.disk_gb
-    # Last, so a deployment can correct anything above it without waiting for
-    # a release — including a field this function got wrong.
+    # Last, so a deployment can correct any field above (even a wrong one) without a release.
     body.update(spec.provider_options)
     _restore_credential(body, env)
     return body

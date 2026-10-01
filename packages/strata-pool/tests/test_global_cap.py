@@ -77,9 +77,8 @@ async def test_capacity_freed_by_one_tenant_becomes_available_to_another(make_po
     assert pool.store.get_job(blocked.id).state is JobState.QUEUED
     assert backend.started == ["machine-1"], "the cap, not a slow boot, is what deferred it"
 
-    # Reaping tenant a's idle machine frees the only slot. Nothing else will
-    # ever run for tenant b: its jobs are queued and capacity is only
-    # reconsidered when a tenant submits. The freed slot has to be offered.
+    # Reaping tenant a's idle machine frees the only slot. Capacity is otherwise only
+    # reconsidered on submit, so the freed slot must be offered to tenant b's queue.
     await pool.reap_idle_workers()
 
     assert (await pool.wait(blocked.id)).state is JobState.COMPLETED

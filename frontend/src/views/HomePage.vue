@@ -39,19 +39,14 @@ const importInput = ref<HTMLInputElement | null>(null)
 const importing = ref(false)
 const importError = ref<string | null>(null)
 const importResult = ref<ImportNotebookResponse | null>(null)
-// Active when an ``.ipynb`` is being dragged over the page. The
-// dragenter / dragleave events fire on every child element transit,
-// so we count nested transitions and only clear when the counter
-// hits zero, matching the standard "page-wide drop target" pattern.
+// dragenter / dragleave fire on every child transit, so count the depth and
+// clear the hover only at zero.
 const dragDepth = ref(0)
 const isDragHovering = ref(false)
 
 async function pruneStaleRecents() {
-  // Recent notebooks live in browser localStorage and persist across
-  // notebook deletion + server restarts. Ask the server which paths
-  // still resolve to a notebook directory and drop the rest, so a
-  // stale entry doesn't pop a confusing "session not found" toast
-  // when the user clicks it.
+  // Recents in localStorage outlive deleted notebooks; drop the paths the
+  // server no longer resolves so a click doesn't hit "session not found".
   if (recentNotebooks.value.length === 0) return
   try {
     const paths = recentNotebooks.value.map((entry) => entry.path)
@@ -61,8 +56,7 @@ async function pruneStaleRecents() {
       if (!validSet.has(entry.path)) remove(entry.path)
     }
   } catch (e) {
-    // Network errors / offline / 4xx — leave the list alone. The
-    // worst case is a stale entry, same as before this fix.
+    // Best-effort: on failure keep the list; the worst case is a stale entry.
     console.warn('Failed to prune stale recent notebooks', e)
   }
 }
@@ -104,8 +98,7 @@ onMounted(async () => {
   } catch (e) {
     console.warn('Failed to load notebook config, using fallback parent path', e)
   }
-  // Run after config load — pruning is best-effort, so a slow path
-  // check shouldn't gate the rest of the home page.
+  // Last, so a slow best-effort check doesn't gate the page.
   await pruneStaleRecents()
 })
 
@@ -205,10 +198,8 @@ function dismissImportError() {
 function isIpynbDrag(event: DragEvent): boolean {
   const items = event.dataTransfer?.items
   if (!items || items.length === 0) return false
-  // ``DataTransfer.items`` only exposes the *kind* during drag (not
-  // the filename), so accept anything that looks like a file drop
-  // and validate the extension on drop. Multi-file drops surface as
-  // multiple items; we reject them on drop too.
+  // During a drag ``DataTransfer.items`` exposes only the kind, not the name;
+  // the extension and file count are checked on drop.
   for (let i = 0; i < items.length; i++) {
     if (items[i].kind === 'file') return true
   }
@@ -224,8 +215,7 @@ function onWindowDragEnter(event: DragEvent) {
 
 function onWindowDragOver(event: DragEvent) {
   if (!isIpynbDrag(event)) return
-  // preventDefault on dragover is what tells the browser this is a
-  // valid drop target; without it the drop event never fires.
+  // Without this the drop event never fires.
   event.preventDefault()
 }
 
@@ -278,8 +268,7 @@ async function loadDiscoveredNotebooks() {
   }
 }
 
-// Refresh the list whenever the "Open Existing" panel becomes visible
-// so the user sees recent writes from other notebooks without a reload.
+// Refresh on open so writes from other notebooks show without a reload.
 watch(showOpenForm, (visible) => {
   if (visible) void loadDiscoveredNotebooks()
 })
@@ -332,7 +321,7 @@ function forgetRecent(path: string) {
 }
 
 async function deleteRecent(path: string, name: string) {
-  // Destructive: rm -rf the notebook directory on disk + drop from recents.
+  // Destructive: deletes the notebook directory on disk.
   const confirmed = window.confirm(
     `Delete notebook "${name}"?\n\nThis permanently removes the directory:\n${path}\n\nThis cannot be undone.`,
   )
@@ -343,8 +332,7 @@ async function deleteRecent(path: string, name: string) {
   try {
     await strata.deleteNotebookByPath(path)
   } catch {
-    // If the backend returns 404, the directory is already gone —
-    // fall through and remove from recents anyway.
+    // A 404 means it is already gone; remove from recents anyway.
   }
   remove(path)
   if (failedRecentPath.value === path) {

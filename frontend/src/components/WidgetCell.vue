@@ -4,18 +4,15 @@ import { useNotebook } from '../stores/notebook'
 import type { Cell, WidgetDescriptor } from '../types/notebook'
 
 /**
- * Renders a widget cell's control panel. Each control is declared in the cell
- * source (`name = slider(...)`) and its value lives in runtime state. Changing
- * a control sends a debounced `widget_update` over the WS, which re-materializes
- * the value artifact and stales downstream cells.
+ * A widget cell's control panel. Controls are declared in source
+ * (`name = slider(...)`); changes send a debounced `widget_update`.
  */
 const props = defineProps<{ cell: Cell }>()
 const { updateWidgetValues, updateSource, flushCellSource } = useNotebook()
 
 const descriptors = computed<WidgetDescriptor[]>(() => props.cell.widget?.descriptors ?? [])
 
-// Live mode: whether the cell source carries a `# @live` annotation. When on,
-// changing a control auto-runs the cheap downstream cells (backend cost-gated).
+// `# @live`: a change auto-runs cheap downstream cells (backend cost-gated).
 const isLive = computed(() =>
   props.cell.source.split('\n').some((line) => {
     const match = /^#\s*@live\b\s*(\w+)?/.exec(line.trim())
@@ -40,8 +37,7 @@ function num(value: unknown, fallback = 0): number {
   return typeof value === 'number' ? value : fallback
 }
 
-// Debounce control changes so a slider drag is a train of frames flushed on
-// release; discrete controls (dropdown/checkbox/number) push immediately.
+// Slider drags are debounced; discrete controls push immediately.
 let timer: ReturnType<typeof setTimeout> | undefined
 function push(name: string, value: unknown, immediate = false) {
   clearTimeout(timer)

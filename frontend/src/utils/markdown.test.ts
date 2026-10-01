@@ -26,15 +26,12 @@ test('renderMarkdownToHtml escapes raw html and blocks javascript links', () => 
 [bad](javascript:alert(1))`,
   )
 
-  // Inline HTML is escaped (markdown-it ``html: false``) — ``<script>``
-  // never reaches the DOM.
+  // Inline HTML is escaped (markdown-it ``html: false``).
   assert.match(html, /&lt;script&gt;alert\(1\)&lt;\/script&gt;/)
   assert.doesNotMatch(html, /<script>/i)
   // Safe links render as anchors with ``target="_blank" rel="noreferrer noopener"``.
   assert.match(html, /href="https:\/\/example\.com"/)
-  // ``javascript:`` URLs are rejected by markdown-it's link validator
-  // and the source is left as inert literal text — there should be no
-  // anchor tag carrying a ``javascript:`` href.
+  // markdown-it's link validator leaves ``javascript:`` URLs as inert text.
   assert.doesNotMatch(html, /href="javascript:/)
   assert.doesNotMatch(html, /<a [^>]*javascript:/)
 })

@@ -28,12 +28,8 @@ interface EdgeLayout {
   points: { x: number; y: number }[]
 }
 
-// Per-node widths so labels like "Fetch latest prices" (19 chars) don't
-// truncate inside a cramped 140px box, while single-word cells still
-// render compact. JetBrains Mono at 11px renders ~6.6px/char; padding
-// covers the rounded corners plus a little breathing room. Labels that
-// would exceed maxNodeWidth still get ellipsized — unbounded growth
-// makes dagre emit lopsided layouts.
+// Node width follows the label (JetBrains Mono 11px is ~6.6px/char) but is
+// capped and ellipsized: unbounded widths make dagre lay out lopsided.
 const nodeHeight = 36
 const charWidthPx = 6.6
 const nodePaddingPx = 20
@@ -46,16 +42,9 @@ function widthForLabel(label: string): number {
   return Math.max(minNodeWidth, Math.min(maxNodeWidth, estimated))
 }
 
-// Layout using dagre
 const layout = computed(() => {
-  // Hide cells that don't belong on the executable graph:
-  //   - Inactive variants — represented via the stacked-card visual on
-  //     the active variant; rendering them too would just stack
-  //     orphan boxes next to the canonical node.
-  //   - Markdown cells — they have no defines/references by construction
-  //     so they'd dagre-layout as disconnected floaters competing with
-  //     real compute nodes; they render in the Notes panel beside the
-  //     DAG instead.
+  // Inactive variants show as the active node's stacked card; markdown cells
+  // have no edges and render in the Notes panel instead.
   const cells = orderedCells.value.filter(
     (c) => c.variantActive !== false && c.language !== 'markdown',
   )
@@ -76,8 +65,7 @@ const layout = computed(() => {
   })
   g.setDefaultEdgeLabel(() => ({}))
 
-  // Compute per-node width up front so dagre routes edges around the
-  // actual rendered box, not a uniform 140px placeholder.
+  // Up front, so dagre routes edges around the real box.
   const nodeWidths = new Map<CellId, number>()
   for (const c of cells) {
     const name = c.annotations?.name
@@ -86,12 +74,11 @@ const layout = computed(() => {
     nodeWidths.set(c.id, widthForLabel(rawLabel))
   }
 
-  // Add nodes
   for (const c of cells) {
     g.setNode(c.id, { width: nodeWidths.get(c.id) ?? minNodeWidth, height: nodeHeight })
   }
 
-  // Add edges (dedupe by from+to since multiple variables can connect same pair)
+  // Dedupe by from+to: several variables can connect the same pair.
   const edgeSet = new Set<string>()
   for (const e of dagEdges.value) {
     const key = `${e.from_cell_id}->${e.to_cell_id}`
@@ -103,7 +90,6 @@ const layout = computed(() => {
 
   dagre.layout(g)
 
-  // Build node layouts
   const nodeMap = new Map<CellId, NodeLayout>()
   const nodes: NodeLayout[] = []
   for (const c of cells) {
@@ -133,12 +119,8 @@ const layout = computed(() => {
     nodeMap.set(c.id, node)
   }
 
-  // Build edge layouts with dagre's routed points. Multiple variables
-  // flowing between the same (from, to) pair share a single routed
-  // path — rendering one arrow per variable just stacks identical
-  // labels at the same midpoint, which looks like the text has been
-  // jammed into one illegible blob. Group by pair and join the
-  // variable names so each edge gets one clean label like "x, y, z".
+  // One edge per (from, to) pair labelled "x, y, z"; per-variable arrows
+  // would stack their labels illegibly at the same midpoint.
   const edgeGroups = new Map<string, { from: NodeLayout; to: NodeLayout; vars: string[] }>()
   for (const e of dagEdges.value) {
     const from = nodeMap.get(e.from_cell_id)
@@ -174,7 +156,6 @@ const layout = computed(() => {
 const nodes = computed(() => layout.value.nodes)
 const edges = computed(() => layout.value.edges)
 
-// SVG dimensions from dagre layout bounds
 const svgWidth = computed(() => {
   if (nodes.value.length === 0) return 240
   let maxX = 0
@@ -189,7 +170,6 @@ const svgHeight = computed(() => {
   return maxY + 24
 })
 
-// Pan and zoom state
 const pan = reactive({ x: 0, y: 0 })
 const zoom = ref(1)
 const isPanning = ref(false)
@@ -237,7 +217,6 @@ function scrollToCell(cellId: CellId) {
   const el = document.querySelector(`[data-testid="notebook-cell"][data-cell-id="${cellId}"]`)
   if (el) {
     el.scrollIntoView({ behavior: 'smooth', block: 'center' })
-    // Brief highlight flash
     el.classList.add('dag-jump-highlight')
     setTimeout(() => el.classList.remove('dag-jump-highlight'), 1500)
   }
@@ -258,10 +237,8 @@ function statusStroke(status: Cell['status']): string {
   }
 }
 
-// Translucent fill companion to statusStroke. The SVG rect can't do
-// string-concatenated alpha (e.g. "var(--accent-success)" + "22") because
-// the result isn't valid CSS and browsers fall back to black — which is
-// why these nodes rendered dark in both themes before.
+// Translucent fill for statusStroke. Appending alpha to a var() string
+// ("var(--accent-success)" + "22") is invalid CSS and renders black.
 function statusFill(status: Cell['status']): string {
   switch (status) {
     case 'ready':
@@ -285,13 +262,11 @@ function edgePath(points: { x: number; y: number }[]): string {
   if (rest.length === 1) {
     d += ` L ${rest[0].x} ${rest[0].y}`
   } else {
-    // Use cubic bezier through the control points
     for (let i = 0; i < rest.length - 1; i += 2) {
       const cp = rest[i]
       const end = rest[i + 1] ?? rest[i]
       d += ` Q ${cp.x} ${cp.y}, ${end.x} ${end.y}`
     }
-    // If odd number of remaining points, line to the last
     if (rest.length % 2 === 1) {
       d += ` L ${rest[rest.length - 1].x} ${rest[rest.length - 1].y}`
     }
@@ -361,8 +336,7 @@ function edgePath(points: { x: number; y: number }[]): string {
 
         <!-- Nodes -->
         <g v-for="n in nodes" :key="n.id" class="dag-node" @dblclick.stop="scrollToCell(n.id)">
-          <!-- Stacked-card hint for variant groups: two offset shadow
-               rects behind the active node convey "there are alternatives". -->
+          <!-- Stacked-card hint: the group has other variants -->
           <template v-if="n.variantSiblings > 0">
             <rect
               :x="n.x - n.width / 2 + 6"
@@ -452,8 +426,7 @@ function edgePath(points: { x: number; y: number }[]): string {
   display: flex;
   flex-direction: column;
 }
-/* Matches ProfilingPanel's .profiling-header so the two panes in the
- * Execution drawer read as siblings, not strangers. */
+/* Matches ProfilingPanel's .profiling-header (sibling panes). */
 .dag-header {
   display: flex;
   align-items: center;
@@ -486,10 +459,7 @@ function edgePath(points: { x: number; y: number }[]): string {
   cursor: grab;
   flex: 1;
   min-height: 0;
-  /* Panning would otherwise highlight the node / edge labels as a
-   * text selection — ugly and distracting. The viewport never has
-   * meaningful selectable text; double-click jumps to a cell via a
-   * handler, not via native selection. */
+  /* Panning would otherwise select label text. */
   user-select: none;
   -webkit-user-select: none;
 }

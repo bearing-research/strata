@@ -33,9 +33,7 @@ const route = useRoute()
 const router = useRouter()
 const { record, remove, findBySessionId } = useRecentNotebooks()
 
-// "Embed" (in the Export menu) — copy a ready-to-paste iframe snippet (app view
-// in embed mode) plus the tiny auto-resize listener, so the notebook drops into
-// another site.
+// Export menu "Embed": an app-view iframe snippet plus its auto-resize listener.
 function embedSnippet(): string {
   const url = `${window.location.origin}/#/app/${props.sessionId}?embed=1`
   return [
@@ -78,8 +76,7 @@ const {
   pushToast,
 } = useNotebook()
 
-// Bottom drawer tab: the existing DAG/Notes/Profiling stack ('execution')
-// plus the new Registry dashboard ('registry', gated by registryEnabled).
+// 'execution' is the DAG/Notes/Profiling stack; 'registry' needs registryEnabled.
 const bottomTab = ref<'execution' | 'registry'>('execution')
 function selectBottomTab(tab: 'execution' | 'registry') {
   bottomTab.value = tab
@@ -89,10 +86,8 @@ function selectBottomTab(tab: 'execution' | 'registry') {
 const editingName = ref(false)
 const nameInput = ref<HTMLInputElement | null>(null)
 
-// Variant cells render in a single slot per group. Switch mode: only the
-// active member is `variantActive`, so the filter below keeps just it. Sweep
-// mode: every member is active and runs, but the editor still shows one slot —
-// the display-selected member (the tab strip swaps which), so collapse the rest.
+// One slot per variant group: the active member in switch mode, the
+// display-selected member in sweep mode (where every member is active).
 const renderedCells = computed(() => {
   const sweepDisplay = new Map<string, string>()
   for (const g of notebook.variantGroups) {
@@ -106,9 +101,7 @@ const renderedCells = computed(() => {
     return true
   })
 })
-// The kinds offered on an empty notebook. A subset of AddCellMenu's six on
-// purpose: the point is to get someone to their first cell, not to make them
-// choose. The full list stays one click away in "+ Add cell".
+// Deliberately fewer than AddCellMenu offers: get to a first cell, not a choice.
 const emptyStateKinds = [
   { language: 'python', label: 'Python', description: 'Code cell — the default' },
   { language: 'sql', label: 'SQL', description: 'Query a connected database' },
@@ -116,10 +109,8 @@ const emptyStateKinds = [
   { language: 'markdown', label: 'Markdown', description: 'Documentation / prose' },
 ]
 
-// These buttons stay on screen for the whole `addCell` round-trip (the empty
-// state only unmounts once the cell lands), so without a latch a double-click
-// POSTs twice and creates two cells. AddCellMenu avoids this by accident — its
-// dropdown closes on the first click.
+// The empty state stays up for the whole `addCell` round-trip, so without a
+// latch a double-click creates two cells.
 const addingFirstCell = ref(false)
 async function addFirstCell(language: string) {
   if (addingFirstCell.value) return
@@ -143,10 +134,7 @@ const sidebarWidth = ref(340)
 const showShortcuts = ref(false)
 
 // --- DAG bottom drawer ---------------------------------------------------
-// Large notebooks (10+ cells with many edges) don't fit well in a
-// narrow right sidebar, so the DAG lives in a collapsible bottom
-// drawer instead. Height + collapsed state are persisted to
-// localStorage so they stick across page reloads.
+// Large DAGs don't fit a narrow sidebar. Height and collapsed state persist.
 const DAG_DRAWER_HEIGHT_KEY = 'strata:dagDrawerHeight'
 const DAG_DRAWER_COLLAPSED_KEY = 'strata:dagDrawerCollapsed'
 const DAG_DRAWER_DEFAULT_HEIGHT = 320
@@ -195,7 +183,7 @@ function startDagDrawerResize(event: PointerEvent) {
 
 function handleDagDrawerResize(event: PointerEvent) {
   if (dagResizePointerId == null) return
-  // Dragging up grows the drawer (mouse Y decreases → height increases).
+  // Dragging up grows the drawer.
   dagDrawerHeight.value = clampDagDrawerHeight(
     dagResizeStartHeight - (event.clientY - dagResizeStartY),
   )
@@ -290,10 +278,8 @@ onMounted(async () => {
   measureNotebookPerf('create_route_ms', 'create_route_start', 'notebook_page_mount')
   measureNotebookPerf('open_route_ms', 'open_route_start', 'notebook_page_mount')
   await connectToSession(props.sessionId)
-  // Fetch the worker catalog on mount so the mode badge in the header
-  // reflects the backend's actual deployment mode. Without this, the
-  // badge stays at its fail-closed default (Service mode) until the
-  // user opens a worker panel.
+  // Or the header mode badge stays at its fail-closed default until a worker
+  // panel opens.
   void ensureWorkersLoaded()
 })
 
@@ -712,8 +698,7 @@ function goHome() {
             @move-up="(id) => moveCell(id, 'up')"
             @move-down="(id) => moveCell(id, 'down')"
           />
-          <!-- First run: a new notebook has no cells, and a bare canvas with
-               one small button gives a first-time user nothing to aim at. -->
+          <!-- Empty notebook -->
           <div v-if="orderedCells.length === 0" class="cells-empty">
             <p class="cells-empty-title">This notebook is empty.</p>
             <p class="cells-empty-hint">
@@ -763,9 +748,7 @@ function goHome() {
           @pointerdown="startSidebarResize"
         ></div>
 
-        <!-- Runtime / config panels. ProfilingPanel lives in the
-             DAG drawer alongside the graph — it reads per-cell
-             execution stats that pair naturally with the DAG view. -->
+        <!-- Runtime / config panels (ProfilingPanel is in the DAG drawer) -->
         <aside class="sidebar">
           <MountsPanel />
           <ConnectionsPanel />
@@ -776,8 +759,7 @@ function goHome() {
         </aside>
       </div>
 
-      <!-- DAG bottom drawer. Drag its top edge to resize, click the
-           header to collapse. Persisted to localStorage. -->
+      <!-- DAG bottom drawer: drag the top edge to resize, click the header to collapse -->
       <div
         v-if="!dagDrawerCollapsed"
         class="dag-drawer-resizer"
@@ -824,11 +806,11 @@ function goHome() {
       </section>
     </div>
 
-    <!-- v1.1: Impact preview dialog -->
+    <!-- Impact preview dialog -->
     <ImpactPreview />
     <KeyboardShortcutsModal :visible="showShortcuts" @close="showShortcuts = false" />
 
-    <!-- Lineage modal (P3e) -->
+    <!-- Lineage modal -->
     <LineageModal />
 
     <!-- Registry feedback toasts -->
@@ -895,9 +877,7 @@ function goHome() {
   border-color: var(--accent-primary);
 }
 
-/* Works identically for the <a> nav links and the <button> (Embed): the
-   button-chrome resets (font, background, line-height, cursor) keep the two
-   element types pixel-identical. */
+/* Shared by the <a> links and the Embed <button>; the resets keep them identical. */
 .header-logs-link {
   font-family: inherit;
   font-size: 12px;

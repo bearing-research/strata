@@ -15,23 +15,17 @@ import {
   bracketMatching,
   StreamLanguage,
 } from '@codemirror/language'
-// Legacy-modes package ships CM5 modes ported to CM6 — no first-party
-// ``@codemirror/lang-r`` exists yet, so wrap the legacy R mode in
-// ``StreamLanguage.define()`` to get syntax highlighting + indent in
-// R cells. Same pattern any CM6 ecosystem doc recommends for R.
+// No first-party ``@codemirror/lang-r`` exists; wrap the legacy CM5 mode in
+// ``StreamLanguage.define()``.
 import { r as rLegacyMode } from '@codemirror/legacy-modes/mode/r'
 import { closeBrackets } from '@codemirror/autocomplete'
 import type { CellLanguage } from '../types/notebook'
 import { editorKeymaps } from './editorKeymaps'
 import { useTheme } from './useTheme'
 
-// ---------------------------------------------------------------------------
-// Theme
-// ---------------------------------------------------------------------------
-// Dark theme: oneDark (bundled) + a gutter tweak to match the Mocha base.
-// Light theme: hand-rolled minimal theme with Catppuccin Latte colors so we
-// don't pull in an extra dep. `defaultHighlightStyle` still provides syntax
-// colors — both themes share it, and it reads well on either background.
+// Dark: oneDark plus a gutter tweak for the Mocha base. Light: a minimal
+// hand-rolled Catppuccin Latte theme, to avoid another dependency. Both share
+// `defaultHighlightStyle` for syntax colors.
 
 const darkTheme = [
   oneDark,
@@ -68,18 +62,11 @@ export function useCodemirror(
   const view = ref<EditorView | null>(null)
   let suppressNextUpdate = false
 
-  // One compartment per editor instance — the compartment lets us swap the
-  // theme with view.dispatch({ effects: themeCompartment.reconfigure(...) })
-  // instead of rebuilding the EditorState.
+  // Compartments swap the theme or language without rebuilding the EditorState.
   const themeCompartment = new Compartment()
-  // Markdown's grammar is 490 kB of the editor's 563 kB — an order of
-  // magnitude more than Python's 44 kB, because lang-markdown carries the
-  // nested grammars for fenced code blocks. Loading it for every notebook,
-  // including the many with no markdown cell at all, is most of the editor's
-  // download for a minority of cells. It is fetched when a markdown cell is
-  // actually mounted and swapped in through this compartment, the same way
-  // the theme is; until it lands the cell renders as plain text, which for
-  // prose is a much smaller cost than the bytes.
+  // lang-markdown is 490 kB of the editor's 563 kB (it carries nested grammars
+  // for fenced code), so it loads only when a markdown cell mounts. Until then
+  // the cell renders as plain text.
   const langCompartment = new Compartment()
   const { resolved } = useTheme()
 
@@ -90,13 +77,8 @@ export function useCodemirror(
   onMounted(() => {
     if (!container.value) return
 
-    // Per-language CodeMirror extension. ``prompt`` cells render as plain
-    // text (no syntax highlighting — the body is a template, not code).
-    // ``markdown`` uses the official lang-markdown package; ``r`` wraps
-    // the legacy CM5 R mode via ``StreamLanguage`` (no first-party
-    // ``@codemirror/lang-r`` exists yet); everything else (``python``,
-    // ``sql``, future additions) falls through to Python highlighting,
-    // which is the closest visual fit.
+    // ``prompt`` bodies are templates, so plain text. Anything without its own
+    // mode (``sql`` included) gets Python highlighting, the closest fit.
     const langExt =
       opts.language === 'markdown'
         ? []
@@ -140,10 +122,8 @@ export function useCodemirror(
     view.value = new EditorView({ state, parent: container.value })
 
     if (opts.language === 'markdown') {
-      // Fetched after the editor is on screen, so a markdown cell is
-      // immediately usable and gains highlighting a moment later. The guard
-      // covers a cell unmounted before the grammar arrives — dispatching into
-      // a destroyed view throws.
+      // The guard covers a cell unmounted before the grammar arrives:
+      // dispatching into a destroyed view throws.
       void import('@codemirror/lang-markdown')
         .then(({ markdown }) => {
           const v = view.value
@@ -151,15 +131,12 @@ export function useCodemirror(
           v.dispatch({ effects: langCompartment.reconfigure(markdown()) })
         })
         .catch((error) => {
-          // The cell is still fully editable without it, so this is not worth
-          // failing over — but silence would leave a markdown cell showing as
-          // plain text with nothing to explain why.
+          // The cell still works; warn so plain-text markdown has an explanation.
           console.warn('Markdown syntax highlighting could not be loaded', error)
         })
     }
   })
 
-  // Swap theme live when the user flips the toggle — no editor rebuild.
   watch(resolved, (mode) => {
     const v = view.value
     if (!v) return

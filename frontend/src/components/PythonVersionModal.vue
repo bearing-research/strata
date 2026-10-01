@@ -21,8 +21,7 @@ const emit = defineEmits<{
 
 const selected = ref(props.current)
 
-// Reset the selected version whenever the modal re-opens so a previous
-// pick doesn't leak across open/close cycles.
+// Reset on re-open so a previous pick doesn't carry over.
 watch(
   () => props.open,
   (isOpen) => {

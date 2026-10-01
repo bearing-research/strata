@@ -139,10 +139,8 @@ def _dict_to_ipc(data: JsonArtifactInput) -> bytes:
         if len(set(lengths)) == 1:
             try:
                 table = pa.Table.from_pydict(dict(data))
-                # Mark the columnar encoding too. Without it a new
-                # ``{"data": ["only"]}`` — one column, one row — is
-                # indistinguishable from the legacy blob shape, so the reader
-                # would parse the cell as JSON and raise.
+                # Mark columnar explicitly: otherwise ``{"data": ["only"]}`` (one column, one
+                # row) looks like the JSON blob shape and the reader tries to parse it as JSON.
                 table = table.replace_schema_metadata({_JSON_BLOB_KEY: b"0"})
                 return _table_to_ipc(table)
             except Exception:
@@ -150,11 +148,8 @@ def _dict_to_ipc(data: JsonArtifactInput) -> bytes:
 
     json_str = json.dumps(dict(data))
     table = pa.Table.from_pydict({"data": [json_str]})
-    # Mark the encoding instead of leaving the reader to guess from the column
-    # name. ``{"data": [...]}`` is a perfectly ordinary columnar dict, and it
-    # satisfies the old "one column called data" heuristic too, so it was
-    # written columnar and read back as a JSON blob: put_json three strings in,
-    # get_json an int out, with no error.
+    # Mark the encoding explicitly: a columnar ``{"data": [...]}`` has the same
+    # shape, so guessing from the column name reads it back wrong.
     table = table.replace_schema_metadata({_JSON_BLOB_KEY: b"1"})
     return _table_to_ipc(table)
 
@@ -179,8 +174,7 @@ def _convert_to_arrow_ipc(data: PutData) -> bytes:
         if isinstance(data, pd.DataFrame):
             return _table_to_ipc(pa.Table.from_pandas(data))
     except ImportError:
-        # pandas is optional (not a strata-client dependency); if it's absent
-        # the value can't be a DataFrame — fall through to the next type.
+        # pandas is optional; without it the value can't be a DataFrame.
         pass
 
     try:
@@ -189,8 +183,7 @@ def _convert_to_arrow_ipc(data: PutData) -> bytes:
         if isinstance(data, pl.DataFrame):
             return _table_to_ipc(data.to_arrow())
     except ImportError:
-        # polars is optional; absence means the value isn't a polars DataFrame —
-        # fall through to the final unsupported-type error.
+        # polars is optional; without it the value can't be a polars DataFrame.
         pass
 
     raise TypeError(
@@ -311,7 +304,6 @@ class Artifact:
 
     def to_table(self) -> pa.Table:
         """Download artifact data as Arrow Table."""
-        # Use cached stream data if available (from fetch with stream mode)
         if self._stream_data is not None:
             if not self._stream_data:
                 return pa.table({})
@@ -458,9 +450,7 @@ class StrataClient:
         response.raise_for_status()
         return response.json()
 
-    # -----------------------------------------------------------------------
-    # Unified Materialize API
-    # -----------------------------------------------------------------------
+    # --- Unified Materialize API ---
 
     def fetch(
         self,
@@ -503,7 +493,6 @@ class StrataClient:
         start_time = time.time()
 
         while True:
-            # Check artifact status
             status_resp = self._client.get(f"/v1/artifacts/{artifact_id}/v/{version}")
             status_resp.raise_for_status()
             status = status_resp.json()
@@ -511,20 +500,18 @@ class StrataClient:
             state = status.get("state", "ready")
 
             if state == "ready":
-                # Artifact is ready, download data
                 return self._fetch_artifact_data(artifact_id, version)
             elif state == "failed":
                 error_msg = status.get("error_message", "Unknown error")
                 raise RuntimeError(f"Artifact build failed: {error_msg}")
             elif state == "building":
-                # Still building, check timeout
                 if time.time() - start_time > timeout:
                     raise TimeoutError(
                         f"Artifact {artifact_id}@v={version} timed out after {timeout}s"
                     )
                 time.sleep(0.5)
             else:
-                # Unknown state, assume ready and try to fetch
+                # Unknown state: assume ready.
                 return self._fetch_artifact_data(artifact_id, version)
 
     def _fetch_stream_with_retry(self, stream_url: str) -> bytes:
@@ -542,7 +529,6 @@ class StrataClient:
             if attempt >= self.retry_config.max_retries:
                 break
 
-            # Calculate delay
             retry_after = response.headers.get("Retry-After")
             if retry_after:
                 try:
@@ -564,9 +550,7 @@ class StrataClient:
         response.raise_for_status()
         return response.json()
 
-    # -----------------------------------------------------------------------
-    # Artifact API
-    # -----------------------------------------------------------------------
+    # --- Artifact API ---
 
     def materialize(
         self,
@@ -642,12 +626,8 @@ class StrataClient:
         timeout: float,
     ) -> Artifact:
         """Request server-side execution via unified /v1/materialize endpoint."""
-        # Public API documents transform={"ref": ..., "params": ...}; the
-        # server only accepts ``executor``. This shim renames so callers can
-        # use either spelling. Deleting it would silently break every
-        # ``ref``-style call site (examples/10_artifacts.py plus the
-        # integration test suite); add an explicit deprecation cycle if it
-        # ever needs to go away.
+        # The public API documents ``ref``; the server only accepts ``executor``.
+        # Keep the rename until ``ref`` goes through a deprecation cycle.
         server_transform = dict(transform)
         if "ref" in server_transform:
             server_transform["executor"] = server_transform.pop("ref")
@@ -666,7 +646,6 @@ class StrataClient:
         response.raise_for_status()
         data = response.json()
 
-        # Parse artifact_uri to get artifact_id and version
         artifact_uri = data["artifact_uri"]
         artifact_id, version = _parse_artifact_uri(artifact_uri)
         hit = data.get("hit", False)
@@ -675,9 +654,7 @@ class StrataClient:
         stream_url = data.get("stream_url")
         build_id = data.get("build_id")
 
-        # Cache hit - artifact is ready
         if hit or state == "ready":
-            # On cache hit with stream mode, fetch the data via stream_url
             stream_data = None
             if stream_url and mode == "stream":
                 stream_data = self._fetch_stream_with_retry(stream_url)
@@ -692,7 +669,6 @@ class StrataClient:
                 _stream_data=stream_data,
             )
 
-        # Stream mode - fetch data via stream URL
         if mode == "stream" and stream_url:
             content = self._fetch_stream_with_retry(stream_url)
             return Artifact(
@@ -705,7 +681,6 @@ class StrataClient:
                 _stream_data=content,
             )
 
-        # Artifact mode - poll for completion if wait=True
         if not wait:
             return Artifact(
                 _client=self,
@@ -717,14 +692,12 @@ class StrataClient:
                 name=name,
             )
 
-        # Wait for build to complete
         if build_id:
             start_time = time.time()
             while True:
                 if time.time() - start_time > timeout:
                     raise TimeoutError(f"Build {build_id} timed out after {timeout}s")
 
-                # Check build status
                 status_resp = self._client.get(f"/v1/artifacts/builds/{build_id}")
                 if status_resp.status_code == 404:
                     status_resp = self._client.get(f"/v1/artifacts/{artifact_id}/v/{version}")
@@ -749,7 +722,7 @@ class StrataClient:
 
                 time.sleep(poll_interval)
 
-        # Return artifact (may still be building)
+        # May still be building.
         return Artifact(
             _client=self,
             artifact_id=artifact_id,
@@ -792,7 +765,6 @@ class StrataClient:
         Raises:
             httpx.HTTPStatusError: If artifact not found (404)
         """
-        # Verify artifact exists
         response = self._client.get(f"/v1/artifacts/{artifact_id}/v/{version}")
         response.raise_for_status()
         return Artifact(_client=self, artifact_id=artifact_id, version=version)
@@ -917,9 +889,7 @@ class StrataClient:
         response.raise_for_status()
         return response.json()
 
-    # -------------------------------------------------------------------------
-    # Registry: aliases, tags, audit
-    # -------------------------------------------------------------------------
+    # --- Registry: aliases, tags, audit ---
 
     def set_alias(self, name: str, alias: str, artifact_id: str, version: int) -> dict:
         """Point ``name @ alias`` (e.g. champion) at an artifact version.
@@ -1016,9 +986,7 @@ class StrataClient:
         response.raise_for_status()
         return response.json()["entries"]
 
-    # -------------------------------------------------------------------------
-    # Direct Artifact Upload (for local execution)
-    # -------------------------------------------------------------------------
+    # --- Direct Artifact Upload (for local execution) ---
 
     def put(
         self,
@@ -1075,7 +1043,6 @@ class StrataClient:
                 data=df,
             )
         """
-        # Convert data to Arrow IPC bytes
         arrow_bytes = _convert_to_arrow_ipc(data)
 
         # Map 'ref' to 'executor' for server compatibility
@@ -1083,7 +1050,6 @@ class StrataClient:
         if "ref" in server_transform:
             server_transform["executor"] = server_transform.pop("ref")
 
-        # Send as multipart form data
         import json
 
         metadata: ArtifactUploadMetadata = {
@@ -1102,7 +1068,6 @@ class StrataClient:
         response.raise_for_status()
         result = response.json()
 
-        # Parse artifact URI
         artifact_uri = result["artifact_uri"]
         artifact_id, version = _parse_artifact_uri(artifact_uri)
 
@@ -1157,19 +1122,15 @@ class StrataClient:
         """
         table = self.fetch(artifact_uri)
 
-        # Check if this is a single-column JSON artifact
         if _is_json_blob(table):
             import json
 
             json_str = table.column("data")[0].as_py()
             return cast(JsonArtifactData, json.loads(json_str))
 
-        # Otherwise return as columnar dict
         return cast(JsonArtifactData, table.to_pydict())
 
-    # -------------------------------------------------------------------------
-    # Artifact Lifecycle Management
-    # -------------------------------------------------------------------------
+    # --- Artifact Lifecycle Management ---
 
     def list_artifacts(
         self,
@@ -1273,9 +1234,7 @@ class StrataClient:
         response.raise_for_status()
         return response.json()
 
-    # -------------------------------------------------------------------------
-    # Staleness Detection
-    # -------------------------------------------------------------------------
+    # --- Staleness Detection ---
 
     def get_name_status(self, name: str) -> dict:
         """Get status of a named artifact including staleness info.
@@ -1460,9 +1419,7 @@ class AsyncStrataClient:
         response.raise_for_status()
         return response.json()
 
-    # -----------------------------------------------------------------------
-    # Unified Materialize API
-    # -----------------------------------------------------------------------
+    # --- Unified Materialize API ---
 
     async def fetch(
         self,
@@ -1505,7 +1462,6 @@ class AsyncStrataClient:
         start_time = time.time()
 
         while True:
-            # Check artifact status
             status_resp = await self._client.get(f"/v1/artifacts/{artifact_id}/v/{version}")
             status_resp.raise_for_status()
             status = status_resp.json()
@@ -1513,20 +1469,18 @@ class AsyncStrataClient:
             state = status.get("state", "ready")
 
             if state == "ready":
-                # Artifact is ready, download data
                 return await self._fetch_artifact_data(artifact_id, version)
             elif state == "failed":
                 error_msg = status.get("error_message", "Unknown error")
                 raise RuntimeError(f"Artifact build failed: {error_msg}")
             elif state == "building":
-                # Still building, check timeout
                 if time.time() - start_time > timeout:
                     raise TimeoutError(
                         f"Artifact {artifact_id}@v={version} timed out after {timeout}s"
                     )
                 await asyncio.sleep(0.5)
             else:
-                # Unknown state, assume ready and try to fetch
+                # Unknown state: assume ready.
                 return await self._fetch_artifact_data(artifact_id, version)
 
     async def find_by_provenance(self, provenance_hash: str) -> dict | None:
@@ -1648,7 +1602,6 @@ class AsyncStrataClient:
         stream_url = data.get("stream_url")
         build_id = data.get("build_id")
 
-        # Cache hit - artifact is ready
         if hit or state == "ready":
             stream_data = None
             if stream_url and mode == "stream":
@@ -1664,7 +1617,6 @@ class AsyncStrataClient:
                 _stream_data=stream_data,
             )
 
-        # Stream mode - fetch data via stream URL
         if mode == "stream" and stream_url:
             content = await self._fetch_stream_with_retry(stream_url)
             return AsyncArtifact(
@@ -1677,7 +1629,6 @@ class AsyncStrataClient:
                 _stream_data=content,
             )
 
-        # Artifact mode - poll for completion if wait=True
         if build_id and wait:
             start_time = time.time()
             while True:
@@ -1774,9 +1725,7 @@ class AsyncStrataClient:
             name=name,
         )
 
-    # -------------------------------------------------------------------------
-    # Direct Artifact Upload (for local execution)
-    # -------------------------------------------------------------------------
+    # --- Direct Artifact Upload (for local execution) ---
 
     async def put(
         self,
@@ -1823,7 +1772,6 @@ class AsyncStrataClient:
                 data=table,
             )
         """
-        # Convert data to Arrow IPC bytes
         arrow_bytes = _convert_to_arrow_ipc(data)
 
         # Map 'ref' to 'executor' for server compatibility
@@ -1831,7 +1779,6 @@ class AsyncStrataClient:
         if "ref" in server_transform:
             server_transform["executor"] = server_transform.pop("ref")
 
-        # Send as multipart form data
         import json
 
         metadata: ArtifactUploadMetadata = {
@@ -1850,7 +1797,6 @@ class AsyncStrataClient:
         response.raise_for_status()
         result = response.json()
 
-        # Parse artifact URI
         artifact_uri = result["artifact_uri"]
         artifact_id, version = _parse_artifact_uri(artifact_uri)
 
@@ -1905,14 +1851,12 @@ class AsyncStrataClient:
         """
         table = await self.fetch(artifact_uri)
 
-        # Check if this is a single-column JSON artifact
         if _is_json_blob(table):
             import json
 
             json_str = table.column("data")[0].as_py()
             return cast(JsonArtifactData, json.loads(json_str))
 
-        # Otherwise return as columnar dict
         return cast(JsonArtifactData, table.to_pydict())
 
 
@@ -1963,7 +1907,6 @@ class AsyncArtifact:
 
     async def to_table(self) -> pa.Table:
         """Download artifact data as Arrow Table."""
-        # Use cached stream data if available (from fetch with stream mode)
         if self._stream_data is not None:
             if not self._stream_data:
                 return pa.table({})

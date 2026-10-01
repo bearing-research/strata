@@ -1,25 +1,13 @@
 /**
- * Deciding whether a backend snapshot's cell source may replace the local one.
+ * Whether a backend snapshot's cell source may replace the local one.
  *
- * Source edits are local-first: typing updates the buffer and marks the cell
- * dirty, and the flush happens later. But a cell can also change from outside
- * this tab — an agent driving the notebook over the CLI or MCP, or
- * `strata cell edit` — and those edits have to reach the editor, or a human
- * watching an agent sees cells go stale above source that still looks
- * unchanged.
+ * Edits are local-first, but a cell can also change outside this tab (an agent
+ * over the CLI or MCP) and the editor must follow. Rule: unflushed keystrokes
+ * win, everything else yields to the backend.
  *
- * One guard resolves the tension: unflushed keystrokes win, everything else
- * yields to the backend.
- *
- * A first attempt also held off while a flush was sent but not yet echoed
- * back, to avoid adopting a snapshot built before the backend applied it.
- * That was worse than the race it prevented. Holding *drops* the update rather
- * than deferring it — the decision is only revisited when another snapshot
- * arrives, and if none does, the cell stops following remote edits for the
- * life of the page. The race itself is benign: the flush is already on its way,
- * so the backend's next snapshot carries the text back and the worst case is a
- * brief flicker. And if the flush never lands, the file on disk really does
- * hold the old text, so showing it is honest.
+ * Don't also hold off while a flush is in flight: holding drops the update
+ * rather than deferring it, so with no later snapshot the cell stops following
+ * remote edits. The race is benign; the next snapshot brings the text back.
  */
 
 export function shouldAdoptRemoteSource(params: {

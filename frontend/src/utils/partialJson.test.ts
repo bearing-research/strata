@@ -45,8 +45,7 @@ test('partial literal tail is trimmed back to the last separator', () => {
 })
 
 test('half-typed key without colon falls back to undefined', () => {
-  // Nothing structurally complete to show yet — the caller renders the
-  // char ticker instead.
+  // Nothing complete yet; the caller shows the char ticker.
   assert.equal(parsePartialJson('{"on'), undefined)
 })
 

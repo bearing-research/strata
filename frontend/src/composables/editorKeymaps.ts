@@ -10,10 +10,8 @@ export interface RunHandlers {
 /**
  * The cell editor's key bindings: run and rerun, then CodeMirror's defaults.
  *
- * The run bindings take high precedence because the default keymap binds
- * Enter with a Shift variant (insert a newline), and between two keymaps of
- * the same precedence the earlier one wins. Listed after it, Shift+Enter
- * inserted a newline and never ran the cell.
+ * Run bindings need high precedence: the default keymap binds Shift+Enter to
+ * insert a newline, and at equal precedence the earlier keymap wins.
  */
 export function editorKeymaps(handlers: RunHandlers): Extension[] {
   return [

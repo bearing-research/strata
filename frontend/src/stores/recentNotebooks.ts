@@ -1,9 +1,4 @@
-/**
- * localStorage-backed recent notebooks list.
- *
- * Stores up to 20 entries sorted by last-opened timestamp.
- * Survives server restarts (unlike the in-memory session manager).
- */
+/** Recent notebooks in localStorage (up to 20, newest first). */
 
 import { ref } from 'vue'
 
@@ -90,7 +85,7 @@ function save() {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(entries.value))
   } catch {
-    // localStorage full or disabled — ignore
+    // localStorage full or disabled: keep the in-memory list.
   }
 }
 

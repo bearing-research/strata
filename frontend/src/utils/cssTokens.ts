@@ -1,17 +1,12 @@
 /**
- * Collecting the CSS custom properties the frontend defines and references.
+ * Collect the CSS custom properties the frontend defines and references.
  *
- * A missing token fails silently: with a fallback the declaration quietly uses
- * a hardcoded literal, and without one it is dropped and the property
- * inherits. Neither shows up in a build, a type check, or a lint pass. That is
- * how the lineage modal ended up painting pure white underneath theme-coloured
- * text, unreadable in dark mode and fine in light mode by accident.
+ * A missing token fails silently (the fallback literal is used, or the
+ * declaration is dropped) and no build, type check or lint catches it.
  *
- * Known limitation: definitions are pooled across every file, so a token
- * declared in one component's scoped style counts as defined for all of them.
- * Modelling which elements actually inherit a declaration would mean modelling
- * the DOM. The check is therefore a floor, not a proof: it catches names that
- * exist nowhere, which is the failure that has actually happened here.
+ * Definitions are pooled across files, so a token scoped to one component
+ * counts as defined everywhere. A floor, not a proof: it catches names that
+ * exist nowhere.
  */
 
 /**
@@ -31,10 +26,8 @@ export interface TokenUsage {
 }
 
 /**
- * Blank out comments, keeping every newline so reported lines stay right.
- *
- * Prose is not code: this file's own docstring names tokens, and without this
- * the checker would read them as declarations and consider them defined.
+ * Blank out comments, keeping newlines so reported lines stay right. Tokens
+ * named in prose would otherwise count as declarations.
  */
 function stripComments(text: string): string {
   return text.replace(COMMENT, (comment) => comment.replace(/[^\n]/g, ' '))
@@ -65,9 +58,7 @@ export function collectTokens(sources: Iterable<{ path: string; text: string }>)
     const text = stripComments(source.text)
     for (const m of text.matchAll(DEFINITION)) defined.add(m[1])
 
-    // Scanned over the whole text rather than line by line: a `var(` whose
-    // token name wraps to the next line would otherwise never match, and go
-    // unchecked — the one thing this file exists to catch.
+    // Whole text, not per line: a `var(` whose name wraps a line must still match.
     const starts = lineIndex(text)
     for (const m of text.matchAll(REFERENCE)) {
       const sites = referenced.get(m[1]) ?? []

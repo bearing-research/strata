@@ -1,18 +1,10 @@
 /**
- * Lenient parsing for incomplete JSON streams (issue #112).
+ * Lenient parsing for incomplete JSON streams.
  *
- * Prompt cells with `@output_schema` stream raw JSON over
- * `cell_output_delta` — mostly punctuation accumulating on one wrapped
- * line, which is unreadable as progress feedback. This module repairs a
- * truncated JSON prefix (close open strings/brackets, drop the dangling
- * tail) so the UI can pretty-print whatever is structurally complete and
- * let fields pop in as the model finishes them.
- *
- * The repair is best-effort by design: a prefix that can't be made
- * parseable within a bounded number of trim-and-retry passes returns
- * `undefined`, and the caller falls back to a char-count ticker. The
- * parsed value is transient display state — the canonical output is
- * still the final `cell_output` frame.
+ * `@output_schema` prompt cells stream raw JSON, unreadable as progress. This
+ * repairs a truncated prefix (close strings/brackets, drop the dangling tail)
+ * so the UI can pretty-print what is complete. Best-effort: an unrepairable
+ * prefix returns `undefined` and the caller shows a char-count ticker.
  */
 
 interface ScanResult {
@@ -79,9 +71,8 @@ export function parsePartialJson(text: string): unknown {
   let candidate = text.trimStart()
   if (!candidate.startsWith('{') && !candidate.startsWith('[')) return undefined
 
-  // Bounded trim-and-retry: each pass cuts the unparseable tail back to
-  // the previous structural separator. 32 passes is far beyond any
-  // realistic nesting of dangling tokens between two deltas.
+  // Each pass trims back to the previous separator. 32 is far beyond any
+  // realistic run of dangling tokens between two deltas.
   for (let attempt = 0; attempt < 32; attempt++) {
     try {
       return JSON.parse(repair(candidate))

@@ -1,7 +1,6 @@
-// Adapt the backend's flat lineage graph (nodes + edges) into the recursive
-// tree the UI renders: model ← features ← scan ← table @ snapshot. Edges run
-// from_uri (input) → to_uri (consumer), so a node's children are the from_uris
-// of edges pointing at it.
+// Adapt the backend's flat lineage graph into the recursive tree the UI
+// renders. Edges run from_uri (input) to to_uri (consumer), so a node's
+// children are the from_uris of edges pointing at it.
 
 import type { LineageGraph } from '../composables/useStrata'
 
@@ -12,21 +11,15 @@ export interface LineageTreeNode {
   version: number | null
   children: LineageTreeNode[]
   /**
-   * Who computed this step, on what, and how long it took.
-   *
-   * Worth nothing until results could be shared — "who" was always you and
-   * "which environment" was always this machine. Once a lineage graph can
-   * contain a step a teammate ran elsewhere, these are the questions the graph
-   * is being opened to answer. Absent for tables and for anything stored
-   * before the fields existed.
+   * Who computed this step, on what, and how long it took. Matters once a step
+   * can come from a teammate's machine. Absent for tables and older results.
    */
   principal: string | null
   buildEnv: string
   buildDurationMs: number
   /**
-   * Which package set, where ``buildEnv`` is which platform. Together they are
-   * the step's environment identity, and comparing them is the only way to
-   * answer "you got a cache hit and I did not".
+   * Which package set (``buildEnv`` is the platform). Together they are the
+   * environment identity that explains "you got a cache hit and I did not".
    */
   envHash: string
 }

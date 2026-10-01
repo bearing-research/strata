@@ -40,8 +40,7 @@ pytestmark = [
 ]
 
 if LIVE and not API_KEY:
-    # Opting in without a key is a mistake worth saying out loud, rather than
-    # skipping and reporting green.
+    # Opting in without a key is a mistake; say so rather than skip and report green.
     raise RuntimeError("STRATA_POOL_RUNPOD_LIVE=1 but RUNPOD_API_KEY is not set")
 
 # A published image that serves HTTP and echoes, so the test needs nothing
@@ -83,9 +82,7 @@ async def runpod():
     finally:
         stranded: list[str] = []
         try:
-            # One pod refusing to terminate must not strand the rest. The
-            # docstring promises this cleans up; a bare loop breaks that
-            # promise on the first RunPodError and leaves GPUs running.
+            # One pod refusing to terminate must not strand the rest with GPUs running.
             for pod_id in started:
                 try:
                     await backend.stop(pod_id)
@@ -95,9 +92,8 @@ async def runpod():
         finally:
             await backend.aclose()
 
-        # Not a print. Teardown output is swallowed under default capture when
-        # the test passes, so a green run would be hiding a billing GPU — and
-        # a run that leaves one is not a passing run.
+        # Not a print: output of a passing test is swallowed, and a run that leaves a
+        # billing GPU is not a pass.
         if stranded:
             pytest.fail("RunPod pods left running, terminate them by hand: " + "; ".join(stranded))
 

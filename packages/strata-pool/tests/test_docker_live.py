@@ -22,11 +22,9 @@ IMAGE = "python:3.12-slim"
 _PULL_ATTEMPTS = 3
 _PULL_RETRY_SECONDS = 5.0
 
-# A worker: 200 on any GET (the health check), and POST /execute echoes its
-# body back so the test can prove the payload made the round trip. It enforces
-# the bearer token, which is what makes these tests prove the credential
-# actually reaches the container and matches what the pool sends — a 401 here
-# fails the job, so every passing test below is an assertion about auth.
+# A worker: 200 on any GET (the health check); POST /execute echoes its body. It
+# enforces the bearer token, so a 401 fails the job and every passing test below
+# also proves the credential reaches the container.
 WORKER_SCRIPT = """
 import os
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -77,9 +75,7 @@ def _daemon_is_reachable() -> bool:
 _DAEMON_IS_REACHABLE = _daemon_is_reachable()
 
 if os.environ.get("STRATA_POOL_REQUIRE_DOCKER") == "1" and not _DAEMON_IS_REACHABLE:
-    # CI sets this. Without it, a runner whose socket moved would skip every
-    # test in this file and report green — coverage that examined nothing,
-    # which is the exact failure mode this package keeps guarding against.
+    # CI sets this, so a runner whose socket moved fails instead of skipping every test here.
     raise RuntimeError(
         "STRATA_POOL_REQUIRE_DOCKER=1 but no Docker daemon is reachable at "
         f"{os.environ.get('STRATA_POOL_DOCKER_SOCKET', DEFAULT_SOCKET)}"

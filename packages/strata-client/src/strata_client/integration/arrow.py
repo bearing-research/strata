@@ -107,7 +107,6 @@ class StrataScanner:
         Yields:
             pyarrow.RecordBatch objects
         """
-        # Use the unified materialize API
         artifact = self._client.materialize(
             inputs=[self._table_uri],
             transform=_build_scan_transform(self._columns, self._filters, self._snapshot_id),
@@ -121,7 +120,6 @@ class StrataScanner:
         Returns:
             pyarrow.Table containing all scan results
         """
-        # Use the unified materialize API
         artifact = self._client.materialize(
             inputs=[self._table_uri],
             transform=_build_scan_transform(self._columns, self._filters, self._snapshot_id),
@@ -139,7 +137,6 @@ class StrataScanner:
         """
         batches = list(self.to_batches())
         if not batches:
-            # Return empty reader with no schema
             return pa.RecordBatchReader.from_batches(pa.schema([]), [])
         return pa.RecordBatchReader.from_batches(batches[0].schema, batches)
 
@@ -175,7 +172,6 @@ class StrataScanner:
                 batches.append(batch)
                 rows_collected += batch.num_rows
             else:
-                # Slice the batch
                 batches.append(batch.slice(0, rows_needed))
                 rows_collected += rows_needed
                 break
@@ -263,7 +259,6 @@ class StrataDataset:
         Fetches schema on first access by reading a small sample.
         """
         if self._schema is None:
-            # Fetch schema by reading data using the unified materialize API
             artifact = self._client.materialize(
                 inputs=[self._table_uri],
                 # The schema probe must read the same snapshot the data reads,
@@ -290,7 +285,6 @@ class StrataDataset:
         Returns:
             StrataScanner for reading data
         """
-        # Normalize filter to list
         filters: list[Filter] | None = None
         if filter is not None:
             filters = [filter] if isinstance(filter, Filter) else filter

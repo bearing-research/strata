@@ -1,26 +1,16 @@
 /**
- * Markdown → sanitized HTML rendering for cell outputs and markdown cells.
+ * Markdown to sanitized HTML for markdown cells and ``Markdown(...)`` outputs.
  *
- * We use ``markdown-it`` (CommonMark + tables + linkify + strikethrough)
- * and run the result through ``DOMPurify`` because both Markdown cell
- * sources and ``Markdown(...)`` outputs are user-controlled and we render
- * via ``v-html``. Sanitization is non-optional — without it a malicious
- * notebook could plant `<script>` tags into the rendered output.
- *
- * The public surface is a single function that takes raw markdown and
- * returns sanitized HTML; consumers stay decoupled from the renderer.
+ * Both are user-controlled and rendered via ``v-html``, so DOMPurify is
+ * mandatory: without it a malicious notebook could inject `<script>`.
  */
 
 import DOMPurifyFactory, { type Config as DOMPurifyConfig } from 'dompurify'
 import MarkdownIt from 'markdown-it'
 
-// Resolve DOMPurify's runtime shape. In a browser, the default export is
-// already bound to ``window`` and has ``sanitize`` directly. In Node
-// (used by the unit tests under ``node --test``) the default export is a
-// factory that needs a window to instantiate — there's no DOM available
-// so we fall back to a no-op shim. That's safe because the rendered
-// HTML never reaches a DOM in Node; the only XSS path is the in-browser
-// ``v-html`` path, which still gets the real DOMPurify.
+// In a browser the default export is bound to ``window``. In Node (unit tests)
+// it is a factory with no DOM to bind, so use a no-op shim; the HTML never
+// reaches a DOM there, and the browser still gets the real DOMPurify.
 type DOMPurifyLike = { sanitize: (html: string, cfg?: DOMPurifyConfig) => string }
 
 const purify: DOMPurifyLike =
@@ -29,24 +19,16 @@ const purify: DOMPurifyLike =
     : { sanitize: (html: string) => html }
 
 const md = new MarkdownIt({
-  // Disallow inline HTML — sanitization would strip most of it anyway,
-  // and turning it off keeps the output predictable for both cell
-  // sources and dynamic ``Markdown(...)`` outputs.
+  // Sanitization would strip most inline HTML anyway; off is predictable.
   html: false,
-  // Auto-detect URLs in plain text and turn them into links.
   linkify: true,
-  // Smart quotes / em-dashes off — plays badly with code identifiers
-  // that get pasted into prose ("don't" → "don’t" breaks copy-paste).
+  // Smart quotes break copy-paste of code identifiers in prose.
   typographer: false,
-  // Convert single newlines inside a paragraph into <br>. Matches the
-  // old hand-rolled renderer's behavior so existing markdown outputs
-  // don't suddenly reflow.
+  // Single newlines become <br> so existing outputs don't reflow.
   breaks: true,
 })
 
-// Make every link open in a new tab and drop referrer/opener for the
-// classic ``target=_blank`` security pair. markdown-it's default
-// ``link_open`` renderer doesn't add these.
+// Links open in a new tab with noopener/noreferrer.
 const defaultLinkOpen =
   md.renderer.rules.link_open ||
   function (tokens, idx, options, _env, self) {
@@ -70,9 +52,7 @@ md.renderer.rules.link_open = (tokens, idx, options, env, self) => {
   return defaultLinkOpen(tokens, idx, options, env, self)
 }
 
-// DOMPurify allowlist: keep target/rel on anchors (we just set them).
-// Default DOMPurify already strips <script>, on* event handlers, and
-// javascript: URLs, so we just need to permit our intentional additions.
+// Allow the target/rel set above; the defaults strip scripts and handlers.
 const PURIFY_CONFIG: DOMPurifyConfig = {
   ADD_ATTR: ['target', 'rel'],
 }

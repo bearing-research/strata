@@ -5,11 +5,8 @@ import { useStrata } from '../composables/useStrata'
 /**
  * Interactive viewer for a DataFrame cell output.
  *
- * The cell payload only carries a 20-row preview; this component queries the
- * *full* cached Arrow artifact via `GET …/cells/{cellId}/data` for paging,
- * sorting, global search, per-column filters, a column-stats row, and
- * CSV/Parquet export. The preview paints instantly; server queries kick in
- * when there's a live session + backing artifact URI.
+ * Paints the 20-row preview at once, then pages, sorts, filters and exports
+ * the full artifact via `GET …/cells/{cellId}/data`.
  */
 const props = defineProps<{
   notebookId: string | undefined
@@ -64,8 +61,7 @@ const expanded = ref<Set<string>>(new Set())
 const showFilterForm = ref(false)
 const draft = reactive({ col: '', op: 'contains', value: '', value2: '' })
 
-// Server queries need a live session + a backing artifact; without them
-// (e.g. mock data) we only show the static preview.
+// Without a session and artifact (e.g. mock data), only the static preview.
 const canQuery = computed(() => Boolean(props.notebookId) && Boolean(props.artifactUri))
 const hasQuery = computed(() => Boolean(search.value) || filters.value.length > 0)
 const rangeStart = computed(() => (rows.value.length ? offset.value + 1 : 0))
@@ -149,7 +145,6 @@ function sortIndicator(col: string): string {
   return sortDir.value === 'asc' ? ' ▲' : ' ▼'
 }
 
-// Debounced search — refetch 300ms after the user stops typing.
 let searchTimer: ReturnType<typeof setTimeout> | undefined
 watch(search, () => {
   if (!canQuery.value) return
@@ -241,7 +236,7 @@ function toggleCell(r: number, c: number) {
   expanded.value = next
 }
 
-// Re-run replaces the backing artifact — reset all query state to the preview.
+// A re-run replaces the artifact; reset query state to the preview.
 watch(
   () => props.artifactUri,
   () => {

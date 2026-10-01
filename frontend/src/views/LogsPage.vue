@@ -2,8 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 
-// A plain back control: return to wherever the user came from (usually the
-// notebook they opened Logs from), falling back to the home list.
+// Back to wherever the user came from, falling back to the home list.
 const router = useRouter()
 function goBack() {
   if (window.history.length > 1) router.back()
@@ -36,8 +35,7 @@ const cursor = ref(0)
 const expanded = ref<Set<number>>(new Set())
 
 const listEl = ref<HTMLElement | null>(null)
-// When the user scrolls up we stop auto-following so reading history isn't
-// yanked away by incoming lines; re-enabled once they scroll back to bottom.
+// Scrolling up stops auto-follow so incoming lines don't yank the view.
 const stickToBottom = ref(true)
 let pollTimer: ReturnType<typeof setInterval> | null = null
 
@@ -81,8 +79,7 @@ function onScroll() {
   stickToBottom.value = atBottom
 }
 
-// Full reload: reset the buffer and fetch from the start. Used on mount,
-// manual refresh, and whenever a filter changes.
+// Reset the buffer and fetch from the start.
 async function reload() {
   if (!validateRegex()) return
   loading.value = true
@@ -101,7 +98,6 @@ async function reload() {
   }
 }
 
-// Incremental tail: append only entries newer than the last cursor.
 async function poll() {
   if (regexError.value) return
   try {
@@ -150,8 +146,6 @@ watch(liveTail, (on) => {
   else stopPolling()
 })
 
-// Any filter change resets the view; if tailing, polling continues from the
-// fresh cursor.
 watch([level, notebook, regex], () => {
   void reload()
 })

@@ -60,15 +60,10 @@ import {
 let nextOrder = 0
 const FALLBACK_NOTEBOOK_PARENT_PATH = '/tmp/strata-notebooks'
 
-// ---------------------------------------------------------------------------
-// Connection state — visible to the UI
-// ---------------------------------------------------------------------------
 const connected = ref(false)
 const connectError = ref<string | null>(null)
 
-// ---------------------------------------------------------------------------
-// Store
-// ---------------------------------------------------------------------------
+// --- Store -----------------------------------------------------------------
 
 const notebook = reactive<Notebook>({
   id: '',
@@ -111,9 +106,8 @@ const notebook = reactive<Notebook>({
     lastSyncedAt: 0,
     syncState: 'absent',
     syncError: null,
-    // Default to ``unknown`` so the panel's first render renders
-    // a "loading" indicator rather than a misleading "no packages
-    // installed" — the env panel fetches the list on mount.
+    // `unknown` renders "loading", not a misleading "no packages installed",
+    // until the env panel fetches the list on mount.
     packages: [],
     packagesStatus: 'unknown',
     packagesError: null,
@@ -133,20 +127,13 @@ const cellMap = computed(() => {
 const orderedCells = computed(() => [...notebook.cells].sort((a, b) => a.order - b.order))
 
 /**
- * DAG edges authoritatively supplied by the backend.
- *
- * Recomputing locally from defines/references used a "last define wins"
- * map that dropped legitimate upstream edges when a cell both defined
- * and referenced a variable (e.g. a loop cell whose body rebinds the
- * carry). The backend DAG builder walks cells in order and resolves
- * the correct producer for each reference, so we use its output
- * directly and keep the client side for layout only.
+ * DAG edges from the backend. Not recomputed locally: a "last define wins"
+ * map drops edges when a cell both defines and references a variable
+ * (e.g. a loop cell rebinding its carry).
  */
 const backendDagEdges = ref<DagEdge[]>([])
 
 const dagEdges = computed<DagEdge[]>(() => backendDagEdges.value)
-
-// --- Helper: sessionId accessor -------------------------------------------
 
 function sessionId(): string | undefined {
   return (notebook as any).sessionId
@@ -160,10 +147,8 @@ async function addCell(afterId?: CellId, language?: string) {
   const strata = useStrata()
   try {
     const data = await strata.addCell(sid, afterId, language)
-    // The POST broadcasts `notebook_state` to every watcher — including this
-    // one — before it returns. When that frame wins the race it has already
-    // inserted the new cell, so splicing it again renders the same cell twice
-    // (until a reload). The optimistic insert has to be idempotent.
+    // The POST broadcasts `notebook_state` to this tab too, possibly before
+    // it returns, so the frame may have inserted the cell already.
     if (notebook.cells.some((c) => c.id === data.id)) return
     const newCell: Cell = {
       id: data.id,
@@ -217,11 +202,8 @@ function removeCell(id: CellId) {
         notebook.cells.splice(idx, 1)
         notebook.updatedAt = Date.now()
       }
-      // Variant cleanup: when the deleted cell was part of a group, the
-      // backend may have promoted a sibling to active (its variantActive
-      // flips true) or dissolved the group entirely. Sync from the
-      // response so the tab strip + variant flags + DAG edges reflect
-      // the new state without waiting for a manual reload.
+      // Deleting a variant may promote a sibling or dissolve the group;
+      // sync from the response so tabs, flags and edges update now.
       if (response && typeof response === 'object') {
         if (Array.isArray(response.variant_groups)) {
           notebook.variantGroups = parseBackendVariantGroups(response.variant_groups)
@@ -246,9 +228,8 @@ function removeCell(id: CellId) {
 }
 
 // --- Local-first source editing ------------------------------------------------
-// Editing is instant and local. Backend sync happens asynchronously via
-// WebSocket — the editor never blocks on a round-trip during typing.
-// The backend broadcasts dag_update + cell_status when analysis finishes.
+// Edits are local; dirty cells sync over WS and the backend answers with
+// dag_update + cell_status. The editor never waits on a round-trip.
 
 const dirtyCells = new Set<CellId>()
 let idleFlushTimer: ReturnType<typeof setTimeout> | null = null
@@ -259,15 +240,13 @@ function updateSource(id: CellId, source: string) {
   if (!cell) return
   cell.source = source
 
-  // A source edit invalidates the last test result (the cell the tests ran
-  // against has changed). Cheap, edit-driven staleness — see runCellTests.
+  // The tests ran against the old source.
   if (cell.testResult && !cell.testResult.stale) {
     cell.testResult = { ...cell.testResult, stale: true }
   }
 
-  // Mark dirty for async backend sync. No local regex extraction —
-  // defines/references/DAG update from the backend after flush to
-  // avoid noisy partial-word references mid-typing.
+  // No local define/reference extraction: mid-typing partial words would
+  // produce bogus references. The backend sends them after the flush.
   dirtyCells.add(id)
   scheduleIdleFlush()
 
@@ -418,11 +397,8 @@ function parseDependencyInfo(raw: any): DependencyInfo {
 
 function parseEnvironmentOperation(raw: any): EnvironmentOperation | null {
   if (!raw || typeof raw !== 'object') return null
-  // Whitelist mirrors the backend's ``EnvironmentJobRequest`` valid_actions.
-  // Missing entries here previously caused ``r_init`` / ``r_add`` jobs to
-  // parse as ``null`` — the env-operation panel flashed once on the
-  // optimistic local ``beginEnvironmentOperation`` call, then got wiped
-  // by the WS ``environment_job_started`` round-trip.
+  // Must mirror the backend's ``EnvironmentJobRequest`` valid_actions; a
+  // missing action parses as ``null`` and wipes the running-job panel.
   const action =
     raw.action === 'add' ||
     raw.action === 'remove' ||
@@ -491,12 +467,8 @@ function syncResolvedDependenciesFromBackend(raw: any) {
 function parseBackendREnvironment(
   raw: any,
 ): Omit<RNotebookEnvironment, 'packages' | 'packagesStatus' | 'packagesError'> {
-  // The env-state payload omits the package list — that's served
-  // by a separate ``GET /r-packages`` route so notebook open /
-  // state sync / env refresh paths don't pay a synchronous Rscript
-  // spawn. Callers reuse the store's existing
-  // ``packages``/``packagesStatus``/``packagesError`` fields and
-  // overwrite them via ``fetchRPackagesAction``.
+  // The package list comes from ``GET /r-packages`` (``fetchRPackagesAction``)
+  // so open and state sync don't pay for an Rscript spawn.
   const syncStateRaw = String(raw?.sync_state ?? raw?.syncState ?? 'absent')
   const syncState = (
     ['absent', 'never', 'ok', 'outdated', 'failed'].includes(syncStateRaw) ? syncStateRaw : 'absent'
@@ -515,9 +487,7 @@ function parseBackendREnvironment(
 }
 
 function syncNotebookREnvironmentFromBackend(raw: any) {
-  // Overlay the parsed env-state fields on top of the existing
-  // packages/packagesStatus/packagesError fields so a state-sync
-  // doesn't clobber a previously-fetched package listing.
+  // Keep the existing package fields so a state sync doesn't clobber them.
   notebook.rEnvironment = {
     ...notebook.rEnvironment,
     ...parseBackendREnvironment(raw),
@@ -564,11 +534,6 @@ function syncEnvironmentPayloadFromBackend(data: any) {
   if (data?.environment) {
     syncNotebookEnvironmentFromBackend(data.environment)
   }
-  // R-side env is parallel to Python's. Backend always emits the
-  // ``r_environment`` field (with zero fields when the notebook has
-  // no renv.lock), so absence here means we're talking to a
-  // pre-#87 server — leave the store's default zero entry in
-  // place rather than wiping anything.
   if (data?.r_environment) {
     syncNotebookREnvironmentFromBackend(data.r_environment)
   }
@@ -939,11 +904,8 @@ function applyDisplayOutputsToCell(
 }
 
 function adoptBackendSource(localCell: Cell, remote: unknown) {
-  // Follow a source edit made outside this tab — an agent driving the notebook
-  // over the CLI or MCP, or `strata cell edit`. Without this the cell's
-  // staleness and DAG update while the editor keeps showing the old text, so a
-  // human watching an agent work sees stale cells above source that still
-  // looks unchanged. The rule itself lives in utils/cellSourceSync.
+  // Follow source edits made outside this tab (an agent over the CLI or MCP),
+  // or the editor shows old text next to updated staleness and DAG.
   if (
     shouldAdoptRemoteSource({
       remote,
@@ -1052,11 +1014,8 @@ function updateWorkerHealth(workerName: string, health: WorkerHealth) {
 }
 
 function syncWorkerDefinitionsEditableFromBackend(value: any) {
-  // Fail closed: only treat as editable (personal mode) when the backend
-  // explicitly says so. Unknown / missing / errored responses leave the
-  // editing affordances shut.
+  // Fail closed: editable only when the backend explicitly says so.
   workerDefinitionsEditable.value = value === true
-  // The backend answered, so the deployment mode is now known either way.
   workerModeKnown.value = true
 }
 
@@ -1077,7 +1036,7 @@ function clearServerWorkerRegistryState() {
 function resetWorkerCatalogState() {
   availableWorkers.value = []
   workerCatalogLoaded.value = false
-  // Fail closed to non-editable; backend will re-sync personal if applicable.
+  // Fail closed; the backend re-syncs personal mode if applicable.
   workerDefinitionsEditable.value = false
   workerModeKnown.value = false
   workerHealthLoading.value = false
@@ -1095,9 +1054,8 @@ function syncNotebookEnvFromBackend(serverEnv: any) {
   notebook.env = parseEnvMap(serverEnv)
 }
 
-/** Merge the env-response fields (sources + fetch status + secret-manager
- * config) into the store. Shared by the env PUT, /secret-manager/refresh,
- * /secret-manager/config PUT, and initial open since all four share shape. */
+/** Merge env sources, fetch status and secret-manager config into the store.
+ * The env PUT, both secret-manager routes and open share this shape. */
 function applyEnvSources(payload: any) {
   notebook.envSources =
     payload && typeof payload.env_sources === 'object'
@@ -1136,9 +1094,7 @@ function parseBackendNotebookRuntimeConfig(raw: any): NotebookRuntimeConfig {
       ? raw.default_python_version
       : availablePythonVersions[0] || ''
   return {
-    // Fail closed to 'service' so the header doesn't falsely advertise
-    // personal mode before the runtime-defaults fetch succeeds. Personal
-    // is only reported when the backend explicitly says so.
+    // Fail closed: personal only when the backend explicitly says so.
     deploymentMode: raw?.deployment_mode === 'personal' ? 'personal' : 'service',
     defaultParentPath:
       typeof raw?.default_parent_path === 'string' && raw.default_parent_path.trim()
@@ -1148,7 +1104,6 @@ function parseBackendNotebookRuntimeConfig(raw: any): NotebookRuntimeConfig {
     defaultPythonVersion,
     pythonSelectionFixed:
       raw?.python_selection_fixed === true || availablePythonVersions.length <= 1,
-    // Fail closed: registry UI only shows when the backend explicitly enables it.
     registryEnabled: raw?.registry_enabled === true,
     teamStoreConfigured: raw?.team_store_configured === true,
   }
@@ -1304,16 +1259,11 @@ function parseBackendCellPayload(raw: any): Cell {
 
   applySerializedExecutionMetadata(cell, raw)
 
-  // Restore persisted console output so it survives notebook reopens.
-  // Stored on the Cell directly — the renderer shows it in its own
-  // panel below the cell's structured output so it doesn't pollute
-  // the display value (important for @output_schema cells where the
-  // output is a user-controlled JSON object).
+  // Console lives on the Cell, not in the output, so @output_schema cells
+  // keep a clean display value.
   cell.consoleStdout = typeof raw.console_stdout === 'string' ? raw.console_stdout : ''
   cell.consoleStderr = typeof raw.console_stderr === 'string' ? raw.console_stderr : ''
 
-  // Unit-test source + last result (Python cells). Hydrated on open so the
-  // panel and the toolbar health badge restore without a re-run.
   cell.testSource = typeof raw.test_source === 'string' ? raw.test_source : ''
   cell.testResult = raw.test_result ? parseBackendTestResult(raw.test_result) : undefined
 
@@ -1326,10 +1276,8 @@ function loadNotebookStateFromBackend(data: any) {
   notebook.worker = data.worker ?? null
   notebook.timeout = data.timeout ?? null
   notebook.env = parseEnvMap(data.env)
-  // Registry UI gate from the runtime config merged into the open response.
   registryEnabled.value = data?.registry_enabled === true
   teamStoreConfigured.value = data?.team_store_configured === true
-  // Populate the per-cell strips for already-published artifacts on open.
   scheduleRegistryRefresh()
   applyEnvSources(data)
   notebook.workers = Array.isArray(data.workers) ? data.workers.map(parseWorkerSpec) : []
@@ -1356,20 +1304,17 @@ async function moveCell(id: CellId, direction: 'up' | 'down') {
   const swapIdx = direction === 'up' ? idx - 1 : idx + 1
   if (swapIdx < 0 || swapIdx >= sorted.length) return
 
-  // Swap locally for instant feedback
   const tmp = sorted[idx].order
   sorted[idx].order = sorted[swapIdx].order
   sorted[swapIdx].order = tmp
   notebook.updatedAt = Date.now()
 
-  // Persist to backend
   const sid = sessionId()
   if (!sid) return
   try {
     const newOrder = orderedCells.value.map((c) => c.id)
     await useStrata().reorderCells(sid, newOrder)
   } catch (err) {
-    // Revert on failure
     const revertTmp = sorted[idx].order
     sorted[idx].order = sorted[swapIdx].order
     sorted[swapIdx].order = revertTmp
@@ -1382,7 +1327,6 @@ async function duplicateCell(id: CellId) {
   if (!cell) return
   const source = cell.source
   await addCell(id)
-  // Find the newly added cell (right after the original)
   const sorted = orderedCells.value
   const idx = sorted.findIndex((c) => c.id === id)
   const newCell = sorted[idx + 1]
@@ -1424,8 +1368,7 @@ function applyBackendDag(backendDag: any) {
   }
 }
 
-/** Re-derive cell.variantActive from notebook.variantGroups so cells and
- *  groups never drift. The backend is authoritative; this just mirrors. */
+/** Re-derive cell.variantActive from notebook.variantGroups so they never drift. */
 function syncCellVariantFlagsFromGroups() {
   const activeIds = new Set<CellId>()
   for (const group of notebook.variantGroups) {
@@ -1445,10 +1388,7 @@ function syncCellVariantFlagsFromGroups() {
 
 // --- API Integration -------------------------------------------------------
 
-/**
- * Boot: create scratch notebook with one empty cell, connect WebSocket.
- * Called once on app mount. Resolves when ready to use.
- */
+/** Create a scratch notebook with one empty cell and connect the WebSocket. */
 async function boot(): Promise<void> {
   const strata = useStrata()
   try {
@@ -1463,7 +1403,6 @@ async function boot(): Promise<void> {
     resetWorkerCatalogState()
     const runtimeConfig = parseBackendNotebookRuntimeConfig(await strata.getNotebookRuntimeConfig())
 
-    // Create a scratch notebook with one starter cell
     const data = await strata.createNotebook(runtimeConfig.defaultParentPath, 'scratch', null, true)
     markNotebookPerf('boot_response')
     measureNotebookPerf('boot_request_ms', 'boot_request_start', 'boot_response')
@@ -1471,8 +1410,8 @@ async function boot(): Promise<void> {
     markNotebookPerf('boot_hydrated')
     measureNotebookPerf('boot_hydrate_ms', 'boot_response', 'boot_hydrated')
 
-    // Connect WebSocket in the background; initial notebook render does not
-    // need to wait for the live channel as long as execution stays disabled.
+    // Not awaited: rendering doesn't need the live channel while execution
+    // stays disabled.
     initializeWebSocket()
     connected.value = false
     void waitForWebSocket()
@@ -1494,13 +1433,9 @@ async function boot(): Promise<void> {
   }
 }
 
-/**
- * Open an existing notebook from disk.
- */
 async function openNotebook(path: string): Promise<any> {
   const strata = useStrata()
   markNotebookPerf('store_open_request_start')
-  // Cleanup existing WebSocket
   cleanupWebSocket()
   dependencyError.value = null
   environmentError.value = null
@@ -1536,8 +1471,7 @@ async function openNotebook(path: string): Promise<any> {
 }
 
 /**
- * Reconnect to an existing session by session ID.
- * Used when navigating to /notebook/:sessionId (e.g. page refresh).
+ * Reconnect to an existing session (e.g. a refresh of /notebook/:sessionId).
  * Returns session data including path/name for recent-notebooks tracking.
  */
 async function openBySessionId(sessionId: string): Promise<any> {
@@ -1636,19 +1570,17 @@ async function updateNotebookNameAction(name: string): Promise<any> {
 
 // --- WebSocket integration -------------------------------------------------
 
-// v1.1: Impact preview and profiling state
 const currentImpactPreview = ref<ImpactPreview | null>(null)
 const profilingSummary = ref<ProfilingSummary | null>(null)
 
-// Environment / dependency state
 const dependencies = ref<DependencyInfo[]>([])
 const resolvedDependencies = ref<DependencyInfo[]>([])
 const dependencyLoading = ref(false)
 const dependencyError = ref<string | null>(null)
 const environmentLoading = ref(false)
 const environmentError = ref<string | null>(null)
-// Who else is on the session (``presence`` frames), this tab's own identity,
-// and the cells whose last edit from here was refused: cell id -> who holds it.
+// Session presence, this tab's identity, and cells whose last edit from here
+// was refused (cell id -> holder).
 const presence = ref<PresenceEntryModel[]>([])
 const presenceYou = ref<string | null>(null)
 const cellLocks = ref<Record<string, string>>({})
@@ -1663,26 +1595,19 @@ const availableWorkers = ref<WorkerCatalogEntry[]>([])
 const WORKER_FETCH_RETRIES = 1
 const WORKER_FETCH_RETRY_MS = 1500
 const workerCatalogLoaded = ref(false)
-// Default to service mode (non-editable) until the backend confirms
-// otherwise. Personal mode relaxes restrictions, so failing closed here
-// keeps the editing affordances shut while the answer is unknown.
+// Fail closed (service mode) until the backend confirms personal mode.
 const workerDefinitionsEditable = ref(false)
-// Whether the backend has actually answered. Failing closed is right for
-// *permissions*, but it is not an answer about deployment mode: a personal
-// server whose /workers request fails (a 429 from the client rate limiter is
-// the easy way) would otherwise have its header claim "Service mode" and keep
-// claiming it. Consumers that describe the deployment must wait for this.
+// Failing closed is right for permissions but is not an answer about the
+// deployment mode (a failed /workers fetch would claim "Service mode").
+// Anything that describes the deployment must wait for this.
 const workerModeKnown = ref(false)
-// Registry UI gate: true only when the backend reports the registry routes
-// are reachable (personal mode today). Fail closed so the dashboard stays
-// hidden until the open response confirms it.
+// Fail closed: the dashboard stays hidden until the backend enables it.
 const registryEnabled = ref(false)
 const teamStoreConfigured = ref(false)
 const workerHealthLoading = ref(false)
 const workerHealthCheckedAt = ref<number | null>(null)
 
-// Registry / dashboard state (P3). Populated lazily by the Registry tab and
-// the per-cell strip; reads/writes go through the SERVER registry routes.
+// Registry state, loaded lazily via the server registry routes.
 const registryArtifactsByCell = ref<Record<string, PublishedArtifact[]>>({})
 const registryNames = ref<RegistryName[]>([])
 const registryPending = ref<PendingChange[]>([])
@@ -1690,7 +1615,6 @@ const registryAudit = ref<AuditEntry[]>([])
 const registryLoading = ref(false)
 const registryError = ref<string | null>(null)
 
-// Minimal toast feed for registry feedback (promoted / pending / approved).
 interface Toast {
   id: number
   kind: 'success' | 'error' | 'info'
@@ -1711,9 +1635,6 @@ function dismissToast(id: number) {
   toasts.value = toasts.value.filter((t) => t.id !== id)
 }
 
-// Refresh the registry state shown in the tab + per-cell strip: a cell's
-// published artifacts and the pending-approval queue. Called on tab open,
-// after a mutation, and after a cell finishes (it may have published).
 async function refreshRegistryAction() {
   const sid = sessionId()
   if (!sid) return
@@ -1736,9 +1657,8 @@ async function refreshRegistryAction() {
   }
 }
 
-// Debounced refresh: the per-cell strip and tab need fresh data after a cell
-// finishes (it may have published) without per-output thrash. No-op when the
-// registry is unreachable (service mode).
+// Debounced so a finishing cell doesn't refresh per output. No-op when the
+// registry is disabled.
 let _registryRefreshTimer: ReturnType<typeof setTimeout> | null = null
 function scheduleRegistryRefresh() {
   if (!registryEnabled.value) return
@@ -1757,8 +1677,7 @@ async function fetchRegistryAuditAction(name?: string) {
   }
 }
 
-// Mutations propagate errors so the component can toast; they refresh on
-// success. setAlias returns the move result (applied | pending | unchanged).
+// Mutations rethrow so the component can toast.
 async function setAliasAction(
   name: string,
   alias: string,
@@ -1770,9 +1689,8 @@ async function setAliasAction(
   return result
 }
 
-// Send one of a cell's outputs, and its chain, to the team store under a name.
-// Stamped with the cell so the strip lists it afterwards, like a result the
-// cell published itself.
+// Promote a cell output and its chain to the team store. Stamped with the
+// cell so the strip lists it like a result the cell published itself.
 async function promoteToTeamAction(
   cellId: CellId,
   artifactUri: string,
@@ -1803,8 +1721,6 @@ function fetchLineageAction(artifactId: string, version: number) {
   return useStrata().getLineage(artifactId, version)
 }
 
-// Lineage modal (P3e): fetch the flat graph, adapt to a tree, flatten to
-// indented rows, and open the overlay.
 const lineageOpen = ref(false)
 const lineageTitle = ref('')
 const lineageRows = ref<Array<LineageTreeNode & { depth: number }>>([])
@@ -1838,7 +1754,6 @@ const serverWorkerRegistryLoading = ref(false)
 const serverWorkerActionLoading = ref<Record<string, boolean>>({})
 const serverWorkerRegistryError = ref<string | null>(null)
 
-// Inspect REPL state
 interface InspectEntry {
   expr: string
   result?: string
@@ -1846,18 +1761,13 @@ interface InspectEntry {
   type?: string
   stdout?: string
 }
-// Inspect REPL state is per-cell. The backend supports N concurrent
-// inspect sessions per notebook; the frontend caps the visible panels
-// via maxInspectPanels (user-configurable, default 1). When the cap is
-// hit, opening a new inspect prompts the user to confirm closing the
-// oldest panel — see pendingInspectRequest.
+// Inspect state is per-cell. Visible panels are capped by maxInspectPanels;
+// at the cap, opening another asks to close the oldest (pendingInspectRequest).
 const inspectOpenOrder = ref<CellId[]>([])
 const inspectReadyMap = ref(new Map<CellId, boolean>())
 const inspectHistoryMap = ref(new Map<CellId, InspectEntry[]>())
-// In-flight open requests that haven't received an 'inspect_result' yet.
-// Counted against the panel cap to prevent a race where two quick clicks
-// both pass the check before either response arrives, letting both panels
-// through and silently exceeding the cap.
+// Opens awaiting 'inspect_result'. They count against the cap, or two quick
+// clicks could both pass the check and exceed it.
 const inspectPendingOpens = ref(new Set<CellId>())
 const pendingInspectRequest = ref<{ newCellId: CellId; evictCellId: CellId } | null>(null)
 
@@ -1877,9 +1787,7 @@ function setMaxInspectPanels(n: number) {
   localStorage.setItem('strata.inspect.maxPanels', String(clamped))
 }
 
-// Back-compat aliases for callers that still read a single inspect.
-// The first open cell (if any) is treated as "the current inspect" for
-// legacy code paths. Remove once no consumers reference these.
+// Single-inspect aliases (first open cell). Remove once nothing reads them.
 const inspectCellId = computed<CellId | null>(() => inspectOpenOrder.value[0] ?? null)
 const inspectReady = computed(() => {
   const id = inspectCellId.value
@@ -1901,10 +1809,7 @@ function inspectHistoryFor(cellId: CellId): InspectEntry[] {
 }
 
 // --- Cell unit-test panels -------------------------------------------------
-// Which cells currently have the Tests panel open. Purely client-side
-// (mirrors the inspect toggle's UX, but there's no backend open/close — the
-// only backend round-trip is running the tests). Test source / result /
-// status live on the Cell itself, like console output.
+// Client-side only; test source, result and status live on the Cell.
 const testOpenCells = ref<Set<CellId>>(new Set())
 
 function isTesting(cellId: CellId): boolean {
@@ -1926,7 +1831,6 @@ function updateTestSource(cellId: CellId, source: string) {
   const cell = cellMap.value.get(cellId)
   if (!cell) return
   cell.testSource = source
-  // A test-source edit invalidates the last result.
   if (cell.testResult && !cell.testResult.stale) {
     cell.testResult = { ...cell.testResult, stale: true }
   }
@@ -1952,8 +1856,7 @@ function parseBackendTestResult(raw: any): CellTestResult {
           message: t.message ?? '',
         }))
       : [],
-    // Persisted results carry no `stale` (it's computed at emit time); a
-    // freshly hydrated result is trusted until the user edits the cell/tests.
+    // Persisted results carry no `stale`; trust them until the next edit.
     stale: raw.stale === true,
     pytestUnavailable: raw.pytest_unavailable === true,
     ranAt: raw.ran_at ?? 0,
@@ -1962,8 +1865,8 @@ function parseBackendTestResult(raw: any): CellTestResult {
 
 let wsInstance: ReturnType<typeof useWebSocket> | null = null
 
-// App-view (read-only) mode: when true, the WS connects with `?role=viewer`
-// so the server rejects any mutation frame. Set before opening the session.
+// App view: the WS connects with `?role=viewer` so the server rejects
+// mutations. Set before opening the session.
 const viewerMode = ref(false)
 
 function setViewerMode(on: boolean) {
@@ -1985,11 +1888,8 @@ function initializeWebSocket() {
 
       const cell = cellMap.value.get(cellId)
 
-      // A fresh "running" from the backend starts a new execution —
-      // drop any stale stream buffer from a previous (e.g. cancelled)
-      // run. This covers run-all / rerun-all / cascade / force paths
-      // that don't go through the local execute* helpers, where a new
-      // attempt-1 stream would otherwise append onto the old text.
+      // A new run: drop the previous run's stream buffer. Run-all, cascade
+      // and force paths skip the local execute* helpers that clear it.
       if (cell && status === 'running') {
         cell.streamBuffer = undefined
         cell.streamAttempt = undefined
@@ -2003,10 +1903,8 @@ function initializeWebSocket() {
         }
       }
 
-      // When a cell enters "running" state against a remote worker, the
-      // backend includes remote_worker + remote_transport on the payload
-      // so the UI can render a live "dispatching → X" badge while the
-      // cell executes. Local cells omit these fields.
+      // Remote-worker runs carry remote_worker + remote_transport for the
+      // "dispatching" badge; local cells omit them.
       if (cell && status === 'running' && typeof p.remote_worker === 'string') {
         applyRemoteExecutionMetadata(cell, p)
       }
@@ -2041,8 +1939,7 @@ function initializeWebSocket() {
       const p = msg.payload as Record<string, any>
       const cellId = p.cell_id as CellId
       const outputs = p.outputs as Record<string, any> | undefined
-      // A finished cell may have published to the registry — refresh the
-      // per-cell strip + Registry tab (debounced, registry-gated).
+      // A finished cell may have published to the registry.
       scheduleRegistryRefresh()
 
       const displayOutputs =
@@ -2069,24 +1966,20 @@ function initializeWebSocket() {
       output.cacheHit = p.cache_hit || false
       output.cacheLoadMs = p.duration_ms
 
-      // Console output is stored on the Cell, not on output.scalar —
-      // keeps the structured display value clean for @output_schema
-      // prompts and pandas cells that return typed objects.
+      // Console lives on the Cell, not output.scalar, to keep the display
+      // value clean.
       const stdout = typeof p.stdout === 'string' ? p.stdout : undefined
       const stderr = typeof p.stderr === 'string' ? p.stderr : undefined
 
       const cell = cellMap.value.get(cellId)
       if (cell) {
-        // The canonical output replaces any streamed partial buffer.
         cell.streamBuffer = undefined
         cell.streamAttempt = undefined
         cell.durationMs = p.duration_ms
         cell.displayOutputs = displayOutputs
         if (p.artifact_uris !== undefined) cell.artifactUris = parseArtifactUris(p.artifact_uris)
-        // If cell_output carries fresh stdout/stderr, overwrite.
-        // Otherwise keep whatever earlier cell_console messages
-        // streamed in (so the console doesn't disappear on cache
-        // hits that don't re-stream).
+        // Absent stdout/stderr keeps the streamed console (cache hits don't
+        // re-stream).
         if (stdout !== undefined) cell.consoleStdout = stdout
         if (stderr !== undefined) cell.consoleStderr = stderr
         if (p.execution_method) {
@@ -2096,11 +1989,8 @@ function initializeWebSocket() {
         if (p.execution_method === 'executor') {
           updateWorkerHealth(effectiveWorkerNameForCell(cell), 'healthy')
         }
-        // Capture suggest_install + language for "click to install"
-        // UX. The button in CellEditor.vue only shows for ``python``;
-        // an R suggestion hydrates the field so it appears in tests
-        // and future install actions, but the visible button stays
-        // hidden until the R install endpoint ships.
+        // CellEditor only shows the install button for ``python``; R
+        // suggestions are stored but hidden until an R install route exists.
         cell.suggestInstall = p.suggest_install || undefined
         cell.suggestInstallLanguage =
           p.suggest_install_language === 'r'
@@ -2121,9 +2011,8 @@ function initializeWebSocket() {
       const text = typeof p.text === 'string' ? p.text : ''
       const attempt = Number(p.attempt) || 1
       if (p.kind === 'retry') {
-        // Schema validation failed and the backend is retrying —
-        // clear the buffer so attempt N's invalid JSON never fuses
-        // with attempt N+1's corrected output.
+        // Schema retry: clear so the failed attempt's JSON doesn't fuse with
+        // the next attempt's.
         cell.streamBuffer = ''
         cell.streamAttempt = attempt
         return
@@ -2178,10 +2067,6 @@ function initializeWebSocket() {
       const stream = p.stream === 'stderr' ? 'stderr' : 'stdout'
       const cell = cellMap.value.get(cellId)
       if (cell && text) {
-        // Append to the stream-specific field on the cell. Storing
-        // console on the Cell (not inside output.scalar) keeps the
-        // display value clean — important for cells whose output is
-        // a user-controlled JSON object under @output_schema.
         if (stream === 'stderr') {
           cell.consoleStderr = (cell.consoleStderr ?? '') + text
         } else {
@@ -2245,9 +2130,7 @@ function initializeWebSocket() {
           variant_groups: dagData.variant_groups,
         })
       }
-      // Merge authoritative cell analysis from backend (defines,
-      // references, upstream/downstream). Arrives asynchronously
-      // after WS cell_source_update — no blocking round-trip.
+      // Authoritative defines/references/edges, sent after cell_source_update.
       if (dagData.cells && Array.isArray(dagData.cells)) {
         for (const sc of dagData.cells) {
           const cell = cellMap.value.get(sc.id as CellId)
@@ -2257,8 +2140,7 @@ function initializeWebSocket() {
           if (Array.isArray(sc.upstream_ids)) cell.upstreamIds = sc.upstream_ids
           if (Array.isArray(sc.downstream_ids)) cell.downstreamIds = sc.downstream_ids
           if (typeof sc.is_leaf === 'boolean') cell.isLeaf = sc.is_leaf
-          // An edit moves updated_by, and this frame is the only thing that
-          // arrives after one — without it the header keeps the old author.
+          // The only frame after an edit, so it must carry the new author.
           if (sc.created_by !== undefined) {
             cell.createdBy = typeof sc.created_by === 'string' ? sc.created_by : null
           }
@@ -2283,9 +2165,6 @@ function initializeWebSocket() {
                   .map((e: any) => ({ name: String(e.name), kind: String(e.kind ?? '') }))
               : undefined
           }
-          // Variant fields update when the user edits a `# @variant`
-          // annotation in source; for plain switches the values are
-          // unchanged but still safe to overwrite.
           if (sc.variant_group !== undefined) {
             cell.variantGroup = typeof sc.variant_group === 'string' ? sc.variant_group : null
           }
@@ -2304,14 +2183,9 @@ function initializeWebSocket() {
       const cellId = p.cell_id as CellId
       const planId = p.plan_id as string
 
-      // Always auto-accept cascades. This is the decision, not a stopgap:
-      // running a cell means running it against current inputs, and a
-      // confirmation step would interrupt every cascade to catch the rare
-      // expensive one. Gating it on an estimated duration was considered
-      // and rejected (#631) — cost is only one of the reasons someone
-      // might not want a rerun, and the common ones (a cosmetic edit
-      // upstream, iterating on a downstream cell) have nothing to do with
-      // how long it takes.
+      // Always auto-accept, by decision: running a cell means running it
+      // against current inputs. A duration-based confirmation gate was
+      // rejected; cost is rarely why someone wouldn't want a rerun.
       if (planId) {
         executeCascadeWebSocket(cellId, planId)
       }
@@ -2342,7 +2216,7 @@ function initializeWebSocket() {
         const cellsRemoved = notebook.cells.some((c) => !serverIds.has(c.id))
 
         if (cellsAdded || cellsRemoved) {
-          // Full replace when cells were added or removed (e.g. by agent)
+          // Cells were added or removed (e.g. by an agent).
           notebook.cells = state.cells.map(parseBackendCellPayload)
           notebook.cells.sort((a, b) => a.order - b.order)
         } else {
@@ -2406,7 +2280,6 @@ function initializeWebSocket() {
       if (!cellId) return
 
       if (action === 'open') {
-        // Clear the in-flight marker regardless of success.
         if (inspectPendingOpens.value.has(cellId)) {
           const next = new Set(inspectPendingOpens.value)
           next.delete(cellId)
@@ -2515,12 +2388,7 @@ function initializeWebSocket() {
         if (job.action === 'import') {
           environmentImportPreview.value = null
         }
-        // R jobs ship a fresh ``r_environment`` block in the finished
-        // payload (the panel's status pill + lock hash + last sync
-        // come from there), but the installed-package listing is
-        // fetched on demand via a dedicated route. Trigger that
-        // refresh here so the package list reflects the post-install
-        // library without waiting for the next panel mount.
+        // The finished payload omits the package list; refetch it now.
         if (job.action === 'r_init' || job.action === 'r_add') {
           void fetchRPackagesAction()
         }
@@ -2585,17 +2453,13 @@ function cleanupWebSocket() {
   }
 }
 
-// Session-only display selection for sweep variant groups (group → cellId).
-// In sweep mode every member is "active", so the tab strip picks which member's
-// source is shown in the single collapsed editor slot; switch groups ignore it.
+// Sweep groups only (group -> cellId): every member is active, so this picks
+// whose source fills the collapsed editor slot. Session-only.
 const variantDisplaySelection = ref<Record<string, string>>({})
 
 function variantDisplayCellId(group: VariantGroup): string {
-  // Fall back whenever the remembered cell is no longer a member, not just
-  // when nothing was ever picked. Deleting the displayed variant used to
-  // leave a dead id here, and since the sweep filter in NotebookPage keeps
-  // only the cell matching it, *every* member of the group disappeared from
-  // the editor — including the ones still on disk.
+  // Fall back when the remembered cell is no longer a member: NotebookPage's
+  // sweep filter keeps only the matching cell, so a dead id hides the group.
   const remembered = variantDisplaySelection.value[group.group]
   if (remembered && group.members.some((m) => m.cellId === remembered)) {
     return remembered
@@ -2619,8 +2483,7 @@ function addVariant(group: string): void {
 
 function updateWidgetValues(cellId: CellId, values: Record<string, unknown>): void {
   if (!wsInstance) return
-  // Optimistic local update so the control reflects the change immediately;
-  // the backend re-materializes + broadcasts staleness for downstream cells.
+  // Optimistic; the backend broadcasts downstream staleness.
   const cell = notebook.cells.find((c) => c.id === cellId)
   if (cell?.widget) {
     cell.widget = { ...cell.widget, values: { ...cell.widget.values, ...values } }
@@ -2647,11 +2510,8 @@ async function executeCellWebSocket(cellId: CellId) {
       return
     }
   }
-  // Flush any pending source edits so the backend has the latest
-  // source before execution begins.
   flushCellSource(cellId)
 
-  // Clear any stale loop progress so the badge restarts from zero.
   const cell = cellMap.value.get(cellId)
   if (cell?.loopProgress) {
     cell.loopProgress = undefined
@@ -2684,8 +2544,7 @@ async function executeNotebookRunAllWebSocket() {
       return
     }
   }
-  // Flush every dirty cell first — otherwise run-all hits the backend with
-  // the stale debounced copy of any cell the user just edited.
+  // Otherwise run-all sends the stale debounced copy of a just-edited cell.
   flushDirtyCells()
   wsInstance.executeNotebookRunAll()
 }
@@ -2715,9 +2574,7 @@ async function executeForceWebSocket(cellId: CellId) {
       return
     }
   }
-  // "Run this only" runs the target with whatever upstream artifacts are
-  // already on disk, so flushing the target's source is enough — we
-  // explicitly do not want to flush upstreams here.
+  // "Run this only" uses upstream artifacts as they are; don't flush upstreams.
   flushCellSource(cellId)
   setCellStatus(cellId, 'running')
   wsInstance.executeForce(cellId)
@@ -2742,9 +2599,7 @@ async function executeRerunWebSocket(cellId: CellId) {
       return
     }
   }
-  // Flush every dirty cell — the backend's cascade planner needs current
-  // source for *all* upstreams to make the right cascade decision, not just
-  // the target. A dirty upstream would otherwise look ready and get skipped.
+  // All of them: a dirty upstream would look ready to the cascade planner.
   flushDirtyCells()
   const cell = cellMap.value.get(cellId)
   if (cell?.loopProgress) {
@@ -2777,8 +2632,7 @@ async function executeNotebookRerunAllWebSocket() {
       return
     }
   }
-  // Flush every dirty cell first — otherwise rerun-all hits the backend with
-  // the stale debounced copy of any cell the user just edited.
+  // Otherwise rerun-all sends the stale debounced copy of a just-edited cell.
   flushDirtyCells()
   wsInstance.executeNotebookRerunAll()
 }
@@ -2843,9 +2697,8 @@ async function fetchWorkers(forceRefresh = false, retriesLeft = WORKER_FETCH_RET
   } catch (err) {
     console.error('Failed to fetch workers:', err)
     if (retriesLeft > 0) {
-      // Nothing else re-requests this, so without a retry one transient
-      // rejection leaves the deployment mode unknown and the workers editor
-      // disabled until the page is reloaded.
+      // Nothing else re-requests this; without a retry one transient failure
+      // leaves the mode unknown until a reload.
       workerHealthLoading.value = false
       await new Promise((resolve) => setTimeout(resolve, WORKER_FETCH_RETRY_MS))
       return fetchWorkers(forceRefresh, retriesLeft - 1)
@@ -2906,9 +2759,7 @@ async function updatePythonVersionAction(
   const strata = useStrata()
   try {
     const data = await strata.updateNotebookPythonVersion(sid, newVersion)
-    // 200 no-op + 202 accepted both surface as no thrown error. The
-    // environment-job WS broadcasts handle live progress updates, so
-    // we don't have to refresh the panel inline here.
+    // Progress arrives over the environment-job WS frames.
     return { accepted: data.accepted }
   } catch (err: any) {
     return { accepted: false, error: err?.message || 'Failed to update Python version' }
@@ -2951,9 +2802,6 @@ async function initRenvAction() {
   environmentWarnings.value = []
   environmentImportPreview.value = null
   const command = "Rscript -e 'renv::init(bare = TRUE)'"
-  // Reuse the env-operation block for visual parity with uv jobs —
-  // the action enum has been widened (see types/notebook.ts) but
-  // the UI render is unchanged.
   beginEnvironmentOperation('r_init' as any, command, null)
   const strata = useStrata()
   try {
@@ -2962,12 +2810,8 @@ async function initRenvAction() {
     if (data.cells && Array.isArray(data.cells)) {
       syncCellsFromBackend(data.cells)
     }
-    // The 202 response just acknowledges the job submission; the
-    // background job is still running. ``handleEnvironmentJobMessage``
-    // fires ``fetchRPackagesAction`` when the WS finished frame
-    // lands with a completed status — no eager fetch here, which
-    // would race against the still-running subprocess and pull
-    // pre-install package state.
+    // No eager package fetch: the job is still running.
+    // ``handleEnvironmentJobMessage`` refetches when it finishes.
   } catch (err: any) {
     dependencyError.value = err.message || 'Failed to initialise renv'
     syncEnvironmentPayloadFromBackend(err?.payload)
@@ -2996,9 +2840,7 @@ async function addRPackageAction(pkg: string) {
     if (data.cells && Array.isArray(data.cells)) {
       syncCellsFromBackend(data.cells)
     }
-    // 202 only. WS ``environment_job_finished`` triggers the
-    // package-list refresh once the job actually completes — see
-    // ``handleEnvironmentJobMessage``.
+    // The package list refreshes on ``environment_job_finished``.
   } catch (err: any) {
     dependencyError.value = err.message || `Failed to install R package ${pkg}`
     syncEnvironmentPayloadFromBackend(err?.payload)
@@ -3536,17 +3378,12 @@ function requestProfilingSummary() {
 
 function openInspect(cellId: CellId) {
   if (!wsInstance || !wsInstance.connected()) return
-  // Already open or mid-open for this cell? Nothing to do. (Toggle is
-  // the CellEditor's job — it closes on a second click rather than
-  // re-opening.)
+  // Toggling closed is CellEditor's job.
   if (inspectOpenOrder.value.includes(cellId)) return
   if (inspectPendingOpens.value.has(cellId)) return
   if (inspectActiveCount() >= maxInspectPanels.value) {
-    // At the user-configured panel cap. Ask the user to confirm closing
-    // the oldest panel before we open a new one. The actual swap happens
-    // in confirmInspectSwap() once the user says yes. Evict the oldest
-    // *confirmed-open* panel, not a pending one — pending opens will
-    // resolve on their own and don't represent a user-visible panel yet.
+    // At the cap: confirmInspectSwap() does the swap once the user agrees.
+    // Prefer evicting a visible panel over a pending open.
     const evictCellId = inspectOpenOrder.value[0] ?? Array.from(inspectPendingOpens.value)[0]
     if (!evictCellId) return
     pendingInspectRequest.value = { newCellId: cellId, evictCellId }
@@ -3597,7 +3434,7 @@ export function useNotebook() {
     // Lifecycle
     boot,
     openNotebook,
-    // Registry / dashboard (P3)
+    // Registry / dashboard
     registryArtifactsByCell,
     registryNames,
     registryPending,
@@ -3655,7 +3492,7 @@ export function useNotebook() {
     selectVariantDisplay,
     variantDisplayCellId,
     addVariant,
-    // v1.1: Impact Preview, Profiling
+    // Impact preview, profiling
     currentImpactPreview,
     profilingSummary,
     requestImpactPreview,

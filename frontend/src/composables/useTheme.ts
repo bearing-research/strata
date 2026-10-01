@@ -1,11 +1,8 @@
 /**
- * Theme composable — tracks the user's choice (system / light / dark),
- * resolves it against prefers-color-scheme, and applies a data-theme
- * attribute to <html> that the CSS tokens in style.css key off.
+ * Theme mode (system / light / dark), resolved against prefers-color-scheme
+ * into the <html> data-theme attribute that style.css keys off.
  *
- * The store is module-scoped (not per-component) so every call to
- * useTheme() shares state — reading mode from two places always shows
- * the same value. Initialization runs once at module load.
+ * Module-scoped so every useTheme() call shares one state.
  */
 import { computed, ref, watchEffect } from 'vue'
 
@@ -23,7 +20,7 @@ function loadStoredMode(): ThemeMode {
       return raw as ThemeMode
     }
   } catch {
-    // localStorage disabled (private mode, quota, etc.) — fall through.
+    // localStorage disabled (private mode, quota): fall through.
   }
   return 'system'
 }
@@ -49,8 +46,7 @@ const resolved = computed<ResolvedTheme>(() => {
   return mode.value
 })
 
-// Apply data-theme to <html> and persist whenever the user flips the
-// switch. watchEffect runs once on registration so first paint matches.
+// Runs once on registration, so first paint matches.
 watchEffect(() => {
   if (typeof document !== 'undefined') {
     document.documentElement.dataset.theme = resolved.value
@@ -69,7 +65,7 @@ function setMode(next: ThemeMode) {
 }
 
 function cycleMode() {
-  // system → light → dark → system (matches the order shown in the UI).
+  // Same order as the UI.
   const order: ThemeMode[] = ['system', 'light', 'dark']
   const idx = order.indexOf(mode.value)
   mode.value = order[(idx + 1) % order.length]

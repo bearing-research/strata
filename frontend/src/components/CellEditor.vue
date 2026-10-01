@@ -63,9 +63,8 @@ const variantGroup = computed(() => {
   return notebook.variantGroups.find((g) => g.group === props.cell.variantGroup) ?? null
 })
 
-// In sweep mode every member runs; the tab strip is a display selector and the
-// "active" highlight follows the locally-selected display cell, not the backend
-// active pointer. In switch mode they coincide.
+// In sweep mode every member runs, so the "active" tab is the locally selected
+// display cell rather than the backend's active pointer.
 const isSweepVariant = computed(() => variantGroup.value?.mode === 'sweep')
 const variantSelectedCellId = computed(() =>
   variantGroup.value
@@ -84,8 +83,7 @@ function onVariantTabClick(member: { cellId: string; name: string }): void {
   }
 }
 
-// Sweep-group rollup: resolve each member to its cell for a status count, and a
-// run-all that runs every variant (each emits `run`, same as the per-cell path).
+// Sweep-group rollup: per-member status counts and a run-all over every variant.
 const variantMemberCells = computed(() =>
   (variantGroup.value?.members ?? [])
     .map((m) => notebook.cells.find((c) => c.id === m.cellId))
@@ -108,8 +106,7 @@ function toggleInspect() {
   openInspect(props.cell.id)
 }
 
-// Cell unit tests — Python cells only. The toolbar button doubles as a health
-// badge so test status is readable without opening the panel.
+// Cell unit tests (Python only). The toolbar button doubles as a health badge.
 const notebookId = computed(() => (notebook as { sessionId?: string }).sessionId)
 
 /** The 20-row preview arrives as column-keyed dicts; the data grid renders
@@ -120,8 +117,7 @@ function previewArraysFor(output: CellOutput): unknown[][] {
 }
 
 const isPythonCell = computed(() => props.cell.language === 'python')
-// Widget cells render their control panel in place of the editor; this toggles
-// the source editor so the control *declaration* can still be edited in the UI.
+// Widget cells show controls instead of the editor; this reveals the source.
 const widgetShowSource = ref(false)
 const isTesting = computed(() => storeIsTesting(props.cell.id))
 
@@ -164,10 +160,7 @@ const showCausality = ref(false)
 const folded = ref(false)
 const installRequestedPackage = ref<string | null>(null)
 
-// Markdown cells default to a rendered "preview" view; clicking the
-// preview swaps in the CodeMirror editor for editing. New (empty)
-// markdown cells start in edit mode so the user can begin typing
-// immediately. Non-markdown cells ignore this state entirely.
+// Markdown cells start in preview (click to edit), except empty new ones.
 const isMarkdownPreviewing = ref(
   props.cell.language === 'markdown' && Boolean(props.cell.source.trim()),
 )
@@ -182,14 +175,12 @@ const renderedMarkdownSource = computed(() => {
 function enterMarkdownEdit() {
   if (props.cell.language !== 'markdown') return
   isMarkdownPreviewing.value = false
-  // Focus the editor on the next tick so the click handler doesn't race
-  // with CodeMirror's mount/show transition.
+  // Next tick, or the click races CodeMirror's mount/show transition.
   setTimeout(() => view.value?.focus(), 0)
 }
 
 function exitMarkdownEditOnBlur() {
-  // Persist any pending source first; blur is when the debounced flush
-  // would otherwise lose un-WS'd edits.
+  // Flush first, or the debounced edits are lost on blur.
   flushCellSource(props.cell.id)
   if (props.cell.language === 'markdown' && props.cell.source.trim()) {
     isMarkdownPreviewing.value = true
@@ -224,12 +215,8 @@ watch(
 
 const statusClass = computed(() => `status-${props.cell.status}`)
 
-// Live dispatch badge: shows "dispatching → gpu-fly" when a remote cell
-// is in-flight. The backend includes remote_worker on the cell_status
-// running message precisely so this badge can appear without waiting for
-// the cell to finish. A worker that runs jobs asynchronously reports
-// "starting" while its machine is provisioned, before the cell's own
-// timeout begins.
+// Live badge for a remote cell in flight. An async worker reports "starting"
+// while its machine is provisioned, before the cell's timeout begins.
 const dispatchLabel = computed(() => {
   if (props.cell.status !== 'running') return null
   const worker = props.cell.remoteWorkerName
@@ -256,9 +243,7 @@ const statusLabel = computed(() => {
   }
 })
 
-// Human-readable staleness reasons for the status-dot tooltip, so a
-// stale cell reads "stale · upstream changed" rather than a bare "stale"
-// (#361 — a downstream of a changed upstream is STALE with reason UPSTREAM).
+// Status-dot tooltip text, e.g. "stale · upstream changed".
 const STALENESS_REASON_LABELS: Record<StalenessReason, string> = {
   self: 'source changed',
   upstream: 'upstream changed',
@@ -287,7 +272,6 @@ const canExplainStaleness = computed(() =>
   Boolean(props.cell.causality && (props.cell.status === 'idle' || props.cell.status === 'stale')),
 )
 
-/** v1.1: Execution method label */
 const executionMethodLabel = computed(() => {
   if (!props.cell.executorName) return ''
   switch (props.cell.executorName) {
@@ -302,23 +286,9 @@ const executionMethodLabel = computed(() => {
   }
 })
 
-/**
- * Phase 2: Progress badge for loop cells.
- *
- * While the loop is running, ``# @loop_until`` has not yet fired, and the
- * current iteration is strictly less than ``maxIter``, we display the
- * completed-iteration count with a spinner so the user sees live progress
- * of a multi-minute agentic loop. After the loop finishes the badge stays
- * visible as a compact summary ("iter N/M done" or similar) so users can
- * see at a glance that a cell ran 7 iterations without opening the
- * inspect panel.
- */
-
-// --- Streamed prompt output (issues #110/#112) ---------------------------
-// Free-text streams render raw. Structured (JSON) streams are mostly
-// punctuation on one wrapped line, so we pretty-print whatever prefix is
-// structurally complete (fields pop in as the model finishes them) and
-// fall back to a char ticker + raw tail while the prefix is unparseable.
+// --- Streamed prompt output ----------------------------------------------
+// Free text renders raw. JSON streams pretty-print the structurally complete
+// prefix, falling back to a char ticker + raw tail while it is unparseable.
 
 const streamIsStructured = computed(() => isStructuredStream(props.cell.streamBuffer ?? ''))
 
@@ -348,7 +318,7 @@ const loopProgressDone = computed(() => {
 const loopProgressLabel = computed(() => {
   const progress = props.cell.loopProgress
   if (!progress) return ''
-  // iteration is 0-based; display the 1-based completed-iteration count.
+  // iteration is 0-based.
   const completed = progress.iteration + 1
   return `iter ${completed}/${progress.maxIter}`
 })
@@ -371,14 +341,8 @@ const loopProgressTitle = computed(() => {
   return `${status} (iter ${completed}/${progress.maxIter})${duration}`
 })
 
-// ---- Elapsed-time tracking for running cells ----
-//
-// Plain Python cells get no per-step progress signal (only loop cells
-// emit cell_iteration_progress). Without an elapsed counter, a cell
-// that's been training for 20 minutes looks identical to one that
-// started two seconds ago: same status dot, no time. Track the
-// transition into 'running' and tick a per-cell counter while it's
-// in that state.
+// Elapsed time for running cells: plain cells have no progress signal, so
+// without it a 20-minute run looks like one that just started.
 const runStartedAtMs = ref<number | null>(null)
 const nowMs = ref(Date.now())
 let tickHandle: number | null = null
@@ -404,10 +368,8 @@ watch(
   () => props.cell.status,
   (status, prev) => {
     if (status === 'running' && prev !== 'running') {
-      // Reload edge case: status was already 'running' when the
-      // component mounted. We don't know the real start time, so this
-      // counts from "first observed running", a lower bound. Better
-      // than no info.
+      // Already running at mount (reload): the real start is unknown, so
+      // count from first observation as a lower bound.
       runStartedAtMs.value = Date.now()
       startTicker()
     } else if (status !== 'running') {
@@ -443,7 +405,7 @@ function cancelThisCell() {
   cancelCellWebSocket(props.cell.id)
 }
 
-/** v1.1: Causality summary for tooltip */
+/** Causality summary for tooltip */
 const causalityTooltip = computed(() => {
   const c = props.cell.causality
   if (!c) return ''
@@ -600,10 +562,7 @@ const annotationDiagnosticsTitle = computed(() =>
   annotationDiagnostics.value.map((d) => `${d.code}: ${d.message}`).join('\n'),
 )
 
-// Module-cell marker. Only shown when the cell classifies as a module
-// cell (pure source + at least one exported def/class). The tooltip
-// lists the symbols the cell makes available to downstream cells —
-// the same names they'd reference by bare identifier.
+// Module-cell tooltip: the symbols downstream cells can reference.
 const moduleExportsTitle = computed(() => {
   const exports = props.cell.moduleExports
   if (!exports?.length) {
@@ -621,11 +580,7 @@ const installTargetPackage = computed(
   () => installRequestedPackage.value || props.cell.suggestInstall || null,
 )
 
-// Match both ``add`` (Python ``uv add``) and ``r_add`` (R
-// ``renv::install``) here. Pre-PR H the R install button kept its
-// "Install <pkg>" label forever during an r_add and never
-// surfaced the completion hint, because both checks only
-// recognised the Python action enum.
+// Both ``add`` (``uv add``) and ``r_add`` (``renv::install``).
 function isInstallAction(action: string | null | undefined): boolean {
   return action === 'add' || action === 'r_add'
 }
@@ -653,10 +608,7 @@ async function installSuggestedPackage() {
   const pkg = props.cell.suggestInstall
   if (!pkg || installInProgress.value) return
   installRequestedPackage.value = pkg
-  // Dispatch to the matching env-job pipeline: Python -> ``uv add``,
-  // R -> ``renv::install`` + snapshot. Both go through the same
-  // background-job machinery; the cell-output hint just chooses the
-  // right entry point.
+  // Python -> ``uv add``, R -> ``renv::install`` + snapshot.
   if (props.cell.suggestInstallLanguage === 'r') {
     await addRPackageAction(pkg)
   } else {
@@ -701,10 +653,7 @@ function isJsonLike(text: string): boolean {
   return trimmed.startsWith('{') || trimmed.startsWith('[')
 }
 
-/** Combined console text for a cell — stdout first, stderr after. Empty
- * string when the cell has no captured output. Console is a Cell-level
- * field (not part of the display output) so @output_schema cells keep
- * a clean structured display value. */
+/** Console text for a cell: stdout, then stderr. */
 function cellConsoleText(cell: Cell): string {
   const stdout = cell.consoleStdout ?? ''
   const stderr = cell.consoleStderr ?? ''
@@ -815,7 +764,7 @@ function outputKey(output: CellOutput, index: number): string {
 
     <!-- Editor + output -->
     <div class="cell-body">
-      <!-- Variant tab strip — shown when this cell is part of a variant group -->
+      <!-- Variant tab strip -->
       <div v-if="variantGroup" class="variant-tabs" data-testid="variant-tabs">
         <button
           v-for="member in variantGroup.members"
@@ -1087,7 +1036,7 @@ function outputKey(output: CellOutput, index: number): string {
         </span>
       </div>
 
-      <!-- v1.1: Causality chain detail (expanded) -->
+      <!-- Causality chain detail (expanded) -->
       <div v-if="showCausality && canExplainStaleness && cell.causality" class="causality-panel">
         <div class="causality-header">
           Stale because: <span class="causality-reason">{{ cell.causality.reason }}</span>
@@ -1132,8 +1081,6 @@ function outputKey(output: CellOutput, index: number): string {
         v-html="renderedMarkdownSource || '<p class=\'placeholder\'>(empty markdown cell)</p>'"
       ></div>
 
-      <!-- Widget cells render their control panel in place of the editor, with
-           a toggle to reveal the declaration source for editing. -->
       <div v-if="!folded && cell.language === 'widget'" class="widget-source-toggle">
         <button type="button" @click="widgetShowSource = !widgetShowSource">
           {{ widgetShowSource ? '✓ Done editing controls' : '✎ Edit controls' }}
@@ -1159,10 +1106,8 @@ function outputKey(output: CellOutput, index: number): string {
         "
       />
 
-      <!-- Live streamed partial output (prompt cells, #110). Ephemeral:
-           plain monospace text while running — no markdown rendering
-           mid-stream (avoids reflow churn) — replaced by the canonical
-           output when the final cell_output frame lands. -->
+      <!-- Streamed partial output (prompt cells). Plain text, not markdown,
+           to avoid reflow churn; replaced by the final cell_output. -->
       <div
         v-if="!folded && cell.status === 'running' && cell.streamBuffer"
         class="cell-stream"
@@ -1225,15 +1170,8 @@ function outputKey(output: CellOutput, index: number): string {
             </span>
           </div>
           <pre class="output-error-detail">{{ cell.output.error }}</pre>
-          <!--
-            Install button is language-aware: Python dispatches to
-            ``uv add``, R dispatches to ``renv::install`` (only after
-            ``renv::init`` has produced a lockfile). Pre-lockfile we
-            fall back to a read-only hint pointing the user at the
-            Environment panel's "Initialize renv" affordance, since
-            ``renv::install`` without a project lockfile would just
-            scribble into the system library.
-          -->
+          <!-- R install needs a lockfile: without one, ``renv::install``
+               writes into the system library, so show a read-only hint. -->
           <div
             v-if="cell.suggestInstall && cell.suggestInstallLanguage === 'python'"
             class="suggest-install"
@@ -1362,7 +1300,7 @@ function outputKey(output: CellOutput, index: number): string {
         </template>
       </div>
 
-      <!-- Registry: artifacts this cell published, with Promote (P3d) -->
+      <!-- Registry: artifacts this cell published -->
       <CellArtifactStrip :cell-id="cell.id" />
 
       <div v-if="installCompleted && installTargetPackage" class="install-complete-hint">
@@ -1564,13 +1502,8 @@ function outputKey(output: CellOutput, index: number): string {
   margin: 0.4em 0;
 }
 
-/* The global ``* { padding: 0 }`` reset wipes the browser default
- * ``padding-inline-start: 40px`` on lists, which collapses every nesting
- * level to the same column. Restore an explicit indent on each ``ul``/
- * ``ol`` so each level visually steps in. ``list-style-position: outside``
- * is the default but we set it explicitly because we're re-establishing
- * the layout from scratch.
- */
+/* The global ``* { padding: 0 }`` reset removes list indents, collapsing
+ * every nesting level into one column; restore them. */
 .markdown-preview :deep(ul),
 .markdown-preview :deep(ol) {
   padding-inline-start: 1.6em;
@@ -1808,10 +1741,7 @@ function outputKey(output: CellOutput, index: number): string {
   }
 }
 
-/* Plain Python cells: badge shown while the cell is running. Reuses
-   the loop-progress-badge visual treatment so loop and non-loop
-   running states look the same. The spinner animation is shared with
-   loop-spin via the running-spinner rule below. */
+/* Matches the loop-progress badge so running states look the same. */
 .running-badge {
   display: inline-flex;
   align-items: center;
@@ -1834,8 +1764,7 @@ function outputKey(output: CellOutput, index: number): string {
   animation: loop-spin 0.9s linear infinite;
 }
 
-/* Cancel button replaces the run button while a cell is executing.
-   Uses the warning color palette to match the running badge. */
+/* Warning palette to match the running badge. */
 .cell-actions .cancel-btn {
   color: var(--accent-warning);
 }
@@ -2034,8 +1963,7 @@ function outputKey(output: CellOutput, index: number): string {
   cursor: help;
 }
 
-/* Module-cell marker — shown when the cell's source is pure enough to
- * be shared as a synthetic module across downstream cells. */
+/* Module-cell marker */
 .module-cell-badge {
   background: var(--tint-primary);
   color: var(--accent-primary);
@@ -2047,7 +1975,7 @@ function outputKey(output: CellOutput, index: number): string {
   letter-spacing: 0.02em;
 }
 
-/* v1.1: Causality inspector */
+/* Causality inspector */
 .causality-btn {
   background: var(--tint-warning);
   color: var(--accent-warning);
@@ -2163,9 +2091,8 @@ function outputKey(output: CellOutput, index: number): string {
 }
 
 .editor-container {
-  /* CodeMirror auto-sizes to content; a forced min-height left ~18px of
-     dead space below 1-line cells. The cell-gutter padding (8px top +
-     bottom) already guarantees a visible click target on empty cells. */
+  /* No min-height: it left dead space below 1-line cells, and the gutter
+     padding already keeps empty cells clickable. */
 }
 .widget-source-toggle {
   display: flex;
@@ -2237,8 +2164,7 @@ function outputKey(output: CellOutput, index: number): string {
   font-weight: 600;
 }
 
-/* R-only variant — no install button (action endpoint not yet wired).
-   Slightly muted tint so it reads as advisory rather than actionable. */
+/* R read-only hint: muted so it reads as advisory, not actionable. */
 .suggest-install-readonly {
   background: var(--bg-input);
   border-color: var(--border-subtle);
@@ -2310,9 +2236,7 @@ function outputKey(output: CellOutput, index: number): string {
   margin: 0 0 10px;
 }
 
-/* Mirror the .markdown-preview indent fix: the global ``* { padding: 0 }``
- * reset removes the browser default list indent, so without restoring
- * ``padding-inline-start`` every nesting level lands at column zero. */
+/* Same list-indent fix as .markdown-preview. */
 .output-markdown :deep(ul),
 .output-markdown :deep(ol) {
   padding-inline-start: 1.6em;

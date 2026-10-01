@@ -33,22 +33,13 @@ function formatMs(ms: number): string {
             <span class="ltype" :class="row.type">{{ row.type === 'table' ? '⛁' : '⬡' }}</span>
             <span class="llabel">{{ row.label }}</span>
             <span v-if="row.version != null" class="lver">v{{ row.version }}</span>
-            <!--
-              Who and where, shown only when recorded. A solo notebook records
-              neither and would otherwise gain a column of dashes; the moment a
-              step comes from a teammate's machine, this is the question the
-              lineage view was opened to answer.
-            -->
+            <!-- Only when recorded; solo notebooks would show a column of dashes. -->
             <span v-if="row.principal" class="lmeta lwho">{{ row.principal }}</span>
             <span v-if="row.buildEnv" class="lmeta lenv">{{ row.buildEnv }}</span>
             <span v-if="row.buildDurationMs > 0" class="lmeta lcost">{{
               formatMs(row.buildDurationMs)
             }}</span>
-            <!--
-              Abbreviated, and titled with the full digest. Nobody reads a
-              sha256, but two of them side by side answer "why did mine miss?"
-              at a glance, which is what this is for.
-            -->
+            <!-- Abbreviated digest (full in the title), for comparing cache misses. -->
             <span v-if="row.envHash" class="lmeta lenvhash" :title="row.envHash"
               >env:{{ row.envHash.slice(0, 8) }}</span
             >

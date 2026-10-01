@@ -7,9 +7,8 @@ import { test } from 'node:test'
 import { collectTokens, undefinedTokens } from './cssTokens.ts'
 
 const SRC = join(fileURLToPath(new URL('.', import.meta.url)), '..')
-// Styles live in .vue and .css; a .ts file only ever *defines* a variable, via
-// an inline style binding. Tests are skipped so their fixtures — deliberately
-// undefined names — are not mistaken for the real thing.
+// A .ts file only defines variables (inline style bindings). Tests are skipped:
+// their fixtures use deliberately undefined names.
 const REFERENCE_FILES = ['.vue', '.css']
 const DEFINITION_FILES = ['.vue', '.css', '.ts']
 
@@ -40,8 +39,7 @@ test('undefinedTokens reports a reference with no definition, and where it is', 
 })
 
 test('undefinedTokens sees through a fallback into a nested reference', () => {
-  // `var(--defined, var(--typo))` never evaluates the inner name, so the typo
-  // is invisible in the rendered page — but it is still a dangling reference.
+  // The inner name never evaluates, so the typo is invisible on the page.
   const usage = collectTokens([
     { path: 'a.css', text: ':root { --real: 1px; }\n.x { border: var(--real, var(--typo)); }' },
   ])
@@ -49,8 +47,7 @@ test('undefinedTokens sees through a fallback into a nested reference', () => {
 })
 
 test('a reference is found even when the token name wraps to the next line', () => {
-  // Collected per line, this reference is invisible — and silently exempt from
-  // the check the whole module exists to perform.
+  // Collected per line, this reference would be missed.
   const usage = collectTokens([
     { path: 'a.css', text: '.x {\n  color: var(\n    --wrapped\n  );\n}' },
   ])
@@ -58,8 +55,7 @@ test('a reference is found even when the token name wraps to the next line', () 
 })
 
 test('prose in a comment is not a definition', () => {
-  // This module's own docstring names tokens. Treating a comment as a
-  // declaration would let a real typo pass whenever some comment mentions it.
+  // A comment counted as a declaration would let a typo pass if it is mentioned.
   const usage = collectTokens([
     { path: 'a.css', text: '/* --documented: what it does */\n.x { color: var(--documented); }' },
   ])
@@ -74,9 +70,7 @@ test('blanking a comment keeps later line numbers honest', () => {
 })
 
 test('every CSS variable the frontend references is defined somewhere', () => {
-  // The regression guard. A `var(--typo)` fails silently — with a fallback it
-  // uses a hardcoded literal (theme-blind, so wrong in one theme), without one
-  // the declaration is dropped. Nothing else in the toolchain catches it.
+  // The real check: a `var(--typo)` fails silently and nothing else catches it.
   const usage = collectTokens(sources(SRC, DEFINITION_FILES))
   const missing = undefinedTokens({
     defined: usage.defined,

@@ -21,15 +21,11 @@ test('ignores a payload with no source field', () => {
 })
 
 test('never overwrites unflushed keystrokes', () => {
-  // The window this protects: the user types, and a snapshot triggered by
-  // something else (an agent running a different cell) arrives before the 2s
-  // idle flush. Adopting here would silently discard what they typed.
+  // A snapshot arriving before the 2s idle flush must not discard typing.
   assert.equal(shouldAdoptRemoteSource({ ...base, isDirty: true }), false)
 })
 
 test('resumes adopting once the local edit is flushed', () => {
-  // The regression an earlier in-flight hold introduced: after a local edit,
-  // remote edits were ignored for the life of the page because the hold was
-  // waiting on an echo that never came.
+  // After a flushed local edit, remote edits must still be followed.
   assert.equal(shouldAdoptRemoteSource({ remote: 'theirs', local: 'mine', isDirty: false }), true)
 })

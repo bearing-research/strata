@@ -91,17 +91,13 @@ def fetch_to_polars(
     client = StrataClient(config=config, base_url=base_url)
 
     try:
-        # Materialize the table data
         artifact = client.materialize(
             inputs=[table_uri],
             transform=_build_scan_transform(columns, filters, snapshot_id),
         )
-        # Fetch the artifact data
         arrow_table = client.fetch(artifact.uri)
-        # Arrow-native; typically zero-copy when types are supported.
-        # ``pl.from_arrow`` on a ``pa.Table`` always yields a DataFrame
-        # (Series only for Array / ChunkedArray inputs); narrow so the
-        # function signature is honored without leaking the union.
+        # Usually zero-copy. ``pl.from_arrow`` on a ``pa.Table`` always yields a DataFrame;
+        # narrow so the union does not leak into the signature.
         result = pl.from_arrow(arrow_table)
         assert isinstance(result, pl.DataFrame)
         return result
@@ -210,12 +206,10 @@ class StrataPolarsScanner:
         """Fetch a table and return a Polars DataFrame."""
         import polars as pl
 
-        # Materialize the table data
         artifact = self.client.materialize(
             inputs=[table_uri],
             transform=_build_scan_transform(columns, filters, snapshot_id),
         )
-        # Fetch the artifact data
         arrow_table = self.client.fetch(artifact.uri)
         # ``pa.Table`` → DataFrame (never Series); narrow to honor the signature.
         result = pl.from_arrow(arrow_table)
@@ -274,7 +268,6 @@ class StrataPolarsScanner:
                     df = pl.from_arrow(batch)
                     process(df)
         """
-        # Materialize and fetch
         artifact = self.client.materialize(
             inputs=[table_uri],
             transform=_build_scan_transform(columns, filters, snapshot_id),
