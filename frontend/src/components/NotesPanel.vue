@@ -21,16 +21,11 @@ function firstMarkdownHeading(source: string): string | null {
 }
 
 function cardFor(cell: Cell): NoteCard {
-  // Title priority:
-  //   1. ``# name`` annotation (matches the cell-name convention used by
-  //      DagView for compute cells)
-  //   2. First markdown heading inside the body
-  //   3. Cell ID prefix (deterministic fallback)
+  // Title: ``# name`` annotation, then the first heading, then the cell ID prefix.
   const annotationName = cell.annotations?.name ?? null
   const headingName = firstMarkdownHeading(cell.source)
   const title = annotationName || headingName || cell.id.slice(0, 8)
-  // Preview is the first non-blank line *after* the title source so it
-  // doesn't duplicate the title; falls back to "(empty)" for blank cells.
+  // First non-blank line after the title source, so it doesn't repeat it.
   const lines = cell.source.split('\n').map((l) => l.trim())
   const titleLine = annotationName ? '' : (headingName ?? '')
   const previewLine = lines.find((l) => l && l !== `# ${titleLine}` && !l.startsWith('# ')) ?? ''
@@ -45,10 +40,7 @@ const noteCards = computed<NoteCard[]>(() =>
 const collapsed = ref(false)
 
 function scrollToCell(cellId: CellId) {
-  // Reuses the data-cell-id attribute the cell editor list already
-  // stamps; matches DagView.vue:229. Kept inline rather than emitting
-  // because the editor area is a sibling tree we'd otherwise need an
-  // event bus to reach.
+  // Queried directly, like DagView: the editor list is a sibling tree.
   const el = document.querySelector(`[data-testid="notebook-cell"][data-cell-id="${cellId}"]`)
   if (el) {
     el.scrollIntoView({ behavior: 'smooth', block: 'center' })

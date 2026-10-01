@@ -36,10 +36,8 @@ const {
   updatePythonVersionAction,
 } = useNotebook()
 
-// R packages fetched separately from the env state so the open
-// path doesn't block on a synchronous Rscript spawn. Trigger the
-// fetch on mount + whenever the R sync state changes (a fresh
-// renv::restore() can produce a different package list).
+// R packages are fetched separately so open doesn't block on Rscript;
+// refetch when the sync state changes (a restore can change the list).
 onMounted(() => {
   if (notebook.rEnvironment.hasLockfile) {
     fetchRPackagesAction()
@@ -56,9 +54,7 @@ watch(
 
 const strata = useStrata()
 
-// Python-version modal state. Versions are fetched lazily when the
-// modal opens so the panel doesn't pay the round-trip cost on every
-// notebook open — the picker is a rarely-used affordance.
+// Versions are fetched when the modal opens; the picker is rarely used.
 const pythonModalOpen = ref(false)
 const pythonModalBusy = ref(false)
 const pythonModalError = ref<string | null>(null)
@@ -91,17 +87,13 @@ async function confirmPythonChange(version: string) {
   pythonModalBusy.value = true
   pythonModalError.value = null
   try {
-    // The store action resolves the session id internally (the REST
-    // route uses session_id, not notebook content id) and surfaces
-    // server errors as ``error`` rather than throwing.
+    // Returns server errors as ``error`` rather than throwing.
     const result = await updatePythonVersionAction(version)
     if (result.error) {
       pythonModalError.value = result.error
       return
     }
-    // 200 no-op + 202 accepted both close the modal — the WS
-    // environment_job_progress channel surfaces live progress, so
-    // the modal doesn't have to stay open.
+    // Progress arrives over environment_job_progress frames.
     pythonModalOpen.value = false
   } finally {
     pythonModalBusy.value = false
@@ -145,10 +137,7 @@ const shortLockfileHash = computed(() =>
   notebook.environment.lockfileHash ? notebook.environment.lockfileHash.slice(0, 12) : 'none',
 )
 
-// Show the current-on-disk lockfile hash, not the last-good-sync
-// hash — the user wants to see what their renv.lock looks like
-// *now*. ``syncState`` carries whether that matches the last
-// successful sync.
+// The on-disk hash, not the last good sync's; ``syncState`` says if they match.
 const shortRLockHash = computed(() =>
   notebook.rEnvironment.currentLockHash
     ? notebook.rEnvironment.currentLockHash.slice(0, 12)
@@ -160,10 +149,7 @@ const rLastSyncedLabel = computed(() => {
   return new Date(notebook.rEnvironment.lastSyncedAt).toLocaleString()
 })
 
-// True while the user has fired an R-side env-job (init or install)
-// that hasn't reported back as completed/failed yet. We use this to
-// flip the R card into a "live" rendering so the user sees what's
-// happening without scrolling to the shared footer.
+// An R env job is in flight: the R card shows it live, not only the footer.
 const rOperationRunning = computed(
   () =>
     environmentMutationActive.value &&
@@ -175,12 +161,8 @@ const rOperationIsInit = computed(
   () => environmentMutationActive.value && environmentOperation.value?.action === 'r_init',
 )
 
-// Status pill label: while an R env-job is running the label
-// reflects the live operation; otherwise it falls back to the
-// persisted ``syncState``. Without renv set up we say "System R"
-// not "Not set up" — R cells still work in that state (using
-// the system R library), and "Not set up" read as alarming to
-// users whose cells were running fine.
+// Without renv the label is "System R", not "Not set up": R cells still work
+// against the system library, and "Not set up" read as an error.
 const rSyncStateLabel = computed(() => {
   if (rOperationRunning.value) {
     return rOperationIsInit.value ? 'Bootstrapping…' : 'Installing…'
@@ -200,10 +182,7 @@ const rSyncStateLabel = computed(() => {
   }
 })
 
-// R-side dot color maps onto the shared ``.state-*`` palette used by
-// Python so both cards' status pills feel like part of the same
-// component. The mapping is deliberate: ``never`` → pending (neutral
-// progress), ``outdated`` → fallback (warning), ``failed`` → failed.
+// Shares the Python card's ``.state-*`` palette.
 const rStateDotClass = computed(() => {
   if (rOperationRunning.value) return 'state-pending'
   if (!notebook.rEnvironment.hasLockfile) return 'state-unknown'
@@ -221,11 +200,7 @@ const rStateDotClass = computed(() => {
   }
 })
 
-// Tail of the running operation's stdout/stderr so the bootstrap
-// card can show *what* is currently compiling without forcing the
-// user to expand the footer's collapsed log block. We keep it
-// short (last 6 lines) because long arrow compile output would
-// otherwise dominate the panel.
+// Short tail of the running job's output: long compile logs would dominate.
 const rOperationTail = computed(() => {
   if (!rOperationRunning.value) return ''
   const op = environmentOperation.value
@@ -239,11 +214,8 @@ const rOperationTail = computed(() => {
   return lines.slice(-6).join('\n')
 })
 
-// Ticker so the bootstrap duration counter updates while the
-// subprocess is running. ``Date.now()`` isn't reactive so a static
-// computed would freeze at "0s" until the next WS message bumps
-// ``environmentOperation``. We only tick while an R job is live
-// so the panel doesn't burn cycles in steady state.
+// ``Date.now()`` isn't reactive, so tick for the duration counter, only while
+// an R job is live.
 const nowMs = ref(Date.now())
 let nowTickHandle: number | null = null
 watch(
@@ -281,17 +253,13 @@ const rOperationDurationLabel = computed(() => {
   return `${m}m ${s}s`
 })
 
-// Show the R section whenever the notebook has any R cell or
-// a lockfile already exists. Pre-bootstrap notebooks (R cells
-// present but no renv.lock) need the section visible so the
-// "Initialize renv" button has somewhere to live.
+// R cells without a lockfile still need the section, for "Initialize renv".
 const hasAnyRCell = computed(() =>
   notebook.cells.some((c: { language: string }) => c.language === 'r'),
 )
 const showRSection = computed(() => notebook.rEnvironment.hasLockfile || hasAnyRCell.value)
 
-// R package input — mirrors ``newPackage`` for Python. Same name
-// shape the backend validator enforces: ``[A-Za-z][A-Za-z0-9.]*``.
+// The backend validator enforces ``[A-Za-z][A-Za-z0-9.]*``.
 const newRPackage = ref('')
 const newRPackageValid = computed(() => /^[A-Za-z][A-Za-z0-9.]*$/.test(newRPackage.value.trim()))
 
@@ -306,10 +274,8 @@ async function submitAddRPackage() {
   newRPackage.value = ''
 }
 
-// Empty-list message — varies by the listing-probe outcome so the
-// user can tell "the library is empty" from "the probe couldn't
-// run". ``failed`` status renders its own error block below the
-// list (with the actual error text), so we don't repeat it here.
+// Tells an empty library from a probe that couldn't run. ``failed`` has its
+// own error block below the list.
 const rPackagesEmptyMessage = computed(() => {
   if (notebook.rEnvironment.packages.length > 0) return ''
   switch (notebook.rEnvironment.packagesStatus) {
@@ -573,13 +539,7 @@ function downloadRequirements() {
     </button>
 
     <div v-if="showPanel" class="env-content">
-      <!--
-        Python card. Holds everything Python-specific so the panel
-        reads top-to-bottom as "Python config, then R config, then
-        a shared footer that captures cross-language operations and
-        history". The section chrome (`env-section`) is the same
-        for both languages so the visual weight matches.
-      -->
+      <!-- Python card, then R card, then a shared footer. -->
       <section class="env-section env-section--python">
         <header class="env-section-header">
           <div class="env-section-title">
@@ -681,12 +641,7 @@ function downloadRequirements() {
           <div v-else-if="!notebook.environment.hasLockfile">Lockfile not created yet</div>
         </div>
 
-        <!--
-        Requirements editor is Python-specific (requirements.txt /
-        environment.yaml), so it lives inside the Python card. Renders
-        inline above the package list when the user clicks any of the
-        Import/Export buttons in the header.
-      -->
+        <!-- Requirements import/export editor -->
         <div v-if="requirementsMode" class="requirements-editor">
           <div class="requirements-header">
             <strong>{{
@@ -892,12 +847,6 @@ function downloadRequirements() {
         </ul>
       </section>
 
-      <!--
-        R card. Renders whenever the notebook has any R cell or an
-        existing renv.lock. Pre-bootstrap state (R cells present,
-        no lockfile yet) shows the "Initialize renv" affordance so
-        the user has a discoverable entry point.
-      -->
       <section v-if="showRSection" class="env-section env-section--r">
         <header class="env-section-header">
           <div class="env-section-title">
@@ -912,15 +861,7 @@ function downloadRequirements() {
           </div>
         </header>
 
-        <!--
-          Live state — an ``r_init`` or ``r_add`` env-job is
-          currently running. Shows the command, a hint about why
-          this is slow (arrow source compile), and a tail of the
-          subprocess output. Without this the R card looked
-          identical whether nothing was happening or a 10-min
-          arrow compile was in flight; the user had to scroll to
-          the shared operation footer to know.
-        -->
+        <!-- An ``r_init`` / ``r_add`` job is running -->
         <div v-if="rOperationRunning" class="env-r-live">
           <div class="env-r-live-headline">
             <span class="env-r-live-spinner" aria-hidden="true">⏳</span>
@@ -936,14 +877,8 @@ function downloadRequirements() {
           <pre v-if="rOperationTail" class="env-r-live-tail">{{ rOperationTail }}</pre>
         </div>
 
-        <!--
-          Bootstrap state — no ``renv.lock`` on disk yet and no
-          init in flight. ``renv::init(bare = TRUE)`` creates the
-          lockfile + empty project library; user adds packages
-          explicitly via the form below afterwards. Predictable
-          diffs > frictionless auto-init: matches uv's explicit
-          ``add`` pattern.
-        -->
+        <!-- No lockfile yet. Init is bare and packages are added explicitly
+             (like ``uv add``) so lockfile diffs stay predictable. -->
         <div v-else-if="!notebook.rEnvironment.hasLockfile" class="env-r-bootstrap">
           <div v-if="notebook.rEnvironment.systemRVersion" class="env-r-bootstrap-meta">
             R {{ notebook.rEnvironment.systemRVersion }} · system library
@@ -986,11 +921,6 @@ function downloadRequirements() {
             {{ notebook.rEnvironment.syncError }}
           </div>
 
-          <!--
-            Add-R-package form. Submit fires `r_add` through the
-            env-job pipeline; the shared operation block below
-            renders progress just like a `uv add`.
-          -->
           <form class="env-r-add-form" @submit.prevent="submitAddRPackage">
             <input
               v-model="newRPackage"
@@ -1037,13 +967,7 @@ function downloadRequirements() {
         </template>
       </section>
 
-      <!--
-        Shared footer — cross-language operation state, history, and
-        errors. ``env-job`` machinery is shared between ``uv add`` /
-        ``renv::install`` / etc., so a single timeline shows the user
-        every recent environment change regardless of which card
-        triggered it.
-      -->
+      <!-- Shared footer: one timeline of env jobs from both languages. -->
       <div v-if="lastActionLabel" class="env-action">
         {{ lastActionLabel }}
       </div>
@@ -1192,13 +1116,7 @@ function downloadRequirements() {
   gap: 12px;
 }
 
-/*
- * Language card chrome. The bordered + padded card gives Python and
- * R clear visual separation so the R section no longer reads as a
- * Python sub-block. Both cards use identical structure; the
- * ``--python`` / ``--r`` modifiers only exist to allow tinted
- * borders if we want differentiation later.
- */
+/* Language card chrome, shared by the Python and R cards. */
 .env-section {
   border: 1px solid var(--border-subtle);
   border-radius: 8px;
@@ -1232,12 +1150,7 @@ function downloadRequirements() {
   color: var(--text-primary);
 }
 
-/*
- * Status pill has a neutral background; the colored ``.status-dot``
- * (using the shared ``.state-*`` palette) does the signaling. This
- * keeps the pill from screaming green/red while still giving an
- * at-a-glance health indicator.
- */
+/* Neutral pill; the colored ``.status-dot`` does the signaling. */
 .env-section-state {
   display: inline-flex;
   align-items: center;

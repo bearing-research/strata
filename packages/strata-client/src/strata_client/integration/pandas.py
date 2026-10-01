@@ -92,14 +92,12 @@ def fetch_to_pandas(
     client = StrataClient(config=config, base_url=base_url)
 
     try:
-        # Materialize the table data
         artifact = client.materialize(
             inputs=[table_uri],
             transform=_build_scan_transform(columns, filters, snapshot_id),
         )
-        # Fetch the artifact data
         arrow_table = client.fetch(artifact.uri)
-        # Convert Arrow table to pandas (may copy due to memory layout)
+        # May copy, depending on memory layout.
         return arrow_table.to_pandas()
     finally:
         client.close()
@@ -150,12 +148,10 @@ class StrataPandasScanner:
         filters: list[Filter] | None = None,
     ) -> "pd.DataFrame":
         """Fetch a table and return a pandas DataFrame."""
-        # Materialize the table data
         artifact = self.client.materialize(
             inputs=[table_uri],
             transform=_build_scan_transform(columns, filters, snapshot_id),
         )
-        # Fetch the artifact data
         arrow_table = self.client.fetch(artifact.uri)
         return arrow_table.to_pandas()
 
@@ -190,7 +186,6 @@ class StrataPandasScanner:
                     df = batch.to_pandas()
                     process(df)
         """
-        # Materialize and fetch
         artifact = self.client.materialize(
             inputs=[table_uri],
             transform=_build_scan_transform(columns, filters, snapshot_id),

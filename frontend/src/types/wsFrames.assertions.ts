@@ -1,12 +1,8 @@
 /**
  * Compile-time assertions about the generated WS payload types.
  *
- * Not a `.test.ts` file: `tsconfig.app.json` excludes those, and `node --test`
- * strips types without checking them, so a narrowing assertion written there
- * verifies nothing — the runtime sees only `message.type === frame`. These live
- * in a checked file, so `vue-tsc -b` (which CI runs via `npm run build`) is what
- * enforces them.
- *
+ * Not a `.test.ts` file: `tsconfig.app.json` excludes those and `node --test`
+ * strips types unchecked. Here `vue-tsc -b` (`npm run build`) enforces them.
  * Types only, so nothing reaches the bundle.
  */
 import type { TypedWsMessage } from './notebook'

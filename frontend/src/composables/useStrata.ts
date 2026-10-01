@@ -1,9 +1,4 @@
-/**
- * Communication layer with the Strata server.
- *
- * Day-one approach: REST calls to /v1/materialize + a mock fallback
- * so the UI works even without a running server.
- */
+/** REST client for the Strata server. */
 
 import { ref } from 'vue'
 import type {
@@ -80,7 +75,7 @@ interface CellUpdateResponse {
   cells?: BackendCellPayload[]
 }
 
-// ---- Registry / dashboard (P3) ----
+// ---- Registry / dashboard ----
 
 /** One artifact a cell published into the registry (GET …/artifacts). */
 export interface PublishedArtifact {
@@ -158,7 +153,7 @@ export interface LineageNode {
   build_env?: string
   /** How long the producing run took. */
   build_duration_ms?: number
-  /** Digest of the environment it ran in — with build_env, the identity. */
+  /** Digest of the environment it ran in; with build_env, the identity. */
   env_hash?: string
 }
 export interface LineageEdge {
@@ -340,12 +335,9 @@ async function readJson<T>(resp: Response): Promise<T> {
   return (await resp.json()) as T
 }
 
-// ---------------------------------------------------------------------------
-// Mock execution — lets us demo the UI without a live server
-// ---------------------------------------------------------------------------
+// --- Mock execution (no server needed) ------------------------------------
 
 function mockExecute(source: string): CellOutput {
-  // Simulate a Python cell that produces tabular data
   const lines = source.trim().split('\n')
 
   // If source looks like it assigns a list/dict, produce mock table
@@ -380,9 +372,7 @@ function mockExecute(source: string): CellOutput {
   }
 }
 
-// ---------------------------------------------------------------------------
-// Real Strata API calls
-// ---------------------------------------------------------------------------
+// --- Strata API calls -----------------------------------------------------
 
 async function materialize(req: MaterializeRequest): Promise<MaterializeResponse> {
   const resp = await fetchWithTimeout(`${STRATA_BASE}/v1/materialize`, {
@@ -438,50 +428,30 @@ async function throwApiError(resp: Response, fallback: string): Promise<never> {
   throw error
 }
 
-// ---------------------------------------------------------------------------
-// Execute a cell — try real server, fall back to mock
-// ---------------------------------------------------------------------------
-
+// Probes the server but always returns mock output.
 async function executeCell(source: string, _language: string): Promise<CellOutput> {
-  // For day-one: always use mock. When server is running, swap to real.
   try {
     const health = await fetchWithTimeout(`${STRATA_BASE}/health`, { timeoutMs: 500 })
     if (health.ok) {
       connected.value = true
-      // TODO: Wire to real materialize call once notebook backend is ready
-      // For now, even with server up, use mock since we don't have notebook endpoints yet
     }
   } catch {
     connected.value = false
   }
 
-  // Simulate async work
   await new Promise((r) => setTimeout(r, 300 + Math.random() * 700))
   return mockExecute(source)
 }
 
-// ---------------------------------------------------------------------------
-// Notebook API functions
-// ---------------------------------------------------------------------------
+// --- Notebook API ---------------------------------------------------------
 
 async function openNotebook(path: string): Promise<NotebookSessionPayload> {
   const resp = await fetchWithTimeout(`${STRATA_BASE}/v1/notebooks/open`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ path }),
-    // 10 minutes — matches the backend's ``_renv_sync`` timeout
-    // (``writer.py:_renv_sync``). A cold first-open of a notebook
-    // with ``renv.lock`` can spend that long compiling R packages
-    // from source. Same-or-cached-lockfile reopens short-circuit
-    // inside ``ensure_renv_synced`` in milliseconds, so this
-    // generous cap only matters on the first restore. Python-only
-    // notebooks' ``uv sync`` finishes well under a minute even on
-    // cold start, so this isn't a regression for them.
-    //
-    // Background-restore + WS-pushed progress is the architectural
-    // answer for the slow first-open UX; this timeout bump is the
-    // minimum guard that "open didn't time out the wire" doesn't
-    // shadow a real, working restore in progress.
+    // Matches the backend's ``_renv_sync`` timeout: a first open with
+    // ``renv.lock`` can spend that long compiling R packages from source.
     timeoutMs: 600_000,
   })
   if (!resp.ok) {
@@ -513,10 +483,8 @@ async function createNotebook(
 }
 
 /**
- * Outcome of importing a Jupyter ``.ipynb`` file via
- * ``POST /v1/notebooks/import``. Mirrors the ``ImportResult`` field
- * shapes from ``strata.notebook.jupyter_import`` so the UI can
- * display the conversion report inline.
+ * Report from ``POST /v1/notebooks/import``; mirrors ``ImportResult`` in
+ * ``strata.notebook.jupyter_import``.
  */
 export interface ImportReport {
   markdown_cells: number
@@ -544,9 +512,7 @@ async function importNotebook(
   form.append('file', file, file.name)
   if (options?.name) form.append('name', options.name)
   if (options?.parentPath) form.append('parent_path', options.parentPath)
-  // The server runs ``uv sync`` after the conversion to install the
-  // captured deps, so this can take a while on a cold cache. Match
-  // the openNotebook timeout (120s) which has the same characteristic.
+  // The server runs ``uv sync`` for the captured deps, slow on a cold cache.
   const resp = await fetchWithTimeout(`${STRATA_BASE}/v1/notebooks/import`, {
     method: 'POST',
     body: form,
@@ -632,10 +598,9 @@ async function getNotebookRuntimeConfig(): Promise<NotebookRuntimeConfigResponse
   return readJson<NotebookRuntimeConfigResponse>(resp)
 }
 
-// ---- Registry / dashboard (P3) ----
-// Reads/writes go to the existing SERVER registry routes; only the per-cell
-// published list is notebook-scoped. Names are slash-namespaced and the route
-// converters expect raw slashes, so names go into the path unencoded.
+// ---- Registry / dashboard ----
+// Server registry routes; only the per-cell published list is notebook-scoped.
+// Names go into the path unencoded: the route converters expect raw slashes.
 
 async function getNotebookArtifacts(sessionId: string): Promise<NotebookArtifactsResponse> {
   const resp = await fetchWithTimeout(`${STRATA_BASE}/v1/notebooks/${sessionId}/artifacts`)
@@ -950,18 +915,14 @@ async function addCell(
 }
 
 /**
- * Trigger a browser download of the notebook's export. Hits the
- * server-side `GET /export?fmt=...` endpoint, which returns the
- * rendered content with `Content-Disposition: attachment` so the
- * browser handles the save dialog. No file is buffered in JS.
+ * Download the notebook's export. `GET /export` sends
+ * `Content-Disposition: attachment`, so nothing is buffered in JS.
  */
 function downloadExport(notebookId: string, format: 'markdown' | 'html', appView = false): void {
   const url =
     `${STRATA_BASE}/v1/notebooks/${notebookId}/export?fmt=${format}` +
     (appView ? '&app_view=1' : '')
-  // A hidden anchor click is the canonical "start a download" trick;
-  // window.open would briefly flash a tab, window.location would
-  // navigate away. The anchor stays invisible.
+  // window.open would flash a tab and window.location would navigate away.
   const link = document.createElement('a')
   link.href = url
   link.rel = 'noopener'
@@ -977,9 +938,7 @@ async function removeCell(notebookId: string, cellId: string): Promise<unknown> 
   if (!resp.ok) {
     throw new Error(`Failed to remove cell: ${resp.status}`)
   }
-  // Body carries refreshed variant_groups + cells for variant-aware
-  // delete cleanup. Caller picks them up; returning a parsed value
-  // instead of void is backwards compatible.
+  // Refreshed variant_groups + cells for the caller's variant cleanup.
   return resp.json().catch(() => null)
 }
 
@@ -1042,7 +1001,7 @@ async function getConnectionSchema(
     try {
       detail = ((await readJson<{ detail?: string }>(resp)).detail ?? '').toString()
     } catch {
-      /* ignore */
+      /* no JSON body: report the status alone */
     }
     throw new Error(`Schema fetch failed: ${resp.status}${detail ? ` — ${detail}` : ''}`)
   }
@@ -1072,7 +1031,7 @@ async function updateNotebookConnections(
     try {
       detail = ((await readJson<{ detail?: string }>(resp)).detail ?? '').toString()
     } catch {
-      // ignore
+      // no JSON body: report the status alone
     }
     throw new Error(
       `Failed to update notebook connections: ${resp.status}${detail ? ` — ${detail}` : ''}`,
@@ -1180,9 +1139,7 @@ async function updateNotebookPythonVersion(
   accepted: boolean
   reason?: string
 }> {
-  // 200 (no-op when already at requested version) or 202 (job dispatched)
-  // both indicate the request was understood. Errors throw via
-  // throwApiError so callers see 400/404/409 with the server's detail.
+  // 200 is a no-op (already at that version), 202 dispatches a job.
   const resp = await fetchWithTimeout(`${STRATA_BASE}/v1/notebooks/${notebookId}/python-version`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
@@ -1312,9 +1269,7 @@ async function refreshAdminNotebookWorker(
   return readJson<AdminNotebookWorkersResponse>(resp)
 }
 
-// ---------------------------------------------------------------------------
-// Dependency API
-// ---------------------------------------------------------------------------
+// --- Dependency API -------------------------------------------------------
 
 async function listDependencies(notebookId: string): Promise<DependencyListResponse> {
   const resp = await fetchWithTimeout(`${STRATA_BASE}/v1/notebooks/${notebookId}/dependencies`)
@@ -1339,10 +1294,7 @@ async function addDependency(notebookId: string, pkg: string): Promise<Environme
   return readJson<EnvironmentResponse>(resp)
 }
 
-// R-side env jobs ride the same ``environment/jobs`` endpoint —
-// just a different ``action`` string. The backend dispatches to
-// Rscript instead of uv. Frontend gets the same job-progress
-// frames and the same env-state refresh in the 202 response.
+// R env jobs use the same ``environment/jobs`` endpoint with an R ``action``.
 async function initRenv(notebookId: string): Promise<EnvironmentResponse> {
   const resp = await fetchWithTimeout(
     `${STRATA_BASE}/v1/notebooks/${notebookId}/environment/jobs`,
@@ -1403,12 +1355,9 @@ interface RPackagesResponse {
 }
 
 async function getRPackages(notebookId: string): Promise<RPackagesResponse> {
-  // Separate from getEnvironmentStatus because it spawns Rscript
-  // (~1-2s). The env panel calls this on mount + manual refresh;
-  // notebook open / state sync don't.
+  // Separate from getEnvironmentStatus because it spawns Rscript (~1-2s).
   const resp = await fetchWithTimeout(`${STRATA_BASE}/v1/notebooks/${notebookId}/r-packages`, {
-    // 30s — generous for a one-Rscript-spawn listing on cold start.
-    // The backend itself imposes a 30s timeout on the subprocess.
+    // Above the backend's own 30s subprocess timeout.
     timeoutMs: 45_000,
   })
   if (!resp.ok) {
@@ -1514,9 +1463,7 @@ async function previewEnvironmentYamlImport(
   return readJson<EnvironmentImportPreviewResponse>(resp)
 }
 
-// ---------------------------------------------------------------------------
-// Session management
-// ---------------------------------------------------------------------------
+// --- Session management ---------------------------------------------------
 
 async function listSessions(): Promise<NotebookSessionSummary[]> {
   const resp = await fetchWithTimeout(`${STRATA_BASE}/v1/notebooks/sessions`)
@@ -1535,9 +1482,7 @@ async function getSession(sessionId: string): Promise<NotebookSessionPayload> {
   return readJson<NotebookSessionPayload>(resp)
 }
 
-// ---------------------------------------------------------------------------
-// Logs (observability)
-// ---------------------------------------------------------------------------
+// --- Logs -----------------------------------------------------------------
 
 export interface LogEntry {
   cursor: number
@@ -1546,8 +1491,7 @@ export interface LogEntry {
   logger?: string
   message?: string
   notebook_id?: string
-  // Structured logging flattens arbitrary kwargs onto the record, so keep the
-  // door open for extra fields the UI renders in the expandable detail row.
+  // Structured logging flattens arbitrary kwargs onto the record.
   [key: string]: unknown
 }
 
@@ -1580,9 +1524,7 @@ async function getLogs(query: LogQuery = {}): Promise<LogsResponse> {
   return { entries: data.entries ?? [], cursor: data.cursor ?? 0 }
 }
 
-// ---------------------------------------------------------------------------
-// Artifacts (observability)
-// ---------------------------------------------------------------------------
+// --- Artifacts ------------------------------------------------------------
 
 export interface ArtifactStats {
   total_versions: number
@@ -1650,9 +1592,7 @@ async function getArtifacts(query: ArtifactQuery = {}): Promise<ArtifactListResp
   }
 }
 
-// ---------------------------------------------------------------------------
-// Public API
-// ---------------------------------------------------------------------------
+// --- Public API -----------------------------------------------------------
 
 export function useStrata() {
   return {

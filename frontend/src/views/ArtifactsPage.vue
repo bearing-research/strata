@@ -2,8 +2,7 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 
-// A plain back control: return to wherever the user came from (usually the
-// notebook they opened Artifacts from), falling back to the home list.
+// Back to wherever the user came from, falling back to the home list.
 const router = useRouter()
 function goBack() {
   if (window.history.length > 1) router.back()
@@ -62,8 +61,7 @@ async function loadStats() {
   try {
     stats.value = await strata.getArtifactStats()
   } catch {
-    // Stats failing shouldn't blank the table; the list load surfaces the
-    // error banner if the store is truly unreachable.
+    // Don't blank the table; the list load reports an unreachable store.
     stats.value = null
   }
 }
@@ -94,8 +92,6 @@ function refresh() {
   void loadArtifacts()
 }
 
-// Clicking a sortable header sets that column, toggling asc/desc when it's
-// already the active sort. Any sort/filter change returns to page 1.
 function setSort(key: SortKey) {
   if (sort.value === key) {
     order.value = order.value === 'asc' ? 'desc' : 'asc'
@@ -127,8 +123,7 @@ function nextPage() {
   offset.value += PAGE_SIZE
 }
 
-// Filters/sort reset to page 1; the offset watcher then refetches. When
-// already on page 1 the offset watcher won't fire, so refetch directly.
+// Back to page 1; the offset watcher refetches unless already there.
 watch([stateFilter, namePrefix, sort, order], () => {
   if (offset.value !== 0) offset.value = 0
   else void loadArtifacts()

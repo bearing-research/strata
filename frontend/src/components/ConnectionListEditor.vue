@@ -38,19 +38,13 @@ interface DraftConnection {
   datasetId: string
   credentialsPath: string
   writeCredentialsPath: string
-  // Round-trip for fields the form doesn't editorialize. Two slots:
-  //  - extras: top-level keys outside the known set (``options``,
-  //    plus driver-specific extras a future driver may add).
-  //  - extraAuth: auth-map keys other than ``user``/``password``,
-  //    so a driver-specific credential (e.g. ``api_token``) survives
-  //    a save unchanged.
+  // Fields the form doesn't edit, round-tripped unchanged: unknown top-level
+  // keys (``extras``) and auth keys besides ``user``/``password`` (``extraAuth``).
   extras: Record<string, unknown>
   extraAuth: Record<string, string>
 }
 
-// Field names handled explicitly in the per-driver forms. Anything
-// else found on a ConnectionSpec is preserved verbatim via
-// ``extras`` and re-emitted by ``toSpec``.
+// Anything else on a ConnectionSpec round-trips via ``extras``.
 const KNOWN_TOP_LEVEL_KEYS = new Set([
   'name',
   'driver',
@@ -188,9 +182,7 @@ function validate(): boolean {
 }
 
 function toSpec(d: DraftConnection): ConnectionSpec {
-  // Start from preserved extras so unknown driver-specific fields
-  // (``options``, future-driver-keys) survive a save unchanged.
-  // The known fields below overwrite, never drop.
+  // Start from extras so unknown fields survive; known fields overwrite.
   const spec: ConnectionSpec = {
     ...d.extras,
     name: d.name.trim(),
@@ -248,8 +240,7 @@ function toSpec(d: DraftConnection): ConnectionSpec {
     if (Object.keys(auth).length) spec.auth = auth
     else delete spec.auth
   } else {
-    // Unknown driver — preserve every editable text field but
-    // don't impose Postgres-shaped auth structure.
+    // Unknown driver: keep the text fields, impose no Postgres-shaped auth.
     if (d.uri.trim()) spec.uri = d.uri.trim()
     else delete spec.uri
     if (d.path.trim()) spec.path = d.path.trim()
@@ -325,10 +316,8 @@ function preservedExtraSummary(d: DraftConnection): string {
           <option v-for="opt in DRIVER_OPTIONS" :key="opt.value" :value="opt.value">
             {{ opt.label }}
           </option>
-          <!-- Preserve an unknown driver (e.g. one declared by hand
-               in notebook.toml) instead of silently coercing to
-               sqlite. The value still selects in the dropdown, just
-               via the synthetic option below. -->
+          <!-- Keep an unknown driver (e.g. hand-written in notebook.toml)
+               selectable rather than coercing it to sqlite. -->
           <option v-if="isUnknownDriver(conn.driver)" :value="conn.driver">
             {{ conn.driver }} (custom)
           </option>
@@ -567,10 +556,7 @@ function preservedExtraSummary(d: DraftConnection): string {
           </p>
         </template>
         <template v-else-if="isUnknownDriver(conn.driver)">
-          <!-- Unknown driver: surface the common URI + path slots
-               so the user can adjust them without losing the rest
-               of the on-disk shape. ``extras`` round-trips
-               anything the form doesn't editorialize. -->
+          <!-- Unknown driver: URI + path only; ``extras`` keeps the rest. -->
           <label class="conn-field">
             <span class="field-label">URI</span>
             <input v-model="conn.uri" type="text" placeholder="driver://…" :disabled="readOnly" />
@@ -646,11 +632,8 @@ function preservedExtraSummary(d: DraftConnection): string {
   color: var(--text-primary);
 }
 
-/* Set color on both the select and its options. Browsers (esp.
-   Chrome on macOS dark mode) ignore the inherited color on
-   <option> in some configurations, so an option list rendered
-   on a system-default white background needs the option color
-   set explicitly to stay readable. */
+/* Options too: some browsers (Chrome, macOS dark mode) don't inherit color
+   into <option>, leaving it unreadable on a white system list. */
 .conn-driver-select,
 .conn-driver-select option {
   padding: 4px 6px;

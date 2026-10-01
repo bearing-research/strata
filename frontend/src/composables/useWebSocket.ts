@@ -1,12 +1,4 @@
-/**
- * WebSocket connection management for real-time notebook execution updates.
- *
- * Handles:
- * - Connection lifecycle (connect, reconnect with backoff, disconnect)
- * - Message serialization/deserialization
- * - Sequence number tracking
- * - Event handlers for different message types
- */
+/** Notebook WebSocket: connection lifecycle with backoff, sequencing, dispatch. */
 
 import { ref, shallowRef } from 'vue'
 import type { WsMessage, WsClientMessageType, WsServerMessageType } from '../types/notebook'
@@ -44,13 +36,9 @@ export function useWebSocket(notebookId: string, options: { role?: string } = {}
   const maxReconnectAttempts = 10
   const reconnectDelay = ref(1000) // Start at 1s, backoff to 30s max
 
-  // Pending connection promise resolvers
   let _connectResolve: (() => void) | null = null
   let _connectReject: ((err: Error) => void) | null = null
 
-  /**
-   * Connect to the WebSocket endpoint.
-   */
   function connect(): void {
     if (state.value === 'connected' || state.value === 'connecting') {
       return
@@ -75,7 +63,6 @@ export function useWebSocket(notebookId: string, options: { role?: string } = {}
         reconnectDelay.value = 1000
         connection.value = ws
         requestSync()
-        // Resolve any pending waitForConnection promise
         if (_connectResolve) {
           _connectResolve()
           _connectResolve = null
@@ -108,7 +95,6 @@ export function useWebSocket(notebookId: string, options: { role?: string } = {}
         connection.value = null
 
         if (state.value === 'connected' || state.value === 'connecting') {
-          // Unexpected close — try to reconnect
           scheduleReconnect()
         } else {
           state.value = 'disconnected'
@@ -124,9 +110,6 @@ export function useWebSocket(notebookId: string, options: { role?: string } = {}
     }
   }
 
-  /**
-   * Schedule a reconnection attempt with exponential backoff.
-   */
   function scheduleReconnect(): void {
     if (reconnectAttempts.value >= maxReconnectAttempts) {
       state.value = 'error'
@@ -150,9 +133,6 @@ export function useWebSocket(notebookId: string, options: { role?: string } = {}
     }, delay)
   }
 
-  /**
-   * Disconnect from the WebSocket.
-   */
   function disconnect(): void {
     if (connection.value) {
       connection.value.close()
@@ -161,9 +141,6 @@ export function useWebSocket(notebookId: string, options: { role?: string } = {}
     state.value = 'disconnected'
   }
 
-  /**
-   * Send a message to the server.
-   */
   function send(type: WsClientMessageType, payload: Record<string, any> = {}): void {
     if (state.value !== 'connected' || !connection.value) {
       console.warn('[WebSocket] Not connected, dropping message:', type)
@@ -185,10 +162,7 @@ export function useWebSocket(notebookId: string, options: { role?: string } = {}
     }
   }
 
-  /**
-   * Register a handler for a message type.
-   * Multiple handlers can be registered for the same type.
-   */
+  /** Register a handler for a message type; a type can have several. */
   function onMessage(type: WsServerMessageType, handler: MessageHandler): void {
     if (!messageHandlers.has(type)) {
       messageHandlers.set(type, [])
@@ -196,9 +170,6 @@ export function useWebSocket(notebookId: string, options: { role?: string } = {}
     messageHandlers.get(type)!.push(handler)
   }
 
-  /**
-   * Handle incoming message — dispatch to registered handlers.
-   */
   function handleMessage(msg: WsMessage): void {
     const type = msg.type as WsServerMessageType
     const handlers = messageHandlers.get(type)
@@ -216,66 +187,42 @@ export function useWebSocket(notebookId: string, options: { role?: string } = {}
     }
   }
 
-  /**
-   * Request notebook state (for reconnection or sync).
-   */
   function requestSync(): void {
     send('notebook_sync', {})
   }
 
-  /**
-   * Execute a cell.
-   */
   function executeCell(cellId: string): void {
     send('cell_execute', { cell_id: cellId })
   }
 
-  /**
-   * Execute all runnable notebook cells in notebook order.
-   */
+  /** Execute all runnable notebook cells in notebook order. */
   function executeNotebookRunAll(): void {
     send('notebook_run_all', {})
   }
 
-  /**
-   * Execute cascade plan.
-   */
   function executeCascade(cellId: string, planId: string): void {
     send('cell_execute_cascade', { cell_id: cellId, plan_id: planId })
   }
 
-  /**
-   * Execute cell with stale inputs ("Run this only").
-   */
+  /** Execute cell with stale inputs ("Run this only"). */
   function executeForce(cellId: string): void {
     send('cell_execute_force', { cell_id: cellId })
   }
 
-  /**
-   * Force re-execute a cell, bypassing its cache but still materializing
-   * upstreams normally (stale upstreams refresh from the artifact store).
-   */
+  /** Re-execute a cell bypassing its cache; upstreams materialize normally. */
   function executeRerun(cellId: string): void {
     send('cell_execute_rerun', { cell_id: cellId })
   }
 
-  /**
-   * Force re-execute every cell in the notebook with cache off.
-   */
+  /** Force re-execute every cell in the notebook with cache off. */
   function executeNotebookRerunAll(): void {
     send('notebook_rerun_all', {})
   }
 
-  /**
-   * Cancel a running cell.
-   */
   function cancelCell(cellId: string): void {
     send('cell_cancel', { cell_id: cellId })
   }
 
-  /**
-   * Update cell source code.
-   */
   function updateCellSource(cellId: string, source: string, force = false): void {
     send(
       'cell_source_update',
@@ -283,82 +230,50 @@ export function useWebSocket(notebookId: string, options: { role?: string } = {}
     )
   }
 
-  /**
-   * Tell the server which cell this client is on (null for none), so the
-   * others on the session see it in presence.
-   */
+  /** Report this client's current cell (or null) for presence. */
   function focusCell(cellId: string | null): void {
     send('cell_focus', { cell_id: cellId })
   }
 
-  /**
-   * Open an inspect REPL for a cell.
-   */
   function inspectOpen(cellId: string): void {
     send('inspect_open', { cell_id: cellId })
   }
 
-  /**
-   * Evaluate expression in an inspect REPL.
-   */
   function inspectEval(cellId: string, expr: string): void {
     send('inspect_eval', { cell_id: cellId, expr })
   }
 
-  /**
-   * Close an inspect REPL.
-   */
   function inspectClose(cellId: string): void {
     send('inspect_close', { cell_id: cellId })
   }
 
-  /**
-   * Persist a cell's unit-test source and run it (Python cells only).
-   */
+  /** Persist a cell's unit-test source and run it (Python cells only). */
   function runCellTests(cellId: string, testSource: string): void {
     send('cell_run_tests', { cell_id: cellId, test_source: testSource })
   }
 
-  /**
-   * Add a package dependency.
-   */
   function addDependency(pkg: string): void {
     send('dependency_add', { package: pkg })
   }
 
-  /**
-   * Remove a package dependency.
-   */
   function removeDependency(pkg: string): void {
     send('dependency_remove', { package: pkg })
   }
 
-  /**
-   * Switch the active variant for a group.
-   */
   function setVariantActive(group: string, name: string): void {
     send('variant_set_active', { group, name })
   }
 
-  /**
-   * Set one or more of a widget cell's control values. The backend persists
-   * them, re-materializes the widget artifacts, and stales downstream cells.
-   */
+  /** Set widget control values; the backend persists them and stales downstream. */
   function sendWidgetUpdate(cellId: string, values: Record<string, unknown>): void {
     send('widget_update', { cell_id: cellId, values })
   }
 
-  /**
-   * Add a new variant to an existing group; the backend auto-names it
-   * and switches it to active.
-   */
+  /** Add a variant to a group; the backend names it and makes it active. */
   function addVariant(group: string): void {
     send('variant_add', { group })
   }
 
-  /**
-   * Debounced source update (for editor changes).
-   */
   function debounceSourceUpdate(cellId: string, source: string, delayMs: number = 500): () => void {
     let timeoutId: number
 
@@ -370,11 +285,7 @@ export function useWebSocket(notebookId: string, options: { role?: string } = {}
     }
   }
 
-  /**
-   * Wait for the WebSocket to reach 'connected' state.
-   * Resolves immediately if already connected.
-   * Rejects after timeoutMs (default 5s) or on connection error.
-   */
+  /** Wait for 'connected'. Rejects after timeoutMs or on connection error. */
   function waitForConnection(timeoutMs: number = 5000): Promise<void> {
     if (state.value === 'connected') return Promise.resolve()
     return new Promise<void>((resolve, reject) => {
@@ -385,7 +296,6 @@ export function useWebSocket(notebookId: string, options: { role?: string } = {}
         _connectReject = null
         reject(new Error(`WebSocket connection timed out after ${timeoutMs}ms`))
       }, timeoutMs)
-      // Clear the timeout if we resolve/reject before it fires
       const origResolve = _connectResolve
       _connectResolve = () => {
         clearTimeout(timer)
@@ -399,7 +309,6 @@ export function useWebSocket(notebookId: string, options: { role?: string } = {}
     })
   }
 
-  // Auto-cleanup on component unmount
   const cleanup = () => {
     disconnect()
   }

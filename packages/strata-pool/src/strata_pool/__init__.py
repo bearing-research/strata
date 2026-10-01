@@ -33,6 +33,5 @@ __all__ = [
     "WorkerState",
 ]
 
-# From the installed distribution, so it cannot fall behind pyproject.toml the
-# way a literal did (it said 0.1.0 through 0.8.0).
+# From the installed distribution, so it cannot drift from pyproject.toml.
 __version__ = _metadata.version("strata-pool")

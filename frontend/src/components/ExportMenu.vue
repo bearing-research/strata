@@ -10,9 +10,7 @@ interface ExportOption {
   embed?: boolean
 }
 
-// Every way to get a notebook *out*: file downloads (Markdown / HTML / the
-// frozen app snapshot) and the live embed snippet — one menu, since they're all
-// "export / share this notebook".
+// File downloads and the live embed snippet share one menu.
 const OPTIONS: ExportOption[] = [
   {
     key: 'markdown',

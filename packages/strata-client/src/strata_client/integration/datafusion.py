@@ -111,15 +111,12 @@ def register_strata_table(
 
     client = StrataClient(config=config, base_url=base_url)
     try:
-        # Fetch data as Arrow table using unified materialize API
         artifact = client.materialize(
             inputs=[table_uri],
             transform=_build_scan_transform(columns, filters, snapshot_id),
         )
         arrow_table = artifact.to_table()
 
-        # Register with DataFusion using from_arrow_table
-        # This creates a DataFrame internally, we need to register it as a table
         ctx.register_record_batches(name, [arrow_table.to_batches()])
 
         return ctx
@@ -173,7 +170,6 @@ def strata_query(
 
     client = StrataClient(config=config, base_url=base_url)
     try:
-        # Register all tables using unified materialize API
         for name, uri in tables.items():
             artifact = client.materialize(
                 inputs=[uri],
@@ -182,7 +178,6 @@ def strata_query(
             arrow_table = artifact.to_table()
             ctx.register_record_batches(name, [arrow_table.to_batches()])
 
-        # Execute query and collect results
         df = ctx.sql(sql)
         return df.collect()
     finally:
@@ -251,14 +246,12 @@ class StrataDataFusionContext:
         Returns:
             self for method chaining
         """
-        # Fetch data using unified materialize API
         artifact = self.client.materialize(
             inputs=[table_uri],
             transform=_build_scan_transform(columns, filters, snapshot_id),
         )
         arrow_table = artifact.to_table()
 
-        # Keep reference to prevent garbage collection
         self._tables[name] = arrow_table
 
         self.ctx.register_record_batches(name, [arrow_table.to_batches()])

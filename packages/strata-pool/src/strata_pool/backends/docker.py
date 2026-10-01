@@ -77,13 +77,11 @@ class DockerBackend:
     ) -> ProvisionedWorker:
         port_key = f"{self.worker_port}/tcp"
         host_config: dict[str, object] = {
-            # Empty HostPort means "pick a free one". Binding to loopback
-            # keeps a worker off the network: the pool is the only thing that
-            # should be able to reach it.
+            # Empty HostPort picks a free port. Loopback keeps the worker off the network:
+            # only the pool should reach it.
             "PortBindings": {port_key: [{"HostIp": "127.0.0.1", "HostPort": ""}]},
         }
-        # Unset means the container may consume the whole host, which is one
-        # tenant's job able to starve every other container on the box.
+        # Unset lets one tenant's job starve every other container on the host.
         if spec.cpus is not None:
             host_config["NanoCpus"] = int(spec.cpus * 1_000_000_000)
         if spec.memory_mb is not None:
@@ -108,8 +106,7 @@ class DockerBackend:
 
         started = await self._api.post(f"/containers/{container_id}/start")
         if started.status_code >= 400:
-            # The container exists and would sit there costing disk, so take
-            # it back out before reporting the failure.
+            # The container exists and costs disk; remove it before reporting the failure.
             await self.stop(container_id)
             raise DockerError(f"could not start {container_id}: {_message(started)}")
 

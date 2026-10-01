@@ -21,10 +21,8 @@ const secretManagerConfigError = ref<string | null>(null)
 const envCount = computed(() => Object.keys(notebook.env).length)
 const timeoutLabel = computed(() => (notebook.timeout == null ? 'default' : `${notebook.timeout}s`))
 
-// Form state mirrors notebook.secretManagerConfig but stays local so the
-// user can edit without committing until Save. When the backend
-// pushes a new config (initial open, refresh, etc.) the watcher below
-// resets the form to match.
+// Local copy of notebook.secretManagerConfig until Save; a new backend config
+// resets it.
 const form = ref<{
   provider: string
   project_id: string
@@ -80,8 +78,8 @@ async function handleRefresh() {
   try {
     await refreshSecretManagerAction()
   } catch {
-    // Fetch errors land on notebook.envFetchError via the response;
-    // a thrown exception here means the POST itself failed (404 etc.).
+    // Fetch errors arrive in notebook.envFetchError; a throw means the POST
+    // itself failed.
   } finally {
     refreshing.value = false
   }

@@ -129,8 +129,7 @@ CREATE TABLE IF NOT EXISTS catalogue (
 );
 """
 
-# Columns added after the first release, so a store written by an older pool
-# is upgraded in place.
+# Columns added after the first release; an older store is upgraded in place.
 _ADDED_COLUMNS = (
     ("workers", "image", "TEXT"),
     ("workers", "lease_owner", "TEXT"),
@@ -494,15 +493,13 @@ class _SqlStore:
         and two tenants cannot both spend the fleet's last slot.
         """
         live = [WorkerState.STARTING, WorkerState.WARM, WorkerState.BUSY]
-        # A machine whose stop is in flight is still allocated at the provider,
-        # and still billing, until the call comes back — so the fleet counts it
-        # even though the tenant's own cap does not (below).
+        # A machine mid-stop still bills at the provider until the call returns, so the
+        # fleet counts it; the tenant's own cap does not (below).
         allocated = [*live, WorkerState.STOPPING]
         with self._transaction():
             queued = self.count_queued(worker.machine_type, worker.tenant_id)
-            # Stale machines (another image) are left out: they take no new
-            # jobs, so counting them would hold work back from machines that
-            # could run it. They still count against the global fleet cap.
+            # Stale machines (another image) take no new jobs, so counting them would hold work
+            # back. They still count against the global fleet cap.
             absorbing = self.count_workers(
                 worker.machine_type,
                 worker.tenant_id,
@@ -511,9 +508,8 @@ class _SqlStore:
             )
             if queued - absorbing <= 0:
                 return "no_demand"
-            # STOPPING is deliberately absent: a machine being torn down is not
-            # capacity, and counting it would keep a tenant at its cap from
-            # starting the replacement.
+            # STOPPING is deliberately absent: counting a machine being torn down would keep a
+            # tenant at its cap from starting the replacement.
             if (
                 self.count_workers(worker.machine_type, worker.tenant_id, live, image=worker.image)
                 >= max_workers

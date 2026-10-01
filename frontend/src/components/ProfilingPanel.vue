@@ -45,11 +45,7 @@ function refresh() {
             <span class="stat-detail">({{ profilingSummary.cacheHits }} hits)</span>
           </span>
         </div>
-        <!--
-          Only shown once a team hit has actually happened. A permanent "0 from
-          your team" row on a solo notebook advertises a feature the reader has
-          not turned on, which is noise rather than information.
-        -->
+        <!-- Hidden until a team hit happens: "0 from your team" is noise solo. -->
         <div v-if="profilingSummary.teamCacheHits > 0" class="stat-row">
           <span class="stat-label">From your team</span>
           <span class="stat-value cache-savings">

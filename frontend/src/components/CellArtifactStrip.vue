@@ -26,8 +26,7 @@ interface StripRow {
   tags: Record<string, string>
 }
 
-// A cell's published artifacts (GET …/artifacts gives name + tags) joined to
-// the registry summary for alias chips (★champion / candidate).
+// A cell's published artifacts joined to the registry summary for alias chips.
 const rows = computed<StripRow[]>(() => {
   const published = registryArtifactsByCell.value[props.cellId] || []
   const aliasesByName: Record<string, Record<string, number>> = {}
@@ -66,12 +65,8 @@ async function promote(row: StripRow, alias: 'champion' | 'candidate') {
   }
 }
 
-// Any stored output of the cell can go to the team store, not only a result the
-// cell published itself with put(name=...). Offered only when a team store is
-// configured; without one the promote route has nowhere to send it.
-// Only a ready cell, and only what it still defines: the backend's map keeps
-// every variable a cell has ever stored, so after a rename or an unrun edit it
-// would otherwise offer an outdated result for promotion under a team name.
+// Any stored output can be promoted, not only put(name=...) results. Needs a
+// team store; promotableOutputs drops outdated variables.
 const shareable = computed<Record<string, string>>(() => {
   if (!teamStoreConfigured.value) return {}
   return promotableOutputs(cellMap.value.get(props.cellId))
@@ -81,9 +76,8 @@ const shareVariables = computed(() => Object.keys(shareable.value).sort())
 const sharing = ref(false)
 const shareVariable = ref('')
 const shareName = ref('')
-// Whether the person typed a name. Until they do, the name follows the chosen
-// output, so switching from `model` to `scaler` cannot promote the scaler as
-// "model" over the team's real model.
+// Until a name is typed it follows the chosen output, so switching from
+// `model` to `scaler` can't promote the scaler as "model".
 const shareNameEdited = ref(false)
 const shareBusy = ref(false)
 

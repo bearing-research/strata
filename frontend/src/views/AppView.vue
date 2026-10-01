@@ -8,10 +8,8 @@ import { renderMarkdownToHtml } from '../utils/markdown'
 import type { Cell, CellOutput } from '../types/notebook'
 
 /**
- * Read-only "app" view of a notebook: renders widget control panels + display
- * outputs only — no editor, DAG, or toolbars. The WS connects with
- * `?role=viewer` (mutations rejected server-side). Turn on a widget cell's
- * ⚡ Live toggle for the interactive "tweak a parameter, see the result" loop.
+ * Read-only app view: widget panels and display outputs, no editor or DAG.
+ * The WS connects with `?role=viewer`, so the server rejects mutations.
  */
 const props = defineProps<{ sessionId: string }>()
 const { notebook, orderedCells, openBySessionId, cleanupWebSocket, setViewerMode } = useNotebook()
@@ -19,11 +17,9 @@ const { notebook, orderedCells, openBySessionId, cleanupWebSocket, setViewerMode
 const loading = ref(true)
 const error = ref<string | null>(null)
 
-// Embed mode (`/app/:id?embed=1`): drop the standalone chrome (title + Edit
-// link) so the view drops cleanly into a host `<iframe>`, and post the content
-// height to the parent frame so the host can size the iframe with no inner
-// scrollbar. Only the height travels — no notebook data — so a `*` target
-// origin is safe.
+// Embed mode (`/app/:id?embed=1`): no title or Edit link, and the content
+// height is posted to the host frame for sizing. Only the height travels, so a
+// `*` target origin is safe.
 const route = useRoute()
 const isEmbed = computed(() => route.query.embed === '1')
 const rootEl = ref<HTMLElement | null>(null)
@@ -64,9 +60,8 @@ onUnmounted(() => {
 
 const notebookName = computed(() => notebook.name || 'Notebook')
 
-// Cells worth showing in an app: widget panels, markdown prose, and anything
-// with a display output. Bare compute cells with no output — and cells the
-// author marked `# @app hide` — are hidden.
+// Shown: widgets, markdown, and cells with a display output, unless marked
+// `# @app hide`.
 function isAppHidden(source: string): boolean {
   return source.split('\n').some((line) => /^#\s*@app\s+hide\b/.test(line.trim()))
 }
@@ -157,8 +152,7 @@ function outputRows(output: CellOutput): unknown[][] {
   margin: 0 auto;
   padding: 24px 20px 64px;
 }
-/* Embedded in a host iframe: tighter padding, no full-page bottom gutter, and
-   let the host's background show through rather than forcing our own. */
+/* In a host iframe: tighter padding, and the host's background shows through. */
 .app-view.embed {
   padding: 12px 14px;
   max-width: none;

@@ -115,15 +115,13 @@ def register_strata_scan(
     client = StrataClient(config=config, base_url=base_url)
 
     try:
-        # Materialize the table data
         artifact = client.materialize(
             inputs=[table_uri],
             transform=_build_scan_transform(columns, filters, snapshot_id),
         )
-        # Fetch the artifact data
         arrow_table = client.fetch(artifact.uri)
 
-        # Register as a view in DuckDB (overwrites if exists)
+        # Overwrites an existing view of the same name.
         conn.register(name, arrow_table)
 
         return arrow_table
@@ -290,7 +288,6 @@ class StrataScanner:
             base_url=self.base_url,
         )
 
-        # Keep reference to prevent GC
         self._tables[name] = arrow_table
 
         return self

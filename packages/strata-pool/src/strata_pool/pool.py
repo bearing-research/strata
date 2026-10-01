@@ -126,19 +126,14 @@ class Pool:
         self._health_poll_seconds = health_poll_seconds
         self.max_workers_total = max_workers_total
         self._tracer = tracer
-        # Not a constant: a SQLite file may be shared by two processes on one
-        # host, and under one name each would take the other's machines and
-        # jobs for its own — every lease predicate would match. A process
-        # restarted under a generated name waits out the old leases instead of
-        # taking its rows straight back, which is the safe direction.
+        # Not a constant: two processes sharing a SQLite file under one name would each
+        # take the other's machines and jobs as its own. A restart under a new name waits
+        # out the old leases instead, which is the safe direction.
         self.instance_id = instance_id or f"{socket.gethostname()}:{os.getpid()}:{new_id('p')}"
         self.lease_seconds = lease_seconds
         self._tasks: set[asyncio.Task] = set()
-        # worker id -> consecutive failed probes. In memory rather than in the
-        # store: it is a judgement about right now, and a pool that restarts
-        # health-checks everything in recover() anyway, so carrying a stale
-        # count across a restart would only let one bad reading survive the
-        # thing that would have corrected it.
+        # worker id -> consecutive failed probes. In memory: recover() re-checks everything
+        # on restart, and a persisted count would let one stale bad reading survive it.
         self._probe_failures: dict[str, int] = {}
 
     async def aclose(self) -> None:
@@ -293,8 +288,7 @@ class Pool:
                 return False
             if self._assign(worker, job):
                 return True
-            # Lost the race for this machine or this job. Which one decides
-            # whether there is anything left to do.
+            # Lost the race for this machine or this job; which one decides what is left to do.
             latest = self.store.get_job(job.id)
             if latest is None or latest.state is not JobState.QUEUED:
                 return True
@@ -333,10 +327,9 @@ class Pool:
             return
         queued = self.store.count_queued(machine_type, tenant_id)
 
-        # One machine per reservation, each decided against the store as it is
-        # then: starting a machine awaits the backend, and in that window
-        # another tenant, or another pool process, can start its own. Bounded
-        # by the queue, so a backend that fails every start cannot spin here.
+        # One machine per reservation, each checked against the store as it is then: another
+        # tenant or process can start one while the backend call awaits. Bounded by the queue,
+        # so a backend that fails every start cannot spin here.
         for _ in range(max(queued, 0)):
             worker = Worker(
                 id=new_id("worker"),
@@ -354,9 +347,7 @@ class Pool:
                 worker, max_workers=spec.max_workers, max_workers_total=self.max_workers_total
             )
             if outcome == "fleet_cap":
-                # Saying so matters: a fleet at its ceiling looks exactly like
-                # a queue that is simply slow, and a silent stall is the kind
-                # of thing that gets debugged at 3am.
+                # Log it: a fleet at its ceiling otherwise looks like a slow queue.
                 logger.warning(
                     "fleet is at its global cap; jobs will wait",
                     extra={
@@ -393,9 +384,8 @@ class Pool:
         the provider created one — reconciling that needs a backend that can
         list its own machines, which arrives with the first real backend.
         """
-        # The token has to reach the machine before it can accept anything, so
-        # it goes in the environment the backend boots it with. Minted per
-        # worker: one machine's credential must not open another's.
+        # The token must reach the machine before it accepts anything, so it goes in the
+        # boot environment. Minted per worker: one machine's credential must not open another's.
         assert worker.auth_token is not None
         env = {**spec.env, WORKER_TOKEN_ENV: worker.auth_token}
         try:
@@ -415,9 +405,8 @@ class Pool:
         try:
             recorded = self.store.record_provisioned(worker, self.instance_id, self._wall())
         except Exception:
-            # The machine exists but we could not write down its ID, so nothing
-            # would ever be able to stop it. Stop it now, while the ID is still
-            # in hand, rather than leak a billing resource.
+            # The machine exists but its ID was not recorded, so nothing could ever stop it.
+            # Stop it now rather than leak a billing resource.
             logger.exception(
                 "could not record a machine that was just started; stopping it",
                 extra={"worker_id": worker.id, "backend_id": provisioned.backend_id},
@@ -426,8 +415,8 @@ class Pool:
             self.store.delete_worker(worker.id)
             return
         if not recorded:
-            # The start outlasted the lease and another process took the row
-            # over. It had no machine to stop, so this one stops its own.
+            # The start outlasted the lease and another process took the row, with no machine
+            # to stop; this one stops its own.
             logger.warning(
                 "lost a starting machine's row to another pool process; stopping it",
                 extra={"worker_id": worker.id, "backend_id": provisioned.backend_id},
@@ -483,10 +472,9 @@ class Pool:
             job.timeout_seconds if job.timeout_seconds is not None else spec.job_timeout_seconds
         )
 
-        # Someone else may have taken this job over while the task waited to
-        # run — a reclaim after this process stalled past its lease. Writing
-        # ``running`` over their terminal row would leave it running forever:
-        # nothing reclaims a row with no lease owner.
+        # Another process may have reclaimed this job after this one stalled past its lease.
+        # Writing ``running`` over its terminal row would leave it running forever: nothing
+        # reclaims a row with no lease owner.
         current = self.store.get_job(job.id)
         if current is None or current.state not in (JobState.DISPATCHED, JobState.RUNNING):
             logger.info(
@@ -501,9 +489,8 @@ class Pool:
 
         keep_worker = False
         try:
-            # asyncio.timeout is the wall-clock bound; httpx's own timeout is
-            # per phase (its read timeout is the gap between bytes, so a worker
-            # dribbling output could outlive the budget the error text claims).
+            # asyncio.timeout bounds wall-clock time; httpx's read timeout is per gap between
+            # bytes, so a worker dribbling output could outlive the budget.
             with self._execution_span(job, worker) as trace_headers:
                 async with (
                     self._holding(job_id=job.id, worker_id=worker.id),
@@ -519,25 +506,22 @@ class Pool:
                         timeout=timeout,
                     )
         except (httpx.ConnectTimeout, httpx.PoolTimeout) as exc:
-            # These are timeouts that never reached the worker. A machine that
-            # black-holes packets looks exactly like this, and calling it a slow
-            # job would hand the next one to a corpse.
+            # Timeouts that never reached the worker. A machine black-holing packets looks like
+            # this, and treating it as a slow job would hand the next job to a dead machine.
             job.state = JobState.FAILED
             job.error = f"worker unreachable: {exc}"
         except (httpx.TimeoutException, TimeoutError):
-            # The work is still running on the machine and there is no way to
-            # tell it to stop, so the machine is not reusable: handing it the
-            # next job would put two jobs on hardware sized for one.
+            # The work still runs on the machine and cannot be stopped, so the machine is not
+            # reusable: the next job would share hardware sized for one.
             job.state = JobState.TIMED_OUT
             job.error = f"job exceeded its {timeout}s timeout"
         except httpx.TransportError as exc:
             job.state = JobState.FAILED
             job.error = f"worker unreachable: {exc}"
         except Exception as exc:
-            # Anything else (a corrupt response body, a malformed endpoint) is
-            # a machine behaving in a way we cannot reason about. Losing the
-            # job is recoverable; leaving the worker BUSY forever is not — it
-            # would bill indefinitely and hold a slot against max_workers.
+            # Anything else (a corrupt body, a malformed endpoint) is a machine we cannot reason
+            # about. Losing the job is recoverable; a worker left BUSY bills forever and holds a
+            # max_workers slot.
             logger.exception(
                 "unexpected failure while running a job",
                 extra={"job_id": job.id, "worker_id": worker.id},
@@ -559,9 +543,8 @@ class Pool:
         taken_over = False
         try:
             if not self.store.finish_job(job, self.instance_id):
-                # This process stopped renewing for longer than a lease, and
-                # another one failed the job and is stopping the machine. Its
-                # answer stands; recording ours would bill a job twice.
+                # This process missed renewals for longer than a lease, and another one failed
+                # the job and is stopping the machine. Its answer stands; ours would bill twice.
                 taken_over = True
                 logger.warning(
                     "another pool process took over a job before it finished",
@@ -582,10 +565,9 @@ class Pool:
                 )
             )
         finally:
-            # Releasing the worker happens even if persistence just failed.
-            # A store that rejects a write is a problem; a worker stuck BUSY
-            # with nothing left to release it is a permanent one. A machine
-            # another process took over is that process's to stop.
+            # Release the worker even if persistence just failed: a worker stuck BUSY with
+            # nothing to release it is permanent. A machine another process took over is that
+            # process's to stop.
             if not taken_over:
                 if keep_worker:
                     worker.last_active_at = self._wall()
@@ -597,9 +579,7 @@ class Pool:
                     await self._drain(job.machine_type, job.tenant_id)
                 else:
                     await self._stop_worker(worker)
-                    # The queue may still hold work this machine was going to
-                    # take — and the slot it just freed belongs to whoever is
-                    # waiting, not only to this job's tenant.
+                    # The freed slot belongs to whoever is waiting, not only to this job's tenant.
                     await self._offer_freed_capacity()
 
     @contextlib.contextmanager
@@ -644,17 +624,14 @@ class Pool:
 
         Returns whether this process stopped it.
         """
-        # Every path that ends a machine comes through here, so this is the
-        # one place the probe counter can be dropped without leaking. A
-        # machine that missed one probe and was then reaped for idleness, or
-        # stopped after a failed job, is never listed WARM again — so the
-        # probe loop that would have popped it never sees it, and the entry
-        # would outlive the machine for the life of the process.
+        # Every path that ends a machine comes through here, so drop the probe counter here.
+        # A machine reaped or stopped after one missed probe is never WARM again, so the
+        # probe loop would never pop its entry.
         self._probe_failures.pop(worker.id, None)
 
-        # A claim, not a write: of two processes deciding to stop the same
-        # machine, or one stopping it while another hands it a job, one wins.
-        # A machine another live process holds is left to that process.
+        # A claim, not a write: of two processes stopping the same machine, or one stopping
+        # it while another hands it a job, one wins. A machine another live process holds is
+        # left to it.
         now = self._wall()
         if not self.store.claim_for_stop(
             worker.id, self.instance_id, now, now + self.lease_seconds
@@ -665,12 +642,10 @@ class Pool:
         worker.lease_owner = self.instance_id
 
         if worker.backend_id is not None:
-            # No lease renewal around the stop: it is one provider call, and a
-            # renewal task would put an extra suspension between the machine
-            # stopping and its row going, where a caller could see a stopped
-            # machine still listed. It is bounded by the lease instead, so a
-            # provider that hangs cannot have another process take the row
-            # while this one is still waiting on it.
+            # No lease renewal around the stop: a renewal task would add a suspension between the
+            # machine stopping and its row going, exposing a stopped machine still listed. The
+            # lease bounds it instead, so a hung provider cannot let another process take the row
+            # mid-call.
             try:
                 async with asyncio.timeout(self.lease_seconds / 2):
                     await self.backend.stop(worker.backend_id)
@@ -679,9 +654,8 @@ class Pool:
                     "backend failed to stop a worker; its row is kept so the stop is tried again",
                     extra={"worker_id": worker.id, "backend_id": worker.backend_id},
                 )
-                # The row stays, in ``stopping``, holding the machine's place
-                # against the fleet cap: deleting it would leave a machine
-                # running and billing with nothing naming it.
+                # The row stays in ``stopping``, holding the machine's place against the fleet cap:
+                # deleting it would leave a machine billing with nothing naming it.
                 return False
         self.store.delete_worker(worker.id)
         return True
@@ -712,23 +686,20 @@ class Pool:
                 await self._stop_worker(worker)
                 continue
             if worker.state is WorkerState.BUSY:
-                # Our process died, not the machine's: it may still be running
-                # the job we are about to fail, and nothing can tell it to stop.
-                # Reusing it would put the next job alongside an orphan.
+                # Our process died, not the machine: it may still run the job we are about to fail,
+                # and nothing can stop it. Reusing it would put the next job beside an orphan.
                 await self._stop_worker(worker)
                 continue
             if worker.state is WorkerState.STOPPING:
-                # A previous process claimed this machine and died before the
-                # backend call landed. Nothing else would ever finish the job:
-                # the scaler only looks at warm machines and the dispatcher
-                # cannot see this one, so it would bill forever, invisible.
+                # A previous process claimed this machine and died before the backend call landed.
+                # Nothing else would finish it: the scaler only sees warm machines and the
+                # dispatcher cannot see this one, so it would bill forever, invisible.
                 await self._stop_worker(worker)
                 continue
             if worker.state is WorkerState.STARTING:
-                # Answering a health check is exactly the promotion criterion,
-                # and no _await_boot task survived the restart to apply it.
-                # Left alone this machine bills forever and takes a slot
-                # against max_workers without ever accepting work.
+                # A passing health check is the promotion criterion, and no _await_boot task
+                # survived the restart to apply it. Left alone, the machine bills and holds a
+                # max_workers slot without ever accepting work.
                 self.store.mark_warm(worker, self.instance_id, now)
 
         in_flight = [JobState.DISPATCHED, JobState.RUNNING]
@@ -760,9 +731,8 @@ class Pool:
         """
         now = self._wall()
         in_flight = [JobState.DISPATCHED, JobState.RUNNING]
-        # Another process's rows only: this one's own are live in this process,
-        # and a warm machine has no lease to expire. Whether the lease has run
-        # out is the store's call, made in the same statement that acts on it.
+        # Other processes' rows only: this one's are live here, and a warm machine has no
+        # lease. The store decides lease expiry in the same statement that acts on it.
         for job in self.store.list_jobs(in_flight):
             if job.lease_owner is None or job.lease_owner == self.instance_id:
                 continue
@@ -849,9 +819,8 @@ class Pool:
         loses a race against a long-running cell must not retire the machine
         running it.
         """
-        # The endpoint is carried rather than re-read, so it is a str by
-        # construction: a filter in a comprehension does not narrow the
-        # attribute for the use below it.
+        # Carry the endpoint rather than re-read it: a comprehension filter would not narrow
+        # the attribute to str for the use below.
         candidates: list[tuple[MachineType, Worker, str]] = []
         for name, spec in self.machine_types.items():
             if spec.health_check_failures <= 0:
@@ -864,29 +833,20 @@ class Pool:
         if not candidates:
             return 0
 
-        # Concurrently, because this shares the scaler pass with
-        # reap_idle_workers. A backend's health check has its own timeout (10s
-        # for RunPod), and a provider black-holing packets would make a serial
-        # pass take that times the fleet size -- minutes during which nothing
-        # is reaped, and reaping is the only thing that stops a machine
-        # billing. The stall would be worst exactly when it costs most.
+        # Concurrent because this shares the scaler pass with reap_idle_workers. Each health
+        # check has its own timeout (10s for RunPod), so a serial pass against a provider
+        # black-holing packets would stall reaping, the only thing that stops billing, for
+        # minutes.
         results = await asyncio.gather(
             *(self._health_or_false(endpoint) for _, _, endpoint in candidates)
         )
 
         if len(candidates) > 1 and not any(results):
-            # Every machine in the fleet failed at once. That is far more
-            # likely to be this process's own network -- DNS, a proxy, an
-            # exhausted connection pool -- than every machine dying
-            # simultaneously, and acting on it would retire the entire warm
-            # fleet for a fault that was never on the machines.
-            #
-            # Counts are left untouched rather than cleared, so a genuine
-            # fleet-wide outage is still caught by the first pass that sees
-            # anything healthy. And a machine that really is gone is still
-            # stopped the way it always was: by the job dispatched to it
-            # failing. With a single candidate there is no evidence either
-            # way, so it is acted on -- one cold start beats never noticing.
+            # Every machine failed at once: far more likely this process's own network (DNS, a
+            # proxy, an exhausted connection pool) than a fleet-wide death, so retire nothing.
+            # Counts are kept, so a real outage is caught by the first pass that sees anything
+            # healthy, and a dead machine still fails the job dispatched to it. A single
+            # candidate is no evidence either way, so it is acted on.
             logger.warning(
                 "every warm machine failed its probe; treating it as a "
                 "pool-side fault rather than retiring the fleet",
@@ -896,10 +856,8 @@ class Pool:
 
         stopped = 0
         for (spec, candidate, _endpoint), healthy in zip(candidates, results, strict=True):
-            # Re-read after the await, exactly as reap_idle_workers does:
-            # the machine may have taken a job while the probe was in
-            # flight, and stopping a busy machine kills the job on it. A
-            # machine that just started work is also evidence it is alive.
+            # Re-read after the await, as reap_idle_workers does: the machine may have taken a
+            # job during the probe, and stopping a busy machine kills that job.
             worker = self.store.get_worker(candidate.id)
             if worker is None or worker.state is not WorkerState.WARM:
                 self._probe_failures.pop(candidate.id, None)
@@ -936,8 +894,7 @@ class Pool:
             stopped += 1
 
         if stopped:
-            # The slot this freed belongs to whoever is waiting, not only to
-            # the tenant whose machine died.
+            # The freed slot belongs to whoever is waiting, not only the dead machine's tenant.
             await self._offer_freed_capacity()
         return stopped
 
@@ -952,9 +909,8 @@ class Pool:
         """
         now = self._wall()
         stopped = 0
-        # A machine whose stop failed keeps its row, in ``stopping``, holding
-        # its place against the fleet cap. Retry it here: nothing else revisits
-        # it, and a row nobody retries is a slot the fleet never gets back.
+        # A machine whose stop failed keeps its row in ``stopping``, holding its place against
+        # the fleet cap. Retry it here: nothing else revisits it.
         for stopping in self.store.list_workers(states=[WorkerState.STOPPING]):
             held_elsewhere = (
                 stopping.lease_owner not in (None, self.instance_id)
@@ -964,19 +920,16 @@ class Pool:
                 continue
             if await self._stop_worker(stopping):
                 stopped += 1
-        # Every warm machine, not only those of types still in the catalogue:
-        # a removed type's machines retire here too.
+        # Every warm machine, including those of types removed from the catalogue.
         for candidate in self.store.list_workers(states=[WorkerState.WARM]):
-            # Its type's cool-down, or the one it had when the type was
-            # removed. A type forgotten across a restart has none to honour.
+            # Its type's cool-down, or the one it had when removed. A type forgotten across a
+            # restart has none.
             spec = self.machine_types.get(candidate.machine_type) or self._retired_types.get(
                 candidate.machine_type
             )
             cool_down = spec.cool_down_seconds if spec is not None else 0.0
-            # Stopping a machine awaits the backend, and the list was read
-            # before that. Re-read: a machine further down it may have
-            # taken a job in the meantime, and stopping a busy machine
-            # kills the job running on it.
+            # Re-read: a machine later in the list may have taken a job while an earlier stop
+            # awaited the backend, and stopping a busy machine kills that job.
             worker = self.store.get_worker(candidate.id)
             if worker is None or worker.state is not WorkerState.WARM:
                 continue
@@ -986,9 +939,8 @@ class Pool:
             last_active = worker.last_active_at or worker.created_at
 
             if last_active > now:
-                # The wall clock moved backwards. Left alone this machine
-                # is unreapable until the clock catches up, which is
-                # unbounded idle billing; clamping makes it age from now.
+                # The wall clock moved backwards. Unclamped, this machine is unreapable until the
+                # clock catches up (unbounded idle billing); clamping makes it age from now.
                 logger.warning(
                     "machine was last active in the future; clamping to now",
                     extra={"worker_id": worker.id, "skew_seconds": round(last_active - now, 1)},
@@ -1033,9 +985,8 @@ class Pool:
                 await self.reap_idle_workers()
                 await self.probe_warm_workers()
             except Exception:
-                # A pass that raises must not take the loop down with it:
-                # the loop dying is indistinguishable from having no scaler,
-                # and that failure is measured in dollars per hour.
+                # A raising pass must not kill the loop: a dead loop looks like having no scaler,
+                # and that failure costs dollars per hour.
                 logger.exception("scaler pass failed")
 
     # --- task bookkeeping ---

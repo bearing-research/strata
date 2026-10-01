@@ -1,14 +1,7 @@
 <script setup lang="ts">
 /**
- * Post-import dialog: shows the conversion report and lets the user
- * either open the new notebook (the normal flow) or close the dialog
- * and stay on the home page (the "I just wanted to check the report"
- * flow).
- *
- * Used by the Jupyter-import flow on HomePage. The report itself is
- * server-rendered as Markdown; we run it through the same
- * renderMarkdownToHtml() helper the rest of the UI uses, which
- * goes through markdown-it + DOMPurify.
+ * Post-Jupyter-import dialog: shows the conversion report (server Markdown,
+ * sanitized by renderMarkdownToHtml) and offers to open the new notebook.
  */
 import { computed } from 'vue'
 import type { ImportReport } from '../composables/useStrata'

@@ -27,10 +27,7 @@ const carryVariable = computed(() => currentCell.value?.annotations?.loop?.carry
 
 const cellLabel = computed(() => {
   const cell = currentCell.value
-  // Prefer the @name annotation (user-given cell name), falling back to
-  // the short cell id. We used to show cell.defines[0] here, but the
-  // REPL is scoped to the cell's *inputs*, not its defines — showing a
-  // define name was misleading.
+  // @name, else the short id. Not a define name: the REPL sees the cell's inputs.
   if (cell?.annotations?.name) return cell.annotations.name
   return props.cellId.slice(0, 8)
 })
@@ -74,8 +71,7 @@ onMounted(() => {
   refreshIterations()
 })
 
-// Refresh whenever a new iteration completes (the progress badge updates
-// cell.loopProgress.iteration) so the picker tracks live progress.
+// Refresh as iterations complete so the picker tracks live progress.
 watch(
   () => currentCell.value?.loopProgress?.iteration ?? -1,
   () => {
@@ -83,7 +79,6 @@ watch(
   },
 )
 
-// Also refresh when the user opens the panel on a different cell.
 watch(
   () => props.cellId,
   () => {
@@ -102,7 +97,7 @@ async function copyArtifactUri() {
       uriCopiedHint.value = false
     }, 1500)
   } catch {
-    // Clipboard API can fail in insecure contexts; silently no-op.
+    // Clipboard API can fail in insecure contexts.
   }
 }
 
@@ -112,7 +107,6 @@ function formatBytes(n: number): string {
   return `${(n / (1024 * 1024)).toFixed(1)} MB`
 }
 
-// Auto-scroll history when new entries arrive
 watch(
   () => history.value.length,
   async () => {

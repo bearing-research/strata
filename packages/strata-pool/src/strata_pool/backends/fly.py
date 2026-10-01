@@ -78,8 +78,7 @@ class FlyBackend:
         self.worker_port = worker_port
         self._owns_api = api is None
         self._owns_probe = probe is None
-        # Per request rather than on the client, for the same reason as the
-        # RunPod backend: an injected client must not silently drop auth.
+        # Per request, not on the client: an injected client must not silently drop auth.
         self._auth = {"Authorization": f"Bearer {api_token}"}
         self._api = api or httpx.AsyncClient(base_url=base_url, timeout=60.0)
         self._probe = probe or httpx.AsyncClient()

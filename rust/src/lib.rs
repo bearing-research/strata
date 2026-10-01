@@ -25,7 +25,6 @@ use std::fs::File;
 use std::io::Cursor;
 use thiserror::Error;
 
-// Arrow IPC constants
 const CONTINUATION_MARKER: [u8; 4] = [0xFF, 0xFF, 0xFF, 0xFF];
 const EOS_MARKER: [u8; 8] = [0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00];
 
@@ -84,38 +83,30 @@ fn concat_streams_fast(segments: &[&[u8]]) -> Result<Vec<u8>, StrataError> {
         return Ok(segments[0].to_vec());
     }
 
-    // Estimate total size
     let total_size: usize = segments.iter().map(|s| s.len()).sum();
     let mut result = Vec::with_capacity(total_size);
 
-    // Copy first segment completely (includes schema and EOS)
-    // But we need to strip the EOS marker (last 8 bytes)
+    // Keep the first segment's schema but strip its EOS marker (last 8 bytes).
     let first = &segments[0];
     if first.len() < 8 {
         return Err(StrataError::InvalidFile("First segment too small".into()));
     }
 
-    // Verify EOS marker at end of first segment
     if &first[first.len() - 8..] != &EOS_MARKER {
         return Err(StrataError::InvalidFile(
             "First segment missing EOS marker".into(),
         ));
     }
 
-    // Copy first segment without EOS
     result.extend_from_slice(&first[..first.len() - 8]);
 
-    // For subsequent segments, we need to skip the schema message and copy only record batches.
+    // Later segments: skip the schema message and copy only record batches.
     //
-    // Every malformed shape below returns Err rather than skipping the segment.
-    // Returning Ok having copied nothing from it silently drops its rows: the
-    // caller gets a well-formed stream that is simply short, with no error
-    // anywhere. Err is what hands the input to the Arrow fallback further down,
-    // which either parses it properly or fails loudly.
+    // Malformed shapes return Err, never skip: Ok with nothing copied silently drops
+    // rows, while Err hands the input to the Arrow fallback, which parses it or fails.
     for segment in &segments[1..] {
-        // An empty segment is legitimate — the pyarrow implementation in
-        // fast_io skips those too. Anything nonempty but too small to even
-        // hold an EOS marker is corrupt.
+        // Empty segments are legitimate (fast_io's pyarrow path skips them too); a
+        // nonempty one too small for an EOS marker is corrupt.
         if segment.is_empty() {
             continue;
         }
@@ -125,15 +116,13 @@ fn concat_streams_fast(segments: &[&[u8]]) -> Result<Vec<u8>, StrataError> {
             ));
         }
 
-        // Verify EOS marker
         if &segment[segment.len() - 8..] != &EOS_MARKER {
             return Err(StrataError::InvalidFile(
                 "Segment missing EOS marker".into(),
             ));
         }
 
-        // Find where record batches start by parsing message headers
-        // Schema message format: continuation (4) + size (4) + flatbuffer (size bytes)
+        // Schema message: continuation (4) + size (4) + flatbuffer (size bytes)
         let mut offset = 0;
 
         // Skip continuation marker if present
@@ -141,7 +130,6 @@ fn concat_streams_fast(segments: &[&[u8]]) -> Result<Vec<u8>, StrataError> {
             offset = 4;
         }
 
-        // Read schema message size
         if offset + 4 > segment.len() {
             return Err(StrataError::InvalidFile(
                 "segment truncated before its schema-message length".into(),
@@ -154,9 +142,8 @@ fn concat_streams_fast(segments: &[&[u8]]) -> Result<Vec<u8>, StrataError> {
             segment[offset + 3],
         ]) as usize;
 
-        // Checked throughout: schema_size comes off disk, so a damaged entry can
-        // put any u32 here, and wrapping would turn a bogus length into a
-        // plausible in-range offset.
+        // Checked: schema_size comes off disk, and wrapping would turn a bogus length
+        // into a plausible in-range offset.
         offset = offset
             .checked_add(4)
             .and_then(|o| o.checked_add(schema_size))
@@ -181,7 +168,6 @@ fn concat_streams_fast(segments: &[&[u8]]) -> Result<Vec<u8>, StrataError> {
         }
     }
 
-    // Add final EOS marker
     result.extend_from_slice(&EOS_MARKER);
 
     Ok(result)
@@ -204,11 +190,8 @@ impl BytesLikeInput {
             return Ok(Self::Buffer(buffer));
         }
 
-        // Fallback for non-contiguous buffer-protocol inputs. This copies into
-        // owned Rust memory so the rest of the concat path can operate on a
-        // plain byte slice. If the object cannot be exported as a contiguous
-        // u8 buffer at all, ``to_vec(py)?`` raises and the Python exception
-        // bubbles back to the caller unchanged.
+        // Non-contiguous buffer: copy into owned memory so the concat path sees a plain
+        // slice. ``to_vec(py)?`` raises if the object cannot export a u8 buffer at all.
         Ok(Self::Owned(buffer.to_vec(py)?))
     }
 
@@ -219,11 +202,9 @@ impl BytesLikeInput {
                 let cells = buffer.as_slice(py).ok_or_else(|| {
                     PyValueError::new_err("bytes-like segment must be C-contiguous")
                 })?;
-                // SAFETY: ReadOnlyCell<u8> is repr(transparent) over a single
-                // byte cell. We hold the PyBuffer for the lifetime of the
-                // returned slice and never call back into Python while the
-                // slice is in use, so the backing memory stays valid for this
-                // FFI call.
+                // SAFETY: ReadOnlyCell<u8> is repr(transparent) over a byte cell. We hold the
+                // PyBuffer for the slice's lifetime and never call into Python while it is in
+                // use, so the memory stays valid for this FFI call.
                 Ok(unsafe { std::slice::from_raw_parts(cells.as_ptr().cast::<u8>(), cells.len()) })
             }
             Self::Owned(bytes) => Ok(bytes.as_slice()),
@@ -259,7 +240,6 @@ fn concat_ipc_streams<'py>(
         .map(|segment| segment.as_slice(py))
         .collect::<PyResult<_>>()?;
 
-    // Try fast path first (byte manipulation)
     match concat_streams_fast(&segment_slices) {
         Ok(result) => return Ok(PyBytes::new(py, &result)),
         Err(_) => {
@@ -271,12 +251,10 @@ fn concat_ipc_streams<'py>(
         return Ok(PyBytes::new(py, &[]));
     }
 
-    // Read first segment to get schema
     let first_cursor = Cursor::new(segment_slices[0]);
     let first_reader = StreamReader::try_new(first_cursor, None).map_err(StrataError::from)?;
     let schema = first_reader.schema();
 
-    // Collect all batches
     let mut all_batches = Vec::new();
 
     for segment in &segment_slices {
@@ -289,7 +267,6 @@ fn concat_ipc_streams<'py>(
         }
     }
 
-    // Write combined stream
     let estimated_size: usize = segment_slices.iter().map(|s| s.len()).sum();
     let mut buffer = Vec::with_capacity(estimated_size);
 

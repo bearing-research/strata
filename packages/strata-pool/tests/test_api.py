@@ -25,8 +25,7 @@ def _require_server_extra() -> bool:
 _HAS_SERVER = _require_server_extra()
 
 if os.environ.get("STRATA_POOL_REQUIRE_SERVER") == "1" and not _HAS_SERVER:
-    # CI sets this. Otherwise a venv missing the extra would skip this entire
-    # file and report green, which is coverage that examined nothing.
+    # CI sets this, so a venv missing the extra fails instead of skipping the whole file.
     raise RuntimeError("STRATA_POOL_REQUIRE_SERVER=1 but the `server` extra is not installed")
 
 pytestmark = pytest.mark.skipif(not _HAS_SERVER, reason="needs the `server` extra")

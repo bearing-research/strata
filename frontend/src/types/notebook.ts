@@ -1,7 +1,5 @@
 import type { TypedWsFrame, WsServerPayloadMap } from './ws-payloads.generated'
 
-/** Core notebook types — maps to Strata's artifact/transform model */
-
 export type CellId = string
 
 export type CellLanguage = 'python' | 'prompt' | 'markdown' | 'sql' | 'r' | 'widget'
@@ -17,9 +15,8 @@ export interface MountSpec {
   pin?: string | null
 }
 
-/** SQL connection driver. Open-ended (server adds new drivers); UI
- * forms know how to render the two phase-1 drivers and fall back
- * to a generic key/value editor for anything else. */
+/** SQL connection driver. Open-ended: the UI falls back to a generic
+ * key/value editor for drivers it has no form for. */
 export type ConnectionDriver = string
 
 /** Auth values as stored: ``${VAR}`` indirection or empty (literal
@@ -155,7 +152,6 @@ export type StalenessReason =
 export type InputState = 'ready' | 'stale' | 'missing' | 'error'
 
 export interface CellInput {
-  /** Variable name */
   variable: string
   /** Which cell defines this variable */
   sourceCellId: CellId
@@ -214,7 +210,6 @@ export interface WidgetSpec {
 
 export interface Cell {
   id: CellId
-  /** Source code */
   source: string
   language: CellLanguage
   /** Widget cell control panel (only present when language === 'widget') */
@@ -228,7 +223,6 @@ export interface Cell {
    */
   createdBy?: string | null
   updatedBy?: string | null
-  /** Execution state */
   status: CellStatus
   /** Why the cell is stale (only present when status === 'stale') */
   stalenessReasons?: StalenessReason[]
@@ -294,14 +288,11 @@ export interface Cell {
   annotations?: CellAnnotations
   /** Causality chain explaining why this cell is stale */
   causality?: CausalityChain
-  /** Suggested package to install (when execution fails with a
-   * recognisable missing-package error). */
+  /** Package to install, when execution failed on a recognisable
+   * missing-package error. */
   suggestInstall?: string
-  /** Language the suggested install applies to. ``"python"`` → the
-   * cell install button calls ``uv add``. ``"r"`` → the button is
-   * hidden until the R install action ships (manual
-   * ``install.packages()`` in an R cell remains the workaround).
-   * Backend always emits this when ``suggestInstall`` is set. */
+  /** Always set with ``suggestInstall``. Only ``"python"`` shows the install
+   * button (``uv add``); R has no install action yet. */
   suggestInstallLanguage?: 'python' | 'r'
   /** Shadow warnings from the DAG builder */
   shadowWarnings?: string[]
@@ -309,12 +300,11 @@ export interface Cell {
   annotationDiagnostics?: AnnotationDiagnostic[]
   /** Live loop-cell progress — hydrated from WS ``cell_iteration_progress`` messages */
   loopProgress?: LoopProgress
-  /** Live @per_variant fan-out progress — accumulated from WS
-   * ``cell_variant_progress`` frames, reset when the cell starts running. */
+  /** Live @per_variant fan-out progress from ``cell_variant_progress``;
+   * reset when the cell starts running. */
   variantProgress?: VariantProgress[]
-  /** Live streamed partial output (prompt cells) — hydrated from WS
-   * ``cell_output_delta`` frames. Ephemeral display state: cleared by the
-   * final ``cell_output`` / ``cell_error`` frame and never persisted. */
+  /** Streamed partial output (prompt cells) from ``cell_output_delta``.
+   * Cleared by the final ``cell_output`` / ``cell_error``; never persisted. */
   streamBuffer?: string
   /** Attempt number for the in-flight stream (>1 after schema-validation
    * retries; the buffer resets between attempts). */
@@ -323,11 +313,9 @@ export interface Cell {
   consoleStdout?: string
   /** Captured stderr from the last execution (persisted so it survives reopens) */
   consoleStderr?: string
-  /** True when the cell's source classifies as a module cell (pure defs/classes
-   * + optional literal constants). Drives the "module" pill in the UI. */
+  /** Module cell: only defs/classes plus optional literal constants. */
   isModuleCell?: boolean
-  /** Symbols exported by this cell when it's a module cell — shown in the
-   * module pill's tooltip so users see what crosses the cell boundary. */
+  /** A module cell's exported symbols, shown in the module pill's tooltip. */
   moduleExports?: Array<{ name: string; kind: string }>
   /** Variant group ID parsed from ``# @variant <group> <name>``. Null for
    * cells that aren't members of a group. */
@@ -470,9 +458,7 @@ export interface PublishedOutput {
   mode: 'static' | 'api'
   /** Schema derived from artifact metadata */
   schema?: { columns: string[] }
-  /** Last updated timestamp */
   lastUpdatedAt?: number
-  /** Artifact URI */
   artifactUri?: string
 }
 
@@ -517,30 +503,20 @@ export interface NotebookEnvironment {
   interpreterSource: 'unknown' | 'venv' | 'path'
 }
 
-// R-side runtime environment, parallel to NotebookEnvironment.
-// Populated for any notebook that ships a ``renv.lock`` — even
-// when the latest restore failed, so the UI can surface the
-// failure instead of hiding the R section entirely.
-//
-// Source of truth for "is there a renv.lock right now?" is
-// ``hasLockfile`` (derived from disk at serialize time).
-// ``lockHash`` / ``rVersion`` / ``lastSyncedAt`` reflect the *last
-// successful* sync; ``syncError`` carries the *latest attempt's*
-// error message.
+// R counterpart of NotebookEnvironment, populated whenever a ``renv.lock``
+// exists (even after a failed restore). ``hasLockfile`` reflects disk now;
+// ``lockHash`` / ``rVersion`` / ``lastSyncedAt`` reflect the last successful
+// sync; ``syncError`` the latest attempt.
 export interface RNotebookEnvironment {
   hasLockfile: boolean
-  /** sha256(renv.lock) on disk right now. Compare against
-   * ``lockHash`` (last good sync) to know if the user edited
-   * the lockfile since the last successful restore. */
+  /** sha256(renv.lock) on disk now; differs from ``lockHash`` after an edit. */
   currentLockHash: string
   /** Lockfile hash at the last *successful* renv::restore(). */
   lockHash: string
   /** R version at the last *successful* renv::restore(). */
   rVersion: string
-  /** R version of ``Rscript`` on PATH right now (probed once per
-   * session). Falls back here when ``rVersion`` is empty (no
-   * lockfile / never synced) so the R card can always show
-   * *some* version info next to the status pill. */
+  /** R version of ``Rscript`` on PATH (probed once per session); shown
+   * when ``rVersion`` is empty. */
   systemRVersion: string
   /** Epoch-ms timestamp of the last *successful* renv::restore(),
    * or 0 if never. */
@@ -554,17 +530,10 @@ export interface RNotebookEnvironment {
   syncState: 'absent' | 'never' | 'ok' | 'outdated' | 'failed'
   /** Error message from the most recent failed attempt, or null. */
   syncError: string | null
-  /** Packages installed in the renv project library, sorted by name.
-   *
-   * Populated by an explicit ``GET /v1/notebooks/{id}/r-packages``
-   * fetch — the env-state serialization on open / state sync /
-   * env refresh deliberately omits the package list so those
-   * paths don't pay a synchronous Rscript spawn. The env panel
-   * fetches lazily on mount.
-   *
-   * ``packagesStatus`` disambiguates "the probe failed" from
-   * "the library is empty" — both produce ``packages: []``.
-   */
+  /** Installed renv packages, sorted by name. Fetched lazily from
+   * ``GET /v1/notebooks/{id}/r-packages``; env-state payloads omit them to
+   * avoid an Rscript spawn. ``packagesStatus`` tells a failed probe from an
+   * empty library. */
   packages: RPackageInfo[]
   /** Outcome of the most recent ``installed.packages()`` probe.
    *
@@ -581,9 +550,7 @@ export interface RNotebookEnvironment {
   packagesError: string | null
 }
 
-// One R package installed in the project's renv library.
-// Parallel to ``DependencyInfo`` for the Python side. R uses CRAN
-// version strings rather than PEP 440 — render the version as-is.
+// R counterpart of ``DependencyInfo``. CRAN versions, not PEP 440: render as-is.
 export interface RPackageInfo {
   name: string
   version: string
@@ -595,18 +562,13 @@ export interface NotebookRuntimeConfig {
   availablePythonVersions: string[]
   defaultPythonVersion: string
   pythonSelectionFixed: boolean
-  /** Registry UI gate — true only when the registry routes are reachable
-   * (personal mode today). The dashboard hides itself when false. */
+  /** True only when the registry routes are reachable; gates the dashboard. */
   registryEnabled: boolean
   /** A team store is configured, so a cell's output can be promoted to it. */
   teamStoreConfigured: boolean
 }
 
-// ``r_init`` and ``r_add`` reuse the same env-job UI surface as
-// the Python actions — same progress block, same status icons,
-// just different ``command`` text in the operation log. Keeping
-// the union open at the type level avoids per-language branching
-// in the env panel rendering.
+// R actions share the Python env-job UI; only the ``command`` text differs.
 export type EnvironmentJobAction = 'add' | 'remove' | 'sync' | 'import' | 'r_init' | 'r_add'
 
 export interface EnvironmentActionSummary {
@@ -675,9 +637,7 @@ export interface Notebook {
   variantGroups: VariantGroup[]
   /** Environment info */
   environment: NotebookEnvironment
-  /** R-side environment info. Populated when ``renv.lock`` is present;
-   * fields are zero / empty otherwise (matches the
-   * default-RRuntime backend serialization). */
+  /** Zero / empty fields when there is no ``renv.lock``. */
   rEnvironment: RNotebookEnvironment
   /** Published outputs exposed as stable endpoints */
   publishedOutputs?: PublishedOutput[]
@@ -741,7 +701,7 @@ export interface CascadeStep {
   estimatedMs: number
 }
 
-/** Profiling summary for the entire notebook (v1.1) */
+/** Profiling summary for the entire notebook */
 export interface ProfilingSummary {
   totalExecutionMs: number
   cacheHits: number
@@ -784,8 +744,8 @@ export type WsClientMessageType =
   | 'inspect_open' // Open inspect REPL for a cell
   | 'inspect_eval' // Evaluate expression in inspect REPL
   | 'inspect_close' // Close inspect REPL
-  | 'impact_preview_request' // Request impact preview for a cell (v1.1)
-  | 'profiling_request' // Request profiling summary (v1.1)
+  | 'impact_preview_request' // Request impact preview for a cell
+  | 'profiling_request' // Request profiling summary
   | 'dependency_add' // Add a package dependency
   | 'dependency_remove' // Remove a package dependency
   | 'variant_set_active' // Switch the active variant in a group
@@ -808,7 +768,7 @@ export type WsServerMessageType =
   | 'cascade_prompt' // "This cell needs N upstream cells to run first"
   | 'cascade_progress' // During cascade, reports which cell is running
   | 'impact_preview' // Run impact preview (upstream + downstream effects)
-  | 'profiling_summary' // Notebook profiling summary (v1.1)
+  | 'profiling_summary' // Notebook profiling summary
   | 'presence' // Who is on the session and which cell each is on
   | 'inspect_result' // Result of an inspect REPL evaluation
   | 'notebook_status' // Batch status update (e.g., after open or env change)

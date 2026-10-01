@@ -76,7 +76,7 @@ def test_fetch_over_mock_transport() -> None:
                 content=ipc_bytes,
                 headers={"content-type": "application/vnd.apache.arrow.stream"},
             )
-        # Artifact status probe — report ready so fetch proceeds to /data.
+        # Status probe: report ready so fetch proceeds to /data.
         return httpx.Response(200, json={"artifact_id": "abc123", "version": 1, "state": "ready"})
 
     client = StrataClient.from_transport(httpx.MockTransport(handler))
@@ -129,7 +129,7 @@ class TestSnapshotPinReachesTheWire:
         assert "snapshot_id" not in df_build(["id"])["params"]
 
     def test_it_matches_the_integrations_that_were_already_correct(self) -> None:
-        # This one genuinely needs duckdb: it compares against that builder.
+        # Needs duckdb: it compares against that builder.
         pytest.importorskip("duckdb")
         from strata_client.integration.arrow import _build_scan_transform as arrow_build
         from strata_client.integration.duckdb import _build_scan_transform as duckdb_build
@@ -229,7 +229,7 @@ class TestJsonArtifactRoundTrip:
         "payload",
         [
             {"data": ["1", "2", "3"]},  # the collision, numeric-looking
-            {"data": ["a", "b"]},  # the collision, used to raise
+            {"data": ["a", "b"]},  # the collision, non-numeric
             {"data": ["only"]},  # single row: ambiguous with the blob shape
             {"a": [1, 2], "b": [3, 4]},  # ordinary columnar
             {"nested": {"x": 1}, "n": 5},  # a genuine JSON document

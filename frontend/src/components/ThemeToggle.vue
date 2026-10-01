@@ -4,8 +4,7 @@ import { useTheme } from '../composables/useTheme'
 
 const { mode, cycleMode } = useTheme()
 
-// Three-state cycle — the icon shown is the *current* mode, the
-// title hints at what comes next so the click target feels predictable.
+// The icon shows the current mode; the title names the next one.
 const icon = computed(() => {
   if (mode.value === 'system') return '◐'
   if (mode.value === 'light') return '☀'

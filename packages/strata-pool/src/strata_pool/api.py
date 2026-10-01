@@ -162,9 +162,8 @@ def create_app(
         try:
             done = await pool.wait(job.id, timeout=wait_seconds)
         except TimeoutError:
-            # 202: it is still running, and the ID is how you find it. Re-read
-            # for the freshest state, falling back to the submitted snapshot
-            # rather than pretending a row we just wrote could be missing.
+            # 202: still running, and the ID is how you find it. Re-read for the freshest
+            # state; fall back to the submitted snapshot.
             latest = pool.store.get_job(job.id) or job
             return JSONResponse(_job_json(latest), status_code=202)
         return _terminal_response(done)

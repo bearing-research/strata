@@ -17,8 +17,7 @@ actually need.
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:  # pragma: no cover - resolved by type checkers only
-    # ``__all__`` is built from ``_EXPORTS`` below, which linters cannot see,
-    # hence the noqa on each re-export.
+    # ``__all__`` comes from ``_EXPORTS``, which linters cannot see; hence the noqa.
     from strata_client.integration.arrow import (  # noqa: F401
         StrataDataset,
         dataset,
@@ -52,23 +51,18 @@ if TYPE_CHECKING:  # pragma: no cover - resolved by type checkers only
 # Exported name -> (submodule, attribute in that submodule). The attribute is
 # named separately because two integrations export a differently-aliased class.
 _EXPORTS: dict[str, tuple[str, str]] = {
-    # Arrow
     "StrataDataset": ("arrow", "StrataDataset"),
     "StrataArrowScanner": ("arrow", "StrataScanner"),
     "dataset": ("arrow", "dataset"),
-    # DataFusion
     "StrataDataFusionContext": ("datafusion", "StrataDataFusionContext"),
     "register_strata_table": ("datafusion", "register_strata_table"),
     "datafusion_query": ("datafusion", "strata_query"),
-    # DuckDB
     "StrataScanner": ("duckdb", "StrataScanner"),
     "StrataTableParams": ("duckdb", "StrataTableParams"),
     "register_strata_scan": ("duckdb", "register_strata_scan"),
     "strata_query": ("duckdb", "strata_query"),
-    # pandas
     "StrataPandasScanner": ("pandas", "StrataPandasScanner"),
     "scan_to_pandas": ("pandas", "scan_to_pandas"),
-    # Polars
     "StrataPolarsScanner": ("polars", "StrataPolarsScanner"),
     "scan_to_lazy": ("polars", "scan_to_lazy"),
     "scan_to_polars": ("polars", "scan_to_polars"),
