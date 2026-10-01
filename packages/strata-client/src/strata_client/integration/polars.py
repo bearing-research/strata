@@ -1,22 +1,8 @@
-"""Polars integration for Strata.
+"""Fetch Strata scans as Polars frames, usually zero-copy from Arrow.
 
-Provides helpers to convert Strata fetches to Polars DataFrames.
-Polars is Arrow-native, so conversions are typically zero-copy when
-Arrow types are supported (may copy for dictionary encoding, large
-strings, or extension types).
+Polars filtering runs after the fetch; pass Strata filters for server-side pruning::
 
-Important: Polars filter operations (e.g., df.filter(...)) are applied
-*after* data is fetched from Strata. To get Strata-side pruning, pass
-filters to the fetch functions. For example:
-
-    # Strata-side pruning (fast, reduces data transfer):
     df = fetch_to_polars(uri, filters=[gt("value", 100)])
-
-    # Polars-side filtering (after full fetch):
-    df = fetch_to_polars(uri).filter(pl.col("value") > 100)
-
-For best performance, use Strata filters for coarse pruning and Polars
-filters for fine-grained predicates.
 """
 
 from collections.abc import Iterator
@@ -59,32 +45,21 @@ def fetch_to_polars(
     config: HasServerUrl | None = None,
     base_url: str | None = None,
 ) -> "pl.DataFrame":
-    """Fetch an Iceberg table via Strata and return a Polars DataFrame.
-
-    This is the simplest way to get Iceberg data into Polars.
-    Arrow-native; typically zero-copy when types are supported.
+    """Fetch an Iceberg table via Strata as a Polars DataFrame.
 
     Args:
-        table_uri: Iceberg table URI (e.g., "file:///warehouse#db.table")
-        snapshot_id: Specific snapshot to read (None for latest)
-        columns: Columns to project (None for all)
-        filters: Filters for row-group pruning
-        config: Strata configuration
-        base_url: Override server URL (default: http://127.0.0.1:8765)
+        table_uri: Iceberg table URI, e.g. "file:///warehouse#db.table".
+        snapshot_id: Snapshot to read (None for latest).
+        columns: Columns to project (None for all).
+        filters: Filters for row-group pruning.
+        config: Anything with ``server_url``.
+        base_url: Server URL; overrides ``config``.
 
     Returns:
-        Polars DataFrame with the fetch results
+        Polars DataFrame with the scan result.
 
     Example:
-        from strata_client.integration.polars import fetch_to_polars
-        from strata_client.client import gt
-
-        df = fetch_to_polars(
-            "file:///warehouse#db.events",
-            columns=["id", "value", "timestamp"],
-            filters=[gt("value", 100.0)],
-        )
-        print(df.head())
+        df = fetch_to_polars("file:///warehouse#db.events", filters=[gt("value", 100.0)])
     """
     import polars as pl
 
@@ -117,36 +92,24 @@ def fetch_to_lazy(
     config: HasServerUrl | None = None,
     base_url: str | None = None,
 ) -> "pl.LazyFrame":
-    """Fetch an Iceberg table via Strata and return a Polars LazyFrame.
+    """Fetch an Iceberg table via Strata as a Polars LazyFrame.
 
-    NOTE: Data is fetched eagerly from Strata, then wrapped in a LazyFrame
-    for downstream lazy transforms. This is NOT true lazy evaluation from
-    storage—use this when you want Polars' lazy API for chaining operations
-    after the fetch is complete.
+    The data is fetched eagerly; only the downstream Polars operations are lazy.
 
     Args:
-        table_uri: Iceberg table URI
-        snapshot_id: Specific snapshot to read
-        columns: Columns to project
-        filters: Filters for row-group pruning
-        config: Strata configuration
-        base_url: Override server URL
+        table_uri: Iceberg table URI.
+        snapshot_id: Snapshot to read (None for latest).
+        columns: Columns to project.
+        filters: Filters for row-group pruning.
+        config: Anything with ``server_url``.
+        base_url: Server URL; overrides ``config``.
 
     Returns:
-        Polars LazyFrame wrapping eagerly-fetched data
+        Polars LazyFrame over the fetched data.
 
     Example:
-        from strata_client.integration.polars import fetch_to_lazy
-
-        # Data is fetched immediately, but downstream ops are lazy
         lf = fetch_to_lazy("file:///warehouse#db.events")
-        result = (
-            lf
-            .filter(pl.col("value") > 100)
-            .group_by("category")
-            .agg(pl.col("value").mean())
-            .collect()  # Only this triggers Polars computation
-        )
+        result = lf.filter(pl.col("value") > 100).collect()
     """
     df = fetch_to_polars(
         table_uri=table_uri,
@@ -164,19 +127,11 @@ scan_to_lazy = fetch_to_lazy
 
 
 class StrataPolarsScanner:
-    """A reusable scanner for Polars integration.
-
-    Maintains a connection to the Strata server for multiple fetches.
+    """One Strata client reused across several Polars fetches.
 
     Example:
-        from strata_client.integration.polars import StrataPolarsScanner
-
         with StrataPolarsScanner() as scanner:
             events = scanner.fetch("file:///warehouse#db.events")
-            users = scanner.fetch("file:///warehouse#db.users")
-
-            # Join in Polars
-            result = events.join(users, on="user_id")
     """
 
     def __init__(
@@ -226,10 +181,7 @@ class StrataPolarsScanner:
         columns: list[str] | None = None,
         filters: list[Filter] | None = None,
     ) -> "pl.LazyFrame":
-        """Fetch a table and return a Polars LazyFrame.
-
-        NOTE: Data is fetched eagerly, then wrapped in LazyFrame.
-        """
+        """Fetch a table eagerly and return it as a Polars LazyFrame."""
         return self.fetch(
             table_uri=table_uri,
             snapshot_id=snapshot_id,
@@ -247,26 +199,20 @@ class StrataPolarsScanner:
         columns: list[str] | None = None,
         filters: list[Filter] | None = None,
     ) -> Iterator[pa.RecordBatch]:
-        """Fetch a table and yield Arrow RecordBatches.
-
-        Uses the unified materialize API and returns all batches from the
-        Arrow IPC stream.
+        """Fetch a table and yield its Arrow RecordBatches (the whole table is fetched first).
 
         Args:
-            table_uri: Iceberg table URI
-            snapshot_id: Specific snapshot to read
-            columns: Columns to project
-            filters: Filters for row-group pruning
+            table_uri: Iceberg table URI.
+            snapshot_id: Snapshot to read (None for latest).
+            columns: Columns to project.
+            filters: Filters for row-group pruning.
 
         Yields:
-            pyarrow.RecordBatch objects from the fetched data
+            pyarrow.RecordBatch objects.
 
         Example:
-            with StrataPolarsScanner() as scanner:
-                for batch in scanner.fetch_batches("file:///warehouse#db.events"):
-                    # Process each batch
-                    df = pl.from_arrow(batch)
-                    process(df)
+            for batch in scanner.fetch_batches("file:///warehouse#db.events"):
+                process(pl.from_arrow(batch))
         """
         artifact = self.client.materialize(
             inputs=[table_uri],

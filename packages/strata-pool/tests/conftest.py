@@ -1,7 +1,6 @@
-"""Fakes for the pool's two outside edges: the backend and the workers.
+"""Fakes for the pool's two outside edges, the backend and the workers.
 
-Everything the pool touches beyond its own SQLite file is one of these, so
-the tests exercise the real dispatch code with no containers and no sockets.
+The tests run the real dispatch code with no containers and no sockets.
 """
 
 from collections.abc import Awaitable, Callable

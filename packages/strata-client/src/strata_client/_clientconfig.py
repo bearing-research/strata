@@ -1,19 +1,11 @@
-"""Slim server-URL resolution for the client.
-
-The full :class:`strata.config.StrataConfig` pulls in pydantic, pydantic-settings,
-and notebook submodules — far more than a client needs just to find the server.
-This module replicates *only* the server-URL resolution, standard library only,
-so ``StrataClient()`` can locate the server without importing the server's config
-stack. ``StrataClient(config=...)`` still accepts a full ``StrataConfig`` (it has
-a ``server_url``); this is just the default path.
+"""Standard-library server-URL resolution, so the client need not import ``StrataConfig``.
 
 Resolution precedence (highest wins):
 
-1. ``STRATA_SERVER_URL`` env var (a full URL — the simplest knob for pointing a
-   client at a remote server; not read by the server config itself).
+1. ``STRATA_SERVER_URL`` env var (a full URL; the server config does not read it).
 2. ``STRATA_HOST`` / ``STRATA_PORT`` env vars.
 3. ``[tool.strata]`` ``host`` / ``port`` in the nearest ``pyproject.toml``.
-4. Defaults ``127.0.0.1:8765`` — matching ``StrataConfig`` defaults.
+4. Defaults ``127.0.0.1:8765``, matching ``StrataConfig``.
 """
 
 from __future__ import annotations
@@ -28,7 +20,7 @@ _DEFAULT_PORT = 8765
 
 
 class HasServerUrl(Protocol):
-    """Anything carrying a ``server_url`` — e.g. a full ``StrataConfig``."""
+    """Anything carrying a ``server_url``, such as a full ``StrataConfig``."""
 
     @property
     def server_url(self) -> str: ...

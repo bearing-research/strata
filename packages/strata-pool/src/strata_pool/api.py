@@ -1,18 +1,8 @@
-"""HTTP surface, for running the pool as a service.
+"""HTTP surface for running the pool as a service (needs the `server` extra).
 
-Needs the `server` extra. The pool is usable as a library without it, and the
-proxy that composes it may well bring its own framework, so a web server is
-not something `import strata_pool` should pull in.
-
-Job payloads and results are opaque bytes, so they travel as raw request and
-response bodies rather than being wedged into JSON. Everything else — status,
-fleet, usage — is JSON.
-
-The caller is trusted for tenant identity. It presents the pool's API token
-and asserts a tenant in a header; the pool does not authenticate end users and
-has no idea who they are. That is the same trusted-proxy model the Strata
-server uses, and it means the pool must never be reachable from anywhere but
-the proxy.
+Job payloads and results travel as raw bodies; everything else is JSON. The
+caller presents the API token and asserts the tenant in a header, which the
+pool trusts: it must be reachable only from the proxy.
 """
 
 import logging
@@ -40,12 +30,7 @@ def _job_json(job: Job) -> dict:
 
 
 def _worker_json(worker: Worker) -> dict:
-    """A machine without its credential.
-
-    Built by hand rather than from asdict: `repr=False` keeps the token out of
-    logs but not out of a dict, and this response is the one place it would
-    otherwise be handed to whoever asked.
-    """
+    """A machine without its credential; `repr=False` does not keep it out of `asdict`."""
     fields = asdict(worker)
     fields.pop("auth_token")
     return fields
@@ -61,14 +46,12 @@ def create_app(
     api_token: str | None = None,
     scaler_interval_seconds: float = 10.0,
 ) -> FastAPI:
-    """Build the pool's HTTP app.
+    """Build the pool's HTTP app; its lifespan recovers the fleet and starts the scaler.
 
     Args:
         api_token: Bearer token every route except `/health` requires. None
-            disables the check, which is a local-development choice: an open
-            submit endpoint runs arbitrary payloads on machines you pay for.
-        scaler_interval_seconds: How often idle machines are reaped. The app
-            starts the scaler itself, so a deployment cannot forget to.
+            disables the check (local development only: anyone could run jobs).
+        scaler_interval_seconds: How often idle machines are reaped.
     """
     if api_token is None:
         logger.warning("pool API starting with no token; anyone who can reach it can run jobs")
@@ -144,10 +127,8 @@ def create_app(
     ) -> Response:
         """Queue a job and block until it finishes.
 
-        What the notebook's executor protocol wants, since it expects one
-        synchronous response. `wait_seconds` bounds how long the caller waits,
-        not how long the job may run — a job that outlives it keeps going and
-        can be collected by ID.
+        `wait_seconds` bounds the wait, not the job: past it the response is a
+        202 with the job ID, and the job keeps running.
         """
         job = await _submit(
             pool,
@@ -192,12 +173,10 @@ def create_app(
 
     @app.put("/v1/machine-types", dependencies=guard)
     async def replace_machine_types(request: Request) -> list[dict]:
-        """Replace the whole catalogue, without a restart.
+        """Replace the whole machine-type catalogue, without a restart.
 
-        The body is the full list, in the shape `GET` returns. Types left out
-        are removed; see `Pool.replace_machine_types` for what happens to
-        their machines and queued jobs, and to machines on a changed image.
-        Persisted, so a restart serves this catalogue.
+        The body is the full list in the shape `GET` returns; types left out are
+        removed. The catalogue is persisted and survives a restart.
         """
         body = await request.json()
         if not isinstance(body, list):
@@ -243,11 +222,9 @@ async def _submit(pool: Pool, **kwargs) -> Job:
 
 
 def _terminal_response(job: Job) -> Response:
-    """Map a finished job onto a status code.
+    """Map a finished job onto a status code: 200, 502 for a failed job, 504 for a timeout.
 
-    A failure on the worker is reported as a failure of the job, not of the
-    pool: the caller needs to tell "your code raised" from "we could not run
-    it", and a 500 would blur the two.
+    Never 500: the caller must tell "your code raised" from "the pool could not run it".
     """
     if job.state is JobState.COMPLETED:
         return Response(content=job.result or b"", media_type="application/octet-stream")

@@ -1,9 +1,4 @@
-"""A ceiling on the whole fleet, not just on one tenant.
-
-`MachineType.max_workers` caps a single tenant. Without a global cap the
-fleet is that number times however many tenants show up, which is the shape
-of a cloud bill nobody predicted.
-"""
+"""A ceiling on the whole fleet; `MachineType.max_workers` caps only one tenant."""
 
 import asyncio
 import logging
@@ -115,13 +110,9 @@ async def test_no_ceiling_is_the_default(make_pool):
 
 
 async def test_two_tenants_starting_at_once_cannot_overshoot_the_ceiling(make_pool):
-    """Starting a machine awaits the backend, and another tenant can start its
-    own in that window. Headroom decided once, before the loop, lets two
-    callers each spend the same last slot.
+    """Two provisioning loops overlapping across the backend await cannot share the last slot.
 
-    Driven through `_ensure_capacity` directly with the queues pre-loaded,
-    because that is the only way to get two provisioning loops overlapping on
-    purpose rather than by luck.
+    Calls `_ensure_capacity` directly with pre-loaded queues to force the overlap.
     """
     backend = SlowStartBackend()
     pool = make_pool(
@@ -154,8 +145,7 @@ async def test_two_tenants_starting_at_once_cannot_overshoot_the_ceiling(make_po
 
 
 async def test_no_warning_when_nothing_was_wanted(make_pool, caplog):
-    """The fleet can sit at or over its ceiling with an empty queue. Warning
-    then trains operators to ignore the one warning that matters."""
+    """A fleet at its ceiling with an empty queue must not warn, or the warning loses meaning."""
     backend = FakeBackend()
     pool = make_pool(backend=backend, machine_types=[_spec()], max_workers_total=1)
 

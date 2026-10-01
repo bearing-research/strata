@@ -1,38 +1,16 @@
 """Job dispatch over a fleet of ephemeral workers.
 
-What this slice does: accept a job, hand it to a warm worker of the right
-machine type (preferring one that already served the same session), start a
-machine when there is none, forward the payload over HTTP, record the result,
-and meter the execution.
+A job goes to a warm worker of its machine type (same session preferred), or a
+machine is started for it. Only the scaler (`start_scaler`) stops idle machines;
+without it every machine bills forever. There is no warm floor and no retry: if
+the only booting worker fails, its jobs wait for the next submit of that type.
 
-Idle machines are stopped by the scaler (`start_scaler`), which is the only
-thing in the pool that ever ends a machine that finished its work. A
-deployment that forgets to call it bills for every machine it ever started.
+A machine is retired whenever the pool cannot vouch for what runs on it
+(unreachable, timed out, orphaned job), since remote work cannot be cancelled.
 
-What it deliberately still does not do: keep a warm floor, or retry
-preemptions. A floor per tenant means paying for every tenant that ever
-existed, and per machine type it means choosing whose latency to subsidise;
-neither has a caller. Pre-warm belongs with the proxy, which is the thing
-that knows a user just opened a notebook.
-
-One consequence of having no other timer, intentional and tested: if the
-only booting worker fails to come up, its queued jobs stay queued until the
-next submit for that machine type triggers another start.
-
-A machine is retired whenever the pool cannot vouch for what is running on
-it: unreachable, timed out, or holding an orphaned job across a restart.
-Nothing here can cancel remote work, so reuse would mean two jobs on
-hardware sized for one. That trades a cold start for a correctness
-guarantee, which is the right trade until the worker protocol grows a
-cancel.
-
-Several pool processes may share one store (`PostgresPoolStore`), each with
-its own `instance_id`. They never dispatch the same job or start a machine for
-the same demand, because every such change is a claim or a reservation in the
-store. Each holds a lease on the machines and jobs it is acting on and renews
-it while it works; when a process dies, the others fail its jobs and stop its
-machines once the lease runs out (`reclaim_expired_leases`, run by the
-scaler).
+Several processes may share one store, each with its own `instance_id`. Every
+dispatch and start is a claim in the store, and each process leases what it acts
+on; a dead process's leases expire and the others take over.
 """
 
 import asyncio
@@ -87,29 +65,19 @@ class Pool:
         instance_id: str | None = None,
         lease_seconds: float = _LEASE_SECONDS,
     ):
-        """
+        """Create a pool over a store and a backend.
+
         Args:
-            wall: Wall-clock source, for the timestamps that place a job in a
-                billing period.
-            monotonic: Monotonic source, for durations. Separate from `wall`
-                so a clock step cannot change what a customer is charged.
-            max_workers_total: Machines this pool may run at once, across
-                every tenant and machine type. `MachineType.max_workers` caps
-                one tenant; without this, the fleet is that cap times however
-                many tenants show up. None means no ceiling, which is the
-                right default for a single-tenant pool and the wrong one for
-                a hosted deployment.
-            tracer: OpenTelemetry tracer for the span around each execution.
-                None uses the global provider's, when OpenTelemetry is
-                installed; the pool does not require it.
-            instance_id: This process's name in the leases it holds. Required
-                when the store is shared: two processes under one name would
-                each take the other's machines and jobs for their own. A
-                process restarted under its old name takes back what it held
-                at once, without waiting for those leases to expire.
-            lease_seconds: How long a lease lasts without renewal, and so how
-                long a dead process's jobs and machines wait before another
-                takes them over. Renewed at a third of this.
+            wall: Wall-clock source, for timestamps that place a job in a billing period.
+            monotonic: Monotonic source, for durations, so a clock step cannot change a charge.
+            max_workers_total: Machines across every tenant and type. None means no
+                ceiling: fine for one tenant, wrong for a hosted deployment, since
+                `MachineType.max_workers` caps each tenant separately.
+            tracer: OpenTelemetry tracer; None uses the global one if OpenTelemetry is installed.
+            instance_id: This process's name in its leases. Required for a shared
+                store (raises ValueError otherwise); reusing an old name after a
+                restart reclaims its leases at once.
+            lease_seconds: Lease length without renewal; renewed at a third of this.
         """
         if store.shared and instance_id is None:
             raise ValueError("a pool over a shared store needs its own instance_id")
@@ -137,11 +105,7 @@ class Pool:
         self._probe_failures: dict[str, int] = {}
 
     async def aclose(self) -> None:
-        """Cancel in-flight work and release resources.
-
-        The tasks are owned by the loop that created them, so they are
-        cancelled here rather than left for whatever loop runs next.
-        """
+        """Cancel in-flight background tasks and close the HTTP client if the pool owns it."""
         for task in list(self._tasks):
             task.cancel()
         if self._tasks:
@@ -154,13 +118,9 @@ class Pool:
     async def replace_machine_types(self, machine_types: Iterable[MachineType]) -> None:
         """Swap the catalogue without restarting.
 
-        A new type accepts jobs at once. A removed type accepts no more: its
-        queued jobs fail with a reason, and its machines finish what they are
-        running and retire once idle past their cool-down. A type whose image
-        changed starts new machines with the new image; the machines already
-        running the old one take no new jobs and retire the same way. A
-        machine on the old image is never handed work, because a caller who
-        changed the image wants the next job to run on the new one.
+        A removed type's queued jobs fail; its machines finish their work and
+        retire once idle. Machines on a changed type's old image take no new
+        jobs and retire the same way.
         """
         updated = {mt.name: mt for mt in machine_types}
         for name, spec in self.machine_types.items():
@@ -214,15 +174,9 @@ class Pool:
     ) -> Job:
         """Queue a job and place it, without waiting for it to run.
 
-        Returns once the job is durable and any machines it needs have been
-        requested — so it does wait on `backend.start()`, which a cloud API
-        makes slow. Moving provisioning off the caller's path needs the counts
-        it reads to stay consistent, and belongs with the first backend where
-        that latency is real rather than as untested indirection now.
-
-        The caller decides whether the work is needed at all. The pool has no
-        idea Strata has a cache; submitting a job whose result already exists
-        boots a machine to recompute it.
+        Does wait on `backend.start()` for any machine the job needs, which can
+        be slow. The pool knows nothing of Strata's cache: every submit runs.
+        Raises ValueError for an unknown machine type.
         """
         if machine_type not in self.machine_types:
             raise ValueError(f"unknown machine type: {machine_type!r}")
@@ -246,11 +200,9 @@ class Pool:
         return job
 
     async def wait(self, job_id: str, timeout: float = 30.0) -> Job:
-        """Block until a job reaches a terminal state.
+        """Block until a job reaches a terminal state, polling the store.
 
-        A polling loop rather than a future, because the authoritative state
-        is the row, not an in-memory handle — a job dispatched before a
-        restart is still waited on correctly after one.
+        Raises KeyError for an unknown job and TimeoutError after ``timeout`` seconds.
         """
         deadline = self._monotonic() + timeout
         while True:
@@ -317,11 +269,7 @@ class Pool:
                 return
 
     async def _ensure_capacity(self, machine_type: str, tenant_id: str) -> None:
-        """Start machines for the jobs this tenant's fleet cannot absorb.
-
-        Counted per tenant, because a machine belonging to another tenant is
-        not capacity this one can use.
-        """
+        """Start machines for the jobs this tenant's own fleet cannot absorb."""
         spec = self.machine_types.get(machine_type)
         if spec is None:
             return
@@ -363,26 +311,19 @@ class Pool:
             await self._start_worker(spec, worker)
 
     async def _offer_freed_capacity(self) -> None:
-        """Hand headroom back to whoever is waiting for it.
+        """Hand freed headroom to any tenant waiting on it.
 
-        A tenant the fleet cap deferred has no other way back: its jobs sit
-        queued, and `_ensure_capacity` otherwise only runs when *that* tenant
-        submits again. Freeing a machine is by definition freeing it for
-        somebody else, so the release needs a path back to the work waiting
-        on it — the same shape as every other bug in this package.
+        A tenant deferred by the fleet cap is otherwise retried only when it submits again.
         """
         for machine_type in self.machine_types:
             for tenant_id in self.store.queued_tenants(machine_type):
                 await self._ensure_capacity(machine_type, tenant_id)
 
     async def _start_worker(self, spec: MachineType, worker: Worker) -> None:
-        """Provision the machine *worker* reserved, and poll it to warm in the
-        background.
+        """Provision the machine *worker* reserved, then poll it to warm in the background.
 
-        The row is written before the backend call so a crash mid-start
-        leaves evidence. It leaves a machine leaked if the crash lands after
-        the provider created one — reconciling that needs a backend that can
-        list its own machines, which arrives with the first real backend.
+        The row exists before the backend call, but a crash after the provider
+        creates the machine still leaks it: backends cannot list their machines.
         """
         # The token must reach the machine before it accepts anything, so it goes in the
         # boot environment. Minted per worker: one machine's credential must not open another's.
@@ -584,11 +525,9 @@ class Pool:
 
     @contextlib.contextmanager
     def _execution_span(self, job: Job, worker: Worker) -> Iterator[dict[str, str]]:
-        """A span for this job's time on the machine, and the headers that
-        make the machine's work its child.
+        """Span the job's time on the machine; yield headers that make its work a child span.
 
-        Without OpenTelemetry the submitter's context is forwarded as it came,
-        so the trace still joins up one level higher.
+        Without OpenTelemetry the submitter's trace context is forwarded unchanged.
         """
         try:
             from opentelemetry import trace
@@ -612,17 +551,10 @@ class Pool:
             yield carrier
 
     async def _stop_worker(self, worker: Worker) -> bool:
-        """Deallocate a machine and forget it.
+        """Deallocate a machine and delete its row; return whether this process stopped it.
 
-        The row goes away rather than becoming a tombstone: nothing in this
-        slice would ever bring it back, and jobs keep `worker_id` as plain
-        history.
-
-        The state flips to STOPPING first, synchronously. Everything below
-        awaits, and in that window the dispatcher could otherwise find this
-        machine warm and hand it a job we are about to kill.
-
-        Returns whether this process stopped it.
+        The machine is claimed as STOPPING before any await, so the dispatcher
+        cannot hand it a job in the meantime.
         """
         # Every path that ends a machine comes through here, so drop the probe counter here.
         # A machine reaped or stopped after one missed probe is never WARM again, so the
@@ -665,20 +597,9 @@ class Pool:
     async def recover(self) -> None:
         """Reconcile persisted state with reality after a restart.
 
-        Workers that no longer answer are dropped. A job that was in flight
-        is failed rather than silently re-run: its result went to a process
-        that is gone, and the caller is owed an answer, not a duplicate
-        charge.
-
-        In-flight jobs are not metered. Their monotonic start is gone with the
-        process, and the only remaining source is the wall clock — inventing a
-        duration from it would bill a customer for our own crash. Undercharging
-        is the right direction to be wrong in.
-
-        Over a shared store, only rows this instance may take over change: its
-        own from before the restart, and any whose lease has run out. A machine
-        or job another live process holds is that process's business, and the
-        store's conditional updates are what leave it alone.
+        Unreachable workers are dropped. In-flight jobs fail rather than re-run,
+        and are not metered: their monotonic start died with the process. Over a
+        shared store, only this instance's rows and expired leases are touched.
         """
         now = self._wall()
         for worker in self.store.list_workers():
@@ -720,14 +641,9 @@ class Pool:
                 await self._ensure_capacity(machine_type, tenant_id)
 
     async def reclaim_expired_leases(self) -> int:
-        """Finish what a pool process that stopped renewing left behind.
+        """Fail the in-flight jobs and stop the machines of a process whose leases expired.
 
-        Its in-flight jobs fail, since their results went to a process that is
-        gone, and its starting, busy and stopping machines are stopped, since
-        nothing can vouch for what is running on them. Returns how many
-        machines were stopped. Run by the scaler; a pool alone on its store
-        never has an expired lease that is not its own, and `recover` takes
-        those back at startup.
+        Returns how many machines were stopped. Run by the scaler.
         """
         now = self._wall()
         in_flight = [JobState.DISPATCHED, JobState.RUNNING]
@@ -768,8 +684,7 @@ class Pool:
     async def _holding(
         self, *, job_id: str | None = None, worker_id: str | None = None
     ) -> AsyncIterator[None]:
-        """Renew this process's lease on a job and a machine while the body
-        runs, so another process takes them over only if this one dies."""
+        """Renew this process's leases on a job and a machine while the body runs."""
 
         async def renew() -> None:
             while True:
@@ -806,18 +721,9 @@ class Pool:
             return False
 
     async def probe_warm_workers(self) -> int:
-        """Health-check idle machines and retire the ones that are gone.
+        """Health-check warm machines and retire the dead ones; return how many were stopped.
 
-        Returns how many were stopped.
-
-        Without this, a machine that dies while warm is discovered by the next
-        job being sent to it — and that job fails. The machine was already
-        unusable; the only thing the delay bought was a user watching a cell
-        fail for reasons that have nothing to do with their code.
-
-        Only warm machines. A busy one is answering a job, and a probe that
-        loses a race against a long-running cell must not retire the machine
-        running it.
+        Busy machines are skipped: a probe slowed by a long job must not retire it.
         """
         # Carry the endpoint rather than re-read it: a comprehension filter would not narrow
         # the attribute to str for the use below.
@@ -901,12 +807,7 @@ class Pool:
     # --- scaling down ---
 
     async def reap_idle_workers(self) -> int:
-        """One scaler pass. Returns how many machines were stopped.
-
-        Public and synchronous-to-call so tests drive it directly with an
-        injected clock, rather than proving a cost control works by sleeping
-        and hoping.
-        """
+        """Stop machines idle past their cool-down and retry failed stops; return the count."""
         now = self._wall()
         stopped = 0
         # A machine whose stop failed keeps its row in ``stopping``, holding its place against
@@ -970,10 +871,9 @@ class Pool:
         return stopped
 
     def start_scaler(self, interval_seconds: float = 10.0) -> None:
-        """Run `reap_idle_workers` on a timer until the pool closes.
+        """Run the scaler passes on a timer until the pool closes.
 
-        Nothing else stops a machine that finished its work, so a pool
-        without this call bills for every machine it ever started, forever.
+        Nothing else stops idle machines; without this every machine bills forever.
         """
         self._spawn(self._scaler_loop(interval_seconds))
 
@@ -997,12 +897,7 @@ class Pool:
         task.add_done_callback(self._task_finished)
 
     def _task_finished(self, task: asyncio.Task) -> None:
-        """Drop the reference, and say so when a background task died.
-
-        Without this the only trace of a crashed dispatch is asyncio's
-        "Task exception was never retrieved" at collection time, on the root
-        logger, with no job or worker to correlate it to.
-        """
+        """Drop the task reference, logging the exception if the task died."""
         self._tasks.discard(task)
         if task.cancelled():
             return

@@ -1,11 +1,6 @@
-"""The pool against a real Docker daemon.
+"""The pool against a real Docker daemon: provision, boot, dispatch, execute, meter, stop.
 
-This is the reason Docker is the first backend: the whole path — provision,
-boot, dispatch, execute, meter, stop — runs against real containers in CI
-before any of it produces a number someone pays for. The fakes elsewhere
-cannot catch a wrong port binding or a container that never becomes healthy.
-
-Skipped when there is no daemon, which is the common local case.
+Catches what the fakes cannot, such as a wrong port binding. Skipped without a daemon.
 """
 
 import asyncio
@@ -97,13 +92,7 @@ def _daemon_client() -> httpx.AsyncClient:
 
 
 async def _pull_image(daemon: httpx.AsyncClient) -> None:
-    """Pull the worker image, tolerating a bad minute at the registry.
-
-    The pull is unauthenticated Docker Hub, which answers 5xx often enough
-    that a single blip would otherwise fail the build. Retrying only widens
-    the window; a registry that is genuinely down still fails the assert, so
-    this does not turn a broken environment into a green run.
-    """
+    """Pull the worker image, retrying Docker Hub's occasional 5xx; a real outage still fails."""
     for attempt in range(_PULL_ATTEMPTS):
         pull = await daemon.post(
             "/images/create", params={"fromImage": "python", "tag": "3.12-slim"}
@@ -117,12 +106,7 @@ async def _pull_image(daemon: httpx.AsyncClient) -> None:
 
 @pytest.fixture
 async def docker_pool(tmp_path):
-    """A pool wired to a real daemon, with every container it started removed.
-
-    Cleanup goes by label rather than by what the store remembers: a test that
-    exercises a machine dying deletes the row, and the container still has to
-    go.
-    """
+    """A pool on a real daemon; teardown removes its containers by label, not by store row."""
     async with _daemon_client() as daemon:
         # /containers/create does not pull, and the pool does not either yet.
         await _pull_image(daemon)
@@ -163,8 +147,7 @@ async def docker_pool(tmp_path):
 
 @requires_docker
 async def test_the_daemon_applies_the_resource_limits_we_asked_for(docker_pool):
-    """The limits are only real if the daemon accepted them; a field name we
-    got wrong would be ignored silently."""
+    """The daemon accepted the limits; a wrong field name would be ignored silently."""
     job = await docker_pool.submit(tenant_id="acme", machine_type="cpu", payload=b"work")
     await docker_pool.wait(job.id, timeout=120)
 
@@ -202,12 +185,7 @@ async def test_a_second_job_reuses_the_container_that_is_already_warm(docker_poo
 
 
 async def _eventually_gone(store, worker_id: str, timeout: float = 30.0) -> bool:
-    """Wait for a worker row to disappear.
-
-    The job is answered before the machine is torn down — stopping a container
-    is a round trip to the daemon, and no caller should wait on it — so
-    cleanup lands shortly after `wait()` returns, not before.
-    """
+    """Wait for a worker row to disappear; teardown lands shortly after `wait()` returns."""
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         if store.get_worker(worker_id) is None:
@@ -235,11 +213,7 @@ async def test_a_container_that_dies_mid_flight_fails_the_job_and_leaves_no_work
 
 @requires_docker
 async def test_the_scaler_removes_an_idle_container_from_the_daemon(docker_pool):
-    """The row disappearing is not the point; the container disappearing is.
-
-    A stop path that updated the database and left the machine running would
-    keep billing while the pool believed it had scaled down.
-    """
+    """The container itself must go, not just the row, or it keeps billing."""
     job = await docker_pool.submit(tenant_id="acme", machine_type="cpu", payload=b"work")
     await docker_pool.wait(job.id, timeout=120)
 

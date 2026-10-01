@@ -1,9 +1,7 @@
 """The HTTP surface.
 
-Driven through `httpx.ASGITransport` on the test's own event loop rather than
-`TestClient`, which runs the app in a portal thread with its own loop. The
-pool's background tasks belong to the loop that created them, and this repo
-has already paid for one cross-loop task bug (#607).
+Driven through `httpx.ASGITransport` on the test's own loop, not `TestClient`
+(a portal thread with its own loop): the pool's tasks belong to their creating loop.
 """
 
 import os
@@ -242,8 +240,7 @@ async def test_serving_the_pool_reconciles_what_the_last_process_left(tmp_path):
 
 
 async def test_the_callers_trace_headers_travel_with_the_job(api):
-    """A dispatcher in front of the pool sends its W3C trace context; the job
-    keeps it, across the store, for the machine the job is sent to."""
+    """The caller's W3C trace context survives the store and reaches the machine."""
     traceparent = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
     response = await api.post(
         "/v1/jobs",

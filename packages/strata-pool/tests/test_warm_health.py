@@ -1,11 +1,4 @@
-"""Finding a dead warm machine before a job does.
-
-`backend.health` was called while awaiting boot and in `recover()`, and
-nowhere else. A machine that died while warm was discovered by the next job
-being sent to it — and that job failed. The machine was already unusable; the
-delay only bought a user watching a cell fail for reasons unrelated to their
-code.
-"""
+"""Finding a dead warm machine before a job does (and fails on it)."""
 
 from conftest import FakeBackend
 from strata_pool import JobState, MachineType, WorkerState
@@ -47,8 +40,7 @@ class TestRetiringADeadMachine:
 
 
 class TestOneMissIsNotDeath:
-    """A single missed probe is a slow machine, a restarting agent, or a
-    dropped packet. Retiring on that trades a cold start for every hiccup."""
+    """A single missed probe is a hiccup, not a reason to retire the machine."""
 
     async def test_it_takes_consecutive_failures(self, make_pool):
         backend = FakeBackend()
@@ -61,9 +53,7 @@ class TestOneMissIsNotDeath:
         assert await pool.probe_warm_workers() == 1
 
     async def test_recovering_resets_the_count(self, make_pool):
-        """Two misses and a hit is a machine that is alive, not two-thirds
-        dead — otherwise an intermittent probe retires a healthy machine
-        eventually, however long it stays up."""
+        """A hit resets the miss count, or intermittent misses would retire a healthy machine."""
         backend = FakeBackend()
         pool = make_pool(backend, machine_types=[_spec(health_check_failures=3)])
         worker = await _warm_worker(pool, backend)
@@ -90,15 +80,10 @@ class TestScope:
         assert len(pool.store.list_workers("cpu", [WorkerState.WARM])) == 1
 
     async def test_a_freed_slot_is_offered_to_whoever_is_waiting(self, make_pool):
-        """Retiring a machine frees capacity, and the queue may hold work for
-        a different tenant than the one whose machine died.
+        """Retiring a machine offers the freed slot to a waiting job of another tenant.
 
-        The second job is for a *different* tenant and the fleet cap is 1.
-        Submitting for the same tenant would dispatch straight onto the dying
-        machine — flipping it to BUSY before the probe runs, so the probe
-        would list nothing, stop nothing, and the job would still complete
-        over the mock transport. The assertion would then hold whatever this
-        code did.
+        It must be another tenant: a same-tenant job would dispatch onto the
+        dying machine before the probe, and the assertion would pass regardless.
         """
         backend = FakeBackend()
         pool = make_pool(
@@ -117,12 +102,7 @@ class TestScope:
 
 
 class TestPoolSideFaults:
-    """Every machine failing at once is more likely this process than the fleet.
-
-    DNS, a proxy, an exhausted connection pool: any of them fails every probe
-    simultaneously. Acting on that retires the entire warm fleet and hands
-    every user a cold start for a fault that was never on the machines.
-    """
+    """Every probe failing at once is more likely a pool-side fault (DNS, proxy) than the fleet."""
 
     async def test_a_whole_fleet_failing_at_once_is_not_acted_on(self, make_pool):
         backend = FakeBackend()
@@ -138,8 +118,7 @@ class TestPoolSideFaults:
         assert len(pool.store.list_workers("cpu", [WorkerState.WARM])) == 2
 
     async def test_a_single_machine_is_still_retired(self, make_pool):
-        """With one candidate there is no evidence either way, and never
-        noticing is worse than one cold start."""
+        """With one candidate the fleet-wide guard does not apply."""
         backend = FakeBackend()
         pool = make_pool(backend, machine_types=[_spec(health_check_failures=1)])
         worker = await _warm_worker(pool, backend)
@@ -163,9 +142,7 @@ class TestPoolSideFaults:
 
 class TestProbeBudget:
     async def test_machines_are_probed_concurrently(self, make_pool):
-        """Serially, a provider black-holing packets costs the health timeout
-        times the fleet size — and reap_idle_workers, the only thing that
-        stops a machine billing, does not run until the pass finishes."""
+        """Serial probes would cost a timeout per machine and delay the reaper behind them."""
         import asyncio
 
         class SlowBackend(FakeBackend):
@@ -191,8 +168,7 @@ class TestProbeBudget:
 
 class TestNoCounterLeak:
     async def test_stopping_a_machine_forgets_its_probe_count(self, make_pool):
-        """A machine stopped by any other path is never listed WARM again, so
-        the probe loop that would have popped it never sees it."""
+        """Any stop path clears the probe count; the probe loop never sees the machine again."""
         backend = FakeBackend()
         pool = make_pool(backend, machine_types=[_spec(health_check_failures=3)])
         worker = await _warm_worker(pool, backend)
@@ -208,8 +184,7 @@ class TestNoCounterLeak:
 
 class TestBusyMachines:
     async def test_a_busy_machine_is_never_probed_out_from_under_its_job(self, make_pool):
-        """Only warm machines are listed. A probe that loses a race against a
-        long-running cell must not retire the machine running it."""
+        """Only warm machines are probed; a slow probe must not retire a machine mid-job."""
         backend = FakeBackend()
         pool = make_pool(backend, machine_types=[_spec(health_check_failures=1)])
         worker = await _warm_worker(pool, backend)

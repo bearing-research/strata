@@ -129,9 +129,7 @@ async def test_a_machine_that_never_boots_is_stopped_and_the_work_stays_queued(m
 
 
 async def test_a_machine_we_cannot_write_down_is_stopped_rather_than_leaked(make_pool):
-    """The ID is only in hand once. If it never lands in the store, nothing
-    downstream could ever stop the machine, and it bills until someone notices
-    it in a cloud console."""
+    """The backend ID is in hand once; if the store write fails, nothing could stop the machine."""
     backend = FakeBackend()
     pool = make_pool(backend=backend)
 

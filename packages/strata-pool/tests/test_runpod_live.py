@@ -1,24 +1,15 @@
 """The RunPod backend against a real account.
 
-**This starts a real pod and costs real money.** It is opt-in, it never runs
-in CI, and it terminates what it starts in a `finally` — but a crashed
-interpreter can still leave a pod running, so check the console afterwards.
+**This starts a real pod and costs real money.** It is opt-in, never runs in
+CI, and terminates what it starts in a `finally`; a crashed interpreter can
+still leave a pod running, so check the console afterwards.
 
     export RUNPOD_API_KEY=...
     STRATA_POOL_RUNPOD_LIVE=1 pytest tests/test_runpod_live.py -v -s
 
-Everything in `test_runpod_backend.py` proves only that we send what we
-intended to send — not that RunPod wants it. This test is the one that closes
-that gap, and it prints the pod id so a failure can be chased in the console.
-
-Last run 2026-09-02: passed in 25s. A CPU pod booted, answered health through
-the proxy, and terminated with nothing left in the account — covering the base
-URL, the create body, the `id` in the response, the proxy endpoint, and a
-repeated delete. It does **not** cover the accelerator fields.
-
-It uses a CPU pod by default because it is the cheapest thing that exercises
-the same path. Point `STRATA_POOL_RUNPOD_GPU` at a GPU type to prove the
-accelerator fields too, which is the part most likely to be wrong.
+This confirms RunPod accepts what `test_runpod_backend.py` asserts we send, and
+prints the pod id for chasing failures. It uses a CPU pod; set
+`STRATA_POOL_RUNPOD_GPU` to a GPU type to cover the accelerator fields too.
 """
 
 import asyncio
@@ -99,12 +90,7 @@ async def runpod():
 
 
 async def test_a_pod_starts_becomes_healthy_and_terminates(runpod):
-    """The whole backend contract, against the real API.
-
-    Deliberately not a full job run: this proves provisioning, the proxy
-    endpoint, health polling, and termination, which is everything the pool
-    depends on. Running a job needs a worker image that speaks the contract.
-    """
+    """The backend contract against the real API: provision, proxy endpoint, health, terminate."""
     spec = _spec()
     provisioned = await runpod.start(spec, {"STRATA_WORKER_TOKEN": "unused-here"})
 
@@ -127,10 +113,9 @@ async def test_a_pod_starts_becomes_healthy_and_terminates(runpod):
 
 
 async def test_the_pool_drives_a_real_pod_end_to_end(tmp_path, runpod):
-    """Provision, boot, dispatch, meter, reap — on rented hardware.
+    """Provision, boot, dispatch, meter and reap on rented hardware.
 
-    Skipped unless an image that speaks the worker contract is given, since
-    the default image answers health but not `/execute`.
+    Skipped without an image that serves `/execute`; the default one only answers health.
     """
     if "STRATA_POOL_RUNPOD_IMAGE" not in os.environ:
         pytest.skip("set STRATA_POOL_RUNPOD_IMAGE to an image that serves /execute")

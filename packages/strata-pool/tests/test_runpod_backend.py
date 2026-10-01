@@ -1,8 +1,6 @@
-"""Every request the RunPod backend makes.
+"""The shape of every request the RunPod backend makes.
 
-These assert the *shape* of what we send. They cannot tell us the shape is
-what RunPod actually wants — only a live account can do that — but they make
-correcting it a one-line edit, and they stop it drifting afterwards.
+Only a live account confirms RunPod wants it (``test_runpod_live.py``); these stop drift.
 """
 
 import httpx
@@ -67,8 +65,7 @@ async def test_starting_a_pod_returns_its_proxy_endpoint():
 
 
 async def test_the_endpoint_is_derived_not_waited_for():
-    """It is available the moment the pod exists, so the pool can start
-    polling before RunPod reports the pod as running."""
+    """The proxy URL exists with the pod, so polling can start before RunPod reports it running."""
     assert proxy_url("abc", 8080) == "https://abc-8080.proxy.runpod.net"
     assert proxy_url("abc", 9000) == "https://abc-9000.proxy.runpod.net"
 
@@ -83,8 +80,7 @@ async def test_the_gpu_is_asked_for_by_the_providers_own_name():
 
 
 async def test_a_cpu_machine_asks_for_no_gpu_at_all():
-    """Sending gpuCount for a CPU pod would either be rejected or, worse,
-    quietly rent a GPU."""
+    """Sending gpuCount for a CPU pod could quietly rent a GPU."""
     fake = FakeRunPod()
     await _backend(fake).start(_spec())
 
@@ -116,8 +112,7 @@ async def test_the_pod_is_named_for_the_pool_that_started_it():
 
 
 async def test_provider_options_can_correct_anything_above_them():
-    """A deployment should not have to wait for a release to fix a field we
-    got wrong."""
+    """A deployment can fix a wrong field without waiting for a release."""
     fake = FakeRunPod()
     await _backend(fake).start(
         _spec(
@@ -148,8 +143,7 @@ async def test_a_refusal_surfaces_runpods_own_message():
 
 
 async def test_a_pod_created_without_an_id_is_an_error_not_a_bad_endpoint():
-    """Building a proxy URL out of None produces a worker that can never be
-    reached and never be stopped."""
+    """A proxy URL built from None would be a worker nobody can reach or stop."""
     fake = FakeRunPod(**{"POST /pods": httpx.Response(201, json={})})
     with pytest.raises(RunPodError, match="without an id"):
         await _backend(fake).start(_spec())
@@ -184,8 +178,7 @@ async def test_the_api_key_travels_as_a_bearer_token():
 
 class TestHealth:
     async def test_a_booting_pod_is_not_healthy_rather_than_an_error(self):
-        """RunPod's proxy answers 502 until the pod serves, and the pool polls
-        this in a loop."""
+        """RunPod's proxy answers 502 until the pod serves."""
         backend = RunPodBackend(
             api_key="secret",
             api=httpx.AsyncClient(transport=httpx.MockTransport(FakeRunPod().handle)),
@@ -221,16 +214,13 @@ class TestHealth:
 
 
 class TestResponseShapes:
-    """Everything here runs with a pod already created and already billing.
+    """Response shapes that must not raise once a pod exists and bills.
 
-    A parse that raises is caught upstream as a failed start, which deletes
-    the row holding the backend_id — so nothing could ever terminate the pod.
-    These are the shapes that must not do that.
+    A raising parse is a failed start, which deletes the row holding the backend_id.
     """
 
     async def test_a_pod_not_yet_placed_on_a_host_has_a_null_machine(self):
-        """The normal shape immediately after create. `.get("machine", {})`
-        returns None for it, not the default."""
+        """`machine: null` is normal right after create; `.get("machine", {})` returns None."""
         fake = FakeRunPod(
             **{"POST /pods": httpx.Response(201, json={"id": "pod123", "machine": None})}
         )
@@ -251,9 +241,7 @@ class TestResponseShapes:
             await _backend(fake).start(_spec())
 
     async def test_an_unidentifiable_pod_is_named_in_the_error(self):
-        """The pool deletes the row that would have held the id, so the
-        generated name is the only handle anyone has left for a pod that is
-        already billing."""
+        """The generated name is the only handle left on a billing pod with no id."""
         fake = FakeRunPod(**{"POST /pods": httpx.Response(201, json={})})
         with pytest.raises(RunPodError, match=r"strata-h100-80gb-[0-9a-f]{8}"):
             await _backend(fake).start(_spec())
@@ -264,9 +252,7 @@ class TestResponseShapes:
             await _backend(fake).start(_spec())
 
     async def test_a_bare_string_error_body_still_reports_the_status(self):
-        """A formatter that raises replaces RunPod's actual complaint with a
-        traceback, and in stop() that is swallowed as "may still be billing"
-        while the operator never learns the key is wrong."""
+        """A raising formatter would hide RunPod's real complaint, such as a bad key."""
         fake = FakeRunPod(**{"POST /pods": httpx.Response(401, json="Unauthorized")})
         with pytest.raises(RunPodError, match="401"):
             await _backend(fake).start(_spec())
@@ -279,8 +265,7 @@ class TestResponseShapes:
 
 class TestCredentialCannotBeDropped:
     async def test_adding_an_env_var_does_not_delete_the_worker_credential(self):
-        """A pod without its token is an open execute endpoint on a public URL,
-        and adding one HF_TOKEN is a plausible way to get there by accident."""
+        """Overriding env (say, to add HF_TOKEN) must not drop the worker token."""
         fake = FakeRunPod()
         await _backend(fake).start(
             _spec(provider_options={"env": {"HF_TOKEN": "hf_abc"}}),
@@ -301,9 +286,7 @@ class TestCredentialCannotBeDropped:
         assert fake.body()["env"]["STRATA_WORKER_TOKEN"] == "ours"
 
     async def test_the_list_encoding_is_supported_not_refused(self):
-        """RunPod's GraphQL surface takes env as a list of {key, value}. That
-        is the field most likely to be wrong here, so refusing the correction
-        would close the escape hatch on exactly the case it exists for."""
+        """An env override as a list of {key, value} (RunPod's GraphQL form) is accepted."""
         fake = FakeRunPod()
         await _backend(fake).start(
             _spec(provider_options={"env": [{"key": "HF_TOKEN", "value": "hf_abc"}]}),
@@ -327,8 +310,7 @@ class TestCredentialCannotBeDropped:
         assert tokens == ["ours"]
 
     async def test_an_override_can_still_correct_other_env_values(self):
-        """`provider_options` overrides everything except the credential —
-        including values the caller set."""
+        """`provider_options` overrides everything except the credential, even caller-set values."""
         fake = FakeRunPod()
         await _backend(fake).start(
             _spec(provider_options={"env": {"HF_HOME": "/corrected"}}),
@@ -350,8 +332,7 @@ class TestCredentialCannotBeDropped:
 
 class TestClientOwnership:
     async def test_injecting_one_client_does_not_leak_the_other(self):
-        """The documented reason to inject `api` is retries on the control
-        plane; the probe is then built here and nobody else can close it."""
+        """With only `api` injected, the backend still closes the probe client it built."""
         injected = httpx.AsyncClient(transport=httpx.MockTransport(FakeRunPod().handle))
         backend = RunPodBackend(api_key="secret", api=injected)
         probe = backend._probe

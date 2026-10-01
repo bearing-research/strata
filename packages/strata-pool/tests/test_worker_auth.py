@@ -1,9 +1,4 @@
-"""The credential the pool presents to a machine.
-
-Without it, `POST /execute` is an unauthenticated remote-code-execution
-endpoint. That is survivable while the only backend publishes on loopback,
-and stops being survivable the moment a machine has a routable address.
-"""
+"""The credential the pool presents to a machine; without it `POST /execute` is open RCE."""
 
 import logging
 

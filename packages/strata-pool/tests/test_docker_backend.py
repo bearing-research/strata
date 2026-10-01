@@ -1,8 +1,6 @@
-"""The Docker Engine API calls, without a daemon.
+"""The Docker Engine API calls, asserted against a mock transport (no daemon).
 
-Every request the backend makes is asserted here against a mock transport;
-`test_docker_live.py` runs the same code against a real daemon when there is
-one. These stay fast and always run.
+`test_docker_live.py` runs the same code against a real daemon.
 """
 
 import httpx
@@ -202,8 +200,7 @@ async def test_health_is_false_when_the_worker_answers_badly():
 
 
 async def test_resource_limits_reach_the_container():
-    """Unset, a container may consume the whole host — one tenant's job able
-    to starve every other container on the box."""
+    """Unset, one tenant's container could starve every other on the host."""
     daemon = FakeDaemon()
     await _backend(daemon).start(_spec(cpus=2.5, memory_mb=4096))
 
@@ -213,8 +210,7 @@ async def test_resource_limits_reach_the_container():
 
 
 async def test_limits_are_omitted_rather_than_sent_as_zero():
-    """Docker reads 0 as unlimited, but sending a field we were not asked to
-    set would silently override a daemon-level default."""
+    """An unset limit is omitted, not sent as 0, so a daemon-level default still applies."""
     daemon = FakeDaemon()
     await _backend(daemon).start(_spec())
 

@@ -1,9 +1,7 @@
 """Standalone tests for the ``strata-client`` distribution.
 
-These run with ONLY the client's own dependencies installed (httpx + pyarrow) —
-no ``strata`` / server stack. The client-only CI job runs this file in such an
-environment to guard the slim-install promise. They also pass in the full dev
-env. See docs/internal/design-strata-client.md.
+CI runs these with only httpx and pyarrow installed, guarding the slim-install
+promise; they also pass in the full dev env.
 """
 
 from __future__ import annotations
@@ -58,11 +56,7 @@ def test_filter_constructors() -> None:
 
 
 def test_fetch_over_mock_transport() -> None:
-    """Arrow IPC fetch decodes correctly against a mocked server (no network).
-
-    The full materialize protocol is covered in test_client_unit.py; this just
-    confirms the standalone client can do an Arrow round-trip end to end.
-    """
+    """Arrow IPC fetch decodes correctly against a mocked server (no network)."""
     table = pa.table({"x": [1, 2, 3]})
     sink = pa.BufferOutputStream()
     with ipc.new_stream(sink, table.schema) as writer:
@@ -93,16 +87,10 @@ def test_retry_config_backoff() -> None:
 
 
 class TestSnapshotPinReachesTheWire:
-    """``snapshot_id`` is the reproducibility control: it pins a scan to one
-    Iceberg snapshot.
+    """A pinned ``snapshot_id`` must reach the scan request in every integration.
 
-    The arrow and datafusion integrations accepted it, stored it, exposed it
-    as a property and documented it as "Pin to specific snapshot" — but their
-    ``_build_scan_transform`` did not take the parameter, so it never reached
-    the request. A pinned read silently returned the *current* snapshot, and
-    because the provenance hash is computed from what was actually sent, it
-    recorded the current snapshot too. Nothing downstream could flag the
-    divergence. ``duckdb``/``polars``/``pandas`` always did this correctly.
+    Dropping it silently reads the current snapshot and records that in the
+    provenance hash, so nothing downstream notices.
     """
 
     def test_arrow_puts_the_snapshot_in_the_transform(self) -> None:
@@ -141,14 +129,10 @@ class TestSnapshotPinReachesTheWire:
 
 
 class TestOptionalExtrasAreIndependentlyUsable:
-    """The package declares four separate extras — duckdb, pandas, polars,
-    datafusion — but ``integration/__init__`` imported all five integrations
-    eagerly, and importing any submodule runs that file first.
+    """Each extra works alone: importing one integration must not import another's deps.
 
-    So ``pip install "strata-client[pandas]"`` then ``from
-    strata_client.integration.pandas import scan_to_pandas`` raised
-    ``ModuleNotFoundError: No module named 'duckdb'``. Only ``[all]`` worked,
-    which made the separate extras misleading.
+    Importing any submodule runs ``integration/__init__`` first, so an eager
+    import there breaks e.g. a pandas-only install.
     """
 
     def _import_with_blocked(self, blocked: str, statement: str) -> str:
@@ -202,17 +186,10 @@ class TestOptionalExtrasAreIndependentlyUsable:
 
 
 class TestJsonArtifactRoundTrip:
-    """``put_json`` and ``get_json`` disagreed about the encoding.
+    """``put_json`` then ``get_json`` returns the same dict, including the ambiguous shapes.
 
-    ``_dict_to_ipc`` stores a dict *columnar* when every value is an
-    equal-length list. ``get_json`` used a different discriminator — "one
-    column named ``data`` means it's a JSON blob" — and a dict whose only key
-    is ``data`` satisfies both. So the columnar write was read back through
-    the blob branch: three strings in, the integer ``1`` out, no error. With
-    non-numeric strings it raised ``JSONDecodeError`` from a call that has no
-    documented failure mode.
-
-    The encoding is now marked in the schema metadata rather than guessed.
+    A dict whose only key is ``data`` with list values is both "columnar" and
+    "one column named data"; reading it as a JSON blob corrupts it silently.
     """
 
     def _roundtrip(self, payload):
@@ -254,8 +231,7 @@ class TestJsonArtifactRoundTrip:
         assert not _is_json_blob(pa.Table.from_pydict({"a": [1, 2], "b": [3, 4]}))
 
     def test_a_scanned_table_with_a_data_column_is_not_a_document(self):
-        """A scan result that happens to have one column called ``data`` is
-        columnar, and multiple rows are what distinguish it from a blob."""
+        """A multi-row table with one ``data`` column is columnar, not a blob."""
         from strata_client.client import _is_json_blob
 
         assert not _is_json_blob(pa.Table.from_pydict({"data": [1, 2, 3]}))
