@@ -1,11 +1,4 @@
-"""Tests for environment lifecycle: venv creation, sync, and lockfile hashing.
-
-Validates that:
-- create_notebook() produces pyproject.toml and runs uv sync
-- ensure_venv_synced() sets venv_python on the session
-- Lockfile hash changes when dependencies change
-- _uv_sync is best-effort (graceful failure)
-"""
+"""Tests for environment lifecycle: venv creation, sync, and lockfile hashing."""
 
 from __future__ import annotations
 
@@ -32,7 +25,6 @@ class TestCreateNotebookVenv:
     """create_notebook() should scaffold pyproject.toml and run uv sync."""
 
     def test_pyproject_toml_created(self, tmp_path: Path):
-        """Notebook creation writes pyproject.toml."""
         nb_dir = create_notebook(tmp_path, "my_nb")
         assert (nb_dir / "pyproject.toml").exists()
         content = (nb_dir / "pyproject.toml").read_text()
@@ -40,19 +32,16 @@ class TestCreateNotebookVenv:
         assert f'requires-python = "{format_requires_python(current_python_minor())}"' in content
 
     def test_pyproject_toml_respects_requested_python_version(self, tmp_path: Path):
-        """Notebook creation should persist the requested Python minor version."""
         nb_dir = create_notebook(tmp_path, "py312_nb", python_version="3.12")
         content = (nb_dir / "pyproject.toml").read_text()
         expected = format_requires_python("3.12")
         assert f'requires-python = "{expected}"' in content
 
     def test_uv_lock_created(self, tmp_path: Path):
-        """uv sync produces uv.lock."""
         nb_dir = create_notebook(tmp_path, "test_lock")
         assert (nb_dir / "uv.lock").exists()
 
     def test_venv_created(self, tmp_path: Path):
-        """uv sync produces .venv/ directory."""
         nb_dir = create_notebook(tmp_path, "test_venv")
         assert (nb_dir / ".venv").is_dir()
 
@@ -65,7 +54,6 @@ class TestCreateNotebookVenv:
             assert (nb_dir / "pyproject.toml").exists()
 
     def test_can_skip_initial_environment_creation(self, tmp_path: Path):
-        """Notebook scaffolding can skip the initial uv sync when requested."""
         with (
             patch("strata.notebook.writer._uv_sync") as mock_sync,
             patch("strata.notebook.writer._update_environment_metadata") as mock_update,
@@ -85,16 +73,12 @@ class TestCreateNotebookVenv:
 
 
 class TestUvSyncHelper:
-    """_uv_sync() helper function."""
-
     def test_returns_true_on_success(self, tmp_path: Path):
-        """Successful sync returns True."""
         nb_dir = create_notebook(tmp_path, "sync_ok")
         # Already synced at creation; calling again is idempotent.
         assert _uv_sync(nb_dir) is True
 
     def test_sync_uses_requested_python_when_provided(self, tmp_path: Path):
-        """Requested Python should be forwarded to uv sync."""
         with patch("strata.notebook.writer.subprocess.run") as mock_run:
             mock_run.return_value = subprocess.CompletedProcess(
                 args=["uv", "sync"],
@@ -108,12 +92,10 @@ class TestUvSyncHelper:
         assert command == ["uv", "sync", "--python", "3.12"]
 
     def test_returns_false_when_uv_missing(self, tmp_path: Path):
-        """Returns False when uv is not available."""
         with patch("strata.notebook.writer.subprocess.run", side_effect=FileNotFoundError):
             assert _uv_sync(tmp_path) is False
 
     def test_returns_false_on_timeout(self, tmp_path: Path):
-        """Returns False on timeout."""
         with patch(
             "strata.notebook.writer.subprocess.run",
             side_effect=subprocess.TimeoutExpired(cmd="uv sync", timeout=60),
@@ -155,9 +137,9 @@ class TestSessionVenvPython:
         assert session.environment_interpreter_source == "venv"
 
     def test_a_new_session_has_no_interpreter_even_with_a_venv(self, tmp_path: Path):
-        """While venv_python is None cells do not run. A session that seeded
-        it from an existing .venv let a sync that raised on open leave cells
-        running in the old environment with no notice."""
+        """While venv_python is None cells do not run. Seeding it from an existing .venv would let
+        a sync that raised on open leave cells running in the old environment with no notice.
+        """
         from strata.notebook.parser import parse_notebook
 
         nb_dir = create_notebook(tmp_path, "venv_present")  # creating it built .venv
@@ -185,10 +167,9 @@ class TestSessionVenvPython:
     def test_a_reopen_retries_a_sync_that_raised_instead_of_undoing_it(
         self, tmp_path: Path, monkeypatch
     ):
-        """Reopening an open notebook (a browser reload) refreshed the runtime
-        from whatever .venv held, which recorded it as the interpreter and made
-        the cells runnable although the sync never succeeded. The reopen syncs
-        again: a failure keeps the cells blocked, a success unblocks them."""
+        """A reopen (a browser reload) syncs again rather than trusting whatever .venv holds: a
+        failure keeps the cells blocked, a success unblocks them.
+        """
         from strata.notebook.session import SessionManager
 
         nb_dir = create_notebook(tmp_path, "sync_raises_reopen")
@@ -212,8 +193,9 @@ class TestSessionVenvPython:
         assert session.environment_execution_block_message() is None
 
     def test_no_sync_takes_the_prepared_venv_as_the_interpreter(self, tmp_path: Path):
-        """`strata run --no-sync` and `cell add --no-sync` never sync; they
-        used to leave the session on whatever `python` was on PATH."""
+        """`strata run --no-sync` and `cell add --no-sync` never sync, so they take the prepared
+        venv rather than `python` on PATH.
+        """
         from strata.notebook.cli import _use_existing_environment
         from strata.notebook.parser import parse_notebook
 
@@ -228,8 +210,9 @@ class TestSessionVenvPython:
         assert session.environment_execution_block_message() is None
 
     def test_no_sync_refuses_a_venv_with_no_interpreter(self, tmp_path: Path):
-        """The check is for bin/python, not the directory: a venv whose
-        interpreter points nowhere used to pass and fall back to PATH."""
+        """The check is for bin/python, not the directory, so a venv whose interpreter points
+        nowhere does not fall back to PATH.
+        """
         from strata.notebook.cli import _use_existing_environment
         from strata.notebook.parser import parse_notebook
 
@@ -264,7 +247,7 @@ class TestSessionVenvPython:
         assert session.environment_interpreter_source == "venv"
 
     def test_path_fallback_when_uv_missing_and_no_venv(self, tmp_path: Path):
-        """Without uv and without .venv, the session falls back to PATH python."""
+        """Without uv or .venv the sync fails and venv_python is a bare PATH ``python``."""
         import shutil
 
         nb_dir = create_notebook(tmp_path, "no_uv_no_venv")
@@ -600,12 +583,12 @@ class TestDependencyChangeRefresh:
 
 
 class TestEnvironmentMetadata:
-    """Environment metadata persisted to notebook.toml."""
+    """Environment metadata persisted to ``.strata/runtime.json``."""
 
     def test_update_environment_metadata_records_runtime_fields(self, tmp_path: Path):
-        """Environment metadata is persisted to ``.strata/runtime.json`` —
-        the values change on every sync and are not user-authored, so
-        they do not belong in the committed ``notebook.toml``."""
+        """The values change on every sync and are not user-authored, so they go to
+        ``.strata/runtime.json``, not the committed ``notebook.toml``.
+        """
         from strata.notebook.runtime_state import load_runtime_state
 
         nb_dir = create_notebook(tmp_path, "env_metadata")
@@ -643,7 +626,6 @@ class TestLockfileHash:
     """compute_lockfile_hash() produces consistent hashes."""
 
     def test_hash_with_lockfile(self, tmp_path: Path):
-        """Hash is deterministic for a given lockfile."""
         nb_dir = create_notebook(tmp_path, "hash_test")
         h1 = compute_lockfile_hash(nb_dir)
         h2 = compute_lockfile_hash(nb_dir)
@@ -658,7 +640,6 @@ class TestLockfileHash:
         assert compute_lockfile_hash(tmp_path) == expected
 
     def test_hash_changes_on_lockfile_modification(self, tmp_path: Path):
-        """Modifying uv.lock changes the hash."""
         nb_dir = create_notebook(tmp_path, "hash_change")
         h1 = compute_lockfile_hash(nb_dir)
 

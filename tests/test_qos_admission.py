@@ -1,11 +1,7 @@
-"""Unit tests for QoSAdmission — the acquire/release lifecycle in isolation.
+"""Unit tests for QoSAdmission: the acquire/release lifecycle in isolation.
 
-These pin the #238 cancel-safety property deterministically, which the
-HTTP-level QoS characterization tests (test_qos.py) can't do reliably: a small
-streaming response buffers fully before the client reads, so a mid-flight
-disconnect never actually cancels the held-slot path. Extracting the admission
-logic into QoSAdmission makes it directly callable, so we drive the cancel path
-with a fake limiter instead of a racy socket.
+Drives the cancel path with a fake limiter, which HTTP tests cannot do reliably because a small
+response buffers fully before the client reads.
 """
 
 import asyncio
@@ -19,7 +15,7 @@ from strata.streaming.qos import QoSAdmission, QoSRejected
 
 
 class _FakeLimiter:
-    """Stand-in tenant limiter: records acquire/release, scriptable outcome."""
+    """Stand-in tenant limiter that records acquire/release with a scriptable outcome."""
 
     def __init__(self, *, acquire_result: bool = True, raise_cancel: bool = False):
         self._acquire_result = acquire_result
@@ -149,14 +145,11 @@ async def test_per_client_cap_rejects_second_concurrent_admit(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_two_admissions_sharing_a_scan_id_both_release_their_slot(monkeypatch):
-    """``_scan_client`` is keyed by scan_id, and nothing stops two admissions
-    sharing one — ``GET /v1/streams/{id}`` has no already-consumed guard, so a
-    client retry or a proxy retry produces two handlers for the same stream.
+    """Two handlers for one stream (a client or proxy retry) share a scan_id.
 
-    Release used to re-derive the semaphore from that table, so the first
-    release popped the entry and the second found nothing and never released
-    its slot: the client permanently lost capacity and was eventually 429'd
-    forever."""
+    Releasing through the ``_scan_client`` table would let the second find nothing and leak its
+    slot, until the client is 429'd forever.
+    """
     _install_registry(monkeypatch, _FakeLimiter(), _FakeLimiter())
     qos = QoSAdmission(StrataConfig(per_client_interactive=2))
 
@@ -177,10 +170,10 @@ async def test_two_admissions_sharing_a_scan_id_both_release_their_slot(monkeypa
 
 @pytest.mark.asyncio
 async def test_release_survives_client_semaphore_eviction(monkeypatch):
-    """``_get_client_semaphore`` *creates* one when the entry is missing, so a
-    release after an LRU eviction landed on a brand-new semaphore and ratcheted
-    its value above the cap — repeatable, so the per-client limit grew without
-    bound. Releasing the held object instead is immune."""
+    """Releasing after an LRU eviction must not hit a freshly created semaphore.
+
+    That would ratchet its value above the cap, so the per-client limit grows without bound.
+    """
     _install_registry(monkeypatch, _FakeLimiter(), _FakeLimiter())
     qos = QoSAdmission(StrataConfig(per_client_interactive=1))
 
@@ -202,8 +195,7 @@ async def test_release_survives_client_semaphore_eviction(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_double_release_is_idempotent(monkeypatch):
-    """A second release would otherwise drive the counters negative and hand
-    the same slot back twice."""
+    """A second release would drive counters negative and return the slot twice."""
     limiter = _FakeLimiter()
     _install_registry(monkeypatch, limiter, _FakeLimiter())
     qos = QoSAdmission(StrataConfig(per_client_interactive=1))
@@ -250,16 +242,10 @@ class _RecordingController:
 
 @pytest.mark.asyncio
 async def test_queue_wait_metric_reflects_the_actual_wait(monkeypatch):
-    """``/metrics`` reported ``queue_wait_avg_ms: 0`` under every load.
+    """``queue_wait_avg_ms`` reports the real wait, not a constant zero.
 
-    The accounting lived on ``POST /v1/scan`` and was deleted with that endpoint;
-    the fields survived on the metrics payload, so the number an operator reads
-    to size their deployment has been a constant zero since the unified
-    materialize API landed.
-
-    Asserted against the wall time the admit call actually took, not against a
-    fixed threshold: the recorded wait is a sub-interval of that call, so it can
-    be neither zero nor larger than the whole.
+    Compared with the admit call's wall time rather than a fixed threshold: the wait is a
+    sub-interval of it.
     """
     _install_registry(monkeypatch, _SlowLimiter(0.05), _FakeLimiter())
     qos = QoSAdmission(StrataConfig())
@@ -277,8 +263,7 @@ async def test_queue_wait_metric_reflects_the_actual_wait(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_tier_rejections_are_counted(monkeypatch):
-    """``interactive_rejected`` / ``bulk_rejected`` were never incremented, so
-    the metric that says "we are shedding load" read zero while shedding load."""
+    """``interactive_rejected`` / ``bulk_rejected`` must count shed load."""
     _install_registry(monkeypatch, _FakeLimiter(acquire_result=False), _FakeLimiter())
     qos = QoSAdmission(StrataConfig())
 
@@ -306,11 +291,9 @@ async def test_bulk_tier_rejections_are_counted_separately(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_attached_controller_receives_both_signals(monkeypatch):
-    """The adaptive control loop has two inputs and both come from here.
+    """The adaptive control loop's two inputs both come from admission.
 
-    Without them ``get_p95()`` returns None forever and ``_evaluate_and_adjust``
-    returns early on every tick — a 5-second timer that logs "started" and
-    adjusts nothing (#549).
+    Without them ``get_p95()`` stays None and ``_evaluate_and_adjust`` never adjusts.
     """
     _install_registry(monkeypatch, _SlowLimiter(0.01), _FakeLimiter())
     qos = QoSAdmission(StrataConfig())
@@ -361,9 +344,10 @@ async def test_admission_works_with_no_controller_attached(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_admit_acquires_the_limiter_the_registry_counts(monkeypatch):
-    """A tenant idle when admit starts can be evicted while its request waits
-    for the per-client slot. The request must then acquire the limiter the
-    registry tracks, or the shutdown drain and the quota never see it."""
+    """A tenant can be evicted while its request waits for the per-client slot.
+
+    The request must then acquire the limiter the registry tracks, or the drain and quota miss it.
+    """
     from strata.tenant_registry import MAX_TRACKED_TENANTS, TenantRegistry
 
     registry = TenantRegistry(default_interactive_slots=1, default_bulk_slots=1)

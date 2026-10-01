@@ -1,10 +1,7 @@
 """A guarded client connects only to an address the guard validated.
 
-The guard used to resolve a URL's host and check the addresses, and then httpx
-resolved the host again to connect. A name that answered the check with a public
-address and the connection with 127.0.0.1 (DNS rebinding) got past it. These
-tests stand in for the socket layer with a recording backend, so what they see
-is the exact host and port a connection was opened to, and never touch a network.
+Resolving once to check and again to connect lets DNS rebinding reach 127.0.0.1. A recording backend
+stands in for sockets, so tests see the exact host and port opened.
 """
 
 from __future__ import annotations
@@ -74,11 +71,7 @@ class _AsyncStream(httpcore.AsyncNetworkStream):
 
 @pytest.fixture
 def sockets(monkeypatch):
-    """Every TCP connection httpcore opens, as ``(host, port)``, in order.
-
-    ``refuse`` names hosts whose connection fails, the way an unreachable
-    address does.
-    """
+    """Every TCP connection httpcore opens, as ``(host, port)``; ``refuse`` hosts fail."""
 
     recorded = SimpleNamespace(connects=[], refuse=set(), record={})
 
@@ -108,8 +101,7 @@ def _get(url: str, **guard) -> httpx.Response:
 
 class TestPinning:
     def test_the_connection_goes_to_the_address_the_check_validated(self, rebinding_dns, sockets):
-        """The rebinding answer is never asked for: the name is resolved once,
-        and the socket is opened to that answer's address, not to the name."""
+        """The name is resolved once and the socket opens to that address, not the name."""
         rebinding_dns.answers["rebind.test"] = [[_PUBLIC], ["127.0.0.1"]]
 
         response = _get("http://rebind.test:8080/data")
@@ -159,8 +151,7 @@ class TestPinning:
     def test_an_unreachable_address_falls_through_to_the_next_validated_one(
         self, rebinding_dns, sockets
     ):
-        """What connecting by name did: a host whose IPv6 address has no route
-        still connects over IPv4."""
+        """A host whose IPv6 address has no route still connects over IPv4."""
         rebinding_dns.answers["dual.test"] = [[_PUBLIC_V6, _PUBLIC]]
         sockets.refuse.add(_PUBLIC_V6)
 
@@ -209,8 +200,7 @@ class TestProxies:
     def test_a_guarded_client_ignores_the_environments_proxy(
         self, rebinding_dns, sockets, monkeypatch
     ):
-        """Through a proxy the proxy resolves the name, and the check would be
-        about an address nothing connects to."""
+        """A proxy resolves the name itself, so the check would cover an unused address."""
         monkeypatch.setenv("HTTP_PROXY", "http://proxy.test:3128")
         monkeypatch.setenv("HTTPS_PROXY", "http://proxy.test:3128")
         rebinding_dns.answers["files.example.org"] = [[_PUBLIC]]

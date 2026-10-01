@@ -1,16 +1,8 @@
 """A web page must not be able to drive the loopback API.
 
-The server used to send ``Access-Control-Allow-Origin: *`` on every route. In
-personal mode there is no auth, and the browser runs on loopback too, so any
-page the user happened to visit could read ``/v1/notebooks/discover``, open a
-notebook, add a cell holding arbitrary Python, and execute it — remote code
-execution from an unrelated tab.
-
-Restricting the header is necessary but not sufficient:
-``POST .../cells/{id}/execute`` takes no request body (``mode`` is a query
-parameter), which makes it a CORS *simple request* that a page can fire
-without any preflight to block. So a disallowed ``Origin`` must also fail
-closed on unsafe methods.
+Personal mode has no auth, so a cross-origin page that can add and execute a cell is remote code
+execution. ``POST .../execute`` has no body, which makes it a CORS simple request with no preflight,
+so a disallowed ``Origin`` must also fail closed on unsafe methods.
 """
 
 import tempfile
@@ -73,8 +65,7 @@ class TestACrossOriginPageCannotDriveTheApi:
         assert resp.status_code == 403
 
     def test_a_cross_origin_read_is_not_made_readable(self, client):
-        """GET is allowed through, but without the header the browser blocks
-        the page from reading the body — so notebooks can't be enumerated."""
+        """GET goes through, but without the header the browser hides the body."""
         c = client()
         resp = c.get("/v1/notebooks/discover", headers={"Origin": EVIL})
         assert "access-control-allow-origin" not in resp.headers

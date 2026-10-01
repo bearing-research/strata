@@ -1,15 +1,8 @@
 """A notebook's ``[ai] base_url`` on a service-mode server.
 
-A prompt cell posts to that URL from the server process and shows the author
-what came back, the error body included. On a shared server the author is not
-the operator, so a URL pointed at the cloud metadata address or an internal
-service would read it. A base_url the notebook chose goes through the guard
-``@fetch`` uses: private and loopback addresses are refused unless the operator
-named the host in ``notebook_fetch_allowed_hosts``. The operator's own
-``ai_base_url`` stays trusted, and personal mode is unchanged.
-
-The fake provider listens on 127.0.0.1, which is exactly an address the guard
-refuses, so whether it was reached is the whole question.
+A notebook-chosen base_url goes through the ``@fetch`` guard: private and loopback addresses
+are refused unless listed in ``notebook_fetch_allowed_hosts``. The operator's ``ai_base_url``
+stays trusted. The fake provider listens on 127.0.0.1, so whether it was reached is the test.
 """
 
 from __future__ import annotations
@@ -181,8 +174,7 @@ async def test_a_host_the_operator_allowed_is_reached(tmp_path, provider, monkey
 
 
 async def test_the_operators_base_url_is_trusted(tmp_path, provider, monkeypatch):
-    """``STRATA_AI_BASE_URL`` is the operator's own choice, private or not; a
-    notebook naming that same URL is not choosing anything new."""
+    """The operator's ``STRATA_AI_BASE_URL`` is trusted; a notebook naming it adds nothing."""
     _server(monkeypatch, mode="service", ai_base_url=provider.url)
     inherited = _session(tmp_path / "a", "Say hi.", {"model": "m"})
     restated = _session(tmp_path / "b", "Say hi.", {"base_url": provider.url + "/"})

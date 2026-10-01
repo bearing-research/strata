@@ -1,15 +1,8 @@
-"""The adaptive controller must be connected to something that feeds it.
+"""The adaptive controller must be fed by real traffic.
 
-``AdaptiveConcurrencyController`` was constructed and started in the lifespan,
-logged ``"Adaptive concurrency control started"``, and published a populated
-``adaptive_concurrency`` block on ``/metrics`` — while nothing anywhere called
-``record_latency`` or ``record_queue_wait``. Its windows stayed empty, so
-``get_p95()`` returned ``None`` and every tick returned early: a five-second
-timer that adjusted nothing, for eight months (#549).
-
-The unit tests around the control loop all passed throughout, because they
-feed the controller by hand. Only the wire was missing, so only a test of the
-wire catches it coming loose again.
+Nothing called ``record_latency`` or ``record_queue_wait``, so ``get_p95()`` stayed ``None`` and
+every tick was a no-op. Control-loop unit tests feed the controller by hand, so only a test of the
+wiring catches this.
 """
 
 from __future__ import annotations

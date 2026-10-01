@@ -1,9 +1,7 @@
 """The registry dashboard describes the store the cells actually write to.
 
-With ``notebook_remote_store_url`` set, a cell's ``strata.put(name=...)`` and
-every promotion land in the team's store. The dashboard read the local one, so
-it showed an empty registry on exactly the deployment where the registry is the
-point. Item 22.
+With ``notebook_remote_store_url`` set, ``strata.put(name=...)`` and promotions land in the team's
+store, so reading the local one shows an empty registry exactly where it matters.
 """
 
 from __future__ import annotations
@@ -25,12 +23,9 @@ def team_dir(tmp_path):
 
 @pytest.fixture
 def team_store(tmp_path, team_dir):
-    """A server standing in for the organization's store.
+    """A server standing in for the organization's store; only ever the target.
 
-    The local routes are called directly rather than over HTTP, so this server
-    is only ever the *target*. Pointing a server's remote-store URL at itself
-    would make every registry read recurse, which is not a shape worth
-    building a test around.
+    Pointing a server's remote-store URL at itself would make every registry read recurse.
     """
     from tests.conftest import run_server_with_context
 
@@ -52,14 +47,10 @@ def team_registry(team_dir, team_store):
 
 @pytest.fixture
 def pointed_at_team(team_store, monkeypatch):
-    """Make the local registry routes forward to the team store.
+    """Make the local registry routes forward to the team store, from this thread only.
 
-    Only from this thread. In a real deployment the notebook server and the
-    team store are two processes, and only the first has a remote-store URL;
-    in one process they would share ``remote_registry`` and the team store
-    would forward every request back to itself. The thread is what separates
-    them here: the routes under test are called directly from the test thread,
-    the team store answers on uvicorn's.
+    In one process both sides share ``remote_registry``, so the thread separates them: tests call
+    the routes from the test thread, and the team store answers on uvicorn's.
     """
     return _point_at(team_store, monkeypatch)
 
@@ -67,9 +58,7 @@ def pointed_at_team(team_store, monkeypatch):
 def _point_at(base_url: str, monkeypatch):
     """Patch every module that decides whether to forward.
 
-    Each router imports ``remote_registry`` by name, so each needs its own
-    patch — and a router left out here is a router whose forwarding no test
-    exercises, which is how the names routes went unforwarded the first time.
+    Each router imports ``remote_registry`` by name; a router left out here has no forwarding test.
     """
     import strata.api.remote_registry as remote
     import strata.api.routers.artifacts as artifacts_router
@@ -88,8 +77,7 @@ def _point_at(base_url: str, monkeypatch):
 
 
 def _local_store(tmp_path):
-    """A local store holding something the team's does not, so a route that
-    read the wrong one would be visibly reading the wrong one."""
+    """A local store holding something the team's does not, so a wrong read is visible."""
     store = ArtifactStore(tmp_path / "local")
     store.create_artifact("private-scratch", "bb" * 32)
     store.finalize_artifact("private-scratch", 1, '{"fields": []}', 1, 8)
@@ -128,8 +116,7 @@ class TestRegistryTab:
     def test_approving_moves_the_alias_in_the_team_store(
         self, tmp_path, team_dir, team_registry, pointed_at_team
     ):
-        """The decision has to land where the alias lives — approving into the
-        local store would report success and change nothing anyone reads."""
+        """Approving into the local store would report success and change nothing anyone reads."""
         from strata.api.routers.registry import PendingDecisionRequest, approve_pending
 
         team_registry.request_alias_change(
@@ -147,8 +134,7 @@ class TestRegistryTab:
         assert ArtifactStore(team_dir).list_pending_changes() == []
 
     def test_a_store_that_cannot_be_reached_is_a_bad_gateway(self, tmp_path, monkeypatch):
-        """Not a 500, and not a silently empty registry: an empty dashboard
-        reads as "nobody has published anything", which is a different fact."""
+        """Not a 500, and not an empty registry that reads as "nothing published"."""
         import strata.api.routers.registry as registry_router
 
         monkeypatch.setattr(registry_router, "remote_registry", lambda: ("http://127.0.0.1:1", {}))
@@ -207,8 +193,7 @@ class TestPerCellStrip:
         assert "nb_cell" not in entry["tags"]
 
     def test_a_whole_notebook_costs_one_request(self, team_registry, pointed_at_team, monkeypatch):
-        """Not one per cell. A strip that asked per cell would put a round trip
-        on every cell of a long notebook every time the panel refreshed."""
+        """Not one per cell, which would add a round trip per cell on every refresh."""
         import strata.api.remote_registry as remote
         from strata.notebook.routes import list_notebook_published_artifacts
 
@@ -236,7 +221,7 @@ class TestPerCellStrip:
 
 
 class TestTargetResolution:
-    """``remote_registry()`` — which store the routes above will ask."""
+    """``remote_registry()``: which store the routes above ask."""
 
     def _config(self, **kwargs):
         from types import SimpleNamespace
@@ -244,8 +229,7 @@ class TestTargetResolution:
         return SimpleNamespace(config=SimpleNamespace(**kwargs))
 
     def test_none_without_a_team_store(self, monkeypatch):
-        """The ordinary single-machine case: the local store *is* the registry
-        the cells write to, so there is nothing to forward."""
+        """On a single machine the local store is the registry, so nothing is forwarded."""
         import strata.server as server_module
         from strata.api.remote_registry import remote_registry
 
@@ -254,9 +238,7 @@ class TestTargetResolution:
         assert remote_registry() is None
 
     def test_the_url_and_its_auth_travel_together(self, monkeypatch):
-        """The headers are why this is server-side. Handing them to the page so
-        it could call the team store itself would put the proxy token in every
-        user's devtools."""
+        """The headers stay server-side; handing them to the page would expose the proxy token."""
         import strata.server as server_module
         from strata.api.remote_registry import remote_registry
 
@@ -276,9 +258,10 @@ class TestTargetResolution:
 
     @pytest.mark.parametrize("forward", [True, False])
     def test_a_caller_is_forwarded_in_place_of_the_servers_identity(self, monkeypatch, forward):
-        """On a shared server an approval from the Registry tab is the member's,
-        not the server's. The flag keeps a store that expects one fixed service
-        identity working. Item 2."""
+        """On a shared server an approval is the member's, not the server's.
+
+        The flag keeps a store that expects one fixed service identity working.
+        """
         import strata.server as server_module
         from strata.api.remote_registry import remote_registry
         from strata.auth import set_principal
@@ -310,10 +293,10 @@ class TestTargetResolution:
 
 
 def test_a_remote_store_url_naming_this_server_is_refused():
-    """It would make every registry read forward to itself and recurse.
+    """Self-forwarding would recurse on every registry read.
 
-    Refused at startup rather than at the first Registry tab, which is where
-    it would otherwise surface — as a hang, with nothing naming the setting.
+    Refused at startup; otherwise it surfaces as a hang on the Registry tab with nothing naming the
+    setting.
     """
     from pydantic import ValidationError
 
@@ -341,9 +324,7 @@ class TestArtifactsByTag:
         return store
 
     def test_a_version_that_has_been_overtaken_is_not_shown(self, tmp_path):
-        """A tag stays on the version it was set on, so a strip that showed
-        every stamped row would keep offering a superseded one as current.
-        Longstanding strip behaviour, restated here because the read moved."""
+        """A tag stays on its version, so a superseded one must not show as current."""
         from strata.services.registry import registry_service
 
         rows = registry_service.artifacts_by_tag(self._store(tmp_path), "nb_cell", tenant=None)
@@ -374,9 +355,10 @@ class TestArtifactsByTag:
 
 
 class TestPromotingFromTheTab:
-    """The dashboard read the team's registry and wrote its promotions to the
-    local store, where the tab — reading the team's — never showed them. A user
-    clicked Promote, saw success, and nothing they could see changed."""
+    """Promotions from the tab go to the team store the tab reads.
+
+    Writing them locally reported success while nothing visible changed.
+    """
 
     def test_promoting_moves_the_alias_in_the_team_store(
         self, tmp_path, team_dir, team_registry, pointed_at_team
@@ -434,9 +416,10 @@ class TestTheStatusSurvivesTheForward:
             yield team_dir
 
     def test_a_protected_alias_still_answers_202_pending(self, tmp_path, protected_team):
-        """The dashboard reads `status: pending` from the body, but a client that
-        decides by the status code — RemoteStore.set_alias does — would take a
-        queued change for an applied one if the forward flattened it to 200."""
+        """The forward keeps the 202: RemoteStore.set_alias decides by status code.
+
+        Flattened to 200, a queued change would read as applied.
+        """
         from strata.api.routers.names import AliasSetRequest, set_alias
 
         response = asyncio.run(
@@ -457,9 +440,7 @@ class TestTheStatusSurvivesTheForward:
 
 
 class TestTheRestOfTheRegistrySurface:
-    """Names, aliases and tags are one registry. Forwarding only the route the
-    dashboard happened to call is what left this bug behind; the next button
-    that reaches for a sibling route would find it again."""
+    """Names, aliases and tags are one registry, so every route forwards."""
 
     def test_tags_land_in_the_team_store(self, tmp_path, team_dir, team_registry, pointed_at_team):
         from strata.api.routers.names import TagSetRequest, set_tag
@@ -493,8 +474,7 @@ class TestTheRestOfTheRegistrySurface:
         assert json.loads(response.body)["artifact_uri"] == "strata://artifact/shared-model@v=1"
 
     def test_lineage_is_read_from_the_team_store(self, tmp_path, team_registry, pointed_at_team):
-        """Opened from the tab or the strip, both of which list the team's
-        artifacts; the local store would 404 on the one just clicked."""
+        """The tab and strip list the team's artifacts, so the local store would 404."""
         from strata.api.routers.artifacts import get_artifact_lineage
 
         response = asyncio.run(

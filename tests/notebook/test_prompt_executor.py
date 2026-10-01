@@ -1,8 +1,6 @@
-"""Tests for prompt-cell execution helpers.
+"""Prompt-cell execution helpers: caching, provider-aware request shaping, validate-and-retry.
 
-Full end-to-end execution is covered by the LLM integration suite;
-these tests focus on the pure-function pieces that drive caching,
-provider-aware request shaping, and the validate-and-retry loop.
+End-to-end execution is covered by the LLM integration suite.
 """
 
 from __future__ import annotations
@@ -33,8 +31,7 @@ def test_provenance_hash_is_stable():
 
 
 def test_schema_change_invalidates_cache():
-    """Editing @output_schema must change the provenance hash so the
-    executor doesn't hand back an answer shaped like the old schema."""
+    """Otherwise the executor hands back an answer shaped like the old schema."""
     a = compute_prompt_provenance_hash(
         **_BASE_ARGS,
         output_schema={"type": "object", "properties": {"score": {"type": "number"}}},
@@ -47,8 +44,6 @@ def test_schema_change_invalidates_cache():
 
 
 def test_schema_key_order_does_not_affect_hash():
-    """Two dicts with the same contents but different insertion order
-    must hash the same — the fingerprint uses sorted keys."""
     a = compute_prompt_provenance_hash(
         **_BASE_ARGS,
         output_schema={
@@ -69,8 +64,7 @@ def test_schema_key_order_does_not_affect_hash():
 
 
 def test_adding_schema_changes_hash():
-    """A prior-run without a schema must not hit the cache for a
-    subsequent run that adds one."""
+    """A run without a schema must not serve a later run that adds one."""
     without = compute_prompt_provenance_hash(**_BASE_ARGS, output_schema=None)
     with_schema = compute_prompt_provenance_hash(
         **_BASE_ARGS,
@@ -129,7 +123,7 @@ class TestRetryPromptFormat:
 
 
 def _prompt_session(tmp_path, source: str, *, cell_id: str = "p1"):
-    """Spin up a minimal session with one prompt cell."""
+    """Minimal session with one prompt cell."""
     from strata.notebook.parser import parse_notebook
     from strata.notebook.session import NotebookSession
     from strata.notebook.writer import add_cell_to_notebook, create_notebook, write_cell
@@ -141,7 +135,7 @@ def _prompt_session(tmp_path, source: str, *, cell_id: str = "p1"):
 
 
 def _fake_llm_returning(*responses: str):
-    """Return an async fake that yields each response in turn."""
+    """Async fake that returns each response in turn."""
     from strata.notebook.llm import LlmCompletionResult
 
     it = iter(responses)
@@ -168,7 +162,6 @@ _TINY_SCHEMA = (
 
 @pytest.mark.asyncio
 async def test_first_try_passes_no_retries_no_feedback(tmp_path):
-    """Clean first response → zero retries, zero follow-up messages."""
     from strata.notebook.llm import LlmConfig
     from strata.notebook.prompt_executor import execute_prompt_cell
 
@@ -188,8 +181,7 @@ async def test_first_try_passes_no_retries_no_feedback(tmp_path):
 
 @pytest.mark.asyncio
 async def test_retries_on_schema_violation_then_succeeds(tmp_path):
-    """Bad JSON shape on attempt 1, valid on attempt 2 → retries=1 and the
-    retry message carries both the prior response and the validator error."""
+    """The retry message carries both the prior response and the validator error."""
     from strata.notebook.llm import LlmConfig
     from strata.notebook.prompt_executor import execute_prompt_cell
 
@@ -225,8 +217,7 @@ async def test_retries_on_schema_violation_then_succeeds(tmp_path):
 
 @pytest.mark.asyncio
 async def test_exhausted_retries_surface_error(tmp_path):
-    """Every attempt fails → error result, final validator message is
-    surfaced so the user can see what went wrong."""
+    """The final validator message is surfaced so the user can see what went wrong."""
     from strata.notebook.llm import LlmConfig
     from strata.notebook.prompt_executor import execute_prompt_cell
 
@@ -248,8 +239,7 @@ async def test_exhausted_retries_surface_error(tmp_path):
 
 @pytest.mark.asyncio
 async def test_no_schema_means_no_retries(tmp_path):
-    """Without a schema the loop should make exactly one call even if the
-    model returned garbage — there's nothing to validate against."""
+    """Without a schema, garbage output still makes exactly one call."""
     from strata.notebook.llm import LlmConfig
     from strata.notebook.prompt_executor import execute_prompt_cell
 
@@ -271,11 +261,7 @@ async def test_no_schema_means_no_retries(tmp_path):
 
 
 def _fake_stream_returning(*responses: str, chunk_size: int = 4):
-    """Async-generator fake for ``chat_completion_stream``.
-
-    Yields each response in turn, chunked, followed by a ``done`` event —
-    the same event shapes the real client produces.
-    """
+    """Async-generator fake for ``chat_completion_stream``: chunked responses, then ``done``."""
     it = iter(responses)
     calls: list[dict] = []
 
@@ -300,8 +286,7 @@ def _delta_collector():
 
 @pytest.mark.asyncio
 async def test_streaming_forwards_deltas_and_accumulates_content(tmp_path):
-    """Text prompt + on_delta → every chunk forwarded with attempt=1 and
-    the accumulated content lands as the cell's stored result."""
+    """Every chunk is forwarded with attempt=1; the accumulated content is the stored result."""
     from strata.notebook.llm import LlmConfig
     from strata.notebook.prompt_executor import execute_prompt_cell
 
@@ -327,8 +312,7 @@ async def test_streaming_forwards_deltas_and_accumulates_content(tmp_path):
 
 @pytest.mark.asyncio
 async def test_streaming_retry_emits_retry_frame_then_clean_attempt(tmp_path):
-    """Schema violation on attempt 1 → one ``kind: retry`` frame carrying
-    the new attempt number, then attempt-2 deltas. retries=1, success."""
+    """A schema violation emits one ``kind: retry`` frame, then the attempt-2 deltas."""
     from strata.notebook.llm import LlmConfig
     from strata.notebook.prompt_executor import execute_prompt_cell
 
@@ -363,8 +347,7 @@ async def test_streaming_retry_emits_retry_frame_then_clean_attempt(tmp_path):
 
 @pytest.mark.asyncio
 async def test_anthropic_with_schema_falls_back_to_unary_no_deltas(tmp_path):
-    """Anthropic + @output_schema takes the native tool-use path, which has
-    no streaming yet (design Phase B) — unary call, zero delta frames."""
+    """Anthropic + @output_schema uses native tool-use, which doesn't stream: zero delta frames."""
     from strata.notebook.llm import LlmConfig
     from strata.notebook.prompt_executor import execute_prompt_cell
 
@@ -393,8 +376,7 @@ async def test_anthropic_with_schema_falls_back_to_unary_no_deltas(tmp_path):
 
 @pytest.mark.asyncio
 async def test_cache_hit_emits_no_deltas(tmp_path):
-    """Second run of an identical prompt returns from the artifact cache
-    before any streaming starts — zero frames."""
+    """An identical rerun returns from the artifact cache before streaming starts."""
     from strata.notebook.llm import LlmConfig
     from strata.notebook.prompt_executor import execute_prompt_cell
 
@@ -421,8 +403,7 @@ async def test_cache_hit_emits_no_deltas(tmp_path):
 
 @pytest.mark.asyncio
 async def test_on_delta_failure_does_not_fail_cell(tmp_path):
-    """A broken WS callback (client gone mid-stream) is logged and
-    swallowed — the cell still succeeds and stores its artifact."""
+    """A broken WS callback is logged and swallowed; the cell still stores its artifact."""
     from strata.notebook.llm import LlmConfig
     from strata.notebook.prompt_executor import execute_prompt_cell
 
@@ -448,8 +429,7 @@ async def test_on_delta_failure_does_not_fail_cell(tmp_path):
 
 @pytest.mark.asyncio
 async def test_no_on_delta_keeps_unary_path(tmp_path):
-    """REST / CLI callers pass no callback — the unary client is used and
-    the stream client never runs (exact pre-#110 behavior)."""
+    """REST / CLI callers pass no callback: the unary client runs, the stream client never does."""
     from strata.notebook.llm import LlmConfig
     from strata.notebook.prompt_executor import execute_prompt_cell
 
@@ -475,9 +455,8 @@ async def test_no_on_delta_keeps_unary_path(tmp_path):
 
 
 def test_upstream_input_hash_invalidates_cache():
-    """The rendered template truncates long variables, so an upstream edit
-    past the cut renders byte-identically — the input hashes must carry
-    the invalidation."""
+    """The template truncates long variables, so the input hashes must carry an edit past the
+    cut."""
     same_render_a = compute_prompt_provenance_hash(
         **_BASE_ARGS, output_schema=None, input_hashes={"doc": "hash-v1"}
     )
@@ -503,8 +482,7 @@ def test_input_hash_order_does_not_affect_hash():
 
 
 def test_max_tokens_change_invalidates_cache():
-    """Lowering @max_tokens asks for a different-length answer — it must
-    not be served the cached full-length response."""
+    """A lower @max_tokens must not be served the cached full-length response."""
     a = compute_prompt_provenance_hash(**_BASE_ARGS, output_schema=None, max_tokens=4096)
     b = compute_prompt_provenance_hash(**_BASE_ARGS, output_schema=None, max_tokens=256)
     assert a != b
@@ -512,9 +490,7 @@ def test_max_tokens_change_invalidates_cache():
 
 @pytest.mark.asyncio
 async def test_cache_hit_display_uses_scalar_key(tmp_path):
-    """The cache-hit display payload must use the same 'scalar' key the
-    fresh-run path uses — the frontend renders output.scalar, so the old
-    'preview' key made a cache-hit prompt cell render blank."""
+    """The frontend renders ``output.scalar``, so a cache hit must use that key too."""
     from strata.notebook.llm import LlmConfig
     from strata.notebook.prompt_executor import execute_prompt_cell
 
@@ -538,10 +514,11 @@ async def test_cache_hit_display_uses_scalar_key(tmp_path):
 
 
 class TestWhatAReopenedPromptCellRestsOn:
-    """The generic staleness triplet sees a prompt cell's source, environment
-    and inputs -- not the model it asked, which comes from the notebook's
-    ``[ai]`` block. A reopen that compares only the triplet kept the previous
-    model's answer on screen, marked ready."""
+    """A prompt cell's model comes from ``[ai]``, outside the staleness triplet.
+
+    A reopen comparing only source, environment and inputs kept the old model's answer as
+    ready.
+    """
 
     @staticmethod
     def _identity(tmp_path, source: str, ai_block: str = ""):
@@ -575,8 +552,7 @@ class TestWhatAReopenedPromptCellRestsOn:
         assert self._identity(tmp_path, first) != self._identity(tmp_path, second)
 
     def test_the_notebook_model_counts_even_when_the_cell_names_none(self, tmp_path):
-        """The cell inherits ``[ai] model`` -- changing it there changes the
-        answer just as surely as an annotation would."""
+        """Changing an inherited ``[ai] model`` changes the answer as surely as an annotation."""
         source = "Summarize {{ data }}"
 
         with_one = self._identity(tmp_path, source, '[ai]\nmodel = "gpt-5.4"\n')

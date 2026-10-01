@@ -1,21 +1,8 @@
-"""A SQL cell's result table is a display like any other.
+"""A SQL cell's result table is a display backed by an artifact, like any other.
 
-Round 7 found that it was the one display in the notebook backed by nothing.
-The rows were always right and so was every Python calculation over them; what
-went wrong was everything built on the display *record*. The preview was inline
-only, so:
-
-- a SQL cell reached as an upstream stayed ``idle`` showing nothing, because
-  staleness resolves a cell's display from its cached artifacts and there were
-  none;
-- one whose consumer had recomputed at a new parameter went on showing the
-  table from before the change;
-- ``save_cell_output`` refused it as "not backed by an artifact";
-- and an export rendered the query and dropped its result, because
-  ``markdown_text`` is stripped at persist time and re-fetched through the
-  artifact uri.
-
-One cause, four symptoms. These tests pin each of them.
+Without one, a SQL upstream stayed idle with no display, showed a table from a
+previous parameter, could not be saved by ``save_cell_output``, and exported
+without its result.
 """
 
 from __future__ import annotations
@@ -50,10 +37,8 @@ CONSUMER = "total = float(regional_revenue['net'].sum())\n{'total': total}\n"
 def orders(tmp_path) -> Path:
     """A widget feeding a SQL query feeding a Python cell.
 
-    The rows are chosen so the two filter settings differ in the table's *first*
-    row: at minimum 0 there are three regions, at 200 only two. A fixture whose
-    top row is the same either way cannot tell a refreshed display from a stale
-    one.
+    The two filter settings differ in the table's first row (three regions at 0, two
+    at 200), so a stale display is distinguishable from a refreshed one.
     """
     db = tmp_path / "orders.db"
     with sqlite3.connect(db) as conn:
@@ -102,9 +87,7 @@ def _display(session: Any, cell_id: str) -> Any:
 
 @pytest.mark.asyncio
 async def test_a_sql_cell_reached_as_an_upstream_shows_what_it_produced(orders):
-    """Running only the consumer materializes the query. The query cell used to
-    stay idle with no display, which reads as "never run" for a cell whose value
-    the consumer just used."""
+    """Running only the consumer leaves the query cell showing what it produced, not idle."""
     from strata.notebook.models import CellStatus
 
     session = _session(orders)
@@ -124,8 +107,7 @@ async def test_a_sql_cell_reached_as_an_upstream_shows_what_it_produced(orders):
 
 @pytest.mark.asyncio
 async def test_the_table_follows_the_parameter_it_was_run_at(orders):
-    """After the widget moves and the consumer recomputes, the query cell must
-    not still be showing the table from before the change."""
+    """After the widget moves and the consumer recomputes, the query shows the new table."""
     from strata.notebook.runtime_state import persist_cell_widget_values
 
     session = _session(orders)
@@ -147,7 +129,7 @@ async def test_the_table_follows_the_parameter_it_was_run_at(orders):
 
 @pytest.mark.asyncio
 async def test_the_table_is_an_artifact_a_caller_can_fetch(orders, tmp_path):
-    """``save_cell_output`` refused a SQL display: it had no artifact behind it."""
+    """``save_cell_output`` can save a SQL display because an artifact backs it."""
     from strata.notebook.ops import _save_blob
 
     session = _session(orders)
@@ -165,8 +147,7 @@ async def test_the_table_is_an_artifact_a_caller_can_fetch(orders, tmp_path):
 
 @pytest.mark.asyncio
 async def test_an_export_reads_the_table_back_off_disk(orders):
-    """``markdown_text`` is stripped when the display is persisted and re-fetched
-    through the uri, so a display with no uri exported as a query and no result."""
+    """An export re-fetches the table through its uri; ``markdown_text`` is not persisted."""
     from strata.notebook.export import export_notebook
 
     session = _session(orders)
@@ -182,9 +163,7 @@ async def test_an_export_reads_the_table_back_off_disk(orders):
 
 @pytest.mark.asyncio
 async def test_a_cache_hit_reuses_the_stored_table(orders):
-    """The query was not re-issued, so the display it rebuilt is the stored one.
-    Writing an identical blob under a new version on every run would grow the
-    store for nothing."""
+    """A cache hit reuses the stored table rather than writing an identical new version."""
     session = _session(orders)
     await _run(session, "q")
     first = _display(session, "q").artifact_uri
@@ -199,12 +178,10 @@ async def test_a_cache_hit_reuses_the_stored_table(orders):
 
 @pytest.mark.asyncio
 async def test_the_chain_behind_a_result_names_the_value_it_was_run_at(orders):
-    """A query binding ``:minimum_amount`` came back as a single step.
+    """The lineage behind a result names the bound parameter's artifact.
 
-    The bound variable's *hash* went into the cache key, which is what makes a
-    change recompute, but a hash identifies no artifact: with no input
-    reference recorded, the walk had nothing to follow and the parameter behind
-    the number was unrecoverable.
+    A hash of the bound value makes a change recompute, but identifies no artifact,
+    so without a recorded input reference the walk stops at one step.
     """
     from strata.notebook.mcp_server import _lineage
     from strata.notebook.session import SessionManager
@@ -223,12 +200,7 @@ async def test_the_chain_behind_a_result_names_the_value_it_was_run_at(orders):
 
 @pytest.mark.asyncio
 async def test_an_agent_setting_a_live_widget_gets_the_cascade_a_drag_gets(orders):
-    """``set_widget_value`` is documented as the same act as moving the slider.
-
-    It ran the widget and stopped there, so a ``# @live`` notebook that
-    auto-computes for a person left an agent looking at stale downstream cells
-    and the previous total.
-    """
+    """``set_widget_value`` on a ``# @live`` notebook cascades as a slider drag does."""
     from strata.notebook.mcp_server import _set_widget_value
     from strata.notebook.models import CellStatus
     from strata.notebook.session import SessionManager
@@ -249,9 +221,7 @@ async def test_an_agent_setting_a_live_widget_gets_the_cascade_a_drag_gets(order
 
 
 def test_an_untouched_control_reports_the_value_the_cell_runs_at(orders):
-    """``value: null`` for a control nobody has moved described the storage, not
-    the notebook: the widget executor falls back to the declared default, so
-    that default *is* the input the result came from."""
+    """An untouched control reports its declared default, the value the cell actually runs at."""
     from strata.notebook.ops import _cell_view
 
     session = _session(orders)

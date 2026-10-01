@@ -1,21 +1,10 @@
 """A provenance hit dispatches zero work.
 
-"You never recompute" is the product claim and the unit economics at once: a
-hit costs nothing to serve, which is why hit rate is margin rather than a
-feature. It has been structurally true for a long time and guarded by nothing —
-any future change that resolved a hit by *asking* something (re-reading an
-input, probing a worker, checking the shared store before the local one) would
-keep every existing test green while quietly making cache hits cost money.
-
-So these tests do not assert that a hit is fast. They assert it does not
-happen: no process spawned, no request sent. Timing would be a threshold to
-tune; absence is a fact.
-
-The instruments record rather than raise. An executor that catches broadly
-would swallow an exception thrown from a spawn and report a failed cell, which
-looks the same as "nothing was spawned" — and the last test here exists to
-prove the instrument fires at all, which it could not do if the mechanism were
-an exception the executor might eat.
+A hit resolved by asking something (re-reading an input, probing a worker, checking the
+shared store first) would keep every other test green while making hits cost money. So
+these tests assert absence, not speed: no process spawned, no request sent. The
+instruments record rather than raise, since an executor that catches broadly would turn a
+raised spawn into a failed cell.
 """
 
 from __future__ import annotations
@@ -34,11 +23,7 @@ SOURCE = "value = sum(range(2000))"
 
 
 def build_notebook(parent, name: str) -> NotebookSession:
-    """A two-cell notebook, so the upstream's output is actually stored.
-
-    A leaf cell keeps nothing in the artifact store, so it could never
-    demonstrate a provenance hit in the first place.
-    """
+    """A two-cell notebook, so the upstream's output is stored; a leaf cell could never hit."""
     notebook_dir = create_notebook(parent / name, name)
     add_cell_to_notebook(notebook_dir, "up", None)
     write_cell(notebook_dir, "up", SOURCE)
@@ -92,11 +77,9 @@ async def test_a_local_hit_spawns_nothing(tmp_path, monkeypatch):
 
 
 async def test_a_local_hit_asks_the_team_store_nothing(tmp_path, monkeypatch):
-    """Configured team cache, local hit — the shared store is never consulted.
+    """With a team cache configured, a local hit never consults the shared store.
 
-    The ordering is the whole point. A lookup before the local check would put
-    a network round-trip on the hot path of every cell run and, in a hosted
-    deployment, would bill for answering a question already answered locally.
+    A lookup before the local check would put a network round-trip on every cell run.
     """
     session = build_notebook(tmp_path, "with-team-store")
     monkeypatch.setattr(
@@ -124,9 +107,9 @@ async def test_a_local_hit_asks_the_team_store_nothing(tmp_path, monkeypatch):
 
 
 async def test_the_instruments_fire_when_a_cell_actually_runs(tmp_path, monkeypatch):
-    """The control. Without it, a bug that reported *every* run as a cache hit
-    would satisfy both tests above — they would pass by never running anything,
-    which is the exact outcome they exist to distinguish from."""
+    """The control: a bug reporting every run as a cache hit would pass the tests above by never
+    running anything.
+    """
     session = build_notebook(tmp_path, "edited")
     executor = CellExecutor(session)
 

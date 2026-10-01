@@ -1,11 +1,8 @@
 """Tests for the per-cell-test pytest plugin (cell_test_conftest.py).
 
-These run the plugin the way the cell-test runner will: stage an isolated run
-dir (conftest + inputs.pkl + cell_source.py + a test_*.py), invoke pytest as a
-subprocess with ``--confcutdir``, and read back ``results.json``. The headline
-assertion is that **assertion rewriting fires** — a failed ``assert`` carries
-the introspected diff, not a bare ``AssertionError`` — since that is the whole
-reason for the conftest-plugin approach.
+Each test stages a run dir as the runner does, runs pytest with ``--confcutdir`` and reads
+``results.json``. The headline: assertion rewriting fires, so a failed ``assert`` carries
+the introspected diff, not a bare ``AssertionError``.
 """
 
 from __future__ import annotations
@@ -84,11 +81,9 @@ def test_assertion_rewriting_fires(tmp_path):
 
 
 def test_failure_message_includes_captured_stdout(tmp_path):
-    """A print() before the failing assert is captured in the message, not lost.
+    """A print() before the failing assert is appended from ``report.capstdout``.
 
-    ``report.longrepr`` carries only the traceback + assert diff; the test's own
-    stdout/stderr is appended from ``report.capstdout`` so debugging output a test
-    emitted is visible in the UI.
+    ``report.longrepr`` alone has only the traceback and assert diff.
     """
     res = _run(
         tmp_path,
@@ -103,7 +98,7 @@ def test_failure_message_includes_captured_stdout(tmp_path):
 
 
 def test_passing_test_has_no_captured_output_noise(tmp_path):
-    """Captured output is only appended on failure — passing tests stay clean."""
+    """Captured output is appended only on failure."""
     res = _run(
         tmp_path,
         "x = 1\n",
@@ -129,9 +124,8 @@ def test_cell_source_error_is_an_error_not_a_fail(tmp_path):
 def test_collection_failure_is_an_error(tmp_path):
     """A syntax error in the test file is an error, not a silent zero.
 
-    The module fails to import, so no runtest report fires; the
-    ``pytest_collectreport`` hook is what keeps ``results.json`` from reading
-    as an all-pass "no tests".
+    No runtest report fires, so the ``pytest_collectreport`` hook keeps ``results.json`` from
+    reading as an all-pass "no tests".
     """
     res = _run(
         tmp_path,

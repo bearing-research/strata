@@ -1,22 +1,11 @@
 """What a cache hit hands back has to be the value its key identifies.
 
-Round 5 found three ways it was not:
-
-- A consumer of a ``@per_variant`` fan-out reads every variant's result, and
-  its cache key had nothing from any of them. The fan-out cell's URIs carry an
-  ``@`` in the id itself (``..._var_score@variant=triple@v=1``), the key
-  builder cut at the first ``@``, found no such artifact, and skipped the
-  input: any change to the fan-out came back as the old dict. Keying on the
-  one URI the cell records is still not enough for a ``@nocache`` fan-out,
-  where one instance can change while the recorded one does not, so the key
-  covers every instance the consumer reads.
-- A display output borrowed its metadata (the preview an agent reads) from
-  whatever the cell was showing, and only swapped in the matched artifact's
-  URI. Reverting a source to an earlier value hit that value's bytes and
-  reported the later value's preview.
-- A failed run clears the cell's display list, and the resolver only looked
-  for as many outputs as the cell currently showed, which was none. Recovering
-  through a cache hit returned success with the display missing.
+- A ``@per_variant`` fan-out consumer's key covers every instance it reads. Instance ids
+  carry an ``@`` of their own, and a ``@nocache`` instance can change while the recorded
+  one does not.
+- A display output's metadata (the preview an agent reads) comes from the matched
+  artifact, not from whatever the cell was showing.
+- A cache hit after a failed run, which cleared the display list, restores the displays.
 """
 
 from __future__ import annotations
@@ -150,9 +139,8 @@ def test_recovering_through_a_cache_hit_keeps_the_display(tmp_path: Path):
 def test_an_artifact_uri_is_parsed_at_its_last_version_marker():
     """A fan-out instance's id carries an ``@`` of its own.
 
-    Cutting at the first ``@`` named ``..._var_score``, an artifact that does
-    not exist, and every fan-out input hashed to nothing: a consumer's key
-    ignored the fan-out entirely.
+    Cutting at the first ``@`` names an artifact that does not exist, so a consumer's key
+    would ignore the fan-out.
     """
     uri = "strata://artifact/nb_x_cell_ev_var_score@variant=triple@v=3"
     assert NotebookSession._parse_artifact_uri(uri) == ("nb_x_cell_ev_var_score@variant=triple", 3)
@@ -165,10 +153,8 @@ def test_an_artifact_uri_is_parsed_at_its_last_version_marker():
 def test_a_revert_restores_every_display_the_reverted_run_produced(tmp_path: Path):
     """Promotion restores as many displays as the reverted run recorded.
 
-    ``A`` shows two outputs, ``C`` two others, then ``B`` only one. Reverting to
-    ``A`` found the cell showing one (``B``'s count) and promoted only the first
-    display, leaving the second slot on ``C``'s version: the variable came back
-    and the display set did not.
+    ``A`` shows two outputs, ``C`` two others, then ``B`` one. Reverting to ``A`` must not stop
+    at ``B``'s count and leave the second slot on ``C``'s version.
     """
 
     def source(value: int, note: str | None) -> str:
@@ -199,9 +185,8 @@ def test_a_revert_restores_every_display_the_reverted_run_produced(tmp_path: Pat
 def test_a_failed_rerun_stays_an_error_over_a_cached_success(tmp_path: Path):
     """A rerun can fail at the very key an earlier success is cached under.
 
-    The resolver now finds that success's displays even after a failure, so the
-    walk computes ``ready``. Until the cell is edited or runs again
-    successfully, the failure is what is true about it.
+    The resolver finds that success's displays, so the walk computes ``ready``; the failure
+    must still win until the cell is edited or succeeds again.
     """
     from strata.notebook.models import CellStatus
 
@@ -230,11 +215,8 @@ def test_a_failed_rerun_stays_an_error_over_a_cached_success(tmp_path: Path):
 def test_a_fresh_fanout_consumer_follows_every_instance(tmp_path: Path):
     """Why the key enumerates instances rather than trusting the recorded one.
 
-    Editing a variant moves every instance's key at once (they share the fan-out
-    cell's base), so for ordinary fan-outs the one URI the cell records is
-    enough once it parses. A ``# @nocache`` fan-out is keyed on content
-    instead, and there one instance can change while the recorded one does
-    not: here only the unrecorded variant reads a file that changes.
+    A ``# @nocache`` fan-out is keyed on content, so one instance can change while the
+    recorded one does not: here only the unrecorded variant reads a file that changes.
     """
     from strata.notebook.writer import set_variant_mode
 

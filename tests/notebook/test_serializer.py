@@ -116,16 +116,7 @@ class _SerializerMarkdownDisplay:
 
 @pytest.fixture(autouse=True)
 def _undo_cell_module_marking():
-    """Strip the cell-module marks the round-trip tests leave on this module.
-
-    ``_mark_as_cell_module`` stamps *this test module* as a cell module, and
-    deserializing a ``module/cell-instance`` artifact then walks that module
-    and sets ``__strata_cell_exported_class__`` on every class defined in it
-    (``serializer.py`` ``_load_cell_module``) — not just the one under test.
-    Left behind, every module-level class in this file is detected as a cell
-    instance for the rest of the session, so an unrelated test asserting
-    ``pickle/object`` passes or fails depending on what ran before it.
-    """
+    """Unmark this module's classes as cell exports so later tests don't depend on order."""
     yield
     module = sys.modules[__name__]
     module.__dict__.pop("__strata_cell_module__", None)
@@ -149,10 +140,7 @@ def _mark_as_cell_module(cls, module_source: str) -> None:
 
 
 class TestArrowSerialization:
-    """Test Arrow IPC serialization."""
-
     def test_serialize_dataframe(self):
-        """Test serializing a pandas DataFrame."""
         df = pd.DataFrame({"a": [1, 2, 3], "b": [4.0, 5.0, 6.0]})
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -165,7 +153,6 @@ class TestArrowSerialization:
             assert result["preview"] == [[1, 4.0], [2, 5.0], [3, 6.0]]
 
     def test_serialize_arrow_table(self):
-        """Test serializing a PyArrow Table."""
         table = pa.table({"x": [10, 20, 30], "y": ["a", "b", "c"]})
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -176,13 +163,10 @@ class TestArrowSerialization:
             assert result["columns"] == ["x", "y"]
 
     def test_roundtrip_pyarrow_table_stays_a_table(self):
-        """A pa.Table handed to the next cell must still be a pa.Table.
+        """A pa.Table handed to the next cell must still be a pa.Table, not pandas.
 
-        Every other table source stamps ``strata.arrow.source`` so the reader
-        can reconstruct the exact type; pyarrow values stamped only the shape,
-        so they fell through to the reader's ``to_pandas()`` default. A cell
-        that did ``t.column("a")`` on its upstream's table got
-        ``AttributeError: 'DataFrame' object has no attribute 'column'``.
+        Without the ``strata.arrow.source`` tag the reader falls back to
+        ``to_pandas()``, and a downstream ``t.column("a")`` raises AttributeError.
         """
         table = pa.table({"a": [1, 2], "b": ["x", "y"]})
 
@@ -206,8 +190,7 @@ class TestArrowSerialization:
         assert back.equals(batch)
 
     def test_roundtrip_empty_pyarrow_values(self):
-        """An empty table has no batches to take, so the RecordBatch path has
-        to rebuild one from the schema rather than index into an empty list."""
+        """An empty table has no batches, so the RecordBatch path rebuilds one from the schema."""
         table = pa.table({"a": pa.array([], type=pa.int64())})
         batch = pa.RecordBatch.from_pydict({"a": pa.array([], type=pa.int64())})
 
@@ -220,8 +203,7 @@ class TestArrowSerialization:
                 assert back.equals(value)
 
     def test_an_untagged_table_still_reads_back_as_pandas(self):
-        """Artifacts written before the source tag existed — and core scan
-        results, which carry no source — must keep their pandas behaviour."""
+        """Untagged artifacts (older ones, and core scan results) still read back as pandas."""
         from strata.notebook.serializer import (
             _SHAPE_TABLE,
             _stamp_shape,
@@ -233,13 +215,10 @@ class TestArrowSerialization:
         assert isinstance(_table_to_pandas_or_arrow(pa.table({"a": [1]})), pd.DataFrame)
 
     def test_json_encoding_is_not_used_when_it_would_change_the_value(self):
-        """``json.dumps`` coerces rather than failing, so the encode probe
-        can't see these.
+        """Values ``json.dumps`` would silently coerce take the pickle path instead.
 
-        Non-string dict keys become strings and tuples become lists, so a cell
-        that stored ``{1: "a"}`` handed the next one ``{"1": "a"}`` and a
-        ``counts[1]`` downstream raised KeyError. Both now take the pickle
-        path, which preserves them.
+        Non-string dict keys become strings and tuples become lists, so ``{1: "a"}``
+        would reach the next cell as ``{"1": "a"}`` and ``counts[1]`` would raise.
         """
         lossy = [
             {1: "a", 2: "b"},
@@ -261,9 +240,8 @@ class TestArrowSerialization:
     def test_json_stays_the_encoding_for_values_it_preserves(self):
         """The guard must not push ordinary values onto the pickle path.
 
-        NaN and Inf matter here: the JSON writer round-trips both, so they are
-        deliberately not treated as losses even though ``nan != nan`` would
-        make an equality-based probe say otherwise.
+        NaN and Inf round-trip through the JSON writer, so they are not losses even
+        though ``nan != nan`` would fool an equality-based probe.
         """
         with tempfile.TemporaryDirectory() as tmpdir:
             tmpdir = Path(tmpdir)
@@ -277,7 +255,6 @@ class TestArrowSerialization:
             assert back["x"] != back["x"]  # still NaN
 
     def test_roundtrip_dataframe(self):
-        """Test round-trip: serialize and deserialize a DataFrame."""
         df_orig = pd.DataFrame({"id": [1, 2, 3], "value": [1.5, 2.5, 3.5], "name": ["a", "b", "c"]})
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -296,7 +273,6 @@ class TestArrowSerialization:
             pd.testing.assert_frame_equal(df_loaded, df_orig)
 
     def test_serialize_arrow_with_nulls(self):
-        """Test Arrow serialization with null values."""
         df = pd.DataFrame({"a": [1, None, 3], "b": [None, 2.0, 3.0]})
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -313,7 +289,6 @@ class TestArrowSerialization:
             assert pd.isna(result.iloc[0, 1])
 
     def test_arrow_json_fallback_roundtrips_dataframe_after_pyarrow_error(self, monkeypatch):
-        """PyArrow conversion errors should fall back to a JSON-backed table artifact."""
         df = pd.DataFrame(
             {
                 "when": [date(2024, 1, 2), date(2024, 1, 3)],
@@ -349,7 +324,6 @@ class TestArrowSerialization:
             ]
 
     def test_arrow_json_fallback_roundtrips_series(self, monkeypatch):
-        """Series should keep Series shape and name through the JSON fallback path."""
         series = pd.Series([10, 20, 30], name="target")
 
         def _raise_arrow_value_error(value, output_dir, variable_name):
@@ -367,7 +341,6 @@ class TestArrowSerialization:
             assert loaded.tolist() == [10, 20, 30]
 
     def test_deserialize_arrow_json_fallback_without_pyarrow(self, monkeypatch):
-        """JSON-backed Arrow fallbacks should remain readable even if pyarrow is unavailable."""
         fallback_path = None
 
         df = pd.DataFrame({"label": ["a", "b"]})
@@ -399,10 +372,7 @@ class TestArrowSerialization:
 
 
 class TestJsonSerialization:
-    """Test JSON serialization."""
-
     def test_serialize_dict(self):
-        """Test serializing a dictionary."""
         data = {"x": 1, "y": "hello", "z": [1, 2, 3]}
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -413,7 +383,6 @@ class TestJsonSerialization:
             assert result["preview"] == data
 
     def test_serialize_list(self):
-        """Test serializing a list."""
         data = [1, 2, 3, "hello"]
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -423,7 +392,6 @@ class TestJsonSerialization:
             assert result["preview"] == data
 
     def test_serialize_scalar(self):
-        """Test serializing scalar values."""
         with tempfile.TemporaryDirectory() as tmpdir:
             result = serialize_value(42, Path(tmpdir), "int_val")
             assert result["content_type"] == "json/object"
@@ -435,7 +403,6 @@ class TestJsonSerialization:
             assert result["content_type"] == "json/object"
 
     def test_roundtrip_dict(self):
-        """Test round-trip for dictionary."""
         data_orig = {"a": 1, "b": "test", "c": [1, 2, 3], "d": None}
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -449,10 +416,7 @@ class TestJsonSerialization:
 
 
 class TestImageSerialization:
-    """Test PNG display serialization."""
-
     def test_serialize_repr_png_value(self):
-        """Values exposing _repr_png_ should serialize as image/png."""
         value = _SerializerPngDisplay()
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -463,7 +427,6 @@ class TestImageSerialization:
             assert result["inline_data_url"].startswith("data:image/png;base64,")
 
     def test_serialize_repr_markdown_value(self):
-        """Values exposing _repr_markdown_ should serialize as text/markdown."""
         value = _SerializerMarkdownDisplay()
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -474,7 +437,6 @@ class TestImageSerialization:
             assert result["markdown_text"] == "# Title\n\n- one\n- two"
 
     def test_serialize_markdown_helper(self):
-        """The public Markdown helper should opt into markdown display."""
         value = Markdown("## Heading")
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -485,7 +447,6 @@ class TestImageSerialization:
             assert deserialize_value(result["content_type"], file_path) == "## Heading"
 
     def test_roundtrip_nested(self):
-        """Test round-trip for nested structure."""
         data_orig = {
             "users": [
                 {"id": 1, "name": "Alice"},
@@ -506,10 +467,7 @@ class TestImageSerialization:
 
 
 class TestPickleSerialization:
-    """Test pickle serialization."""
-
     def test_serialize_custom_object(self):
-        """Test serializing a custom object."""
         obj = _PickleTestCustomClass(42)
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -523,7 +481,6 @@ class TestPickleSerialization:
             assert result["bytes"] > 0
 
     def test_roundtrip_custom_object(self):
-        """Test round-trip for custom object."""
         obj_orig = _PickleTestMyModel("test", 123)
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -536,7 +493,6 @@ class TestPickleSerialization:
             assert obj_loaded == obj_orig
 
     def test_pickle_serialization_uses_codec_envelope(self):
-        """Pickle/object files should store a codec envelope for future backends."""
         obj = _PickleTestCustomClass(42)
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -553,7 +509,6 @@ class TestPickleSerialization:
             assert isinstance(payload["payload"], bytes)
 
     def test_deserialize_legacy_raw_pickle(self):
-        """Legacy raw-pickle files should remain readable after codec abstraction."""
         obj = _PickleTestMyModel("legacy", 7)
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -566,7 +521,6 @@ class TestPickleSerialization:
             assert loaded == obj
 
     def test_roundtrip_cell_instance_without_instance_state(self):
-        """module/cell-instance should restore plain class-var instances with no __dict__ state."""
         person = _SerializerNoStatePerson()
         _mark_as_cell_module(
             _SerializerNoStatePerson,
@@ -587,7 +541,6 @@ class TestPickleSerialization:
             assert str(loaded) == "John:20"
 
     def test_roundtrip_cell_instance_with_slots(self):
-        """module/cell-instance should preserve slot-only instance state."""
         person = _SerializerSlotPerson("Ada", 10)
         _mark_as_cell_module(
             _SerializerSlotPerson,
@@ -610,7 +563,6 @@ class TestPickleSerialization:
             assert str(loaded) == "Ada:10"
 
     def test_roundtrip_cell_instance_with_inherited_slots(self):
-        """module/cell-instance should preserve slots defined across base classes."""
         person = _SerializerDerivedSlotPerson("Grace", 30)
         _mark_as_cell_module(
             _SerializerDerivedSlotPerson,
@@ -639,7 +591,6 @@ class TestPickleSerialization:
             assert str(loaded) == "Grace:30"
 
     def test_roundtrip_cell_instance_with_custom_state_methods(self):
-        """module/cell-instance should respect custom __getstate__/__setstate__."""
         person = _SerializerCustomStatePerson("Lin", 41)
         _mark_as_cell_module(
             _SerializerCustomStatePerson,
@@ -669,8 +620,6 @@ class TestPickleSerialization:
             assert str(loaded) == "Lin:41:True"
 
     def test_serialize_unpicklable_returns_error(self):
-        """Test that unpicklable objects return an error result."""
-
         # Lambdas defined locally can't be pickled
         def func(x):
             return x + 1
@@ -681,7 +630,6 @@ class TestPickleSerialization:
             assert result.get("error") is not None or result["content_type"] == "pickle/object"
 
     def test_deserialize_invalid_cell_module_descriptor(self):
-        """Corrupted module/cell descriptors should fail with a clear error."""
         with tempfile.TemporaryDirectory() as tmpdir:
             tmpdir = Path(tmpdir)
             file_path = tmpdir / "broken.cell_module.json"
@@ -694,7 +642,6 @@ class TestPickleSerialization:
                 deserialize_value("module/cell", file_path)
 
     def test_deserialize_missing_cell_module_symbol(self):
-        """Missing exported symbol names should raise a clear error."""
         with tempfile.TemporaryDirectory() as tmpdir:
             tmpdir = Path(tmpdir)
             file_path = tmpdir / "broken.cell_module.json"
@@ -713,7 +660,6 @@ class TestPickleSerialization:
                 deserialize_value("module/cell", file_path)
 
     def test_deserialize_invalid_cell_instance_payload(self):
-        """Corrupted module/cell-instance payloads should fail clearly."""
         with tempfile.TemporaryDirectory() as tmpdir:
             tmpdir = Path(tmpdir)
             file_path = tmpdir / "broken.cell_instance.pickle"
@@ -724,7 +670,6 @@ class TestPickleSerialization:
                 deserialize_value("module/cell-instance", file_path)
 
     def test_deserialize_invalid_cell_instance_state_payload(self):
-        """Invalid codec-tagged state payloads should fail clearly."""
         with tempfile.TemporaryDirectory() as tmpdir:
             tmpdir = Path(tmpdir)
             file_path = tmpdir / "broken.cell_instance.pickle"
@@ -751,36 +696,29 @@ class TestPickleSerialization:
 
 
 class TestContentTypeDetection:
-    """Test content type detection."""
-
     def test_detect_dataframe(self):
-        """Detect DataFrame as arrow/ipc."""
         from strata.notebook.serializer import detect_content_type
 
         df = pd.DataFrame({"a": [1, 2, 3]})
         assert detect_content_type(df) == "arrow/ipc"
 
     def test_detect_arrow_table(self):
-        """Detect Arrow Table as arrow/ipc."""
         from strata.notebook.serializer import detect_content_type
 
         table = pa.table({"a": [1, 2, 3]})
         assert detect_content_type(table) == "arrow/ipc"
 
     def test_detect_dict(self):
-        """Detect dict as json/object."""
         from strata.notebook.serializer import detect_content_type
 
         assert detect_content_type({"a": 1}) == "json/object"
 
     def test_detect_list(self):
-        """Detect list as json/object."""
         from strata.notebook.serializer import detect_content_type
 
         assert detect_content_type([1, 2, 3]) == "json/object"
 
     def test_detect_scalar(self):
-        """Detect scalars as json/object."""
         from strata.notebook.serializer import detect_content_type
 
         assert detect_content_type(42) == "json/object"
@@ -788,7 +726,6 @@ class TestContentTypeDetection:
         assert detect_content_type(True) == "json/object"
 
     def test_detect_custom_object(self):
-        """Detect custom object as pickle/object."""
         from strata.notebook.serializer import detect_content_type
 
         class MyClass:
@@ -797,7 +734,6 @@ class TestContentTypeDetection:
         assert detect_content_type(MyClass()) == "pickle/object"
 
     def test_detect_ndarray_goes_to_arrow_ipc(self):
-        """Unified codec: ndarray detects as arrow/ipc, not tensor/arrow."""
         import numpy as np
 
         from strata.notebook.serializer import detect_content_type
@@ -806,7 +742,6 @@ class TestContentTypeDetection:
         assert detect_content_type(np.zeros((2, 3))) == "arrow/ipc"
 
     def test_detect_numpy_scalar_goes_to_arrow_ipc(self):
-        """numpy scalars route through the typed arrow/ipc codec."""
         import numpy as np
 
         from strata.notebook.serializer import detect_content_type
@@ -815,7 +750,6 @@ class TestContentTypeDetection:
         assert detect_content_type(np.float64(1.5)) == "arrow/ipc"
 
     def test_detect_typed_primitives_go_to_arrow_ipc(self):
-        """Typed Python primitives route through arrow/ipc for fidelity."""
         from datetime import datetime, timedelta
         from uuid import uuid4
 
@@ -935,8 +869,7 @@ class TestUnifiedArrowCodec:
             assert list(back) == [1, 2, 3]
 
     def test_roundtrip_series_falsy_and_typed_names(self):
-        """`str(name or "")` collapsed falsy names (0, "", False) to None and
-        stringified ints — the exact name (value AND type) must survive."""
+        """Falsy names (0, "", False) and int names survive with value and type intact."""
         for name in (0, "", False, 5, None, 2.5):
             with tempfile.TemporaryDirectory() as tmp:
                 s = pd.Series([1, 2], name=name)
@@ -949,10 +882,7 @@ class TestUnifiedArrowCodec:
 
 
 class TestLargeDataFrames:
-    """Test serialization of larger DataFrames."""
-
     def test_serialize_large_dataframe(self):
-        """Test serializing a larger DataFrame (1000 rows)."""
         df = pd.DataFrame(
             {
                 "id": range(1000),
@@ -979,14 +909,10 @@ class TestLargeDataFrames:
 
 
 class TestRdsArtifactRefusal:
-    """``application/x-r-rds`` artifacts are R-only — Python deserialization must fail loudly.
+    """``application/x-r-rds`` artifacts are R-only: Python deserialization fails loudly.
 
-    The harness.R fallback tier produces RDS blobs (saveRDS) for any
-    value that isn't a data.frame/tibble or a JSON-able scalar/list.
-    Python has no RDS reader, so the dispatcher's job is to surface a
-    structured error pointing the user back to R for an Arrow re-export
-    instead of throwing a confusing "Unknown content type" or returning
-    raw bytes.
+    Python has no RDS reader, so the error must point the user back to R for an
+    Arrow re-export rather than say "Unknown content type" or return raw bytes.
     """
 
     def test_content_type_registered(self):
@@ -1030,8 +956,7 @@ class TestRdsArtifactRefusal:
 
 
 class TestPolarsSerialization:
-    """polars DataFrames / Series route through the unified arrow/ipc codec
-    and round-trip back to polars (degrading to pandas when polars is absent)."""
+    """polars values round-trip through arrow/ipc, degrading to pandas when polars is absent."""
 
     def test_detect_polars_dataframe_goes_to_arrow_ipc(self):
         pl = pytest.importorskip("polars")
@@ -1070,8 +995,7 @@ class TestPolarsSerialization:
         assert loaded.to_list() == [10, 20, 30]
 
     def test_polars_degrades_to_pandas_when_polars_absent(self, monkeypatch):
-        """A polars-sourced artifact stays readable as pandas when the reader
-        has no polars — better than pickle, which would need polars."""
+        """Pandas beats pickle here: unpickling a polars value would need polars."""
         pl = pytest.importorskip("polars")
         orig = pl.DataFrame({"a": [1, 2], "b": [3, 4]})
 
@@ -1164,15 +1088,10 @@ def fake_jax(monkeypatch):
 
 @pytest.fixture
 def fake_jax_x64(monkeypatch):
-    """A jax whose ``asarray`` narrows 64-bit dtypes when x64 is off.
+    """A jax whose ``asarray`` silently narrows 64-bit dtypes while ``mod.x64`` is False.
 
-    ``jax_enable_x64`` is off by default and is read once, when jax is first
-    imported, so within one process it is simply on or off. With it off,
-    ``jnp.asarray`` silently returns float32 for a float64 input — no warning,
-    no error, plausible-looking values. ``mod.x64`` flips it so one test can
-    write where it was on and read where it is off, which is the real shape of
-    the bug: a producing cell configured for x64 and a reading process that
-    imported jax before the notebook's ``[env]`` was applied.
+    Flipping ``mod.x64`` models the real bug: x64 on where a cell wrote, off in a reader
+    that imported jax before the notebook's ``[env]`` applied.
     """
     import sys
     import types
@@ -1227,14 +1146,9 @@ def fake_jax_x64(monkeypatch):
 class TestJaxPrecisionGuard:
     """What a cell stores is what the next cell receives.
 
-    A 64-bit jax.Array can only be created where x64 was enabled, so reading
-    one back somewhere it is off would hand the consumer a different value
-    than the producer stored. x64 is settable after import, so the reader
-    turns it on rather than narrowing the value or refusing it.
-
-    Complex arrays are included because they are on this path now: Arrow has
-    no complex type, so they used to pickle, which records no dtype and left
-    the reader nothing to check or repair.
+    A 64-bit jax.Array exists only where x64 was enabled; x64 is settable after
+    import, so the reader turns it on rather than narrowing or refusing. Complex
+    arrays are covered because Arrow has no complex type and they ride this path.
     """
 
     @pytest.mark.parametrize("dtype", ["float64", "int64", "complex128"])
@@ -1258,8 +1172,7 @@ class TestJaxPrecisionGuard:
     def test_a_dtype_jax_cannot_represent_raises_rather_than_narrowing(
         self, fake_jax_x64, tmp_path
     ):
-        """The backstop: if enabling x64 does not repair it, do not hand back
-        a quietly narrowed value."""
+        """The backstop: if enabling x64 does not repair it, never return a narrowed value."""
         import numpy as np
 
         from strata.notebook import serializer
@@ -1277,11 +1190,9 @@ class TestJaxPrecisionGuard:
         assert excinfo.value.reconstructed_dtype == "float32"
 
     def test_throwing_the_switch_is_reported(self, fake_jax_x64, tmp_path, monkeypatch):
-        """``jax_enable_x64`` has no per-array form, so repairing one value
-        changes the process. In the warm pool and the batch that process runs
-        the cells after it too, and their provenance does not record which
-        width they got -- so the author has to be told, and told what to do
-        instead: name it in the notebook's env, where it is hashed.
+        """Flipping x64 changes the whole process, and later cells' provenance does not record it.
+
+        So the author is told, and pointed at the notebook's env, where it is hashed.
         """
         import numpy as np
 
@@ -1303,7 +1214,7 @@ class TestJaxPrecisionGuard:
     def test_a_reader_that_never_needed_it_reports_nothing(
         self, fake_jax_x64, tmp_path, monkeypatch
     ):
-        """Or the note appears for notebooks the switch was never thrown for."""
+        """Otherwise the note would appear in notebooks that never needed the switch."""
         import numpy as np
 
         from strata.notebook import serializer
@@ -1336,11 +1247,8 @@ class TestJaxPrecisionGuard:
 class TestComplexArrayEncoding:
     """Complex arrays travel as interleaved real/imag on the tensor path.
 
-    Arrow has no complex type, so they used to fall back to ``pickle/object``.
-    That round-trips a dtype correctly only as long as the reading process
-    agrees, and it records nothing the reader could check — so a complex128
-    read back under a jax without x64 became complex64 with no evidence left
-    that anything had changed.
+    Pickle records no dtype, so a complex128 read under a jax without x64 would
+    become complex64 with no evidence of the change.
     """
 
     @pytest.mark.parametrize("dtype", ["complex64", "complex128"])
@@ -1361,8 +1269,7 @@ class TestComplexArrayEncoding:
 
 
 class TestTensorLibrarySerialization:
-    """torch / jax arrays route through the arrow tensor codec and round-trip
-    back to their origin type via the _META_SOURCE tag."""
+    """torch and jax arrays round-trip to their origin type via the _META_SOURCE tag."""
 
     def test_detect_torch_tensor_goes_to_arrow_ipc(self, fake_torch):
         import numpy as np
@@ -1436,9 +1343,8 @@ class TestArrowTypeRegistry:
 class _CapsuleOnlyTable:
     """A table type pyarrow has never heard of, exporting only the capsule.
 
-    Stands in for duckdb / cudf / ibis / datafusion: the point is that nothing
-    in the registry names this class, so if it serializes as Arrow it did so
-    through ``_matches_arrow_capsule`` alone.
+    Nothing in the registry names it, so serializing as Arrow proves
+    ``_matches_arrow_capsule`` alone did the routing.
     """
 
     def __init__(self, table):
@@ -1449,13 +1355,10 @@ class _CapsuleOnlyTable:
 
 
 class _HostileProxy:
-    """A stand-in for a detached-session proxy or lazy remote handle.
+    """A stand-in for a detached-session proxy whose ``__getattr__`` raises RuntimeError.
 
-    Its ``__getattr__`` raises ``RuntimeError``, not ``AttributeError``, which
-    is what makes an instance-level ``hasattr`` probe dangerous rather than
-    merely wasteful: ``hasattr`` swallows only ``AttributeError``, so anything
-    else escapes. That is also what gives the test its teeth — an instance-level
-    probe would raise out of the assertion rather than return the wrong answer.
+    ``hasattr`` swallows only AttributeError, so an instance-level probe would
+    raise out of the assertion instead of returning the wrong answer.
     """
 
     def __getattr__(self, name):
@@ -1465,9 +1368,8 @@ class _HostileProxy:
 class _DeviceArrayStub:
     """A dlpack exporter whose buffer lives somewhere numpy cannot read.
 
-    Module level, not nested in the test: the pickle fallback is the assertion,
-    and a locally-defined class exercises cloudpickle's by-value path instead
-    of the by-reference one a real cell variable would take.
+    Module level so the pickle fallback takes cloudpickle's by-reference path, as
+    a real cell variable would.
     """
 
     def __dlpack__(self, *args, **kwargs):
@@ -1494,9 +1396,7 @@ class _DlpackOnlyArray:
 def _capture_serializer_logs():
     """Collect this module's log records.
 
-    ``caplog`` cannot see them: ``configure_logging`` sets ``propagate = False``
-    on the ``strata`` logger, so records never reach the root handler pytest
-    installs. Attaching to the module's own logger is the way in.
+    ``caplog`` cannot see them: the ``strata`` logger sets ``propagate = False``.
     """
     records: list[logging.LogRecord] = []
     logger = logging.getLogger("strata.notebook.serializer")
@@ -1510,10 +1410,9 @@ def _capture_serializer_logs():
 
 
 class _CountingCapsuleTable:
-    """A capsule exporter that counts how often its stream is pulled.
+    """A capsule exporter that counts stream pulls, standing in for a lazy query handle.
 
-    Stands in for a lazy query handle: every conversion re-runs the query, so
-    the count is what says whether a value was written once or twice.
+    The count says whether a value was written once or twice.
     """
 
     def __init__(self, table):
@@ -1759,7 +1658,7 @@ class TestGenericArrowProtocols:
 
 
 def _arrow_blob(value, name="v"):
-    """Serialize *value* the way the harness does and return the raw blob bytes."""
+    """Serialize *value* the way the harness does and return the blob bytes."""
     with tempfile.TemporaryDirectory() as tmpdir:
         meta = serialize_value(value, Path(tmpdir), name)
         return (Path(tmpdir) / meta["file"]).read_bytes()
@@ -1829,7 +1728,7 @@ class TestReadTablePage:
 
 
 class TestReadTablePageFiltering:
-    """Filter + search narrow the frame before paging; total reflects it."""
+    """Filter and search narrow the frame before paging; total reflects it."""
 
     def _blob(self):
         df = pd.DataFrame(

@@ -1,9 +1,4 @@
-"""Tests for artifact lineage and dependents endpoints.
-
-These tests verify:
-1. GET /v1/artifacts/{id}/v/{version}/lineage - Input dependency traversal
-2. GET /v1/artifacts/{id}/v/{version}/dependents - Reverse dependency lookup
-"""
+"""The artifact lineage and dependents endpoints."""
 
 import httpx
 import pyarrow as pa
@@ -14,7 +9,7 @@ from tests.conftest import run_server_with_context, table_to_ipc_bytes
 
 @pytest.fixture
 def lineage_server(tmp_path):
-    """Start a server in personal mode for lineage testing."""
+    """A personal-mode server for lineage tests."""
     cache_dir = tmp_path / "cache"
     artifact_dir = tmp_path / "artifacts"
     cache_dir.mkdir()
@@ -25,12 +20,9 @@ def lineage_server(tmp_path):
 
 
 def create_artifact(base_url: str, inputs: list[str], executor: str = "test") -> dict:
-    """Persist an artifact via PUT /v1/artifacts, returning artifact info.
+    """Persist an artifact via PUT /v1/artifacts and return its info.
 
-    The personal-mode build-spec → upload → finalize protocol was replaced
-    by the embedded build runner; lineage fixtures persist their tables
-    through the direct-put path (same provenance/lineage substrate). Each
-    call salts params with the input list so distinct fixtures don't dedup.
+    Params are salted with the input list so distinct fixtures do not dedup.
     """
     import json as json_module
     import re
@@ -62,10 +54,7 @@ def create_artifact(base_url: str, inputs: list[str], executor: str = "test") ->
 
 
 class TestArtifactLineage:
-    """Tests for the artifact lineage endpoint."""
-
     def test_lineage_single_artifact_no_inputs(self, lineage_server):
-        """Lineage of artifact with no inputs returns just the root node."""
         base_url = lineage_server["base_url"]
 
         artifact = create_artifact(base_url, inputs=[])
@@ -88,7 +77,7 @@ class TestArtifactLineage:
         assert root_node["artifact_id"] == artifact["artifact_id"]
 
     def test_lineage_with_table_input(self, lineage_server):
-        """Lineage of artifact with table input shows table as leaf node."""
+        """A table input appears as a leaf node."""
         base_url = lineage_server["base_url"]
 
         table_uri = "file:///warehouse#db.events"
@@ -113,7 +102,6 @@ class TestArtifactLineage:
         assert artifact["artifact_id"] in edge["to_uri"]
 
     def test_lineage_with_artifact_input(self, lineage_server):
-        """Lineage of artifact with artifact input shows both artifacts."""
         base_url = lineage_server["base_url"]
 
         base_artifact = create_artifact(base_url, inputs=["file:///warehouse#db.base"])
@@ -140,7 +128,7 @@ class TestArtifactLineage:
         assert base_artifact["artifact_uri"] in data["direct_inputs"][0]
 
     def test_lineage_with_named_artifact_input(self, lineage_server):
-        """Named artifact inputs should traverse to the resolved artifact lineage."""
+        """A named artifact input traverses to the resolved artifact's lineage."""
         base_url = lineage_server["base_url"]
 
         base_artifact = create_artifact(base_url, inputs=["file:///warehouse#db.base"])
@@ -172,7 +160,6 @@ class TestArtifactLineage:
         assert data["direct_inputs"] == ["strata://name/shared-base"]
 
     def test_lineage_max_depth(self, lineage_server):
-        """Lineage respects max_depth parameter."""
         base_url = lineage_server["base_url"]
 
         # Chain: table -> artifact1 -> artifact2 -> artifact3
@@ -191,7 +178,6 @@ class TestArtifactLineage:
         assert data["depth"] <= 1
 
     def test_lineage_not_found(self, lineage_server):
-        """Lineage returns 404 for non-existent artifact."""
         base_url = lineage_server["base_url"]
 
         resp = httpx.get(f"{base_url}/v1/artifacts/nonexistent-id/v/1/lineage")
@@ -199,10 +185,7 @@ class TestArtifactLineage:
 
 
 class TestArtifactDependents:
-    """Tests for the artifact dependents endpoint."""
-
     def test_dependents_no_dependents(self, lineage_server):
-        """Artifact with no dependents returns empty list."""
         base_url = lineage_server["base_url"]
 
         artifact = create_artifact(base_url, inputs=[])
@@ -219,7 +202,6 @@ class TestArtifactDependents:
         assert data["total_count"] == 0
 
     def test_dependents_single_dependent(self, lineage_server):
-        """Find artifact that uses another artifact as input."""
         base_url = lineage_server["base_url"]
 
         base_artifact = create_artifact(base_url, inputs=["file:///warehouse#db.source"])
@@ -245,7 +227,6 @@ class TestArtifactDependents:
         assert dep_info["transform_ref"] == "dependent_transform"
 
     def test_dependents_multiple_dependents(self, lineage_server):
-        """Find multiple artifacts that use the same artifact as input."""
         base_url = lineage_server["base_url"]
 
         base_artifact = create_artifact(base_url, inputs=["file:///warehouse#db.source"])
@@ -273,7 +254,6 @@ class TestArtifactDependents:
         assert dep2["artifact_id"] in dep_ids
 
     def test_dependents_limit(self, lineage_server):
-        """Dependents respects limit parameter."""
         base_url = lineage_server["base_url"]
 
         base_artifact = create_artifact(base_url, inputs=[])
@@ -296,7 +276,6 @@ class TestArtifactDependents:
         assert len(data["dependents"]) == 2
 
     def test_dependents_not_found(self, lineage_server):
-        """Dependents returns 404 for non-existent artifact."""
         base_url = lineage_server["base_url"]
 
         resp = httpx.get(f"{base_url}/v1/artifacts/nonexistent-id/v/1/dependents")
@@ -304,10 +283,7 @@ class TestArtifactDependents:
 
 
 class TestArtifactStoreLineageMethods:
-    """Unit tests for ArtifactStore lineage methods."""
-
     def test_find_dependents_method(self, tmp_path):
-        """Test ArtifactStore.find_dependents directly."""
         from strata.artifact_store import ArtifactStore, TransformSpec
 
         store = ArtifactStore(tmp_path)
@@ -350,7 +326,7 @@ class TestArtifactStoreLineageMethods:
         assert "base-123@v=1" in input_ver
 
     def test_find_dependents_uses_exact_artifact_match(self, tmp_path):
-        """Prefix-sharing artifact IDs should not confuse reverse dependency lookups."""
+        """Artifact IDs sharing a prefix must not confuse reverse lookups."""
         from strata.artifact_store import ArtifactStore, TransformSpec
 
         store = ArtifactStore(tmp_path)
@@ -394,7 +370,6 @@ class TestArtifactStoreLineageMethods:
         assert input_ver == "base-1@v=1"
 
     def test_get_name_for_artifact_method(self, tmp_path):
-        """Test ArtifactStore.get_name_for_artifact directly."""
         from strata.artifact_store import ArtifactStore, TransformSpec
 
         store = ArtifactStore(tmp_path)

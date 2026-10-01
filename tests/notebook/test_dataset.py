@@ -1,4 +1,4 @@
-"""``@dataset``: a registry name, resolved to one version, as a cell input. Item 50."""
+"""``@dataset``: a registry name, resolved to one version, as a cell input."""
 
 from __future__ import annotations
 
@@ -70,8 +70,7 @@ class TestAnnotation:
 
 @pytest.fixture
 def notebook(tmp_path, notebook_personal_server):
-    """A notebook whose first cell reads a dataset and whose later cells consume
-    what it computed. The server's own store is the registry."""
+    """A notebook whose first cell reads a dataset; the server's own store is the registry."""
     from strata.notebook.parser import parse_notebook
     from strata.notebook.session import NotebookSession
     from strata.notebook.writer import add_cell_to_notebook, create_notebook, write_cell

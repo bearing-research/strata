@@ -4,10 +4,7 @@ import pytest
 
 
 class TestWindowStats:
-    """Tests for WindowStats dataclass."""
-
     def test_hit_rate_calculation(self):
-        """Test hit rate calculation."""
         from strata.cache_stats import WindowStats
 
         stats = WindowStats(
@@ -24,7 +21,7 @@ class TestWindowStats:
         assert stats.miss_rate == 0.2
 
     def test_zero_division(self):
-        """Test hit rate with no accesses."""
+        """Hit rate with no accesses."""
         from strata.cache_stats import WindowStats
 
         stats = WindowStats(
@@ -41,7 +38,6 @@ class TestWindowStats:
         assert stats.miss_rate == 0.0
 
     def test_to_dict(self):
-        """Test conversion to dict."""
         from strata.cache_stats import WindowStats
 
         stats = WindowStats(
@@ -63,10 +59,7 @@ class TestWindowStats:
 
 
 class TestCacheStatsHistogram:
-    """Tests for CacheStatsHistogram."""
-
     def test_initial_state(self):
-        """Test histogram starts empty."""
         from strata.cache_stats import CacheStatsHistogram
 
         histogram = CacheStatsHistogram()
@@ -77,7 +70,6 @@ class TestCacheStatsHistogram:
         assert stats["total"] == 0
 
     def test_record_hit(self):
-        """Test recording a cache hit."""
         from strata.cache_stats import CacheStatsHistogram
 
         histogram = CacheStatsHistogram()
@@ -89,7 +81,6 @@ class TestCacheStatsHistogram:
         assert stats["bytes_from_cache"] == 1024
 
     def test_record_miss(self):
-        """Test recording a cache miss."""
         from strata.cache_stats import CacheStatsHistogram
 
         histogram = CacheStatsHistogram()
@@ -101,7 +92,6 @@ class TestCacheStatsHistogram:
         assert stats["bytes_from_storage"] == 2048
 
     def test_hit_rate_calculation(self):
-        """Test hit rate over multiple accesses."""
         from strata.cache_stats import CacheStatsHistogram
 
         histogram = CacheStatsHistogram()
@@ -117,7 +107,6 @@ class TestCacheStatsHistogram:
         assert stats["hit_rate"] == 0.75
 
     def test_window_stats(self):
-        """Test getting stats for a time window."""
         from strata.cache_stats import CacheStatsHistogram
 
         histogram = CacheStatsHistogram()
@@ -134,7 +123,6 @@ class TestCacheStatsHistogram:
         assert window_stats.bytes_from_storage == 200
 
     def test_all_window_stats(self):
-        """Test getting stats for all windows."""
         from strata.cache_stats import CacheStatsHistogram
 
         histogram = CacheStatsHistogram(windows=[60, 300, 3600])
@@ -148,7 +136,7 @@ class TestCacheStatsHistogram:
         assert all_stats[2].window_seconds == 3600
 
     def test_table_stats(self):
-        """Test per-table statistics."""
+        """Per-table statistics."""
         from strata.cache_stats import CacheStatsHistogram
 
         histogram = CacheStatsHistogram()
@@ -168,7 +156,6 @@ class TestCacheStatsHistogram:
         assert table_stats[1]["total"] == 1
 
     def test_summary(self):
-        """Test getting full summary."""
         from strata.cache_stats import CacheStatsHistogram
 
         histogram = CacheStatsHistogram()
@@ -184,7 +171,6 @@ class TestCacheStatsHistogram:
         assert summary["lifetime"]["misses"] == 1
 
     def test_reset(self):
-        """Test resetting the histogram."""
         from strata.cache_stats import CacheStatsHistogram
 
         histogram = CacheStatsHistogram()
@@ -211,10 +197,7 @@ class TestCacheStatsHistogram:
 
 
 class TestGlobalHistogram:
-    """Tests for global histogram functions."""
-
     def test_get_and_reset(self):
-        """Test getting and resetting global histogram."""
         from strata.cache_stats import get_cache_histogram, reset_cache_histogram
 
         reset_cache_histogram()
@@ -230,11 +213,9 @@ class TestGlobalHistogram:
 
 
 class TestCacheHistogramIntegration:
-    """Integration tests for cache histogram with server."""
-
     @pytest.mark.asyncio
     async def test_histogram_endpoint(self, tmp_path):
-        """Test /v1/cache/histogram endpoint."""
+        """/v1/cache/histogram endpoint."""
         from httpx import ASGITransport, AsyncClient
 
         import strata.server as server_module
@@ -280,12 +261,8 @@ class TestCacheHistogramIntegration:
 class TestWindowsCoverTheirFullDuration:
     """A window must count everything in it, not everything still buffered.
 
-    The histogram used to retain the last 10,000 individual events and answer
-    every window by scanning that buffer. One event is recorded per row group
-    rather than per request, so a busy server drained the buffer in a handful
-    of scans -- the "1 hour" window then reported a few seconds of traffic
-    under an hour's label, and the 5-minute and 1-hour windows returned
-    identical numbers because both were just "everything buffered".
+    One event is recorded per row group, so an event buffer drains in a few scans on a busy server
+    and every window then reports the same few seconds of traffic.
     """
 
     def test_a_window_counts_more_than_the_old_event_cap(self):
@@ -314,8 +291,8 @@ class TestWindowsCoverTheirFullDuration:
     def test_buckets_older_than_the_window_are_excluded(self):
         """Seed a bucket at the far edge of the ring and check it is dropped.
 
-        A slot is reused every ``depth`` seconds, so the ring has to reject a
-        wrapped-around slot rather than read its stale counts as current.
+        A slot is reused every ``depth`` seconds, so a wrapped-around slot must not be read as
+        current.
         """
         import time
 

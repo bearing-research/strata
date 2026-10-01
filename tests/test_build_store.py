@@ -15,12 +15,8 @@ from tests.conftest import seed_build_targets
 
 @pytest.fixture
 def build_store(tmp_path):
-    """Create a temporary build store over a database that also holds artifacts.
-
-    ``artifact_builds`` has a foreign key into ``artifact_versions``, so the
-    build store cannot live in a file of its own: the constraint would have
-    nothing to resolve against. Production shares one database for exactly
-    this reason.
+    """A temp build store sharing a database with artifacts, as ``artifact_builds``' foreign key
+    needs.
     """
     seed_build_targets(tmp_path)
     store = BuildStore(tmp_path / "artifacts.sqlite")
@@ -28,10 +24,7 @@ def build_store(tmp_path):
 
 
 class TestBuildStore:
-    """Tests for BuildStore."""
-
     def test_create_build(self, build_store):
-        """Create a new build record."""
         build_id = str(uuid.uuid4())
         state = build_store.create_build(
             build_id=build_id,
@@ -56,7 +49,6 @@ class TestBuildStore:
         assert state.completed_at is None
 
     def test_get_build(self, build_store):
-        """Get build by ID."""
         build_id = str(uuid.uuid4())
         build_store.create_build(
             build_id=build_id,
@@ -89,12 +81,10 @@ class TestBuildStore:
         assert updated.version == 7
 
     def test_get_build_not_found(self, build_store):
-        """Get build returns None for missing ID."""
         result = build_store.get_build("nonexistent")
         assert result is None
 
     def test_start_build(self, build_store):
-        """Start a pending build."""
         build_id = str(uuid.uuid4())
         build_store.create_build(
             build_id=build_id,
@@ -111,7 +101,6 @@ class TestBuildStore:
         assert state.started_at is not None
 
     def test_start_build_wrong_state(self, build_store):
-        """Start fails for non-pending builds."""
         build_id = str(uuid.uuid4())
         build_store.create_build(
             build_id=build_id,
@@ -126,7 +115,6 @@ class TestBuildStore:
         assert not success
 
     def test_complete_build(self, build_store):
-        """Complete a building build."""
         build_id = str(uuid.uuid4())
         build_store.create_build(
             build_id=build_id,
@@ -145,7 +133,6 @@ class TestBuildStore:
         assert state.output_byte_count == 1024
 
     def test_complete_build_wrong_state(self, build_store):
-        """Complete fails for non-building builds."""
         build_id = str(uuid.uuid4())
         build_store.create_build(
             build_id=build_id,
@@ -158,7 +145,6 @@ class TestBuildStore:
         assert not success
 
     def test_fail_build(self, build_store):
-        """Fail a building build."""
         build_id = str(uuid.uuid4())
         build_store.create_build(
             build_id=build_id,
@@ -182,7 +168,7 @@ class TestBuildStore:
         assert state.error_code == "EXECUTOR_TIMEOUT"
 
     def test_fail_pending_build(self, build_store):
-        """Can fail a pending build (before it starts)."""
+        """A pending build can fail before it starts."""
         build_id = str(uuid.uuid4())
         build_store.create_build(
             build_id=build_id,
@@ -202,7 +188,7 @@ class TestBuildStore:
         assert state.state == "failed"
 
     def test_list_pending_builds(self, build_store):
-        """List pending builds in order."""
+        """Pending builds are listed in order."""
         ids = []
         for i in range(3):
             build_id = str(uuid.uuid4())
@@ -223,7 +209,6 @@ class TestBuildStore:
         assert pending[1].build_id == ids[2]
 
     def test_list_builds_by_tenant(self, build_store):
-        """List builds for a specific tenant."""
         build_store.create_build(
             build_id=str(uuid.uuid4()),
             artifact_id="art-1",
@@ -253,7 +238,6 @@ class TestBuildStore:
         assert len(builds) == 1
 
     def test_list_builds_by_tenant_with_state_filter(self, build_store):
-        """List builds with state filter."""
         build_id_1 = str(uuid.uuid4())
         build_id_2 = str(uuid.uuid4())
 
@@ -283,7 +267,7 @@ class TestBuildStore:
         assert building[0].build_id == build_id_1
 
     def test_cleanup_old_builds(self, build_store):
-        """Cleanup old completed/failed builds."""
+        """Old completed and failed builds are cleaned up."""
         old_build = str(uuid.uuid4())
         build_store.create_build(
             build_id=old_build,
@@ -324,7 +308,6 @@ class TestBuildStore:
         assert build_store.get_build(recent_build) is not None
 
     def test_get_stats(self, build_store):
-        """Get build statistics."""
         b1 = str(uuid.uuid4())
         b2 = str(uuid.uuid4())
         b3 = str(uuid.uuid4())
@@ -349,7 +332,6 @@ class TestBuildStore:
         assert stats["failed"] == 1
 
     def test_build_state_to_dict(self, build_store):
-        """BuildState.to_dict() returns expected format."""
         build_id = str(uuid.uuid4())
         build_store.create_build(
             build_id=build_id,
@@ -370,23 +352,17 @@ class TestBuildStore:
 
 
 class TestSingletons:
-    """Tests for module-level singleton functions."""
-
     def setup_method(self):
-        """Reset singleton before each test."""
         reset_build_store()
 
     def teardown_method(self):
-        """Reset singleton after each test."""
         reset_build_store()
 
     def test_get_build_store_uninitialized(self):
-        """get_build_store returns None if not initialized."""
         store = get_build_store()
         assert store is None
 
     def test_get_build_store_initialized(self, tmp_path):
-        """get_build_store returns store after initialization."""
         db_path = tmp_path / "test.sqlite"
         store = get_build_store(db_path)
 
@@ -396,7 +372,6 @@ class TestSingletons:
         assert store2 is store
 
     def test_reset_clears_singleton(self, tmp_path):
-        """reset_build_store clears the singleton."""
         db_path = tmp_path / "test.sqlite"
         get_build_store(db_path)
 
@@ -407,15 +382,10 @@ class TestSingletons:
 
 
 class TestCompletionIsLeaseChecked:
-    """``claim_build`` decides which runner *starts* a build; completion has to
-    decide which one is allowed to *publish* its result.
+    """``claim_build`` decides who starts a build; completion decides who may publish.
 
-    When a lease expires (a GC pause or a partition longer than
-    ``lease_duration_seconds``) ``reclaim_expired_build`` hands the build to
-    another runner. The original runner keeps executing — that is deliberate,
-    the heartbeat loop declines to cancel it — and it used to be able to walk
-    all the way through completion, marking the build ready and repointing the
-    requested registry name at its own output, after the takeover.
+    After a lease expires and ``reclaim_expired_build`` reassigns the build, the original runner
+    keeps executing by design; it must not mark the build ready or repoint the registry name.
     """
 
     def test_a_runner_that_lost_its_lease_cannot_complete(self, build_store):

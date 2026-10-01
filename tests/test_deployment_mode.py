@@ -1,13 +1,4 @@
-"""Tests for deployment mode configuration and personal mode safety.
-
-These tests verify:
-1. deployment_mode defaults to "personal" (the common case)
-2. Invalid deployment_mode raises ValueError
-3. Personal mode creates artifact_dir
-4. Personal mode binding to non-loopback is blocked unless explicitly allowed
-5. writes_enabled property reflects deployment_mode
-6. require_writes_enabled dependency blocks writes in service mode
-"""
+"""Deployment mode configuration, mode coherence and personal-mode safety."""
 
 from typing import Any, cast
 
@@ -18,19 +9,13 @@ from strata.server import _should_warn_unset_signing_secret
 
 
 class TestDeploymentModeConfig:
-    """Tests for deployment mode configuration."""
-
     def test_default_is_personal(self, tmp_path):
-        """Default deployment_mode is 'personal' — the common case.
-
-        First-time ``strata-notebook`` invocations boot single-user on
-        loopback. Service mode is explicit opt-in."""
+        """First-time ``strata-notebook`` boots single-user on loopback; service mode is opt-in."""
         config = StrataConfig(cache_dir=tmp_path / "cache")
         assert config.deployment_mode == "personal"
         assert config.writes_enabled is True
 
     def test_service_mode(self, tmp_path):
-        """Service mode can be explicitly set."""
         config = StrataConfig(
             cache_dir=tmp_path / "cache",
             deployment_mode="service",
@@ -39,7 +24,6 @@ class TestDeploymentModeConfig:
         assert config.writes_enabled is False
 
     def test_invalid_mode_raises(self, tmp_path):
-        """Invalid deployment_mode raises ValueError."""
         with pytest.raises(ValueError) as exc_info:
             StrataConfig(
                 cache_dir=tmp_path / "cache",
@@ -49,7 +33,6 @@ class TestDeploymentModeConfig:
         assert "'service'" in error_str or "'personal'" in error_str
 
     def test_personal_mode_creates_artifact_dir(self, tmp_path):
-        """Personal mode creates artifact_dir if not specified."""
         # A custom artifact_dir keeps the test out of the home directory.
         artifact_dir = tmp_path / "artifacts"
         config = StrataConfig(
@@ -61,16 +44,12 @@ class TestDeploymentModeConfig:
         assert artifact_dir.exists()
 
     def test_service_mode_no_artifact_dir(self, tmp_path):
-        """Service mode does not create artifact_dir by default."""
         config = StrataConfig(cache_dir=tmp_path / "cache", deployment_mode="service")
         assert config.artifact_dir is None
 
 
 class TestPersonalModeBinding:
-    """Tests for personal mode binding safety."""
-
     def test_loopback_binding_allowed(self, tmp_path):
-        """Personal mode allows loopback binding."""
         config = StrataConfig(
             cache_dir=tmp_path / "cache",
             deployment_mode="personal",
@@ -80,7 +59,6 @@ class TestPersonalModeBinding:
         config.validate_personal_mode_binding()
 
     def test_localhost_binding_allowed(self, tmp_path):
-        """Personal mode allows localhost binding."""
         config = StrataConfig(
             cache_dir=tmp_path / "cache",
             deployment_mode="personal",
@@ -90,7 +68,6 @@ class TestPersonalModeBinding:
         config.validate_personal_mode_binding()
 
     def test_ipv6_loopback_allowed(self, tmp_path):
-        """Personal mode allows IPv6 loopback binding."""
         config = StrataConfig(
             cache_dir=tmp_path / "cache",
             deployment_mode="personal",
@@ -100,7 +77,6 @@ class TestPersonalModeBinding:
         config.validate_personal_mode_binding()
 
     def test_non_loopback_blocked(self, tmp_path):
-        """Personal mode blocks non-loopback binding by default."""
         config = StrataConfig(
             cache_dir=tmp_path / "cache",
             deployment_mode="personal",
@@ -113,7 +89,6 @@ class TestPersonalModeBinding:
         assert "unsafe" in str(exc_info.value)
 
     def test_external_ip_blocked(self, tmp_path):
-        """Personal mode blocks external IP binding."""
         config = StrataConfig(
             cache_dir=tmp_path / "cache",
             deployment_mode="personal",
@@ -125,7 +100,6 @@ class TestPersonalModeBinding:
         assert "Personal mode binding" in str(exc_info.value)
 
     def test_non_loopback_allowed_with_override(self, tmp_path):
-        """Personal mode allows non-loopback binding with explicit override."""
         config = StrataConfig(
             cache_dir=tmp_path / "cache",
             deployment_mode="personal",
@@ -147,10 +121,7 @@ class TestPersonalModeBinding:
 
 
 class TestEnvOverrides:
-    """Tests for environment variable overrides."""
-
     def test_deployment_mode_from_env(self, tmp_path, monkeypatch):
-        """STRATA_DEPLOYMENT_MODE overrides default."""
         monkeypatch.setenv("STRATA_DEPLOYMENT_MODE", "personal")
         config = StrataConfig.load(
             cache_dir=tmp_path / "cache",
@@ -159,13 +130,11 @@ class TestEnvOverrides:
         assert config.deployment_mode == "personal"
 
     def test_allow_remote_from_env(self, tmp_path, monkeypatch):
-        """STRATA_ALLOW_REMOTE_CLIENTS_IN_PERSONAL overrides default."""
         monkeypatch.setenv("STRATA_ALLOW_REMOTE_CLIENTS_IN_PERSONAL", "true")
         config = StrataConfig.load(cache_dir=tmp_path / "cache")
         assert config.allow_remote_clients_in_personal is True
 
     def test_artifact_dir_from_env(self, tmp_path, monkeypatch):
-        """STRATA_ARTIFACT_DIR overrides default."""
         artifact_dir = tmp_path / "custom_artifacts"
         monkeypatch.setenv("STRATA_ARTIFACT_DIR", str(artifact_dir))
         monkeypatch.setenv("STRATA_DEPLOYMENT_MODE", "personal")
@@ -174,10 +143,7 @@ class TestEnvOverrides:
 
 
 class TestWritesEnabled:
-    """Tests for writes_enabled property."""
-
     def test_service_mode_writes_disabled(self, tmp_path):
-        """Service mode has writes disabled."""
         config = StrataConfig(
             cache_dir=tmp_path / "cache",
             deployment_mode="service",
@@ -185,7 +151,6 @@ class TestWritesEnabled:
         assert config.writes_enabled is False
 
     def test_personal_mode_writes_enabled(self, tmp_path):
-        """Personal mode has writes enabled."""
         config = StrataConfig(
             cache_dir=tmp_path / "cache",
             deployment_mode="personal",
@@ -195,10 +160,7 @@ class TestWritesEnabled:
 
 
 class TestModeCoherence:
-    """Tests for personal/service mode coherence validation."""
-
     def test_personal_with_trusted_proxy_rejected(self, tmp_path):
-        """Personal mode + auth_mode='trusted_proxy' is incoherent."""
         with pytest.raises(ValueError) as exc_info:
             StrataConfig(
                 cache_dir=tmp_path / "cache",
@@ -209,7 +171,6 @@ class TestModeCoherence:
         assert "trusted_proxy" in str(exc_info.value)
 
     def test_personal_with_multi_tenant_rejected(self, tmp_path):
-        """Personal mode + multi_tenant_enabled=True is incoherent."""
         with pytest.raises(ValueError) as exc_info:
             StrataConfig(
                 cache_dir=tmp_path / "cache",
@@ -220,7 +181,6 @@ class TestModeCoherence:
         assert "multi_tenant_enabled" in str(exc_info.value)
 
     def test_personal_with_require_tenant_header_rejected(self, tmp_path):
-        """Personal mode + require_tenant_header=True is incoherent."""
         with pytest.raises(ValueError) as exc_info:
             StrataConfig(
                 cache_dir=tmp_path / "cache",
@@ -231,7 +191,7 @@ class TestModeCoherence:
         assert "require_tenant_header" in str(exc_info.value)
 
     def test_service_with_mcp_enabled_rejected(self, tmp_path):
-        """Service mode + mcp_enabled=True is incoherent (MCP has no per-request auth)."""
+        """MCP has no per-request auth."""
         with pytest.raises(ValueError) as exc_info:
             StrataConfig(
                 cache_dir=tmp_path / "cache",
@@ -244,13 +204,8 @@ class TestModeCoherence:
     def test_personal_mcp_with_per_user_header_rejected(self, tmp_path):
         """MCP plus the multi-user shim would expose every user's notebooks.
 
-        ``personal_mode_user_header`` is the proxy-fronted multi-user
-        deployment: ``discover`` and ``delete`` filter by owner, and every
-        REST notebook route runs ``_require_owner``. The MCP mount has no
-        per-request identity and no owner filtering — ``list_notebooks``
-        returns every open session with its path, and any tool accepts any
-        session id — so one user could enumerate and execute code in another
-        user's notebook, which REST on the same server would 404.
+        REST filters notebooks by owner, but the MCP mount has no per-request identity, so one user
+        could list and execute another user's sessions.
         """
         with pytest.raises(ValueError) as exc_info:
             StrataConfig(
@@ -272,7 +227,7 @@ class TestModeCoherence:
         assert config.personal_mode_user_header == "X-Auth-User"
 
     def test_personal_with_mcp_enabled_allowed(self, tmp_path):
-        """Personal mode + mcp_enabled=True is coherent — the supported combination."""
+        """Personal mode with MCP is the supported combination."""
         config = StrataConfig(
             cache_dir=tmp_path / "cache",
             deployment_mode="personal",
@@ -308,8 +263,7 @@ class TestModeCoherence:
         assert config.auth_mode == "trusted_proxy"
 
     def test_service_with_multi_tenant_allowed(self, tmp_path):
-        """Service mode + multi_tenant + trusted-proxy auth is the normal hosted
-        configuration (multi-tenancy requires auth to be a real boundary)."""
+        """Multi-tenancy requires auth to be a real boundary."""
         config = StrataConfig(
             cache_dir=tmp_path / "cache",
             deployment_mode="service",
@@ -322,7 +276,6 @@ class TestModeCoherence:
         assert config.require_tenant_header is True
 
     def test_personal_with_defaults_allowed(self, tmp_path):
-        """Personal mode with default auth/tenant settings passes."""
         config = StrataConfig(
             cache_dir=tmp_path / "cache",
             deployment_mode="personal",
@@ -334,7 +287,7 @@ class TestModeCoherence:
         assert config.require_tenant_header is False
 
     def test_service_with_personal_user_header_rejected(self, tmp_path):
-        """personal_mode_user_header is a personal-mode shim; reject in service mode."""
+        """personal_mode_user_header is a personal-mode shim."""
         with pytest.raises(ValueError) as exc_info:
             StrataConfig(
                 cache_dir=tmp_path / "cache",
@@ -344,7 +297,7 @@ class TestModeCoherence:
         assert "personal_mode_user_header" in str(exc_info.value)
 
     def test_personal_with_user_header_allowed(self, tmp_path):
-        """personal_mode_user_header is the intended shape for proxy-fronted personal deploys."""
+        """The intended shape for proxy-fronted personal deploys."""
         config = StrataConfig(
             cache_dir=tmp_path / "cache",
             deployment_mode="personal",
@@ -354,7 +307,7 @@ class TestModeCoherence:
         assert config.personal_mode_user_header == "Cf-Access-Authenticated-User-Email"
 
     def test_service_acl_without_auth_rejected(self, tmp_path):
-        """ACL rules with auth_mode='none' are silently inert — reject them."""
+        """ACL rules with auth_mode='none' would be silently inert."""
         from strata.config import AclConfig
 
         with pytest.raises(ValueError) as exc_info:
@@ -379,7 +332,7 @@ class TestModeCoherence:
         assert config.acl_config.default == "deny"
 
     def test_service_default_acl_without_auth_allowed(self, tmp_path):
-        """The default (allow-all, no rules) ACL is not 'configured' — allowed."""
+        """The default ACL (allow-all, no rules) does not count as configured."""
         config = StrataConfig(
             cache_dir=tmp_path / "cache",
             deployment_mode="service",
@@ -387,7 +340,7 @@ class TestModeCoherence:
         assert config.auth_mode == "none"
 
     def test_service_transforms_without_artifact_dir_rejected(self, tmp_path):
-        """Transform builds persist artifacts; reject if no artifact store."""
+        """Transform builds persist artifacts, so they need a store."""
         with pytest.raises(ValueError) as exc_info:
             StrataConfig(
                 cache_dir=tmp_path / "cache",
@@ -397,7 +350,6 @@ class TestModeCoherence:
         assert "artifact_dir" in str(exc_info.value)
 
     def test_service_transforms_with_artifact_dir_allowed(self, tmp_path):
-        """Transforms + an artifact store is the build-service configuration."""
         config = StrataConfig(
             cache_dir=tmp_path / "cache",
             deployment_mode="service",
@@ -407,9 +359,7 @@ class TestModeCoherence:
         assert config.server_transforms_enabled is True
 
     def test_service_multi_tenant_without_auth_rejected(self, tmp_path):
-        """Multi-tenancy is an access-control boundary: without trusted-proxy
-        auth the tenant header is spoofable and reads aren't tenant-filtered, so
-        multi_tenant + auth='none' is rejected at startup."""
+        """Without trusted-proxy auth the tenant header is spoofable."""
         with pytest.raises(ValueError) as exc_info:
             StrataConfig(
                 cache_dir=tmp_path / "cache",
@@ -419,7 +369,7 @@ class TestModeCoherence:
         assert "multi_tenant_enabled" in str(exc_info.value)
 
     def test_service_writes_without_auth_rejected(self, tmp_path):
-        """Authenticated write-back must be attributable — reject without auth."""
+        """Authenticated write-back must be attributable."""
         with pytest.raises(ValueError) as exc_info:
             StrataConfig(
                 cache_dir=tmp_path / "cache",
@@ -429,7 +379,6 @@ class TestModeCoherence:
         assert "service_writes_enabled" in str(exc_info.value)
 
     def test_service_writes_with_trusted_proxy_allowed(self, tmp_path):
-        """service_writes_enabled is coherent with trusted-proxy auth."""
         config = StrataConfig(
             cache_dir=tmp_path / "cache",
             artifact_dir=tmp_path / "artifacts",
@@ -442,18 +391,14 @@ class TestModeCoherence:
 
 
 class TestTeamCacheCoherence:
-    """The team cache needs a store to be a cache *of*.
+    """The team cache needs a store to be a cache of.
 
-    Not a deployment-mode rule: the notebook reading a team store is normally
-    a personal-mode process on a laptop, pointed at a service-mode store
-    elsewhere. It is the pairing that has to hold, in either mode.
+    The pairing must hold in either mode: the reader is usually a personal-mode laptop pointed at a
+    service-mode store.
     """
 
     def test_team_cache_without_a_store_is_rejected(self, tmp_path):
-        """Silently inert is the worse outcome: every lookup would have
-        nowhere to go, so every cell would recompute and the operator would
-        conclude the shared cache does not work rather than that it was never
-        switched on."""
+        """Silently inert would recompute every cell and look like a broken cache."""
         with pytest.raises(ValueError) as exc_info:
             StrataConfig(
                 cache_dir=tmp_path / "cache",
@@ -470,8 +415,7 @@ class TestTeamCacheCoherence:
         assert config.notebook_team_cache_enabled is True
 
     def test_a_remote_store_alone_does_not_turn_the_cache_on(self, tmp_path):
-        """Wanting a shared store to publish to is not the same as wanting one
-        to silently source results from: the pull is a separate opt-in."""
+        """Publishing to a store does not imply pulling results from it."""
         config = StrataConfig(
             cache_dir=tmp_path / "cache",
             notebook_remote_store_url="https://store.example",
@@ -480,19 +424,10 @@ class TestTeamCacheCoherence:
 
 
 class TestUnsetSigningSecretIsSurfaced:
-    """Service mode warns when pull-model URLs get a throwaway signing secret.
+    """Service mode warns when signed URLs get a throwaway signing secret.
 
-    Without a configured secret the signer falls back to `secrets.token_bytes`,
-    which is per-process. The pull-model routes are registered unconditionally,
-    so an executor handed a manifest by one replica gets 403 "Invalid or expired
-    signature" when its callback lands on another, and in-flight URLs die on
-    every restart.
-
-    This warning was removed as collateral when the dead `pull_model_enabled`
-    flag went (#567): it was the only thing reading the flag, so it went with
-    it. But the flag never gated the routes -- that was the point of #550 -- so
-    removing the condition removed the operator's only signal for a hazard that
-    is in fact unconditional. Nothing pinned it, which is why it could vanish.
+    The fallback secret is per-process and the pull-model routes are always registered, so a
+    callback landing on another replica, or after a restart, gets 403.
     """
 
     def test_service_mode_without_a_secret_warns(self, tmp_path):

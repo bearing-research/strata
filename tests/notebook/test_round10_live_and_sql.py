@@ -1,18 +1,8 @@
-"""Three gaps round 10 found, two of them in round 9's own fixes.
+"""Write-body splitting, failed-dependency frames, and the sequence counter.
 
-Splitting a write body at the tokenizer's semicolons kept any non-whitespace
-tail as a statement, so a script ending in ``-- done`` handed the driver a bare
-comment and it answered "INTERNAL: (unknown error)" for work it had already
-finished.
-
-Broadcasting the failed dependency's *status* was not enough: a status changes
-a client's badge and nothing else, so the cell showed an error colour over the
-table it produced before the failure, with no error text to read.
-
-And the outbound sequence counter lived on the per-connection execution state,
-which the grace-period teardown drops, so reconnecting to a session that was
-still open restarted the count at 1. The protocol reference says the counter
-resets only when the session closes or the server restarts.
+A trailing comment must not become a statement the driver rejects; a failed
+dependency must send its error, not only its status; and the outbound ``seq``
+survives a reconnect, resetting only when the session closes.
 """
 
 from __future__ import annotations
@@ -103,8 +93,7 @@ async def _run(session: Any, cell_id: str) -> Any:
 )
 @pytest.mark.asyncio
 async def test_a_trailing_comment_is_not_a_statement(tmp_path, name, tail):
-    """The text after the last semicolon has no tokens, so there is nothing
-    there to run."""
+    """The text after the last semicolon has no tokens, so there is nothing to run."""
     db = tmp_path / "w.db"
     sqlite3.connect(db).close()
     nb = _notebook(
@@ -129,9 +118,7 @@ async def test_a_trailing_comment_is_not_a_statement(tmp_path, name, tail):
 
 @pytest.mark.asyncio
 async def test_comments_and_quoted_semicolons_survive_together(tmp_path):
-    """The reported script: a leading comment, a semicolon inside a string, and
-    a trailing comment. Only the trailing comment broke it, and the row still
-    has to land with its semicolon intact."""
+    """A leading comment, a semicolon in a string and a trailing comment together."""
     db = tmp_path / "w.db"
     sqlite3.connect(db).close()
     nb = _notebook(
@@ -161,8 +148,7 @@ async def test_comments_and_quoted_semicolons_survive_together(tmp_path):
 
 @pytest.mark.asyncio
 async def test_a_failed_dependency_sends_its_error_not_only_its_status(tmp_path):
-    """A status alone leaves the client showing the table from before the
-    failure, coloured as an error, with nothing to say what went wrong."""
+    """A status alone leaves the old table shown in error colour with no error text."""
     from strata.notebook.ws import _notebook_connections
 
     nb = _notebook(tmp_path, [("q", "sql", GOOD), ("py", "python", CONSUMER)], _db(tmp_path))
@@ -198,10 +184,10 @@ async def test_a_failed_dependency_sends_its_error_not_only_its_status(tmp_path)
 
 @pytest.mark.asyncio
 async def test_the_sequence_survives_a_reconnect_after_the_grace_window(tmp_path):
-    """The session stayed open the whole time, so the counter has to carry on.
+    """The session stayed open, so the counter carries on across the reconnect.
 
-    A client keeping the last number it saw, as the reference tells it to,
-    reads a restart at 1 as frames it has already handled.
+    A client keeping the last number it saw would read a restart at 1 as frames
+    it already handled.
     """
     from strata.notebook.ws import (
         _ensure_execution_state,
@@ -225,7 +211,7 @@ async def test_the_sequence_survives_a_reconnect_after_the_grace_window(tmp_path
 
 @pytest.mark.asyncio
 async def test_closing_the_session_does_let_the_counter_go(tmp_path):
-    """The one boundary the reference gives, so the map does not grow forever."""
+    """Closing the session is the one reset boundary, so the map does not grow forever."""
     from strata.notebook.session import SessionManager
     from strata.notebook.ws import _ensure_execution_state, next_notebook_sequence
 
@@ -246,8 +232,7 @@ async def test_closing_the_session_does_let_the_counter_go(tmp_path):
 
 @pytest.mark.asyncio
 async def test_a_body_of_only_comments_runs_nothing(tmp_path):
-    """It tokenizes to no statements, which is not the same as failing to
-    tokenize. Sending the comment is what the driver refused."""
+    """A comment-only body tokenizes to no statements, which is not a tokenize failure."""
     db = tmp_path / "w.db"
     sqlite3.connect(db).close()
     nb = _notebook(
@@ -264,11 +249,11 @@ async def test_a_body_of_only_comments_runs_nothing(tmp_path):
 
 @pytest.mark.asyncio
 async def test_a_statement_after_a_comment_keeps_its_row_count(tmp_path):
-    """A trailing comment parses to its own node, so dropping the fragment
-    without dropping that node left the two lists a different length and every
-    statement's kind fell back to a guess at its text. A guess reads
-    ``WITH ... INSERT`` as "WITH", which is not DML, and the run then reports
-    no row count for a statement that has one."""
+    """A trailing comment must not shift statement kinds, losing a ``WITH ... INSERT`` row count.
+
+    The comment parses to its own node; dropping only the fragment left the lists
+    misaligned, so kinds fell back to a text guess that reads "WITH" as non-DML.
+    """
     db = tmp_path / "w.db"
     with sqlite3.connect(db) as conn:
         conn.execute("CREATE TABLE totals(n INTEGER)")
@@ -303,9 +288,7 @@ async def test_a_statement_after_a_comment_keeps_its_row_count(tmp_path):
 
 @pytest.mark.asyncio
 async def test_a_failed_dependency_keeps_what_its_result_carried(tmp_path):
-    """The frame is built from the upstream's own result, so an install
-    suggestion survives. A frame made from cell state could not carry one:
-    ``suggest_install`` is on the result and nowhere else."""
+    """The frame is built from the upstream's result, so ``suggest_install`` survives."""
     from strata.notebook.ws import _notebook_connections
 
     nb = _notebook(
@@ -336,9 +319,7 @@ async def test_a_failed_dependency_keeps_what_its_result_carried(tmp_path):
 
 @pytest.mark.asyncio
 async def test_typing_elsewhere_does_not_re_announce_a_failure(tmp_path):
-    """A source flush broadcasts the whole staleness map, and a standing
-    failure is re-stamped on every pass. Announcing the error there would
-    replay it every couple of seconds while someone types in another cell."""
+    """A source flush in another cell does not replay a standing failure's error."""
     from strata.notebook.ws import (
         _ensure_execution_state,
         _handle_cell_source_update,
@@ -373,13 +354,10 @@ async def test_typing_elsewhere_does_not_re_announce_a_failure(tmp_path):
 
 @pytest.mark.asyncio
 async def test_every_cell_a_chain_broke_gets_its_own_error(tmp_path):
-    """Round 11: a chain fails more than once, and each failure is somebody's
-    stale result.
+    """Every failure in a broken chain gets its own error frame.
 
-    Recording one upstream per run kept only the last one seen. The outer
-    materialization sees the *consumer* fail after the inner one saw the cell
-    that actually broke, so the client heard about the middle of the chain and
-    never about its start, and the cell at fault went on showing its table.
+    The outer materialization sees the consumer fail after the inner one saw the
+    real culprit; keeping only the last one hid the start of the chain.
     """
     from strata.notebook.ws import _notebook_connections
 
@@ -449,13 +427,10 @@ async def test_the_whole_chain_recovers_when_the_query_is_fixed(tmp_path):
 
 @pytest.mark.asyncio
 async def test_a_broken_chain_is_announced_whatever_language_it_runs_through(tmp_path):
-    """The guarantee cannot depend on what kind of cell sits in the chain.
+    """A broken chain is announced whatever cell languages it runs through.
 
-    Python and R turn a broken upstream into a failed result through their own
-    ``except``; SQL, prompt and loop cells let the error out instead, and an
-    escaping exception reached the caller by a route that never looked at what
-    the run had found. So a SQL cell in the middle was never recorded and never
-    announced, and a SQL cell at the end took the whole run with it.
+    SQL, prompt and loop cells raise instead of returning a failed result, and that
+    path never consulted what the run had found.
     """
     from strata.notebook.ws import _notebook_connections
 
@@ -492,9 +467,7 @@ async def test_a_broken_chain_is_announced_whatever_language_it_runs_through(tmp
 
 @pytest.mark.asyncio
 async def test_a_sql_target_still_reports_the_upstream_that_broke(tmp_path):
-    """A SQL cell asked for directly, whose own upstream is broken. The error
-    used to escape as an exception, and the path that catches one never told
-    the client anything about the cell that had actually failed."""
+    """A SQL target whose upstream is broken still reports that upstream."""
     from strata.notebook.ws import _notebook_connections
 
     nb = _notebook(

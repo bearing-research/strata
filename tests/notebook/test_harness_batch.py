@@ -1,9 +1,7 @@
-"""Unit tests for ``harness.execute_batch`` — the library function that
-drives a sequence of cells in one Python process.
+"""Unit tests for ``harness.execute_batch``, which runs a sequence of cells in one process.
 
-These tests drive the function from a background thread and act as the
-"fake parent" on the other end of two real ``os.pipe`` pairs. No
-subprocess yet; that's PR-b2's job.
+The function runs on a background thread and the test is the fake parent on two real
+``os.pipe`` pairs; no subprocess.
 """
 
 from __future__ import annotations
@@ -37,9 +35,7 @@ def _send_response(stream: Any, payload: dict) -> None:
 
 @pytest.fixture
 def batch_pipes(tmp_path):
-    """Yields (frame_r, frame_w, resp_r, resp_w, output_dir) — two pipe
-    pairs wrapped as buffered file objects plus a temp output dir.
-    """
+    """Yields (frame_r, frame_w, resp_r, resp_w, output_dir): two pipe pairs and a temp dir."""
     frame_r, frame_w = os.pipe()
     resp_r, resp_w = os.pipe()
     output_dir = tmp_path / "batch_out"
@@ -355,11 +351,10 @@ def test_batch_cache_hit_loads_from_disk_and_continues(batch_pipes, tmp_path):
 
 
 def test_display_capture_reinstalls_per_cell(batch_pipes):
-    """Each cell needs its own DisplayCapture handler. ``install()`` uses
-    ``setdefault`` so once the namespace has a ``display`` key from cell A,
-    cell B's calls to ``display(...)`` would go to A's capture (and into
-    cell A's display values). Verify cell B's display captures cell B's
-    payload, not cell A's.
+    """Each cell needs its own DisplayCapture.
+
+    ``install()`` uses ``setdefault``, so without a reinstall cell B's ``display(...)`` would
+    land in cell A's capture.
     """
     frame_r, frame_w, resp_r, resp_w, output_dir = batch_pipes
 
@@ -408,10 +403,8 @@ def test_display_capture_reinstalls_per_cell(batch_pipes):
 
 
 def test_display_filenames_use_serializer_convention(batch_pipes):
-    """Harness serializes display outputs as ``__display__N{ext}``, the
-    naming convention the serializer's content-type detection recognizes
-    (``_is_display_variable_name`` in serializer.py L312). With ``display_N``
-    the values would be classified as regular pickles.
+    """Display outputs are named ``__display__N{ext}``, which ``_is_display_variable_name``
+    recognizes; ``display_N`` would classify them as regular pickles.
     """
     frame_r, frame_w, resp_r, resp_w, output_dir = batch_pipes
 
@@ -520,16 +513,11 @@ def test_mount_name_save_restore(batch_pipes, tmp_path):
 
 
 def test_batch_surfaces_rds_input_as_first_consumer_cell_error(batch_pipes):
-    """An RDS upstream consumed by a Python cell becomes a cell_error
-    on the first consumer — not subprocess_died.
+    """An RDS upstream consumed by a Python cell is a cell_error on the first consumer, not
+    subprocess_died.
 
-    Pre-fix behaviour: ``deserialize_inputs`` raised ``StrataRArtifactError``
-    inside ``execute_batch`` before any ``cell_start`` frame fired, so the
-    parent's frame-reader hit EOF and reported the batch as
-    ``subprocess_died``. The fix defers the error to the first cell whose
-    source references the tainted variable, emitting a proper
-    ``cell_start`` + ``cell_error`` + ``batch_end`` sequence with the
-    structured "re-export as data.frame" message.
+    The error waits for the first cell referencing the tainted variable, which gets
+    ``cell_start``, ``cell_error`` and ``batch_end`` with the "re-export as data.frame" message.
     """
     frame_r, frame_w, resp_r, resp_w, output_dir = batch_pipes
 
@@ -612,14 +600,8 @@ def test_batch_surfaces_rds_input_as_first_consumer_cell_error(batch_pipes):
 
 
 def test_batch_word_boundary_avoids_spurious_taint(batch_pipes):
-    """``fit`` in another identifier (``unfit_data``) or a string literal
-    must not trigger the tainted-input branch.
-
-    Without word-boundary matching, a tainted ``fit`` would block any
-    cell whose source contained the substring ``fit`` — including
-    ``unfit_data = ...``, comments, and string literals like
-    ``"benefit"``. Use a clearly substring-only case here so the
-    test fails loudly if the matcher regresses to ``var in source``.
+    """``fit`` inside another identifier (``unfit_data``) or a string literal must not trigger
+    the tainted-input branch; this fails if the matcher regresses to ``var in source``.
     """
     frame_r, frame_w, resp_r, resp_w, output_dir = batch_pipes
 
@@ -665,10 +647,10 @@ def test_batch_word_boundary_avoids_spurious_taint(batch_pipes):
 
 
 def test_batch_injects_ambient_client(batch_pipes):
-    """A ``strata_url`` in a batched cell injects the ambient ``strata``
-    client into the shared namespace — the batch path is a SEPARATE
-    injection site from single-cell/warm-pool (the #145 trap), so it must
-    be wired too. The client is excluded from outputs and closed on exit.
+    """A ``strata_url`` in a batched cell injects the ambient ``strata`` client.
+
+    The batch path is a separate injection site from single-cell and the warm pool. The
+    client is excluded from outputs and closed on exit.
     """
     frame_r, frame_w, resp_r, resp_w, output_dir = batch_pipes
 
@@ -717,12 +699,10 @@ def test_batch_injects_ambient_client(batch_pipes):
 
 
 def test_batch_warns_on_inplace_mutation_of_input(batch_pipes):
-    """A cell that mutates an upstream DataFrame in place surfaces a mutation
-    warning in its persist frame — batch detection parity with single-cell.
+    """An in-place mutation of an upstream DataFrame warns in the cell's persist frame.
 
-    Uses the aliased form (``alias = df; alias.drop(inplace=True)``), the exact
-    residual case the static analyzer can't see, so only runtime detection
-    catches it. Batch can't recapture (the DAG is static), so it warns.
+    Uses the aliased form (``alias = df; alias.drop(inplace=True)``) that only runtime
+    detection catches; a batch cannot recapture, so it warns.
     """
     frame_r, frame_w, resp_r, resp_w, output_dir = batch_pipes
 
@@ -786,15 +766,9 @@ def test_batch_warns_on_inplace_mutation_of_input(batch_pipes):
 def test_batch_seeds_upstream_inputs_under_the_shared_env(batch_pipes, monkeypatch):
     """A batch is one process, so a library configured at import is configured once.
 
-    Upstream artifacts were seeded before any ``[env]`` was applied, so a
-    library that reads its configuration at import — jax and JAX_ENABLE_X64
-    above all — was configured from the *server's* environment for the whole
-    batch. That silently downcast float64 inputs to float32.
-
-    Only entries every cell agrees on can be applied: one cell's private value
-    would otherwise configure the batch for whichever cell ran first. The
-    notebook-level ``[env]`` is common to all of them, which is the case that
-    matters.
+    Upstream inputs are seeded under the shared ``[env]``; otherwise a library like jax
+    (JAX_ENABLE_X64) takes the server's environment and downcasts float64 inputs. Only entries
+    every cell agrees on apply, such as the notebook-level ``[env]``.
     """
     import os
 

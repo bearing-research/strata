@@ -1,16 +1,7 @@
-"""Tests for the DuckDB DriverAdapter.
+"""Tests for the DuckDB DriverAdapter: mocks for identity and paths, a real DB for the rest.
 
-DuckDB is local and free, so we don't need testcontainers — the
-real-DB integration tests below exercise the full open → probe →
-write → reprobe cycle end-to-end. The mocks at the top cover the
-identity / path-resolution surface where exercising the engine
-adds nothing.
-
-Note on cursors: DuckDB's ``conn.cursor()`` returns an *independent*
-child connection rather than a SQL-DBAPI cursor that shares
-transaction state with the parent. That's a real footgun for
-read-only enforcement — see the ``_ReadOnlyDuckDB`` proxy in the
-adapter and the in-memory RO tests below.
+DuckDB's ``conn.cursor()`` returns an independent child connection that doesn't share the
+parent's transaction, hence the ``_ReadOnlyDuckDB`` proxy and the in-memory RO tests.
 """
 
 from __future__ import annotations
@@ -43,8 +34,7 @@ def test_capabilities_match_design_doc():
 
 
 def test_connection_id_canonicalizes_relative_paths(tmp_path, monkeypatch):
-    """Two specs that resolve to the same absolute path produce the
-    same id, regardless of how the path was written."""
+    """Specs resolving to the same absolute path produce the same id."""
     a = DuckDBAdapter()
     nested = tmp_path / "nested"
     nested.mkdir()
@@ -78,9 +68,7 @@ def test_connection_id_memory_distinct_from_file():
 
 
 def test_connection_id_read_only_flag_no_op():
-    """DuckDB embedded has no read/write principal split, so the
-    ``read_only`` kwarg in the Protocol is a no-op here. Both
-    sides must produce the same id."""
+    """Embedded DuckDB has no read/write principal split, so ``read_only`` doesn't change the id."""
     a = DuckDBAdapter()
     spec = ConnectionSpec(name="db", driver="duckdb", path="/tmp/x.duckdb")
     assert a.canonicalize_connection_id(spec, read_only=True) == a.canonicalize_connection_id(
@@ -92,8 +80,7 @@ def test_connection_id_read_only_flag_no_op():
 
 
 def test_open_passes_read_only_flag_for_existing_file(tmp_path):
-    """File-backed read_only=True opens with the file flag — the
-    primary security boundary for file DBs."""
+    """The file flag is the primary security boundary for file DBs."""
     target = tmp_path / "existing.duckdb"
     # Create the file first so ``read_only=True`` is permitted.
     duckdb.connect(str(target)).close()
@@ -113,10 +100,7 @@ def test_open_passes_read_only_flag_for_existing_file(tmp_path):
 
 
 def test_open_falls_back_to_writable_for_missing_file(tmp_path):
-    """``duckdb.connect(path, read_only=True)`` errors if the file
-    doesn't exist; falling back to a writable handle keeps a
-    "first run" notebook executable. The RO transaction proxy is
-    what enforces read-only in that case."""
+    """``read_only=True`` errors on a missing file; the RO transaction proxy enforces instead."""
     target = tmp_path / "not_yet.duckdb"
     captured: list[tuple[str, bool]] = []
 
@@ -132,9 +116,7 @@ def test_open_falls_back_to_writable_for_missing_file(tmp_path):
 
 
 def test_open_memory_db_uses_writable_handle():
-    """``:memory:`` cannot be opened ``read_only=True`` (the database
-    is created on demand). The proxy + RO transaction is the only
-    enforcement mechanism for memory DBs."""
+    """``:memory:`` can't open ``read_only=True``; the proxy is the only enforcement."""
     captured: list[tuple[str, bool]] = []
 
     def fake_connect(path, *, read_only):
@@ -150,9 +132,7 @@ def test_open_memory_db_uses_writable_handle():
 
 
 def test_open_returns_proxy_when_read_only(tmp_path):
-    """``read_only=True`` always returns a ``_ReadOnlyDuckDB``
-    proxy, so cursor spawning runs through our RO-transaction
-    interception. ``read_only=False`` returns the bare connection."""
+    """``read_only=True`` returns a ``_ReadOnlyDuckDB`` proxy; ``False`` the bare connection."""
     a = DuckDBAdapter()
     db = tmp_path / "p.duckdb"
     spec = ConnectionSpec(name="db", driver="duckdb", path=str(db))
@@ -177,8 +157,6 @@ def test_open_raises_when_path_missing():
 
 
 def test_real_open_read_only_rejects_write_on_file_db(tmp_path):
-    """File-backed ``read_only=True`` opens with ``read_only=True``
-    in the engine. Writes are blocked at the file level."""
     db = tmp_path / "ro.duckdb"
     a = DuckDBAdapter()
     rw_spec = ConnectionSpec(name="db", driver="duckdb", path=str(db))
@@ -198,9 +176,7 @@ def test_real_open_read_only_rejects_write_on_file_db(tmp_path):
 
 
 def test_real_open_read_only_rejects_write_on_memory_db():
-    """Memory DBs can't open with the file ``read_only=True`` flag
-    (no file). The ``_ReadOnlyDuckDB`` proxy + ``BEGIN TRANSACTION
-    READ ONLY`` per-cursor is the only barrier — and it must hold."""
+    """The proxy's per-cursor ``BEGIN TRANSACTION READ ONLY`` is the only barrier here."""
     a = DuckDBAdapter()
     spec = ConnectionSpec(name="db", driver="duckdb", path=":memory:")
     ro = a.open(spec, read_only=True)
@@ -214,8 +190,7 @@ def test_real_open_read_only_rejects_write_on_memory_db():
 
 
 def test_real_write_path_still_allows_dml(tmp_path):
-    """Sanity: ``read_only=False`` lets writes through and the
-    proxy is bypassed entirely."""
+    """``read_only=False`` lets writes through and bypasses the proxy."""
     db = tmp_path / "w.duckdb"
     a = DuckDBAdapter()
     spec = ConnectionSpec(name="db", driver="duckdb", path=str(db))
@@ -233,9 +208,7 @@ def test_real_write_path_still_allows_dml(tmp_path):
 
 
 def test_real_probe_freshness_changes_after_dml(tmp_path):
-    """``PRAGMA database_size`` advances when blocks flip to dirty
-    and a checkpoint persists them. Two distinct on-disk states
-    must produce two distinct tokens."""
+    """``PRAGMA database_size`` moves once a checkpoint persists dirty blocks."""
     db = tmp_path / "f.duckdb"
     a = DuckDBAdapter()
     spec = ConnectionSpec(name="db", driver="duckdb", path=str(db))
@@ -268,9 +241,7 @@ def test_real_probe_freshness_changes_after_dml(tmp_path):
 
 
 def test_real_probe_freshness_ignores_table_list_db_wide(tmp_path):
-    """Capability flag says ``per_table_freshness=False`` — two
-    different table sets against the same DB state must produce
-    the same token."""
+    """``per_table_freshness=False``: different table sets on the same DB state share a token."""
     db = tmp_path / "g.duckdb"
     a = DuckDBAdapter()
     spec = ConnectionSpec(name="db", driver="duckdb", path=str(db))
@@ -296,8 +267,7 @@ def test_real_probe_freshness_ignores_table_list_db_wide(tmp_path):
 
 
 def test_real_probe_schema_changes_on_add_column(tmp_path):
-    """Per-table fingerprint catches metadata-only ADD COLUMN even
-    if the freshness probe (block-aligned) hasn't moved."""
+    """ADD COLUMN changes the schema token even if block-aligned freshness hasn't moved."""
     db = tmp_path / "s.duckdb"
     a = DuckDBAdapter()
     spec = ConnectionSpec(name="db", driver="duckdb", path=str(db))
@@ -333,10 +303,7 @@ def test_real_probe_schema_empty_tables_yields_empty_token(tmp_path):
 
 
 def test_probe_schema_rejects_invalid_schema_name(tmp_path):
-    """Identifier validation defends against splice in the
-    ``duckdb_columns()`` predicates. Even though the adapter uses
-    bind parameters for the values, the upstream ``QualifiedTable``
-    is user-influenced — fail fast on garbage input."""
+    """``QualifiedTable`` is user-influenced, so identifiers are validated before use."""
     db = tmp_path / "q.duckdb"
     a = DuckDBAdapter()
     spec = ConnectionSpec(name="db", driver="duckdb", path=str(db))
@@ -357,9 +324,7 @@ def test_probe_schema_rejects_invalid_schema_name(tmp_path):
 
 
 def test_real_list_schema_returns_tables_and_columns(tmp_path):
-    """``duckdb_tables()`` + ``duckdb_columns()`` enumerate the
-    user-visible surface, with internal databases (``system``,
-    ``temp``) and internal schemas filtered out."""
+    """Internal databases (``system``, ``temp``) and internal schemas are filtered out."""
     db = tmp_path / "ls.duckdb"
     a = DuckDBAdapter()
     spec = ConnectionSpec(name="db", driver="duckdb", path=str(db))

@@ -57,10 +57,7 @@ def temp_warehouse(tmp_path):
 
 
 class TestResourceLimitConfig:
-    """Tests for resource limit configuration."""
-
     def test_default_limits(self):
-        """Test default resource limit values."""
         config = StrataConfig()
 
         assert config.max_concurrent_scans == 100
@@ -70,7 +67,6 @@ class TestResourceLimitConfig:
         assert config.max_response_bytes == 512 * 1024 * 1024  # 512 MB
 
     def test_custom_limits(self, tmp_path):
-        """Test setting custom resource limits."""
         config = StrataConfig(
             cache_dir=tmp_path / "cache",
             max_concurrent_scans=10,
@@ -88,11 +84,11 @@ class TestResourceLimitConfig:
 
 
 class TestServerResourceLimits:
-    """Tests for server-side resource limit enforcement."""
+    """Server-side resource limit enforcement."""
 
     @pytest.fixture
     def server_with_client(self, temp_warehouse, tmp_path):
-        """Start a server with custom limits and provide a client."""
+        """A server with custom limits, and a client for it."""
         import socket
 
         sock = socket.socket()
@@ -140,7 +136,7 @@ class TestServerResourceLimits:
         client.close()
 
     def test_metrics_include_resource_limits(self, server_with_client):
-        """Test that metrics endpoint includes resource limit info."""
+        """The metrics endpoint includes resource limit info."""
         client = server_with_client["client"]
 
         metrics = client.metrics()
@@ -163,7 +159,7 @@ class TestServerResourceLimits:
         assert isinstance(limits["active_scans"], int)
 
     def test_fetch_completes_within_limits(self, server_with_client):
-        """Test that a normal fetch completes successfully."""
+        """A normal fetch completes."""
         client = server_with_client["client"]
         table_uri = server_with_client["warehouse"]["table_uri"]
 

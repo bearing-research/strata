@@ -1,15 +1,7 @@
 """One sequence per outbound message, as the protocol reference promises.
 
-The reference says the counter "increments on every outbound message" and tells
-client authors to "key dedupe on ``seq``". Several places sent a batch of
-frames under one number instead: an execution's stdout, stderr and result; one
-number for every cell a failure made stale; one for every cell a Run All
-started; the error and status of a failed cell. A client following that advice
-kept the first of each batch and dropped the rest, which meant losing the frame
-that said a cell had finished, or the error text behind a red cell.
-
-Asserted over a whole stream rather than one call, because that is how the
-grouping showed up: each individual frame looked fine.
+Several paths sent a batch of frames under one ``seq``; a client deduping on it kept the
+first frame and lost the rest. Asserted over a whole stream, since each frame looks fine alone.
 """
 
 from __future__ import annotations
@@ -96,10 +88,7 @@ def _session(nb: Path) -> Any:
 
 @contextmanager
 def _watching(session: Any) -> Iterator[Observer]:
-    """Register a connection for the session, and take it out again.
-
-    The connection map is module global and nothing resets it between tests.
-    """
+    """Register a connection for the session and remove it after (the map is module global)."""
     from strata.notebook.ws import _notebook_connections
 
     observer = Observer()
@@ -112,8 +101,7 @@ def _watching(session: Any) -> Iterator[Observer]:
 
 @pytest.mark.asyncio
 async def test_a_run_that_prints_numbers_its_console_and_its_result_apart(chain):
-    """stdout, stderr and the result describe one execution and used to share
-    one number. A client deduping on it kept the console and lost the result."""
+    """stdout, stderr and the result each get a number; a client deduping on one lost the result."""
     from strata.notebook.ws import _ensure_execution_state, execute_cell_and_broadcast
 
     session = _session(chain)
@@ -152,16 +140,11 @@ async def test_a_failure_numbers_its_console_its_error_and_its_status_apart(chai
 
 @pytest.mark.asyncio
 async def test_requests_through_the_handlers_leave_no_gaps(chain):
-    """Driven through the incoming handlers, with one client throughout.
+    """Driven through the real handlers, with one observer across every request.
 
-    The other tests here call the execution helper directly, which skips the
-    reservation the real handlers take, and that is where a sequence was drawn
-    before anything knew whether a frame would follow. A successful request
-    never sent it, and the reference tells a client to treat the gap it leaves
-    as a reason to resync and replace its whole state.
-
-    One observer across every request, because a fresh one per request hides
-    the gap between them.
+    The handlers' reservation is where a sequence could be drawn without a frame following,
+    leaving a gap the reference treats as a reason to resync. A fresh observer per request
+    would hide it.
     """
     from strata.notebook.ws import (
         _ensure_execution_state,
@@ -195,7 +178,7 @@ async def test_requests_through_the_handlers_leave_no_gaps(chain):
 
 @pytest.mark.asyncio
 async def test_run_all_numbers_every_cell_it_starts_apart(chain):
-    """Every cell's running frame drew the one sequence the run began with."""
+    """Each cell's running frame gets its own sequence, not the one the run began with."""
     from strata.notebook.ws import _ensure_execution_state, _handle_notebook_run_all
 
     session = _session(chain)

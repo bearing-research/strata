@@ -1,9 +1,6 @@
-"""A digest on every artifact version, so two machines can be compared.
+"""Every artifact version carries a digest, so two machines can compare outputs.
 
-Two runs of one notebook produced reports that agreed on "both green" and on
-nothing else: the store recorded ``byte_size`` and no digest, so an output that
-changed while keeping its size and row count was indistinguishable from one
-that had not. Item 43.
+``byte_size`` and row count cannot tell apart two outputs of the same shape.
 """
 
 from __future__ import annotations
@@ -47,9 +44,7 @@ class TestRecordedOnWrite:
         assert artifact.content_sha256 == hashlib.sha256(blob).hexdigest()
 
     def test_a_caller_holding_the_bytes_is_believed(self, store):
-        """The bytes have just passed through the caller, so hashing them again
-        in the store is a second read of a remote blob for no new information.
-        Passing a digest is the caller saying what it wrote."""
+        """A caller-supplied digest is stored without re-reading the blob."""
         blob = _ipc_bytes([1, 2, 3])
         declared = hashlib.sha256(blob).hexdigest()
 
@@ -58,8 +53,7 @@ class TestRecordedOnWrite:
         assert artifact.content_sha256 == declared
 
     def test_two_stores_agree_on_the_same_bytes(self, tmp_path):
-        """The whole point: two machines that ran the same cell can compare
-        outputs by digest without either downloading the other's bytes."""
+        """Two stores compare outputs by digest without downloading each other's bytes."""
         blob = _ipc_bytes([1, 2, 3])
 
         here = _store_one(ArtifactStore(tmp_path / "here"), "a", blob)
@@ -70,8 +64,7 @@ class TestRecordedOnWrite:
         assert here.content_sha256 == there.content_sha256
 
     def test_a_different_result_of_the_same_shape_digests_differently(self, tmp_path):
-        """Same schema, same row count, same size — the case `byte_size` and
-        `row_count` both call identical and the digest does not."""
+        """Same schema, row count and size, which ``byte_size`` and ``row_count`` call identical."""
         mine = _store_one(ArtifactStore(tmp_path / "mine"), "a", _ipc_bytes([1, 2, 3]))
         yours = _store_one(ArtifactStore(tmp_path / "yours"), "a", _ipc_bytes([1, 2, 4]))
 
@@ -95,10 +88,7 @@ class TestFilledOnDemand:
             conn.close()
 
     def test_asking_fills_it_in(self, store):
-        """Backfilling every row at migration time would have made the upgrade
-        proportional to the store's size — every blob read before the server
-        could start. Filling one when something asks costs the same read, once,
-        and only for the rows anyone looks at."""
+        """Digests are filled lazily so the migration does not read every blob."""
         self._undigested(store)
         assert store.get_artifact("old", 1).content_sha256 is None
 
@@ -119,7 +109,7 @@ class TestFilledOnDemand:
         assert store.content_digest("old", 1) is not None
 
     def test_an_artifact_with_no_blob_stays_empty(self, store):
-        """Nothing to hash, so nothing to record — and asking again is cheap."""
+        """Nothing to hash, so nothing to record."""
         store.create_artifact("bodiless", "c" * 64)
 
         assert store.content_digest("bodiless", 1) is None
@@ -130,12 +120,9 @@ class TestFilledOnDemand:
 
 class TestVerify:
     def test_an_edit_that_keeps_the_shape_is_caught(self, store):
-        """The check the other two miss.
+        """A blob swapped for one with the same schema and row count.
 
-        A blob swapped for one with the same schema and the same row count
-        still parses and still counts right, so verify called that consistent.
-        A value changed in place is exactly the alteration a reader would
-        never otherwise notice.
+        It still parses and counts right, so only the digest catches it.
         """
         _store_one(store, "a", _ipc_bytes([1, 2, 3]))
         store.write_blob("a", 1, _ipc_bytes([1, 2, 4]))
@@ -150,8 +137,7 @@ class TestVerify:
         assert store.verify_artifacts() == []
 
     def test_a_row_with_no_digest_is_not_a_finding(self, store):
-        """Rows predating the column are silent here. Verify reports damage,
-        and "written before we recorded digests" is not damage."""
+        """A row written before digests existed is not damage."""
         _store_one(store, "a", _ipc_bytes([1, 2, 3]))
         conn = store._get_connection()
         try:
@@ -165,9 +151,7 @@ class TestVerify:
 
 class TestPublication:
     def test_a_publication_carries_the_versions_own_digest(self, store, monkeypatch):
-        """Not a second computation of the same bytes. A publication that
-        disagreed with the artifact it names would be the more alarming of the
-        two answers, and there would be no way to tell which was right."""
+        """The publication reuses the artifact's digest instead of computing a second one."""
         artifact = _store_one(store, "a", _ipc_bytes([1, 2, 3]))
 
         # If publishing recomputed, it would take this instead of the row's.
@@ -208,8 +192,7 @@ class TestOnTheWire:
         assert body["content_sha256"] == digest
 
     def test_every_step_of_the_lineage_carries_it(self, served):
-        """Comparing a rerun with a snapshot is cell by cell, so a digest only
-        on the result would answer "these differ" and not where."""
+        """Each lineage step carries a digest so a diff can say where outputs differ."""
         import httpx
 
         base_url, digest = served
@@ -222,8 +205,7 @@ class TestOnTheWire:
         assert next(n for n in artifacts if n["artifact_id"] == "rows")["content_sha256"] == digest
 
     def test_a_provenance_hit_carries_it(self, served):
-        """The team-cache path: a hit says what it is, so a puller can check
-        the bytes it received are the bytes that were offered."""
+        """A team-cache hit carries the digest so a puller can check the bytes it got."""
         import httpx
 
         base_url, digest = served
@@ -234,12 +216,7 @@ class TestOnTheWire:
 
 
 class TestRunReport:
-    """``strata run --format json`` — the report two machines diff.
-
-    Before this it carried per-cell status, duration and a cache-hit flag, so
-    two runs that computed different numbers produced identical JSON and the
-    only available conclusion was "both green".
-    """
+    """``strata run --format json``: the report two machines diff."""
 
     def _notebook(self, tmp_path, value: str):
         from strata.notebook.writer import add_cell_to_notebook, create_notebook, write_cell
@@ -269,8 +246,7 @@ class TestRunReport:
         assert rows["outputs"][0]["content_sha256"]
 
     def test_two_notebooks_computing_differently_report_different_digests(self, tmp_path, capsys):
-        """The comparison the report exists for, and the one it could not make:
-        both runs are green, both take about as long, and the digests differ."""
+        """Both runs are green and similar in duration, but the digests differ."""
         mine = self._run(self._notebook(tmp_path / "mine", "[1, 2, 3]"), capsys)
         yours = self._run(self._notebook(tmp_path / "yours", "[1, 2, 4]"), capsys)
 
@@ -283,9 +259,7 @@ class TestRunReport:
         assert digest(mine, "rows") != digest(yours, "rows")
 
     def test_two_runs_of_the_same_notebook_agree_on_the_bytes(self, tmp_path, capsys):
-        """Digests, not versions. A forced rerun writes a new version of the
-        same computation, so the version legitimately moves and the bytes do
-        not — which is the distinction the digest exists to make."""
+        """A forced rerun moves the version but not the bytes, so digests agree."""
         nb = self._notebook(tmp_path, "[1, 2, 3]")
 
         first = self._run(nb, capsys)

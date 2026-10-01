@@ -30,8 +30,6 @@ def setup():
 
 
 class TestMessageOrdering:
-    """Verify correct ordering of WebSocket messages."""
-
     def test_running_before_output(self, setup):
         """cell_status(running) must come before cell_output."""
         client, tmp = setup
@@ -110,8 +108,6 @@ class TestMessageOrdering:
 
 
 class TestProtocolErrors:
-    """Malformed or invalid messages."""
-
     def test_missing_cell_id(self, setup):
         """cell_execute without cell_id returns error."""
         client, tmp = setup
@@ -128,7 +124,6 @@ class TestProtocolErrors:
                 )
 
     def test_unknown_message_type(self, setup):
-        """Unknown message type returns error."""
         client, tmp = setup
         nb = NotebookBuilder(tmp).add_cell("c1", "x = 1")
 
@@ -139,7 +134,6 @@ class TestProtocolErrors:
                 assert msg["type"] == "error"
 
     def test_nonexistent_cell(self, setup):
-        """Executing a non-existent cell returns error."""
         client, tmp = setup
         nb = NotebookBuilder(tmp).add_cell("c1", "x = 1")
 
@@ -151,7 +145,6 @@ class TestProtocolErrors:
                 assert "not found" in msg["payload"]["error"].lower()
 
     def test_unknown_notebook_ws(self):
-        """Connecting to WebSocket for unknown session should fail."""
         app = create_test_app()
         client = TestClient(app)
 
@@ -161,8 +154,6 @@ class TestProtocolErrors:
 
 
 class TestSourceUpdate:
-    """Source update protocol tests."""
-
     def test_source_update_returns_dag(self, setup):
         """cell_source_update → dag_update with edges."""
         client, tmp = setup

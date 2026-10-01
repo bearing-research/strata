@@ -1,9 +1,6 @@
 """An admin change to the worker registry survives a restart.
 
-The admin routes replaced an in-memory dict and nothing wrote it anywhere, so
-adding a machine type through the API worked until the next restart and then
-silently reverted — which for a fleet manager means a catalogue that quietly
-disagrees with what the server will dispatch to.
+Otherwise the catalogue silently reverts and disagrees with what the server dispatches to.
 """
 
 from __future__ import annotations
@@ -57,11 +54,10 @@ class TestPersistence:
         assert [r.worker.name for r in records] == ["gpu-a100"]
 
     def test_the_file_wins_over_the_configured_table(self, server):
-        """It is the later statement: an admin said so after the config did.
+        """The file wins: an admin said so after the config did.
 
-        The config table is rewritten afterwards, so this cannot pass by
-        reading back the in-memory value the mutation also set — which is what
-        it would do if nothing were persisted at all.
+        The config table is rewritten afterwards, so this cannot pass by reading back the in-memory
+        value.
         """
         from strata.server import get_state
 
@@ -73,10 +69,8 @@ class TestPersistence:
         assert [r.worker.name for r in get_server_managed_worker_records()] == ["from-admin"]
 
     def test_an_empty_registry_is_not_a_missing_one(self, server):
-        """Deleting every worker is a decision, not an absence.
-
-        Falling back to the config table here would resurrect the machine
-        types an operator just removed.
+        """Deleting every worker is a decision; falling back to config would resurrect removed
+        types.
         """
         from strata.server import get_state
 
@@ -100,14 +94,10 @@ class TestPersistence:
 
 
 class TestAfterARestart:
-    """What dispatch sees, not just what the admin routes report.
+    """What dispatch sees after a restart, not just what the admin routes report.
 
-    Every other test here runs in one process, where the mutation sets both
-    the file and the in-memory config table — so they agree for the wrong
-    reason. A restart is the case that matters: the file holds the admin's
-    registry and the config table holds whatever was configured. If those two
-    are read by different code paths, the admin UI shows one catalogue while
-    cells dispatch to another.
+    In one process the mutation sets both the file and the config table, so they agree for the wrong
+    reason. After a restart, both readers must use the file.
     """
 
     def test_the_catalogue_reflects_the_persisted_registry(self, server, tmp_path):
@@ -140,8 +130,7 @@ class TestDurability:
         assert load_persisted_managed_worker_records() is None
 
     def test_the_write_is_atomic(self, server):
-        """Rewritten on every mutation; a truncated file at boot is a server
-        that starts with no workers and no obvious reason why."""
+        """Rewritten on every mutation; a truncated file would boot a server with no workers."""
         replace_server_managed_worker_records([ManagedWorkerRecord(_worker("a"), True)])
         replace_server_managed_worker_records([ManagedWorkerRecord(_worker("b"), True)])
 

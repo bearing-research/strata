@@ -1,7 +1,6 @@
-"""``# @cache snapshot`` on warehouses with time travel. Item 25.
+"""``# @cache snapshot`` on warehouses with time travel.
 
-No live warehouse: a fake Snowflake connection answers the adapter's queries
-and serves a table whose rows carry the time they landed, so a query pinned
+A fake Snowflake connection serves a table whose rows carry their landing time, so a query pinned
 ``AT (TIMESTAMP => ...)`` sees exactly the rows that existed then.
 """
 
@@ -246,9 +245,9 @@ class TestTheAdapters:
 
 
 class TestWhichTablesAPinCovers:
-    """A cell's provenance says it read one moment, so every table it reads
-    must carry that moment — and no table the author pinned themselves may be
-    moved to another one."""
+    """A cell's provenance names one moment, so every table it reads must carry that moment, and no
+    table the author pinned may be moved to another.
+    """
 
     _AT = "SELECT * FROM t AT (TIMESTAMP => CAST('2020-01-01T00:00:00+00:00' AS TIMESTAMPTZ))"
 

@@ -1,10 +1,7 @@
 """A failed cell's error, carried by everything that copies the notebook.
 
-The live cell view shows a failure with its traceback (#820). Two other ways
-out of a notebook dropped it: the Markdown and HTML export rendered a failed
-cell's source and prints and nothing about the failure, and a snapshot
-round trip brought the console across but not the error, so the imported copy
-of a red cell opened idle.
+Markdown and HTML export render the failure, and a snapshot round trip keeps the error,
+so an imported copy of a failed cell does not open idle.
 """
 
 from __future__ import annotations

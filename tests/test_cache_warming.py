@@ -13,10 +13,7 @@ from pyiceberg.types import DoubleType, LongType, NestedField, StringType
 
 
 class TestCacheWarmer:
-    """Tests for CacheWarmer class."""
-
     def test_warming_job_creation(self):
-        """Test creating a warming job."""
         from strata.cache_warmer import WarmingJob
         from strata.types import WarmAsyncRequest, WarmJobStatus
 
@@ -39,7 +36,6 @@ class TestCacheWarmer:
         assert job.tables_completed == 0
 
     def test_warming_job_to_progress(self):
-        """Test converting job to progress response."""
         from strata.cache_warmer import WarmingJob
         from strata.types import WarmAsyncRequest, WarmJobStatus
 
@@ -125,11 +121,9 @@ def temp_warehouse(tmp_path):
 
 
 class TestCacheWarmerIntegration:
-    """Integration tests for cache warmer with server."""
-
     @pytest.mark.asyncio
     async def test_async_warm_endpoint(self, tmp_path):
-        """Test POST /v1/cache/warm/async endpoint."""
+        """POST /v1/cache/warm/async."""
         from httpx import ASGITransport, AsyncClient
 
         import strata.server as server_module
@@ -187,7 +181,7 @@ class TestCacheWarmerIntegration:
 
     @pytest.mark.asyncio
     async def test_list_jobs_endpoint(self, tmp_path):
-        """Test GET /v1/cache/warm/jobs endpoint."""
+        """GET /v1/cache/warm/jobs."""
         from httpx import ASGITransport, AsyncClient
 
         import strata.server as server_module
@@ -233,7 +227,7 @@ class TestCacheWarmerIntegration:
 
     @pytest.mark.asyncio
     async def test_cancel_job_endpoint(self, tmp_path):
-        """Test DELETE /v1/cache/warm/jobs/{job_id} endpoint."""
+        """DELETE /v1/cache/warm/jobs/{job_id}."""
         from httpx import ASGITransport, AsyncClient
 
         import strata.server as server_module
@@ -267,7 +261,7 @@ class TestCacheWarmerIntegration:
 
     @pytest.mark.asyncio
     async def test_job_not_found(self, tmp_path):
-        """Test 404 for nonexistent job."""
+        """404 for a nonexistent job."""
         from httpx import ASGITransport, AsyncClient
 
         import strata.server as server_module
@@ -301,10 +295,7 @@ class TestCacheWarmerIntegration:
 
 
 class TestWarmTypes:
-    """Tests for warming request/response types."""
-
     def test_warm_async_request(self):
-        """Test WarmAsyncRequest model."""
         from strata.types import WarmAsyncRequest
 
         request = WarmAsyncRequest(
@@ -324,7 +315,6 @@ class TestWarmTypes:
         assert request.priority == 5
 
     def test_warm_async_request_defaults(self):
-        """Test WarmAsyncRequest default values."""
         from strata.types import WarmAsyncRequest
 
         request = WarmAsyncRequest(tables=["table1"])
@@ -336,7 +326,6 @@ class TestWarmTypes:
         assert request.priority == 0
 
     def test_warm_job_status_enum(self):
-        """Test WarmJobStatus enum values."""
         from strata.types import WarmJobStatus
 
         assert WarmJobStatus.PENDING.value == "pending"
@@ -346,7 +335,6 @@ class TestWarmTypes:
         assert WarmJobStatus.CANCELLED.value == "cancelled"
 
     def test_warm_job_progress_model(self):
-        """Test WarmJobProgress model."""
         from strata.types import WarmJobProgress, WarmJobStatus
 
         progress = WarmJobProgress(
@@ -375,7 +363,6 @@ class TestWarmTypes:
         assert progress.current_table == "ns.table3"
 
     def test_warm_async_response_model(self):
-        """Test WarmAsyncResponse model."""
         from strata.types import WarmAsyncResponse, WarmJobStatus
 
         response = WarmAsyncResponse(
@@ -392,11 +379,9 @@ class TestWarmTypes:
 
 
 class TestCacheWarmingRealTables:
-    """Integration tests for cache warming with real Iceberg tables."""
-
     @pytest.mark.asyncio
     async def test_warm_real_table(self, tmp_path, temp_warehouse):
-        """Test warming a real Iceberg table caches row groups."""
+        """Warming a real Iceberg table caches its row groups."""
         from httpx import ASGITransport, AsyncClient
 
         import strata.server as server_module
@@ -450,7 +435,7 @@ class TestCacheWarmingRealTables:
 
     @pytest.mark.asyncio
     async def test_warm_already_cached_table(self, tmp_path, temp_warehouse):
-        """Test warming an already cached table skips row groups."""
+        """Warming an already cached table skips its row groups."""
         from httpx import ASGITransport, AsyncClient
 
         import strata.server as server_module
@@ -517,7 +502,7 @@ class TestCacheWarmingRealTables:
 
     @pytest.mark.asyncio
     async def test_warm_with_column_projection(self, tmp_path, temp_warehouse):
-        """Test warming with column projection creates separate cache entries."""
+        """A column projection creates separate cache entries."""
         from httpx import ASGITransport, AsyncClient
 
         import strata.server as server_module
@@ -591,7 +576,7 @@ class TestCacheWarmingRealTables:
 
     @pytest.mark.asyncio
     async def test_warm_multiple_tables(self, tmp_path, temp_warehouse):
-        """Test warming multiple tables in a single job."""
+        """One job warms several tables."""
         from httpx import ASGITransport, AsyncClient
 
         import strata.server as server_module
@@ -660,14 +645,9 @@ class TestCacheWarmingRealTables:
 
 
 class TestAsyncWarmDoesNotReportFailuresAsSuccess:
-    """The background job collapsed three different endings onto ``(False, 0)``:
-    written, failed, and cancelled.
+    """Written, failed and cancelled fetches must not all count as cached.
 
-    Only the first is a success, but the aggregation loop read every ``False``
-    as ``row_groups_cached += 1``. So a job whose fetches all raised — or one
-    that was cancelled — still reported row groups cached, with nothing in
-    ``errors``. A background job's record is the only thing an operator can
-    poll, so there was no other signal that the warm did nothing.
+    The job record is the only thing an operator can poll, so a warm that did nothing must say so.
     """
 
     def _warmer_with(self, fetch_impl, task_count=3):
@@ -712,13 +692,10 @@ class TestAsyncWarmDoesNotReportFailuresAsSuccess:
 
     @pytest.mark.asyncio
     async def test_row_groups_skipped_by_cancellation_are_not_counted_as_cached(self):
-        """Cancellation has to land *during* the fetches to be interesting.
+        """The cancel lands while a table's row groups are in flight.
 
-        The table loop breaks on an already-cancelled job before any fetch
-        runs, so a job cancelled up front never reaches the branch. The real
-        case is a cancel arriving while a table's row groups are in flight:
-        the remaining ones return early, and that early return used to be
-        indistinguishable from a successful write.
+        A job cancelled up front breaks out before any fetch runs, so it never reaches the branch
+        under test.
         """
         job_box = {}
 

@@ -1,9 +1,7 @@
-"""Named catalogs and scans across stores. Item 24.
+"""Named catalogs and scans across stores.
 
-The REST, Glue and GCS paths against real services are in
-``test_lake_catalogs_integration.py``; this file covers resolution, the
-planner's identity and credential handling, and file routing, with SQL
-catalogs on local warehouses.
+Covers resolution, the planner's identity and credential handling, and file routing with local SQL
+catalogs; real REST, Glue and GCS are in ``test_lake_catalogs_integration.py``.
 """
 
 from __future__ import annotations
@@ -233,8 +231,10 @@ class TestFileRouting:
 
 
 class TestAclNamesTheCatalog:
-    """A table in a configured catalog is authorized under that catalog's name,
-    so a rule for one catalog does not silently cover another's table."""
+    """A table in a configured catalog is authorized under that catalog's name.
+
+    A rule for one catalog must not silently cover another's table.
+    """
 
     @staticmethod
     def _ref(uri: str):

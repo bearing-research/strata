@@ -1,8 +1,7 @@
-"""Tests for the worker-registration verbs (LocalNotebookOps + `strata worker`).
+"""Tests for the worker-registration verbs (LocalNotebookOps and `strata worker`).
 
-Local backend, offline — writes notebook-scoped ``[[workers]]`` to notebook.toml
-and reads them back. These are the SSH-free P0 primitives: a programmatic way to
-register a worker and set the default, which the CLI and the MCP tools share.
+Offline local backend: registers notebook-scoped ``[[workers]]`` and the default
+in notebook.toml, the primitive the CLI and MCP tools share.
 """
 
 from __future__ import annotations

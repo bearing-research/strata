@@ -1,15 +1,7 @@
-"""Smoke tests for the direct-file module loaders used by subprocess workers.
+"""Modules the subprocess workers load by file path must have no relative imports.
 
-``harness.py`` and ``pool_worker.py`` load a small set of sibling modules
-(``serializer.py``, ``immutability.py``, ``display/runtime.py``) via
-``importlib.util.spec_from_file_location`` rather than the normal
-``strata.notebook.*`` import path. That direct-file load path doesn't set
-up package context, so any relative import inside those modules would
-silently break the subprocess workers — and the breakage wouldn't surface
-in unit tests that import the modules the normal way.
-
-These tests guard the invariant: each loader target must remain importable
-by file path with no relative imports.
+``harness.py`` and ``pool_worker.py`` load these via ``spec_from_file_location``, which
+sets up no package context. Imports through ``strata.notebook.*`` would not catch a break.
 """
 
 from __future__ import annotations
@@ -38,8 +30,6 @@ def _load_by_file(relative_path: str, module_name: str):
 
 
 def test_display_runtime_is_file_loadable():
-    """``display/runtime.py`` loads via direct file path with no
-    relative-import setup, mirroring the subprocess worker path."""
     mod = _load_by_file("display/runtime.py", "_test_nb_display_runtime")
     assert hasattr(mod, "Markdown")
     assert hasattr(mod, "DisplayCapture")
@@ -48,14 +38,12 @@ def test_display_runtime_is_file_loadable():
 
 
 def test_serializer_is_file_loadable():
-    """``serializer.py`` — the other large file-loaded target."""
     mod = _load_by_file("serializer.py", "_test_nb_serializer")
     # Sanity check: the public surface the harness reaches for.
     assert hasattr(mod, "to_serialization_safe")
 
 
 def test_immutability_is_file_loadable():
-    """``immutability.py`` — third file-loaded target."""
     mod = _load_by_file("immutability.py", "_test_nb_immutability")
     assert hasattr(mod, "snapshot_inputs")
     assert hasattr(mod, "detect_mutations")

@@ -1,9 +1,7 @@
-"""Notebook REST routes check the same scopes the WebSocket frames do. Item 7.
+"""Notebook REST routes check the same scopes the WebSocket frames do.
 
-Frames checked ``notebook:read`` / ``notebook:write`` / ``notebook:execute``;
-the REST routes checked nothing, so a principal with only ``notebook:read``
-could run a cell with ``POST /cells/{id}/execute``. Driven through the real app
-and its auth middleware.
+Without it, a principal with only ``notebook:read`` could run a cell over REST. Driven
+through the real app and its auth middleware.
 """
 
 from __future__ import annotations
@@ -116,8 +114,7 @@ class TestTheTable:
         )
 
     def test_every_notebook_route_is_behind_the_gate(self):
-        """The gate is one router-level dependency; a route mounted on another
-        router would escape it silently."""
+        """The gate is one router-level dependency; a route on another router would escape it."""
         from strata.notebook.routes import _require_notebook_scope
         from strata.server import app
 

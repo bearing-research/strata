@@ -25,15 +25,7 @@ def harness_script():
 
 
 def run_harness(harness_path: Path, manifest: dict) -> dict:
-    """Run the harness with a given manifest.
-
-    Args:
-        harness_path: Path to harness.py
-        manifest: Manifest dict
-
-    Returns:
-        Result manifest from harness
-    """
+    """Run the harness on ``manifest`` and return its result manifest."""
     with tempfile.TemporaryDirectory() as tmpdir:
         tmpdir = Path(tmpdir)
 
@@ -54,10 +46,7 @@ def run_harness(harness_path: Path, manifest: dict) -> dict:
 
 
 class TestHarness:
-    """Test harness execution."""
-
     def test_harness_simple_assignment(self, harness_script):
-        """Test harness with simple assignment."""
         manifest = {"source": "x = 1 + 1", "inputs": {}}
 
         result = run_harness(harness_script, manifest)
@@ -67,7 +56,6 @@ class TestHarness:
         assert result["variables"]["x"]["content_type"] == "json/object"
 
     def test_harness_with_print(self, harness_script):
-        """Test that print output is captured."""
         manifest = {"source": 'print("Hello")\ny = 42', "inputs": {}}
 
         result = run_harness(harness_script, manifest)
@@ -77,7 +65,6 @@ class TestHarness:
         assert "y" in result["variables"]
 
     def test_harness_with_error(self, harness_script):
-        """Test harness execution error handling."""
         manifest = {"source": "z = 1 / 0", "inputs": {}}
 
         result = run_harness(harness_script, manifest)
@@ -87,10 +74,9 @@ class TestHarness:
         assert len(result["error"]) > 0
 
     def test_harness_keeps_the_print_trail_of_a_failing_cell(self, harness_script):
-        """The captured streams only come back in ``execute_cell``'s return
-        value, so a cell that raised used to report an empty ``stdout`` — losing
-        exactly the print trail that explains the failure. The batch and pool
-        paths both keep theirs; single-cell was the odd one out."""
+        """A cell that raised still reports its ``stdout``, the print trail that explains the
+        failure, as the batch and pool paths do.
+        """
         manifest = {
             "source": 'print("checkpoint A")\nprint("checkpoint B")\nraise KeyError("boom")',
             "inputs": {},
@@ -103,7 +89,6 @@ class TestHarness:
         assert "checkpoint B" in result["stdout"]
 
     def test_harness_dataframe(self, harness_script):
-        """Test harness with DataFrame creation."""
         manifest = {
             "source": 'import pandas as pd\ndf = pd.DataFrame({"a": [1, 2, 3]})',
             "inputs": {},
@@ -117,10 +102,9 @@ class TestHarness:
         assert result["variables"]["df"]["rows"] == 3
 
     def test_harness_bare_expression_no_display_mutation_warning(self, harness_script):
-        """A bare trailing expression is captured by the injected ``display``
-        helper, growing its value buffer. That must NOT be reported as an
-        in-place mutation of ``display`` (regression for the false positive
-        that fired on every cell ending in a bare expression)."""
+        """A bare trailing expression grows the injected ``display`` helper's buffer; that is not
+        an in-place mutation of ``display``.
+        """
         manifest = {"source": "x = 5\nx", "inputs": {}}
 
         result = run_harness(harness_script, manifest)
@@ -131,7 +115,6 @@ class TestHarness:
         assert "Markdown" not in warned
 
     def test_harness_multiple_outputs(self, harness_script):
-        """Test harness with multiple outputs."""
         manifest = {
             "source": """
 x = 10
@@ -148,7 +131,6 @@ z = [1, 2, 3]
         assert var_names == {"x", "y", "z"}
 
     def test_harness_dict_output(self, harness_script):
-        """Test harness with dict output."""
         manifest = {
             "source": 'data = {"count": 42, "name": "test"}',
             "inputs": {},
@@ -161,7 +143,6 @@ z = [1, 2, 3]
         assert result["variables"]["data"]["content_type"] == "json/object"
 
     def test_harness_ignores_private(self, harness_script):
-        """Test that private variables are not captured."""
         manifest = {
             "source": """
 public = 1
@@ -177,7 +158,6 @@ _private = 2
         assert "_private" not in result["variables"]
 
     def test_harness_empty_output(self, harness_script):
-        """Test harness with no outputs."""
         manifest = {"source": "# Just a comment", "inputs": {}}
 
         result = run_harness(harness_script, manifest)
@@ -186,7 +166,6 @@ _private = 2
         assert len(result["variables"]) == 0
 
     def test_harness_with_stderr(self, harness_script):
-        """Test that stderr is captured."""
         manifest = {
             "source": """
 import sys
@@ -206,11 +185,9 @@ x = 1
     ):
         """A bare trailing variable must not be serialized a second time.
 
-        The display loop and the variable loop are handed the same object, so
-        writing it twice costs a full re-serialization of the frame — and for a
-        lazy or one-shot source the second write does not even produce the same
-        bytes. Runs the harness directly rather than through ``run_harness`` so
-        the output directory survives for inspection.
+        The display and variable loops get the same object; a second write re-serializes it,
+        and for a lazy or one-shot source gives different bytes. Runs the harness directly so the
+        output directory survives.
         """
         manifest_path = tmp_path / "manifest.json"
         manifest = {
@@ -371,7 +348,6 @@ display(Markdown("# First"))
         assert result["variables"]["_"]["preview"] == 42
 
     def test_harness_complex_dataframe(self, harness_script):
-        """Test harness with a more complex DataFrame."""
         manifest = {
             "source": """import pandas as pd
 df = pd.DataFrame({
@@ -393,7 +369,6 @@ df = pd.DataFrame({
         assert len(result["variables"]["df"]["preview"]) == 5
 
     def test_harness_function_definition(self, harness_script):
-        """Test harness with function definition."""
         manifest = {
             "source": """
 def greet(name):
@@ -412,7 +387,6 @@ result = greet("World")
         assert result["variables"]["result"]["preview"] == "Hello, World!"
 
     def test_harness_with_imports(self, harness_script):
-        """Test harness with standard library imports."""
         manifest = {
             "source": """
 import math
@@ -429,7 +403,6 @@ sqrt_2 = math.sqrt(2)
         assert "sqrt_2" in result["variables"]
 
     def test_harness_serialization_error_handled(self, harness_script):
-        """Test that serialization errors are handled gracefully."""
         manifest = {
             "source": """
 # Create a complex object that might not serialize well
@@ -450,9 +423,7 @@ x = 1
 class TestHarnessLoopUntil:
     """The harness evaluates ``@loop_until`` in the cell namespace after the body.
 
-    These tests drive the harness directly via its subprocess entry point so
-    they cover the full manifest → result round-trip, not just the in-process
-    execute_cell function.
+    Driven through the subprocess entry point, so the full manifest round trip is covered.
     """
 
     def test_loop_until_truthy_returns_until_reached(self, harness_script):
@@ -501,10 +472,9 @@ class TestHarnessLoopUntil:
         assert "loop" not in result
 
     def test_loop_until_sees_carry_passed_as_input(self, harness_script, tmp_path):
-        """The executor seeds the carry by writing iter k-1's artifact into
-        the manifest as a regular input. The harness picks it up via normal
-        deserialization, and the ``@loop_until`` expression sees the updated
-        value after the body runs."""
+        """The executor seeds the carry as a regular input (iteration k-1's artifact); the
+        ``@loop_until`` expression sees the value after the body runs.
+        """
         state_path = Path("state.pickle")
         seed = {"confidence": 0.5, "iteration": 0}
 
@@ -548,12 +518,8 @@ class TestHarnessLoopUntil:
 class TestHarnessRdsInput:
     """A Python cell consuming an R-only RDS input fails loudly.
 
-    The R harness's RDS fallback tier produces ``.rds`` artifacts that
-    Python has no way to read. When a downstream Python cell lists such
-    an artifact as an input, ``deserialize_inputs`` must surface the
-    structured ``StrataRArtifactError`` so the user sees the suggested
-    fix ("re-export as data.frame") instead of a vague NameError when
-    the cell later references the missing variable.
+    ``deserialize_inputs`` raises the structured ``StrataRArtifactError`` with its
+    "re-export as data.frame" fix, rather than leaving a vague NameError for later.
     """
 
     def test_rds_input_surfaces_structured_error(self, harness_script):
@@ -601,11 +567,9 @@ class TestHarnessRdsInput:
 class TestEnvAppliedBeforeDeserialization:
     """The notebook's ``[env]`` must be live before any input is decoded.
 
-    Deserializing imports whatever library produced a value, and a library
-    that reads its configuration once at import — jax and ``JAX_ENABLE_X64``
-    above all — is configured for the rest of the process at that moment.
-    Applying the env only around the cell body left jax configured from the
-    *server's* environment, which silently downcast float64 inputs to float32.
+    Deserializing imports the producing library, and one that reads its config at import
+    (jax and ``JAX_ENABLE_X64``) would take the server's environment and downcast float64
+    inputs to float32.
     """
 
     def test_manifest_env_is_visible_while_inputs_are_deserialized(self, tmp_path, monkeypatch):

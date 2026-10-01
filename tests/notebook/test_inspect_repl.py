@@ -51,7 +51,6 @@ class _FakeProcess:
 
 @pytest.mark.asyncio
 async def test_inspect_repl_uses_session_python(monkeypatch, tmp_path):
-    """Inspect subprocess should use the notebook session interpreter."""
     nb_dir = create_notebook(tmp_path, "inspect_repl")
     add_cell_to_notebook(nb_dir, "c1")
     write_cell(nb_dir, "c1", "x = 1")
@@ -98,9 +97,9 @@ async def test_inspect_repl_uses_session_python(monkeypatch, tmp_path):
 
 @pytest.mark.asyncio
 async def test_inspect_repl_does_not_start_without_an_interpreter(monkeypatch, tmp_path):
-    """An inspect process evaluates what is typed into it, so it is cell code:
-    without the notebook's interpreter it does not start, rather than start
-    with whatever ``python`` is on PATH."""
+    """Inspect input is cell code, so without the notebook's interpreter the REPL does not
+    start, rather than fall back to ``python`` on PATH.
+    """
     nb_dir = create_notebook(tmp_path, "inspect_repl")
     add_cell_to_notebook(nb_dir, "c1")
     write_cell(nb_dir, "c1", "x = 1")

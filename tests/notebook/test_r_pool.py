@@ -1,9 +1,7 @@
-"""Tests for the warm R process pool (#81).
+"""Tests for the warm R process pool.
 
-The pool machinery is the shared ``WarmProcessPool`` with an R worker
-command; these tests cover the R-specific pieces — worker readiness,
-end-to-end manifest execution over the frame protocol, and the cold
-fallback — plus session gating (R pool only for notebooks with R cells).
+R-specific pieces only: worker readiness, manifest execution over the frame
+protocol, cold fallback, and starting the pool only for notebooks with R cells.
 """
 
 from __future__ import annotations
@@ -58,7 +56,6 @@ class TestRWarmPool:
 
     @pytest.mark.asyncio
     async def test_executes_manifest_end_to_end(self, notebook_dir, tmp_path):
-        """A warm R worker runs a manifest and relays the result line."""
         output_dir = tmp_path / "out"
         output_dir.mkdir()
         manifest_path = output_dir / "manifest.json"

@@ -1,8 +1,7 @@
-"""DuckDB SQL cells over mounts and a named catalog, without services. Item 26.
+"""DuckDB SQL cells over mounts and a named catalog, without services.
 
-A mount is a view the query reads by name, its files are an input (a new file
-misses the cache and makes the cell stale), and a catalog table the query reads
-is pinned at the snapshot its provenance folds. Reading a real catalog is in
+A mount is a view whose files are an input (a new file misses the cache), and a catalog
+table read is pinned at the snapshot its provenance folds. Real catalogs:
 ``test_e2e_duckdb_lake.py``.
 """
 
@@ -330,9 +329,7 @@ def test_a_python_notebook_needs_no_sql_extra(tmp_path):
 
 
 class TestAReadCellReads:
-    """The connection opens read-only, but a body can end that transaction and
-    keep going, so what a read cell may run is decided before anything is sent
-    to the driver."""
+    """A body can end the read-only transaction, so read cells are checked before the driver."""
 
     @staticmethod
     async def _run(tmp_path, body: str):
@@ -388,10 +385,10 @@ class TestAReadCellReads:
 
 
 class TestHowACatalogTableIsWritten:
-    """DuckDB resolves a database and a schema case-insensitively, and a
-    two-part name takes the catalog's default schema. Every spelling is the
-    same table, and one that is missed is read live under a provenance that
-    never goes stale."""
+    """DuckDB resolves database and schema case-insensitively; a two-part name uses the default.
+
+    A missed spelling is read live under a provenance that never goes stale.
+    """
 
     @staticmethod
     def _tables(state, body: str):
@@ -433,8 +430,7 @@ class TestWhatCountsAsAReadStatement:
 
     @pytest.mark.asyncio
     async def test_explain_analyze_runs_what_it_wraps_so_it_is_not_a_read(self, tmp_path):
-        """DuckDB's EXPLAIN ANALYZE executes the statement it describes, which
-        made it a way around every refusal below it."""
+        """DuckDB's EXPLAIN ANALYZE executes the statement it describes."""
         target = tmp_path / "leak.csv"
         nb_dir = _notebook(
             tmp_path,
@@ -457,9 +453,7 @@ class TestWhatCountsAsAReadStatement:
 
     @pytest.mark.asyncio
     async def test_a_comment_does_not_hide_the_analyze(self, tmp_path):
-        """The parser hands the argument back with its comments, so a
-        classifier reading it raw is one ``/*x*/`` away from the write it
-        refuses without one."""
+        """The parser keeps comments in the argument, so ``/*x*/`` must not hide ANALYZE."""
         target = tmp_path / "leak.csv"
         nb_dir = _notebook(
             tmp_path,

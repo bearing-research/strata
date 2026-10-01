@@ -1,7 +1,6 @@
 """Integration tests for ``CellExecutor.execute_batch``.
 
-PR-b2 of issue #26 — these tests spawn the real harness subprocess
-against a real notebook venv and verify the end-to-end batch flow.
+They spawn the real harness subprocess against a real notebook venv.
 """
 
 from __future__ import annotations
@@ -60,9 +59,8 @@ def _populate_consumed_vars(specs: list[dict], session: NotebookSession) -> list
 
 @pytest.mark.asyncio
 async def test_batch_executes_two_linear_cells_end_to_end(tmp_path: Path):
-    """Two cells, c1 produces x, c2 reads x and produces y. Real subprocess.
-    Verify both succeed and the artifacts persist (single-cell re-run of
-    c2 after the batch should hit the cache).
+    """c1 produces x and c2 reads it; both succeed and persist, so a single-cell re-run of c2
+    hits the cache.
     """
     session = _make_session_with_cells(
         tmp_path,
@@ -132,10 +130,8 @@ async def test_batch_stops_cleanly_on_cell_error(tmp_path: Path):
 
 @pytest.mark.asyncio
 async def test_batch_blocked_module_export_fails_persist(tmp_path: Path):
-    """A cell that defines a top-level lambda (blocked from module export)
-    AND has a downstream consumer should fail to persist — matching
-    single-cell semantics. Batch must surface this as status=persist_failed,
-    NOT silently store as pickle/object.
+    """A consumed top-level lambda (blocked from module export) fails to persist, as in
+    single-cell runs: status=persist_failed, not a silent pickle/object store.
     """
     # A top-level lambda is blocked from module export; with a downstream
     # consumer, single-cell mode returns success=False.
@@ -174,10 +170,8 @@ async def test_batch_blocked_module_export_fails_persist(tmp_path: Path):
 
 @pytest.mark.asyncio
 async def test_batch_cache_hit_skips_execution(tmp_path: Path):
-    """Run a 2-cell batch twice. c1's ``x`` is consumed by c2 (so it's in
-    consumed_vars and persists). Second batch's c1 hits the cache via
-    ``_batch_service_cache_check`` — verifies the cache materialization
-    + harness load path.
+    """Run a 2-cell batch twice; c1's consumed ``x`` persists, so the second batch's c1 hits
+    through ``_batch_service_cache_check`` and the harness load path.
     """
     session = _make_session_with_cells(
         tmp_path,
@@ -204,11 +198,7 @@ async def test_batch_cache_hit_skips_execution(tmp_path: Path):
 
 @pytest.mark.asyncio
 async def test_batch_env_overrides_reach_cell(tmp_path: Path):
-    """Cell-level env passed via cell_spec is bound when the cell runs.
-
-    Regression for #33 review finding #1: the dispatcher had been
-    dropping all env when building cell_specs.
-    """
+    """Cell-level env passed via cell_spec is bound when the cell runs."""
     session = _make_session_with_cells(
         tmp_path,
         [
@@ -243,11 +233,8 @@ async def test_batch_env_overrides_reach_cell(tmp_path: Path):
 async def test_batch_cached_displays_round_trip(tmp_path: Path):
     """Second batch invocation cache-hits and restores display outputs.
 
-    Regression for #33 review finding #3b: cache hit was returning
-    cached_displays=[] so displays were silently dropped on re-run.
-
-    c1 produces both a consumed variable (so cache_check finds something
-    to validate against) AND a display output.
+    c1 produces a consumed variable (so the cache check has something to validate) and a
+    display output.
     """
     session = _make_session_with_cells(
         tmp_path,
@@ -365,11 +352,7 @@ async def test_per_cell_watchdog_kills_hung_cell(tmp_path: Path):
 
 @pytest.mark.asyncio
 async def test_display_only_cell_is_cacheable(tmp_path: Path):
-    """A cell that produces displays but no consumed variables should
-    cache-hit on re-run. Regression for #34 review finding #2 — the
-    cache_check was returning miss for empty consumed_vars even when
-    display artifacts existed.
-    """
+    """A cell with displays but no consumed variables cache-hits on re-run."""
     session = _make_session_with_cells(
         tmp_path,
         # c2 makes c1's `x` a consumed var (so the batch has something
@@ -404,9 +387,10 @@ async def test_display_only_cell_is_cacheable(tmp_path: Path):
 
 @pytest.mark.asyncio
 async def test_batch_warns_on_inplace_input_mutation_end_to_end(tmp_path: Path):
-    """A batched cell that mutates an upstream DataFrame in place surfaces a
-    mutation warning on its BatchCellResult — the full harness → persist →
-    executor chain. Uses the aliased form the static analyzer can't recapture.
+    """An in-place mutation of an upstream DataFrame warns on the BatchCellResult.
+
+    Exercises the full harness, persist and executor chain, with the aliased form the static
+    analyzer cannot recapture.
     """
     src_make = "import pandas as pd\ndf = pd.DataFrame({'a': [1, 2, 3]})\n"
     src_mutate = "alias = df\nalias.drop(index=[0], inplace=True)\nn = len(df)\n"
@@ -440,11 +424,10 @@ async def test_batch_warns_on_inplace_input_mutation_end_to_end(tmp_path: Path):
 
 @pytest.mark.asyncio
 async def test_an_edit_during_a_batch_does_not_rename_what_ran(tmp_path: Path):
-    """A batch is handed every cell's source when the partition is built, and
-    the subprocess runs from that. Nothing refuses an edit to a cell whose
-    turn has not come -- the busy guard covers only the running cell, and in a
-    batch that is the one that just finished -- so the outputs used to be
-    filed under the hash of source that never ran.
+    """A batch runs the sources captured when the partition was built.
+
+    An edit to a cell whose turn has not come is not refused, so outputs must be filed under
+    the hash of the source that ran, not the edited one.
     """
     session = _make_session_with_cells(
         tmp_path,
@@ -490,11 +473,10 @@ async def test_an_edit_during_a_batch_does_not_rename_what_ran(tmp_path: Path):
 
 @pytest.mark.asyncio
 async def test_a_cell_in_a_batch_can_promote_what_it_reads(tmp_path: Path):
-    """``strata.promote("x")`` names an input the way the cell names it, which
-    takes two things a batch did not give it: a promote url, and the map from
-    variable to artifact uri. Without the map the client cannot turn ``x`` into
-    an id; without the url it reports there is no team store at all -- to a
-    user who has one, about a cell that promotes fine when run on its own.
+    """``strata.promote("x")`` in a batch needs a promote url and the variable-to-artifact map.
+
+    Without the map the client cannot resolve ``x``; without the url it reports no team store,
+    though the cell promotes fine on its own.
     """
     import http.server
     import threading
@@ -555,9 +537,8 @@ async def test_a_cell_in_a_batch_can_promote_what_it_reads(tmp_path: Path):
 
 @pytest.mark.asyncio
 async def test_nocache_runs_every_time_in_a_batch_too(tmp_path: Path):
-    """``# @nocache`` marks a cell whose effect the artifact does not capture.
-    Run All served it from cache, so the effect did not happen -- and the agent
-    guide tells agents to mark exactly these cells with it.
+    """``# @nocache`` marks an effect the artifact does not capture, so Run All must run the
+    cell, not serve it from cache.
     """
     source = "# @nocache\nimport pathlib\nx = 1\n"
     # c3 exists so c2 has a consumer: a cell nothing reads has no consumed

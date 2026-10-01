@@ -1,8 +1,4 @@
-"""E2E tests: basic single-cell and two-cell notebook execution.
-
-Validates the fundamental execution flow through WebSocket:
-create notebook → open session → execute cell → verify output.
-"""
+"""E2E tests: basic single-cell and two-cell execution over the WebSocket."""
 
 from __future__ import annotations
 
@@ -34,7 +30,6 @@ class TestSingleCellExecution:
     """Execute a single cell with no dependencies."""
 
     def test_assign_integer(self, setup):
-        """Cell: x = 42 → outputs contain x."""
         client, tmp = setup
         nb = NotebookBuilder(tmp).add_cell("c1", "x = 42")
 
@@ -46,7 +41,6 @@ class TestSingleCellExecution:
                 assert "x" in result["payload"]["outputs"]
 
     def test_assign_string(self, setup):
-        """Cell: name = 'hello' → outputs contain name."""
         client, tmp = setup
         nb = NotebookBuilder(tmp).add_cell("c1", "name = 'hello'")
 
@@ -99,10 +93,10 @@ class TestSingleCellExecution:
 
 
 class TestTwoCellDirect:
-    """Two cells where the first is already ready — no cascade needed."""
+    """Two cells where the first is already ready, so no cascade."""
 
     def test_sequential_execution(self, setup):
-        """Execute c1 then c2 sequentially — c2 sees c1's output."""
+        """Execute c1 then c2; c2 sees c1's output."""
         client, tmp = setup
         nb = NotebookBuilder(tmp).add_cell("c1", "x = 10").add_cell("c2", "y = x + 5", after="c1")
 
@@ -118,7 +112,6 @@ class TestTwoCellDirect:
                 assert "y" in result2["payload"]["outputs"]
 
     def test_multiple_variables(self, setup):
-        """Cell defines multiple variables, downstream reads them."""
         client, tmp = setup
         nb = (
             NotebookBuilder(tmp)
@@ -154,7 +147,6 @@ class TestNotebookSync:
                 assert "edges" in payload["dag"]
 
     def test_sync_reflects_execution_status(self, setup):
-        """After executing a cell, sync shows it as ready."""
         client, tmp = setup
         nb = NotebookBuilder(tmp).add_cell("c1", "x = 1")
 

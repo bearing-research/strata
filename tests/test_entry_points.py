@@ -1,8 +1,6 @@
 """The uv-only guard runs after argument parsing on both entry points.
 
-`strata --help` used to hit the guard before parsing while `strata-notebook
---help` did not. Now both print help from any Python, and every real command
-on both is refused outside a uv-managed environment before it does anything.
+Both print help from any Python; every real command is refused outside a uv-managed environment.
 """
 
 from __future__ import annotations

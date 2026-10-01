@@ -14,11 +14,7 @@ from strata.notebook.writer import create_notebook, write_notebook_toml
 
 
 def _write_raw_toml(notebook_dir: Path, body: dict) -> None:
-    """Write a TOML body straight to notebook.toml.
-
-    Used to test parser tolerance of hand-edited connection blocks
-    (the surface users will actually edit in v1).
-    """
+    """Write a TOML body straight to notebook.toml, as a hand edit would."""
     with open(notebook_dir / "notebook.toml", "wb") as f:
         tomli_w.dump(body, f)
 
@@ -92,10 +88,10 @@ def test_parse_multiple_connections_preserves_extras():
 
 
 def test_invalid_connection_name_is_dropped():
-    """Connection names must be valid Python identifiers — invalid keys
-    are silently dropped from the parsed state. The annotation_validation
-    layer surfaces these as user-visible diagnostics; the parser stays
-    permissive so notebooks open even when partially malformed."""
+    """Connection names must be Python identifiers; invalid keys are dropped from the parsed
+    state. annotation_validation reports them, and the parser stays permissive so a partly
+    malformed notebook still opens.
+    """
     with tempfile.TemporaryDirectory() as tmp:
         nb = create_notebook(Path(tmp), "bad_name")
         body = _read_raw_toml(nb)
@@ -138,8 +134,8 @@ def test_no_connections_block_yields_empty_list():
 def test_writer_roundtrip_preserves_connections():
     """Writing a NotebookToml back out preserves the connections block.
 
-    Without this, every save (cell add/remove/reorder, worker change,
-    etc.) would silently drop user-defined connections.
+    Every save (cell add, reorder, worker change) rewrites the file, so a gap here would drop
+    user-defined connections.
     """
     with tempfile.TemporaryDirectory() as tmp:
         nb = create_notebook(Path(tmp), "roundtrip")
@@ -202,10 +198,9 @@ def test_writer_elides_connections_block_when_empty():
 
 
 def test_malformed_connection_block_is_preserved_across_writer_roundtrip():
-    """Regression: a malformed [connections.<name>] block must survive
-    an unrelated notebook rewrite (cell add, worker change, etc.).
-    Without this, a transient typo gets silently erased on the next
-    save and the user can't recover what they typed."""
+    """A malformed [connections.<name>] block survives an unrelated rewrite, so a typo is not
+    silently erased on the next save.
+    """
     with tempfile.TemporaryDirectory() as tmp:
         nb = create_notebook(Path(tmp), "malformed")
         body = _read_raw_toml(nb)
@@ -280,10 +275,9 @@ def test_malformed_connection_carries_error_for_diagnostics():
 
 
 def test_writer_scrubs_literal_auth_values():
-    """Regression: the writer must blank `auth.*` values that aren't
-    `${VAR}` indirections so secrets never reach disk. The key is
-    preserved so the notebook remembers WHICH credentials are
-    configured."""
+    """The writer blanks `auth.*` values that are not `${VAR}` indirections, so secrets never
+    reach disk; the key stays, recording which credentials are configured.
+    """
     with tempfile.TemporaryDirectory() as tmp:
         nb = create_notebook(Path(tmp), "scrub")
         from strata.notebook.models import NotebookToml
@@ -314,9 +308,9 @@ def test_writer_scrubs_literal_auth_values():
 
 
 def test_writer_scrubs_literal_auth_in_malformed_blocks():
-    """Even in malformed connection blocks, literal auth values must
-    not survive a writer round-trip — otherwise a typo could leak a
-    secret to disk through the malformed-preservation path."""
+    """Literal auth values in malformed blocks are blanked too, so the malformed-preservation
+    path cannot leak a secret to disk.
+    """
     with tempfile.TemporaryDirectory() as tmp:
         nb = create_notebook(Path(tmp), "scrub_malformed")
         body = _read_raw_toml(nb)
@@ -352,9 +346,9 @@ def test_writer_scrubs_literal_auth_in_malformed_blocks():
 
 
 def test_is_auth_indirection_recognizes_var_pattern():
-    """Contract test for the regex that distinguishes ${VAR} from
-    literals. Lower-case and underscored names are accepted; bare
-    $VAR / empty / whitespace forms are rejected."""
+    """Lower-case and underscored names are accepted; bare $VAR, empty and whitespace forms are
+    rejected.
+    """
     from strata.notebook.writer import is_auth_indirection
 
     assert is_auth_indirection("${PGPASS}")
@@ -371,15 +365,9 @@ def test_is_auth_indirection_recognizes_var_pattern():
 
 
 def test_parser_keeps_relative_path_verbatim():
-    """The parser does NOT resolve relative paths — the on-disk
-    value round-trips byte-for-byte through any unrelated edit.
-
-    Codex review fix: an earlier iteration resolved relative paths
-    in the parser, which meant editing a connection list through
-    the UI rewrote ``path = "analytics.db"`` to a host-specific
-    absolute path. The cell executor now resolves at adapter-open
-    time instead (see ``cell_executor._resolve_runtime_spec``);
-    the on-disk shape is preserved here."""
+    """The parser does not resolve relative paths, so the on-disk value round-trips byte for
+    byte; the cell executor resolves them at adapter-open time.
+    """
     from strata.notebook.parser import _parse_connections
 
     valid, malformed = _parse_connections(
@@ -399,9 +387,9 @@ def test_parser_keeps_absolute_path_verbatim():
 
 
 def test_relative_path_resolves_at_adapter_open_time(tmp_path):
-    """Cell-executor resolution: a relative ``path`` is rewritten
-    to an absolute one only in the runtime view handed to the
-    adapter. The original spec stays untouched."""
+    """A relative ``path`` becomes absolute only in the runtime view handed to the adapter; the
+    original spec is untouched.
+    """
     from strata.notebook.models import ConnectionSpec
     from strata.notebook.sql.cell_executor import _resolve_runtime_spec
 

@@ -1,16 +1,8 @@
 """Every artifact write records the source that produced it.
 
-``store_cell_output`` takes ``source`` as an optional keyword, which is what
-lets ten call sites across six modules each decide to omit it. Partial
-coverage is the failure this guards: a lineage view that shows the code for a
-Python cell and a blank for the SQL cell feeding it is worse than one showing
-neither, because a reader cannot tell which case they are looking at — and the
-omission is invisible until someone opens a published artifact.
-
-Static rather than behavioural because the behavioural version would need a
-fixture per cell language, and would still only cover the paths someone
-remembered to write a test for. This one fails on a call site that does not
-exist yet.
+``store_cell_output`` takes ``source`` as optional, so any call site can omit it, and a
+lineage view with code for some cells and blanks for others misleads. Static rather than
+behavioural, so it also fails on call sites that do not exist yet.
 """
 
 from __future__ import annotations

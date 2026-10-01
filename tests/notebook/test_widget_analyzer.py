@@ -1,9 +1,8 @@
-"""Tests for the widget cell analyzer (P1 — declaration + DAG participation).
+"""Tests for the widget cell analyzer.
 
-A widget cell is declarative: each ``name = control(...)`` line defines a DAG
-variable and carries a descriptor. The cell is never executed; these tests
-exercise the static ``ast``-based extraction, its error reporting, the language
-registry wiring, and that a widget cell participates in the DAG as a producer.
+A widget cell is declarative and never executed: each ``name = control(...)`` line defines a DAG
+variable with a descriptor. Covers static extraction, errors, language registry wiring, and DAG
+participation as a producer.
 """
 
 from __future__ import annotations
@@ -138,7 +137,7 @@ class TestWidgetDagParticipation:
 
 
 class TestCoerceWidgetValues:
-    """Incoming WS values are validated + clamped against the descriptors."""
+    """Incoming WS values are validated and clamped against the descriptors."""
 
     def _descriptors(self):
         return analyze_widget_cell(

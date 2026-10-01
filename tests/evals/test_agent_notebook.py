@@ -1,8 +1,7 @@
 """Deterministic CI coverage for the agent-notebook eval harness.
 
-Exercises the trajectory classification, the graders, the drivers (replay +
-stream-json parsing), and the full replay `run_suite` — with no server, no
-venv, and no LLM. The live Claude Code path is on-demand and not covered here.
+Covers trajectory classification, graders, drivers and the replay `run_suite` with no
+server, venv or LLM. The live Claude Code path is not covered.
 """
 
 from __future__ import annotations

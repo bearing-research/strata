@@ -12,7 +12,6 @@ from strata.notebook.writer import add_cell_to_notebook, create_notebook, write_
 
 
 def test_stdout_persists_across_reopen(tmp_path: Path):
-    """Print output should survive closing and reopening a notebook."""
     notebook_dir = create_notebook(tmp_path, "ConsoleTest", initialize_environment=False)
     add_cell_to_notebook(notebook_dir, "c1")
     write_cell(notebook_dir, "c1", 'print("hello from cell")\nx = 42')
@@ -38,7 +37,6 @@ def test_stdout_persists_across_reopen(tmp_path: Path):
 
 
 def test_stderr_persists_across_reopen(tmp_path: Path):
-    """Stderr should also survive reopens."""
     notebook_dir = create_notebook(tmp_path, "StderrTest", initialize_environment=False)
     add_cell_to_notebook(notebook_dir, "c1")
     source = 'import sys\nprint("warning!", file=sys.stderr)\nx = 1'
@@ -61,7 +59,6 @@ def test_stderr_persists_across_reopen(tmp_path: Path):
 
 
 def test_console_output_in_serialized_state(tmp_path: Path):
-    """Serialized notebook state should include console_stdout/stderr."""
     notebook_dir = create_notebook(tmp_path, "SerializeTest", initialize_environment=False)
     add_cell_to_notebook(notebook_dir, "c1")
     write_cell(notebook_dir, "c1", 'print("serialized")\nx = 1')
@@ -79,7 +76,6 @@ def test_console_output_in_serialized_state(tmp_path: Path):
 
 
 def test_console_cleared_on_new_execution(tmp_path: Path):
-    """Re-executing a cell should replace old console output."""
     notebook_dir = create_notebook(tmp_path, "ClearTest", initialize_environment=False)
     add_cell_to_notebook(notebook_dir, "c1")
     write_cell(notebook_dir, "c1", 'print("first")\nx = 1')

@@ -1,10 +1,7 @@
-"""Tests for dependency management: add, remove, list, REST + WS endpoints.
+"""Tests for dependency management.
 
-Validates:
-- dependencies.py core operations (list, add, remove)
-- REST endpoints (GET/POST/DELETE /v1/notebooks/{id}/dependencies)
-- WebSocket messages (dependency_add, dependency_remove → dependency_changed)
-- Lockfile hash change detection
+Covers the dependencies.py core operations, the REST and WebSocket endpoints, and lockfile
+hash change detection.
 """
 
 from __future__ import annotations
@@ -67,11 +64,8 @@ class TestListDependencies:
     """list_dependencies() parses pyproject.toml."""
 
     def test_empty_notebook(self, tmp_path: Path):
-        """Newly created notebook ships the notebook-runtime baseline deps.
-
-        See writer.create_notebook — every generated pyproject.toml
-        pins pyarrow, orjson, and cloudpickle. The runtime (harness,
-        pool_worker, serializer) imports all three unconditionally.
+        """A new notebook ships the runtime baseline deps (pyarrow, orjson, cloudpickle), which the
+        harness, pool worker and serializer import unconditionally.
         """
         nb_dir = create_notebook(tmp_path, "empty")
         deps = list_dependencies(nb_dir)
@@ -79,7 +73,6 @@ class TestListDependencies:
         assert names == ["cloudpickle", "orjson", "pyarrow"]
 
     def test_after_add(self, tmp_path: Path):
-        """After adding a dep, it appears in the list."""
         nb_dir = create_notebook(tmp_path, "with_dep")
         result = add_dependency(nb_dir, "six")
         assert result.success
@@ -88,7 +81,6 @@ class TestListDependencies:
         assert "six" in names
 
     def test_with_version_specifier(self, tmp_path: Path):
-        """Version specifiers are parsed correctly."""
         nb_dir = create_notebook(tmp_path, "versioned")
         add_dependency(nb_dir, "six>=1.0")
         deps = list_dependencies(nb_dir)
@@ -98,7 +90,6 @@ class TestListDependencies:
         assert ">=" in str(six_dep.specifier)
 
     def test_no_pyproject(self, tmp_path: Path):
-        """No pyproject.toml → empty list."""
         deps = list_dependencies(tmp_path)
         assert deps == []
 
@@ -107,7 +98,6 @@ class TestAddDependency:
     """add_dependency() calls uv add."""
 
     def test_add_package(self, tmp_path: Path):
-        """Adding a real package succeeds."""
         nb_dir = create_notebook(tmp_path, "add_test")
         result = add_dependency(nb_dir, "six")
         assert result.success
@@ -124,7 +114,6 @@ class TestAddDependency:
         assert result.success
 
     def test_add_nonexistent_package(self, tmp_path: Path):
-        """Adding a package that doesn't exist fails."""
         nb_dir = create_notebook(tmp_path, "bad_pkg")
         result = add_dependency(nb_dir, "this-package-definitely-does-not-exist-xyz123")
         assert result.success is False
@@ -172,7 +161,6 @@ class TestAddDependency:
         assert any("iniconfig" in d for d in dev)
 
     def test_add_when_uv_missing(self, tmp_path: Path):
-        """Returns failure when uv is not available."""
         with patch(
             "strata.notebook.dependencies.subprocess.run",
             side_effect=FileNotFoundError,
@@ -208,7 +196,6 @@ class TestRemoveDependency:
     """remove_dependency() calls uv remove."""
 
     def test_remove_package(self, tmp_path: Path):
-        """Removing an added package succeeds."""
         nb_dir = create_notebook(tmp_path, "remove_test")
         add_dependency(nb_dir, "six")
         result = remove_dependency(nb_dir, "six")
@@ -221,7 +208,6 @@ class TestRemoveDependency:
         assert "six" not in names
 
     def test_remove_nonexistent(self, tmp_path: Path):
-        """Removing a package that isn't present fails."""
         nb_dir = create_notebook(tmp_path, "remove_missing")
         result = remove_dependency(nb_dir, "this-package-not-installed")
         assert result.success is False
@@ -528,7 +514,7 @@ class TestDependencyRESTEndpoints:
             yield client, Path(tmpdir)
 
     def test_list_dependencies_empty(self, setup):
-        """GET /dependencies on a fresh notebook returns empty list."""
+        """GET /dependencies on a fresh notebook returns the list, resolved deps and env state."""
         client, tmp = setup
         nb = NotebookBuilder(tmp)
 
@@ -784,7 +770,6 @@ dependencies:
             assert detail["operation_log"]["command"] == "uv add this-pkg-does-not-exist-xyz123"
 
     def test_list_dependencies_404(self, setup):
-        """GET /dependencies for unknown notebook returns 404."""
         client, tmp = setup
         resp = client.get("/v1/notebooks/nonexistent/dependencies")
         assert resp.status_code == 404
@@ -915,11 +900,8 @@ class TestDependencyWebSocket:
 class TestListRPackages:
     """``list_r_packages`` parses ``installed.packages()`` output for the UI.
 
-    Returns an ``RPackageListing`` that explicitly distinguishes
-    "the probe failed" from "the project library is empty" — the
-    bare-list-returning shape lost that distinction and the UI
-    rendered "no packages installed" on probe failures (Codex
-    review on #88).
+    Its ``RPackageListing`` tells "the probe failed" apart from "the project library is
+    empty", so the UI does not show "no packages installed" when the probe failed.
     """
 
     def test_rscript_missing_returns_status(self, monkeypatch, tmp_path):
@@ -960,10 +942,9 @@ class TestListRPackages:
         ]
 
     def test_renv_not_active_sentinel(self, monkeypatch, tmp_path):
-        """When the R snippet can't load renv (pre-bootstrap notebook,
-        broken activator) it emits the ``RENV_NOT_ACTIVE`` sentinel
-        and exits 0 — surface as ``status='renv_not_active'`` so the
-        UI can render a targeted hint."""
+        """When the R snippet cannot load renv (pre-bootstrap notebook, broken activator) it emits
+        ``RENV_NOT_ACTIVE`` and exits 0; that becomes ``status='renv_not_active'`` for a UI hint.
+        """
         monkeypatch.setattr(shutil, "which", lambda name: "/fake/Rscript")
         monkeypatch.setattr(
             subprocess,
@@ -976,9 +957,9 @@ class TestListRPackages:
         assert result == RPackageListing(packages=[], status="renv_not_active", error=None)
 
     def test_empty_library_status_ok(self, monkeypatch, tmp_path):
-        """Empty project library: status ``ok`` + empty packages list.
-        Different from the failure modes — the UI shows "no packages
-        installed" only on the ``ok``-but-empty case."""
+        """An empty project library is ``ok`` with no packages, the only case where the UI shows
+        "no packages installed".
+        """
         monkeypatch.setattr(shutil, "which", lambda name: "/fake/Rscript")
         monkeypatch.setattr(
             subprocess,
@@ -991,10 +972,9 @@ class TestListRPackages:
         assert result == RPackageListing(packages=[], status="ok", error=None)
 
     def test_nonzero_exit_returns_failed_status(self, monkeypatch, tmp_path):
-        """Rscript exits non-zero (corrupt R install, etc.) →
-        ``status='failed'`` + error message from stderr. Pre-fix
-        this returned the same empty list as a healthy empty
-        library, and the UI couldn't tell them apart."""
+        """Rscript exiting non-zero (a corrupt R install) gives ``status='failed'`` with stderr,
+        distinct from a healthy empty library.
+        """
         monkeypatch.setattr(shutil, "which", lambda name: "/fake/Rscript")
         monkeypatch.setattr(
             subprocess,
@@ -1026,9 +1006,9 @@ class TestListRPackages:
         assert result.error and "timed out" in result.error
 
     def test_skips_malformed_lines(self, monkeypatch, tmp_path):
-        """Lines without name+version columns are silently dropped — the
-        loop tolerates a single bad line without losing the rest. Final
-        status is still ``ok`` (the malformed lines aren't an error)."""
+        """Lines without name and version columns are dropped without losing the rest; the status
+        stays ``ok``.
+        """
         monkeypatch.setattr(shutil, "which", lambda name: "/fake/Rscript")
         sample_stdout = (
             "arrow\t14.0.0\n"
@@ -1113,11 +1093,8 @@ def _make_fake_rscript_streaming(
 ):
     """Build a stand-in for ``run_rscript_command_streaming``.
 
-    Captures the snippet (so tests can assert what R code ran) and
-    exercises the ``on_update`` callback (so the wiring from
-    streaming → ``environment_job_progress`` is covered). Used by
-    the ``renv_init`` / ``renv_add`` tests to avoid mocking
-    ``asyncio.create_subprocess_exec`` line by line.
+    Records the snippet and fires ``on_update``, so the streaming to
+    ``environment_job_progress`` wiring is covered without mocking subprocesses.
     """
     from strata.notebook.dependencies import _RscriptCommandResult
 
@@ -1154,9 +1131,9 @@ class TestRenvInit:
 
     @pytest.mark.asyncio
     async def test_rscript_missing(self, monkeypatch, tmp_path):
-        """Without Rscript on PATH the streaming helper fails fast with a
-        clear error before spawning a subprocess. Use the real helper
-        (no mock) so we cover the actual shutil.which short-circuit."""
+        """Without Rscript on PATH the real streaming helper fails fast with a clear error, before
+        spawning anything.
+        """
         monkeypatch.setattr(shutil, "which", lambda name: None)
 
         result = await renv_init(tmp_path)
@@ -1167,8 +1144,7 @@ class TestRenvInit:
 
     @pytest.mark.asyncio
     async def test_success_writes_lockfile_change_signal(self, monkeypatch, tmp_path):
-        """A successful init creates ``renv.lock`` — we detect the new
-        hash and report ``lockfile_changed=True``."""
+        """A successful init creates ``renv.lock``, so it reports ``lockfile_changed=True``."""
         from strata.notebook import dependencies as deps_module
 
         captured: list[str] = []
@@ -1200,9 +1176,9 @@ class TestRenvInit:
 
     @pytest.mark.asyncio
     async def test_progress_callback_fires_during_streaming(self, monkeypatch, tmp_path):
-        """The whole point of PR G: ``on_update`` must be invoked while
-        the subprocess is running so ``environment_job_progress`` frames
-        go out live during a multi-minute arrow compile."""
+        """``on_update`` fires while the subprocess runs, so ``environment_job_progress`` frames go
+        out live during a multi-minute arrow compile.
+        """
         from strata.notebook import dependencies as deps_module
 
         monkeypatch.setattr(
@@ -1277,10 +1253,9 @@ class TestRenvAdd:
 
     @pytest.mark.asyncio
     async def test_success_calls_install_and_snapshot(self, monkeypatch, tmp_path):
-        """The R snippet must call both ``renv::install`` AND
-        ``renv::snapshot`` — install puts the package in the library;
-        snapshot writes it to the lockfile. Dropping snapshot would
-        let the on-disk library and lockfile drift."""
+        """The snippet calls both ``renv::install`` (library) and ``renv::snapshot`` (lockfile);
+        dropping snapshot would let the two drift.
+        """
         from strata.notebook import dependencies as deps_module
 
         (tmp_path / "renv.lock").write_text('{"Packages": {}}', encoding="utf-8")
@@ -1341,8 +1316,9 @@ class TestRenvAdd:
 
 
 class TestResolveUv:
-    """resolve_uv: PATH first, then uv's installer dirs (~/.local/bin etc.) —
-    so headless shells without ~/.local/bin on PATH still find uv."""
+    """resolve_uv tries PATH, then uv's installer dirs (~/.local/bin etc.), so headless shells
+    without them on PATH still find uv.
+    """
 
     def test_found_on_path(self):
         from strata.notebook import dependencies
@@ -1381,10 +1357,11 @@ class TestResolveUv:
 
 @pytest.mark.skipif(sys.platform == "win32", reason="the recording uv is a shell script")
 class TestUvCommandsIgnoreTheServersEnvironment:
-    """A server started with UV_PROJECT_ENVIRONMENT (or under ``uv run``, which
-    sets VIRTUAL_ENV) passed it to every uv command it ran for a notebook, and
-    UV_PROJECT_ENVIRONMENT makes uv sync, add to and run in that environment
-    instead of the notebook's ``.venv``."""
+    """uv commands for a notebook drop the server's UV_PROJECT_ENVIRONMENT and VIRTUAL_ENV.
+
+    A server started with them (``uv run`` sets VIRTUAL_ENV) would otherwise make uv sync,
+    add to and run in that environment instead of the notebook's ``.venv``.
+    """
 
     @pytest.fixture
     def recorded(self, tmp_path, monkeypatch):
@@ -1470,9 +1447,11 @@ class TestUvCommandsIgnoreTheServersEnvironment:
 
 @pytest.mark.skipif(sys.platform == "win32", reason="the recording uv is a shell script")
 class TestServiceModeInstallsWheelsOnly:
-    """Building a source distribution runs its build backend as the server's
-    user, with the server's environment: the notebook's ``uv`` commands in
-    service mode tell uv to install wheels only (``UV_NO_BUILD``)."""
+    """In service mode, notebook ``uv`` commands install wheels only (``UV_NO_BUILD``).
+
+    Building a source distribution runs its backend as the server's user, with the server's
+    environment.
+    """
 
     @pytest.fixture
     def recorded(self, tmp_path, monkeypatch):

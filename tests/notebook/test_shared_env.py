@@ -1,4 +1,4 @@
-"""One environment per lockfile, shared by the notebooks that have it. Item 5."""
+"""One environment per lockfile, shared by the notebooks that have it."""
 
 from __future__ import annotations
 
@@ -192,8 +192,7 @@ def test_the_key_names_the_interpreter_build(tmp_path):
 
 
 class TestTheSweepOnlyTakesWhatItBuilt:
-    """A removed environment is a notebook that cannot run, so the sweep is
-    conservative about what it is looking at and what it counts as unused."""
+    """A removed environment is a notebook that cannot run, so the sweep is conservative."""
 
     def test_a_directory_it_did_not_build_is_left_alone(self, tmp_path, shared):
         theirs = shared / "not-an-environment"
@@ -240,8 +239,7 @@ class TestTheSweepOnlyTakesWhatItBuilt:
 
 
 def test_opening_a_notebook_keeps_its_environment_in_use(tmp_path, shared, monkeypatch):
-    """The sweep ages an environment out from when it was last linked, so a
-    notebook that is opened but not re-synced must count as using it."""
+    """The sweep ages from the last link, so an opened, unsynced notebook still counts as a user."""
     from strata.notebook.parser import parse_notebook
     from strata.notebook.session import NotebookSession
     from strata.notebook.writer import create_notebook

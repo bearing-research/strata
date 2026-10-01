@@ -1,19 +1,9 @@
 """A value that is fresh on every run, and the cells that read it.
 
-``# @nocache`` says a cell's result is not determined by its source, inputs and
-environment: a clock, a counter, a file being edited. Two things went wrong
-downstream of such a cell.
-
-Its artifacts carried the provenance hash every other artifact does, and that
-hash is the same on every run. A consumer's cache key is built from its
-inputs' hashes, so the producer could re-run with a new value and the consumer
-would still hit its cache and hand back what it computed from the old one.
-
-And every multi-cell run (headless ``strata run``, the browser cascade, Run
-All) asked each cell to materialise its upstreams, which for a normal producer
-is a cache hit and for a ``@nocache`` one is another execution. One run of a
-producer with two consumers executed it three times, and the two consumers
-read different values in the same run.
+``# @nocache`` marks a result not determined by source, inputs and environment (a clock,
+a counter, a file being edited). Its provenance hash is the same on every run, so a
+consumer's key must follow the value instead, and one multi-cell run must execute such a
+producer once so every consumer reads the same value.
 """
 
 from __future__ import annotations
@@ -73,10 +63,9 @@ def test_a_consumer_recomputes_when_its_fresh_input_changed(tmp_path: Path):
 
 
 def test_an_unchanged_fresh_value_still_lets_the_consumer_hit(tmp_path: Path):
-    """The fix must key on the value, not on the fact of a re-run.
+    """The key follows the value, not the fact of a re-run.
 
-    A @nocache producer that happens to produce the same bytes again has not
-    changed anything its consumer read, so the consumer's cache still applies.
+    A @nocache producer that yields the same bytes again leaves its consumer's cache valid.
     """
     steady = "# @nocache\nrun_count = 7\n"
     nb = _build_notebook(tmp_path, cells=[("p", steady, None), ("c", CONSUMER, "p")])
@@ -91,14 +80,9 @@ def test_an_unchanged_fresh_value_still_lets_the_consumer_hit(tmp_path: Path):
 def test_staleness_sees_a_changed_fresh_input(tmp_path: Path):
     """Execution and staleness compute the same key, so they must move together.
 
-    The report's consumer read ``ready`` with no reason while holding a value
-    computed from an older read. Here ``c`` holds a stored artifact (``d``
-    consumes it) and ``d`` is a leaf; neither may claim ``ready`` once the
-    fresh value underneath them has changed.
-
-    Which not-ready word they get follows the walk's existing rule for a cell
-    whose provenance no longer matches its stored result, and is not what this
-    pins.
+    ``c`` holds a stored artifact (``d`` consumes it) and ``d`` is a leaf; neither may read
+    ``ready`` once the fresh value under them has changed. Which not-ready word they get is
+    not pinned here.
     """
     counter = tmp_path / "count.txt"
     nb = _build_notebook(
@@ -150,10 +134,10 @@ def test_a_consumer_of_a_moved_fresh_value_reads_stale_upstream(tmp_path: Path):
 
 
 def test_the_reported_leaf_consumer_reads_stale_upstream(tmp_path: Path):
-    """The round-3 shape exactly: the consumer is a leaf that displays.
+    """The consumer is a leaf that displays.
 
-    A leaf stores no variable artifact, only its display output, which records
-    the same inputs and the same source and environment hashes.
+    A leaf stores only its display output, which records the same inputs, source and
+    environment hashes.
     """
     counter = tmp_path / "count.txt"
     nb = _build_notebook(tmp_path, cells=[("p", _producer(counter), None), ("c", CONSUMER, "p")])
@@ -235,7 +219,7 @@ def test_a_run_in_display_order_still_materialises_what_it_has_not_run(tmp_path:
 
 
 def test_outside_a_run_a_single_cell_still_refreshes_its_fresh_source(tmp_path: Path):
-    """Standalone semantics are unchanged: running a consumer re-reads @nocache."""
+    """Outside a run, running a consumer re-reads its @nocache upstream."""
     counter = tmp_path / "count.txt"
     nb = _build_notebook(tmp_path, cells=[("p", _producer(counter), None), ("c", CONSUMER, "p")])
     session = _session(nb)
@@ -389,9 +373,8 @@ def _diamond(tmp_path: Path, counter: Path):
 def test_one_requested_cell_executes_a_shared_fresh_ancestor_once(tmp_path: Path):
     """Both branches must read the same snapshot of the shared producer.
 
-    Materialising ``cmp`` reaches ``p`` through ``avg`` and again through
-    ``peak``. Without one scope over the whole traversal, a ``@nocache`` ``p``
-    executed once per branch and the comparison joined two different reads.
+    Materialising ``cmp`` reaches ``p`` through ``avg`` and again through ``peak``; one scope
+    over the whole traversal runs a ``@nocache`` ``p`` once.
     """
     counter = tmp_path / "count.txt"
     session = _session(_diamond(tmp_path, counter))
@@ -423,9 +406,8 @@ def test_an_independent_request_still_refreshes_the_fresh_ancestor(tmp_path: Pat
 def test_a_consumer_of_a_stable_variable_hits_despite_a_changing_sibling(tmp_path: Path):
     """``price`` reads only ``unit_price``, which never changes.
 
-    The fresh producer also defines a changing ``run_count``. Keying the
-    consumer on every variable the producer stored made it miss on every run
-    for a value it never read.
+    The fresh producer also defines a changing ``run_count``; keying the consumer on every
+    variable the producer stored would miss on every run.
     """
     counter = tmp_path / "count.txt"
     producer = _producer(counter) + "unit_price = 12\n"

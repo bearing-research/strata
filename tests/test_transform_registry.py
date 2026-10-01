@@ -10,10 +10,7 @@ from strata.transforms.registry import (
 
 
 class TestTransformDefinition:
-    """Tests for TransformDefinition matching."""
-
     def test_exact_match(self):
-        """Exact ref matches correctly."""
         defn = TransformDefinition(ref="duckdb_sql@v1", executor_url="http://exec:8080")
         assert defn.matches("duckdb_sql@v1")
         assert defn.matches("local://duckdb_sql@v1")  # Strips the URI prefix
@@ -21,7 +18,6 @@ class TestTransformDefinition:
         assert not defn.matches("pandas_script@v1")
 
     def test_wildcard_version(self):
-        """Wildcard version matching."""
         defn = TransformDefinition(ref="duckdb_sql@*", executor_url="http://exec:8080")
         assert defn.matches("duckdb_sql@v1")
         assert defn.matches("duckdb_sql@v2")
@@ -29,36 +25,31 @@ class TestTransformDefinition:
         assert not defn.matches("pandas_script@v1")
 
     def test_wildcard_executor(self):
-        """Wildcard executor matching."""
         defn = TransformDefinition(ref="*_sql@v1", executor_url="http://exec:8080")
         assert defn.matches("duckdb_sql@v1")
         assert defn.matches("sqlite_sql@v1")
         assert not defn.matches("duckdb_sql@v2")
 
     def test_full_wildcard(self):
-        """Full wildcard matches anything."""
+        """A full wildcard matches anything."""
         defn = TransformDefinition(ref="*", executor_url="http://exec:8080")
         assert defn.matches("duckdb_sql@v1")
         assert defn.matches("anything@any_version")
 
 
 class TestTransformRegistry:
-    """Tests for TransformRegistry."""
-
     def test_disabled_registry_returns_none(self):
-        """Disabled registry returns None for all lookups."""
+        """A disabled registry returns None for every lookup."""
         registry = TransformRegistry(enabled=False, definitions=[])
         assert registry.get("duckdb_sql@v1") is None
         assert not registry.is_allowed("duckdb_sql@v1")
 
     def test_enabled_with_no_definitions(self):
-        """Enabled registry with no definitions returns None."""
         registry = TransformRegistry(enabled=True, definitions=[])
         assert registry.get("duckdb_sql@v1") is None
         assert not registry.is_allowed("duckdb_sql@v1")
 
     def test_get_returns_matching_definition(self):
-        """Get returns matching definition."""
         defn1 = TransformDefinition(ref="duckdb_sql@v1", executor_url="http://duck:8080")
         defn2 = TransformDefinition(ref="pandas_script@*", executor_url="http://pandas:8080")
         registry = TransformRegistry(enabled=True, definitions=[defn1, defn2])
@@ -70,7 +61,6 @@ class TestTransformRegistry:
         assert result is defn2
 
     def test_first_match_wins(self):
-        """First matching definition wins."""
         defn1 = TransformDefinition(ref="*", executor_url="http://catch-all:8080")
         defn2 = TransformDefinition(ref="duckdb_sql@v1", executor_url="http://duck:8080")
         registry = TransformRegistry(enabled=True, definitions=[defn1, defn2])
@@ -80,7 +70,7 @@ class TestTransformRegistry:
         assert result is defn1
 
     def test_is_allowed(self):
-        """is_allowed returns True only for registered transforms."""
+        """is_allowed is True only for registered transforms."""
         defn = TransformDefinition(ref="duckdb_sql@v1", executor_url="http://exec:8080")
         registry = TransformRegistry(enabled=True, definitions=[defn])
 
@@ -88,7 +78,7 @@ class TestTransformRegistry:
         assert not registry.is_allowed("unknown@v1")
 
     def test_from_config_empty_embedded_mode(self):
-        """from_config with empty config returns embedded registry by default."""
+        """An empty config gives the embedded registry by default."""
         registry = TransformRegistry.from_config({})
         assert registry.enabled
         assert registry.is_allowed("duckdb_sql@v1")
@@ -97,13 +87,13 @@ class TestTransformRegistry:
         assert defn.executor_url == "embedded://local"
 
     def test_from_config_empty_registry_mode(self):
-        """from_config with empty config and embedded_mode=False returns disabled registry."""
+        """An empty config with embedded_mode=False gives a disabled registry."""
         registry = TransformRegistry.from_config({}, embedded_mode=False)
         assert not registry.enabled
         assert len(registry.definitions) == 0
 
     def test_from_config_enabled(self):
-        """from_config parses full configuration."""
+        """from_config parses a full configuration."""
         config = {
             "enabled": True,
             "registry": [
@@ -140,23 +130,19 @@ class TestTransformRegistry:
 
 
 class TestSingletons:
-    """Tests for module-level singleton functions."""
+    """Module-level singleton functions."""
 
     def setup_method(self):
-        """Reset singleton before each test."""
         reset_transform_registry()
 
     def teardown_method(self):
-        """Reset singleton after each test."""
         reset_transform_registry()
 
     def test_default_registry_disabled(self):
-        """Default registry is disabled."""
         registry = get_transform_registry()
         assert not registry.enabled
 
     def test_set_and_get_registry(self):
-        """set_transform_registry updates the singleton."""
         defn = TransformDefinition(ref="test@v1", executor_url="http://test:8080")
         custom = TransformRegistry(enabled=True, definitions=[defn])
 
@@ -168,7 +154,6 @@ class TestSingletons:
         assert retrieved.is_allowed("test@v1")
 
     def test_reset_clears_registry(self):
-        """reset_transform_registry clears the singleton."""
         defn = TransformDefinition(ref="test@v1", executor_url="http://test:8080")
         custom = TransformRegistry(enabled=True, definitions=[defn])
         set_transform_registry(custom)

@@ -1,15 +1,7 @@
 """The configuration reference and the config surface must not drift apart.
 
-Both directions are failures an operator pays for:
-
-- A documented setting that does not exist. ``StrataConfig`` sets
-  ``extra="ignore"``, so an unknown ``STRATA_*`` is accepted in silence -- the
-  operator sets it, sees no error, and believes something is configured.
-  ``STRATA_PULL_MODEL_ENABLED`` was documented as gating the signed-URL routes
-  long after the flag was deleted; the routes were never gated by it (#550).
-- A real setting with no documentation row. Credentials, CORS origins, and ACL
-  rules were all reachable and undocumented, which is how you end up with a
-  deployment configured from source-reading.
+A documented setting that does not exist is accepted in silence (``extra="ignore"``), so the
+operator believes it is configured. A real setting with no row leaves operators reading source.
 """
 
 from __future__ import annotations
@@ -109,18 +101,7 @@ def _service_mode_doc() -> str:
 
 
 def test_the_documented_acl_example_actually_loads():
-    """The ACL block in service-mode.md must be a config, not a plausible one.
-
-    It was neither: it used ``resource`` and ``scope``, which are not fields,
-    while the real rule is ``principal`` / ``tenant`` / ``tables`` — so the
-    documented example failed validation at startup. And it announced the
-    default for an unmatched request as ``deny`` when the code's default is
-    ``allow``, which is wrong in the direction an operator pays for: they read
-    it, believe unmatched tables are refused, and ship a store that serves
-    them.
-
-    Nothing checked it, which is why it stayed wrong. This checks it.
-    """
+    """The ACL block in service-mode.md must validate as a real config, not a plausible one."""
     import tomllib
 
     from strata.config import AclConfig

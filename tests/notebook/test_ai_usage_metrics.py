@@ -1,9 +1,7 @@
-"""Model tokens this server used, by tenant, principal and model. Item 34.
+"""Model tokens this server used, by tenant, principal and model.
 
-A fake OpenAI-compatible provider answers with known token counts, so the
-counts come through the real response parsing of a streamed completion (the
-path a prompt cell takes) and of a plain completion, and out of the real
-Prometheus route.
+A fake OpenAI-compatible provider returns known token counts, so they pass through the
+real streamed and plain completion parsing and out of the Prometheus route.
 """
 
 from __future__ import annotations

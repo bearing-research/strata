@@ -108,7 +108,6 @@ def test_admin_managed_http_worker_executes_over_websocket(
     service_mode_notebook_client,
     notebook_executor_server,
 ):
-    """A server-managed executor worker should execute through the notebook WS flow."""
     client, tmp = service_mode_notebook_client
     notebook = NotebookBuilder(tmp, "service_remote_http").add_cell("c1", "x = 1")
 
@@ -155,7 +154,6 @@ def test_admin_disabled_worker_blocks_existing_notebook_execution_over_websocket
     service_mode_notebook_client,
     notebook_executor_server,
 ):
-    """Disabling a server-managed worker should block notebook WS execution."""
     client, tmp = service_mode_notebook_client
     notebook = NotebookBuilder(tmp, "service_remote_blocked").add_cell("c1", "x = 1")
 
@@ -210,7 +208,6 @@ def test_admin_managed_signed_worker_executes_over_websocket(
     notebook_executor_server,
     notebook_build_server,
 ):
-    """A server-managed signed worker should execute over the notebook WS flow."""
     client, tmp = service_mode_notebook_client
     notebook = NotebookBuilder(tmp, "service_remote_signed").add_cell("c1", "x = 1")
 
@@ -257,7 +254,6 @@ def test_admin_managed_signed_worker_preserves_exported_class_instances(
     notebook_executor_server,
     notebook_build_server,
 ):
-    """A server-managed signed worker should preserve exported class instances across cells."""
     client, tmp = service_mode_notebook_client
     notebook = (
         NotebookBuilder(tmp, "service_remote_signed_class_instances")
@@ -329,7 +325,6 @@ def test_admin_worker_rename_and_delete_drift_propagates_into_existing_notebook(
     service_mode_notebook_client,
     notebook_executor_server,
 ):
-    """Admin rename/delete should affect an already-open notebook session."""
     client, tmp = service_mode_notebook_client
     notebook = NotebookBuilder(tmp, "service_remote_drift").add_cell("c1", "x = 1")
 

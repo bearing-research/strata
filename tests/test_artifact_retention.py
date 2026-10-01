@@ -1,10 +1,8 @@
 """Retention: the artifact store stays bounded without anyone deleting by hand.
 
-A personal store grew by every distinct ``materialize`` forever. The sweep that
-existed could not help: every result is version 1 of an id the store minted for
-it, so "spare the latest version of an id" spared all of them. Retention now
-keys on use rather than creation, knows which ids the store minted, and can
-hold a store under a byte cap.
+Every materialize result is version 1 of an id the store minted, so "spare the latest version"
+spares everything. Retention keys on use rather than creation, knows which ids the store minted, and
+can hold a store under a byte cap.
 """
 
 from __future__ import annotations
@@ -58,7 +56,7 @@ def _ready(
     size: int = 100,
     inputs: dict[str, str] | None = None,
 ) -> tuple[str, int]:
-    """A ready version. With no id, one the store minted, as a materialize miss."""
+    """A ready version; with no id, one the store minted, like a materialize miss."""
     minted = artifact_id is None
     artifact_id = artifact_id or str(uuid.uuid4())
     version = store.create_artifact(
@@ -103,7 +101,7 @@ class TestUse:
         assert _row(store, *key)["last_used_at"] == pytest.approx(time.time(), abs=60)
 
     def test_a_second_use_within_the_hour_writes_nothing(self, store):
-        """Every read an UPDATE would make reads writes for no gain."""
+        """An UPDATE on every read would turn reads into writes for no gain."""
         key = _ready(store)
         earlier = time.time() - 120
         _set(store, *key, last_used_at=earlier)
@@ -157,8 +155,7 @@ class TestMinted:
         assert _row(store, *key)["minted"] == 0
 
     def test_the_migration_marks_the_ids_the_store_made_up(self, tmp_path):
-        """Rows from before the column: every id the store minted is a uuid4,
-        and the ids callers choose are not."""
+        """Rows from before the column: minted ids are uuid4, caller-chosen ids are not."""
         store = ArtifactStore(tmp_path / "old")
         minted = _ready(store)
         named = _ready(store, "nb_abc_cell_def_var_model")
@@ -178,8 +175,9 @@ class TestMinted:
 
 class TestWhatIsCollected:
     def test_an_idle_minted_result_goes_and_a_notebook_output_stays(self, store):
-        """A notebook output's latest version is the cell's value; a minted
-        id's is only a result nobody asked for again."""
+        """A notebook output's latest version is the cell's value; a minted id's is a result nobody
+        asked for again.
+        """
         minted = _ready(store)
         notebook = _ready(store, "nb_abc_cell_def_var_model")
         for key in (minted, notebook):
@@ -253,9 +251,9 @@ class TestWhatIsCollected:
         assert _exists(store, source)
 
     def test_an_id_never_loses_its_top_while_keeping_a_lower_version(self, store):
-        """``create_artifact`` numbers versions MAX + 1: a top collected under
-        a kept version would be reissued, and a URI somebody holds for it
-        would serve other bytes."""
+        """``create_artifact`` numbers versions MAX + 1, so a collected top would be reissued and a
+        held URI would serve other bytes.
+        """
         artifact_id, _ = _ready(store)
         store.create_artifact(artifact_id, "prov-v2")
         store.write_blob(artifact_id, 2, b"y" * 100)
@@ -379,8 +377,7 @@ class TestThroughTheServer:
         return artifact_id, int(version)
 
     def test_a_collected_result_is_rebuilt_under_a_new_id(self, server, temp_warehouse):
-        """The store never reissues a collected id's version number: the next
-        miss mints another id rather than writing version 1 of the old one."""
+        """A collected id's version is never reissued: the next miss mints a new id."""
         from strata_client.client import StrataClient
 
         base_url, store = server
@@ -405,8 +402,9 @@ class TestThroughTheServer:
     def test_a_result_used_only_as_an_input_stays_while_its_downstream_is_asked_for(
         self, server, temp_warehouse
     ):
-        """A dashboard's request always hit the downstream and never read the
-        scan, so the scan idled out and every later request was a 404."""
+        """A dashboard always hits the downstream and never reads the scan, so input use must count
+        or the scan idles out.
+        """
         from strata_client.client import StrataClient
 
         base_url, store = server
@@ -458,8 +456,7 @@ class TestThroughTheServer:
         assert _row(store, *self._key(uri))["minted"] == 1
 
     def test_a_cell_output_that_names_its_id_is_not(self, server):
-        """The team-cache write: the notebook names the id and reads it back
-        as its latest version."""
+        """The team-cache write: the notebook names the id and reads back its latest version."""
         base_url, store = server
         named = self._put(
             base_url,
@@ -671,8 +668,7 @@ class TestNotebookStores:
 
 
 class TestWhatAKeptResultNeeds:
-    """A kept result keeps what it was built from, and a result in use as an
-    input is in use (pre-release review, round 2)."""
+    """A kept result keeps what it was built from, and a result used as an input is in use."""
 
     @staticmethod
     def _chain(store: ArtifactStore) -> tuple[tuple[str, int], tuple[str, int]]:
@@ -685,7 +681,7 @@ class TestWhatAKeptResultNeeds:
         return scan, result
 
     def test_a_name_keeps_the_chain_behind_it(self, store):
-        """Named "reconstructible", and a refresh re-reads the recorded inputs."""
+        """Named means reconstructible, and a refresh re-reads the recorded inputs."""
         scan, result = self._chain(store)
         store.set_name("features", *result)
 
@@ -710,8 +706,9 @@ class TestWhatAKeptResultNeeds:
         assert store.resolve_alias("model", "champion").id == candidate[0]
 
     def test_a_cell_value_keeps_the_upstream_value_it_was_built_from(self, store):
-        """Pruning an upstream's older values must not take the one a current
-        downstream value recorded, or publishing it copies a broken chain."""
+        """Pruning an upstream's older values must not take the one a current downstream recorded,
+        or publishing copies a broken chain.
+        """
         up = "nb_n1_cell_up_var_x"
         _values(store, up, 1)
         ref = f"{up}@v=1"
@@ -730,8 +727,7 @@ class TestWhatAKeptResultNeeds:
         assert not _exists(store, (up, 2))
 
     def test_the_floor_allows_for_a_use_recorded_late(self, store):
-        """A use writes at most every few minutes, so the recorded time can
-        trail a real read: a floor of one hour must still hold for it."""
+        """Uses are recorded at most every few minutes; a one-hour floor must allow for that lag."""
         from strata.artifact_store import _USE_RESOLUTION_SECONDS
 
         read_late = _ready(store)
@@ -745,8 +741,9 @@ class TestWhatAKeptResultNeeds:
         assert not _exists(store, long_idle)
 
     def test_a_tenants_cap_is_on_its_own_share(self, store):
-        """Measured against the whole store, one tenant's sweep emptied its
-        own cache while the others kept the store over the cap."""
+        """Measured against the whole store, one tenant's sweep would empty its own cache while
+        others kept the store over the cap.
+        """
         mine = []
         for _ in range(2):
             artifact_id = str(uuid.uuid4())
@@ -768,8 +765,9 @@ class TestWhatAKeptResultNeeds:
         assert all(_exists(store, key) for key in mine)
 
     def test_an_imported_copy_starts_its_idle_clock_at_the_import(self, tmp_path):
-        """A promoted chain keeps its source's created_at; without this the
-        next sweep read a chain copied a second ago as days idle."""
+        """A promoted chain keeps its source's created_at, so without this a fresh copy reads as
+        days idle.
+        """
         from dataclasses import replace
 
         source = ArtifactStore(tmp_path / "source")
@@ -802,7 +800,7 @@ class TestWhatAKeptResultNeeds:
 
 
 async def test_the_first_sweep_runs_soon_after_startup(monkeypatch):
-    """A laptop server restarted more often than hourly used to never sweep."""
+    """A laptop server restarted more often than hourly must still sweep."""
     import asyncio
     from types import SimpleNamespace
 

@@ -16,11 +16,8 @@ from strata.config import StrataConfig
 
 
 class TestResizableLimiter:
-    """Tests for ResizableLimiter."""
-
     @pytest.mark.asyncio
     async def test_basic_acquire_release(self):
-        """Basic acquire and release should work."""
         limiter = ResizableLimiter(2)
         assert limiter.capacity == 2
         assert limiter.in_use == 0
@@ -46,7 +43,6 @@ class TestResizableLimiter:
 
     @pytest.mark.asyncio
     async def test_acquire_timeout(self):
-        """Acquire should respect timeout."""
         limiter = ResizableLimiter(1)
 
         await limiter.acquire()
@@ -58,7 +54,6 @@ class TestResizableLimiter:
 
     @pytest.mark.asyncio
     async def test_resize_increase(self):
-        """Resize should allow increasing capacity."""
         limiter = ResizableLimiter(2)
 
         await limiter.acquire()
@@ -75,7 +70,6 @@ class TestResizableLimiter:
 
     @pytest.mark.asyncio
     async def test_resize_decrease(self):
-        """Resize should allow decreasing capacity."""
         limiter = ResizableLimiter(4)
 
         await limiter.acquire()
@@ -92,7 +86,7 @@ class TestResizableLimiter:
 
     @pytest.mark.asyncio
     async def test_resize_below_in_use(self):
-        """Resize below in_use should work, just block new acquires."""
+        """Resize below in_use succeeds and just blocks new acquires."""
         limiter = ResizableLimiter(4)
 
         for _ in range(4):
@@ -114,7 +108,7 @@ class TestResizableLimiter:
 
     @pytest.mark.asyncio
     async def test_resize_wakes_waiters(self):
-        """Resize increase should wake waiting acquirers."""
+        """A capacity increase wakes waiting acquirers."""
         limiter = ResizableLimiter(1)
         await limiter.acquire()
 
@@ -137,11 +131,10 @@ class TestResizableLimiter:
     @pytest.mark.asyncio
     @pytest.mark.parametrize("timeout", [None, 60.0])
     async def test_a_cancelled_waiter_passes_its_wakeup_on(self, timeout):
-        """A waiter cancelled after release() picked it doesn't strand the slot.
+        """A waiter cancelled after release() picked it must not strand the slot.
 
-        On CPython 3.12, asyncio.Condition drops a notify whose waiter is
-        cancelled before it runs, so the next waiter slept with the slot
-        free until its deadline.
+        On CPython 3.12, asyncio.Condition drops a notify whose waiter is cancelled before it runs,
+        so the next waiter slept with the slot free until its deadline.
         """
         limiter = ResizableLimiter(1)
         await limiter.acquire()
@@ -167,20 +160,17 @@ class TestResizableLimiter:
 
     @pytest.mark.asyncio
     async def test_release_without_acquire_raises(self):
-        """Release without acquire should raise."""
         limiter = ResizableLimiter(2)
         with pytest.raises(RuntimeError, match="release.*without"):
             await limiter.release()
 
     @pytest.mark.asyncio
     async def test_resize_to_zero_raises(self):
-        """Resize to zero should raise."""
         limiter = ResizableLimiter(2)
         with pytest.raises(ValueError, match="capacity must be >= 1"):
             await limiter.resize(0)
 
     def test_get_stats(self):
-        """get_stats should return accurate info."""
         limiter = ResizableLimiter(5)
         stats = limiter.get_stats()
         assert stats["capacity"] == 5
@@ -189,22 +179,18 @@ class TestResizableLimiter:
 
 
 class TestRollingLatencyWindow:
-    """Tests for RollingLatencyWindow percentile calculation."""
-
     def test_empty_window_returns_none(self):
-        """Empty window should return None for p95."""
         window = RollingLatencyWindow(size=100)
         assert window.get_p95() is None
 
     def test_few_samples_returns_none(self):
-        """Need at least 10 samples for meaningful percentile."""
+        """At least 10 samples are needed for a meaningful percentile."""
         window = RollingLatencyWindow(size=100)
         for i in range(9):
             window.record(float(i))
         assert window.get_p95() is None
 
     def test_exactly_10_samples(self):
-        """10 samples should give a valid p95."""
         window = RollingLatencyWindow(size=100)
         for i in range(10):
             window.record(float(i))
@@ -214,7 +200,7 @@ class TestRollingLatencyWindow:
         assert p95 >= 8.0
 
     def test_rolling_behavior(self):
-        """Window should drop old values when full."""
+        """A full window drops its oldest values."""
         window = RollingLatencyWindow(size=10)
 
         for _ in range(10):
@@ -230,7 +216,6 @@ class TestRollingLatencyWindow:
         assert p95_high == 100.0  # Old values should be gone
 
     def test_get_stats(self):
-        """Test comprehensive stats output."""
         window = RollingLatencyWindow(size=100)
         for i in range(1, 101):
             window.record(float(i))
@@ -246,7 +231,6 @@ class TestRollingLatencyWindow:
         assert stats["p99_ms"] == pytest.approx(99.0, abs=1)
 
     def test_reset(self):
-        """Reset should clear all samples."""
         window = RollingLatencyWindow(size=100)
         for i in range(50):
             window.record(float(i))
@@ -259,10 +243,7 @@ class TestRollingLatencyWindow:
 
 
 class TestAdaptiveConfig:
-    """Tests for AdaptiveConfig defaults."""
-
     def test_default_values(self):
-        """Test sensible defaults."""
         config = AdaptiveConfig()
         assert config.enabled is False  # Disabled by default
         assert config.adjustment_interval_seconds == 5.0
@@ -274,7 +255,6 @@ class TestAdaptiveConfig:
         assert config.max_slots_bulk == 32
 
     def test_custom_values(self):
-        """Test custom configuration."""
         config = AdaptiveConfig(
             enabled=True,
             latency_target_p95_ms=200.0,
@@ -286,8 +266,6 @@ class TestAdaptiveConfig:
 
 
 class TestAdaptiveConcurrencyController:
-    """Tests for AdaptiveConcurrencyController."""
-
     @pytest.fixture
     def limiters(self):
         """Create test limiters."""
@@ -317,7 +295,6 @@ class TestAdaptiveConcurrencyController:
         )
 
     def test_record_latency(self, controller):
-        """Test latency recording to appropriate tier."""
         controller.record_latency("interactive", 50.0)
         controller.record_latency("bulk", 150.0)
 
@@ -328,7 +305,6 @@ class TestAdaptiveConcurrencyController:
         assert bulk_stats["count"] == 1
 
     def test_get_metrics(self, controller):
-        """Test metrics output."""
         for i in range(20):
             controller.record_latency("interactive", float(50 + i))
             controller.record_latency("bulk", float(100 + i))
@@ -351,7 +327,7 @@ class TestAdaptiveConcurrencyController:
 
     @pytest.mark.asyncio
     async def test_disabled_controller_does_nothing(self, limiters):
-        """Disabled controller should not start background task."""
+        """A disabled controller starts no background task."""
         interactive, bulk = limiters
         config = AdaptiveConfig(enabled=False)
         controller = AdaptiveConcurrencyController(
@@ -366,7 +342,6 @@ class TestAdaptiveConcurrencyController:
 
     @pytest.mark.asyncio
     async def test_start_stop_lifecycle(self, controller):
-        """Test controller start/stop lifecycle."""
         await controller.start()
         assert controller._task is not None
 
@@ -375,7 +350,7 @@ class TestAdaptiveConcurrencyController:
 
     @pytest.mark.asyncio
     async def test_decrease_slots_on_high_latency(self, controller, limiters):
-        """Controller should decrease slots when p95 > target."""
+        """Slots decrease when p95 exceeds the target."""
         interactive, bulk = limiters
 
         # Latencies above the 100ms target.
@@ -394,7 +369,7 @@ class TestAdaptiveConcurrencyController:
 
     @pytest.mark.asyncio
     async def test_increase_slots_on_low_latency_with_queue_pressure(self, controller, limiters):
-        """Controller should increase slots when p95 < 80% of target AND queue pressure exists."""
+        """Slots increase only when p95 < 80% of target and there is queue pressure."""
         interactive, bulk = limiters
 
         # Record low latencies (below 80ms = 80% of 100ms target)
@@ -413,7 +388,6 @@ class TestAdaptiveConcurrencyController:
 
     @pytest.mark.asyncio
     async def test_no_increase_without_queue_pressure(self, controller, limiters):
-        """Controller should NOT increase slots when latency is low but no queue pressure."""
         interactive, bulk = limiters
 
         # Record low latencies (below 80ms = 80% of 100ms target)
@@ -433,7 +407,6 @@ class TestAdaptiveConcurrencyController:
 
     @pytest.mark.asyncio
     async def test_slots_bounded_by_min(self, controller, limiters):
-        """Slots should not go below minimum."""
         interactive, bulk = limiters
 
         # Set slots near minimum - also resize the limiter
@@ -451,7 +424,6 @@ class TestAdaptiveConcurrencyController:
 
     @pytest.mark.asyncio
     async def test_slots_bounded_by_max(self, controller, limiters):
-        """Slots should not go above maximum."""
         interactive, bulk = limiters
 
         # Set slots near maximum - also resize the limiter
@@ -471,7 +443,6 @@ class TestAdaptiveConcurrencyController:
 
     @pytest.mark.asyncio
     async def test_hysteresis_prevents_flapping(self, controller, limiters):
-        """Hysteresis should prevent rapid changes."""
         interactive, bulk = limiters
 
         for _ in range(20):
@@ -495,7 +466,6 @@ class TestAdaptiveConcurrencyController:
 
     @pytest.mark.asyncio
     async def test_bulk_tier_independent(self, controller, limiters):
-        """Bulk tier should be adjusted independently."""
         interactive, bulk = limiters
 
         # Only record high latencies for bulk
@@ -511,10 +481,7 @@ class TestAdaptiveConcurrencyController:
 
 
 class TestTierState:
-    """Tests for TierState dataclass."""
-
     def test_default_values(self):
-        """Test TierState defaults."""
         state = TierState(
             name="interactive",
             current_slots=10,
@@ -531,14 +498,9 @@ class TestTierState:
 class TestSampleAging:
     """A control loop must not steer off traffic that is over.
 
-    The window was count-only, so a burst of slow requests followed by an idle
-    period kept re-triggering decrease signals from stale samples until the
-    tier sat at ``min_slots`` with nothing running.
-
-    Time is stepped rather than slept through. Expiry is a comparison of two
-    timestamps, so sleeping past a 50ms window measures the runner's timer
-    resolution — which is how these flaked on Windows, where ``time`` has
-    ~15ms granularity (#627).
+    A count-only window let stale slow samples keep signalling decreases through an idle period.
+    Time is stepped, not slept: expiry compares timestamps, and Windows' ~15ms timer granularity
+    made sleeping past a 50ms window flaky.
     """
 
     @staticmethod
@@ -578,7 +540,7 @@ class TestSampleAging:
         assert window.get_p95() == 10.0
 
     def test_a_sample_inside_the_window_is_still_live(self):
-        """The boundary the two tests above straddle: just under the age bound."""
+        """Just under the age bound, the sample is still live."""
         window, advance = self._window(size=100, max_age_seconds=60.0)
         for _ in range(10):
             window.record(900.0)
@@ -605,13 +567,10 @@ class TestSampleAging:
 
 
 class TestClampDoesNotReverseDirection:
-    """Clamping bounded the result but not the *direction*.
+    """Clamping bounds the result but must not reverse the direction.
 
-    ``current_slots`` is seeded from the limiter's configured capacity, which
-    could start outside ``[min_slots, max_slots]``. With capacity 2 and
-    ``min_slots_interactive=4``, a latency breach asked for -1, the clamp
-    answered 4, and concurrency doubled on an overloaded tier — logged as an
-    "increase" nothing had requested.
+    ``current_slots`` is seeded from the limiter capacity, which may start below ``min_slots``; a
+    decrease request then clamped up to the minimum and raised concurrency on an overloaded tier.
     """
 
     @pytest.mark.asyncio
@@ -665,12 +624,10 @@ class TestClampDoesNotReverseDirection:
 
 
 class TestAdaptiveStartupValidation:
-    """The controller's starting point has to be inside its own bounds.
+    """The controller's starting slot count must lie within its own bounds.
 
-    It seeds each tier from the configured slot count and clamps from there,
-    so a slot count outside ``[min, max]`` means the first adjustment jumps to
-    a bound instead of nudging. Refusing the config tells the operator; the
-    alternative silently overrides slot counts they chose deliberately.
+    Otherwise the first adjustment jumps to a bound. Refusing the config tells the operator instead
+    of silently overriding slot counts they chose.
     """
 
     def test_slots_below_the_adaptive_floor_are_rejected(self):

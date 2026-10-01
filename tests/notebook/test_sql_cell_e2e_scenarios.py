@@ -1,24 +1,7 @@
-"""End-to-end scenarios for SQL cells (slice 10).
+"""End-to-end SQL cell scenarios that need real DB execution.
 
-Slice 6–9 covered the units (bind coercion, hash resolution, cache
-policy, executor wiring) and a few headline e2e cases (basic execute,
-cache hit, schema-change invalidation, read-only enforcement, cross-
-language Python→SQL bind). This file pins the remaining design-doc
-scenarios that benefit from real DB execution:
-
-- **Injection rejection at the SQL boundary.** The bind unit test
-  proves we accept adversarial strings unchanged; this e2e test
-  proves the database is *not* mutated by a string that would
-  otherwise be a DROP TABLE.
-- **Cache identity tracks upstream values.** Same SQL, different
-  bind value → re-execution; same bind value → cache hit.
-- **Snapshot policy fails fast on non-snapshot drivers.** SQLite
-  can't expose a durable snapshot ID; ``# @cache snapshot`` must
-  surface a clear error before the executor opens the connection.
-- **NULL binds.** ``None`` upstream → SQL NULL bind → expected
-  IS NULL semantics.
-- **Empty result set.** A query returning 0 rows still produces a
-  valid ``arrow/ipc`` artifact with the right schema.
+Covers injection through binds, cache identity tracking upstream values,
+snapshot policy on non-snapshot drivers, NULL binds, and empty results.
 """
 
 from __future__ import annotations
@@ -53,8 +36,8 @@ def _build_notebook(
 ) -> Path:
     """Create a notebook with the given cells (id, language, source).
 
-    Connections appended manually so we don't depend on the writer's
-    [connections.<name>] serialization shape.
+    Connections are appended by hand so the test does not depend on the writer's
+    ``[connections.<name>]`` shape.
     """
     from strata.notebook.writer import (
         add_cell_to_notebook,
@@ -103,12 +86,10 @@ def _load_arrow(session: Any, uri: str) -> Any:
 
 @pytest.mark.asyncio
 async def test_sql_injection_via_bind_does_not_alter_database(tmp_path):
-    """The bind unit test pins "the adversarial string is accepted
-    as data." This test pins the actual security property: after
-    feeding an injection-shaped string through a bind parameter,
-    the underlying database is byte-identical. ADBC's
-    parameter-binding API is the security boundary, not any text
-    filter."""
+    """An injection-shaped string bound as a parameter leaves the table intact.
+
+    ADBC parameter binding is the security boundary, not any text filter.
+    """
     from strata.notebook.executor import CellExecutor
 
     db_path = tmp_path / "events.db"
@@ -153,27 +134,11 @@ async def test_sql_injection_via_bind_does_not_alter_database(tmp_path):
 
 @pytest.mark.asyncio
 async def test_sql_cache_keyed_on_upstream_bind_value_not_rerun(tmp_path):
-    """The SQL provenance hash folds in upstream_input_hashes, so
-    cache identity tracks the *upstream value*, not "did the
-    upstream re-execute".
+    """Cache identity tracks the upstream value, not whether the upstream re-ran.
 
-    Codex review fix: the prior test only asserted "value changed
-    → re-execution," which a buggy "always re-execute when
-    upstream re-runs" implementation would also satisfy. The
-    strengthened version round-trips the upstream value (15 → 25
-    → 15) and asserts the third run returns the *same artifact
-    URI* as the first. Same upstream value ⇒ same provenance
-    hash ⇒ same artifact ID, regardless of whether the upstream
-    re-executed in between.
-
-    Three properties pinned together:
-
-    1. Different upstream value ⇒ different artifact (cache key
-       depends on value).
-    2. Re-running the upstream with the same value ⇒ same artifact
-       (cache key isn't "did the upstream re-run").
-    3. Round-trip back to the original value ⇒ original artifact
-       (the value-to-hash function is deterministic and pure)."""
+    Round-trips the value (15, 25, 15): the third run must return the first run's
+    artifact URI, which an "always re-execute when upstream re-runs" bug would fail.
+    """
     from strata.notebook.executor import CellExecutor
 
     db_path = tmp_path / "events.db"
@@ -206,7 +171,6 @@ async def test_sql_cache_keyed_on_upstream_bind_value_not_rerun(tmp_path):
         return await executor.execute_cell("sql", sql_src)
 
     def _provenance_hash_for(uri: str) -> str:
-        """Pull the artifact's provenance hash via the artifact store."""
         body = uri.removeprefix("strata://artifact/")
         art_id, version = body.rsplit("@v=", 1)
         artifact = session.get_artifact_manager().artifact_store.get_artifact(art_id, int(version))
@@ -263,20 +227,11 @@ async def test_sql_cache_keyed_on_upstream_bind_value_not_rerun(tmp_path):
 
 @pytest.mark.asyncio
 async def test_sql_snapshot_policy_errors_before_opening_connection(tmp_path, monkeypatch):
-    """SQLite has no durable snapshot identity (capabilities.
-    supports_snapshot=False). ``# @cache snapshot`` must fail at
-    ``resolve_cache_policy`` *before* the executor opens any
-    connection — this is the contract that lets users discover
-    the misuse without burning a probe round-trip.
+    """``# @cache snapshot`` on SQLite fails in ``resolve_cache_policy``, before any connection.
 
-    Codex review fix: the prior shape only asserted "snapshot"
-    appeared in the error message, which a regression that opens
-    a connection, runs probes, then fails later would still
-    satisfy. The fix monkeypatches the SQLite adapter's ``open``
-    to crash; if the executor reaches it, the test fails with the
-    crash message rather than the snapshot diagnostic. Counts the
-    open calls too so a future regression where probes run before
-    the policy check fails loudly."""
+    The adapter's ``open`` is patched to crash and counted, so a regression that
+    opens a connection or runs probes first fails with the crash, not the diagnostic.
+    """
     from strata.notebook.sql.cell_executor import execute_sql_cell
     from strata.notebook.sql.drivers.sqlite import SqliteAdapter
 
@@ -320,14 +275,9 @@ async def test_sql_snapshot_policy_errors_before_opening_connection(tmp_path, mo
 async def test_sql_null_bind_param_via_none_upstream(tmp_path):
     """A ``None`` upstream value binds as SQL NULL.
 
-    Codex review fix: the previous shape ``WHERE value IS NULL OR
-    value = :sentinel`` matched a NULL row through the IS NULL
-    branch regardless of what ``:sentinel`` was bound to — even if
-    None binding were broken or ignored, the assertion would pass.
-    The fix selects the bound value back as a column so the bind
-    is the only path to the result, and pairs the run with a
-    non-None counterpart (passing the value through directly) so
-    we can compare both directions on the same surface."""
+    The bound value is selected back as a column, so the bind is the only path to
+    the result (an ``IS NULL OR`` filter would pass even with binding broken).
+    """
     from strata.notebook.executor import CellExecutor
 
     db_path = tmp_path / "events.db"
@@ -383,10 +333,10 @@ async def test_sql_null_bind_param_via_none_upstream(tmp_path):
 
 @pytest.mark.asyncio
 async def test_sql_empty_result_set_produces_valid_artifact(tmp_path):
-    """A SQL query returning zero rows must still produce a valid
-    ``arrow/ipc`` artifact with the correct schema. Edge case: a
-    naive Arrow IPC writer can produce a stream that fails to
-    decode if no batches are written."""
+    """Zero rows still yields a decodable ``arrow/ipc`` artifact with the right schema.
+
+    A naive IPC writer that writes no batches can produce an undecodable stream.
+    """
     from strata.notebook.executor import CellExecutor
 
     db_path = tmp_path / "events.db"
@@ -416,11 +366,11 @@ async def test_sql_empty_result_set_produces_valid_artifact(tmp_path):
 
 
 class TestAnOutsideWriteIsSeen:
-    """The default cache policy folds a freshness token, and for SQLite that
-    token used to be the same value every run: the probe opens a new connection
-    each time, and ``PRAGMA data_version`` reports only what *that* connection
-    has seen since it opened. A cell kept serving its first answer however much
-    the database changed underneath it."""
+    """The default cache policy sees a write made outside the notebook.
+
+    ``PRAGMA data_version`` only reports changes the probing connection saw since
+    it opened, and the probe opens a new connection each time, so it is constant.
+    """
 
     @pytest.mark.asyncio
     async def test_a_write_from_another_connection_makes_the_cell_recompute(self, tmp_path):
@@ -464,8 +414,7 @@ class TestAnOutsideWriteIsSeen:
 
     @pytest.mark.asyncio
     async def test_a_write_in_wal_mode_is_seen_before_any_checkpoint(self, tmp_path):
-        """In WAL mode a commit lands beside the database, and the main file's
-        header does not move until a checkpoint."""
+        """In WAL mode a commit lands beside the database; the header waits for a checkpoint."""
         from strata.notebook.executor import CellExecutor
 
         db_path = tmp_path / "events.db"
@@ -495,11 +444,12 @@ class TestAnOutsideWriteIsSeen:
 
 
 class TestACellThatAlwaysRunsMovesItsConsumers:
-    """A SQL cell whose table no probe can name (Snowflake's
-    ``IDENTIFIER($tbl)``) skips its cache under the default policy, but its
-    provenance hash was the same on every run: the freshness token over no
-    tables is constant. A downstream cell keyed on that hash kept serving what
-    it computed from the old rows."""
+    """A SQL cell that always runs gives its consumers a new provenance hash each run.
+
+    A cell whose table no probe can name (Snowflake's ``IDENTIFIER($tbl)``) skips
+    its cache, but a freshness token over no tables is constant, so a downstream
+    cell keyed on that hash would keep serving results from the old rows.
+    """
 
     @staticmethod
     def _as_if_the_table_were_named_at_run_time(monkeypatch: pytest.MonkeyPatch) -> None:

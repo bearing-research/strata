@@ -1,9 +1,7 @@
-"""What a tenant holds in a shared store, readable by that tenant. Item 54.
+"""What a tenant holds in a shared store, readable by that tenant.
 
-``GET /v1/artifacts/usage`` and ``/stats`` were personal-mode only — 403 in
-service mode, where "the store" is every tenant's at once. A platform metering
-storage per tenant had to read the store's database itself. They now answer in
-service mode, scoped to the caller's tenant and never across tenants.
+``GET /v1/artifacts/usage`` and ``/stats`` answer in service mode, scoped to the caller's tenant and
+never across tenants.
 """
 
 from __future__ import annotations
@@ -92,8 +90,7 @@ def test_a_tenant_sees_what_it_holds(team_server, route):
 
 
 def test_tenantless_rows_are_charged_to_nobody(team_server):
-    """Counting them as each tenant's would bill every tenant for the same
-    bytes — 10 KB each here, on top of what they actually hold."""
+    """Charging them to each tenant would bill everyone for the same bytes."""
     body = httpx.get(
         f"{team_server['base_url']}/v1/artifacts/usage", headers=_headers("team-b", "carol")
     ).json()
@@ -132,8 +129,7 @@ def test_an_admin_can_name_a_tenant(team_server):
 
 
 def test_a_service_store_without_auth_does_not_answer_for_everyone(tmp_path):
-    """No authenticated caller means no tenant to scope to, and the unscoped
-    answer would be every tenant's usage at once."""
+    """With no authenticated caller there is no tenant, and the unscoped answer is everyone's."""
     with run_server_with_context(tmp_path / "cache", tmp_path / "artifacts", "service") as ctx:
         response = httpx.get(f"{ctx.base_url}/v1/artifacts/usage")
 

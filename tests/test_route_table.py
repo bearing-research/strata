@@ -1,19 +1,11 @@
-"""Route-table snapshot — the safety net for the server.py router split (P3).
+"""Route-table snapshot: the full HTTP surface must not change by accident.
 
-The router split (``docs/internal/design-server-decomposition.md`` phase 3) moves
-handlers out of ``server.py`` into ``strata/api/routers/*`` one domain at a time.
-Pure code motion must not change the HTTP surface, so this test freezes the full
-inventory of ``(path, methods, route-level-dependency-count)`` and asserts it is
-unchanged. The dependency count guards the gates: moving a route and dropping its
-``dependencies=[require_scope(...)]`` flips the count and fails here.
+Freezes ``(path, methods, route-level-dependency-count)`` for every route; the count catches a route
+that lost its ``dependencies=[require_scope(...)]`` gate. When a route is intentionally added,
+removed or regated, update ``EXPECTED_ROUTES`` in the same commit.
 
-When a route is *intentionally* added/removed/regated, update ``EXPECTED_ROUTES``
-in the same commit — the diff is the review surface.
-
-The frontend SPA catch-all (``/{full_path:path}``) is deliberately excluded: it
-is mounted by ``_mount_frontend`` only when a built ``frontend/dist`` bundle is
-present, which is true in a dev tree but not in the CI unit-test job — so it is
-environment-dependent and not part of the API surface this guards.
+The SPA catch-all (``/{full_path:path}``) is excluded: it is mounted only when a built
+``frontend/dist`` exists, which CI's unit-test job lacks.
 """
 
 from fastapi.routing import APIRoute, iter_route_contexts
@@ -207,9 +199,5 @@ def _current_routes():
 
 
 def test_route_table_snapshot():
-    """The full HTTP surface (path, methods, route-level gate count) is frozen.
-
-    A mismatch means a route was added, removed, renamed, re-methoded, or lost a
-    route-level dependency. If the change is intentional, update EXPECTED_ROUTES.
-    """
+    """A mismatch means a route was added, removed, renamed, re-methoded or lost a gate."""
     assert _current_routes() == [tuple(row) for row in EXPECTED_ROUTES]

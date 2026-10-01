@@ -21,10 +21,7 @@ from strata.metadata_cache import (
 
 
 class TestLRUCache:
-    """Tests for the base LRU cache."""
-
     def test_put_and_get(self):
-        """Test basic put and get operations."""
         cache = LRUCache[str, int](max_size=10)
         cache.put("a", 1)
         cache.put("b", 2)
@@ -34,7 +31,7 @@ class TestLRUCache:
         assert cache.get("c") is None
 
     def test_lru_eviction(self):
-        """Test that oldest entries are evicted when at capacity."""
+        """The oldest entries are evicted at capacity."""
         cache = LRUCache[str, int](max_size=2)
         cache.put("a", 1)
         cache.put("b", 2)
@@ -45,7 +42,6 @@ class TestLRUCache:
         assert cache.get("c") == 3
 
     def test_access_updates_lru_order(self):
-        """Test that accessing an entry updates its LRU position."""
         cache = LRUCache[str, int](max_size=2)
         cache.put("a", 1)
         cache.put("b", 2)
@@ -60,7 +56,6 @@ class TestLRUCache:
         assert cache.get("c") == 3
 
     def test_update_existing_key(self):
-        """Test that updating an existing key works."""
         cache = LRUCache[str, int](max_size=2)
         cache.put("a", 1)
         cache.put("a", 2)
@@ -69,7 +64,6 @@ class TestLRUCache:
         assert len(cache) == 1
 
     def test_stats(self):
-        """Test cache statistics."""
         cache = LRUCache[str, int](max_size=10)
         cache.put("a", 1)
         cache.put("b", 2)
@@ -86,7 +80,6 @@ class TestLRUCache:
         assert stats["hit_rate"] == 2 / 3
 
     def test_clear(self):
-        """Test clearing the cache."""
         cache = LRUCache[str, int](max_size=10)
         cache.put("a", 1)
         cache.put("b", 2)
@@ -97,7 +90,7 @@ class TestLRUCache:
         assert cache.get("a") is None
 
     def test_contains(self):
-        """Test contains check (doesn't update LRU order)."""
+        """``in`` does not update LRU order."""
         cache = LRUCache[str, int](max_size=2)
         cache.put("a", 1)
 
@@ -105,7 +98,6 @@ class TestLRUCache:
         assert "b" not in cache
 
     def test_get_with_default(self):
-        """Test get with default value."""
         cache = LRUCache[str, int](max_size=10)
         cache.put("a", 1)
 
@@ -115,7 +107,7 @@ class TestLRUCache:
         assert cache.get("a", 99) == 1  # Existing value, not the default
 
     def test_get_or_put(self):
-        """Test get_or_put computes only on miss."""
+        """get_or_put computes only on a miss."""
         cache = LRUCache[str, int](max_size=10)
         call_count = 0
 
@@ -133,7 +125,7 @@ class TestLRUCache:
         assert call_count == 1
 
     def test_resize_shrink(self):
-        """Test resizing cache smaller evicts entries."""
+        """Shrinking evicts entries."""
         cache = LRUCache[str, int](max_size=5)
         for i in range(5):
             cache.put(str(i), i)
@@ -150,7 +142,6 @@ class TestLRUCache:
         assert "4" in cache
 
     def test_resize_grow(self):
-        """Test resizing cache larger allows more entries."""
         cache = LRUCache[str, int](max_size=2)
         cache.put("a", 1)
         cache.put("b", 2)
@@ -163,7 +154,6 @@ class TestLRUCache:
         assert cache.get("a") == 1  # Not evicted
 
     def test_max_size_zero_disables_cache(self):
-        """Test max_size=0 disables caching."""
         cache = LRUCache[str, int](max_size=0)
         cache.put("a", 1)
 
@@ -171,7 +161,6 @@ class TestLRUCache:
         assert cache.get("a") is None
 
     def test_evictions_counter(self):
-        """Test evictions are tracked in stats."""
         cache = LRUCache[str, int](max_size=2)
         cache.put("a", 1)
         cache.put("b", 2)
@@ -182,7 +171,7 @@ class TestLRUCache:
         assert stats["evictions"] == 2
 
     def test_updates_counter(self):
-        """Test updates (overwrites) are tracked in stats."""
+        """Overwrites are tracked in stats."""
         cache = LRUCache[str, int](max_size=10)
         cache.put("a", 1)
         cache.put("a", 2)
@@ -194,11 +183,8 @@ class TestLRUCache:
 
 
 class TestParquetMetadataCache:
-    """Tests for Parquet metadata caching."""
-
     @pytest.fixture
     def sample_parquet_file(self, tmp_path):
-        """Create a sample Parquet file."""
         table = pa.table(
             {
                 "id": [1, 2, 3, 4, 5],
@@ -211,7 +197,6 @@ class TestParquetMetadataCache:
         return str(file_path)
 
     def test_get_or_load_caches_metadata(self, sample_parquet_file):
-        """Test that get_or_load caches Parquet metadata."""
         cache = ParquetMetadataCache(max_size=10)
 
         stats_before = cache.stats()
@@ -232,7 +217,6 @@ class TestParquetMetadataCache:
         assert meta1 is meta2
 
     def test_metadata_contains_expected_fields(self, sample_parquet_file):
-        """Test that cached metadata has all expected fields."""
         cache = ParquetMetadataCache(max_size=10)
         meta = cache.get_or_load(sample_parquet_file)
 
@@ -243,7 +227,6 @@ class TestParquetMetadataCache:
         assert meta.parquet_schema is not None
 
     def test_row_group_metadata_accessible(self, sample_parquet_file):
-        """Test that row group metadata is accessible from cache."""
         cache = ParquetMetadataCache(max_size=10)
         meta = cache.get_or_load(sample_parquet_file)
 
@@ -256,7 +239,6 @@ class TestParquetMetadataCache:
                 assert rg_meta.num_rows == 1
 
     def test_lru_eviction_works(self, tmp_path):
-        """Test that LRU eviction works for Parquet cache."""
         cache = ParquetMetadataCache(max_size=2)
 
         files = []
@@ -277,7 +259,7 @@ class TestParquetMetadataCache:
     def test_get_or_load_many_persists_without_rereading_file(
         self, sample_parquet_file, tmp_path, monkeypatch
     ):
-        """Batch loads should persist from loaded metadata, not reopen the file."""
+        """Batch loads persist from the loaded metadata instead of reopening the file."""
         import strata.metadata_store as metadata_store
 
         store = metadata_store.MetadataStore(tmp_path / "metadata.sqlite")
@@ -295,10 +277,9 @@ class TestParquetMetadataCache:
 
 
 class TestManifestCache:
-    """Tests for manifest resolution caching."""
+    """Manifest resolution caching."""
 
     def test_put_and_get(self):
-        """Test basic put and get operations."""
         cache = ManifestCache(max_size=10)
 
         resolution = ManifestResolution(
@@ -322,7 +303,7 @@ class TestManifestCache:
         assert cache.get("other_catalog", "strata.ns.table", 123) is None
 
     def test_cache_key_includes_snapshot_id(self):
-        """Test that different snapshots have different cache entries."""
+        """Different snapshots get different cache entries."""
         cache = ManifestCache(max_size=10)
 
         res1 = ManifestResolution(
@@ -344,7 +325,6 @@ class TestManifestCache:
         assert cached2.data_files[0].file_path == "/data/v2.parquet"
 
     def test_lru_eviction(self):
-        """Test that LRU eviction works for manifest cache."""
         cache = ManifestCache(max_size=2)
 
         res1 = ManifestResolution(data_files=[])
@@ -360,7 +340,7 @@ class TestManifestCache:
         assert cache.get("default", "table3", 1) is not None
 
     def test_filtered_queries_fall_back_to_unfiltered_cache(self):
-        """Filtered lookups should reuse the unfiltered resolution when needed."""
+        """Filtered lookups reuse the unfiltered resolution."""
         cache = ManifestCache(max_size=10)
         resolution = ManifestResolution(
             data_files=[
@@ -379,7 +359,7 @@ class TestManifestCache:
         assert cached.data_files[0].file_path == "/data/file1.parquet"
 
     def test_filtered_queries_fall_back_to_persisted_unfiltered(self, tmp_path):
-        """Filtered lookups should use persisted unfiltered manifest results after restart."""
+        """After a restart, filtered lookups use the persisted unfiltered result."""
         from strata.metadata_store import MetadataStore
 
         store = MetadataStore(tmp_path / "metadata.sqlite")
@@ -407,26 +387,20 @@ class TestManifestCache:
 
 
 class TestGlobalCaches:
-    """Tests for global cache singletons."""
-
     def setup_method(self):
-        """Reset global caches before each test."""
         reset_caches()
 
     def test_get_parquet_cache_creates_singleton(self):
-        """Test that get_parquet_cache returns a singleton."""
         cache1 = get_parquet_cache()
         cache2 = get_parquet_cache()
         assert cache1 is cache2
 
     def test_get_manifest_cache_creates_singleton(self):
-        """Test that get_manifest_cache returns a singleton."""
         cache1 = get_manifest_cache()
         cache2 = get_manifest_cache()
         assert cache1 is cache2
 
     def test_clear_all_caches(self, tmp_path):
-        """Test that clear_all_caches clears both caches."""
         table = pa.table({"x": [1]})
         file_path = tmp_path / "test.parquet"
         pq.write_table(table, file_path)
@@ -446,7 +420,7 @@ class TestGlobalCaches:
         assert len(manifest_cache._cache) == 0
 
     def test_reset_caches(self):
-        """Test that reset_caches recreates new instances."""
+        """reset_caches recreates new instances."""
         cache1 = get_parquet_cache()
         reset_caches()
         cache2 = get_parquet_cache()
@@ -454,11 +428,11 @@ class TestGlobalCaches:
 
 
 class TestPlannerWithMetadataCache:
-    """Integration tests for planner with metadata caching."""
+    """The planner with metadata caching."""
 
     @pytest.fixture
     def warehouse_with_table(self, tmp_path):
-        """Create a warehouse with an Iceberg table."""
+        """A warehouse with an Iceberg table."""
         import sys
 
         if sys.platform == "win32":
@@ -500,7 +474,6 @@ class TestPlannerWithMetadataCache:
         }
 
     def test_planner_uses_parquet_cache(self, warehouse_with_table):
-        """Test that planner uses Parquet metadata cache."""
         reset_caches()
 
         from strata.config import StrataConfig
@@ -524,7 +497,6 @@ class TestPlannerWithMetadataCache:
         assert pq_cache_stats["hits"] >= 1
 
     def test_planner_uses_manifest_cache(self, warehouse_with_table):
-        """Test that planner uses manifest resolution cache."""
         reset_caches()
 
         from strata.config import StrataConfig
@@ -548,7 +520,7 @@ class TestPlannerWithMetadataCache:
         assert manifest_stats["unfiltered"]["hits"] >= 1
 
     def test_manifest_cache_isolated_per_warehouse(self, tmp_path):
-        """Different warehouses with the same table name should not share manifests."""
+        """Same table name in two warehouses must not share manifests."""
         import sys
 
         if sys.platform == "win32":
@@ -608,7 +580,6 @@ class TestPlannerWithMetadataCache:
         assert manifest_stats["unfiltered"]["misses"] >= 2
 
     def test_different_snapshots_use_different_cache_entries(self, warehouse_with_table):
-        """Test that different snapshots don't share manifest cache entries."""
         reset_caches()
 
         from strata.config import StrataConfig
@@ -646,11 +617,11 @@ class TestPlannerWithMetadataCache:
 
 
 class TestMetadataStore:
-    """Tests for SQLite-backed metadata store."""
+    """The SQLite-backed metadata store."""
 
     @pytest.fixture
     def store(self, tmp_path):
-        """Create a MetadataStore with a temp database."""
+        """A MetadataStore on a temp database."""
         from strata.metadata_store import MetadataStore
 
         db_path = tmp_path / "test_metadata.sqlite"
@@ -658,7 +629,7 @@ class TestMetadataStore:
 
     @pytest.fixture
     def sample_parquet_files(self, tmp_path):
-        """Create sample Parquet files for testing."""
+        """Sample Parquet files."""
         files = []
         for i in range(3):
             file_path = tmp_path / f"test_{i}.parquet"
@@ -673,7 +644,6 @@ class TestMetadataStore:
         return files
 
     def test_manifest_put_and_get(self, store):
-        """Test basic manifest cache operations."""
         data_files = [
             {"file_path": "/data/f1.parquet", "actual_path": "/abs/f1.parquet"},
             {"file_path": "/data/f2.parquet", "actual_path": "/abs/f2.parquet"},
@@ -687,19 +657,16 @@ class TestMetadataStore:
         assert result[0] == {"file_path": "/data/f1.parquet", "actual_path": "/abs/f1.parquet"}
 
     def test_manifest_miss(self, store):
-        """Test manifest cache miss."""
         result = store.get_manifest("default", "ns.table", 999)
         assert result is None
         assert store.manifest_misses == 1
 
     def test_manifest_hit_counter(self, store):
-        """Test manifest hit counter."""
         store.put_manifest("default", "ns.table", 1, [])
         store.get_manifest("default", "ns.table", 1)
         assert store.manifest_hits == 1
 
     def test_parquet_meta_put_and_get(self, store, sample_parquet_files):
-        """Test basic parquet metadata operations."""
         from strata.metadata_store import (
             extract_parquet_meta,
         )
@@ -715,7 +682,7 @@ class TestMetadataStore:
         assert result.column_names == meta.column_names
 
     def test_parquet_meta_stale_detection(self, store, tmp_path):
-        """Test that stale entries are detected."""
+        """Stale entries are detected."""
         import time
 
         from strata.metadata_store import extract_parquet_meta
@@ -741,7 +708,6 @@ class TestMetadataStore:
         assert store.stale_invalidations == initial_stale + 1
 
     def test_get_parquet_meta_many(self, store, sample_parquet_files):
-        """Test batch get for parquet metadata."""
         from strata.metadata_store import extract_parquet_meta
 
         for file_path in sample_parquet_files:
@@ -756,7 +722,6 @@ class TestMetadataStore:
             assert result[file_path].num_row_groups >= 1
 
     def test_get_parquet_meta_many_partial(self, store, sample_parquet_files):
-        """Test batch get with some missing entries."""
         from strata.metadata_store import extract_parquet_meta
 
         meta = extract_parquet_meta(sample_parquet_files[0])
@@ -768,12 +733,10 @@ class TestMetadataStore:
         assert sample_parquet_files[0] in result
 
     def test_get_parquet_meta_many_empty(self, store):
-        """Test batch get with empty input."""
         result = store.get_parquet_meta_many([])
         assert result == {}
 
     def test_put_parquet_meta_many(self, store, sample_parquet_files):
-        """Test batch put for parquet metadata."""
         from strata.metadata_store import extract_parquet_meta
 
         items = [(fp, extract_parquet_meta(fp)) for fp in sample_parquet_files]
@@ -785,11 +748,9 @@ class TestMetadataStore:
             assert result is not None
 
     def test_put_parquet_meta_many_empty(self, store):
-        """Test batch put with empty input."""
         store.put_parquet_meta_many([])
 
     def test_stats_includes_counters(self, store, sample_parquet_files):
-        """Test that stats() includes all counters."""
         from strata.metadata_store import extract_parquet_meta
 
         store.get_manifest("default", "ns.table", 1)  # miss
@@ -811,7 +772,7 @@ class TestMetadataStore:
         assert "db_path" in stats
 
     def test_cleanup_stale_parquet_meta(self, store, tmp_path):
-        """Test cleanup of stale entries."""
+        """Stale entries are cleaned up."""
         from strata.metadata_store import extract_parquet_meta
 
         file_path = tmp_path / "cleanup_test.parquet"
@@ -830,7 +791,7 @@ class TestMetadataStore:
         assert stats["parquet_entries"] == 0
 
     def test_remote_parquet_meta_is_not_treated_as_stale(self, store, tmp_path):
-        """Remote parquet metadata should survive lookup and stale cleanup."""
+        """Remote parquet metadata survives lookup and stale cleanup."""
         from strata.metadata_store import extract_parquet_meta
 
         source_file = tmp_path / "remote_source.parquet"
@@ -847,7 +808,7 @@ class TestMetadataStore:
         assert store.stats()["parquet_entries"] == 1
 
     def test_schema_migration(self, tmp_path):
-        """Test that schema migration works for old databases."""
+        """Old databases migrate to the current schema."""
         import sqlite3
 
         from strata.metadata_store import MetadataStore
@@ -882,16 +843,11 @@ class TestMetadataStore:
 
 
 class TestNestedColumnStatsUsePaths:
-    """Persisted Parquet stats must be keyed by the column's dotted PATH.
+    """Persisted Parquet stats are keyed by the column's dotted path.
 
-    A struct field ``user.id`` has Parquet leaf name ``id``, colliding with a
-    top-level ``id``. Keying persisted stats by leaf name (a) let the nested
-    column's stats overwrite the top-level column's and (b) stripped the dot
-    that the planner's ``"." in col.path`` guard uses to skip nested columns —
-    so after metadata round-tripped through SQLite (i.e. after any restart)
-    row-group pruning compared a filter against the WRONG column's min/max and
-    silently dropped matching rows. That breaks the conservative-pruning
-    invariant in the unsafe direction.
+    A struct field ``user.id`` has leaf name ``id``, colliding with a top-level ``id``. Leaf keys
+    let the nested stats overwrite the top-level ones and drop the dot that skips nested columns, so
+    after a restart pruning dropped matching rows.
     """
 
     def _nested_file(self, tmp_path: Path) -> Path:
@@ -951,9 +907,10 @@ class TestNestedColumnStatsUsePaths:
         assert col.name == "id"
 
     def test_legacy_leaf_named_rows_are_treated_as_a_miss(self):
-        """Rows persisted before this fix hold leaf names; duplicates are the
-        signature. They must be re-read rather than trusted — flat-schema rows
-        (no duplicates) stay valid."""
+        """Rows keyed by leaf name (duplicate names are the signature) are re-read.
+
+        Flat-schema rows, with no duplicates, stay valid.
+        """
         from strata.metadata_cache import _persisted_meta_is_legacy_leaf_named
         from strata.metadata_store import PersistedParquetMeta
 
@@ -968,14 +925,10 @@ class TestNestedColumnStatsUsePaths:
 
 
 class TestPreflightSizeRespectsProjection:
-    """The pre-flight 413 compares an estimate against ``max_response_bytes``,
-    so the estimate has to describe the response the limit governs.
+    """The pre-flight 413 estimate counts only the projected columns.
 
-    It was ``total_byte_size`` — the size of the WHOLE row group — regardless
-    of the projection. Scanning two columns of a forty-column table was
-    estimated as if all forty were read, so a legitimate projected scan was
-    rejected as oversized and the only workaround (raising the limit) defeats
-    the guard.
+    Using the whole row group's size rejects a legitimate narrow scan of a wide table, and the only
+    workaround (raising the limit) defeats the guard.
     """
 
     def test_a_projected_scan_is_estimated_far_smaller(self, temp_warehouse, tmp_path):
@@ -991,8 +944,7 @@ class TestPreflightSizeRespectsProjection:
         assert projected < full
 
     def test_the_estimate_still_covers_the_real_response(self, temp_warehouse, tmp_path):
-        """Over-estimating is the safe direction for a guard; under-estimating
-        lets an oversized response through."""
+        """Over-estimating is safe for a guard; under-estimating is not."""
         from strata.cache import CachedFetcher
         from strata.config import StrataConfig
         from strata.planner import ReadPlanner
@@ -1006,9 +958,7 @@ class TestPreflightSizeRespectsProjection:
         assert plan.estimated_bytes >= actual
 
     def test_it_survives_a_restart(self, temp_warehouse, tmp_path):
-        """The sizes go through the persisted metadata cache, so a second
-        planner over the same cache dir must still see them. Persisted
-        metadata is exactly where the column-keying bug in #533 hid."""
+        """A second planner over the same cache dir still sees the persisted sizes."""
         from strata.config import StrataConfig
         from strata.planner import ReadPlanner
 
@@ -1021,10 +971,7 @@ class TestPreflightSizeRespectsProjection:
         assert warm == cold
 
     def test_a_projection_below_the_limit_is_no_longer_rejected(self, temp_warehouse, tmp_path):
-        """The user-visible symptom: the pre-flight 413 fires on
-        ``plan.estimated_bytes > max_response_bytes``. With a limit set
-        between the projected and unprojected sizes, the projected scan used
-        to trip it because it was measured as the whole row group."""
+        """A limit between the projected and unprojected sizes passes the projected scan."""
         from strata.config import StrataConfig
         from strata.planner import ReadPlanner
 
@@ -1051,8 +998,10 @@ class TestPreflightSizeRespectsProjection:
 
 
 class TestRowGroupEstimateFallsBack:
-    """Whole-row-group size is the safe answer whenever per-column sizes
-    cannot be trusted, since over-estimating only makes the guard stricter."""
+    """Whole-row-group size is the answer whenever per-column sizes cannot be trusted.
+
+    Over-estimating only makes the guard stricter.
+    """
 
     def _rg(self, sizes):
         from strata.metadata_cache import ColumnChunkMeta, RowGroupMeta
@@ -1085,8 +1034,7 @@ class TestRowGroupEstimateFallsBack:
         assert _estimate_row_group_bytes(rg, ["user.id"], {"a": 0, "b": 1}) == 1000
 
     def test_a_legacy_entry_without_recorded_sizes_falls_back(self):
-        """Cache entries written before the sizes existed report 0, which must
-        read as "unknown", not as "this column is free"."""
+        """An entry without recorded sizes reports 0, which means unknown, not free."""
         from strata.planner import _estimate_row_group_bytes
 
         rg = self._rg([0, 0])
@@ -1148,14 +1096,10 @@ class TestPersistedColumnSizes:
 
 
 class TestNoArgLookupKeepsTheConfiguredStore:
-    """``get_metadata_store()`` must mean "the store in use", not "the home one".
+    """A no-arg ``get_metadata_store()`` returns the store in use, not the home one.
 
-    ``/health/ready`` and the metadata routes call it with no argument. That
-    used to resolve to ``~/.strata/cache``, and because the path-mismatch
-    branch rebuilds the singleton for a different path, the readiness probe
-    swapped the global store out from under a server configured with any other
-    cache_dir — on every probe, so the store thrashed between the two while the
-    readiness check reported on a database nothing was serving from.
+    ``/health/ready`` calls it with no argument; resolving to ``~/.strata/cache`` would swap the
+    global store out from under a server configured with another cache_dir on every probe.
     """
 
     @pytest.fixture(autouse=True)
@@ -1187,8 +1131,7 @@ class TestNoArgLookupKeepsTheConfiguredStore:
         assert not (tmp_path / "home" / ".strata" / "cache").exists()
 
     def test_no_arg_still_falls_back_when_nothing_is_initialized(self, tmp_path):
-        """Personal-mode and CLI callers with no server-initialized store keep
-        the home default."""
+        """With no server-initialized store, callers keep the home default."""
         from strata.metadata_cache import get_metadata_store
 
         store = get_metadata_store()
@@ -1199,11 +1142,8 @@ class TestNoArgLookupKeepsTheConfiguredStore:
 class TestGlobalStoreDoesNotLeakBetweenTests:
     """The autouse teardown in ``conftest`` must clear the store singleton.
 
-    Now that a no-arg ``get_metadata_store()`` returns whatever is already
-    installed, a test that installs one for its own tmp_path would stay in
-    force for every later no-arg caller on the same xdist worker. These two
-    run in definition order: the first installs a store, the second asserts it
-    was torn down before it started.
+    These two run in definition order: the first installs a store, the second asserts it was torn
+    down.
     """
 
     def test_a_installs_a_store(self, tmp_path):

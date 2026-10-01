@@ -1,12 +1,7 @@
 """E2E: the app-view snapshot export over the live REST API.
 
-Drives the real ``GET /v1/notebooks/{id}/export?app_view=1`` path end to
-end — open a notebook session, seed the cached outputs + widget values a
-run leaves on disk, then download the export and assert it is the app-view
-snapshot: display outputs and current widget values, no cell sources.
-
-The regular (non-``app_view``) export is exercised alongside as a contrast
-so a future change that blurs the two profiles fails loudly.
+``GET /v1/notebooks/{id}/export?app_view=1`` must return display outputs and current
+widget values with no cell sources. The regular export runs alongside as a contrast.
 """
 
 from __future__ import annotations

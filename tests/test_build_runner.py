@@ -1,12 +1,4 @@
-"""Tests for background build runner (server-mode transforms).
-
-These tests verify:
-1. Successful build execution with mocked executor
-2. Build failure when max_output_bytes is exceeded
-3. Build failure when executor returns non-200 status
-4. Build failure when executor times out
-5. Concurrency controls (global and per-tenant semaphores)
-"""
+"""Tests for the background build runner (server-mode transforms), with a mocked executor."""
 
 import asyncio
 import time
@@ -134,14 +126,7 @@ def build_runner(runner_config, artifact_store, build_store, transform_registry,
 
 
 def create_arrow_ipc_bytes(data: dict) -> bytes:
-    """Create Arrow IPC stream bytes from a dictionary.
-
-    Args:
-        data: Dictionary mapping column names to lists of values
-
-    Returns:
-        Arrow IPC stream bytes
-    """
+    """Arrow IPC stream bytes from a dict of column name to values."""
     table = pa.table(data)
     sink = pa.BufferOutputStream()
     with ipc.new_stream(sink, table.schema) as writer:
@@ -153,8 +138,7 @@ def create_arrow_ipc_bytes(data: dict) -> bytes:
 def create_test_artifact(artifact_store, build_store, executor_ref="test_sql@v1", tenant_id=None):
     """Create a test artifact in building state with a pending build.
 
-    Returns:
-        Tuple of (artifact_id, version, build_id)
+    Returns (artifact_id, version, build_id).
     """
     artifact_id = str(uuid.uuid4())
 
@@ -231,14 +215,10 @@ def two_runners(artifact_store, build_store, transform_registry, artifact_dir):
 
 
 class TestOnlyTheLeaseHolderPublishes:
-    """Found by formal verification (BuildLease.tla, ReadyBytesStable and
-    NoStaleBytesPublished).
+    """Only the lease holder publishes (BuildLease.tla: ReadyBytesStable, NoStaleBytesPublished).
 
-    A runner whose lease was taken over keeps executing, and it used to
-    publish its bytes to the version's key and finalize them as the ready
-    artifact before ``complete_build`` told it it had lost. The rightful owner
-    then wrote its own bytes over that ready artifact, so readers saw its
-    content change and the recorded digest no longer matched.
+    A runner that lost its lease keeps executing; publishing before ``complete_build`` rejects it
+    let the rightful owner overwrite a ready artifact, changing its content under its digest.
     """
 
     async def test_a_runner_that_lost_its_lease_publishes_nothing(
@@ -284,12 +264,10 @@ def artifact_dir_blobs(artifact_store):
 
 
 class TestAnUnpublishedAttemptIsSwept:
-    """A runner writes its output under its own attempt key before it
-    finalizes. When finalize then fails, or the process dies in between, the
-    bytes sit under a key no version records, and the blob stores cannot list
-    keys to find them. The runner records each attempt before writing, and
-    its loop sweeps every attempt whose build is over, except the published
-    one."""
+    """Output is written under an attempt key before finalize, so a failed finalize or crash strands
+    bytes no version records. Each attempt is recorded first, and the loop sweeps every attempt of a
+    finished build except the published one.
+    """
 
     async def test_a_failed_finalize_leaves_nothing_after_the_sweep(
         self, two_runners, artifact_store, build_store, tmp_path, monkeypatch
@@ -331,13 +309,10 @@ class TestAnUnpublishedAttemptIsSwept:
 
 
 class TestALeaseDecidesWhoMayFail:
-    """Found by formal verification (BuildLease.tla, OnlyLeaseHolderFails).
+    """Only the lease holder may fail a build (BuildLease.tla: OnlyLeaseHolderFails).
 
-    A runner whose lease was taken over keeps executing, by design. When its
-    executor then timed out, it failed the build and the artifact the new
-    owner was running: ``fail_build`` and ``fail_artifact`` checked no lease,
-    though ``complete_build`` did. The new owner found its build failed and
-    gave up on work that would have succeeded.
+    A runner that lost its lease keeps executing; if it then timed out, ``fail_build`` and
+    ``fail_artifact`` must not fail the new owner's work.
     """
 
     async def test_a_runner_that_lost_its_lease_leaves_the_build_alone(
@@ -378,8 +353,7 @@ class TestALeaseDecidesWhoMayFail:
         assert artifact_store.get_artifact(artifact_id, version).state == "ready"
 
     def test_a_build_the_caller_does_not_hold_is_not_failed(self, artifact_store, build_store):
-        """The fence on its own, below the runner: a named owner that is not
-        the lease holder changes nothing, and the holder can still fail it."""
+        """The fence alone: a non-holder changes nothing, and the holder can still fail it."""
         _artifact_id, _version, build_id = create_test_artifact(artifact_store, build_store)
         assert build_store.claim_build(build_id, lease_owner="B")
 
@@ -391,11 +365,8 @@ class TestALeaseDecidesWhoMayFail:
 
 
 class TestBuildRunnerBasics:
-    """Basic build runner tests."""
-
     @pytest.mark.asyncio
     async def test_start_stop(self, build_runner):
-        """Test runner start and stop lifecycle."""
         assert not build_runner._running
 
         await build_runner.start()
@@ -408,7 +379,6 @@ class TestBuildRunnerBasics:
 
     @pytest.mark.asyncio
     async def test_double_start(self, build_runner):
-        """Starting twice should be idempotent."""
         await build_runner.start()
         task1 = build_runner._task
 
@@ -426,7 +396,7 @@ class TestBuildRunnerBasics:
         build_store,
         build_runner,
     ):
-        """Externally driven builds should stay pending for their own controller."""
+        """Externally driven builds stay pending for their own controller."""
         artifact_id = str(uuid.uuid4())
         version = artifact_store.create_artifact(
             artifact_id=artifact_id,
@@ -458,7 +428,6 @@ class TestBuildRunnerBasics:
 
     @pytest.mark.asyncio
     async def test_double_stop(self, build_runner):
-        """Stopping twice should be idempotent."""
         await build_runner.start()
         await build_runner.stop()
         # Should not raise
@@ -466,13 +435,7 @@ class TestBuildRunnerBasics:
 
 
 def _send_from_post(mock_post):
-    """Adapt a ``client.post`` mock to the streaming ``client.send`` call.
-
-    The runner streams the executor response (``build_request`` +
-    ``send(..., stream=True)``) so the output size limit is enforced during
-    transfer rather than after the whole body is already in memory. These
-    mocks predate that and script ``post``; this bridges them.
-    """
+    """Adapt a ``client.post`` mock to the streaming ``client.send`` call the runner makes."""
 
     async def _send(request, *args, **kwargs):
         response = await mock_post()
@@ -486,11 +449,8 @@ def _send_from_post(mock_post):
 
 
 class TestBuildExecution:
-    """Tests for build execution with mocked executor."""
-
     @pytest.mark.asyncio
     async def test_successful_build(self, build_runner, artifact_store, build_store, artifact_dir):
-        """Test successful build execution with mocked executor."""
         artifact_id, version, build_id = create_test_artifact(artifact_store, build_store)
 
         output_data = {"id": [1, 2, 3], "value": ["a", "b", "c"]}
@@ -536,7 +496,7 @@ class TestBuildExecution:
     async def test_successful_build_records_quota_bytes(
         self, build_runner, artifact_store, build_store
     ):
-        """Successful server-mode builds should update per-tenant byte quotas."""
+        """Successful server-mode builds update per-tenant byte quotas."""
         qos = BuildQoS(BuildQoSConfig(bytes_per_day_limit=10 * 1024 * 1024))
         set_build_qos(qos)
 
@@ -590,7 +550,7 @@ class TestBuildExecution:
     async def test_duplicate_finalize_repoints_build_to_existing_artifact(
         self, build_runner, artifact_store, build_store
     ):
-        """Duplicate provenance should complete against the canonical artifact."""
+        """Duplicate provenance completes against the canonical artifact."""
         provenance_hash = f"duplicate-hash-{uuid.uuid4()}"
 
         existing_artifact_id = str(uuid.uuid4())
@@ -657,7 +617,6 @@ class TestBuildExecution:
 
     @pytest.mark.asyncio
     async def test_build_max_output_bytes_exceeded(self, build_runner, artifact_store, build_store):
-        """Test build failure when output exceeds max_output_bytes."""
         # small_output has a 100-byte limit.
         artifact_id, version, build_id = create_test_artifact(
             artifact_store, build_store, executor_ref="small_output@v1"
@@ -703,7 +662,6 @@ class TestBuildExecution:
 
     @pytest.mark.asyncio
     async def test_build_executor_non_200(self, build_runner, artifact_store, build_store):
-        """Test build failure when executor returns non-200 status."""
         artifact_id, version, build_id = create_test_artifact(artifact_store, build_store)
 
         mock_response = MagicMock()
@@ -742,7 +700,6 @@ class TestBuildExecution:
 
     @pytest.mark.asyncio
     async def test_build_executor_timeout(self, build_runner, artifact_store, build_store):
-        """Test build failure when executor times out."""
         # slow_transform has a 0.1s timeout.
         artifact_id, version, build_id = create_test_artifact(
             artifact_store, build_store, executor_ref="slow_transform@v1"
@@ -776,7 +733,6 @@ class TestBuildExecution:
 
     @pytest.mark.asyncio
     async def test_build_transform_not_in_registry(self, build_runner, artifact_store, build_store):
-        """Test build failure when transform is not in registry."""
         artifact_id = str(uuid.uuid4())
 
         transform_spec = TransformSpec(
@@ -811,11 +767,8 @@ class TestBuildExecution:
 
 
 class TestConcurrencyControls:
-    """Tests for concurrency controls (semaphores)."""
-
     @pytest.mark.asyncio
     async def test_global_concurrency_limit(self, build_runner, artifact_store, build_store):
-        """Test that global concurrency limit is respected."""
         # Create more builds than global limit
         num_builds = 10
         builds = []
@@ -847,7 +800,6 @@ class TestConcurrencyControls:
 
     @pytest.mark.asyncio
     async def test_per_tenant_concurrency_limit(self, build_runner, artifact_store, build_store):
-        """Test that per-tenant concurrency limit is respected."""
         tenant_id = "test-tenant"
         num_builds = 5
 
@@ -883,13 +835,10 @@ class TestConcurrencyControls:
 
 
 class TestInputAcquisition:
-    """Tests for input acquisition (_acquire_input)."""
-
     @pytest.mark.asyncio
     async def test_acquire_artifact_input(
         self, build_runner, artifact_store, build_store, artifact_dir
     ):
-        """Test acquiring an artifact as input."""
         input_artifact_id = str(uuid.uuid4())
         input_data = {"x": [1, 2, 3]}
         input_bytes = create_arrow_ipc_bytes(input_data)
@@ -924,14 +873,13 @@ class TestInputAcquisition:
 
     @pytest.mark.asyncio
     async def test_acquire_invalid_uri(self, build_runner):
-        """Test that invalid input URI raises error."""
         temp_files = []
         with pytest.raises(ValueError, match="Unsupported input URI"):
             await build_runner._acquire_input("invalid://uri", temp_files)
 
     @pytest.mark.asyncio
     async def test_acquire_named_input_uses_build_tenant(self, build_runner, artifact_store):
-        """Name URIs should resolve within the owning build tenant."""
+        """Name URIs resolve within the owning build's tenant."""
         bytes_a = create_arrow_ipc_bytes({"tenant": ["a"]})
         bytes_b = create_arrow_ipc_bytes({"tenant": ["b"]})
 
@@ -963,7 +911,7 @@ class TestInputAcquisition:
         assert result_path.read_bytes() == bytes_a
 
     def test_scan_to_file_sync_uses_fetch_pipeline_on_cold_cache(self, build_runner, artifact_dir):
-        """Table inputs should fetch through the planner/fetcher path, not raw cache files."""
+        """Table inputs fetch through the planner/fetcher path, not raw cache files."""
         batch = pa.record_batch([pa.array([1, 2, 3])], names=["id"])
         task = Task(
             file_path="file:///warehouse/data.parquet",
@@ -1003,11 +951,8 @@ class TestInputAcquisition:
 
 
 class TestBuildPolling:
-    """Tests for build polling loop."""
-
     @pytest.mark.asyncio
     async def test_pending_builds_picked_up(self, build_runner, artifact_store, build_store):
-        """Test that pending builds are picked up by the polling loop."""
         artifact_id, version, build_id = create_test_artifact(artifact_store, build_store)
 
         executed_builds = []
@@ -1026,7 +971,6 @@ class TestBuildPolling:
 
     @pytest.mark.asyncio
     async def test_shutdown_cancels_builds(self, build_runner, artifact_store, build_store):
-        """Test that shutdown cancels in-progress builds."""
         artifact_id, version, build_id = create_test_artifact(artifact_store, build_store)
 
         # Slow execution, claimed the way _execute_build claims it.
@@ -1046,10 +990,7 @@ class TestBuildPolling:
 
 
 class TestArrowMetadataExtraction:
-    """Tests for Arrow metadata extraction."""
-
     def test_read_arrow_metadata(self, build_runner, artifact_dir):
-        """Test reading Arrow IPC metadata."""
         data = {"id": [1, 2, 3], "name": ["a", "b", "c"]}
         arrow_bytes = create_arrow_ipc_bytes(data)
 
@@ -1068,10 +1009,8 @@ class TestArrowMetadataExtraction:
 class TestV1PushMemoryBounds:
     """The push protocol must not buffer unbounded data.
 
-    ``client.post`` reads the entire response body into memory before
-    returning, so the ``max_output_bytes`` check ran only *after* the whole
-    payload had been allocated — an executor returning 50 GB OOM'd the server
-    despite a 1 GB limit. Streaming makes the check fire during transfer.
+    ``client.post`` reads the whole body before ``max_output_bytes`` is checked, so a huge response
+    OOMs the server; streaming checks during transfer.
     """
 
     @pytest.mark.asyncio
@@ -1120,9 +1059,7 @@ class TestV1PushMemoryBounds:
 
     @pytest.mark.asyncio
     async def test_inputs_are_streamed_not_slurped(self, build_runner, artifact_dir, monkeypatch):
-        """Inputs are handed to httpx as file objects; the bytes form loaded
-        every input fully into RAM and httpx then built the whole multipart
-        body on top of that."""
+        """Inputs go to httpx as file objects, not bytes fully loaded into RAM."""
         payload = artifact_dir / "big-input.arrow"
         payload.write_bytes(b"y" * 4096)
 

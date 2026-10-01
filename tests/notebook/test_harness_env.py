@@ -1,10 +1,8 @@
 """What a cell subprocess is allowed to see of the server's environment.
 
-A cell is arbitrary Python spawned with the server's whole environment. On a
-laptop that is right and there is nothing to protect; on a shared server it
-means every member who can run a cell can read the remote-store headers, the
-proxy token, worker tokens and every data-source credential the server holds.
-Item 49.
+A cell is arbitrary Python spawned with the server's environment. On a shared server that
+exposes the remote-store headers, proxy token, worker tokens and data-source credentials
+to anyone who can run a cell.
 """
 
 from __future__ import annotations
@@ -26,8 +24,7 @@ def a_server_with_secrets(monkeypatch):
 
 class TestUnset:
     def test_nothing_is_filtered_by_default(self):
-        """Every deployment before this setting existed, and every personal one
-        after it: the cell is your own code on your own machine."""
+        """Unset, as in every personal deployment: the cell is your own code on your own machine."""
         env = harness_env([])
 
         assert env["STRATA_PROXY_TOKEN"] == "shhh"
@@ -74,8 +71,9 @@ class TestSet:
         assert "STRATA_PROXY_TOKEN" not in env
 
     def test_naming_one_exactly_hands_it_over(self, monkeypatch):
-        """An operator who writes the whole name means it — some deployments
-        do pass a STRATA_ setting a cell legitimately reads."""
+        """An operator who writes the whole name means it; some deployments pass a STRATA_ setting
+        a cell legitimately reads.
+        """
         monkeypatch.setenv("STRATA_NOTEBOOK_OBJECT_CODEC", "pickle")
 
         env = harness_env(["STRATA_NOTEBOOK_OBJECT_CODEC"])
@@ -118,10 +116,9 @@ class TestConfig:
 class TestEverySpawnApplied:
     """The filter is worth what the spawn sites apply it to.
 
-    The cold Python harness is covered end to end in
-    ``tests/test_harness_isolation.py``, outside this package, because this
-    conftest replaces ``_run_harness``. The other three run cell code too and
-    are covered here by capturing what they hand to the OS.
+    The cold Python harness is covered in ``tests/test_harness_isolation.py`` because this
+    conftest replaces ``_run_harness``; the other spawns are checked by capturing what they
+    hand to the OS.
     """
 
     def _capture(self, monkeypatch, module):

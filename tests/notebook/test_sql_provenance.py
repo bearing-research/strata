@@ -58,8 +58,7 @@ def _hash_inputs(**overrides):
 
 
 def test_resolve_fingerprint_default():
-    """Default policy (no ``# @cache``) is fingerprint — probes
-    required, snapshot not."""
+    """Default policy (no ``# @cache``) is fingerprint: probes required, snapshot not."""
     out = resolve_cache_policy(
         CachePolicy(kind="fingerprint"),
         capabilities=_FULL_CAPS,
@@ -73,8 +72,7 @@ def test_resolve_fingerprint_default():
 
 
 def test_resolve_forever_skips_probes():
-    """``forever`` is the user asserting "this is reference data";
-    no DB-side state factors into the hash, so no probe is needed."""
+    """``forever`` asserts reference data: no DB-side state enters the hash, so no probe runs."""
     out = resolve_cache_policy(
         CachePolicy(kind="forever"),
         capabilities=_FULL_CAPS,
@@ -87,8 +85,7 @@ def test_resolve_forever_skips_probes():
 
 
 def test_resolve_session_includes_session_id():
-    """Different sessions → different salt → different hash. Same
-    session_id twice → same salt."""
+    """Different sessions get different salts; the same session twice gets the same salt."""
     a = resolve_cache_policy(
         CachePolicy(kind="session"), capabilities=_FULL_CAPS, session_id="alpha"
     )
@@ -104,10 +101,7 @@ def test_resolve_session_includes_session_id():
 
 
 def test_resolve_ttl_buckets_clock_into_windows():
-    """Two ``now`` values in the same TTL bucket → same salt; values
-    in different buckets → different salt. Bucket boundary for
-    ttl=300 is at multiples of 300 — 900..1199 fall in bucket 3,
-    1200 starts bucket 4."""
+    """For ttl=300, buckets break on multiples of 300: 900..1199 is bucket 3, 1200 is bucket 4."""
     p = CachePolicy(kind="ttl", ttl_seconds=300)
     same1 = resolve_cache_policy(p, capabilities=_FULL_CAPS, session_id="s", now=900.0)
     same2 = resolve_cache_policy(p, capabilities=_FULL_CAPS, session_id="s", now=1199.0)
@@ -118,9 +112,7 @@ def test_resolve_ttl_buckets_clock_into_windows():
 
 
 def test_resolve_ttl_zero_or_negative_raises():
-    """Belt-and-suspenders: the parser already rejects these, but
-    a directly-constructed policy shouldn't slip through and
-    silently produce a divide-or-bucket-collapse hash."""
+    """The parser rejects these too; a directly built policy must not collapse the bucket hash."""
     with pytest.raises(CachePolicyError, match="positive"):
         resolve_cache_policy(
             CachePolicy(kind="ttl", ttl_seconds=0),
@@ -142,9 +134,7 @@ def test_resolve_ttl_zero_or_negative_raises():
 
 
 def test_resolve_snapshot_requires_capability():
-    """``# @cache snapshot`` against a driver that can't return a
-    durable snapshot ID is a static error — fail before the executor
-    burns a probe."""
+    """``# @cache snapshot`` on a driver without durable snapshot IDs fails before probing."""
     with pytest.raises(CachePolicyError, match="snapshot"):
         resolve_cache_policy(
             CachePolicy(kind="snapshot"),
@@ -174,8 +164,7 @@ def test_resolve_unknown_kind_raises():
 
 
 def test_resolve_returns_frozen_dataclass():
-    """Frozen so callers can't mutate the result and accidentally
-    flip ``freshness_required`` after the fact."""
+    """Frozen so callers cannot flip ``freshness_required`` after the fact."""
     out = resolve_cache_policy(
         CachePolicy(kind="fingerprint"),
         capabilities=_FULL_CAPS,
@@ -203,8 +192,6 @@ def test_normalize_is_keyword_case_insensitive():
 
 
 def test_normalize_strips_comments():
-    """Inline / block comments don't change semantics and shouldn't
-    invalidate the cache."""
     a = normalize_query("SELECT 1 -- doc\nFROM t /* note */", dialect="postgres")
     b = normalize_query("SELECT 1 FROM t", dialect="postgres")
     assert a == b
@@ -235,31 +222,24 @@ def test_normalize_empty_input_returns_empty():
 
 
 def test_serialize_tags_each_value_with_its_concrete_type():
-    """Type tags catch the bool-vs-int gotcha: ``True`` and ``1``
-    serialize to the same JSON without a tag, but they're different
-    inputs to a SQL parameter binding."""
+    """Type tags keep ``True`` and ``1`` apart: same JSON, different SQL bind inputs."""
     out = serialize_bind_params([True, 1])
     assert out == [["bool", True], ["int", 1]]
 
 
 def test_serialize_floats_use_repr_for_cross_platform_stability():
-    """``json.dumps(0.1)`` is stable on CPython but ``repr(x)`` is
-    the canonical round-trippable form — denormals and NaN survive
-    ``repr`` even when JSON would lose them."""
+    """``repr`` is the canonical round-trippable float form; denormals and NaN survive it."""
     out = serialize_bind_params([0.1, 1.5])
     assert out == [["float", "0.1"], ["float", "1.5"]]
 
 
 def test_serialize_bytes_is_base64():
-    """JSON can't carry raw bytes; base64 keeps the bytes intact
-    through the JSON encode."""
     out = serialize_bind_params([b"\x00\x01\x02"])
     assert out == [["bytes", "AAEC"]]
 
 
 def test_serialize_decimal_preserves_precision():
-    """Decimal('1.10') ≠ Decimal('1.1') — different scale, same
-    numeric value. ``str()`` keeps the precision."""
+    """``Decimal('1.10')`` and ``Decimal('1.1')`` differ in scale; ``str()`` keeps it."""
     out = serialize_bind_params([Decimal("1.10"), Decimal("1.1")])
     assert out[0][1] == "1.10"
     assert out[1][1] == "1.1"
@@ -273,9 +253,7 @@ def test_serialize_uuid_canonical_string():
 
 
 def test_serialize_naive_vs_aware_datetime_distinct():
-    """Adding a tz changes wall-clock semantics, so the hash must
-    differ between naive and UTC-aware datetimes that look "the
-    same"."""
+    """A tz changes wall-clock semantics, so naive and UTC-aware datetimes must hash apart."""
     naive = dt.datetime(2026, 5, 6, 12, 0, 0)
     aware = dt.datetime(2026, 5, 6, 12, 0, 0, tzinfo=dt.UTC)
     out = serialize_bind_params([naive, aware])
@@ -294,9 +272,7 @@ def test_serialize_none_is_tagged():
 
 
 def test_serialize_unsupported_type_raises():
-    """``coerce_bind_value`` is the gate; if a caller bypasses it
-    we fail loudly rather than silently producing an unstable
-    hash via ``str()``."""
+    """A caller that bypasses ``coerce_bind_value`` fails loudly instead of hashing ``str()``."""
     with pytest.raises(ValueError, match="cannot serialize"):
         serialize_bind_params([[1, 2, 3]])
 
@@ -305,8 +281,6 @@ def test_serialize_unsupported_type_raises():
 
 
 def test_hash_is_deterministic():
-    """Same inputs twice → same hex digest. The contract every
-    cache lookup depends on."""
     a = compute_sql_provenance_hash(**_hash_inputs())
     b = compute_sql_provenance_hash(**_hash_inputs())
     assert a == b
@@ -327,8 +301,7 @@ def test_hash_responds_to_bind_param_change():
 
 
 def test_hash_distinguishes_bool_and_int_binds():
-    """The whole reason ``serialize_bind_params`` type-tags values:
-    ``True`` and ``1`` are equal in Python but different SQL inputs."""
+    """``True`` and ``1`` are equal in Python but different SQL inputs."""
     a = compute_sql_provenance_hash(**_hash_inputs(bind_params=(True,)))
     b = compute_sql_provenance_hash(**_hash_inputs(bind_params=(1,)))
     assert a != b
@@ -347,8 +320,6 @@ def test_hash_responds_to_connection_id_change():
 
 
 def test_hash_upstream_inputs_dict_is_order_insensitive():
-    """The upstream-inputs dict is sorted before hashing so caller
-    ordering doesn't churn cache identity."""
     a = compute_sql_provenance_hash(**_hash_inputs(upstream_input_hashes={"a": "h1", "b": "h2"}))
     b = compute_sql_provenance_hash(**_hash_inputs(upstream_input_hashes={"b": "h2", "a": "h1"}))
     assert a == b
@@ -361,15 +332,11 @@ def test_hash_upstream_inputs_change_invalidates():
 
 
 def test_hash_unaffected_by_cosmetic_sql_edits():
-    """Codex review fix: the prior version folded a generic
-    ``source_hash`` into the SQL hash. ``compute_source_hash`` for
-    SQL falls back to a line-strip (since ``ast.parse`` rejects
-    SQL), which would re-introduce exactly the whitespace and
-    comment churn that ``normalize_query`` strips away. The fix
-    drops ``source_hash`` from the SQL hash; ``query_normalized``
-    is the canonical equivalent. This regression test confirms
-    that two cells whose only difference is whitespace or
-    comments hash to the same value end-to-end."""
+    """Cells differing only in whitespace or comments hash the same end to end.
+
+    A generic ``source_hash`` (a line-strip for SQL) would bring back the churn ``normalize_query``
+    removes, so the SQL hash uses ``query_normalized`` alone.
+    """
     a_query = normalize_query("SELECT 1 FROM t", dialect="postgres")
     b_query = normalize_query("select  1  /* doc */\nFROM t  -- trailing\n", dialect="postgres")
     assert a_query == b_query  # normalize_query agrees
@@ -391,17 +358,14 @@ def test_hash_freshness_token_change_invalidates():
 
 
 def test_hash_no_freshness_vs_zero_byte_freshness_distinct():
-    """``None`` (policy didn't probe) and ``b""`` (policy probed,
-    backend returned zero-byte token) are semantically different
-    — must produce different hashes."""
+    """``None`` (no probe) and ``b""`` (probe returned an empty token) must hash apart."""
     a = compute_sql_provenance_hash(**_hash_inputs(freshness_token=None))
     b = compute_sql_provenance_hash(**_hash_inputs(freshness_token=FreshnessToken(value=b"")))
     assert a != b
 
 
 def test_hash_session_only_flag_invalidates():
-    """A session-only token *was* in the hash — its session-only
-    nature is part of the cell's identity, not just a UI hint."""
+    """Session-only is part of the cell's identity, not just a UI hint."""
     plain = FreshnessToken(value=b"\x42")
     session_only = FreshnessToken(value=b"\x42", is_session_only=True)
     a = compute_sql_provenance_hash(**_hash_inputs(freshness_token=plain))
@@ -437,8 +401,7 @@ def test_hash_no_schema_vs_zero_byte_schema_distinct():
 
 
 def test_fingerprint_policy_with_probe_token_in_hash():
-    """End-to-end exercise: the fingerprint policy yields the
-    expected salt and the executor folds in the probe results."""
+    """The fingerprint policy's salt and the probe results both reach the hash."""
     policy = resolve_cache_policy(
         CachePolicy(kind="fingerprint"),
         capabilities=_FULL_CAPS,
@@ -462,9 +425,7 @@ def test_fingerprint_policy_with_probe_token_in_hash():
 
 
 def test_forever_policy_unaffected_by_freshness_token():
-    """``forever`` doesn't fold a freshness token (the executor
-    skips the probe), so two cells with the same other inputs
-    produce the same hash regardless of DB-side state."""
+    """``forever`` folds no freshness token, so DB-side state cannot change the hash."""
     policy = resolve_cache_policy(
         CachePolicy(kind="forever"),
         capabilities=_FULL_CAPS,

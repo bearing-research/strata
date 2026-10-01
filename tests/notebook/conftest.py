@@ -20,19 +20,10 @@ from tests.conftest import find_free_port, prepared_venv, wait_for_server
 
 
 def _r_package_available(package: str) -> bool:
-    """Probe ``requireNamespace(package)`` once at conftest import.
+    """Whether Rscript is on PATH and can load ``package``; probed once at import.
 
-    Returning True requires Rscript on PATH *and* the named R package
-    loadable. The 30s timeout is generous — a healthy R install
-    resolves the namespace in well under a second; the only reason
-    this could hang is a stale RPROFILE doing network I/O, which we'd
-    rather skip with a clear reason than block CI on.
-
-    Runs at module load: when Rscript is absent (most dev machines,
-    Windows CI) the probe short-circuits without spawning — so the
-    one-shot Rscript cost is paid only when R is actually installed
-    *and* this conftest is loaded, which is also the only time it
-    could matter.
+    The 30s timeout only bites on a stale RPROFILE doing network I/O, which should skip
+    rather than block CI.
     """
     if shutil.which("Rscript") is None:
         return False
@@ -81,12 +72,8 @@ skip_if_no_r_ggplot2 = pytest.mark.skipif(
 def _check_notebook_extra() -> None:
     """Fail fast when the dev env is missing the [notebook] extra.
 
-    The harness fixtures here point the per-notebook venv at the dev
-    interpreter, so any cell-execution test imports `orjson` / `cloudpickle`
-    from this venv. Plain `uv sync` skips those — running tests then fails
-    deep inside a harness subprocess with a cryptic
-    "Harness did not produce harness-result.json" error that doesn't point
-    at the real fix. Surface it at collection time instead.
+    Cell-execution tests import `orjson` / `cloudpickle` from this venv; without them a
+    harness subprocess fails with a cryptic "Harness did not produce harness-result.json".
     """
     missing: list[str] = []
     try:
@@ -190,9 +177,8 @@ def fast_notebook_env(monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRe
     def _harness_command_direct(self, manifest_path: Path, venv_python: Path, harness_user):
         """The harness with Python directly instead of ``uv run``.
 
-        Only the command. The spawn around it — environment, OS user, and the
-        service-mode refusal — is production's, so a notebook test cannot agree
-        with a spawn that is not the one shipping.
+        Only the command differs; the spawn around it (environment, OS user, service-mode
+        refusal) stays production's.
         """
         return [str(venv_python), str(self.harness_path), str(manifest_path)]
 
@@ -203,13 +189,7 @@ def fast_notebook_env(monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRe
 
 @pytest.fixture
 def notebook_executor_server(monkeypatch):
-    """Run the notebook HTTP executor in a background thread.
-
-    The build server we point at is on 127.0.0.1, which the production
-    SSRF guard refuses; set STRATA_WORKER_ALLOW_LOCAL_HOSTS so the
-    manifest URLs validate without disabling the scheme allowlist
-    that the SSRF tests still want exercised.
-    """
+    """Run the notebook HTTP executor in a background thread, allowing 127.0.0.1 manifest URLs."""
     from strata.notebook.remote_executor import create_notebook_executor_app
 
     monkeypatch.setenv("STRATA_WORKER_ALLOW_LOCAL_HOSTS", "1")
@@ -356,28 +336,11 @@ def notebook_personal_server(tmp_path: Path):
 
 @pytest.fixture
 def r_notebook(tmp_path: Path):
-    """Factory: build a notebook with mixed Python + R cells.
+    """Factory for mixed Python and R notebooks.
 
-    Sibling of the Iceberg ``temp_warehouse`` for R (issue #59 capstone).
-    Returns a callable
-
-        make(cells=[(cell_id, after_id, source, language), ...])
-            → (notebook_dir, NotebookSession)
-
-    that builds the on-disk notebook, parses it, forces per-cell
-    language to match ``language`` (parser defaults to Python; the
-    forced override mirrors ``_make_r_notebook`` in
-    ``test_language_r_executor.py`` so dispatch picks the right
-    executor).
-
-    The session's ``__init__`` runs ``_analyze_and_build_dag`` — for
-    R cells that spawns ``Rscript`` to drive ``analyze_cell.R``, so
-    callers must guard with ``skip_if_no_r``.
-
-    No renv restore here. Tests that need the R ``arrow`` package
-    rely on the system R install (gated with ``skip_if_no_r_arrow``);
-    pre-restored renv libraries land in a follow-up PR once the renv
-    bootstrap helper is wired into the fixture.
+    ``make(cells=[(cell_id, after_id, source, language), ...])`` returns
+    ``(notebook_dir, NotebookSession)``. Session init spawns ``Rscript`` for R cells, so
+    callers must guard with ``skip_if_no_r``. Uses the system R library, not renv.
     """
     from strata.notebook.models import CellLanguage
     from strata.notebook.parser import parse_notebook
@@ -426,20 +389,9 @@ _RENV_JSONLITE_FIXTURE = Path(__file__).parent / "fixtures" / "renv_jsonlite"
 
 @pytest.fixture
 def r_notebook_renv(r_notebook):
-    """Like ``r_notebook`` but with a real renv project scaffold attached.
+    """Like ``r_notebook``, with the committed jsonlite renv scaffold copied alongside.
 
-    Copies the committed jsonlite renv scaffold (``renv.lock`` +
-    ``.Rprofile`` + ``renv/activate.R`` + ``renv/settings.json``)
-    alongside the notebook, so a test can drive an actual
-    ``renv::restore`` end-to-end — the gap left open in #59, where the
-    plain ``r_notebook`` fixture runs against the system R library and
-    ``test_renv_sync.py`` only mocks ``subprocess.run``.
-
-    Deliberately does NOT run the restore itself: the test calls
-    ``_renv_sync`` (or opens the session) and asserts, keeping the
-    real-restore exercise visible in the test body. The ``renv/library``
-    is not committed — restoring it from the lockfile is what's under
-    test.
+    Does not restore; the test calls ``_renv_sync`` so the real restore stays visible.
     """
     import shutil as _shutil
 

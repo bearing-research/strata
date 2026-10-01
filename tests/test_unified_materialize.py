@@ -1,4 +1,4 @@
-"""Tests for the unified /v1/materialize endpoint."""
+"""The unified /v1/materialize endpoint."""
 
 import sys
 import time
@@ -73,11 +73,7 @@ def temp_warehouse(tmp_path):
 
 @pytest.fixture
 def server_with_personal_mode(temp_warehouse, tmp_path):
-    """Start a server in personal mode (writes enabled) and provide base URL.
-
-    Uses the shared run_server_with_context helper — health-polled startup
-    and graceful shutdown (see server_with_artifacts in test_put_json.py).
-    """
+    """A personal-mode server (writes enabled); yields its base URL."""
     from tests.conftest import run_server_with_context
 
     cache_dir = tmp_path / "cache"
@@ -94,10 +90,8 @@ def server_with_personal_mode(temp_warehouse, tmp_path):
 
 
 class TestUnifiedMaterialize:
-    """Tests for the unified /v1/materialize endpoint."""
-
     def test_identity_materialize_stream_mode(self, server_with_personal_mode):
-        """Test scan@v1 transform in stream mode."""
+        """scan@v1 in stream mode."""
         base_url = server_with_personal_mode["base_url"]
         table_uri = server_with_personal_mode["warehouse"]["table_uri"]
 
@@ -138,7 +132,7 @@ class TestUnifiedMaterialize:
         assert set(table.column_names) == {"id", "value", "name", "timestamp"}
 
     def test_identity_materialize_with_projection(self, server_with_personal_mode):
-        """Test scan@v1 with column projection."""
+        """scan@v1 with column projection."""
         base_url = server_with_personal_mode["base_url"]
         table_uri = server_with_personal_mode["warehouse"]["table_uri"]
 
@@ -173,7 +167,7 @@ class TestUnifiedMaterialize:
         assert set(table.column_names) == {"id", "name"}
 
     def test_identity_materialize_with_filters(self, server_with_personal_mode):
-        """Test scan@v1 with row filters."""
+        """scan@v1 with row filters."""
         base_url = server_with_personal_mode["base_url"]
         table_uri = server_with_personal_mode["warehouse"]["table_uri"]
 
@@ -211,7 +205,7 @@ class TestUnifiedMaterialize:
         assert table.num_rows >= 0
 
     def test_identity_materialize_cache_hit(self, server_with_personal_mode):
-        """Test that same query returns cache hit."""
+        """The same query returns a cache hit."""
         base_url = server_with_personal_mode["base_url"]
         table_uri = server_with_personal_mode["warehouse"]["table_uri"]
 
@@ -259,7 +253,7 @@ class TestUnifiedMaterialize:
         assert data2["artifact_uri"] == data1["artifact_uri"]
 
     def test_identity_materialize_artifact_mode(self, server_with_personal_mode):
-        """Test scan@v1 in artifact mode."""
+        """scan@v1 in artifact mode."""
         base_url = server_with_personal_mode["base_url"]
         table_uri = server_with_personal_mode["warehouse"]["table_uri"]
 
@@ -286,7 +280,7 @@ class TestUnifiedMaterialize:
         assert data.get("stream_url") is None
 
     def test_identity_artifact_mode_build_status_and_name(self, server_with_personal_mode):
-        """scan@v1 artifact mode builds in the background and sets names on miss."""
+        """Artifact mode builds in the background and sets names on a miss."""
         base_url = server_with_personal_mode["base_url"]
         table_uri = server_with_personal_mode["warehouse"]["table_uri"]
         table = server_with_personal_mode["warehouse"]["table"]
@@ -361,7 +355,7 @@ class TestUnifiedMaterialize:
         assert info_resp.json()["row_count"] == 100 + extra_rows
 
     def test_identity_artifact_mode_respects_build_qos_quota(self, server_with_personal_mode):
-        """Identity artifact-mode should be admitted through build QoS."""
+        """Identity artifact mode is admitted through build QoS."""
         qos = BuildQoS(BuildQoSConfig(bytes_per_day_limit=1))
         set_build_qos(qos)
 
@@ -388,7 +382,7 @@ class TestUnifiedMaterialize:
             reset_build_qos()
 
     def test_identity_requires_single_input(self, server_with_personal_mode):
-        """Test that scan@v1 rejects multiple inputs."""
+        """scan@v1 rejects multiple inputs."""
         base_url = server_with_personal_mode["base_url"]
         table_uri = server_with_personal_mode["warehouse"]["table_uri"]
 
@@ -407,7 +401,7 @@ class TestUnifiedMaterialize:
         assert "exactly one input" in response.json()["detail"]
 
     def test_identity_rejects_artifact_input(self, server_with_personal_mode):
-        """Test that scan@v1 rejects artifact URIs as input."""
+        """scan@v1 rejects artifact URIs as input."""
         base_url = server_with_personal_mode["base_url"]
 
         response = requests.post(
@@ -425,7 +419,6 @@ class TestUnifiedMaterialize:
         assert "table URI" in response.json()["detail"]
 
     def test_stream_not_found(self, server_with_personal_mode):
-        """Test 404 for non-existent stream."""
         base_url = server_with_personal_mode["base_url"]
 
         response = requests.get(f"{base_url}/v1/streams/nonexistent")
@@ -433,7 +426,6 @@ class TestUnifiedMaterialize:
         assert response.status_code == 404
 
     def test_invalid_identity_params(self, server_with_personal_mode):
-        """Test that invalid identity params return 400."""
         base_url = server_with_personal_mode["base_url"]
         table_uri = server_with_personal_mode["warehouse"]["table_uri"]
 
@@ -454,10 +446,7 @@ class TestUnifiedMaterialize:
 
 
 class TestUnifiedMaterializeEdgeCases:
-    """Edge case tests for unified materialize."""
-
     def test_default_mode_is_stream(self, server_with_personal_mode):
-        """Test that the default mode is 'stream'."""
         base_url = server_with_personal_mode["base_url"]
         table_uri = server_with_personal_mode["warehouse"]["table_uri"]
 
@@ -480,10 +469,9 @@ class TestUnifiedMaterializeEdgeCases:
 
 
 class TestClientFetch:
-    """Tests for the client SDK fetch() method."""
+    """The client SDK's materialize() and fetch()."""
 
     def test_client_fetch_basic(self, server_with_personal_mode):
-        """Test basic materialize() + fetch() usage."""
         from strata_client.client import StrataClient
 
         base_url = server_with_personal_mode["base_url"]
@@ -504,7 +492,7 @@ class TestClientFetch:
             client.close()
 
     def test_client_fetch_with_projection(self, server_with_personal_mode):
-        """Test materialize() + fetch() with column projection."""
+        """materialize() + fetch() with column projection."""
         from strata_client.client import StrataClient
 
         base_url = server_with_personal_mode["base_url"]
@@ -525,7 +513,7 @@ class TestClientFetch:
             client.close()
 
     def test_client_fetch_with_filters(self, server_with_personal_mode):
-        """Test materialize() + fetch() with row filters."""
+        """materialize() + fetch() with row filters."""
         from strata_client.client import StrataClient
 
         base_url = server_with_personal_mode["base_url"]
@@ -550,7 +538,7 @@ class TestClientFetch:
             client.close()
 
     def test_client_materialize_returns_artifact(self, server_with_personal_mode):
-        """Test that materialize() returns an Artifact with metadata."""
+        """materialize() returns an Artifact with metadata."""
         from strata_client.client import StrataClient
 
         base_url = server_with_personal_mode["base_url"]
@@ -575,7 +563,7 @@ class TestClientFetch:
             client.close()
 
     def test_client_materialize_cache_hit(self, server_with_personal_mode):
-        """Test that repeated materialize() calls return cache hits."""
+        """Repeated materialize() calls return cache hits."""
         from strata_client.client import StrataClient
 
         base_url = server_with_personal_mode["base_url"]
@@ -605,11 +593,9 @@ class TestClientFetch:
             client.close()
 
     def test_client_materialize_refresh_rebuilds_same_artifact(self, server_with_personal_mode):
-        """refresh=True rebuilds as a new version of the SAME artifact (#123).
+        """refresh=True rebuilds as a new version of the same artifact.
 
-        Refresh used to fork a parallel artifact identity that provenance
-        lookups never returned; it now supersedes the old version so the
-        rebuild becomes canonical.
+        It supersedes the old version, so provenance lookups return the rebuild.
         """
         from strata_client.client import StrataClient
 
@@ -647,7 +633,7 @@ class TestClientFetch:
             client.close()
 
     def test_client_materialize_artifact_mode(self, server_with_personal_mode):
-        """The sync client can wait for scan@v1 artifact-mode builds."""
+        """The sync client waits for scan@v1 artifact-mode builds."""
         from strata_client.client import StrataClient
 
         base_url = server_with_personal_mode["base_url"]
@@ -675,9 +661,8 @@ class TestTransformOverATable:
     def test_a_schema_change_rebuilds_and_stales_the_name(self, server_with_personal_mode):
         """A rename makes no snapshot, so the table's version must name the schema.
 
-        Versioned by snapshot id alone, the second materialize hit the first
-        artifact and served the column under its old name, and the name's
-        status said it was fresh.
+        Otherwise the second materialize hits the first artifact, serves the old column name, and
+        reports the name fresh.
         """
         from strata_client.client import StrataClient
 

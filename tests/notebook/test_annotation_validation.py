@@ -1,9 +1,7 @@
 """Tests for cell annotation cross-reference validation.
 
-Parsing lives in ``test_annotations.py``. This file covers the five
-diagnostic codes produced by ``validate_cell_annotations`` — the
-cross-reference checks that fire on notebook open, reload, and WS
-source flush (but never during active typing).
+Covers the diagnostics ``validate_cell_annotations`` produces on notebook open, reload and
+WS source flush (never while typing); parsing is in ``test_annotations.py``.
 """
 
 from __future__ import annotations
@@ -194,10 +192,10 @@ class TestEnvMalformed:
 
 
 class TestRecordedInputsUnreadable:
-    """`@fetch` and `@dataset` are dropped when they do not parse. Every other
-    directive with a shape to get wrong reports a diagnostic; these two shipped
-    without one, so a typo vanished and the cell died on a NameError naming a
-    variable nothing explained the absence of."""
+    """`@fetch` and `@dataset` lines that do not parse report a diagnostic.
+
+    Otherwise the directive is dropped silently and the cell dies on an unexplained NameError.
+    """
 
     @pytest.mark.parametrize(
         "source",
@@ -369,16 +367,15 @@ class TestModuleExportBlockedDiagnostic:
         assert _codes(cell, _nb()) == []
 
     def test_literal_constants_with_defs_is_silent(self):
-        """The main UX fix — ``STEP = 0.5`` alongside a def should no
-        longer warn, because literal constants are now exportable."""
+        """``STEP = 0.5`` beside a def does not warn: literal constants are exportable."""
         cell = _cell("STEP = 0.5\n\ndef scale(x):\n    return x * STEP\n")
         assert _codes(cell, _nb()) == []
 
     def test_def_with_unresolved_runtime_dep_warns_when_consumed(self):
-        """``scale`` closes over ``STEP``, which is bound nowhere in the
-        notebook — a truly-unknown name, still a real export blocker. (A
-        *same-cell* or upstream runtime ``STEP`` would instead be hydrated;
-        this warns only because nothing produces it.)"""
+        """``scale`` closes over ``STEP``, bound nowhere in the notebook, a real export blocker.
+
+        A same-cell or upstream ``STEP`` would be hydrated instead.
+        """
         cell = _cell("def scale(x):\n    return x * STEP\n")
         downstream = _cell("y = scale(2)", cell_id="c2")
         downstream.references = ["scale"]
@@ -395,10 +392,9 @@ class TestModuleExportBlockedDiagnostic:
         assert "STEP" in message
 
     def test_top_level_expression_alongside_self_contained_class_is_silent(self):
-        """Slicing drops the top-level expression; ``Config``'s body
-        only references literals/builtins, so the slice exports it
-        cleanly. No diagnostic — this is one of the user-facing wins of
-        slicing."""
+        """Slicing drops the top-level expression, and ``Config``'s body references only literals
+        and builtins, so it exports cleanly.
+        """
         cell = _cell("print('hi')\n\nclass Config:\n    debug = True\n")
         downstream = _cell("c = Config()", cell_id="c2")
         downstream.references = ["Config"]
@@ -408,10 +404,11 @@ class TestModuleExportBlockedDiagnostic:
         assert "module_export_blocked" not in codes
 
     def test_class_with_unresolved_base_warns_when_consumed(self):
-        """A base class whose name is bound nowhere in the notebook is a
-        real export blocker — class body executes at module load and would
-        NameError on the missing base. (A same-cell/upstream ``Parent`` would
-        be hydrated instead.)"""
+        """A base class bound nowhere in the notebook blocks export.
+
+        The class body runs at module load and would NameError; a same-cell or upstream
+        ``Parent`` would be hydrated instead.
+        """
         cell = _cell("class Child(Parent):\n    pass\n")
         downstream = _cell("c = Child()", cell_id="c2")
         downstream.references = ["Child"]
@@ -424,11 +421,8 @@ class TestModuleExportBlockedDiagnostic:
         assert "Parent" in diags[0].message
 
     def test_unused_helper_def_is_silent(self):
-        """Cells with private helpers nobody else references shouldn't warn.
-
-        Common in benchmark scoring loops, ad-hoc parsing — the def is a
-        local helper, not an export. Warning every such cell drowns the
-        signal users actually care about.
+        """A private helper nobody references is not an export; warning on every such cell would
+        drown the real signal.
         """
         cell = _cell("def parse(raw):\n    return raw.strip()\n\nx = parse('abc')\n")
         nb = _nb()

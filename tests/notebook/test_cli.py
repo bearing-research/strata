@@ -21,14 +21,10 @@ def _build_notebook(
     cells: list[tuple[str, str, str | None]],
     language: str = "python",
 ) -> Path:
-    """Create a notebook with the given cells.
+    """Create a notebook from ``(cell_id, source, after_id)`` tuples, added in order.
 
-    ``cells`` is a list of ``(cell_id, source, after_id)`` tuples in the
-    order they should be added. Pass ``None`` for ``after_id`` to add
-    the first cell. ``language`` applies to every cell (Python by
-    default; pass ``"r"`` for an R notebook). The notebook is created
-    with ``initialize_environment=False`` so ``.venv/`` only exists when
-    a test explicitly asks for it (via ``_mk_fake_venv``).
+    ``language`` applies to every cell. ``.venv/`` exists only if a test adds it with
+    ``_mk_fake_venv``.
     """
     import shutil
 
@@ -86,8 +82,9 @@ class TestArgumentHandling:
         assert run_main([str(notebook_dir), "--no-sync"]) == 2
 
     def test_no_sync_with_a_venv_that_has_no_interpreter_exits_2(self, tmp_path, capsys):
-        """A .venv directory whose bin/python points nowhere used to pass the
-        check, and the cells then ran with whatever python was on PATH."""
+        """A .venv whose bin/python points nowhere must fail the check, not run the cells with
+        whatever python is on PATH.
+        """
         notebook_dir = _build_notebook(tmp_path, cells=[("c1", "x = 1", None)])
         (notebook_dir / ".venv" / "bin").mkdir(parents=True)
         (notebook_dir / ".venv" / "bin" / "python").symlink_to(tmp_path / "gone")
@@ -283,10 +280,9 @@ class TestExecutionFlow:
 
 
 class TestRCellsHeadless:
-    """`strata run` executes R cells instead of skipping them (#98).
+    """`strata run` executes R cells instead of skipping them.
 
-    Real Rscript harness — no mock — so this is the end-to-end headless
-    R path that was previously a no-op. Gated on Rscript being present.
+    Real Rscript harness, no mock; gated on Rscript being present.
     """
 
     @skip_if_no_r
@@ -339,14 +335,10 @@ class _FakeJob:
 
 
 class _FakeSyncSession:
-    """Reproduces the session's env-job lifecycle for ``_sync_environment``.
+    """Mimics the session's env-job lifecycle for ``_sync_environment``.
 
-    The real ``_run_environment_job`` mutates the returned job in place to
-    its terminal status and then resets ``environment_job`` to None. This
-    fake does the same — the None reset is exactly the condition that used
-    to trip the false "env sync finished without a status snapshot" error
-    (#99) when ``_sync_environment`` read the session attribute instead of
-    the returned job.
+    Like the real ``_run_environment_job``, it sets the returned job's terminal status and
+    resets ``environment_job`` to None, so ``_sync_environment`` must read the returned job.
     """
 
     def __init__(self, *, final_status: str, error: str | None = None) -> None:
@@ -515,11 +507,9 @@ class TestNew:
 
 
 class TestHandWrittenNotebookContract:
-    """Pins the external-authoring contract: notebook.toml + cells/*.py
-    written byte-by-byte the way docs/reference/notebook-toml.md and
-    AGENTS.md describe must be a fully working notebook. If a writer
-    or parser change breaks this, agents building notebooks from the
-    docs break with it."""
+    """A notebook written by hand as docs/reference/notebook-toml.md and AGENTS.md describe
+    must work; agents building notebooks from the docs depend on it.
+    """
 
     @staticmethod
     def _hand_write(tmp_path: Path) -> Path:
@@ -561,9 +551,7 @@ class TestHandWrittenNotebookContract:
         assert "numbers" in by_id["stats"]["references"]
 
     def test_hand_written_notebook_runs(self, tmp_path, capsys):
-        """`strata run` executes the hand-written notebook end to end
-        (mocked executor — the real-venv path is covered by the examples
-        CI job)."""
+        """Mocked executor; the examples CI job covers the real-venv path."""
         notebook_dir = self._hand_write(tmp_path)
         _mk_fake_venv(notebook_dir)
 
@@ -584,9 +572,9 @@ class TestHandWrittenNotebookContract:
 
 
 class TestRunJsonConsoleOutput:
-    """`run --format json` carries per-cell stdout/stderr so external
-    authors verify computed values from the payload instead of reaching
-    into .strata/ (#114 litmus finding)."""
+    """`run --format json` carries per-cell stdout/stderr, so external authors can check
+    computed values without reading .strata/.
+    """
 
     def test_stdout_lands_in_json_payload(self, tmp_path, capsys):
         notebook_dir = _build_notebook(tmp_path, cells=[("c1", "print('total=42')", None)])

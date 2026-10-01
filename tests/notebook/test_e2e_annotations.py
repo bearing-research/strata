@@ -1,8 +1,4 @@
-"""E2E tests: source annotations overriding persisted notebook config.
-
-Exercises the live notebook REST + WebSocket path to prove that source
-annotations take precedence over saved notebook-level defaults.
-"""
+"""E2E tests: source annotations beat persisted notebook config over REST and WebSocket."""
 
 from __future__ import annotations
 

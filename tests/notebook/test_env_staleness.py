@@ -1,10 +1,7 @@
 """Tests for environment staleness and causality tracking.
 
-Validates:
-- Component hashes (source_hash, env_hash) stored in artifact metadata
-- Causality inspector identifies env_changed vs source_changed
-- Environment metadata persisted in notebook.toml
-- Staleness detection after dependency change
+Covers component hashes in artifact metadata, env_changed vs source_changed causality,
+environment metadata in ``.strata/runtime.json``, and staleness after a dependency change.
 """
 
 from __future__ import annotations
@@ -44,8 +41,6 @@ def _create_notebook_with_cell(tmp_path: Path, cell_source: str = "x = 1") -> tu
 
 
 class TestComponentHashStorage:
-    """Verify source_hash and env_hash are stored in artifact metadata."""
-
     @pytest.fixture
     def session_with_executed_cell(self, tmp_path):
         """Create a session, execute a cell, return (session, cell_id)."""
@@ -224,9 +219,9 @@ class TestStoredHashLookup:
 
 
 class TestEnvironmentMetadata:
-    """Environment metadata lives in ``.strata/runtime.json`` — it changes on
-    every ``uv sync`` and does not belong in the committed
-    ``notebook.toml``."""
+    """Environment metadata lives in ``.strata/runtime.json``: it changes on every ``uv sync``
+    and does not belong in the committed ``notebook.toml``.
+    """
 
     def test_environment_populated_on_create(self, tmp_path):
         """create_notebook populates environment in runtime.json."""

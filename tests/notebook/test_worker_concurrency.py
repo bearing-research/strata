@@ -1,10 +1,7 @@
-"""A worker that cannot be overcommitted, and keeps concurrent cells off each
-other's GPU. Item 40.
+"""A worker caps concurrent cells and keeps them off each other's GPU.
 
-``strata-worker`` spawned a harness per request with no limit, and pinning a
-cell to a GPU was whatever ``CUDA_VISIBLE_DEVICES`` the caller sent. Both were
-the dispatcher's to get right, so a caller that skipped the dispatcher could
-put every member's cells on one GPU.
+Both are the worker's job, so a caller that skips the dispatcher cannot overcommit it or put every
+cell on one GPU.
 """
 
 from __future__ import annotations
@@ -25,8 +22,7 @@ from strata.notebook.remote_executor import (
 
 
 class _BlockingHarness:
-    """Stands in for the harness: records what each cell was given, and holds
-    it running until released, so concurrency is real rather than a race."""
+    """Stands in for the harness: records what each cell got and holds it running until released."""
 
     def __init__(self) -> None:
         self.release = asyncio.Event()
@@ -173,8 +169,7 @@ def test_a_zero_limit_is_refused_at_startup():
 
 
 async def test_a_real_cell_sees_the_gpu_the_worker_chose(tmp_path):
-    """Through the real harness: the pinning is what the cell's process sees,
-    not only what the manifest says."""
+    """Through the real harness: the cell's process sees the chosen GPU, not only the manifest."""
     from strata.notebook.remote_bundle import unpack_notebook_output_bundle
 
     app = create_notebook_executor_app(gpu_slots=1)

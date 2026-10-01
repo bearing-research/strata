@@ -1,10 +1,7 @@
-"""Holding a notebook still for a consistent copy. Item 55.
+"""Holding a notebook still for a consistent copy.
 
-A notebook is a directory Strata writes as cells finish. A nightly copy or a
-project move taken mid-write carries a runtime.json and artifacts from
-different moments. Quiescing waits out running work, then refuses runs and
-edits until released — or until ``max_hold_seconds``, so a caller that dies
-cannot freeze a notebook.
+Quiescing waits out running work, then refuses runs and edits until released or
+until ``max_hold_seconds``, so a caller that dies cannot freeze a notebook.
 """
 
 from __future__ import annotations
@@ -68,8 +65,7 @@ class TestAHeldNotebook:
         assert "held still for a copy" in refused.json()["detail"]["message"]
 
     def test_an_edit_during_the_hold_is_refused(self, client, tmp_path):
-        """Refused by the writer itself, so a route that edits does not have to
-        remember to check."""
+        """The writer itself refuses, so an editing route need not remember to check."""
         notebook_dir = _notebook(tmp_path)
         session_id = open_session_id(client, notebook_dir)
         client.post(f"/v1/notebooks/{session_id}/quiesce", json={"timeout_seconds": 1})
@@ -113,8 +109,7 @@ class TestAHeldNotebook:
 
 class TestDraining:
     def test_running_work_is_waited_for_and_can_still_write(self, client, tmp_path, monkeypatch):
-        """While draining, a cell finishing has to be able to write the result
-        it was allowed to finish; only after does the notebook hold still."""
+        """While draining, a finishing cell can still write its result."""
         from strata.notebook.session import NotebookSession
 
         notebook_dir = _notebook(tmp_path)
@@ -165,9 +160,9 @@ def _writable(notebook_dir: Path) -> bool:
 
 
 def test_a_copy_taken_during_the_hold_verifies_against_its_own_digests(client, tmp_path):
-    """The point of the whole thing: every artifact in the copy hashes to the
-    digest its own store recorded, and runtime.json names only rows that are
-    there."""
+    """Every artifact in the copy hashes to its recorded digest, and runtime.json names
+    only rows that are there.
+    """
     import json
 
     notebook_dir = _notebook(tmp_path)
@@ -241,7 +236,7 @@ def test_service_mode_needs_the_admin_scope(client, tmp_path, monkeypatch):
 
 
 async def test_an_edit_over_the_websocket_is_refused_and_not_written(tmp_path):
-    """The browser's edits arrive as cell_source_update frames, not REST."""
+    """Browser edits arrive as cell_source_update frames, not REST."""
     from typing import cast
 
     from fastapi import WebSocket
@@ -270,8 +265,7 @@ async def test_an_edit_over_the_websocket_is_refused_and_not_written(tmp_path):
 
 
 class TestWritersThatBypassRoutes:
-    """Backstops for paths that reach a notebook's files without an edit route:
-    a result landing, and runtime state being saved."""
+    """Backstops for writes that bypass edit routes: a result landing, runtime state saved."""
 
     def test_runtime_state_is_not_saved_into_a_held_notebook(self, tmp_path):
         from strata.notebook.runtime_state import load_runtime_state, save_runtime_state

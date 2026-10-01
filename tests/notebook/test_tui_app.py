@@ -1,9 +1,7 @@
 """Headless layout test for the TUI app (Textual pilot, no terminal, no network).
 
-Guards the regression where the detail panels rendered ~3 lines and didn't
-scroll: the inner content was ``height: 1fr`` (filling the scroll region exactly,
-so nothing ever overflowed). The fix makes the scroll region ``1fr`` and the
-inner content ``height: auto`` so long content overflows → the scrollbar engages.
+The scroll region is ``1fr`` and the inner content ``height: auto``, so long detail content
+overflows and scrolls; an inner ``1fr`` never overflowed.
 """
 
 from __future__ import annotations
@@ -130,8 +128,6 @@ async def test_detail_panels_are_tall_and_content_overflows(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_number_keys_focus_panels_for_arrow_scrolling(monkeypatch):
-    """Number keys select a panel (across both groups) so arrows scroll it."""
-
     async def _noop(self) -> None:
         return None
 
@@ -154,7 +150,7 @@ async def test_number_keys_focus_panels_for_arrow_scrolling(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_resync_preserves_selection(monkeypatch):
-    """A periodic/manual resync keeps the current selection (doesn't jump to top)."""
+    """A periodic or manual resync keeps the current selection instead of jumping to top."""
 
     async def _noop(self) -> None:
         return None
@@ -247,7 +243,7 @@ async def test_follow_mode_tracks_the_running_cell(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_image_output_renders_without_crashing(monkeypatch):
-    """A single image/png output is rendered inline (terminal-image renderable)."""
+    """A single image/png output renders inline as a terminal-image renderable."""
     import base64
     import io
 
@@ -300,8 +296,6 @@ async def test_image_output_renders_without_crashing(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_markdown_language_cell_renders_in_output(monkeypatch):
-    """A markdown-language cell renders its source as markdown in the Output tab."""
-
     async def _noop(self) -> None:
         return None
 
@@ -339,10 +333,9 @@ async def test_markdown_language_cell_renders_in_output(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_live_frame_updates_table_row_without_resync(monkeypatch):
-    """A live cell frame updates the cell-list row in place (not only on resync).
+    """A live cell frame updates the cell-list row in place, not only on resync.
 
-    Regression: the columns are keyed by auto-generated ColumnKeys, so update_cell
-    by label silently raised and _refresh_cell bailed before re-rendering.
+    Columns use auto-generated ColumnKeys, so updating by label raised silently.
     """
     from textual.widgets import DataTable
 
@@ -424,7 +417,7 @@ async def test_tests_source_tab_shows_test_code(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_tests_tab_shows_per_test_outcomes(monkeypatch):
-    """Key 6 opens the Tests tab; it renders per-test outcomes + failure messages."""
+    """Key 6 opens the Tests tab with per-test outcomes and failure messages."""
 
     async def _noop(self) -> None:
         return None
@@ -475,8 +468,6 @@ async def test_tests_tab_shows_per_test_outcomes(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_cell_test_results_show_badge_in_cell_label(monkeypatch):
-    """A cell_test_results frame surfaces a pass/fail badge in the cell-list label."""
-
     async def _noop(self) -> None:
         return None
 
@@ -511,7 +502,7 @@ async def test_cell_test_results_show_badge_in_cell_label(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_agent_frames_render_in_agent_panel(monkeypatch):
-    """agent_note frames stream into the Agent panel + drive its title/header."""
+    """agent_note frames stream into the Agent panel and drive its title."""
 
     async def _noop(self) -> None:
         return None
@@ -654,13 +645,8 @@ async def test_panel_resize_keys_move_and_reset_boundaries(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_ws_connect_disables_frame_size_cap(monkeypatch):
-    """The WS client must pass ``max_size=None`` to ``websockets.connect``.
-
-    notebook_state / cell_output frames carry display outputs (base64 PNG plots,
-    large tables) that routinely exceed the websockets client default of 1 MiB.
-    Without ``max_size=None`` the client rejects the first oversized frame, closes
-    the connection, and the reconnect loop wedges into a storm (a real regression
-    against notebooks with image outputs).
+    """Display frames (base64 PNGs, large tables) exceed the 1 MiB websockets default; a rejected
+    frame closes the socket and wedges the reconnect loop.
     """
     import asyncio
 
@@ -683,8 +669,6 @@ async def test_ws_connect_disables_frame_size_cap(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_data_viewer_pages_sorts_and_exports(monkeypatch, tmp_path):
-    """A tabular output with a backing artifact drives the interactive viewer."""
-
     async def _noop(self) -> None:
         return None
 
@@ -734,7 +718,7 @@ async def test_data_viewer_pages_sorts_and_exports(monkeypatch, tmp_path):
 
 @pytest.mark.asyncio
 async def test_data_viewer_hidden_for_non_table_output(monkeypatch):
-    """Markdown / non-table outputs keep the static area; the table stays hidden."""
+    """Markdown and other non-table outputs keep the static area; the table stays hidden."""
 
     async def _noop(self) -> None:
         return None
@@ -775,11 +759,9 @@ async def test_data_viewer_ignores_keys_when_hidden(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_time_column_widens_for_a_live_timing_update(monkeypatch):
-    """A `cached` / `412ms` timing arriving after the snapshot isn't clipped.
+    """A `cached` or `412ms` timing arriving after the snapshot is not clipped.
 
-    Columns are sized when the row is added, and a cell that hasn't run yet has
-    an empty time string — so the column was as wide as its 4-char "time"
-    header, and every later value rendered truncated ("cached" -> "cach").
+    Columns are sized when the row is added, while a not-yet-run cell's time is still empty.
     """
 
     async def _noop(self) -> None:

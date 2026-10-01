@@ -1,19 +1,7 @@
-"""S3 integration tests using testcontainers with MinIO.
+"""S3 integration tests against a real MinIO container.
 
-These tests validate end-to-end S3 functionality by:
-1. Starting a real MinIO container
-2. Creating an Iceberg table in MinIO
-3. Scanning the table through Strata
-
-Unlike moto-based tests, these actually exercise the PyArrow S3FileSystem
-code path since PyArrow uses its own AWS SDK implementation.
-
-Requirements:
-    - Docker must be running
-    - Run with: pytest tests/test_s3_integration.py -v
-
-Note: These tests are slower (~5-10s each) due to container startup.
-Mark with @pytest.mark.slow if you want to skip in quick test runs.
+Unlike moto, these exercise PyArrow's S3FileSystem, which uses its own AWS SDK. Needs Docker;
+container startup makes each test slow.
 """
 
 import random
@@ -35,10 +23,7 @@ from tests.conftest import MINIO_IMAGE
 
 
 def _docker_daemon_reachable() -> bool:
-    """Skip when the daemon is unreachable. ``docker`` itself is a transitive
-    dev dep via testcontainers, but the daemon may not be running on a
-    contributor's laptop. CI always has Docker; this only triggers locally.
-    """
+    """Skip when the Docker daemon is not running (CI always has one)."""
     try:
         docker.from_env().ping()
         return True
@@ -63,7 +48,7 @@ TEST_SCHEMA = Schema(
 
 
 def create_test_data(num_rows: int = 1000, seed: int = 42) -> pa.Table:
-    """Create test Arrow table with sample data."""
+    """A sample Arrow table."""
     random.seed(seed)
     categories = ["electronics", "clothing", "food", "books", "sports"]
     base_ts = 1704067200000000  # 2024-01-01 00:00:00 UTC in microseconds
@@ -87,10 +72,7 @@ def create_test_data(num_rows: int = 1000, seed: int = 42) -> pa.Table:
 
 @pytest.fixture(scope="module")
 def minio_container():
-    """Start MinIO container for the test module.
-
-    Using module scope to avoid repeated container startup overhead.
-    """
+    """A MinIO container, module-scoped to avoid repeated startup."""
     with MinioContainer(MINIO_IMAGE) as minio:
         client = minio.get_client()
         bucket_name = "test-warehouse"
@@ -100,10 +82,9 @@ def minio_container():
 
 
 def _get_s3_endpoint(config: dict) -> str:
-    """Get S3 endpoint with HTTP scheme for MinIO.
+    """The MinIO endpoint with an http:// scheme.
 
-    MinIO container returns endpoint without scheme; PyArrow and pyiceberg
-    default to HTTPS which causes SSL errors. Ensure we use HTTP for local MinIO.
+    The container reports no scheme, and PyArrow and pyiceberg default to HTTPS.
     """
     endpoint = config["endpoint"]
     if not endpoint.startswith(("http://", "https://")):
@@ -119,7 +100,7 @@ def s3_catalog_db(tmp_path_factory):
 
 @pytest.fixture(scope="module")
 def s3_config(minio_container, s3_catalog_db, tmp_path_factory):
-    """Create StrataConfig for MinIO with shared catalog."""
+    """StrataConfig for MinIO with the shared catalog."""
     config = minio_container.get_config()
     cache_dir = tmp_path_factory.mktemp("cache")
     endpoint = _get_s3_endpoint(config)
@@ -144,10 +125,7 @@ def s3_config(minio_container, s3_catalog_db, tmp_path_factory):
 
 @pytest.fixture(scope="module")
 def s3_table(minio_container, s3_config, s3_catalog_db):
-    """Create an Iceberg table in MinIO with test data.
-
-    Returns the table URI in format: s3://bucket/warehouse#namespace.table
-    """
+    """An Iceberg table in MinIO; returns ``s3://bucket/warehouse#namespace.table``."""
     config = minio_container.get_config()
     bucket = "test-warehouse"
     warehouse_path = f"s3://{bucket}/warehouse"
@@ -189,10 +167,9 @@ def s3_table(minio_container, s3_config, s3_catalog_db):
 
 
 class TestS3EndToEnd:
-    """End-to-end tests for S3 storage backend."""
+    """End-to-end tests for the S3 storage backend."""
 
     def test_planner_resolves_s3_table(self, s3_config, s3_table):
-        """Test that ReadPlanner can resolve an S3 table."""
         planner = ReadPlanner(s3_config)
 
         plan = planner.plan(s3_table)
@@ -205,7 +182,7 @@ class TestS3EndToEnd:
             assert task.file_path.startswith("s3://"), f"Expected S3 path, got: {task.file_path}"
 
     def test_fetcher_reads_s3_data(self, s3_config, s3_table):
-        """Test that Fetcher can read row groups from S3."""
+        """Fetcher reads row groups from S3."""
         planner = ReadPlanner(s3_config)
         plan = planner.plan(s3_table)
 
@@ -220,7 +197,6 @@ class TestS3EndToEnd:
         assert "category" in batch.schema.names
 
     def test_column_projection_on_s3(self, s3_config, s3_table):
-        """Test that column projection works with S3 files."""
         planner = ReadPlanner(s3_config)
         columns = ["id", "value"]
 
@@ -235,7 +211,7 @@ class TestS3EndToEnd:
         assert set(batch.schema.names) == set(columns)
 
     def test_filter_pruning_on_s3(self, s3_config, s3_table):
-        """Test that row group pruning works with S3 files."""
+        """Row-group pruning works on S3 files."""
         planner = ReadPlanner(s3_config)
 
         # ids are 0-999, so id > 2000 matches nothing.
@@ -254,7 +230,6 @@ class TestS3EndToEnd:
             assert table.num_rows >= 0  # May be 0 if properly pruned
 
     def test_multiple_row_groups(self, minio_container, s3_config, s3_catalog_db):
-        """Test reading a table with multiple row groups."""
         config = minio_container.get_config()
         bucket = "test-warehouse"
         warehouse_path = f"s3://{bucket}/warehouse"
@@ -305,10 +280,10 @@ class TestS3EndToEnd:
 
 
 class TestS3PathHandling:
-    """Tests for S3 path edge cases."""
+    """S3 path edge cases."""
 
     def test_s3_path_with_special_characters(self, s3_config, minio_container, tmp_path_factory):
-        """Test handling of S3 paths with special characters in key names."""
+        """S3 keys with special characters."""
         config = minio_container.get_config()
         bucket = "test-warehouse"
         # Hyphens and underscores, common in real warehouses.
@@ -372,10 +347,10 @@ class TestS3PathHandling:
 
 
 class TestS3ErrorHandling:
-    """Tests for S3 error scenarios."""
+    """S3 error scenarios."""
 
     def test_invalid_bucket_raises_error(self, s3_config):
-        """Test that accessing a non-existent bucket raises an error."""
+        """A non-existent bucket raises."""
         planner = ReadPlanner(s3_config)
 
         with pytest.raises(Exception):
@@ -383,7 +358,6 @@ class TestS3ErrorHandling:
             planner.plan("s3://nonexistent-bucket/warehouse#ns.table")
 
     def test_invalid_credentials_raises_error(self, minio_container, tmp_path_factory):
-        """Test that invalid credentials raise an error."""
         config = minio_container.get_config()
         cache_dir = tmp_path_factory.mktemp("cache")
 
@@ -402,10 +376,10 @@ class TestS3ErrorHandling:
 
 
 class TestS3Latency:
-    """Tests for S3 latency characteristics."""
+    """S3 latency characteristics."""
 
     def test_metadata_caching_reduces_latency(self, s3_config, s3_table):
-        """Test that metadata caching improves subsequent planning latency."""
+        """Metadata caching speeds up later planning."""
         planner = ReadPlanner(s3_config)
 
         start = time.perf_counter()

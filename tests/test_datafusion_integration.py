@@ -13,10 +13,7 @@ from strata_client.integration.datafusion import (  # noqa: E402
 
 
 class TestRegisterStrataTable:
-    """Tests for register_strata_table function."""
-
     def test_basic_registration(self, server_with_client):
-        """register_strata_table creates a queryable table."""
         config = server_with_client["config"]
         table_uri = server_with_client["warehouse"]["table_uri"]
 
@@ -33,7 +30,6 @@ class TestRegisterStrataTable:
         assert result[0].column("cnt")[0].as_py() == 500
 
     def test_with_column_projection(self, server_with_client):
-        """register_strata_table respects column projection."""
         config = server_with_client["config"]
         table_uri = server_with_client["warehouse"]["table_uri"]
 
@@ -49,7 +45,6 @@ class TestRegisterStrataTable:
         assert result[0].num_rows == 5
 
     def test_with_existing_context(self, server_with_client):
-        """register_strata_table can use existing context."""
         config = server_with_client["config"]
         table_uri = server_with_client["warehouse"]["table_uri"]
 
@@ -67,7 +62,6 @@ class TestRegisterStrataTable:
         assert "events" in ctx.catalog().schema("public").table_names()
 
     def test_with_filters(self, server_with_client):
-        """register_strata_table accepts filters for row-group pruning."""
         config = server_with_client["config"]
         table_uri = server_with_client["warehouse"]["table_uri"]
 
@@ -83,10 +77,7 @@ class TestRegisterStrataTable:
 
 
 class TestStrataQuery:
-    """Tests for strata_query function."""
-
     def test_single_table_query(self, server_with_client):
-        """strata_query executes SQL over single table."""
         config = server_with_client["config"]
         table_uri = server_with_client["warehouse"]["table_uri"]
 
@@ -101,7 +92,6 @@ class TestStrataQuery:
         assert total_rows == 10
 
     def test_with_column_projection(self, server_with_client):
-        """strata_query respects per-table column projections."""
         config = server_with_client["config"]
         table_uri = server_with_client["warehouse"]["table_uri"]
 
@@ -115,7 +105,6 @@ class TestStrataQuery:
         assert len(result) > 0
 
     def test_aggregation_query(self, server_with_client):
-        """strata_query handles aggregations."""
         config = server_with_client["config"]
         table_uri = server_with_client["warehouse"]["table_uri"]
 
@@ -130,10 +119,7 @@ class TestStrataQuery:
 
 
 class TestStrataDataFusionContext:
-    """Tests for StrataDataFusionContext class."""
-
     def test_context_manager(self, server_with_client):
-        """StrataDataFusionContext works as context manager."""
         config = server_with_client["config"]
         table_uri = server_with_client["warehouse"]["table_uri"]
 
@@ -143,7 +129,6 @@ class TestStrataDataFusionContext:
             assert result[0].column("cnt")[0].as_py() == 500
 
     def test_multiple_table_registration(self, server_with_client):
-        """Context can register multiple tables."""
         config = server_with_client["config"]
         table_uri = server_with_client["warehouse"]["table_uri"]
 
@@ -155,7 +140,7 @@ class TestStrataDataFusionContext:
             assert "events2" in ctx.tables()
 
     def test_method_chaining(self, server_with_client):
-        """register() returns self for method chaining."""
+        """register() returns self."""
         config = server_with_client["config"]
         table_uri = server_with_client["warehouse"]["table_uri"]
 
@@ -164,7 +149,6 @@ class TestStrataDataFusionContext:
             assert len(result) > 0
 
     def test_table_method(self, server_with_client):
-        """table() returns DataFrame for registered table."""
         config = server_with_client["config"]
         table_uri = server_with_client["warehouse"]["table_uri"]
 
@@ -177,7 +161,6 @@ class TestStrataDataFusionContext:
             assert hasattr(df, "collect")
 
     def test_deregister(self, server_with_client):
-        """deregister() removes table from context."""
         config = server_with_client["config"]
         table_uri = server_with_client["warehouse"]["table_uri"]
 
@@ -189,7 +172,6 @@ class TestStrataDataFusionContext:
             assert "events" not in ctx.tables()
 
     def test_with_filters(self, server_with_client):
-        """register() accepts filters for row-group pruning."""
         config = server_with_client["config"]
         table_uri = server_with_client["warehouse"]["table_uri"]
 
@@ -205,10 +187,7 @@ class TestStrataDataFusionContext:
 
 
 class TestDataFusionDataFrameAPI:
-    """Tests for DataFusion DataFrame API integration."""
-
     def test_select(self, server_with_client):
-        """DataFrame select() works with Strata data."""
         config = server_with_client["config"]
         table_uri = server_with_client["warehouse"]["table_uri"]
 
@@ -222,7 +201,6 @@ class TestDataFusionDataFrameAPI:
             assert "value" in batch.schema.names
 
     def test_filter(self, server_with_client):
-        """DataFrame filter() works with Strata data."""
         config = server_with_client["config"]
         table_uri = server_with_client["warehouse"]["table_uri"]
 
@@ -235,7 +213,6 @@ class TestDataFusionDataFrameAPI:
             assert total_rows == 10
 
     def test_aggregate(self, server_with_client):
-        """DataFrame aggregate() works with Strata data."""
         config = server_with_client["config"]
         table_uri = server_with_client["warehouse"]["table_uri"]
 

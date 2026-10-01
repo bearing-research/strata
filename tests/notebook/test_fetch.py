@@ -1,4 +1,4 @@
-"""``@fetch``: the bytes a cell reads from a URL, recorded as an input. Item 44."""
+"""``@fetch``: the bytes a cell reads from a URL, recorded as an input."""
 
 from __future__ import annotations
 
@@ -224,10 +224,10 @@ class TestTheGuard:
         assert origin.requests == []
 
     def test_personal_mode_may_fetch_from_its_own_machine(self, tmp_path, origin):
-        """The guard asks whether a URL crosses a trust boundary. On one
-        person's laptop ``http://localhost:8000/data.csv`` is their own dev
-        server, and refusing it protected nobody from anything -- it only meant
-        the feature could not be used on the machine most people try it on.
+        """The guard asks whether a URL crosses a trust boundary.
+
+        On one person's laptop ``http://localhost:8000/data.csv`` is their own dev server, and
+        refusing it protects nobody.
         """
         allowed, allow_local = fetch_module.guard_settings(
             SimpleNamespace(deployment_mode="personal", notebook_fetch_allowed_hosts=[])

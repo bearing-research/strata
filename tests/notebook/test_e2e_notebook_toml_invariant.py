@@ -1,12 +1,7 @@
-"""E2E invariant: running cells in a real example notebook must not
-churn ``notebook.toml``.
+"""E2E invariant: running cells in a real example notebook does not churn ``notebook.toml``.
 
-The cleanup split stable config from runtime state — config lives in
-``notebook.toml``, runtime state lives in ``.strata/runtime.json`` —
-but the invariant only holds if every write path in the executor /
-session / writer stack respects the boundary. This test drives a
-checked-in example through the real ``CellExecutor`` and asserts the
-committed ``notebook.toml`` is byte-identical after execution.
+Drives a checked-in example through the real ``CellExecutor`` and asserts the committed
+``notebook.toml`` is byte-identical afterwards.
 """
 
 from __future__ import annotations
@@ -36,21 +31,15 @@ def _copy_example(dst: Path) -> Path:
 
 
 def _inject_legacy_sections(notebook_toml: Path) -> None:
-    """Append the legacy sections we used to carry in notebook.toml.
-
-    The checked-in examples no longer ship with these sections, so we
-    recreate the pre-migration state in the copied fixture. Testing
-    against a mutated copy keeps the assertion self-contained — it
-    doesn't rely on the repo's examples retaining stale noise.
-    """
+    """Append the empty pre-migration sections: artifacts, environment, cache."""
     with open(notebook_toml, "a", encoding="utf-8") as f:
         f.write("\n[artifacts]\n\n[environment]\n\n[cache]\n")
 
 
 def test_copied_example_migrates_once_then_stays_stable(tmp_path: Path):
-    """Opening a notebook with legacy sections rewrites it exactly once
-    (to strip the empty ``[artifacts]`` / ``[environment]`` / ``[cache]``
-    sections). A second open is a no-op."""
+    """Opening a notebook with legacy sections rewrites it once to strip them; a second open is
+    a no-op.
+    """
     notebook_dir = _copy_example(tmp_path)
     notebook_toml = notebook_dir / "notebook.toml"
     _inject_legacy_sections(notebook_toml)
@@ -79,10 +68,9 @@ def test_copied_example_migrates_once_then_stays_stable(tmp_path: Path):
 async def test_executing_cell_in_copied_example_leaves_notebook_toml_untouched(
     tmp_path: Path,
 ):
-    """Run the first cell of pandas_basics via ``CellExecutor`` and
-    assert ``notebook.toml`` is byte-identical — all runtime state
-    (display outputs, console, provenance hashes, environment metadata)
-    must land in ``.strata/`` instead."""
+    """All runtime state (display outputs, console, provenance, environment metadata) must land
+    in ``.strata/``.
+    """
     notebook_dir = _copy_example(tmp_path)
     notebook_toml = notebook_dir / "notebook.toml"
 

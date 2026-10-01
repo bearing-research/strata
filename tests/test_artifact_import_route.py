@@ -1,10 +1,7 @@
 """Copying an artifact into a store on another machine.
 
-A chain lives in the store its cells wrote to; a link resolves from the store
-the server serves. On a hosted deployment those are different machines, so the
-chain has to travel — with its versions intact, because lineage edges are
-recorded as ``id@v=N`` and a copy that assigned fresh versions would land
-ancestors under numbers the descendants' edges do not name.
+Versions must survive: lineage edges are recorded as ``id@v=N``, so fresh versions would orphan the
+descendants' edges.
 """
 
 from __future__ import annotations
@@ -50,7 +47,7 @@ def client(tmp_path, served_dir):
 
 class TestImport:
     def test_a_record_keeps_its_id_and_version(self, client):
-        """The whole point: fresh versions would break every edge naming it."""
+        """Fresh versions would break every edge naming it."""
         body = _post(client, _metadata("fig", 7, "a" * 64)).json()
 
         assert body["id"] == "fig"
@@ -65,11 +62,8 @@ class TestImport:
         assert body["written"] is False
 
     def test_the_same_computation_under_another_id_resolves_onto_the_first(self, client):
-        """Two people whose notebooks ran the identical cell.
-
-        The store permits one ready row per tenant and provenance hash, so the
-        second import cannot land as itself. It has to say where it went, or
-        the caller's descendants name a row this store never received.
+        """One ready row per tenant and provenance, so a second identical computation lands on the
+        first and the response must say where.
         """
         _post(client, _metadata("nb_alice_cell_c1_var_rows", 1, "c" * 64))
 
@@ -98,12 +92,8 @@ class TestIdempotencyByCompleteness:
         assert store.blob_exists("fig", 1), "a retry must repair what an interruption lost"
 
     def test_lineage_completes_a_row_that_had_none(self, client, served_dir):
-        """The team cache writes results with no inputs at all.
-
-        It fires on every successful cell while promotion is deliberate, so the
-        cache almost always gets there first. Without this, a promoted chain
-        resolves exactly one level before reaching an artifact naming no
-        inputs.
+        """The team cache writes results with no inputs and usually gets there first, so promotion
+        must fill in their lineage.
         """
         from strata.artifact_store import ArtifactStore
 
@@ -136,10 +126,9 @@ class TestIdempotencyByCompleteness:
 
 
 class TestAnIdTwoComputationsClaim:
-    """Ids are not globally unique. A notebook's are built from its own id and
-    its cells', so two people working from one repository send the same
-    ``nb_<notebook>_cell_<cell>_var_<name>`` for cells they have each edited
-    differently."""
+    """Notebook ids derive from notebook and cell ids, so two people from one repo send the same id
+    for differently edited cells.
+    """
 
     def test_a_different_computation_under_a_held_id_is_refused(self, client, served_dir):
         from strata.artifact_store import ArtifactStore
@@ -154,7 +143,7 @@ class TestAnIdTwoComputationsClaim:
         assert store.read_blob("shared", 1) == b"ALICE", "and nobody's bytes were replaced"
 
     def test_remap_lands_it_under_a_fresh_id(self, client, served_dir):
-        """The escape the tenant clash already had: keep both."""
+        """Keep both, as for the tenant clash."""
         from strata.artifact_store import ArtifactStore
 
         _post(client, _metadata("shared", 1, "a" * 64), blob=b"ALICE")
@@ -201,8 +190,7 @@ class TestIntegrity:
 
     @pytest.mark.parametrize("artifact_id", ["../../../../victim/pwned", "/etc/pwned", "a/b", ".."])
     def test_an_id_that_names_a_path_is_refused(self, client, served_dir, artifact_id):
-        """The id becomes a blob key, so a record naming a path writes wherever
-        it likes as whoever runs the server. The id arrives in the request."""
+        """The id from the request becomes a blob key, so a path-like id must not write anywhere."""
         response = _post(client, _metadata(artifact_id, 1, "j" * 64), blob=b"pwned")
 
         assert response.status_code == 400
@@ -210,11 +198,7 @@ class TestIntegrity:
 
 
 class TestPublishTo:
-    """``strata artifact publish --to`` end to end.
-
-    The case the route exists for: a chain in a notebook's own store, published
-    to a server on another machine, with the link resolving there.
-    """
+    """``strata artifact publish --to`` end to end: a notebook's chain sent to a remote server."""
 
     def test_a_chain_travels_and_the_link_resolves_on_the_far_side(
         self, client, tmp_path, served_dir
@@ -285,7 +269,7 @@ class TestPublishTo:
         ]
 
     def test_a_refusal_from_the_far_side_is_reported_not_swallowed(self, tmp_path):
-        """A chain half-copied to a store that refused it must say so."""
+        """A chain half-copied to a store that refused it must report the refusal."""
         import argparse
 
         from strata.artifact_cli import cmd_publish

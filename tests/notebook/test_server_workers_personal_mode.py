@@ -1,9 +1,7 @@
 """A personal server can offer a managed catalogue of machine types.
 
-Before, the server-managed registry was consulted only in service mode. A
-platform that manages machine types for its users had to write the same
-``[[workers]]`` block into every ``notebook.toml`` — where it shows up in git
-diffs and drifts the moment the catalogue changes. Item 20.
+Without it, every ``notebook.toml`` needs the same ``[[workers]]`` block, which
+shows up in git diffs and drifts when the catalogue changes.
 """
 
 from __future__ import annotations
@@ -44,7 +42,7 @@ def notebook():
 
 class TestMergedCatalogue:
     def test_a_server_worker_is_offered_to_a_notebook_with_none(self, personal_server, notebook):
-        """The point: no `[[workers]]` block needed in notebook.toml."""
+        """No ``[[workers]]`` block is needed in notebook.toml."""
         replace_server_managed_worker_records(
             [ManagedWorkerRecord(_spec("gpu-a100", "http://gpu.internal:9000"), True)]
         )
@@ -55,8 +53,8 @@ class TestMergedCatalogue:
         assert entry["allowed"] is True
 
     def test_it_is_dispatchable(self, personal_server, notebook):
-        """Showing it in the panel and refusing to run on it would be worse
-        than not offering it."""
+        """Offering a worker in the panel and refusing to run on it would be worse than hiding
+        it."""
         replace_server_managed_worker_records(
             [ManagedWorkerRecord(_spec("gpu-a100", "http://gpu.internal:9000"), True)]
         )
@@ -77,10 +75,9 @@ class TestMergedCatalogue:
 class TestNotebookWins:
     """A name the notebook defines beats the server's, in both places.
 
-    The catalogue and dispatch resolve collisions independently — one is
-    first-writer-wins over an ordered list, the other last-writer-wins over a
-    dict — so they have to be checked separately or they will disagree
-    silently: the panel showing one URL while the cell runs against another.
+    The catalogue (first-writer-wins over a list) and dispatch (last-writer-wins
+    over a dict) resolve collisions independently, so each is checked; otherwise
+    the panel could show one URL while the cell runs against another.
     """
 
     def _collide(self, notebook):
@@ -106,8 +103,7 @@ class TestNotebookWins:
 
 class TestUnchanged:
     def test_notebook_definitions_stay_editable(self, personal_server, notebook):
-        """Merging a server catalogue does not make a personal notebook
-        read-only — its own `[[workers]]` are still its to edit."""
+        """A merged server catalogue leaves the notebook's own ``[[workers]]`` editable."""
         replace_server_managed_worker_records(
             [ManagedWorkerRecord(_spec("gpu-a100", "http://gpu.internal:9000"), True)]
         )

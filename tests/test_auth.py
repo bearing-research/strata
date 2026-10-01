@@ -1,13 +1,8 @@
 """Security regression tests for trusted proxy authentication.
 
-These tests verify the core security invariants of the trusted proxy
-authorization model:
-
-1. Requests without valid proxy token are rejected
-2. Requests with spoofed principal headers (but no token) are rejected
-3. ACL deny rules override allow rules
-4. Scan ownership is enforced
-5. hide_forbidden_as_not_found returns 404 instead of 403
+Invariants: requests without a valid proxy token are rejected, even with spoofed principal headers;
+ACL deny beats allow; scan ownership is enforced; hide_forbidden_as_not_found gives 404 instead of
+403.
 """
 
 import pytest
@@ -24,27 +19,21 @@ from strata.types import Principal, TableIdentity, TableRef
 
 
 class TestProxyTokenVerification:
-    """Tests for proxy token verification."""
-
     def test_no_token_configured_allows_all(self):
-        """When no token is configured, all requests pass."""
         assert verify_proxy_token(None, None) is True
         assert verify_proxy_token("any-token", None) is True
 
     def test_missing_request_token_rejected(self):
-        """Request without token is rejected when token is configured."""
         assert verify_proxy_token(None, "expected-token") is False
 
     def test_wrong_token_rejected(self):
-        """Request with wrong token is rejected."""
         assert verify_proxy_token("wrong-token", "expected-token") is False
 
     def test_correct_token_accepted(self):
-        """Request with correct token is accepted."""
         assert verify_proxy_token("correct-token", "correct-token") is True
 
     def test_timing_safe_comparison(self):
-        """Token comparison is constant-time to prevent timing attacks."""
+        """Token comparison is constant-time."""
         # Timing can't be tested directly; this only checks the comparison's result.
 
         assert verify_proxy_token("a", "b") is False
@@ -52,10 +41,7 @@ class TestProxyTokenVerification:
 
 
 class TestPrincipalParsing:
-    """Tests for parsing Principal from headers."""
-
     def test_missing_principal_raises_auth_error(self):
-        """Missing principal header raises AuthError."""
         from strata.auth import AuthError
 
         config = StrataConfig.load(
@@ -70,7 +56,6 @@ class TestPrincipalParsing:
         assert "principal" in exc_info.value.message.lower()
 
     def test_principal_parsed_from_header(self):
-        """Principal is correctly parsed from headers."""
         config = StrataConfig.load(
             deployment_mode="service", auth_mode="trusted_proxy", proxy_token="t"
         )
@@ -87,7 +72,7 @@ class TestPrincipalParsing:
         assert principal.scopes == frozenset({"scan:create", "scan:read", "admin:cache"})
 
     def test_principal_parsed_from_lowercase_headers(self):
-        """Header parsing should remain case-insensitive through ASGI request dicts."""
+        """Header parsing stays case-insensitive through ASGI request dicts."""
         config = StrataConfig.load(
             deployment_mode="service", auth_mode="trusted_proxy", proxy_token="t"
         )
@@ -104,7 +89,6 @@ class TestPrincipalParsing:
         assert principal.scopes == frozenset({"scan:create"})
 
     def test_empty_scopes_ok(self):
-        """Principal with no scopes is valid."""
         config = StrataConfig.load(
             deployment_mode="service", auth_mode="trusted_proxy", proxy_token="t"
         )
@@ -117,20 +101,15 @@ class TestPrincipalParsing:
 
 
 class TestPrincipalScopes:
-    """Tests for Principal.has_scope()."""
-
     def test_exact_scope_match(self):
-        """Exact scope match returns True."""
         principal = Principal(id="user", scopes=frozenset({"scan:create"}))
         assert principal.has_scope("scan:create") is True
 
     def test_missing_scope_returns_false(self):
-        """Missing scope returns False."""
         principal = Principal(id="user", scopes=frozenset({"scan:create"}))
         assert principal.has_scope("admin:cache") is False
 
     def test_admin_wildcard_grants_all(self):
-        """admin:* scope grants all permissions."""
         principal = Principal(id="admin", scopes=frozenset({"admin:*"}))
 
         assert principal.has_scope("scan:create") is True
@@ -139,10 +118,7 @@ class TestPrincipalScopes:
 
 
 class TestTableRef:
-    """Tests for TableRef canonicalization."""
-
     def test_from_table_identity_file(self):
-        """TableRef from local file table identity."""
         identity = TableIdentity(catalog="strata", namespace="db", table="events")
         table_ref = TableRef.from_table_identity(identity, table_uri="file:///warehouse#db.events")
 
@@ -152,7 +128,6 @@ class TestTableRef:
         assert str(table_ref) == "file:db.events"
 
     def test_from_table_identity_s3(self):
-        """TableRef from S3 table identity."""
         identity = TableIdentity(catalog="strata", namespace="analytics", table="clicks")
         table_ref = TableRef.from_table_identity(
             identity, table_uri="s3://bucket/warehouse#analytics.clicks"
@@ -165,10 +140,7 @@ class TestTableRef:
 
 
 class TestAclEvaluator:
-    """Tests for ACL rule evaluation."""
-
     def test_default_allow(self):
-        """Default allow permits access when no rules match."""
         config = AclConfig(default="allow", deny_rules=[], allow_rules=[])
         acl = AclEvaluator(config)
         principal = Principal(id="anyone")
@@ -177,7 +149,6 @@ class TestAclEvaluator:
         assert acl.authorize(principal, table_ref) is True
 
     def test_default_deny(self):
-        """Default deny blocks access when no rules match."""
         config = AclConfig(default="deny", deny_rules=[], allow_rules=[])
         acl = AclEvaluator(config)
         principal = Principal(id="anyone")
@@ -186,7 +157,6 @@ class TestAclEvaluator:
         assert acl.authorize(principal, table_ref) is False
 
     def test_allow_rule_matches(self):
-        """Allow rule permits access."""
         config = AclConfig(
             default="deny",
             allow_rules=[AclRule(principal="bi-dashboard", tables=("file:db.*",))],
@@ -198,7 +168,6 @@ class TestAclEvaluator:
         assert acl.authorize(principal, table_ref) is True
 
     def test_allow_rule_no_match(self):
-        """Allow rule does not match different principal."""
         config = AclConfig(
             default="deny",
             allow_rules=[AclRule(principal="bi-dashboard", tables=("file:db.*",))],
@@ -228,7 +197,6 @@ class TestAclEvaluator:
         assert acl.authorize(principal, denied_ref) is False
 
     def test_wildcard_principal(self):
-        """Wildcard principal matches any principal."""
         config = AclConfig(
             default="deny",
             allow_rules=[AclRule(principal="*", tables=("file:public.*",))],
@@ -243,7 +211,7 @@ class TestAclEvaluator:
         assert acl.authorize(Principal(id="anonymous"), table_ref) is True
 
     def test_tenant_match(self):
-        """Rule with tenant only matches that tenant."""
+        """A rule with a tenant only matches that tenant."""
         config = AclConfig(
             default="deny",
             allow_rules=[AclRule(principal="*", tenant="data-platform", tables=("file:*.*",))],
@@ -282,10 +250,7 @@ class TestAclEvaluator:
 
 
 class TestPrincipalContext:
-    """Tests for principal context management."""
-
     def test_get_set_principal(self):
-        """Principal can be set and retrieved from context."""
         principal = Principal(id="test-user")
 
         set_principal(principal)
@@ -295,7 +260,7 @@ class TestPrincipalContext:
         assert get_principal() is None
 
     def test_principal_context_isolation(self):
-        """Principal context is isolated (set in one place, retrieved elsewhere)."""
+        """A principal set in one place is retrieved elsewhere in the same context."""
         principal = Principal(id="test-user", tenant="test-tenant")
 
         set_principal(principal)
@@ -309,8 +274,6 @@ class TestPrincipalContext:
 
 
 class TestAclConfigParsing:
-    """Tests for ACL configuration parsing from TOML."""
-
     def test_empty_acl_config(self):
         """Empty ACL config uses defaults."""
         config = StrataConfig.load()
@@ -319,7 +282,6 @@ class TestAclConfigParsing:
         assert config.acl_config.allow_rules == []
 
     def test_acl_config_from_dict(self):
-        """ACL config can be loaded from dictionary."""
         from strata.config import _parse_acl_config
 
         raw = {
@@ -339,13 +301,10 @@ class TestAclConfigParsing:
 
 
 class TestTransformInputAclParity:
-    """Regression: a table used as a *transform input* is gated by the same ACL
-    as the direct scan path.
+    """A table used as a transform input is gated by the same ACL as a direct scan.
 
-    Previously ``AclEvaluator.authorize`` ran only on the ``scan@v1`` path, so a
-    principal denied a table could still read it by passing it as a transform
-    input (``_resolve_input_version`` resolved the table snapshot with no ACL
-    check). Both paths now share ``_authorize_table_access``.
+    Both paths share ``_authorize_table_access``, so a denied table cannot be read by passing it as
+    an input.
     """
 
     @staticmethod
@@ -420,10 +379,9 @@ class TestTransformInputAclParity:
         ],
     )
     def test_a_denied_table_is_denied_before_it_is_planned(self, monkeypatch, failure, hide_as_404):
-        """A table Strata refuses to read is a 422 naming its delete files, and
-        one that does not plan is a 400 that materialize answers by building
-        with the raw URI. A denied caller gets neither: the ACL decides on the
-        identity the URI names, before any manifest is read."""
+        """The ACL decides on the URI's identity before any manifest is read, so a denied caller
+        sees neither the delete-files 422 nor the unplannable 400.
+        """
         from fastapi import HTTPException
 
         from strata.iceberg_schema import UnsupportedTableFormatError
@@ -467,8 +425,7 @@ class TestTransformInputAclParity:
         assert exc.value.status_code == 422
 
     def test_a_table_uri_the_acl_cannot_name_is_denied(self, monkeypatch):
-        """Deny-first: no identity, so no rule allows it. The planner names a
-        table the same way, so it could not have planned it either."""
+        """Deny-first: with no identity, no rule allows it; the planner could not name it either."""
         from fastapi import HTTPException
 
         server_module = self._patch_state(monkeypatch, namespace="public")
@@ -499,12 +456,10 @@ class TestTransformInputAclParity:
 
 
 class TestArtifactReadAcl:
-    """Reading a cached result is ACL-gated (service-mode read path, 0.1/A.1).
+    """Reading a cached result is ACL-gated.
 
-    The artifact cache is shared across principals; "result retrieval is
-    ACL-gated", so a principal denied a table must not read it back via a cached
-    scan result. `_authorize_artifact_read` re-checks the table ACL of the
-    artifact's inputs — parsed straight from the stored transform_spec.
+    The cache is shared across principals, so ``_authorize_artifact_read`` re-checks the table ACL
+    of the inputs in the stored transform_spec.
     """
 
     @staticmethod
@@ -588,12 +543,10 @@ class TestArtifactReadAcl:
 
 
 class TestAclRuleMatchingFailsClosed:
-    """Two ways an ACL rule could silently never match — both failing OPEN.
+    """ACL rules that could never match must fail closed.
 
-    A deny rule that never fires grants the access it was written to refuse,
-    and nothing warned at startup: ``validate_mode_coherence`` still counted
-    such a rule as "acl configured", so the operator booted clean and believed
-    the deny applied.
+    A deny that never fires grants what it was meant to refuse, while ``validate_mode_coherence``
+    still counts it as configured.
     """
 
     def _principal(self, principal_id: str):
@@ -609,8 +562,7 @@ class TestAclRuleMatchingFailsClosed:
         )
 
     def test_wildcard_principal_pattern_now_matches(self):
-        """``principal`` is documented as a pattern and tables are fnmatched,
-        but principals used exact equality — so ``svc-*`` never fired."""
+        """``principal`` is a pattern like tables, so ``svc-*`` must fire."""
         from strata.auth import AclEvaluator
         from strata.config import AclConfig, AclRule
 
@@ -644,8 +596,7 @@ class TestAclRuleMatchingFailsClosed:
         assert evaluator.authorize(self._principal("bobby"), self._ref()) is True
 
     def test_rule_without_table_patterns_is_rejected_at_config_time(self):
-        """``{ principal = "bob" }`` — the natural way to write "deny bob
-        everything" — could never match. Rejected loudly instead of ignored."""
+        """``{ principal = "bob" }`` ("deny bob everything") never matched, so it is rejected."""
         import pydantic
 
         from strata.config import AclRule
@@ -657,13 +608,8 @@ class TestAclRuleMatchingFailsClosed:
 class TestNonAsciiTokensAreRejectedNotCrashed:
     """A non-ASCII token must be a rejection, not a 500.
 
-    ASGI decodes header values as latin-1, so any non-ASCII byte in
-    ``X-Strata-Proxy-Token`` reaches us as a non-ASCII ``str`` —  and
-    ``hmac.compare_digest`` refuses to compare non-ASCII strings, raising
-    ``TypeError``. That turned a trivially-attacker-triggerable "wrong token"
-    into an unhandled 500: the request is still refused (fail-closed), but any
-    unauthenticated client could spike the server's error rate at will.
-    Comparing UTF-8 bytes keeps the comparison constant-time and total.
+    ASGI decodes headers as latin-1 and ``hmac.compare_digest`` raises on non-ASCII ``str``, so any
+    client could spike the error rate. Comparing UTF-8 bytes stays constant-time and total.
     """
 
     def test_non_ascii_token_returns_false(self):
@@ -685,9 +631,9 @@ class TestNonAsciiTokensAreRejectedNotCrashed:
 
 
 class TestEveryStoreIsItsOwnAclSubject:
-    """A rule names a table in a store. Multi-cloud warehouses arrived in this
-    release, and collapsing them into one namespace would have a rule for a
-    local table grant the same-named table in somebody's bucket."""
+    """A rule names a table in a store; one namespace across clouds would let a rule for a local
+    table grant a same-named table in a bucket.
+    """
 
     def test_each_store_has_its_own_namespace(self):
         identity = TableIdentity.from_table_id("secret.events")
@@ -710,9 +656,9 @@ class TestEveryStoreIsItsOwnAclSubject:
 
 
 class TestReadingACachedScanIsGatedWhereverTheTableLives:
-    """``_authorize_artifact_read`` re-checks the ACL of the table an artifact
-    was scanned from. It knew only file:// and s3://, so a cached scan of a
-    GCS, Azure or named-catalog table was readable by a denied principal."""
+    """``_authorize_artifact_read`` must gate cached scans of GCS, Azure and named-catalog tables,
+    not only file:// and s3://.
+    """
 
     @staticmethod
     def _identity(uri: str):
@@ -740,8 +686,9 @@ class TestReadingACachedScanIsGatedWhereverTheTableLives:
         assert self._identity("not-a-table") is None
 
     def test_the_identity_is_the_one_the_planner_uses(self):
-        """The pre-plan gate and the post-plan gate have to name a table the
-        same way, or a rule matches one and not the other."""
+        """The pre-plan and post-plan gates must name a table the same way, or a rule matches only
+        one.
+        """
         from strata.config import StrataConfig
         from strata.iceberg import table_identity_for
 
@@ -753,8 +700,7 @@ class TestReadingACachedScanIsGatedWhereverTheTableLives:
 
 
 class TestARuleIsAsNarrowAsItReads:
-    """A key pydantic does not recognise used to be dropped, and a dropped key
-    in an access rule is a rule wider than the file says it is."""
+    """An unrecognised key in an access rule is refused; dropping it would widen the rule."""
 
     def test_a_misspelled_key_is_refused(self):
         import pytest
@@ -773,10 +719,9 @@ class TestARuleIsAsNarrowAsItReads:
 
 
 class TestADenyForEveryPrefixCoversEveryAddress:
-    """With a SQL catalog configured, one table answers to an ACL name per
-    address form: ``s3:`` for its S3 URI, ``file:`` for a bare name or any
-    other path before ``#``. The configuration docs therefore recommend
-    ``*:namespace.*`` deny patterns; this holds the gate to that advice."""
+    """With a SQL catalog, a table has one ACL name per address form (``s3:`` or ``file:``), so the
+    documented ``*:namespace.*`` deny pattern must cover all of them.
+    """
 
     def test_every_address_of_the_table_is_refused(self, temp_warehouse, tmp_path, monkeypatch):
         from types import SimpleNamespace
@@ -816,14 +761,10 @@ class TestADenyForEveryPrefixCoversEveryAddress:
 
 
 class TestADenyOnOneAddressCoversTheTable:
-    """Found by formal verification (finding 12).
+    """A deny on one address form refuses the table under every name it answers to.
 
-    With a SQL catalog configured, every warehouse URI reads that one catalog
-    whatever comes before ``#``, and a bare name reads it too when the default
-    catalog is the same one. A deny written for one address form, ``s3:`` for
-    data kept in S3, let the same table through as ``file:`` under a bare name
-    or a path that doesn't exist. A deny now refuses the table under every
-    name it answers to.
+    With a SQL catalog, every warehouse URI (and a bare name, when the default catalog matches)
+    reads one catalog, so an ``s3:`` deny must also stop ``file:`` and bare-name access.
     """
 
     S3 = "s3://any-bucket/warehouse#test_db.events"
@@ -916,8 +857,9 @@ class TestADenyOnOneAddressCoversTheTable:
     def test_a_bare_name_in_another_default_catalog_is_another_table(
         self, temp_warehouse, tmp_path, monkeypatch
     ):
-        """The default catalog named ``default`` keeps its own tables, apart
-        from the ``strata`` catalog every warehouse URI reads."""
+        """The ``default`` catalog keeps its own tables, apart from the ``strata`` catalog warehouse
+        URIs read.
+        """
         allowed = self._check(
             monkeypatch,
             tmp_path,
@@ -933,8 +875,9 @@ class TestADenyOnOneAddressCoversTheTable:
             set_principal(None)
 
     def test_without_a_shared_catalog_the_address_is_the_table(self, tmp_path, monkeypatch):
-        """Each local warehouse keeps its own catalog, so a deny on the S3
-        table says nothing about a local one of the same name."""
+        """Each local warehouse keeps its own catalog, so an S3 deny says nothing about a local
+        namesake.
+        """
         allowed = self._check(
             monkeypatch,
             tmp_path,

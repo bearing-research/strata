@@ -1,4 +1,4 @@
-"""Workers running a cell in the notebook's locked environment. Item 6."""
+"""Workers running a cell in the notebook's locked environment."""
 
 from __future__ import annotations
 
@@ -145,9 +145,9 @@ async def test_only_a_worker_that_advertises_it_is_sent_the_lock(tmp_path):
 
 @pytest.mark.locked_environments
 class TestAWorkerThatCannotBeAsked:
-    """A probe that fails is not an answer. Treating it as "no" ran the cell
-    against whatever the worker's image holds while its provenance recorded
-    the lock's hash."""
+    """A failed probe is not "no": treating it so ran the cell on the worker image while provenance
+    recorded the lock's hash.
+    """
 
     @staticmethod
     def _worker(url: str):
@@ -171,8 +171,7 @@ class TestAWorkerThatCannotBeAsked:
 
     @pytest.mark.asyncio
     async def test_a_failed_probe_is_not_cached_as_an_answer(self, tmp_path):
-        """One timed-out probe used to hold authority over every cell
-        dispatched in the next minute."""
+        """One timed-out probe must not decide every cell dispatched in the next minute."""
         from strata.notebook import workers
 
         worker = self._worker("http://127.0.0.1:1/v1/execute")
@@ -199,9 +198,7 @@ class TestAWorkerThatCannotBeAsked:
 
     @pytest.mark.asyncio
     async def test_a_worker_with_no_health_route_has_answered(self, tmp_path):
-        """A 404 is a live worker saying the route is not there -- older than
-        the health document, and older than every feature it would list. It
-        keeps what every worker got before the feature existed."""
+        """A 404 is a live worker older than the health document; it keeps pre-feature behaviour."""
         from strata.notebook import workers
 
         server = self._serving(404)
@@ -214,7 +211,7 @@ class TestAWorkerThatCannotBeAsked:
 
     @pytest.mark.asyncio
     async def test_a_worker_that_is_up_and_unwell_has_not(self, tmp_path):
-        """A 503 while it starts is not an answer about its features."""
+        """A 503 while starting is not an answer about its features."""
         from strata.notebook import workers
 
         server = self._serving(503)
@@ -226,10 +223,9 @@ class TestAWorkerThatCannotBeAsked:
             server.shutdown()
 
     def test_the_probe_outlasts_the_worker_it_asks(self):
-        """``/health`` reports the machine's hardware, and on a GPU box the
-        first call shells out to nvidia-smi with a timeout of its own. A probe
-        that gave up first refused the opening cell on exactly the machine a
-        pool had just started."""
+        """On a GPU box the first ``/health`` shells out to nvidia-smi with its own timeout; a
+        shorter probe would refuse the opening cell on a freshly started machine.
+        """
         from strata.notebook.hardware import _NVIDIA_SMI_TIMEOUT_SECONDS
         from strata.notebook.workers import _PROBE_TIMEOUT_SECONDS
 
@@ -249,8 +245,7 @@ class TestAWorkerThatCannotBeAsked:
 
     @pytest.mark.asyncio
     async def test_a_notebook_without_a_lock_does_not_care(self, tmp_path):
-        """There is nothing to be locked into, so an unanswered probe costs
-        nothing and must not fail the cell."""
+        """With no lock, an unanswered probe costs nothing and must not fail the cell."""
         from strata.notebook.executor import CellExecutor
         from strata.notebook.writer import add_cell_to_notebook, create_notebook
 
@@ -324,9 +319,9 @@ class TestTheWorkerSide:
 
 
 class TestAnEnvironmentIsCompleteWhenItRuns:
-    """The marker says a worker may reuse a directory without installing. An
-    archive with no interpreter where the worker looks for one must not be
-    marked complete, or every cell with that lock fails there for good."""
+    """The marker lets a worker reuse a directory without installing, so an archive with no
+    interpreter where the worker looks must not be marked complete.
+    """
 
     @pytest.mark.asyncio
     async def test_an_archive_without_an_interpreter_is_not_kept(self, tmp_path, monkeypatch):
@@ -387,11 +382,9 @@ class TestAnEnvironmentIsCompleteWhenItRuns:
 
 
 class TestAWorkerAnswersForTheMachineItIsOn:
-    """The server does not guess whether a worker can build a locked
-    environment -- it asks, and believes the answer. Answered as a constant,
-    that made the question pointless: the image the repo ships installs with
-    pip and has no uv, so it claimed the feature, was sent every notebook's
-    lockfile (they all have one), and failed each cell with a 500."""
+    """The server believes a worker's answer about building locked environments, so the answer must
+    reflect the machine: an image without uv must not claim it.
+    """
 
     def _features(self, monkeypatch, uv_path):
         from fastapi.testclient import TestClient

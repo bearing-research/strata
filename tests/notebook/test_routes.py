@@ -22,7 +22,7 @@ from strata.notebook.writer import (
 
 @pytest.fixture(autouse=True)
 def no_uv_sync(monkeypatch):
-    """Skip real venv/pool creation — route tests only test HTTP routing."""
+    """Skip real venv/pool creation; route tests only exercise HTTP routing."""
     monkeypatch.setattr("strata.notebook.session._uv_sync", lambda path, **kw: True)
 
     async def _fake_run_uv_command_streaming(*args, **kwargs):
@@ -42,7 +42,7 @@ def no_uv_sync(monkeypatch):
 
 @pytest.fixture(scope="module")
 def app():
-    """FastAPI app with notebook router. Module-scoped — the router is stateless."""
+    """FastAPI app with the notebook router (module-scoped; the router is stateless)."""
     fastapi_app = FastAPI()
     fastapi_app.include_router(router)
     return fastapi_app
@@ -57,9 +57,7 @@ def client(app):
 def set_server_state(monkeypatch, **config):
     """Set ``strata.server._state`` to a SimpleNamespace with the given config keys.
 
-    ``transforms_config`` defaults to an empty dict so most callers can drop
-    that boilerplate. Pass it explicitly when you need workers or other
-    transforms.
+    ``transforms_config`` defaults to an empty dict.
     """
     monkeypatch.setattr(
         "strata.server._state",
@@ -76,7 +74,7 @@ def open_session_id(client, notebook_dir) -> str:
 
 @pytest.fixture
 def service_mode_worker_state(monkeypatch):
-    """Configure a fake server state with a service-mode worker registry."""
+    """Fake server state with a service-mode worker registry."""
 
     def _configure(workers: list[dict] | None = None) -> None:
         set_server_state(
@@ -100,7 +98,7 @@ def service_mode_worker_state(monkeypatch):
 
 @pytest.fixture
 def deployment_mode_state(monkeypatch):
-    """Configure a fake server state with only deployment-mode settings."""
+    """Fake server state with only deployment-mode settings."""
 
     def _configure(mode: str) -> None:
         set_server_state(monkeypatch, deployment_mode=mode)
@@ -112,7 +110,6 @@ def deployment_mode_state(monkeypatch):
 
 
 def test_open_notebook(client, tmp_path):
-    """POST /v1/notebooks/open returns the canonical open-notebook payload."""
     notebook_dir = create_notebook(tmp_path, "Test Notebook")
 
     response = client.post("/v1/notebooks/open", json={"path": str(notebook_dir)})
@@ -140,7 +137,6 @@ def test_open_notebook(client, tmp_path):
 
 
 def test_open_notebook_reuses_existing_session_in_personal_mode(client, monkeypatch, tmp_path):
-    """Opening the same path twice should reuse the live session in personal mode."""
     notebook_dir = create_notebook(tmp_path, "Reusable Notebook")
     set_server_state(
         monkeypatch,
@@ -158,7 +154,6 @@ def test_open_notebook_reuses_existing_session_in_personal_mode(client, monkeypa
 
 
 def test_open_notebook_rehydrates_environment_job_history(client, tmp_path):
-    """Opening a notebook should expose persisted recent environment jobs."""
     notebook_dir = create_notebook(tmp_path, "Job History Notebook")
     history_path = notebook_dir / ".strata" / "environment_jobs.json"
     history_path.parent.mkdir(parents=True, exist_ok=True)
@@ -198,7 +193,6 @@ def test_open_notebook_rehydrates_environment_job_history(client, tmp_path):
 
 
 def test_open_notebook_rehydrates_cached_status(client, tmp_path):
-    """Opening an existing notebook should restore cached cell statuses."""
     notebook_dir = create_notebook(tmp_path, "Rehydrate Test")
     add_cell_to_notebook(notebook_dir, "c1")
     write_cell(notebook_dir, "c1", "x = 1")
@@ -229,7 +223,6 @@ def test_list_cells_includes_remote_execution_metadata(
     notebook_executor_server,
     notebook_build_server,
 ):
-    """List-cells should retain remote execution metadata from the current session."""
     from strata.notebook.executor import CellExecutor
     from strata.notebook.models import WorkerBackendType, WorkerSpec
 
@@ -285,13 +278,11 @@ def test_list_cells_includes_remote_execution_metadata(
 
 
 def test_open_notebook_not_found(client):
-    """Opening a non-existent notebook returns 404."""
     response = client.post("/v1/notebooks/open", json={"path": "/nonexistent/notebook"})
     assert response.status_code == 404
 
 
 def test_open_notebook_rejects_path_outside_configured_storage_root(client, monkeypatch, tmp_path):
-    """Opening a notebook outside the configured storage root should be rejected."""
     storage_root = tmp_path / "allowed"
     storage_root.mkdir()
     outside_root = tmp_path / "outside"
@@ -313,7 +304,6 @@ def test_open_notebook_rejects_path_outside_configured_storage_root(client, monk
 
 
 def test_create_notebook_endpoint(client, tmp_path):
-    """POST /v1/notebooks/create returns the canonical create-notebook payload."""
     response = client.post(
         "/v1/notebooks/create", json={"parent_path": str(tmp_path), "name": "New Notebook"}
     )
@@ -338,7 +328,7 @@ def test_create_notebook_endpoint(client, tmp_path):
 
 
 def test_create_notebook_endpoint_defers_initial_environment_sync(client, monkeypatch):
-    """Fresh notebook creation should bootstrap the initial env as a background job."""
+    """Fresh notebook creation bootstraps the initial env as a background job."""
     captured: dict[str, object] = {}
 
     def fake_create_notebook(
@@ -415,7 +405,6 @@ def test_create_notebook_endpoint_defers_initial_environment_sync(client, monkey
 
 
 def test_create_notebook_endpoint_with_starter_cell(client, tmp_path):
-    """Scratch-style create requests can return a starter empty cell."""
     response = client.post(
         "/v1/notebooks/create",
         json={"parent_path": str(tmp_path), "name": "Scratch Notebook", "starter_cell": True},
@@ -429,7 +418,6 @@ def test_create_notebook_endpoint_with_starter_cell(client, tmp_path):
 
 
 def test_create_notebook_endpoint_rejects_unsupported_python_version(client, monkeypatch, tmp_path):
-    """Notebook creation should validate requested Python versions against server config."""
     set_server_state(
         monkeypatch,
         deployment_mode="personal",
@@ -449,7 +437,6 @@ def test_create_notebook_endpoint_rejects_unsupported_python_version(client, mon
 def test_create_notebook_endpoint_rejects_parent_path_outside_configured_storage_root(
     client, monkeypatch, tmp_path
 ):
-    """Notebook creation parent paths must stay inside the configured storage root."""
     storage_root = tmp_path / "allowed"
     storage_root.mkdir()
     outside_root = tmp_path / "outside"
@@ -474,7 +461,6 @@ def test_create_notebook_endpoint_rejects_parent_path_outside_configured_storage
 
 
 def test_delete_notebook_endpoint_removes_directory_and_closes_session(client, tmp_path):
-    """Deleting a notebook should remove its files and close the live session."""
     notebook_dir = create_notebook(tmp_path, "Delete Me")
     artifact_file = notebook_dir / ".strata" / "artifacts" / "result.bin"
     artifact_file.parent.mkdir(parents=True, exist_ok=True)
@@ -495,7 +481,6 @@ def test_delete_notebook_endpoint_removes_directory_and_closes_session(client, t
 
 
 def test_delete_notebook_endpoint_rejects_service_mode(client, deployment_mode_state, tmp_path):
-    """Notebook deletion should remain disabled in service mode."""
     notebook_dir = create_notebook(tmp_path, "Service Delete")
     session_id = open_session_id(client, notebook_dir)
 
@@ -508,7 +493,6 @@ def test_delete_notebook_endpoint_rejects_service_mode(client, deployment_mode_s
 
 
 def test_delete_notebook_endpoint_rejects_active_environment_job(client, tmp_path):
-    """Notebook deletion should be blocked while env mutation is running."""
     notebook_dir = create_notebook(tmp_path, "Busy Notebook")
     session_id = open_session_id(client, notebook_dir)
 
@@ -533,7 +517,6 @@ def test_delete_notebook_endpoint_rejects_active_environment_job(client, tmp_pat
 
 
 def test_delete_notebook_endpoint_rejects_running_execution(client, monkeypatch, tmp_path):
-    """Notebook deletion should be blocked while notebook execution is active."""
     notebook_dir = create_notebook(tmp_path, "Running Notebook")
     session_id = open_session_id(client, notebook_dir)
 
@@ -551,7 +534,6 @@ def test_delete_notebook_endpoint_rejects_running_execution(client, monkeypatch,
 
 
 def test_delete_by_path_removes_directory_without_session(client, tmp_path):
-    """Path-based delete should work for a notebook that was never opened."""
     notebook_dir = create_notebook(tmp_path, "Forgotten Notebook")
     assert notebook_dir.exists()
 
@@ -564,7 +546,6 @@ def test_delete_by_path_removes_directory_without_session(client, tmp_path):
 
 
 def test_delete_by_path_closes_open_session_before_removal(client, tmp_path):
-    """If a session happens to be open for the path, it should be closed first."""
     notebook_dir = create_notebook(tmp_path, "Open And Delete")
     session_id = open_session_id(client, notebook_dir)
 
@@ -576,7 +557,6 @@ def test_delete_by_path_closes_open_session_before_removal(client, tmp_path):
 
 
 def test_delete_by_path_rejects_missing_notebook(client, tmp_path):
-    """Deleting a path that is not a notebook directory should 404."""
     bogus = tmp_path / "not-a-notebook"
     bogus.mkdir()
 
@@ -609,7 +589,6 @@ def test_validate_recent_notebooks_handles_empty_list(client):
 
 
 def test_delete_by_path_rejects_service_mode(client, deployment_mode_state, tmp_path):
-    """Path-based delete should also be disabled in service mode."""
     notebook_dir = create_notebook(tmp_path, "Service Path Delete")
     deployment_mode_state("service")
 
@@ -620,7 +599,6 @@ def test_delete_by_path_rejects_service_mode(client, deployment_mode_state, tmp_
 
 
 def test_get_notebook_runtime_config_endpoint(client, monkeypatch):
-    """The runtime config endpoint should expose the server default notebook path."""
     set_server_state(
         monkeypatch,
         deployment_mode="personal",
@@ -646,7 +624,6 @@ def test_get_notebook_runtime_config_endpoint(client, monkeypatch):
 
 
 def test_get_environment_status_endpoint(client, tmp_path):
-    """GET /v1/notebooks/{id}/environment exposes the environment payload."""
     notebook_dir = create_notebook(tmp_path, "Environment Status Test")
     session_id = open_session_id(client, notebook_dir)
 
@@ -669,7 +646,6 @@ def test_get_environment_status_endpoint(client, tmp_path):
 
 
 def test_sync_environment_endpoint(client, monkeypatch, tmp_path):
-    """POST /v1/notebooks/{id}/environment/sync delegates to ``session.sync_environment``."""
     from strata.notebook.models import CellStaleness, CellStatus
 
     notebook_dir = create_notebook(tmp_path, "Environment Sync Test")
@@ -711,7 +687,6 @@ def test_sync_environment_endpoint(client, monkeypatch, tmp_path):
 
 
 def test_submit_environment_job_endpoint(client, monkeypatch, tmp_path):
-    """POST /environment/jobs should accept a background job and expose its snapshot."""
     notebook_dir = create_notebook(tmp_path, "Environment Job Test")
     session_id = open_session_id(client, notebook_dir)
 
@@ -754,7 +729,7 @@ def test_submit_environment_job_endpoint(client, monkeypatch, tmp_path):
 
 
 def test_submit_environment_import_job_endpoint(client, monkeypatch, tmp_path):
-    """POST /environment/jobs should accept async requirements/environment imports."""
+    """POST /environment/jobs accepts async requirements/environment imports."""
     notebook_dir = create_notebook(tmp_path, "Environment Import Job Test")
     session_id = open_session_id(client, notebook_dir)
 
@@ -825,7 +800,6 @@ def test_submit_environment_import_job_endpoint_rejects_invalid_payload(client, 
 
 
 def test_submit_environment_job_endpoint_conflict_when_execution_running(client, tmp_path):
-    """Background environment jobs should be rejected while cells are running."""
     from strata.notebook.models import CellStatus
 
     notebook_dir = create_notebook(tmp_path, "Environment Busy Test")
@@ -851,7 +825,6 @@ def test_submit_environment_job_endpoint_conflict_when_execution_running(client,
 
 
 def test_list_sessions_personal_mode(client, deployment_mode_state, tmp_path):
-    """Session listing should work in personal mode for reconnect UX."""
     deployment_mode_state("personal")
     notebook_dir = create_notebook(tmp_path, "Session Listing Test")
     session_id = open_session_id(client, notebook_dir)
@@ -869,7 +842,7 @@ def test_list_sessions_personal_mode(client, deployment_mode_state, tmp_path):
 def test_get_session_personal_mode_includes_execution_metadata(
     client, deployment_mode_state, tmp_path
 ):
-    """Session reconnect should preserve the same serialized runtime metadata as open."""
+    """Reconnect returns the same serialized runtime metadata as open."""
     deployment_mode_state("personal")
     notebook_dir = create_notebook(tmp_path, "Session Metadata Test")
     add_cell_to_notebook(notebook_dir, "cell-1")
@@ -901,7 +874,6 @@ def test_get_session_personal_mode_includes_execution_metadata(
 
 
 def test_session_endpoints_blocked_in_service_mode(client, deployment_mode_state):
-    """Session discovery/reconnect should not be exposed in service mode."""
     deployment_mode_state("service")
 
     list_response = client.get("/v1/notebooks/sessions")
@@ -917,7 +889,6 @@ def test_session_endpoints_blocked_in_service_mode(client, deployment_mode_state
 
 
 def test_list_cells(client, tmp_path):
-    """GET /v1/notebooks/{id}/cells returns the cells with source."""
     notebook_dir = create_notebook(tmp_path, "Cells Test")
     add_cell_to_notebook(notebook_dir, "cell-1")
     write_cell(notebook_dir, "cell-1", "x = 1")
@@ -933,7 +904,6 @@ def test_list_cells(client, tmp_path):
 
 
 def test_update_notebook_mounts(client, tmp_path):
-    """PUT /v1/notebooks/{id}/mounts replaces the mount list."""
     notebook_dir = create_notebook(tmp_path, "Mount Update Test")
     add_cell_to_notebook(notebook_dir, "cell-1")
     session_id = open_session_id(client, notebook_dir)
@@ -950,7 +920,6 @@ def test_update_notebook_mounts(client, tmp_path):
 
 
 def test_update_notebook_worker(client, tmp_path):
-    """PUT /v1/notebooks/{id}/worker assigns the notebook-level worker."""
     notebook_dir = create_notebook(tmp_path, "Worker Update Test")
     add_cell_to_notebook(notebook_dir, "cell-1")
     session_id = open_session_id(client, notebook_dir)
@@ -965,7 +934,6 @@ def test_update_notebook_worker(client, tmp_path):
 
 
 def test_list_notebook_workers(client, tmp_path):
-    """GET /v1/notebooks/{id}/workers returns the worker catalog."""
     notebook_dir = create_notebook(tmp_path, "Worker Catalog Test")
     add_cell_to_notebook(notebook_dir, "cell-1")
     session_id = open_session_id(client, notebook_dir)
@@ -980,7 +948,6 @@ def test_list_notebook_workers(client, tmp_path):
 
 
 def test_list_notebook_workers_refresh_bypasses_health_cache(client, monkeypatch, tmp_path):
-    """Refreshing the worker list should bypass the short health cache."""
     import strata.notebook.routes as notebook_routes
 
     calls: list[bool] = []
@@ -1020,7 +987,6 @@ def test_list_notebook_workers_refresh_bypasses_health_cache(client, monkeypatch
 
 
 def test_list_notebook_workers_includes_health_history(client, monkeypatch, tmp_path):
-    """Notebook worker catalog responses should include recent health probes."""
     import strata.notebook.routes as notebook_routes
 
     history_entry = {
@@ -1083,7 +1049,6 @@ def test_list_notebook_workers_includes_health_history(client, monkeypatch, tmp_
 
 
 def test_list_notebook_workers_in_service_mode(client, service_mode_worker_state, tmp_path):
-    """Service mode should expose a server-managed worker registry."""
     service_mode_worker_state()
     notebook_dir = create_notebook(tmp_path, "Service Worker Catalog Test")
     session_id = open_session_id(client, notebook_dir)
@@ -1100,7 +1065,6 @@ def test_list_notebook_workers_in_service_mode(client, service_mode_worker_state
 
 
 def test_update_notebook_workers(client, tmp_path):
-    """PUT /v1/notebooks/{id}/workers updates the notebook-level worker catalog."""
     notebook_dir = create_notebook(tmp_path, "Worker Catalog Update Test")
     session_id = open_session_id(client, notebook_dir)
 
@@ -1133,7 +1097,6 @@ def test_update_notebook_workers(client, tmp_path):
 def test_update_notebook_workers_forbidden_in_service_mode(
     client, service_mode_worker_state, tmp_path
 ):
-    """Notebook-scoped worker definitions should be disabled in service mode."""
     service_mode_worker_state()
     notebook_dir = create_notebook(tmp_path, "Service Worker Update Test")
     session_id = open_session_id(client, notebook_dir)
@@ -1158,7 +1121,6 @@ def test_update_notebook_workers_forbidden_in_service_mode(
 def test_update_notebook_worker_requires_allowlisted_service_worker(
     client, service_mode_worker_state, tmp_path
 ):
-    """Service mode should reject worker names outside the server registry."""
     service_mode_worker_state()
     notebook_dir = create_notebook(tmp_path, "Service Worker Assignment Test")
     add_cell_to_notebook(notebook_dir, "cell-1")
@@ -1178,7 +1140,6 @@ def test_update_notebook_worker_requires_allowlisted_service_worker(
 def test_update_notebook_worker_rejects_disabled_service_worker(
     client, service_mode_worker_state, tmp_path
 ):
-    """Service mode should reject server-managed workers that are disabled."""
     service_mode_worker_state(
         [
             {
@@ -1201,7 +1162,6 @@ def test_update_notebook_worker_rejects_disabled_service_worker(
 
 
 def test_update_notebook_workers_probes_executor_health(client, notebook_executor_server, tmp_path):
-    """Configured notebook workers should surface healthy executor probes."""
     notebook_dir = create_notebook(tmp_path, "Worker Health Test")
     session_id = open_session_id(client, notebook_dir)
 
@@ -1227,7 +1187,6 @@ def test_update_notebook_workers_probes_executor_health(client, notebook_executo
 
 
 def test_update_notebook_timeout_and_env(client, tmp_path):
-    """Notebook-level timeout/env endpoints update the persisted defaults."""
     notebook_dir = create_notebook(tmp_path, "Runtime Update Test")
     add_cell_to_notebook(notebook_dir, "cell-1")
     session_id = open_session_id(client, notebook_dir)
@@ -1246,11 +1205,10 @@ def test_update_notebook_timeout_and_env(client, tmp_path):
 
 
 def test_update_notebook_env_restores_sensitive_values_on_cells(client, tmp_path):
-    """Sensitive keys (API keys, tokens) get blanked on disk by the writer,
-    but the in-memory session must hold the real values — otherwise cells
-    launched immediately after the update can't see them. Regression for
-    the bug where ALPACA_API_KEY appeared set in the Runtime panel but
-    the executor saw an empty string."""
+    """Sensitive keys are blanked on disk but the session must hold the real values.
+
+    Otherwise a cell launched right after the update sees an empty string.
+    """
     notebook_dir = create_notebook(tmp_path, "Sensitive Env Test")
     add_cell_to_notebook(notebook_dir, "cell-1")
     session_id = open_session_id(client, notebook_dir)
@@ -1278,7 +1236,7 @@ def test_update_notebook_env_restores_sensitive_values_on_cells(client, tmp_path
 
 
 def test_update_cell_source(client, tmp_path):
-    """PUT /v1/notebooks/{id}/cells/{cell_id} updates the source in-memory and on disk."""
+    """PUT /cells/{cell_id} updates the source in memory and on disk."""
     notebook_dir = create_notebook(tmp_path, "Update Test")
     add_cell_to_notebook(notebook_dir, "cell-1")
     session_id = open_session_id(client, notebook_dir)
@@ -1294,7 +1252,6 @@ def test_update_cell_source(client, tmp_path):
 
 
 def test_add_cell(client, tmp_path):
-    """POST /v1/notebooks/{id}/cells creates a new empty cell."""
     notebook_dir = create_notebook(tmp_path, "Add Cell Test")
     session_id = open_session_id(client, notebook_dir)
 
@@ -1307,7 +1264,6 @@ def test_add_cell(client, tmp_path):
 
 
 def test_delete_cell(client, tmp_path):
-    """DELETE /v1/notebooks/{id}/cells/{cell_id} removes the cell."""
     notebook_dir = create_notebook(tmp_path, "Delete Test")
     add_cell_to_notebook(notebook_dir, "cell-1")
     session_id = open_session_id(client, notebook_dir)
@@ -1320,7 +1276,7 @@ def test_delete_cell(client, tmp_path):
 
 
 def test_delete_unknown_cell_is_404_not_500(client, tmp_path):
-    """Deleting a missing cell is a 404 — the catch-all must not mask it as 500."""
+    """The route's catch-all must not mask the 404 as a 500."""
     notebook_dir = create_notebook(tmp_path, "Delete 404 Test")
     session_id = open_session_id(client, notebook_dir)
 
@@ -1329,7 +1285,7 @@ def test_delete_unknown_cell_is_404_not_500(client, tmp_path):
 
 
 def test_add_cell_bad_after_is_400(client, tmp_path):
-    """An after_cell_id that names no cell is rejected (parity with the local backend)."""
+    """An after_cell_id that names no cell is rejected, as in the local backend."""
     notebook_dir = create_notebook(tmp_path, "Add After Test")
     session_id = open_session_id(client, notebook_dir)
 
@@ -1338,10 +1294,9 @@ def test_add_cell_bad_after_is_400(client, tmp_path):
 
 
 def test_rest_cell_crud_broadcasts_to_ws_spectators(client, tmp_path):
-    """REST structural edits mirror to WS spectators (the TUI sees agent edits live).
+    """REST add / edit / reorder / delete each push a ``notebook_state`` frame to WS watchers.
 
-    add / edit / reorder / delete each push a full ``notebook_state`` frame to a
-    connected watcher, so an agent driving via REST/CLI/MCP shows up live.
+    So an agent driving via REST/CLI/MCP shows up live in the TUI.
     """
     import strata.notebook.ws as ws_module
 
@@ -1383,7 +1338,6 @@ def test_rest_cell_crud_broadcasts_to_ws_spectators(client, tmp_path):
 
 
 def test_reorder_cells(client, tmp_path):
-    """PUT /v1/notebooks/{id}/cells/reorder reorders cells in-place."""
     notebook_dir = create_notebook(tmp_path, "Reorder Test")
     add_cell_to_notebook(notebook_dir, "cell-1")
     add_cell_to_notebook(notebook_dir, "cell-2")
@@ -1401,7 +1355,6 @@ def test_reorder_cells(client, tmp_path):
 
 
 def test_rename_notebook(client, tmp_path):
-    """PUT /v1/notebooks/{id}/name updates the notebook display name."""
     notebook_dir = create_notebook(tmp_path, "Original Name")
     session_id = open_session_id(client, notebook_dir)
 
@@ -1412,7 +1365,6 @@ def test_rename_notebook(client, tmp_path):
 
 
 def test_rename_notebook_rejects_blank_name(client, tmp_path):
-    """Renaming should reject empty notebook names."""
     notebook_dir = create_notebook(tmp_path, "Original Name")
     session_id = open_session_id(client, notebook_dir)
 
@@ -1425,7 +1377,6 @@ def test_rename_notebook_rejects_blank_name(client, tmp_path):
 
 
 def test_execute_cell(client, tmp_path):
-    """POST /v1/notebooks/{id}/cells/{cell_id}/execute runs a cell."""
     notebook_dir = create_notebook(tmp_path, "Execute Test")
     add_cell_to_notebook(notebook_dir, "test-cell")
     write_cell(notebook_dir, "test-cell", "x = 1 + 1\ny = 'hello'")
@@ -1445,7 +1396,6 @@ def test_execute_cell(client, tmp_path):
 
 
 def test_execute_cell_updates_session_state_and_history(client, tmp_path):
-    """REST execution should update backend cell state and profiling history."""
     notebook_dir = create_notebook(tmp_path, "Execute Session State")
     add_cell_to_notebook(notebook_dir, "test-cell")
     write_cell(notebook_dir, "test-cell", "x = 41 + 1")
@@ -1469,7 +1419,6 @@ def test_execute_cell_updates_session_state_and_history(client, tmp_path):
 
 
 def test_execute_cell_not_found(client, tmp_path):
-    """Executing a non-existent cell returns 404."""
     notebook_dir = create_notebook(tmp_path, "Execute Test")
     session_id = open_session_id(client, notebook_dir)
 
@@ -1481,12 +1430,10 @@ def test_execute_cell_not_found(client, tmp_path):
 
 
 class TestCellIterationsEndpoint:
-    """Tests for GET /v1/notebooks/{id}/cells/{cid}/iterations.
+    """GET /cells/{cid}/iterations, the inspect panel's iteration picker.
 
-    The endpoint backs the inspect panel's iteration picker. It must be a safe
-    poll target — empty list for non-loop cells, empty list while a loop cell
-    has yet to run — and it must pick up the carry variable from the cell's
-    ``@loop`` annotation without requiring the caller to know the variable name.
+    It must be safe to poll (empty list for non-loop or not-yet-run cells) and must infer
+    the carry variable from the cell's ``@loop`` annotation.
     """
 
     def _open(self, client, tmp_path: Path, cells: dict[str, str]) -> str:
@@ -1526,8 +1473,7 @@ class TestCellIterationsEndpoint:
         assert payload["iterations"] == []
 
     def test_endpoint_surfaces_recorded_iteration_artifacts(self, client, tmp_path):
-        """After directly storing iteration artifacts, the endpoint returns them
-        in ascending order with their content type and size."""
+        """Stored iteration artifacts come back in ascending order with content type and size."""
         loop_source = "# @loop max_iter=3 carry=state\nstate = {'n': state['n'] + 1}\n"
         session_id = self._open(client, tmp_path, {"loop": loop_source})
 
@@ -1556,9 +1502,7 @@ class TestCellIterationsEndpoint:
         assert first["artifact_uri"].endswith("@iter=0@v=1")
 
     def test_variable_query_param_overrides_inferred_carry(self, client, tmp_path):
-        """Passing ``?variable=`` lets the caller inspect iterations of any
-        variable a cell might persist per iteration (e.g. multi-carry in a
-        future phase)."""
+        """``?variable=`` inspects iterations of any variable, not only the inferred carry."""
         loop_source = "# @loop max_iter=3 carry=state\nstate = {'n': 1}\n"
         session_id = self._open(client, tmp_path, {"loop": loop_source})
 
@@ -1589,10 +1533,8 @@ class TestCellIterationsEndpoint:
 class TestPersonalModeUserScoping:
     """Per-user subdir scoping when STRATA_PERSONAL_MODE_USER_HEADER is set.
 
-    Mirrors the proxy-fronted personal deployment shape: a header injected by
-    Cloudflare Access (or similar) identifies the calling user. Each user gets
-    a private storage subdirectory and physically cannot see — let alone
-    create or delete — notebooks belonging to anyone else.
+    A proxy-injected header identifies the user; each user gets a private storage
+    subdirectory and cannot see, create or delete anyone else's notebooks.
     """
 
     HEADER = "X-Strata-Test-User"
@@ -1627,7 +1569,6 @@ class TestPersonalModeUserScoping:
         return storage_root / sanitized
 
     def test_runtime_config_returns_user_subdir(self, client, configured_state, tmp_path):
-        """``/config`` returns ``<base>/<user>`` so the frontend creates there."""
         configured_state(tmp_path)
 
         response = client.get("/v1/notebooks/config", headers={self.HEADER: "alice@example.com"})
@@ -1637,7 +1578,6 @@ class TestPersonalModeUserScoping:
         assert Path(response.json()["default_parent_path"]) == expected
 
     def test_create_lands_in_user_subdir(self, client, configured_state, tmp_path):
-        """Creating with the user's parent_path stamps owner and lands in their subdir."""
         configured_state(tmp_path)
         alice_root = self._user_subdir(tmp_path, "alice@example.com")
 
@@ -1653,7 +1593,6 @@ class TestPersonalModeUserScoping:
         assert self._read_owner(notebook_dir) == "alice@example.com"
 
     def test_create_outside_own_subdir_is_rejected(self, client, configured_state, tmp_path):
-        """A user passing another user's subdir as parent_path → 400."""
         configured_state(tmp_path)
         bob_root = self._user_subdir(tmp_path, "bob@example.com")
         bob_root.mkdir(parents=True)  # rule out "rejected because dir missing"
@@ -1667,7 +1606,6 @@ class TestPersonalModeUserScoping:
         assert response.status_code == 400
 
     def test_discover_returns_only_callers_subdir(self, client, configured_state, tmp_path):
-        """Alice sees her notebooks; Bob's are physically isolated."""
         configured_state(tmp_path)
 
         client.post(
@@ -1694,7 +1632,6 @@ class TestPersonalModeUserScoping:
         assert names == {"Alice NB"}
 
     def test_delete_by_path_rejects_cross_user_path(self, client, configured_state, tmp_path):
-        """Bob cannot delete a notebook by passing alice's path — boundary rejects."""
         configured_state(tmp_path)
         alice_root = self._user_subdir(tmp_path, "alice@example.com")
 
@@ -1736,7 +1673,7 @@ class TestPersonalModeUserScoping:
         assert not alice_nb.exists()
 
     def test_sanitize_user_dir_name_collapses_unsafe_chars(self):
-        """Sanity check: hostile header values can't escape the storage root."""
+        """Hostile header values can't escape the storage root."""
         from strata.notebook.routes import _sanitize_user_dir_name
 
         assert _sanitize_user_dir_name("alice@example.com") == "alice@example.com"
@@ -1748,14 +1685,8 @@ class TestPersonalModeUserScoping:
     def test_session_keyed_routes_owner_gated(self, client, configured_state, tmp_path):
         """A leaked session_id must not be a bearer capability across users.
 
-        Before #41 the WS upgrade refused cross-owner reconnects but the
-        ``/{session_id}/...`` REST routes did not. Pin that any
-        SessionDep-backed route owned by Alice returns 404 (the same
-        generic body the WS upgrade closes with) when Bob holds the id.
-
-        ``cells`` is a representative read; the test covers the dependency
-        itself, so it implies the same gate for every other SessionDep
-        route by construction.
+        Any SessionDep route owned by Alice returns 404 when Bob holds the id. ``cells`` stands
+        in for the rest: the gate is in the dependency itself.
         """
         configured_state(tmp_path)
         alice_root = self._user_subdir(tmp_path, "alice@example.com")
@@ -1794,13 +1725,10 @@ class TestPersonalModeUserScoping:
     def test_legacy_unowned_notebook_still_accessible_when_scoping_on(
         self, client, configured_state, tmp_path
     ):
-        """An ``owner = None`` notebook stays accessible to any caller.
+        """An ``owner = None`` notebook stays accessible to any caller when scoping is on.
 
-        Per-user scoping was added to a backend that already had
-        notebooks in the wild without an owner field. Closing the
-        missing-header bypass for owned notebooks must not also close
-        legacy unowned notebooks, or every pre-scoping notebook becomes
-        suddenly inaccessible.
+        Notebooks created before per-user scoping have no owner; gating them would lock
+        every one of them out.
         """
         configured_state(tmp_path)
         alice_root = self._user_subdir(tmp_path, "alice@example.com")
@@ -1843,13 +1771,10 @@ class TestPersonalModeUserScoping:
 
 
 def test_list_and_update_notebook_connections(client, tmp_path):
-    """Round-trip the [connections.<name>] surface through the API.
+    """PUT replaces the whole connection list; GET returns it.
 
-    Mirrors the mount/worker patterns: a PUT replaces the whole
-    list, a follow-up GET returns the current state. Auth literals
-    are blanked at write time, so the response reflects the
-    on-disk shape — UI components rely on that to highlight which
-    keys still need ``${VAR}`` indirection.
+    Auth literals are blanked at write time, so the response is the on-disk shape the UI
+    uses to flag keys that still need ``${VAR}`` indirection.
     """
     notebook_dir = create_notebook(tmp_path, "Conn Routes Test")
     nb_id = open_session_id(client, notebook_dir)
@@ -1898,10 +1823,7 @@ def test_list_and_update_notebook_connections(client, tmp_path):
 
 
 def test_update_notebook_connections_rejects_duplicate_names(client, tmp_path):
-    """Two entries with the same name → 400. The annotation
-    validator would surface this even if it landed on disk, but
-    the API layer is the better place to catch it (no on-disk
-    side effects)."""
+    """Duplicate names are rejected at the API, before any on-disk side effect."""
     notebook_dir = create_notebook(tmp_path, "Conn Dup Test")
     nb_id = open_session_id(client, notebook_dir)
 
@@ -1920,12 +1842,9 @@ def test_update_notebook_connections_rejects_duplicate_names(client, tmp_path):
 
 
 def test_update_notebook_connections_preserves_malformed_blocks(client, tmp_path):
-    """Codex review fix: a PUT that touches one connection must NOT
-    erase ``[connections.<name>]`` blocks that previously failed to
-    parse. The parser flags those entries as ``MalformedConnection``
-    and the writer round-trips them. The route used to drop the
-    malformed list before passing it to the writer, silently
-    erasing the on-disk record on every save.
+    """A PUT must not erase ``[connections.<name>]`` blocks that failed to parse.
+
+    The parser flags them as ``MalformedConnection`` and the writer round-trips them.
     """
     from strata.notebook.parser import parse_notebook
 
@@ -1964,11 +1883,10 @@ def test_update_notebook_connections_preserves_malformed_blocks(client, tmp_path
 
 
 def test_update_notebook_connections_preserves_unknown_driver_extras(client, tmp_path):
-    """Codex review fix: ``ConnectionSpec`` is open-ended (Pydantic
-    extra=allow) so a driver-specific ``options`` table or any
-    forward-compat key set by a future driver must round-trip
-    unchanged. The route persists exactly what the UI sends; the
-    UI in turn preserves anything outside its known field set."""
+    """Driver-specific ``options`` and unknown keys round-trip unchanged.
+
+    ``ConnectionSpec`` allows extras; the route persists exactly what the UI sends.
+    """
     notebook_dir = create_notebook(tmp_path, "Conn Extras Test")
     nb_id = open_session_id(client, notebook_dir)
 
@@ -1995,11 +1913,7 @@ def test_update_notebook_connections_preserves_unknown_driver_extras(client, tmp
 
 
 def test_update_notebook_connections_keeps_relative_paths_relative(client, tmp_path):
-    """Codex review fix: a relative SQLite path round-trips
-    byte-for-byte through a no-op edit. The parser stopped
-    resolving paths so the writer persists exactly what the UI
-    sends; the cell executor handles resolution at adapter-open
-    time."""
+    """A relative SQLite path round-trips byte-for-byte; the executor resolves it at open time."""
     import tomllib
 
     notebook_dir = create_notebook(tmp_path, "Conn Rel Path Test")
@@ -2028,9 +1942,7 @@ def test_update_notebook_connections_keeps_relative_paths_relative(client, tmp_p
 
 
 def test_get_connection_schema_endpoint_lists_tables_and_columns(client, tmp_path):
-    """Schema endpoint opens the connection read-only, runs the
-    adapter's list_schema, and returns a JSON tree the UI can
-    render. Pins the SQLite happy path end-to-end."""
+    """Opens the connection read-only and returns the adapter's schema as a JSON tree (SQLite)."""
     import sqlite3
 
     pytest.importorskip("adbc_driver_sqlite")
@@ -2068,9 +1980,7 @@ def test_get_connection_schema_endpoint_lists_tables_and_columns(client, tmp_pat
 
 
 def test_get_connection_schema_endpoint_unknown_connection_404(client, tmp_path):
-    """Asking for a connection that isn't declared returns 404
-    with the connection name in the error so the UI can surface
-    a useful message."""
+    """The 404 names the connection so the UI can show a useful message."""
     notebook_dir = create_notebook(tmp_path, "Schema 404")
     nb_id = open_session_id(client, notebook_dir)
 
@@ -2084,7 +1994,6 @@ def test_get_connection_schema_endpoint_unknown_connection_404(client, tmp_path)
 
 
 def test_export_endpoint_defaults_to_zip(client, tmp_path):
-    """No fmt param -> ZIP bundle (backward-compatible default)."""
     notebook_dir = create_notebook(tmp_path, "ExportZipDefault", initialize_environment=False)
     nb_id = open_session_id(client, notebook_dir)
 
@@ -2096,7 +2005,6 @@ def test_export_endpoint_defaults_to_zip(client, tmp_path):
 
 
 def test_export_endpoint_returns_markdown_when_requested(client, tmp_path):
-    """fmt=markdown -> rendered markdown with the right headers."""
     notebook_dir = create_notebook(tmp_path, "ExportRoute", initialize_environment=False)
     add_cell_to_notebook(notebook_dir, "c1")
     write_cell(notebook_dir, "c1", "x = 1\n")
@@ -2183,9 +2091,7 @@ def _import_storage(monkeypatch, tmp_path: Path) -> Path:
 
 
 def test_import_endpoint_happy_path(client, monkeypatch, tmp_path):
-    """A clean .ipynb with one markdown + one code cell comes back as
-    an opened session with a session_id, a path inside the storage
-    root, and a populated import_report."""
+    """One markdown + one code cell come back as an opened session inside the storage root."""
     storage = _import_storage(monkeypatch, tmp_path)
 
     payload = _ipynb_bytes([_md("# Hi\n"), _code("x = 1\n")])
@@ -2210,8 +2116,7 @@ def test_import_endpoint_happy_path(client, monkeypatch, tmp_path):
 
 
 def test_import_endpoint_reports_magic_translation(client, monkeypatch, tmp_path):
-    """Magics, !shell, and pip-install lines are surfaced through the
-    import_report fields without re-querying the converter."""
+    """Magics, !shell and pip-install lines surface in the import_report."""
     _import_storage(monkeypatch, tmp_path)
 
     payload = _ipynb_bytes(
@@ -2260,8 +2165,7 @@ def test_import_endpoint_rejects_invalid_json(client, monkeypatch, tmp_path):
 
 
 def test_import_endpoint_rejects_collision(client, monkeypatch, tmp_path):
-    """A second import with the same name into the same storage root
-    should not silently overwrite the existing notebook."""
+    """A second import with the same name must not overwrite the first."""
     _import_storage(monkeypatch, tmp_path)
 
     payload = _ipynb_bytes([_code("x = 1\n")])
@@ -2281,8 +2185,7 @@ def test_import_endpoint_rejects_collision(client, monkeypatch, tmp_path):
 
 
 def test_import_endpoint_enforces_upload_size_cap(client, monkeypatch, tmp_path):
-    """Tiny cap monkeypatched on the route — the upload should be
-    rejected before the converter touches disk."""
+    """With a tiny cap, the upload is rejected before the converter touches disk."""
     _import_storage(monkeypatch, tmp_path)
     monkeypatch.setattr(
         "strata.notebook.routes._MAX_IPYNB_UPLOAD_BYTES",
@@ -2302,8 +2205,7 @@ def test_import_endpoint_enforces_upload_size_cap(client, monkeypatch, tmp_path)
 
 
 def test_import_endpoint_rejects_path_traversal_in_name(client, monkeypatch, tmp_path):
-    """Regression: ``name=../escaped`` must not let the imported notebook
-    land outside the configured storage root."""
+    """``name=../escaped`` must not land the notebook outside the storage root."""
     storage = _import_storage(monkeypatch, tmp_path / "storage")
     storage.mkdir(parents=True, exist_ok=True)
 
@@ -2325,10 +2227,7 @@ def test_import_endpoint_rejects_path_traversal_in_name(client, monkeypatch, tmp
 
 
 def test_import_endpoint_rejects_structurally_invalid_notebook(client, monkeypatch, tmp_path):
-    """Regression: a JSON file whose top-level value isn't an object,
-    or whose ``cells`` field isn't a list of dicts, used to crash the
-    converter mid-loop with AttributeError → 500. All shapes should
-    surface as a clean 400 now."""
+    """A non-object top level, or ``cells`` not a list of dicts, is a clean 400, not a 500."""
     _import_storage(monkeypatch, tmp_path)
 
     bad_payloads = (
@@ -2350,8 +2249,7 @@ def test_import_endpoint_rejects_structurally_invalid_notebook(client, monkeypat
 
 
 def test_import_endpoint_stamps_caller_owner(client, monkeypatch, tmp_path):
-    """When personal-mode per-user scoping is on, imported notebooks
-    should inherit the caller identity the same way ``create`` does."""
+    """With per-user scoping on, imports get the caller as owner, as ``create`` does."""
     import tomllib
 
     set_server_state(
@@ -2377,8 +2275,7 @@ def test_import_endpoint_stamps_caller_owner(client, monkeypatch, tmp_path):
 
 
 def test_import_endpoint_uses_custom_name_form_field(client, monkeypatch, tmp_path):
-    """The ``name`` form field overrides the upload's filename stem so
-    the user can re-import into a different directory layout."""
+    """The ``name`` form field overrides the upload's filename stem."""
     storage = _import_storage(monkeypatch, tmp_path)
 
     payload = _ipynb_bytes([_code("x = 1\n")])
@@ -2399,11 +2296,8 @@ def test_import_endpoint_uses_custom_name_form_field(client, monkeypatch, tmp_pa
 
 
 def _snapshot_bytes(tmp_path: Path, owner: str | None = None) -> tuple[bytes, str]:
-    """A snapshot of a one-cell notebook with one stored artifact.
-
-    Built without running anything: route tests exercise the HTTP plumbing,
-    and the importer's own tests cover whether imported cells hit the cache.
-    """
+    """A snapshot of a one-cell notebook with one stored artifact, built without running
+    anything."""
     import io
     import zipfile
 
@@ -2462,8 +2356,7 @@ def test_import_snapshot_opens_a_session_with_the_artifacts(client, monkeypatch,
 
 
 def test_import_snapshot_replaces_an_id_already_in_the_storage_root(client, monkeypatch, tmp_path):
-    """The second copy of one notebook gets its own id: two copies sharing one
-    collide the moment both publish to a shared store."""
+    """The second copy gets its own id; two copies sharing one collide in a shared store."""
     _import_storage(monkeypatch, tmp_path / "storage")
     payload, source_id = _snapshot_bytes(tmp_path)
 
@@ -2484,9 +2377,7 @@ def test_import_snapshot_replaces_an_id_already_in_the_storage_root(client, monk
 
 
 def test_import_snapshot_stamps_the_caller_not_the_exporter(client, monkeypatch, tmp_path):
-    """The bundle names whoever exported it. Discovery on a per-user server lists
-    by owner, so an import left under the original owner would vanish from the
-    importer's own list."""
+    """The import is owned by the caller, or it would vanish from their per-user discovery list."""
     import tomllib
 
     set_server_state(
@@ -2545,8 +2436,7 @@ def test_import_snapshot_enforces_its_upload_cap(client, monkeypatch, tmp_path):
 
 
 def test_import_snapshot_rejects_path_traversal_in_name(client, monkeypatch, tmp_path):
-    """The name goes through the same checks as a Jupyter import's — one helper,
-    so one route cannot miss an escape the other catches."""
+    """The name goes through the same checks as a Jupyter import's."""
     _import_storage(monkeypatch, tmp_path / "storage")
     payload, _ = _snapshot_bytes(tmp_path)
 
@@ -2564,7 +2454,7 @@ def test_import_snapshot_rejects_path_traversal_in_name(client, monkeypatch, tmp
 
 
 def _open_for_python_version_tests(client, parent_dir: Path) -> tuple[str, Path]:
-    """Helper: create a notebook at 3.13, return (session_id, notebook_dir)."""
+    """Create a notebook at 3.13; return (session_id, notebook_dir)."""
     notebook_dir = create_notebook(
         parent_dir, "PyVer Test", python_version="3.13", initialize_environment=False
     )
@@ -2573,7 +2463,6 @@ def _open_for_python_version_tests(client, parent_dir: Path) -> tuple[str, Path]
 
 
 def test_python_version_update_rejects_unknown_version(client, monkeypatch, tmp_path):
-    """Asking for a Python the deployment doesn't allow returns 400."""
     set_server_state(
         monkeypatch,
         deployment_mode="personal",
@@ -2592,8 +2481,7 @@ def test_python_version_update_rejects_unknown_version(client, monkeypatch, tmp_
 
 
 def test_python_version_update_no_op_for_current_version(client, monkeypatch, tmp_path):
-    """Picking the version that's already declared returns 200 without
-    accepting a new job."""
+    """The already-declared version returns 200 without accepting a job."""
     set_server_state(
         monkeypatch,
         deployment_mode="personal",
@@ -2614,7 +2502,6 @@ def test_python_version_update_no_op_for_current_version(client, monkeypatch, tm
 
 
 def test_python_version_update_unknown_notebook_returns_404(client):
-    """Posting to a stale session id returns 404."""
     resp = client.put(
         "/v1/notebooks/nonexistent-session/python-version",
         json={"python_version": "3.13"},
@@ -2623,7 +2510,7 @@ def test_python_version_update_unknown_notebook_returns_404(client):
 
 
 def test_python_version_update_rejects_malformed_version(client, monkeypatch, tmp_path):
-    """The Pydantic field validator rejects anything that isn't major.minor."""
+    """Anything that isn't major.minor fails validation."""
     set_server_state(
         monkeypatch,
         deployment_mode="personal",
@@ -2644,10 +2531,8 @@ def test_python_version_update_rejects_malformed_version(client, monkeypatch, tm
 class TestRuntimeConfigRegistryFlag:
     """``registry_enabled`` says whether there is a registry to show.
 
-    It used to mean "personal mode", because the registry routes went through
-    the bare store gate and 403'd anywhere else. They read through the
-    tenant-scoped read gate now, so a service-mode server has a registry — and
-    hiding the tab there hid the deployment the feature is for.
+    Service mode has one too (the registry routes read through the tenant-scoped gate), so
+    the flag is not "personal mode".
     """
 
     @pytest.mark.parametrize("mode", ["personal", "service"])
@@ -2664,8 +2549,8 @@ class TestRuntimeConfigRegistryFlag:
 
     @pytest.mark.parametrize(("url", "offered"), [(None, False), ("https://store.example", True)])
     def test_promotion_is_offered_only_with_a_team_store(self, url, offered, monkeypatch):
-        """Without one the promote route answers 409, so offering the button
-        would offer an error."""
+        """Without a team store the promote route answers 409, so the button would offer an
+        error."""
         from strata.notebook.routes import _serialize_notebook_runtime_config
 
         monkeypatch.setattr(
@@ -2712,7 +2597,6 @@ def test_set_cell_tests_endpoint(client, tmp_path):
 
 
 def test_run_cell_tests_endpoint(client, tmp_path, monkeypatch):
-    """POST /cells/{id}/tests runs the cell's tests and returns per-test outcomes."""
     from strata.notebook.models import CellTestCase, CellTestResult
     from strata.notebook.writer import write_cell_tests
 
@@ -2748,7 +2632,6 @@ def test_run_cell_tests_endpoint(client, tmp_path, monkeypatch):
 
 
 def test_run_cell_tests_endpoint_no_test_source_is_400(client, tmp_path):
-    """A cell with no cells/{id}.test.py → 400 (nothing to run)."""
     notebook_dir = create_notebook(tmp_path, "NoTestsNb", initialize_environment=False)
     add_cell_to_notebook(notebook_dir, "plain", None, language="python")
     write_cell(notebook_dir, "plain", "x = 1\n")
@@ -2763,7 +2646,6 @@ def test_run_cell_tests_endpoint_no_test_source_is_400(client, tmp_path):
     [("rerun", "execute_cell_rerun"), ("force", "execute_cell_force"), ("normal", "execute_cell")],
 )
 def test_execute_cell_mode_dispatches(client, tmp_path, monkeypatch, mode, method):
-    """POST /cells/{id}/execute?mode= routes to the matching executor method."""
     from strata.notebook.executor import CellExecutionResult
 
     notebook_dir = create_notebook(tmp_path, "ModeNb", initialize_environment=False)
@@ -2803,11 +2685,9 @@ def test_execute_cell_unknown_mode_is_400(client, tmp_path):
 
 
 def test_rest_execute_broadcasts_to_ws_spectators(client, tmp_path, monkeypatch):
-    """A REST/CLI-driven run mirrors live frames to WS spectators (the TUI).
+    """A REST-driven run broadcasts the same frames to WS spectators as a WS-driven run.
 
-    The live-mirror contract: an agent driving via REST (`cell run --server …`)
-    produces the same broadcast frames a Vue WS-driven run does, so a watcher
-    sees the cell go running and the result land — not just a poll catch-up.
+    A watcher sees the cell go running and the result land, not just a poll catch-up.
     """
     import strata.notebook.ws as ws_module
     from strata.notebook.executor import CellExecutionResult
@@ -2847,10 +2727,7 @@ def test_rest_execute_broadcasts_to_ws_spectators(client, tmp_path, monkeypatch)
 
 
 def _store_table_artifact(session, cell_id, dataframe):
-    """Serialize *dataframe* and store it as a cell-output artifact.
-
-    Returns the ``strata://artifact/...`` URI the data endpoint resolves.
-    """
+    """Store *dataframe* as a cell-output artifact; return its ``strata://artifact/...`` URI."""
     import tempfile
 
     from strata.notebook.serializer import serialize_value
@@ -2870,7 +2747,7 @@ def _store_table_artifact(session, cell_id, dataframe):
 
 
 def _open_with_table(client, tmp_path, dataframe):
-    """Create+open a one-cell notebook and stash *dataframe* as its output."""
+    """Create and open a one-cell notebook with *dataframe* as its output."""
     notebook_dir = create_notebook(tmp_path, "Data Viewer")
     add_cell_to_notebook(notebook_dir, "cell-1")
     write_cell(notebook_dir, "cell-1", "df = ...")

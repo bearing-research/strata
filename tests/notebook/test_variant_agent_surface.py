@@ -1,10 +1,7 @@
-"""What an agent can see and do with variant groups.
+"""What an agent can see and do with variant groups through MCP.
 
-Round 5 drove a sweep entirely through the REST route and the DAG's producer
-string, because the MCP surface had neither: no tool switched a variant or a
-group's mode, and ``get_variable`` on a swept variable answered
-``defined_in: "fanout:policy"`` and stopped there, naming no instance an agent
-could then ask about.
+Agents need tools to switch a variant or a group's mode, and ``get_variable`` on a swept variable
+must name instances they can ask about, not stop at ``defined_in: "fanout:policy"``.
 """
 
 from __future__ import annotations
@@ -61,8 +58,9 @@ def test_get_variable_names_the_instances_behind_a_swept_variable(swept):
 
 
 def test_get_variable_names_the_member_cells_of_a_sweep_group(swept):
-    """A sweep group's members are cells of their own; lineage takes the plain
-    name on the member cell, not an ``@variant=`` spelling."""
+    """Sweep members are cells of their own; lineage takes the plain name on the member cell, not an
+    ``@variant=`` spelling.
+    """
     sm, session_id, _ = swept
 
     by_variant = {e["variant"]: e for e in _get_variable(sm, session_id, "preds")["variants"]}
@@ -72,7 +70,7 @@ def test_get_variable_names_the_member_cells_of_a_sweep_group(swept):
 
 
 def test_the_lineage_spelling_get_variable_hands_back_works(swept, tmp_path):
-    """The point of naming it: an agent can pass it straight to `lineage`."""
+    """An agent can pass the returned spelling straight to `lineage`."""
     from strata.notebook.executor import CellExecutor
 
     sm, session_id, _ = swept
@@ -131,11 +129,8 @@ def test_set_variant_is_classified_as_a_write(tmp_path):
 
 
 def test_a_fanout_consumer_records_every_instance_it_read(tmp_path):
-    """Lineage walks the inputs an artifact recorded.
-
-    A fan-out cell keeps one URI per variable, whichever variant stored last,
-    so a consumer that read every instance recorded one of them and its
-    lineage showed a single variant behind a dict built from all of them.
+    """A fan-out cell keeps one URI per variable (whichever variant stored last), so the consumer
+    must record every instance it read or lineage shows only one.
     """
     from strata.notebook.executor import CellExecutor
 
@@ -156,11 +151,8 @@ def test_a_fanout_consumer_records_every_instance_it_read(tmp_path):
 
 
 def test_set_variant_refuses_a_group_no_cell_declares(tmp_path):
-    """The writer appends an entry for whatever it is given.
-
-    A typo would otherwise add a junk `[[variant_group]]` block to the
-    *committed* notebook.toml, report success, and leave the notebook on the
-    variant it was already running.
+    """The writer appends whatever it is given, so a typo would add a junk `[[variant_group]]` to
+    the committed notebook.toml and report success.
     """
     nb = _build_notebook(tmp_path, cells=CELLS)
     sm, session_id = _registered(nb)
@@ -173,8 +165,9 @@ def test_set_variant_refuses_a_group_no_cell_declares(tmp_path):
 
 
 def test_set_variant_refuses_a_variant_the_group_does_not_have(tmp_path):
-    """An unknown name persists, the DAG falls back to the first variant in
-    source order, and the answer would say the unknown one was selected."""
+    """An unknown name would persist while the DAG falls back to the first variant, and the answer
+    would claim it was selected.
+    """
     nb = _build_notebook(tmp_path, cells=CELLS)
     sm, session_id = _registered(nb)
 
@@ -185,8 +178,7 @@ def test_set_variant_refuses_a_variant_the_group_does_not_have(tmp_path):
 
 
 def test_set_variant_tells_an_attached_viewer(tmp_path, monkeypatch):
-    """Every other notebook-mutating tool reloads and broadcasts; a viewer that
-    misses this one keeps the old tab strip and pre-switch staleness badges."""
+    """Every other mutating tool broadcasts; a viewer missing this keeps stale tabs and badges."""
     import strata.notebook.mcp_server as mcp_server
 
     nb = _build_notebook(tmp_path, cells=CELLS)
@@ -212,8 +204,7 @@ def test_set_variant_tells_an_attached_viewer(tmp_path, monkeypatch):
 def test_a_chained_instance_records_the_variant_it_zipped_to(tmp_path):
     """A chained `# @per_variant` cell binds one upstream instance as a scalar.
 
-    Recording the whole set made lineage on `score2@variant=double` name
-    `score@variant=triple` as an ancestor.
+    Recording the whole set made `score2@variant=double` list `score@variant=triple` as an ancestor.
     """
     from strata.notebook.executor import CellExecutor
 

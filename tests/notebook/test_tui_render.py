@@ -1,8 +1,4 @@
-"""Unit tests for the TUI's pure render helpers + client URL/error handling.
-
-These don't launch Textual — they exercise the standalone functions the app
-renders through, so they stay fast and headless.
-"""
+"""Unit tests for the TUI's pure render helpers and client URL/error handling, without Textual."""
 
 from __future__ import annotations
 

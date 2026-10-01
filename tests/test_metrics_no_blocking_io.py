@@ -1,11 +1,7 @@
 """The Prometheus scrape must not block the event loop.
 
-``_get_cache_size_bytes`` rglobs and stats every cache file;
-``_get_cache_entry_count`` rglobs and ``read_text()``s every ``.meta`` sidecar.
-Called inline from an async handler they froze the loop for the duration of a
-full cache walk on every scrape (Prometheus polls every ~15s), stalling
-in-flight Arrow streams and risking a ``/health/ready`` timeout. The sibling
-``/metrics`` handler already offloads exactly these two calls.
+The cache size and entry count walk every cache file; inline in an async handler that freezes the
+loop on every scrape, stalling streams and risking a ``/health/ready`` timeout.
 """
 
 from __future__ import annotations
@@ -73,13 +69,10 @@ async def test_prometheus_reports_the_offloaded_values(monkeypatch, tmp_path):
 
 
 class TestPrometheusLabelEscaping:
-    """Label values must be escaped per the exposition format.
+    """Label values are escaped per the exposition format.
 
-    The table-metric lines carried a comment claiming to escape ``table_id``
-    and then interpolated it raw. A table or tenant name containing a quote
-    emits ``…{table="a"b"} 5``, which fails the scrape parse and drops the
-    **entire** metrics payload — not just that series. A newline could inject
-    fabricated series into the operator's TSDB.
+    An unescaped quote fails the scrape parse and drops the entire payload; a newline could inject
+    fabricated series.
     """
 
     def test_quote_is_escaped(self):

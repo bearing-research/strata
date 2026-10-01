@@ -18,7 +18,7 @@ from strata.notebook.secret_manager.session_integration import (
 
 
 class _FakeClient:
-    """Stand-in for infisicalsdk.InfisicalSDKClient in tests."""
+    """Stand-in for infisicalsdk.InfisicalSDKClient."""
 
     def __init__(
         self,
@@ -70,11 +70,7 @@ def _fake_secret(key: str, value: str):
 
 
 def _install_fake_sdk_client(monkeypatch, client: _FakeClient) -> list[str]:
-    """Patch the SDK client so fetch() builds our fake instead of hitting the network.
-
-    Returns a list that captures the ``host`` passed to each constructor
-    call — tests can assert on it without poking the fake client.
-    """
+    """Patch the SDK client so fetch() builds the fake; returns the hosts each call got."""
     hosts_seen: list[str] = []
 
     def _factory(host: str):
@@ -123,8 +119,7 @@ class TestInfisicalProvider:
             os.environ.pop(name, None)
 
     def test_no_credentials_returns_error(self) -> None:
-        """With neither universal-auth nor token env vars set, surface a
-        clear message that names both auth options."""
+        """With no credentials, the message names both auth options."""
         result = InfisicalProvider().fetch({"project_id": "p"})
         assert result.secrets == {}
         assert result.error is not None
@@ -138,8 +133,7 @@ class TestInfisicalProvider:
         assert "project_id" in (result.error or "")
 
     def test_universal_auth_preferred_over_token(self, monkeypatch) -> None:
-        """When both credentials are present, client-id/secret wins —
-        that's the path Infisical recommends."""
+        """Client id/secret wins over a token when both are set, as Infisical recommends."""
         monkeypatch.setenv("INFISICAL_CLIENT_ID", "cid")
         monkeypatch.setenv("INFISICAL_CLIENT_SECRET", "cs")
         monkeypatch.setenv("INFISICAL_TOKEN", "leftover-token")
@@ -189,7 +183,7 @@ class TestInfisicalProvider:
         assert "list_secrets failed" in (result.error or "")
 
     def test_host_routing_uses_config_then_env_then_default(self, monkeypatch) -> None:
-        """config.base_url beats INFISICAL_HOST env beats the public default."""
+        """config.base_url beats INFISICAL_HOST beats the public default."""
         monkeypatch.setenv("INFISICAL_TOKEN", "tok")
         monkeypatch.setenv("INFISICAL_HOST", "https://env.example.com/")
         client = _FakeClient(list_secrets_return=SimpleNamespace(secrets=[]))
@@ -202,10 +196,11 @@ class TestInfisicalProvider:
 
 
 class TestInfisicalHostInServiceMode:
-    """The provider logs in with the server's own Infisical credentials. On a
-    service-mode server the notebook's author is not the operator, so a
-    ``base_url`` from ``notebook.toml`` would send those credentials to a host
-    the author chose. There the host is the operator's alone."""
+    """In service mode the Infisical host is the operator's, never ``notebook.toml``'s.
+
+    The provider logs in with the server's credentials, and the notebook author is
+    not the operator.
+    """
 
     @pytest.fixture(autouse=True)
     def _credentials(self, monkeypatch):
@@ -322,8 +317,7 @@ class TestApplySecretsToNotebookState:
         assert state.env_sources["OPENAI_API_KEY"] == MANUAL_SOURCE
 
     def test_a_refresh_picks_up_a_rotated_secret(self, monkeypatch) -> None:
-        """The first fetch leaves the old value in env, and the merge read any
-        value already there as a manual override, so a rotation never took."""
+        """A refresh replaces a value an earlier fetch put in env; it is not a manual override."""
         state = _state(secret_manager_config={"provider": "infisical", "project_id": "p"})
         _install_fake_provider(monkeypatch, secrets={"OPENAI_API_KEY": "sk-old"})
         apply_secrets_to_notebook_state(state)
@@ -406,7 +400,7 @@ def _install_fake_provider(
 
 @pytest.fixture
 def client(tmp_path, monkeypatch):
-    """Open a notebook via the test client so we can hit /secret-manager/refresh."""
+    """Open a notebook via the test client for /secret-manager/refresh."""
     from fastapi.testclient import TestClient
 
     from strata.notebook.routes import get_session_manager
@@ -486,8 +480,7 @@ class TestUpdateNotebookSecretManager:
         }
 
     def test_strips_unknown_keys(self, tmp_path) -> None:
-        """Only the whitelisted keys may make it into notebook.toml — this
-        stops a malicious PUT payload from smuggling arbitrary state."""
+        """Only whitelisted keys reach notebook.toml, so a PUT cannot smuggle state."""
         import tomllib
 
         from strata.notebook.writer import create_notebook, update_notebook_secret_manager
@@ -514,8 +507,7 @@ class TestUpdateNotebookSecretManager:
         assert "secret_manager" not in data
 
     def test_same_config_is_no_op_no_updated_at_bump(self, tmp_path) -> None:
-        """Re-saving identical values shouldn't churn updated_at — matches
-        the write-if-changed pattern used by update_notebook_env etc."""
+        """Re-saving identical values does not bump updated_at."""
         from strata.notebook.writer import create_notebook, update_notebook_secret_manager
 
         nb_dir = create_notebook(tmp_path, "Secrets Idempotent Test")

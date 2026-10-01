@@ -22,7 +22,6 @@ from strata.types import EXECUTOR_PROTOCOL_HEADER, EXECUTOR_PROTOCOL_VERSION
 
 
 def test_remote_executor_health(notebook_executor_server):
-    """The notebook executor should expose its protocol and health."""
     response = httpx.get(f"{notebook_executor_server['base_url']}/health")
 
     assert response.status_code == 200
@@ -41,7 +40,7 @@ def test_remote_executor_executes_simple_cell_via_notebook_endpoint(
     tmp_path,
     notebook_executor_server,
 ):
-    """The compatibility notebook endpoint should return a notebook result bundle."""
+    """The compatibility notebook endpoint returns a notebook result bundle."""
     metadata = {
         "protocol_version": NOTEBOOK_EXECUTOR_PROTOCOL_VERSION,
         "source": "x = 1 + 1",
@@ -82,7 +81,7 @@ def test_remote_executor_executes_simple_cell_via_executor_v1(
     tmp_path,
     notebook_executor_server,
 ):
-    """The standard executor v1 endpoint should support notebook_cell@v1."""
+    """The standard executor v1 endpoint supports notebook_cell@v1."""
     metadata = {
         "protocol_version": EXECUTOR_PROTOCOL_VERSION,
         "build_id": "b-test",
@@ -131,7 +130,6 @@ def test_remote_executor_executes_simple_cell_via_executor_v1(
 
 
 def test_remote_executor_rejects_file_mounts(notebook_executor_server):
-    """Remote execution should reject notebook-declared file:// mounts."""
     metadata = {
         "protocol_version": NOTEBOOK_EXECUTOR_PROTOCOL_VERSION,
         "source": "x = 1",
@@ -168,7 +166,7 @@ def test_remote_executor_executes_signed_manifest_build(
     notebook_executor_server,
     notebook_build_server,
 ):
-    """The manifest endpoint should execute, upload, and finalize a notebook bundle."""
+    """The manifest endpoint executes, uploads and finalizes a notebook bundle."""
     artifact_store = notebook_build_server["artifact_store"]
     build_store = notebook_build_server["build_store"]
     base_url = notebook_build_server["base_url"]
@@ -274,7 +272,7 @@ def test_remote_executor_manifest_reports_finalize_failure(
     notebook_executor_server,
     notebook_build_server,
 ):
-    """Manifest execution should surface finalize failures as 502s."""
+    """Finalize failures surface as 502s."""
     artifact_store = notebook_build_server["artifact_store"]
     build_store = notebook_build_server["build_store"]
     base_url = notebook_build_server["base_url"]
@@ -367,7 +365,7 @@ def test_remote_executor_manifest_reports_finalize_failure(
 
 
 def test_service_finalize_rejects_incomplete_notebook_bundle(notebook_build_server):
-    """Finalize should reject malformed notebook bundles and fail the artifact."""
+    """Finalize rejects a malformed bundle and fails the artifact."""
     artifact_store = notebook_build_server["artifact_store"]
     build_store = notebook_build_server["build_store"]
     base_url = notebook_build_server["base_url"]
@@ -444,7 +442,7 @@ def test_remote_executor_cleans_up_tempdir_after_streamed_response(
     notebook_executor_server,
     monkeypatch,
 ):
-    """FileResponse + BackgroundTask should remove the executor tempdir after streaming."""
+    """The BackgroundTask removes the executor tempdir after streaming."""
     import tempfile as stdlib_tempfile
 
     from strata.notebook import remote_executor as remote_executor_module
@@ -506,7 +504,7 @@ def test_remote_executor_cleans_up_tempdir_after_streamed_response(
 def test_remote_executor_error_detail_survives_streaming_client(
     notebook_executor_server,
 ):
-    """Streaming clients that aread() on non-200 should see the executor's JSON detail."""
+    """Streaming clients that aread() on non-200 see the executor's JSON detail."""
     import asyncio
 
     async def _run():
@@ -543,7 +541,7 @@ def test_remote_executor_round_trips_large_input_bundle(
     tmp_path,
     notebook_executor_server,
 ):
-    """Large inputs should flow through the streaming transport without corruption."""
+    """Large inputs flow through the streaming transport without corruption."""
     import hashlib
     import pickle
 
@@ -590,9 +588,7 @@ def test_remote_executor_round_trips_large_input_bundle(
 
 
 def test_manifest_rejects_input_url_with_disallowed_scheme(notebook_executor_server):
-    """A compromised orchestrator could put file:// or ftp:// in a manifest;
-    the worker must reject up front before httpx fetches anything.
-    """
+    """file:// or ftp:// in a manifest is rejected before httpx fetches anything."""
     manifest = {
         "schema_version": NOTEBOOK_EXECUTOR_MANIFEST_VERSION,
         "metadata": {
@@ -656,13 +652,9 @@ def test_manifest_rejects_finalize_url_with_disallowed_scheme(notebook_executor_
 
 
 def test_manifest_rejects_url_resolving_to_loopback(notebook_executor_server, monkeypatch):
-    """SSRF guard: a hostname like ``localhost`` resolves to 127.0.0.1 / ::1
-    and would let a compromised orchestrator coerce the worker into
-    fetching internal services on the worker's loopback interface.
+    """SSRF guard: ``localhost`` resolves to loopback, where internal services listen.
 
-    The fixture sets STRATA_WORKER_ALLOW_LOCAL_HOSTS so the build-server
-    tests pass against 127.0.0.1; delete it here to exercise the
-    production SSRF guard.
+    Deletes the fixture's STRATA_WORKER_ALLOW_LOCAL_HOSTS to exercise the production guard.
     """
     monkeypatch.delenv("STRATA_WORKER_ALLOW_LOCAL_HOSTS", raising=False)
     manifest = {
@@ -691,9 +683,7 @@ def test_manifest_rejects_url_resolving_to_loopback(notebook_executor_server, mo
 
 
 def test_manifest_rejects_url_with_metadata_ip(notebook_executor_server, monkeypatch):
-    """SSRF guard: 169.254.169.254 is the AWS / Azure / GCP cloud-metadata
-    endpoint and must never be reachable from worker code paths.
-    """
+    """SSRF guard: 169.254.169.254 is the cloud-metadata endpoint."""
     monkeypatch.delenv("STRATA_WORKER_ALLOW_LOCAL_HOSTS", raising=False)
     manifest = {
         "schema_version": NOTEBOOK_EXECUTOR_MANIFEST_VERSION,
@@ -714,10 +704,7 @@ def test_manifest_rejects_url_with_metadata_ip(notebook_executor_server, monkeyp
 
 
 def test_manifest_rejects_url_with_private_ip(notebook_executor_server, monkeypatch):
-    """SSRF guard: RFC1918 private addresses (10/8, 172.16/12, 192.168/16)
-    typically belong to the worker's VPC and host internal services
-    that should not be reachable from manifest URLs.
-    """
+    """SSRF guard: RFC1918 addresses typically reach internal services in the worker's VPC."""
     monkeypatch.delenv("STRATA_WORKER_ALLOW_LOCAL_HOSTS", raising=False)
     manifest = {
         "schema_version": NOTEBOOK_EXECUTOR_MANIFEST_VERSION,

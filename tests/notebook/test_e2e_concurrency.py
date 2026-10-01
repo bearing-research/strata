@@ -1,11 +1,6 @@
-"""E2E tests: sequential execution and connection scenarios.
+"""E2E tests: cell cancel, rapid sequential runs, and multiple WebSocket connections.
 
-Tests cell cancel, rapid sequential executions, and
-multiple WebSocket connections to the same notebook.
-
-NOTE: These tests are sequential, not truly concurrent.
-True concurrent execution tests (e.g., two cells executing
-simultaneously via asyncio.gather) are not yet implemented.
+The runs are sequential; nothing here executes two cells at once.
 """
 
 from __future__ import annotations
@@ -35,8 +30,6 @@ def setup():
 
 
 class TestCellCancel:
-    """Test cell cancellation."""
-
     def test_cancel_idle_cell(self, setup):
         """Cancelling an idle cell sets status to idle."""
         client, tmp = setup
@@ -50,8 +43,6 @@ class TestCellCancel:
 
 
 class TestRapidExecution:
-    """Test executing cells in rapid succession."""
-
     def test_notebook_run_all_executes_all_nonempty_cells(self, setup):
         """Run-all should execute each non-empty cell, not just the first one."""
         client, tmp = setup
@@ -78,7 +69,6 @@ class TestRapidExecution:
                 assert cells["c3"]["status"] == "ready"
 
     def test_execute_all_cells_sequentially(self, setup):
-        """Execute 5 cells in sequence — all should complete."""
         client, tmp = setup
         nb = NotebookBuilder(tmp)
         for i in range(5):
@@ -92,7 +82,6 @@ class TestRapidExecution:
                     assert result["type"] == "cell_output", f"Cell c{i} failed: {result}"
 
     def test_reexecute_same_cell_multiple_times(self, setup):
-        """Execute the same cell 3 times in a row."""
         client, tmp = setup
         nb = NotebookBuilder(tmp).add_cell("c1", "x = 1")
 
@@ -104,10 +93,7 @@ class TestRapidExecution:
 
 
 class TestMultipleConnections:
-    """Test multiple WebSocket connections to the same notebook."""
-
     def test_second_connection_receives_sync(self, setup):
-        """A second WebSocket connection can sync notebook state."""
         client, tmp = setup
         nb = NotebookBuilder(tmp).add_cell("c1", "x = 1")
 

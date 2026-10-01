@@ -1,20 +1,9 @@
-"""Live-provider LLM integration tests — opt-in, env-gated.
+"""Live-provider LLM integration tests, opt-in and env-gated.
 
-These hit REAL provider APIs and cost (a few cents of) money. They exist
-to catch contract drift the MockTransport tests cannot: request shapes
-the provider rejects, SSE framing changes, tool-use response changes.
-
-Run them explicitly:
-
-    STRATA_TEST_LIVE_LLM=1 ANTHROPIC_API_KEY=... OPENAI_API_KEY=... \\
-        uv run pytest tests/notebook/test_llm_live.py -v
-
-Gating, mirroring the real-backend mount tests' pattern:
-- the whole module skips unless ``STRATA_TEST_LIVE_LLM`` is set;
-- each provider class skips unless its API key is present.
-
-Model overrides (default to the cheapest sensible model per provider):
-``STRATA_TEST_LIVE_ANTHROPIC_MODEL``, ``STRATA_TEST_LIVE_OPENAI_MODEL``.
+They hit real APIs (a few cents) to catch contract drift MockTransport cannot.
+The module skips unless ``STRATA_TEST_LIVE_LLM`` is set; each provider class
+skips without its API key. Models: ``STRATA_TEST_LIVE_ANTHROPIC_MODEL``,
+``STRATA_TEST_LIVE_OPENAI_MODEL``.
 """
 
 from __future__ import annotations
@@ -66,7 +55,7 @@ def _openai_config() -> LlmConfig:
 
 @pytest.mark.skipif(not os.getenv("ANTHROPIC_API_KEY"), reason="ANTHROPIC_API_KEY not set")
 class TestAnthropicLive:
-    """Anthropic: OpenAI-compat unary/streaming + native tool-use for schemas."""
+    """Anthropic: OpenAI-compat unary/streaming plus native tool-use for schemas."""
 
     @pytest.mark.asyncio
     async def test_unary_completion(self):
@@ -121,7 +110,7 @@ class TestOpenAILive:
 
     @pytest.mark.asyncio
     async def test_schema_via_strict_json_schema(self):
-        """The full-required schema goes out as strict: true and validates."""
+        """The all-required schema goes out as strict: true and validates."""
         result = await chat_completion(
             _openai_config(),
             [{"role": "user", "content": _SCHEMA_PROMPT}],
@@ -134,8 +123,8 @@ class TestOpenAILive:
 
     @pytest.mark.asyncio
     async def test_streaming_schema_and_usage(self):
-        """Streaming + json_schema: deltas accumulate to a valid object and
-        stream_options.include_usage delivers token counts."""
+        """Streaming json_schema deltas form a valid object, and include_usage gives token
+        counts."""
         events = [
             e
             async for e in chat_completion_stream(

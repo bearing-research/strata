@@ -14,9 +14,10 @@ def _artifact_mode_scan(table_uri: str) -> dict:
 
 
 def test_artifact_mode_without_store_is_rejected(temp_warehouse, tmp_path):
-    """mode='artifact' needs a store to persist into. In service mode without an
-    artifact_dir the background build would no-op and the returned build_id would
-    never resolve — so the request is rejected up front (400) instead of hanging."""
+    """mode='artifact' needs a store, so without one it is a 400 rather than a hang.
+
+    The background build would no-op and the build_id would never resolve.
+    """
     cache_dir = tmp_path / "cache"
     cache_dir.mkdir()
     with run_server_with_context(cache_dir, None, "service") as ctx:
@@ -29,7 +30,7 @@ def test_artifact_mode_without_store_is_rejected(temp_warehouse, tmp_path):
 
 
 def test_artifact_mode_with_store_succeeds(temp_warehouse, tmp_path):
-    """With an artifact_dir, artifact mode is accepted and returns a build id."""
+    """With an artifact_dir, artifact mode returns a build id."""
     cache_dir = tmp_path / "cache"
     cache_dir.mkdir()
     artifact_dir = tmp_path / "artifacts"

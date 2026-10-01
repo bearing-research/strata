@@ -1,7 +1,4 @@
-"""Tests for the Snowflake DriverAdapter — contract, identity hash,
-and probe shape with mocked ADBC connections. Real-Snowflake
-integration tests are out of scope locally (would burn cloud-services
-credits and need a live account)."""
+"""Snowflake DriverAdapter tests with mocked ADBC connections: contract, identity hash, probes."""
 
 from __future__ import annotations
 
@@ -19,11 +16,8 @@ from strata.notebook.sql.drivers.snowflake import SnowflakeAdapter
 class _FakeCursor:
     """Minimal DBAPI cursor that returns scripted rows.
 
-    ``scripts`` is a list of (query_substring, result) pairs; the
-    next ``fetchone`` / ``fetchall`` call uses the result whose
-    query substring matches the most recently executed SQL. The
-    cursor records every (sql, params) pair so tests can assert
-    what the adapter actually issued.
+    ``scripts`` holds (query_substring, result) pairs; a fetch returns the result whose substring
+    matches the last executed SQL. Every (sql, params) pair is recorded.
     """
 
     def __init__(self, scripts: list[tuple[str, object]]):
@@ -92,8 +86,7 @@ def test_capabilities_match_design():
 
 
 def test_connection_id_includes_all_identity_shaping_fields():
-    """account, user, role, warehouse, database, schema all change
-    what objects the connection sees — distinct ids."""
+    """Account, user, role, warehouse, database and schema each change the id."""
     a = SnowflakeAdapter()
     base = ConnectionSpec(
         name="x",
@@ -121,7 +114,6 @@ def test_connection_id_includes_all_identity_shaping_fields():
 
 
 def test_connection_id_excludes_password():
-    """Password is a secret — never identity-shaping."""
     a = SnowflakeAdapter()
     base = ConnectionSpec(
         name="x",
@@ -141,10 +133,7 @@ def test_connection_id_excludes_password():
 
 
 def test_connection_id_resolves_auth_user_var(monkeypatch):
-    """Two specs that point at the same effective user via different
-    expression paths (one literal, one ${VAR}) produce the same id
-    once the env var is resolved — so cache identity is stable
-    across user-typed and env-derived configs."""
+    """A literal user and a ``${VAR}`` resolving to the same user produce the same id."""
     monkeypatch.setenv("SF_USER", "reader")
     a = SnowflakeAdapter()
     via_literal = ConnectionSpec(
@@ -166,10 +155,9 @@ def test_connection_id_resolves_auth_user_var(monkeypatch):
 
 
 def test_open_applies_role_warehouse_database_schema_in_order():
-    """Each declared identity-shaping field issues its own ``USE …``
-    statement before the connection is handed back. Order matches
-    the spec field order in the adapter so a missing role doesn't
-    leave the warehouse / db / schema unconfigured."""
+    """Each identity field issues its own ``USE ...`` before the connection is returned, in spec
+    order.
+    """
     cur = _FakeCursor([])
     a = SnowflakeAdapter(connect_fn=lambda _uri: _FakeConn(cur))
 
@@ -194,9 +182,7 @@ def test_open_applies_role_warehouse_database_schema_in_order():
 
 
 def test_open_skips_unset_fields():
-    """Only fields present on the spec issue ``USE …``. A spec
-    with just account + role doesn't try to ``USE WAREHOUSE`` of
-    an empty string."""
+    """A spec with only account and role must not ``USE WAREHOUSE`` an empty string."""
     cur = _FakeCursor([])
     a = SnowflakeAdapter(connect_fn=lambda _uri: _FakeConn(cur))
     a.open(
@@ -207,9 +193,9 @@ def test_open_skips_unset_fields():
 
 
 def test_open_rejects_invalid_identifier():
-    """``USE`` doesn't accept bind parameters; we splice the
-    identifier in. A pathological value (semicolons, quotes) must
-    be rejected before any SQL hits the connection."""
+    """``USE`` takes no bind parameters, so spliced identifiers must be validated before any SQL
+    runs.
+    """
     cur = _FakeCursor([])
     a = SnowflakeAdapter(connect_fn=lambda _uri: _FakeConn(cur))
     with pytest.raises(RuntimeError, match="Snowflake identifier"):
@@ -248,8 +234,7 @@ def test_build_uri_from_components():
 
 
 def test_build_uri_passes_through_explicit_uri():
-    """When a user has hand-rolled a Snowflake URI (private-key auth,
-    custom params) we don't second-guess it."""
+    """A hand-rolled URI (private-key auth, custom params) is used as is."""
     a = SnowflakeAdapter()
     spec = ConnectionSpec(
         name="x",
@@ -269,9 +254,7 @@ def test_build_uri_requires_account_or_uri():
 
 
 def test_probe_freshness_groups_by_database():
-    """One INFORMATION_SCHEMA query per touched database (Snowflake
-    scopes INFORMATION_SCHEMA per database). Tables grouped by
-    catalog yield one round-trip per group."""
+    """INFORMATION_SCHEMA is per database, so one query runs per touched database."""
     cur = _FakeCursor(
         [
             ("INFORMATION_SCHEMA.TABLES", ("PUBLIC", "events", "2026-05-01 12:00:00")),
@@ -296,7 +279,6 @@ def test_probe_freshness_groups_by_database():
 
 
 def test_probe_freshness_uses_current_database_for_unqualified_tables():
-    """A table without a catalog falls back to CURRENT_DATABASE()."""
     cur = _FakeCursor(
         [
             ("CURRENT_DATABASE", ("MAIN_DB",)),
@@ -314,9 +296,6 @@ def test_probe_freshness_uses_current_database_for_unqualified_tables():
 
 
 def test_probe_freshness_token_changes_on_last_altered():
-    """Same table, different LAST_ALTERED → different token. This
-    is the core fingerprint property — without it, cache
-    invalidation is broken."""
     a = SnowflakeAdapter()
     tables = [QualifiedTable(catalog="EVENTS", schema="PUBLIC", name="orders")]
 
@@ -329,9 +308,7 @@ def test_probe_freshness_token_changes_on_last_altered():
 
 
 def test_probe_freshness_missing_table_distinct_from_present():
-    """A table that resolves vs one that doesn't must produce
-    different tokens — otherwise a permission lapse silently
-    masquerades as 'unchanged.'"""
+    """Otherwise a permission lapse masquerades as unchanged."""
     a = SnowflakeAdapter()
     tables = [QualifiedTable(catalog="EVENTS", schema="PUBLIC", name="orders")]
 
@@ -343,11 +320,11 @@ def test_probe_freshness_missing_table_distinct_from_present():
 
 
 def test_probes_ask_for_the_names_snowflake_stores():
-    """Snowflake stores an unquoted identifier uppercased, and
-    ``INFORMATION_SCHEMA`` compares names exactly. A cell that wrote
-    ``FROM mydb.public.events`` used to probe for ``events`` in ``"mydb"``,
-    found nothing, and folded the same "missing" token on every run, so
-    the cell never saw a write. A quoted name is stored as written."""
+    """Unquoted identifiers are stored uppercased and INFORMATION_SCHEMA compares exactly.
+
+    Probing the lowercase name found nothing, so the token never changed and the cell never saw a
+    write. A quoted name is stored as written.
+    """
     from strata.notebook.sql.analyzer import analyze_sql_cell
 
     src = '# @sql connection=db\nSELECT * FROM mydb.public.events JOIN "MixedCase" USING (id)'
@@ -372,7 +349,7 @@ def test_probes_ask_for_the_names_snowflake_stores():
 
 
 def test_probe_freshness_empty_tables():
-    """No tables touched → empty token, no queries issued."""
+    """No tables touched gives an empty token and issues no queries."""
     cur = _FakeCursor([])
     a = SnowflakeAdapter()
     token = a.probe_freshness(_FakeConn(cur), [])
@@ -384,10 +361,7 @@ def test_probe_freshness_empty_tables():
 
 
 def test_probe_schema_walks_columns():
-    """Schema fingerprint reads INFORMATION_SCHEMA.COLUMNS per
-    touched table, grouped by database. Catches metadata-only
-    changes that LAST_ALTERED would also catch — belt-and-
-    suspenders."""
+    """Reads INFORMATION_SCHEMA.COLUMNS per touched table, grouped by database."""
     cur = _FakeCursor(
         [
             (
@@ -407,8 +381,7 @@ def test_probe_schema_walks_columns():
 
 
 def test_probe_schema_fingerprint_changes_on_column_set():
-    """Add a column → different fingerprint, even if LAST_ALTERED
-    didn't move."""
+    """Adding a column changes the fingerprint even if LAST_ALTERED did not move."""
     a = SnowflakeAdapter()
     tables = [QualifiedTable(catalog="EVENTS", schema="PUBLIC", name="orders")]
 
@@ -430,9 +403,7 @@ def test_probe_schema_fingerprint_changes_on_column_set():
 
 
 def test_list_schema_uses_current_database():
-    """Schema discovery scopes to the connection's current
-    database. The route returns columns grouped by ordinal_position
-    so users see the natural ordering."""
+    """Discovery is scoped to the current database; columns come back in ordinal_position order."""
     cur = _FakeCursor(
         [
             ("CURRENT_DATABASE", ("EVENTS",)),
@@ -461,9 +432,7 @@ def test_list_schema_uses_current_database():
 
 
 def test_list_schema_empty_when_no_database():
-    """If CURRENT_DATABASE() is null (rare but possible — no
-    default DB on the role), enumeration silently returns []
-    rather than running an unscoped INFORMATION_SCHEMA query."""
+    """A role with no default database returns [] instead of running an unscoped query."""
     cur = _FakeCursor([("CURRENT_DATABASE", (None,))])
     a = SnowflakeAdapter()
     assert a.list_schema(_FakeConn(cur)) == []
@@ -473,11 +442,11 @@ def test_list_schema_empty_when_no_database():
 
 
 def test_connection_id_includes_uri_components():
-    """Codex review fix: explicit ``spec.uri`` overrides used to
-    bypass the cache identity entirely — two URI-only connections
-    pointing at different DBs collapsed onto the same id. The
-    adapter now parses the URI and folds account / database /
-    schema / warehouse / role into the identity."""
+    """Two URI-only connections to different databases get different ids.
+
+    The adapter parses ``spec.uri`` and folds account, database, schema, warehouse and role into the
+    identity.
+    """
     a = SnowflakeAdapter()
     db_a = ConnectionSpec(
         name="a",
@@ -500,10 +469,7 @@ def test_connection_id_includes_uri_components():
 
 
 def test_connection_id_discrete_fields_override_uri():
-    """A user can build on a URI base and supply discrete
-    overrides — ``spec.role = "OVERRIDE"`` wins over a role
-    embedded in the URI. The merged identity is what gets
-    hashed."""
+    """Discrete fields override the URI: ``spec.role = "OVERRIDE"`` beats a role in the URI."""
     a = SnowflakeAdapter()
     base_uri = "snowflake://reader@ACME/EVENTS/PUBLIC?warehouse=WH&role=URI_ROLE"
     spec = ConnectionSpec(
@@ -527,12 +493,7 @@ def test_connection_id_discrete_fields_override_uri():
 
 
 def test_probe_freshness_uses_current_schema_for_unqualified_tables():
-    """Codex review fix: probes used to hardcode ``PUBLIC`` for
-    unqualified tables. Now they resolve via
-    ``CURRENT_SCHEMA()``, which matches what the query
-    connection's ``USE SCHEMA`` left as the default. A
-    connection defaulting to ANALYTICS now fingerprints
-    ANALYTICS.orders, not PUBLIC.orders."""
+    """Unqualified tables resolve via ``CURRENT_SCHEMA()``, not a hard-coded ``PUBLIC``."""
     cur = _FakeCursor(
         [
             ("CURRENT_DATABASE()", ("EVENTS", "ANALYTICS")),
@@ -555,10 +516,7 @@ def test_probe_freshness_uses_current_schema_for_unqualified_tables():
 
 
 def test_probe_freshness_no_schema_does_not_pretend_to_match_public():
-    """When neither the table nor the session has a schema, the
-    probe must not silently pretend it's PUBLIC and run the
-    query — that would hash a fingerprint that doesn't match
-    what execution would resolve. Fold a sentinel and skip."""
+    """With no schema anywhere the probe folds a sentinel and skips, rather than assuming PUBLIC."""
     cur = _FakeCursor(
         [
             # CURRENT_SCHEMA returns null (no default schema).
@@ -575,11 +533,9 @@ def test_probe_freshness_no_schema_does_not_pretend_to_match_public():
 
 
 def test_open_uses_write_role_when_read_only_false():
-    """Codex review fix: the ``read_only`` parameter used to be
-    discarded. Now the adapter applies ``role`` for read cells
-    and ``write_role`` for write cells (falling back to ``role``
-    when no write_role is configured). This makes
-    ``# @sql write=true`` meaningful on Snowflake."""
+    """Read cells apply ``role`` and write cells apply ``write_role``, so ``# @sql write=true``
+    means something.
+    """
     cur = _FakeCursor([])
     a = SnowflakeAdapter(connect_fn=lambda _uri: _FakeConn(cur))
     spec = ConnectionSpec(
@@ -600,9 +556,9 @@ def test_open_uses_write_role_when_read_only_false():
 
 
 def test_open_falls_back_to_role_when_write_role_unset():
-    """Without write_role, write cells inherit the same role as
-    read cells. Documented behavior — the user's warehouse access
-    policy then decides whether the write succeeds."""
+    """Without ``write_role``, write cells use ``role``; warehouse policy decides if the write
+    succeeds.
+    """
     cur = _FakeCursor([])
     a = SnowflakeAdapter(connect_fn=lambda _uri: _FakeConn(cur))
     spec = ConnectionSpec(
@@ -617,14 +573,7 @@ def test_open_falls_back_to_role_when_write_role_unset():
 
 
 def test_connection_id_write_role_only_in_write_identity():
-    """``write_role`` joins identity only when ``read_only=False``.
-
-    Read cells never apply write_role at open time, so changing
-    it must not churn read-cell caches. Write cells *do* apply
-    write_role, so the cache identity for write cells must
-    distinguish a more-privileged write role from a less-
-    privileged one.
-    """
+    """Read cells never apply ``write_role``, so it must not churn their cache; write cells do."""
     a = SnowflakeAdapter()
     base = ConnectionSpec(
         name="x",

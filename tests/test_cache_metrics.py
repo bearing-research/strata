@@ -4,10 +4,7 @@ import pytest
 
 
 class TestEvictionEvent:
-    """Tests for EvictionEvent dataclass."""
-
     def test_eviction_event_creation(self):
-        """Test creating an eviction event."""
         from strata.cache_metrics import EvictionEvent
 
         event = EvictionEvent(
@@ -28,10 +25,7 @@ class TestEvictionEvent:
 
 
 class TestEvictionStats:
-    """Tests for EvictionStats dataclass."""
-
     def test_asdict(self):
-        """EvictionStats serializes to a plain field mapping via asdict."""
         from dataclasses import asdict
 
         from strata.cache_metrics import EvictionStats
@@ -58,10 +52,7 @@ class TestEvictionStats:
 
 
 class TestCacheEvictionTracker:
-    """Tests for CacheEvictionTracker."""
-
     def test_initial_state(self):
-        """Test tracker starts with zero stats."""
         from strata.cache_metrics import CacheEvictionTracker
 
         tracker = CacheEvictionTracker()
@@ -73,7 +64,6 @@ class TestCacheEvictionTracker:
         assert stats.pressure_level == "low"
 
     def test_record_eviction(self):
-        """Test recording an eviction event."""
         from strata.cache_metrics import CacheEvictionTracker
 
         tracker = CacheEvictionTracker()
@@ -90,7 +80,6 @@ class TestCacheEvictionTracker:
         assert stats.total_bytes_evicted == 1024 * 1024
 
     def test_multiple_evictions(self):
-        """Test recording multiple eviction events."""
         from strata.cache_metrics import CacheEvictionTracker
 
         tracker = CacheEvictionTracker()
@@ -108,7 +97,7 @@ class TestCacheEvictionTracker:
         assert stats.total_bytes_evicted == 1024 * (1 + 2 + 3 + 4 + 5)
 
     def test_pressure_levels(self):
-        """Test pressure level calculation based on eviction rate."""
+        """Pressure level follows the eviction rate."""
         from strata.cache_metrics import CacheEvictionTracker
 
         tracker = CacheEvictionTracker()
@@ -129,12 +118,10 @@ class TestCacheEvictionTracker:
         assert stats.pressure_level == "critical"
 
     def test_a_young_server_reports_the_traffic_it_is_seeing(self):
-        """The denominator has to be the span observed, not a constant hour.
+        """The denominator is the span observed, not a constant hour.
 
-        A server up for 90 seconds that evicted 50 times was dividing by 60
-        minutes it had not lived -- 0.83/min, reported LOW -- while the
-        documented band for that traffic is CRITICAL. It took 60 evictions in
-        total to leave LOW at all, however fast they arrived.
+        A server up 90 seconds with 50 evictions must report CRITICAL, not divide by an hour it has
+        not lived and report LOW.
         """
         from strata.cache_metrics import CacheEvictionTracker
 
@@ -152,7 +139,7 @@ class TestCacheEvictionTracker:
         assert stats.pressure_level == "critical"
 
     def test_a_steady_hour_is_unchanged(self):
-        """The fix is identical to the old arithmetic once an hour has passed."""
+        """Once an hour has passed the rate equals the hourly mean."""
         from strata.cache_metrics import CacheEvictionTracker
 
         now = [1000.0]
@@ -167,10 +154,8 @@ class TestCacheEvictionTracker:
         assert stats.pressure_level == "medium"
 
     def test_a_burst_raises_the_band_the_hourly_mean_would_hide(self):
-        """An hourly mean cannot tell a thrash from a trickle.
-
-        A quiet hour with a burst at the end averages out to nothing, which is
-        precisely when an operator wants to hear about it.
+        """An hourly mean cannot tell a thrash from a trickle; a late burst must still raise the
+        band.
         """
         from strata.cache_metrics import CacheEvictionTracker
 
@@ -187,8 +172,7 @@ class TestCacheEvictionTracker:
         assert stats.pressure_level == "critical"
 
     def test_the_first_seconds_do_not_extrapolate_into_a_crisis(self):
-        """Floored at a minute, so one sweep on a one-second-old process is not
-        divided by a second and reported as 60/min."""
+        """Floored at a minute, so one eviction one second in is not reported as 60/min."""
         from strata.cache_metrics import CacheEvictionTracker
 
         now = [1000.0]
@@ -202,7 +186,6 @@ class TestCacheEvictionTracker:
         assert stats.pressure_level == "medium"
 
     def test_recent_events(self):
-        """Test getting recent eviction events."""
         from strata.cache_metrics import CacheEvictionTracker
 
         tracker = CacheEvictionTracker()
@@ -223,7 +206,6 @@ class TestCacheEvictionTracker:
         assert events[2]["reason"] == "reason_2"
 
     def test_max_events_limit(self):
-        """Test that events are limited to max_events."""
         from strata.cache_metrics import CacheEvictionTracker
 
         tracker = CacheEvictionTracker(max_events=5)
@@ -240,7 +222,6 @@ class TestCacheEvictionTracker:
         assert len(events) == 5
 
     def test_reset(self):
-        """Test resetting the tracker."""
         from strata.cache_metrics import CacheEvictionTracker
 
         tracker = CacheEvictionTracker()
@@ -258,10 +239,7 @@ class TestCacheEvictionTracker:
 
 
 class TestGlobalTracker:
-    """Tests for global tracker functions."""
-
     def test_get_and_reset(self):
-        """Test getting and resetting global tracker."""
         from strata.cache_metrics import (
             get_eviction_tracker,
             reset_eviction_tracker,
@@ -280,11 +258,8 @@ class TestGlobalTracker:
 
 
 class TestCacheEvictionIntegration:
-    """Integration tests for cache eviction with server."""
-
     @pytest.mark.asyncio
     async def test_evictions_endpoint(self, tmp_path):
-        """Test /v1/cache/evictions endpoint."""
         from httpx import ASGITransport, AsyncClient
 
         import strata.server as server_module
@@ -324,7 +299,7 @@ class TestCacheEvictionIntegration:
 
     @pytest.mark.asyncio
     async def test_evictions_endpoint_with_events(self, tmp_path):
-        """Test /v1/cache/evictions with include_events=true."""
+        """``/v1/cache/evictions`` with include_events=true."""
         from httpx import ASGITransport, AsyncClient
 
         import strata.server as server_module

@@ -1,4 +1,4 @@
-"""Presence, cell focus and soft locks on a notebook session. Item 45."""
+"""Presence, cell focus and soft locks on a notebook session."""
 
 from __future__ import annotations
 

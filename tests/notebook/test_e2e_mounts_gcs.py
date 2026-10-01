@@ -1,28 +1,10 @@
 """GCS mount integration tests against a fake-gcs-server testcontainer.
 
-Phase 3 of issue #19. Mirrors ``test_e2e_mounts_s3.py`` and
-``test_e2e_mounts_azure.py`` against ``fsouza/fake-gcs-server`` — a
-read-write GCS emulator that speaks the JSON API.
-
-``testcontainers.google`` only ships Datastore + PubSub emulators (no
-GCS), so this file uses ``DockerContainer`` directly and runs the
-emulator with ``-scheme http`` so we don't need a self-signed cert.
-``gcsfs`` is the fsspec backend (mapped from URI scheme ``gs`` →
-fsspec protocol ``gcs`` by ``mounts._scheme_to_fsspec_protocol``).
-
-Three scopes:
-
-- **Scope A — Annotation-only.** ``# @mount data gs://bucket/key ro``
-  with no ``[[mounts]]`` block. Credentials reach fsspec via the
-  ``CellExecutor.mount_credentials`` kwarg from Phase 0.
-- **Scope B — Read-write.** A cell mounts ``rw`` and writes; a separate
-  cell mounts ``ro`` and reads back, asserting sync-back actually pushed
-  bytes to the emulator.
-- **Scope C — Storage options via TOML.** ``[[mounts]] options = {...}``
-  carries the same ``endpoint_url`` / ``token`` / ``project`` per-mount;
-  ``CellExecutor`` constructed *without* ``mount_credentials``.
-
-Requires Docker. Skipped at collection time when the daemon is unreachable.
+Mirrors the S3 and Azure mount tests with ``gcsfs`` as the fsspec backend (scheme ``gs``
+maps to protocol ``gcs``). ``testcontainers.google`` has no GCS emulator, so this uses
+``DockerContainer`` directly. Covers an annotation-only mount, an ``rw`` mount read back
+by a separate ``ro`` cell, and ``[[mounts]] options`` with no ``mount_credentials``.
+Skipped when the Docker daemon is unreachable.
 """
 
 from __future__ import annotations
@@ -74,12 +56,10 @@ _FAKE_GCS_PORT = 4443
 
 @pytest.fixture(scope="module")
 def fake_gcs_container():
-    """Module-scoped fake-gcs-server emulator.
+    """Module-scoped fake-gcs-server emulator on plain HTTP.
 
-    ``-scheme http`` keeps it on plain HTTP so we don't fight self-signed
-    certs in CI. ``-public-host`` makes the emulator return signed-URL
-    redirects against the host:port that the test process sees rather
-    than the in-container ``0.0.0.0:4443`` (which gcsfs cannot reach).
+    ``-public-host`` makes redirects target the host:port the test sees, not the in-container
+    ``0.0.0.0:4443`` that gcsfs cannot reach.
     """
     container = DockerContainer("fsouza/fake-gcs-server:latest")
     container.with_command(
@@ -104,12 +84,7 @@ def _endpoint(fake_gcs_container: DockerContainer) -> str:
 
 
 def _gcsfs_options(fake_gcs_container: DockerContainer) -> dict[str, object]:
-    """fsspec/gcsfs storage_options for the fake-gcs-server emulator.
-
-    ``token="anon"`` skips OAuth — the emulator doesn't validate
-    credentials. ``endpoint_url`` overrides the production GCS endpoint.
-    ``project`` can be any non-empty string; the emulator doesn't care.
-    """
+    """fsspec/gcsfs storage_options for the emulator, which validates no credentials."""
     return {
         "endpoint_url": _endpoint(fake_gcs_container),
         "token": "anon",
@@ -125,11 +100,7 @@ def gs_credentials(fake_gcs_container) -> MountCredentials:
 
 @pytest.fixture
 def fresh_bucket(fake_gcs_container, request) -> str:
-    """Make-and-return a unique bucket per test via fake-gcs-server's REST API.
-
-    GCS bucket names: lowercase, hyphens/digits, 3–63 chars — same
-    munging as the S3/Azure test fixtures.
-    """
+    """A unique bucket per test, created through fake-gcs-server's REST API."""
     raw = request.node.name.lower().replace("_", "-").replace(".", "-")
     name = f"mt-{raw}"[:63].rstrip("-")
     endpoint = _endpoint(fake_gcs_container)
@@ -179,7 +150,7 @@ async def test_annotation_only_mount_reads_via_credentials_kwarg(
     gs_credentials: MountCredentials,
     fresh_bucket: str,
 ) -> None:
-    """Phase 0's mount_credentials kwarg drives an annotation-only mount end-to-end."""
+    """The ``mount_credentials`` kwarg drives an annotation-only mount end to end."""
     _put(fake_gcs_container, fresh_bucket, "data/hello.txt", b"hello from fake-gcs")
 
     source = textwrap.dedent(

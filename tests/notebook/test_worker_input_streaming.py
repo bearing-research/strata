@@ -1,8 +1,7 @@
-"""A worker writes signed-URL inputs to disk as they arrive. Item 19.
+"""A worker writes signed-URL inputs to disk as they arrive.
 
-The download used to collect each input in a ``bytearray`` before writing it,
-so ``STRATA_WORKER_MAX_INPUT_BYTES`` was really a memory bound: a 2 GiB input
-on a 4 GiB machine failed.
+``STRATA_WORKER_MAX_INPUT_BYTES`` bounds the file, not memory, so a 2 GiB input fits on a 4 GiB
+machine.
 """
 
 from __future__ import annotations
@@ -26,9 +25,10 @@ _BLOCK = bytes(range(256)) * 256  # 64 KiB
 
 
 class _Store:
-    """Serves one close-delimited input of ``size`` bytes (no Content-Length,
-    so only the running count can enforce the cap) and accepts the upload and
-    finalize calls."""
+    """Serves one close-delimited input of ``size`` bytes and accepts upload and finalize.
+
+    No Content-Length, so only the running count can enforce the cap.
+    """
 
     def __init__(self, size: int):
         self.size = size
@@ -147,8 +147,7 @@ def test_an_input_over_the_cap_is_refused_at_the_cap(worker, monkeypatch):
 
 
 def test_an_input_named_to_leave_the_run_directory_is_refused(worker):
-    """The name comes from the request and is cut to its last component,
-    and ``..`` is a last component."""
+    """The request's name is cut to its last component, and ``..`` is a last component."""
     store = _Store(1024)
     manifest = _manifest(store, "x = 1")
     manifest["metadata"]["params"]["input_specs"]["data"]["file"] = ".."

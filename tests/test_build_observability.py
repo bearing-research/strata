@@ -1,9 +1,5 @@
-"""Tests for build observability features.
-
-Tests cover:
-- BuildMetricsCollector for Prometheus metrics
-- BuildContext for structured logging
-- Build logs storage in BuildStore
+"""Tests for build observability: Prometheus metrics, structured logging context, and build logs in
+BuildStore.
 """
 
 from __future__ import annotations
@@ -25,10 +21,7 @@ from tests.conftest import seed_build_targets
 
 
 class TestBuildMetricsCollector:
-    """Tests for BuildMetricsCollector."""
-
     def test_record_started(self):
-        """Test recording build start events."""
         collector = BuildMetricsCollector()
 
         collector.record_started(
@@ -44,7 +37,6 @@ class TestBuildMetricsCollector:
         assert stats["avg_queue_wait_ms"] == 42.5
 
     def test_record_succeeded(self):
-        """Test recording build success events."""
         collector = BuildMetricsCollector()
 
         collector.record_started(
@@ -69,7 +61,6 @@ class TestBuildMetricsCollector:
         assert stats["total_bytes_out"] == 500
 
     def test_record_failed(self):
-        """Test recording build failure events."""
         collector = BuildMetricsCollector()
 
         collector.record_started(
@@ -92,7 +83,6 @@ class TestBuildMetricsCollector:
         assert stats["error_codes"]["TimeoutError"] == 1
 
     def test_record_cancelled(self):
-        """Test recording build cancellation events."""
         collector = BuildMetricsCollector()
 
         collector.record_started(
@@ -112,7 +102,6 @@ class TestBuildMetricsCollector:
         assert stats["builds_in_flight"] == 0
 
     def test_per_transform_stats(self):
-        """Test per-transform metrics tracking."""
         collector = BuildMetricsCollector()
 
         for i in range(3):
@@ -137,7 +126,6 @@ class TestBuildMetricsCollector:
         assert transform_stats["total_bytes_out"] == 1500
 
     def test_per_tenant_stats(self):
-        """Test per-tenant metrics tracking."""
         collector = BuildMetricsCollector()
 
         # Tenant 1: 2 builds
@@ -174,7 +162,6 @@ class TestBuildMetricsCollector:
         assert tenant2_stats["succeeded"] == 0
 
     def test_prometheus_metrics_format(self):
-        """Test Prometheus text exposition format."""
         collector = BuildMetricsCollector()
 
         collector.record_started(
@@ -202,7 +189,6 @@ class TestBuildMetricsCollector:
         assert 'strata_build_transform_started_total{transform="sql@v1"} 1' in prom_metrics
 
     def test_duration_percentiles(self):
-        """Test duration percentile calculations."""
         collector = BuildMetricsCollector()
 
         for i in range(10):
@@ -227,7 +213,6 @@ class TestBuildMetricsCollector:
         assert pcts["p99_ms"] is not None
 
     def test_singleton_management(self):
-        """Test module-level singleton get/set/reset."""
         reset_build_metrics()
         assert get_build_metrics() is None
 
@@ -239,10 +224,7 @@ class TestBuildMetricsCollector:
 
 
 class TestBuildContext:
-    """Tests for BuildContext structured logging."""
-
     def test_build_context_sets_values(self):
-        """Test BuildContext sets context values."""
         with BuildContext(
             build_id="build-123",
             tenant_id="acme",
@@ -256,7 +238,6 @@ class TestBuildContext:
             assert ctx["provenance_hash"] == "abc123"
 
     def test_build_context_clears_on_exit(self):
-        """Test BuildContext clears values after exit."""
         with BuildContext(build_id="build-123"):
             pass
 
@@ -264,7 +245,6 @@ class TestBuildContext:
         assert "build_id" not in ctx
 
     def test_build_context_with_extra_kwargs(self):
-        """Test BuildContext with additional keyword arguments."""
         with BuildContext(
             build_id="build-123",
             custom_key="custom_value",
@@ -274,7 +254,7 @@ class TestBuildContext:
             assert ctx["custom_key"] == "custom_value"
 
     def test_build_context_optional_fields(self):
-        """Test BuildContext with only required field."""
+        """BuildContext with only the required field."""
         with BuildContext(build_id="build-123"):
             ctx = get_request_context()
             assert ctx["build_id"] == "build-123"
@@ -283,18 +263,13 @@ class TestBuildContext:
 
 
 class TestBuildStoreLogs:
-    """Tests for build logs storage in BuildStore."""
-
     @pytest.fixture
     def build_store(self, tmp_path: Path) -> BuildStore:
-        """Create a temporary build store over a database that also holds
-        artifacts, so ``artifact_builds``' foreign key has something to
-        resolve against."""
+        """A temp build store whose database also holds artifacts, so the foreign key resolves."""
         seed_build_targets(tmp_path)
         return BuildStore(tmp_path / "artifacts.sqlite")
 
     def test_complete_build_with_logs(self, build_store: BuildStore):
-        """Test completing a build with logs."""
         build = build_store.create_build(
             build_id="build-123",
             artifact_id="artifact-1",
@@ -317,7 +292,6 @@ class TestBuildStoreLogs:
         assert build.logs == "[INFO] Transform completed successfully\n[DEBUG] Rows: 42"
 
     def test_fail_build_with_logs(self, build_store: BuildStore):
-        """Test failing a build with logs."""
         build_store.create_build(
             build_id="build-456",
             artifact_id="artifact-2",
@@ -342,7 +316,6 @@ class TestBuildStoreLogs:
         assert build.error_message == "Syntax error"
 
     def test_complete_build_without_logs(self, build_store: BuildStore):
-        """Test completing a build without logs."""
         build_store.create_build(
             build_id="build-789",
             artifact_id="artifact-3",
@@ -361,7 +334,7 @@ class TestBuildStoreLogs:
         assert build.logs is None
 
     def test_logs_column_migration(self, tmp_path: Path):
-        """Test that logs column is added via migration."""
+        """The logs column is added via migration."""
         db_path = tmp_path / "migration_test.sqlite"
 
         # An old-style database without the logs column.
@@ -417,10 +390,9 @@ class TestBuildStoreLogs:
 
 
 class TestBuildMetricsIntegration:
-    """Integration tests for build metrics with runner-like usage."""
+    """Build metrics under runner-like usage."""
 
     def test_full_build_lifecycle_metrics(self):
-        """Test metrics for a complete build lifecycle."""
         reset_build_metrics()
         collector = init_build_metrics()
 
@@ -455,7 +427,6 @@ class TestBuildMetricsIntegration:
         reset_build_metrics()
 
     def test_multiple_concurrent_builds_metrics(self):
-        """Test metrics tracking for multiple concurrent builds."""
         collector = BuildMetricsCollector()
 
         for i in range(3):

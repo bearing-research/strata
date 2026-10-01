@@ -1,17 +1,9 @@
 """The TUI must show cell content verbatim, not as Rich console markup.
 
-Every panel in the TUI displays arbitrary user content: stdout, tracebacks,
-cell source, artifact values. Handing those to a ``Static`` or a table cell as
-a bare ``str`` makes Rich parse ``[...]`` as markup, which fails two ways:
+As a bare ``str``, Rich parses ``[...]`` as markup and fails two ways:
 
-* silently — ``print(data[key])`` in a traceback renders as ``print(data)``,
-  because ``key`` is read as a style name. The console panel exists to debug
-  failures, and it was dropping the subscript that caused them.
-* loudly — ``counts[/tmp/x]`` looks like a closing tag with no opening tag and
-  raises ``MarkupError`` out of the render, taking the panel with it.
-
-Both are reachable from ordinary notebook output, so the panels are checked
-here with content that triggers each.
+* silently: ``print(data[key])`` renders as ``print(data)``, since ``key`` reads as a style.
+* loudly: ``counts[/tmp/x]`` looks like an unmatched closing tag and raises ``MarkupError``.
 """
 
 from __future__ import annotations
@@ -91,9 +83,9 @@ async def test_agent_feed_keeps_bracketed_text(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_dag_view_keeps_a_bracketed_cell_name(monkeypatch):
-    """The DAG art is built from cell names, so it is user content too. A name
-    like ``load[raw]`` was rendered as ``load`` inside a box still sized for the
-    full name, and ``load[/raw]`` crashed the modal outright."""
+    """DAG art is built from cell names, so ``load[raw]`` must not render as ``load`` and
+    ``load[/raw]`` must not crash the modal.
+    """
     app = await _app(monkeypatch)
     async with app.run_test(size=(100, 40)) as pilot:
         app.vm.cells["c1"] = CellView(id="c1", name="load[raw]", status="ready")

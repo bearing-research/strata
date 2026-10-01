@@ -1,12 +1,7 @@
-"""Service-mode data-plane tests (the audit's biggest coverage gap).
+"""Scan and stream in genuine service mode (deployment_mode="service", writes off).
 
-Before this, there were *zero* tests exercising scan/stream in genuine service
-mode (deployment_mode="service", writes_enabled=False). These cover:
-
-- the read-gateway pass-through (scan → stream, no artifact store);
-- the identity-scan cache-hit read-back over /data (the #169 / A.1 fix), which
-  previously 403'd in service mode;
-- table-ACL enforcement on the scan path under trusted-proxy auth.
+Covers the read-gateway pass-through, the identity-scan cache-hit read-back over /data, and table
+ACLs on the scan path under trusted-proxy auth.
 """
 
 import pyarrow.ipc as ipc
@@ -38,7 +33,7 @@ class TestServiceModeScanStream:
     """The read gateway: scans stream in service mode."""
 
     def test_scan_stream_works_without_store(self, temp_warehouse, tmp_path):
-        """Face A: scan → bounded stream pass-through, no persistence."""
+        """Scan to bounded stream pass-through, with no persistence."""
         cache_dir = tmp_path / "cache"
         cache_dir.mkdir()
         with run_server_with_context(cache_dir, None, "service") as ctx:
@@ -55,8 +50,7 @@ class TestServiceModeScanStream:
             assert set(table.column_names) == {"id", "value", "name", "timestamp"}
 
     def test_scan_cache_hit_readable_with_store(self, temp_warehouse, tmp_path):
-        """Identity-scan cache hit returns a /data URL that is actually readable
-        in service mode (regression for the #169 cache-hit 403)."""
+        """An identity-scan cache hit returns a /data URL readable in service mode."""
         cache_dir = tmp_path / "cache"
         cache_dir.mkdir()
         artifact_dir = tmp_path / "artifacts"

@@ -1,4 +1,4 @@
-"""Tests for optimized cache methods and Rust acceleration integration."""
+"""Tests for optimized cache methods and Rust acceleration."""
 
 import pyarrow as pa
 import pyarrow.ipc as ipc
@@ -12,7 +12,7 @@ from strata.types import CacheKey, TableIdentity
 
 @pytest.fixture
 def strata_config(tmp_path):
-    """Create a test configuration."""
+    """A test configuration."""
     cache_dir = tmp_path / "cache"
     cache_dir.mkdir()
     return StrataConfig(cache_dir=cache_dir)
@@ -20,7 +20,7 @@ def strata_config(tmp_path):
 
 @pytest.fixture
 def sample_batch():
-    """Create a sample record batch."""
+    """A sample record batch."""
     return pa.RecordBatch.from_pydict(
         {
             "id": [1, 2, 3, 4, 5],
@@ -32,7 +32,7 @@ def sample_batch():
 
 @pytest.fixture
 def cache_key():
-    """Create a sample cache key."""
+    """A sample cache key."""
     identity = TableIdentity.from_table_id("test_db.events")
     return CacheKey(
         tenant_id="_default",
@@ -45,10 +45,7 @@ def cache_key():
 
 
 class TestDiskCacheGetAsStreamBytes:
-    """Tests for DiskCache.get_as_stream_bytes() method."""
-
     def test_returns_none_for_missing_key(self, strata_config, cache_key):
-        """Test that get_as_stream_bytes returns None for missing keys."""
         cache = DiskCache(strata_config)
 
         result = cache.get_as_stream_bytes(cache_key)
@@ -56,7 +53,6 @@ class TestDiskCacheGetAsStreamBytes:
         assert result is None
 
     def test_returns_stream_bytes_for_cached_data(self, strata_config, cache_key, sample_batch):
-        """Test that get_as_stream_bytes returns valid stream bytes for cached data."""
         cache = DiskCache(strata_config)
 
         cache.put(cache_key, sample_batch)
@@ -72,7 +68,6 @@ class TestDiskCacheGetAsStreamBytes:
         assert batches[0].num_rows == sample_batch.num_rows
 
     def test_stream_bytes_data_matches_original(self, strata_config, cache_key, sample_batch):
-        """Test that stream bytes contain the same data as the original batch."""
         cache = DiskCache(strata_config)
         cache.put(cache_key, sample_batch)
 
@@ -87,10 +82,7 @@ class TestDiskCacheGetAsStreamBytes:
 
 
 class TestDiskCacheGetPath:
-    """Tests for DiskCache.get_path() method."""
-
     def test_returns_none_for_missing_key(self, strata_config, cache_key):
-        """Test that get_path returns None for missing keys."""
         cache = DiskCache(strata_config)
 
         result = cache.get_path(cache_key)
@@ -98,7 +90,6 @@ class TestDiskCacheGetPath:
         assert result is None
 
     def test_returns_path_for_cached_data(self, strata_config, cache_key, sample_batch):
-        """Test that get_path returns a valid path for cached data."""
         cache = DiskCache(strata_config)
         cache.put(cache_key, sample_batch)
 
@@ -110,10 +101,8 @@ class TestDiskCacheGetPath:
 
 
 class TestDiskCacheStatsAndCleanup:
-    """Tests for cache stats and corruption cleanup behavior."""
-
     def test_stats_use_actual_stream_file_size(self, strata_config, cache_key, sample_batch):
-        """Reported cache size should match the stored Arrow stream bytes."""
+        """Reported cache size matches the stored Arrow stream bytes."""
         cache = DiskCache(strata_config)
         cache.put(cache_key, sample_batch)
 
@@ -129,7 +118,7 @@ class TestDiskCacheStatsAndCleanup:
     def test_corrupted_data_removes_sidecar_and_disappears_from_stats(
         self, strata_config, cache_key, sample_batch
     ):
-        """Corrupted cache reads should remove both data and metadata files."""
+        """A corrupted read removes both the data and metadata files."""
         cache = DiskCache(strata_config)
         cache.put(cache_key, sample_batch)
 
@@ -175,9 +164,9 @@ class TestDiskCacheStatsAndCleanup:
         assert str(cache_dir / "v1") in caplog.text
 
     def test_a_version_named_directory_the_cache_did_not_write_is_left(self, strata_config, caplog):
-        """``cache_dir`` can be a directory people keep other things in, and
-        ``v1`` is an ordinary name. A tree is removed only when everything in
-        it is what a cache writes: hex-named directories and entry files."""
+        """``cache_dir`` may hold other things and ``v1`` is an ordinary name, so a tree is removed
+        only if it holds just hex-named directories and entry files.
+        """
         cache_dir = strata_config.cache_dir
         cache_dir.mkdir(parents=True, exist_ok=True)
         notes = cache_dir / "v1" / "my_notes.txt"
@@ -204,10 +193,7 @@ class TestDiskCacheStatsAndCleanup:
 
 
 class TestCachedFetcherFetchAsStreamBytes:
-    """Tests for CachedFetcher.fetch_as_stream_bytes() method."""
-
     def test_returns_stream_bytes_for_cache_hit(self, strata_config, cache_key, sample_batch):
-        """Test that fetch_as_stream_bytes returns stream bytes for cache hits."""
         cache = DiskCache(strata_config)
         cache.put(cache_key, sample_batch)
 
@@ -238,10 +224,7 @@ class TestCachedFetcherFetchAsStreamBytes:
 
 
 class TestRustAccelerationIntegration:
-    """Tests for Rust acceleration integration with cache."""
-
     def test_rust_path_produces_valid_output(self, strata_config, cache_key, sample_batch):
-        """Test that Rust acceleration produces valid output when available."""
         cache = DiskCache(strata_config)
         cache.put(cache_key, sample_batch)
 
@@ -256,7 +239,6 @@ class TestRustAccelerationIntegration:
         assert result_batch.column("id").to_pylist() == sample_batch.column("id").to_pylist()
 
     def test_rust_availability_is_reported(self):
-        """Test that Rust availability is correctly reported."""
         is_available = fast_io.is_rust_available()
         assert isinstance(is_available, bool)
 
@@ -265,10 +247,7 @@ class TestRustAccelerationIntegration:
 
 
 class TestMmapFileReading:
-    """Tests for memory-mapped file reading."""
-
     def test_read_file_mmap_returns_bytes(self, tmp_path):
-        """Test that read_file_mmap returns file contents as bytes."""
         test_file = tmp_path / "test.txt"
         test_data = b"Hello, memory-mapped world!"
         test_file.write_bytes(test_data)
@@ -278,7 +257,6 @@ class TestMmapFileReading:
         assert result == test_data
 
     def test_read_file_mmap_with_binary_data(self, tmp_path):
-        """Test that read_file_mmap handles binary data correctly."""
         test_file = tmp_path / "binary.bin"
         test_data = bytes(range(256)) * 10
         test_file.write_bytes(test_data)
@@ -289,7 +267,6 @@ class TestMmapFileReading:
         assert len(result) == 2560
 
     def test_read_file_mmap_large_file(self, tmp_path):
-        """Test that read_file_mmap handles larger files."""
         test_file = tmp_path / "large.bin"
         test_data = b"x" * (1024 * 1024)
         test_file.write_bytes(test_data)
@@ -300,7 +277,6 @@ class TestMmapFileReading:
         assert len(result) == 1024 * 1024
 
     def test_read_file_mmap_arrow_stream(self, strata_config, cache_key, sample_batch):
-        """Test that read_file_mmap correctly reads Arrow IPC stream files."""
         cache = DiskCache(strata_config)
         cache.put(cache_key, sample_batch)
 
@@ -316,7 +292,7 @@ class TestMmapFileReading:
         assert result_batch.column("id").to_pylist() == sample_batch.column("id").to_pylist()
 
     def test_read_file_mmap_matches_read_bytes(self, strata_config, cache_key, sample_batch):
-        """Test that read_file_mmap produces same result as Path.read_bytes()."""
+        """read_file_mmap matches Path.read_bytes()."""
         cache = DiskCache(strata_config)
         cache.put(cache_key, sample_batch)
 
@@ -329,7 +305,6 @@ class TestMmapFileReading:
         assert mmap_result == read_bytes_result
 
     def test_read_file_mmap_nonexistent_file(self, tmp_path):
-        """Test that read_file_mmap raises on nonexistent file."""
         nonexistent = tmp_path / "does_not_exist.txt"
 
         # IOError from Rust or FileNotFoundError from Python.
@@ -338,17 +313,11 @@ class TestMmapFileReading:
 
 
 class TestDamagedEntriesSelfHeal:
-    """A damaged entry on the zero-parse path used to poison a key forever.
+    """A damaged entry on the zero-parse path must not poison its key forever.
 
-    ``get`` parses Arrow and drops an entry that fails, so it recovers on its
-    own. ``get_as_stream_bytes`` deliberately skips parsing — that is the point
-    of the hot path — and so noticed nothing: the damaged bytes went straight
-    to the network, and because cache keys are immutable snapshot IDs that are
-    never invalidated, the *same* damaged entry was served again on every later
-    request for that row group. There is no expiry to eventually clear it.
-
-    The stream's fixed head and end-of-stream markers make the check free: the
-    bytes are already in memory.
+    ``get_as_stream_bytes`` skips Arrow parsing, and keys are never invalidated, so a damaged entry
+    would be served on every request. The stream's head and end-of-stream markers make the check
+    free.
     """
 
     @pytest.mark.parametrize(
@@ -401,21 +370,11 @@ class TestDamagedEntriesSelfHeal:
 
 
 class TestClearPreservesTheMetadataDatabase:
-    """``clear`` documents itself as preserving ``metadata.sqlite``, but it
-    matched that name exactly and so deleted the ``-wal`` and ``-shm``
-    sidecars beside it.
+    """``clear`` preserves ``metadata.sqlite`` and its ``-wal`` and ``-shm`` sidecars.
 
-    Under WAL mode — which ``MetadataStore`` enables — those two files are
-    part of the database, not scratch next to it. The ``-wal`` holds committed
-    transactions not yet checkpointed into the main file, and the ``-shm`` is
-    the shared index into it that every live connection maps (the store keeps
-    one per thread). Removing them from under an open database can discard
-    committed metadata and can leave a connection raising SQLITE_IOERR.
-
-    SQLite checkpoints and removes the sidecars itself when the *last*
-    connection closes, so the live connection here is what makes the
-    difference observable — and it is also the state a running server is
-    always in.
+    Under WAL mode the sidecars are part of the database; removing them under an open connection can
+    lose committed metadata or raise SQLITE_IOERR. The live connection here keeps SQLite from
+    removing them itself, as on a running server.
     """
 
     def _live_store(self, cache_dir):
@@ -461,7 +420,7 @@ class TestClearPreservesTheMetadataDatabase:
             held.close()
 
     def test_clear_still_removes_cached_row_groups(self, strata_config, sample_batch, cache_key):
-        """The preservation must not cost ``clear`` its actual job."""
+        """``clear`` still removes cached row groups."""
         cache = DiskCache(strata_config)
         cache.put(cache_key, sample_batch)
         assert cache.get_as_stream_bytes(cache_key) is not None

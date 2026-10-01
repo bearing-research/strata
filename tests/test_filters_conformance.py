@@ -1,10 +1,7 @@
 """Conformance tests for the duplicated filter modules.
 
-``src/strata/filters.py`` and ``packages/strata-client/src/strata_client/filters.py``
-are duplicated *by design* (server and client share no code, only the JSON wire
-format). These tests pin the behavior that must stay identical across both
-copies — fingerprint stability/collision-safety and value serialization — and
-guard against the two files drifting.
+``src/strata/filters.py`` and ``packages/strata-client/src/strata_client/filters.py`` share only the
+JSON wire format by design; these pin fingerprints and value serialization across both.
 """
 
 import uuid
@@ -71,7 +68,7 @@ def test_unsupported_value_type_rejected(mod):
 
 @BOTH
 def test_fingerprint_no_field_boundary_collision(mod):
-    """The bug: ('a>','=') and ('a','>=') concatenated to the same string."""
+    """('a>','=') and ('a','>=') must not concatenate to the same string."""
     fp1 = mod.compute_filter_fingerprint([mod.Filter("a>", mod.FilterOp.EQ, 1)])
     fp2 = mod.compute_filter_fingerprint([mod.Filter("a", mod.FilterOp.GE, 1)])
     assert fp1 != fp2
@@ -98,7 +95,7 @@ def test_fingerprint_empty_is_nofilter(mod):
 
 
 def test_both_copies_agree_on_fingerprint():
-    """Same filters → same fingerprint from either copy (shared wire format)."""
+    """Same filters, same fingerprint from either copy."""
     sf = [server_filters.Filter("ts", server_filters.FilterOp.GE, datetime(2021, 5, 1))]
     cf = [client_filters.Filter("ts", client_filters.FilterOp.GE, datetime(2021, 5, 1))]
     assert server_filters.compute_filter_fingerprint(
@@ -107,8 +104,7 @@ def test_both_copies_agree_on_fingerprint():
 
 
 class TestFilterSpecOpValidation:
-    """Finding #3: an invalid operator must fail validation (→ 400), not escape
-    as an uncaught ValueError from FilterOp(f.op) later."""
+    """An invalid operator fails validation (400), not later as an uncaught ValueError."""
 
     def test_invalid_op_rejected_at_validation(self):
         from pydantic import ValidationError
@@ -129,11 +125,9 @@ class TestFilterSpecOpValidation:
 
 
 class TestAdapterToServerFilterRoundTrip:
-    """Finding #2 fast-follow (#193): a richer-typed filter value must survive the
-    full client-adapter → JSON wire → server ``FilterSpec`` path with its Python
-    type intact, so the planner compares against Parquet column stats correctly.
-    Before the fix the adapters passed raw ``f.value`` and a non-primitive (e.g. a
-    timestamp partition filter) failed at ``json.dumps``.
+    """A richer-typed filter value survives adapter, JSON wire and ``FilterSpec`` intact.
+
+    The planner compares it against Parquet column stats, so the Python type must survive.
     """
 
     _ADAPTERS = ["pandas", "arrow", "polars", "duckdb", "datafusion"]

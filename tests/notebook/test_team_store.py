@@ -1,14 +1,9 @@
 """The team cache tier: a colleague's result instead of your recomputation.
 
-The claim being tested is narrow and load-bearing: a pull must leave the local
-store in *exactly* the state a local run would have. The executor's cache-hit
-check does not trust ``find_by_provenance`` on its own — it re-reads each
-consumed variable's canonical artifact and compares its provenance — so a pull
-that writes anything less specific than that is a pull that still misses.
-
-The other half is that none of this can break a cell. A store that is
-unreachable, refusing, or missing one variable has to end in "run it locally",
-never in an exception.
+A pull must leave the local store in exactly the state a local run would: the cache-hit check
+re-reads each consumed variable's canonical artifact and compares its provenance, so anything less
+specific still misses. And a store that is unreachable, refusing, or missing a variable must end in
+"run it locally", never an exception.
 """
 
 from __future__ import annotations
@@ -40,7 +35,7 @@ def team_store_server(tmp_path):
 
 @pytest.fixture
 def local_manager(tmp_path):
-    """This machine's own notebook artifact store — empty."""
+    """This machine's own notebook artifact store, empty."""
     return NotebookArtifactManager(NOTEBOOK_ID, artifact_dir=tmp_path / "local-artifacts")
 
 
@@ -55,15 +50,8 @@ def seed_team_result(
 ) -> str:
     """Put a teammate's result in the shared store, keyed by provenance.
 
-    Written directly rather than over HTTP because ``PUT /v1/artifacts``
-    computes its own provenance hash from inputs+transform and offers no way
-    to supply the notebook's. Storing bytes under a caller-supplied key is the
-    *next* slice; this one is about reading them back, so the seeding here is
-    deliberately the same shape that slice will produce over the wire.
-
-    The artifact id is deliberately unlike anything this notebook would
-    construct — it belongs to a different notebook, which is the whole point:
-    the hash is the join key, not the id.
+    Written directly because ``PUT /v1/artifacts`` computes its own provenance hash. The artifact id
+    belongs to a different notebook on purpose: the hash is the join key, not the id.
     """
     artifact_id = f"nb_someone_elses_notebook_cell_zz_var_{variable}"
     provenance = derive_subkey(cell_provenance, variable)
@@ -90,7 +78,7 @@ def seed_team_result(
 
 
 def canonical_provenance(manager: NotebookArtifactManager, variable: str) -> str | None:
-    """What the executor's cache-hit check reads: the local canonical artifact."""
+    """The local canonical artifact's provenance, which the cache-hit check reads."""
     stored = manager.artifact_store.get_latest_version(
         manager.cell_artifact_id(CELL_ID, variable),
     )
@@ -98,8 +86,9 @@ def canonical_provenance(manager: NotebookArtifactManager, variable: str) -> str
 
 
 async def test_a_pull_lands_where_the_cache_check_looks(team_store_server, local_manager):
-    """Not just "an artifact exists" — the exact canonical id and provenance
-    the executor re-reads before it will call a hit."""
+    """Checks the exact canonical id and provenance the executor re-reads, not just that an artifact
+    exists.
+    """
     seed_team_result(team_store_server["artifact_dir"], variable="model", blob=b'{"trees": 200}')
     seed_team_result(team_store_server["artifact_dir"], variable="scaler", blob=b'{"mean": 0}')
 
@@ -132,8 +121,7 @@ async def test_a_pull_lands_where_the_cache_check_looks(team_store_server, local
 
 
 async def test_one_missing_variable_is_a_miss_and_writes_nothing(team_store_server, local_manager):
-    """The cache check needs every consumed variable, so a partial pull is a
-    miss that also littered the local store. Fetch all, then write."""
+    """The cache check needs every consumed variable, so a partial pull must write nothing."""
     seed_team_result(team_store_server["artifact_dir"], variable="model", blob=b'{"trees": 200}')
 
     store = TeamStore(team_store_server["base_url"])
@@ -154,8 +142,7 @@ async def test_one_missing_variable_is_a_miss_and_writes_nothing(team_store_serv
 
 
 async def test_an_unreachable_store_is_a_miss_not_an_error(local_manager):
-    """A store that is down is a store you recompute past. Raising here would
-    turn a shared-cache outage into every teammate's notebook breaking."""
+    """Raising would turn a shared-cache outage into every teammate's notebook breaking."""
     unreachable = httpx.AsyncClient(
         transport=httpx.MockTransport(
             lambda request: (_ for _ in ()).throw(httpx.ConnectError("no route to host"))
@@ -178,14 +165,11 @@ async def test_an_unreachable_store_is_a_miss_not_an_error(local_manager):
 
 
 async def test_a_refusing_store_is_loud_while_an_empty_one_is_quiet(monkeypatch):
-    """Both end in "run it locally", so the log is the only place the
-    difference can live — and the difference matters: an expired token is a
-    permanent unexplained slowdown, an empty cache is Tuesday.
+    """Both end in a local run, so only the log can show the difference: an expired token is a
+    permanent unexplained slowdown, an empty cache is normal.
 
-    The logger is monkeypatched rather than read through ``caplog``: the
-    package configures its own logging with ``propagate=False``, so records
-    never reach pytest's capture handler (same reason as
-    ``tests/test_blob_store.py``).
+    The logger is monkeypatched because the package logs with ``propagate=False``, so ``caplog``
+    never sees the records.
     """
 
     class _Recorder:
@@ -228,17 +212,11 @@ async def test_a_refusing_store_is_loud_while_an_empty_one_is_quiet(monkeypatch)
 async def test_a_teammates_result_is_served_instead_of_running_the_cell(
     tmp_path, team_store_server, monkeypatch
 ):
-    """The product claim, end to end.
+    """End to end: two unrelated notebooks run the same cell and the second is served the first's
+    result without running.
 
-    Two notebooks that never met run the same cell. The first computes it and
-    its result reaches the shared store; the second is served that result and
-    does not run — no subprocess, no seconds. It works because the notebook's
-    provenance key contains no notebook id and no cell id, so two people arrive
-    at the same hash independently.
-
-    The seeding is the first notebook's *real* stored bytes, copied into the
-    shared store under the same provenance. That keeps this test about the pull
-    and not about a hand-built blob that happens to deserialize.
+    It works because the provenance key holds no notebook or cell id. The seed is the first
+    notebook's real stored bytes, so this tests the pull, not a hand-built blob.
     """
     from strata.config import StrataConfig
     from strata.notebook.executor import CellExecutor
@@ -328,14 +306,8 @@ async def test_a_teammates_result_is_served_instead_of_running_the_cell(
 async def test_a_result_alice_never_published_by_hand_reaches_bob(
     tmp_path, team_store_server, monkeypatch
 ):
-    """The whole loop, with nothing seeded.
-
-    Alice runs a cell; the push happens because she has the team cache on, not
-    because the test placed anything anywhere. Bob then runs the same cell on a
-    cold notebook and is served her result. This is the claim the roadmap's
-    Phase 1 asks about — a colleague's expensive preprocessing is your instant
-    result — with no step performed by the test that a real user would not get
-    for free.
+    """The whole loop with nothing seeded: Alice's run pushes because team cache is on, and Bob's
+    cold notebook is served her result.
     """
     from strata.config import StrataConfig
     from strata.notebook.executor import CellExecutor
@@ -397,12 +369,8 @@ async def test_a_result_alice_never_published_by_hand_reaches_bob(
 async def test_run_all_both_contributes_to_the_team_and_is_served_by_it(
     tmp_path, team_store_server, monkeypatch
 ):
-    """The same loop as above, driven through Run All instead of one cell.
-
-    The batch path had neither half: it never offered what it computed and
-    never looked before computing, so a team that used Run All -- the ordinary
-    way to run a notebook -- shared nothing and reused nothing, while the
-    identical notebook run cell by cell did both.
+    """The same loop driven through Run All, which must both offer its results and look before
+    computing.
     """
     from strata.config import StrataConfig
     from strata.notebook.executor import CellExecutor
@@ -472,9 +440,9 @@ async def test_run_all_both_contributes_to_the_team_and_is_served_by_it(
 
 
 async def test_a_store_that_refuses_a_publish_does_not_fail_the_cell(tmp_path, monkeypatch):
-    """The cell already succeeded. A read-only member, an expired token, or a
-    store that is simply down must cost the *next* person a recomputation and
-    this one nothing at all."""
+    """A read-only member, expired token or down store costs the next person a recompute, never this
+    cell.
+    """
     from strata.config import StrataConfig
     from strata.notebook.executor import CellExecutor
     from strata.notebook.parser import parse_notebook
@@ -512,8 +480,9 @@ async def test_a_store_that_refuses_a_publish_does_not_fail_the_cell(tmp_path, m
 
 
 async def test_the_pull_is_off_unless_it_is_switched_on(tmp_path, monkeypatch):
-    """A configured remote store is for publishing. Sourcing results from one
-    is the separate opt-in, and with it off nothing reaches the network."""
+    """A configured remote store is for publishing; pulling is a separate opt-in, and with it off
+    nothing reaches the network.
+    """
     from strata.config import StrataConfig
     from strata.notebook.executor import CellExecutor
     from strata.notebook.parser import parse_notebook
@@ -554,8 +523,7 @@ async def test_the_pull_is_off_unless_it_is_switched_on(tmp_path, monkeypatch):
 
 
 async def test_a_cell_with_no_downstream_consumers_is_not_pulled(local_manager):
-    """Nothing to pull: a leaf cell stores no artifacts, and its console and
-    display outputs live in the session's runtime state instead."""
+    """A leaf cell stores no artifacts; its console and display live in runtime state."""
     store = TeamStore("http://store.example", client=httpx.AsyncClient())
     pull = await pull_cell_outputs(
         store,
@@ -568,15 +536,10 @@ async def test_a_cell_with_no_downstream_consumers_is_not_pulled(local_manager):
 
 
 async def test_a_pulled_result_says_where_it_was_computed(tmp_path, team_store_server, monkeypatch):
-    """The honesty half of the team cache.
+    """The provenance key covers the lockfile, not the platform, so a hit can cross machines.
 
-    The provenance key covers the lockfile, not the platform: `uv.lock`
-    resolves to different wheels on macOS-arm64 and Linux-x86_64, so a hit can
-    legitimately cross machines. That is deliberate — hashing the platform
-    would drop cross-machine hit rate to roughly zero and delete the feature in
-    order to protect it — but sharing across platforms while recording *nothing*
-    is not defensible. So the producer records what ran it, and the pull says
-    so.
+    That is deliberate (hashing the platform would kill cross-machine hits), so the producer records
+    what ran it and the pull reports it.
     """
     from strata.config import StrataConfig
     from strata.notebook.executor import CellExecutor
@@ -623,11 +586,8 @@ async def test_a_pulled_result_says_where_it_was_computed(tmp_path, team_store_s
 
 
 async def test_a_pulled_result_keeps_the_publishers_platform(team_store_server, local_manager):
-    """Preserved, not restamped.
-
-    Rewriting it with the puller's own identity would convert a record of
-    where the result came from into a claim that this machine produced it —
-    and the next person to pull from *this* store would inherit the lie.
+    """Preserved, not restamped: the puller's identity would claim this machine produced it, and the
+    next pull from this store would inherit that.
     """
     import json as json_module
 
@@ -676,13 +636,9 @@ async def test_a_pulled_result_keeps_the_publishers_platform(team_store_server, 
 async def test_a_team_hit_is_priced_by_the_run_it_replaced(
     tmp_path, team_store_server, monkeypatch
 ):
-    """The number that makes the shared store legible, end to end.
+    """The publisher's duration travels with the bytes so Bob is told what he skipped.
 
-    Alice runs the cell; what it cost her travels with the bytes. Bob, who has
-    never run it, is told what he skipped. Without the publisher's duration
-    riding along there is nothing to report: his own history has no comparable
-    run, so the savings estimate would credit zero for exactly the case the
-    shared store exists to create.
+    His own history has no comparable run, so without it the savings estimate would be zero.
     """
     from strata.config import StrataConfig
     from strata.notebook.executor import CellExecutor
@@ -742,20 +698,11 @@ async def test_a_team_hit_is_priced_by_the_run_it_replaced(
 
 
 async def test_a_failed_environment_sync_does_not_publish(tmp_path, team_store_server, monkeypatch):
-    """The poisoning vector this gate exists for.
+    """A failed ``uv sync`` keeps the old venv and leaves sync state ``ready``, while provenance
+    follows the new ``uv.lock``.
 
-    A failed ``uv sync`` keeps the previous venv and leaves the sync state
-    ``ready`` — deliberately, so a transient network failure does not lock
-    someone out of their own notebook. But provenance is computed from
-    ``uv.lock`` on disk, which has moved on. Every artifact produced from then
-    on is stamped with an environment it was not built in.
-
-    Locally that is the owner's problem. Published to a shared store it is
-    permanent and everyone's: first-writer-wins means the stale-environment
-    result becomes the answer the whole team gets.
-
-    The cell must still run, and its result must still be stored locally.
-    Only the publish is refused.
+    Published, such a result would become the team's answer under first-writer-wins. The cell still
+    runs and stores locally; only the publish is refused.
     """
     from strata.config import StrataConfig
     from strata.notebook.executor import CellExecutor
@@ -812,7 +759,7 @@ async def test_a_failed_environment_sync_does_not_publish(tmp_path, team_store_s
 async def test_publishing_resumes_once_the_environment_is_synced(
     tmp_path, team_store_server, monkeypatch
 ):
-    """The gate must be a gate, not a latch — a fixed environment publishes."""
+    """The gate must be a gate, not a latch: a fixed environment publishes."""
     from strata.config import StrataConfig
     from strata.notebook.executor import CellExecutor
     from strata.notebook.parser import parse_notebook
@@ -873,12 +820,9 @@ def _synced_notebook(tmp_path, name: str):
 
 
 def test_an_environment_metadata_refresh_keeps_the_attestation(tmp_path):
-    """The metadata snapshot is rebuilt wholesale on every sync, dependency
-    change, and environment job. It describes what is *declared*; the
-    attestation describes what was *installed*. Rebuilding the record without
-    carrying the attestation forward revoked it every time — so clicking "Sync
-    environment" once turned publishing off permanently, on a healthy
-    environment, with only a per-cell warning to show for it.
+    """The metadata snapshot (what is declared) is rebuilt on every sync; it must carry the
+    attestation (what was installed) forward, or one "Sync environment" turns publishing off for
+    good.
     """
     from strata.notebook.writer import update_environment_metadata
 
@@ -889,12 +833,9 @@ def test_an_environment_metadata_refresh_keeps_the_attestation(tmp_path):
 
 
 def test_reopening_a_session_does_not_launder_a_failed_sync(tmp_path, monkeypatch):
-    """``refresh_environment_runtime`` runs on the session-reuse path — every
-    reopen of an already-open notebook — where nothing is installed.
+    """``refresh_environment_runtime`` runs on every reopen, where nothing is installed.
 
-    Attesting there meant a failed sync could be laundered by reloading the
-    browser tab: the new lockfile would be recorded as realized with nothing
-    installed, and the next cell would publish a stale-environment result.
+    Attesting there would let a browser reload launder a failed sync and publish a stale result.
     """
     session = _synced_notebook(tmp_path, "reopened")
 
@@ -912,13 +853,9 @@ def test_reopening_a_session_does_not_launder_a_failed_sync(tmp_path, monkeypatc
 
 
 def test_a_directly_constructed_session_can_still_publish(tmp_path):
-    """The CLI, the MCP ops layer, and the agent scratchpad all build sessions
-    directly and never call a sync, leaving ``interpreter_source`` at
-    ``unknown``. Treating that as a failure switched publishing off for that
-    entire surface — with nothing to diagnose it but a warning about uv.lock.
+    """CLI, MCP and scratchpad sessions never sync, leaving ``interpreter_source`` ``unknown``.
 
-    ``unknown`` means unprobed, not broken. Only a *known* system-python
-    fallback disqualifies.
+    ``unknown`` means unprobed, not broken; only a known system-python fallback disqualifies.
     """
     from strata.notebook.parser import parse_notebook
     from strata.notebook.session import NotebookSession
@@ -934,10 +871,8 @@ def test_a_directly_constructed_session_can_still_publish(tmp_path):
 
 
 def test_a_stale_r_library_does_not_publish(tmp_path):
-    """The Python attestation covers ``compute_lockfile_hash``, which folds
-    ``renv.lock`` in too — so on an R notebook it can be satisfied by a
-    ``uv sync`` that ran before a ``renv::restore()`` that failed, leaving the
-    R library stale while the gate says everything is fine.
+    """The Python attestation folds ``renv.lock`` in, so a ``uv sync`` before a failed
+    ``renv::restore()`` would otherwise pass the gate with a stale R library.
     """
     session = _synced_notebook(tmp_path, "rnotebook")
 
@@ -953,15 +888,8 @@ def test_a_stale_r_library_does_not_publish(tmp_path):
 def test_both_execution_paths_report_the_same_build_environment():
     """A warm-pool cell and a cold-harness cell land in the same shared cache.
 
-    ``harness.py`` and ``pool_worker.py`` both run inside the notebook venv and
-    neither can ``import strata``, so each carries its own copy of the identity
-    function. The duplication is fine; a divergence is not — the values are
-    compared as strings by anyone reading the store, and the two paths are
-    interchangeable from the user's point of view.
-
-    The pool worker originally had no copy at all. Every test exercised the
-    cold path, so it went unnoticed until a live team store showed warm-pool
-    artifacts published with no platform recorded.
+    ``harness.py`` and ``pool_worker.py`` cannot ``import strata``, so each carries its own copy of
+    the identity function; the copies must agree.
     """
     from strata.notebook.harness import build_env_identity as harness_identity
     from strata.notebook.pool_worker import build_env_identity as pool_identity
@@ -973,14 +901,10 @@ def test_both_execution_paths_report_the_same_build_environment():
 async def test_a_store_that_disagrees_about_the_environment_is_not_believed(
     team_store_server, local_manager, monkeypatch
 ):
-    """An honest pull cannot disagree — ``env_hash`` is part of the provenance
-    key, so a matching provenance implies a matching env_hash.
+    """An honest pull cannot disagree: ``env_hash`` is part of the provenance key.
 
-    If one disagrees anyway, importing it pushes the wrongness somewhere it
-    cannot be read as a problem: ``causality._get_stored_hash`` prefers the
-    stored env_hash over the cell's own when explaining staleness, so the cell
-    would report "the environment changed" forever with nothing pointing at
-    why. Keep the local value and say so out loud instead.
+    If one does, importing it would make ``causality._get_stored_hash`` report "the environment
+    changed" forever with no cause shown, so the local value is kept and a warning logged.
     """
     import json as json_module
 
@@ -1035,13 +959,7 @@ async def test_a_store_that_disagrees_about_the_environment_is_not_believed(
 async def test_a_pulled_result_keeps_its_author_in_the_local_store(
     team_store_server, local_manager
 ):
-    """The lineage view reads the *local* store.
-
-    ``TeamPull.principal`` was logged and surfaced at pull time but never
-    persisted, and ``store_cell_output`` never passed one — so every notebook
-    artifact had a null author and the lineage column stayed blank on exactly
-    the steps someone else produced. Which is the case the column exists for.
-    """
+    """The lineage view reads the local store, so the pulled principal must be persisted there."""
     seed_team_result(
         team_store_server["artifact_dir"], variable="model", blob=b"{}", principal="alice@lab"
     )
@@ -1069,9 +987,9 @@ async def test_a_pulled_result_keeps_its_author_in_the_local_store(
 async def test_a_disputed_env_hash_on_any_variable_is_caught(
     team_store_server, local_manager, monkeypatch
 ):
-    """Checking the alphabetically-first variable and stamping every variable
-    from it would launder a bad value on anything sorting later — silently,
-    since the warning never looks at it."""
+    """Stamping every variable from the alphabetically first one would silently launder a bad value
+    on the rest.
+    """
     import json as json_module
 
     shared = ArtifactStore(team_store_server["artifact_dir"])
@@ -1125,16 +1043,10 @@ async def test_a_disputed_env_hash_on_any_variable_is_caught(
 async def test_under_the_promoted_policy_a_cell_run_offers_nothing(
     tmp_path, team_store_server, monkeypatch
 ):
-    """The same loop as above, with the policy set to `promoted`.
+    """Under ``promoted`` a cell run offers nothing, so Bob misses.
 
-    That test's whole point is that Alice's result reaches Bob without her
-    doing anything. This is the setting that makes it not: on a personal
-    server, offering every intermediate means everything a researcher computes
-    lands in the team's store whether or not they meant to share it.
-
-    Pulls are deliberately unchanged, which is why Bob is checked for a miss
-    rather than the store being checked for silence — a store that never
-    received her result is exactly a store Bob misses against.
+    On a personal server, offering every intermediate would share everything a researcher computes.
+    Pulls are unchanged, so Bob is checked for a miss.
     """
     from strata.artifact_store import ArtifactStore
     from strata.config import StrataConfig
@@ -1184,9 +1096,9 @@ async def test_under_the_promoted_policy_a_cell_run_offers_nothing(
 
 
 async def test_each_callers_offered_results_carry_that_callers_principal(tmp_path, monkeypatch):
-    """A shared server offers results for several members. Each has to arrive
-    as the member who ran the cell, or the team cache's "computed by" names
-    the server for all of them. Item 2."""
+    """A shared server offers results for several members; each must arrive as the member who ran
+    the cell, not as the server.
+    """
     import asyncio
     import http.server
     import threading

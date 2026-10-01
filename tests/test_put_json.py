@@ -1,12 +1,4 @@
-"""Tests for the PUT /v1/artifacts (put_json) endpoint.
-
-These tests verify:
-1. Direct JSON upload with provenance tracking
-2. Cache hit on duplicate request
-3. Lineage tracking via input_versions
-4. Name assignment
-5. JSON retrieval via get_json
-"""
+"""PUT /v1/artifacts (put_json): provenance, cache hits, lineage, names and get_json."""
 
 import pytest
 import requests
@@ -15,13 +7,7 @@ from strata_client.client import StrataClient
 
 @pytest.fixture
 def server_with_artifacts(tmp_path):
-    """Start a server in personal mode for artifact testing.
-
-    Uses the shared run_server_with_context helper: health-polled startup
-    (a bare ``time.sleep(1)`` raced slow CI runners into connection-refused
-    flakes) and graceful shutdown (orphaned daemon servers each kept a live
-    build-runner poll loop running for the rest of the suite).
-    """
+    """A personal-mode server, health-polled on startup and shut down gracefully."""
     from tests.conftest import run_server_with_context
 
     cache_dir = tmp_path / "cache"
@@ -34,10 +20,9 @@ def server_with_artifacts(tmp_path):
 
 
 class TestPutJson:
-    """Tests for PUT /v1/artifacts endpoint."""
+    """PUT /v1/artifacts."""
 
     def test_put_json_basic(self, server_with_artifacts):
-        """Test basic JSON upload."""
         base_url = server_with_artifacts["base_url"]
 
         response = requests.put(
@@ -59,7 +44,7 @@ class TestPutJson:
         assert data["byte_size"] > 0
 
     def test_put_json_cache_hit(self, server_with_artifacts):
-        """Test that duplicate request returns cache hit."""
+        """A duplicate request returns a cache hit."""
         base_url = server_with_artifacts["base_url"]
 
         request_body = {
@@ -87,7 +72,6 @@ class TestPutJson:
         assert data2["artifact_uri"] == data1["artifact_uri"]
 
     def test_put_json_with_name(self, server_with_artifacts):
-        """Test JSON upload with name assignment."""
         base_url = server_with_artifacts["base_url"]
 
         response = requests.put(
@@ -107,7 +91,7 @@ class TestPutJson:
         assert data["artifact_uri"].startswith("strata://artifact/")
 
     def test_put_json_with_inputs(self, server_with_artifacts):
-        """Test JSON upload with input references for lineage."""
+        """Input references record lineage."""
         base_url = server_with_artifacts["base_url"]
 
         parent_response = requests.put(
@@ -138,10 +122,7 @@ class TestPutJson:
 
 
 class TestPutJsonClient:
-    """Tests for client.put_json() method."""
-
     def test_client_put_json(self, server_with_artifacts):
-        """Test client.put_json() method."""
         base_url = server_with_artifacts["base_url"]
         client = StrataClient(base_url=base_url)
 
@@ -166,7 +147,6 @@ class TestPutJsonClient:
             client.close()
 
     def test_client_put_json_cache_hit(self, server_with_artifacts):
-        """Test client.put_json() returns cache_hit=True on duplicate."""
         base_url = server_with_artifacts["base_url"]
         client = StrataClient(base_url=base_url)
 
@@ -187,7 +167,6 @@ class TestPutJsonClient:
             client.close()
 
     def test_client_get_json(self, server_with_artifacts):
-        """Test client.get_json() retrieves data correctly."""
         base_url = server_with_artifacts["base_url"]
         client = StrataClient(base_url=base_url)
 
@@ -210,7 +189,6 @@ class TestPutJsonClient:
             client.close()
 
     def test_client_put_json_with_name(self, server_with_artifacts):
-        """Test client.put_json() with name assignment."""
         base_url = server_with_artifacts["base_url"]
         client = StrataClient(base_url=base_url)
 
@@ -228,10 +206,10 @@ class TestPutJsonClient:
 
 
 class TestDeliberaIntegration:
-    """Tests simulating Delibera-like usage patterns."""
+    """Delibera-like usage patterns."""
 
     def test_delibera_step_persistence(self, server_with_artifacts):
-        """Test Delibera-style step artifact persistence."""
+        """Delibera-style step artifact persistence."""
         base_url = server_with_artifacts["base_url"]
         client = StrataClient(base_url=base_url)
 
@@ -316,10 +294,9 @@ class TestDeliberaIntegration:
 
 
 class TestPutMultipleTypes:
-    """Tests for client.put() with different data types."""
+    """client.put() with different data types."""
 
     def test_put_arrow_table(self, server_with_artifacts):
-        """Test put() with Arrow Table."""
         import pyarrow as pa
 
         base_url = server_with_artifacts["base_url"]
@@ -350,7 +327,6 @@ class TestPutMultipleTypes:
             client.close()
 
     def test_put_pandas_dataframe(self, server_with_artifacts):
-        """Test put() with Pandas DataFrame."""
         import pandas as pd
 
         base_url = server_with_artifacts["base_url"]
@@ -383,7 +359,7 @@ class TestPutMultipleTypes:
             client.close()
 
     def test_put_dict_columnar(self, server_with_artifacts):
-        """Test put() with dict that has columnar data."""
+        """A dict of columns."""
         base_url = server_with_artifacts["base_url"]
         client = StrataClient(base_url=base_url)
 
@@ -407,7 +383,7 @@ class TestPutMultipleTypes:
             client.close()
 
     def test_put_dict_nested_json(self, server_with_artifacts):
-        """Test put() with nested dict (stored as JSON)."""
+        """A nested dict is stored as JSON."""
         base_url = server_with_artifacts["base_url"]
         client = StrataClient(base_url=base_url)
 
@@ -431,7 +407,6 @@ class TestPutMultipleTypes:
             client.close()
 
     def test_put_cache_hit_with_arrow(self, server_with_artifacts):
-        """Test cache hit detection with Arrow Table."""
         import pyarrow as pa
 
         base_url = server_with_artifacts["base_url"]
@@ -451,7 +426,7 @@ class TestPutMultipleTypes:
             client.close()
 
     def test_put_with_lineage(self, server_with_artifacts):
-        """Test put() with lineage tracking across data types."""
+        """Lineage tracking across data types."""
         import pyarrow as pa
 
         base_url = server_with_artifacts["base_url"]
@@ -478,11 +453,11 @@ class TestPutMultipleTypes:
 
 
 class TestAsyncPut:
-    """Tests for AsyncStrataClient.put() and related methods."""
+    """AsyncStrataClient.put() and related methods."""
 
     @pytest.fixture
     async def async_client(self, server_with_artifacts):
-        """Create an async client for testing."""
+        """An async client."""
         from strata_client.client import AsyncStrataClient
 
         base_url = server_with_artifacts["base_url"]
@@ -492,7 +467,6 @@ class TestAsyncPut:
 
     @pytest.mark.asyncio
     async def test_async_put_json(self, async_client):
-        """Test async client put_json() method."""
         artifact = await async_client.put_json(
             inputs=[],
             transform={
@@ -507,7 +481,6 @@ class TestAsyncPut:
 
     @pytest.mark.asyncio
     async def test_async_put_json_cache_hit(self, async_client):
-        """Test async client put_json() returns cache hit on duplicate."""
         transform = {
             "executor": "async_cache@v1",
             "params": {"version": 1},
@@ -523,7 +496,6 @@ class TestAsyncPut:
 
     @pytest.mark.asyncio
     async def test_async_get_json(self, async_client):
-        """Test async client get_json() retrieves data correctly."""
         original_data = {
             "nested": {"key": "value"},
             "list": [1, 2, 3],
@@ -540,7 +512,6 @@ class TestAsyncPut:
 
     @pytest.mark.asyncio
     async def test_async_put_arrow_table(self, async_client):
-        """Test async client put() with Arrow Table."""
         import pyarrow as pa
 
         table = pa.table(
@@ -565,7 +536,6 @@ class TestAsyncPut:
 
     @pytest.mark.asyncio
     async def test_async_put_pandas_dataframe(self, async_client):
-        """Test async client put() with Pandas DataFrame."""
         import pandas as pd
 
         df = pd.DataFrame(
@@ -589,7 +559,6 @@ class TestAsyncPut:
 
     @pytest.mark.asyncio
     async def test_async_put_with_name(self, async_client):
-        """Test async client put() with name assignment."""
         artifact = await async_client.put(
             inputs=[],
             transform={"executor": "async_named@v1", "params": {}},
@@ -601,7 +570,6 @@ class TestAsyncPut:
 
     @pytest.mark.asyncio
     async def test_async_put_with_lineage(self, async_client):
-        """Test async client put() with lineage tracking."""
         import pyarrow as pa
 
         parent = await async_client.put(

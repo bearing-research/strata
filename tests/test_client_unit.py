@@ -1,8 +1,6 @@
-"""Unit tests for ``strata.client`` — HTTP-mocked, no live server.
+"""Unit tests for ``strata.client`` against a mocked HTTP transport.
 
-Complements the integration tests (which exercise happy paths against a
-running server) by covering the error / retry / parsing paths that the
-integration suite doesn't reach. These tests run in milliseconds.
+Covers the error, retry and parsing paths the live-server integration tests do not reach.
 """
 
 from __future__ import annotations
@@ -25,17 +23,11 @@ from strata_client.client import (
 
 
 def _make_client(handler) -> StrataClient:
-    """Build a StrataClient backed by an httpx MockTransport.
-
-    Thin wrapper around ``StrataClient.from_transport`` so tests stay
-    readable; ``handler`` is the request-handler callable that maps
-    ``httpx.Request`` → ``httpx.Response``.
-    """
+    """Build a StrataClient whose requests go to ``handler``."""
     return StrataClient.from_transport(httpx.MockTransport(handler))
 
 
 def _arrow_ipc_bytes(table: pa.Table) -> bytes:
-    """Serialize a pyarrow Table to Arrow IPC stream bytes."""
     sink = pa.BufferOutputStream()
     with ipc.new_stream(sink, table.schema) as writer:
         writer.write_table(table)
@@ -46,7 +38,7 @@ def _arrow_ipc_bytes(table: pa.Table) -> bytes:
 
 
 class TestRetryConfig:
-    """Tests for ``RetryConfig.calculate_delay`` — pure math, no I/O."""
+    """``RetryConfig.calculate_delay``: pure math, no I/O."""
 
     def test_defaults_are_set(self):
         config = RetryConfig()
@@ -82,7 +74,7 @@ class TestRetryConfig:
 
 
 class TestArtifactProperties:
-    """Properties on ``Artifact`` — pure formatting, no I/O."""
+    """Properties on ``Artifact``: pure formatting, no I/O."""
 
     def _artifact(self, **kwargs: Any) -> Artifact:
         defaults = {"_client": None, "artifact_id": "abc123", "version": 7}
@@ -99,7 +91,7 @@ class TestArtifactProperties:
 
 
 class TestParseArtifactUri:
-    """``_parse_artifact_uri`` — invalid input raises ValueError."""
+    """``_parse_artifact_uri`` raises ValueError on invalid input."""
 
     def test_valid_uri(self):
         assert _parse_artifact_uri("strata://artifact/abc@v=3") == ("abc", 3)
@@ -177,7 +169,7 @@ class TestArtifactHttpAccessors:
 
 
 class TestArtifactToTable:
-    """``Artifact.to_table`` and friends — stream-cached path."""
+    """``Artifact.to_table`` and friends on the stream-cached path."""
 
     def test_to_table_from_empty_stream(self):
         artifact = Artifact(_client=None, artifact_id="abc", version=1, _stream_data=b"")
@@ -225,7 +217,7 @@ class TestArtifactToTable:
 
 
 class TestSimpleEndpoints:
-    """``health`` / ``metrics`` / ``clear_cache`` — single-call helpers."""
+    """``health`` / ``metrics`` / ``clear_cache``."""
 
     def test_health(self):
         def handler(request: httpx.Request) -> httpx.Response:
@@ -260,7 +252,7 @@ class TestSimpleEndpoints:
 
 
 class TestFetchStreamRetry:
-    """``_fetch_stream_with_retry`` — 429 → backoff → success."""
+    """``_fetch_stream_with_retry``: 429, backoff, then success."""
 
     def test_returns_content_on_first_success(self):
         def handler(request: httpx.Request) -> httpx.Response:
@@ -315,7 +307,7 @@ class TestFetchStreamRetry:
 
 
 class TestFetchWithWait:
-    """``_fetch_artifact_data_with_wait`` — building / failed / unknown branches."""
+    """``_fetch_artifact_data_with_wait``: building, failed and unknown states."""
 
     def test_failed_state_raises_with_message(self):
         def handler(request: httpx.Request) -> httpx.Response:
@@ -355,9 +347,7 @@ class TestFetchWithWait:
         assert calls["status"] >= 3
 
     def test_unknown_state_falls_back_to_direct_fetch(self, monkeypatch):
-        """A state the client doesn't recognize falls through to a fetch
-        rather than looping forever. Defensive against server-side
-        introducing new state values."""
+        """An unrecognized state falls through to a fetch rather than looping forever."""
 
         def handler(request: httpx.Request) -> httpx.Response:
             return httpx.Response(200, json={"state": "some-new-state"})
@@ -390,8 +380,7 @@ class TestFetchWithWait:
 
 
 class TestMaterializeRequestShape:
-    """``materialize`` request body shape: ``ref`` → ``executor`` rename,
-    optional ``name`` / ``refresh`` flags, cache-hit response handling."""
+    """``materialize`` request body: ``ref`` sent as ``executor``, optional flags, cache hits."""
 
     def test_ref_is_renamed_to_executor(self):
         captured: list[dict[str, Any]] = []

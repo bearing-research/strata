@@ -1,4 +1,4 @@
-"""Tests for server-mode transforms (async materialize + build polling)."""
+"""Server-mode transforms: async materialize and build polling."""
 
 import json
 
@@ -19,7 +19,7 @@ from strata.transforms.registry import (
 
 @pytest.fixture
 def server_mode_config(tmp_path):
-    """Create config for server mode with transforms enabled."""
+    """Server-mode config with transforms enabled."""
     artifact_dir = tmp_path / "artifacts"
     artifact_dir.mkdir()
 
@@ -49,7 +49,7 @@ def server_mode_config(tmp_path):
 
 @pytest.fixture
 def personal_mode_config(tmp_path):
-    """Create config for personal mode (client-side execution)."""
+    """Personal-mode config."""
     artifact_dir = tmp_path / "artifacts"
     artifact_dir.mkdir()
 
@@ -64,7 +64,7 @@ def personal_mode_config(tmp_path):
 
 @pytest.fixture
 def server_mode_auth_config(tmp_path):
-    """Create config for server mode with trusted-proxy auth enabled."""
+    """Server-mode config with trusted-proxy auth."""
     artifact_dir = tmp_path / "artifacts"
     artifact_dir.mkdir()
 
@@ -97,7 +97,7 @@ def server_mode_auth_config(tmp_path):
 
 @pytest.fixture
 def server_mode_app(server_mode_config):
-    """Create test app with server mode config."""
+    """A test app with the server-mode config."""
     import strata.server as server_module
     from strata.server import app
 
@@ -140,7 +140,7 @@ def server_mode_app(server_mode_config):
 
 @pytest.fixture
 def personal_mode_app(personal_mode_config):
-    """Create test app with personal mode config."""
+    """A test app with the personal-mode config."""
     import strata.server as server_module
     from strata.server import app
 
@@ -177,7 +177,7 @@ def personal_mode_app(personal_mode_config):
 
 @pytest.fixture
 def server_mode_auth_app(server_mode_auth_config):
-    """Create test app with server mode config and trusted-proxy auth."""
+    """A test app with server mode and trusted-proxy auth."""
     import strata.server as server_module
     from strata.server import app
 
@@ -231,10 +231,10 @@ def _auth_headers(
 
 
 class TestNotebookWorkerAdminApi:
-    """Tests for the server-managed notebook worker admin API."""
+    """The server-managed notebook worker admin API."""
 
     def test_list_notebook_workers_service_mode(self, server_mode_app):
-        """Service mode should expose the server-managed notebook worker registry."""
+        """Service mode exposes the server-managed notebook worker registry."""
         response = server_mode_app.get("/v1/admin/notebook-workers")
 
         assert response.status_code == 200
@@ -250,7 +250,7 @@ class TestNotebookWorkerAdminApi:
         )
 
     def test_update_notebook_workers_service_mode(self, server_mode_app):
-        """Replacing the registry should update both stored specs and catalog."""
+        """Replacing the registry updates both the stored specs and the catalog."""
         response = server_mode_app.put(
             "/v1/admin/notebook-workers",
             json={
@@ -284,7 +284,7 @@ class TestNotebookWorkerAdminApi:
         assert listed.json()["configured_workers"][0]["name"] == "gpu-a100"
 
     def test_create_update_delete_notebook_worker_service_mode(self, server_mode_app):
-        """Service mode should support targeted worker CRUD by name."""
+        """Targeted worker CRUD by name."""
         created = server_mode_app.post(
             "/v1/admin/notebook-workers",
             json={
@@ -322,7 +322,6 @@ class TestNotebookWorkerAdminApi:
         assert deleted.json()["configured_workers"] == []
 
     def test_create_notebook_worker_rejects_duplicate_name(self, server_mode_app):
-        """Targeted create should reject an existing worker name."""
         seeded = server_mode_app.post(
             "/v1/admin/notebook-workers",
             json={
@@ -347,7 +346,7 @@ class TestNotebookWorkerAdminApi:
         assert "already exists" in duplicate.json()["detail"]
 
     def test_patch_notebook_worker_enabled_state(self, server_mode_app):
-        """Service-mode worker admin can disable and re-enable one worker."""
+        """One worker can be disabled and re-enabled."""
         seeded = server_mode_app.put(
             "/v1/admin/notebook-workers",
             json={
@@ -384,7 +383,7 @@ class TestNotebookWorkerAdminApi:
         assert enabled.json()["configured_workers"][0]["enabled"] is True
 
     def test_refresh_notebook_worker_health(self, server_mode_app):
-        """Service-mode worker admin can force-refresh one worker by name."""
+        """One worker's health can be force-refreshed by name."""
         seeded = server_mode_app.put(
             "/v1/admin/notebook-workers",
             json={
@@ -413,7 +412,7 @@ class TestNotebookWorkerAdminApi:
         server_mode_app,
         monkeypatch,
     ):
-        """Forced refreshes should accumulate a short recent probe trail."""
+        """Forced refreshes accumulate a short recent probe trail."""
         import strata.notebook.workers as notebook_workers
 
         class _FakeResponse:
@@ -496,7 +495,6 @@ class TestNotebookWorkerAdminApi:
         ]
 
     def test_update_notebook_workers_rejects_duplicate_names(self, server_mode_app):
-        """Service-mode worker admin should reject duplicate worker names."""
         response = server_mode_app.put(
             "/v1/admin/notebook-workers",
             json={
@@ -524,7 +522,7 @@ class TestNotebookWorkerAdminApi:
         tmp_path,
         monkeypatch,
     ):
-        """Admin enable/disable should flow through notebook worker APIs."""
+        """Admin enable/disable flows through the notebook worker APIs."""
 
         monkeypatch.setattr("strata.notebook.session._uv_sync", lambda path, **kw: True)
 
@@ -613,7 +611,7 @@ class TestNotebookWorkerAdminApi:
         tmp_path,
         monkeypatch,
     ):
-        """Create/update/delete should propagate into notebook-visible worker policy."""
+        """Create, update and delete reach the notebook-visible worker policy."""
 
         monkeypatch.setattr("strata.notebook.session._uv_sync", lambda path, **kw: True)
 
@@ -715,14 +713,14 @@ class TestNotebookWorkerAdminApi:
         assert "not allowed in service mode" in blocked_deleted.json()["detail"]
 
     def test_notebook_workers_admin_requires_service_mode(self, personal_mode_app):
-        """The admin registry should not exist in personal mode."""
+        """The admin registry does not exist in personal mode."""
         response = personal_mode_app.get("/v1/admin/notebook-workers")
 
         assert response.status_code == 409
         assert "service mode" in response.json()["detail"]
 
     def test_notebook_workers_admin_requires_scope(self, server_mode_auth_app):
-        """Trusted-proxy mode should require the notebook worker admin scope."""
+        """Trusted-proxy mode requires the notebook worker admin scope."""
         blocked = server_mode_auth_app.get(
             "/v1/admin/notebook-workers",
             headers=_auth_headers(),
@@ -796,10 +794,9 @@ class TestNotebookWorkerAdminApi:
 
 
 class TestTransformValidation:
-    """Tests for transform allowlist validation in server mode."""
+    """Transform allowlist validation in server mode."""
 
     def test_allowed_transform_succeeds(self, server_mode_app):
-        """Materialize with registered transform succeeds."""
         response = server_mode_app.post(
             "/v1/artifacts/materialize",
             json={
@@ -820,7 +817,7 @@ class TestTransformValidation:
         assert data["build_spec"] is None
 
     def test_unregistered_transform_rejected(self, server_mode_app):
-        """Materialize with unregistered transform returns 403."""
+        """An unregistered transform returns 403."""
         response = server_mode_app.post(
             "/v1/artifacts/materialize",
             json={
@@ -838,7 +835,7 @@ class TestTransformValidation:
         assert "unknown_executor" in data["detail"]["message"]
 
     def test_wildcard_version_matches(self, server_mode_app):
-        """Wildcard version in registry matches any version."""
+        """A wildcard version in the registry matches any version."""
         response = server_mode_app.post(
             "/v1/artifacts/materialize",
             json={
@@ -855,12 +852,9 @@ class TestTransformValidation:
         assert data["build_id"] is not None
 
     def test_personal_mode_runs_embedded_and_rejects_unknown(self, personal_mode_app):
-        """Personal mode executes embedded transforms; unknown ones fail fast.
+        """Personal mode runs registered transforms embedded; unknown refs are a 400.
 
-        An executor the registry can't resolve used to be accepted and
-        parked in 'building' forever (no executor existed in personal
-        mode). The embedded runner now executes registered transforms,
-        and unknown refs are rejected with a 400.
+        Accepting an unresolvable executor would park the build in 'building' forever.
         """
         response = personal_mode_app.post(
             "/v1/artifacts/materialize",
@@ -891,7 +885,7 @@ class TestTransformValidation:
         assert data["state"] == "pending"
 
     def test_transform_requires_scope_without_scope_is_rejected(self, server_mode_auth_app):
-        """Registered transforms can still require an explicit principal scope."""
+        """A registered transform can require an explicit principal scope."""
         response = server_mode_auth_app.post(
             "/v1/artifacts/materialize",
             json={
@@ -910,7 +904,7 @@ class TestTransformValidation:
         assert data["detail"]["required_scope"] == "transform:restricted"
 
     def test_transform_requires_scope_with_scope_succeeds(self, server_mode_auth_app):
-        """Transforms guarded by requires_scope should run for authorized callers."""
+        """A requires_scope transform runs for an authorized caller."""
         response = server_mode_auth_app.post(
             "/v1/artifacts/materialize",
             json={
@@ -932,7 +926,7 @@ class TestTransformValidation:
     async def test_server_mode_materialize_respects_quota_estimate(
         self, server_mode_config, monkeypatch
     ):
-        """Quota checks should use a real output estimate, not zero."""
+        """Quota checks use a real output estimate, not zero."""
         from unittest.mock import MagicMock
 
         import strata.server as server_module
@@ -1016,10 +1010,10 @@ class TestTransformValidation:
 
 
 class TestAsyncBuildFlow:
-    """Tests for async build flow in server mode."""
+    """The async build flow in server mode."""
 
     def test_materialize_returns_build_id(self, server_mode_app):
-        """Materialize in server mode returns build_id for polling."""
+        """Materialize returns a build_id for polling."""
         response = server_mode_app.post(
             "/v1/artifacts/materialize",
             json={
@@ -1040,7 +1034,6 @@ class TestAsyncBuildFlow:
         assert data["artifact_uri"].startswith("strata://artifact/")
 
     def test_poll_build_status(self, server_mode_app):
-        """Can poll build status using build_id."""
         create_resp = server_mode_app.post(
             "/v1/artifacts/materialize",
             json={
@@ -1065,13 +1058,12 @@ class TestAsyncBuildFlow:
         assert data["created_at"] > 0
 
     def test_poll_nonexistent_build(self, server_mode_app):
-        """Polling nonexistent build returns 404."""
         response = server_mode_app.get("/v1/artifacts/builds/nonexistent-id")
 
         assert response.status_code == 404
 
     def test_build_polling_nonexistent_build_in_personal_mode(self, personal_mode_app):
-        """Personal mode exposes build polling, but missing builds still return 404."""
+        """Personal mode exposes build polling; a missing build is still 404."""
         response = personal_mode_app.get("/v1/artifacts/builds/some-id")
 
         assert response.status_code == 404
@@ -1079,10 +1071,10 @@ class TestAsyncBuildFlow:
 
 
 class TestProvenanceDeduplication:
-    """Tests for provenance-based deduplication in server mode."""
+    """Provenance-based deduplication in server mode."""
 
     def test_same_inputs_same_provenance(self, server_mode_app):
-        """Same inputs + transform should have same provenance."""
+        """Same inputs and transform give the same provenance."""
         resp1 = server_mode_app.post(
             "/v1/artifacts/materialize",
             json={
@@ -1129,7 +1121,7 @@ class TestProvenanceDeduplication:
         assert data2["state"] == "ready"
 
     def test_named_inputs_resolve_with_tenant_context(self, server_mode_auth_app):
-        """Tenant-scoped name inputs should drive provenance and rebuilds correctly."""
+        """Tenant-scoped name inputs drive provenance and rebuilds."""
         store = get_artifact_store()
         assert store is not None
 
@@ -1199,10 +1191,8 @@ class TestProvenanceDeduplication:
 
 
 class TestServerModeConfig:
-    """Tests for server-mode configuration."""
-
     def test_server_transforms_enabled_property(self, tmp_path):
-        """server_transforms_enabled returns True with proper config."""
+        """server_transforms_enabled is True with the right config."""
         config = StrataConfig(
             deployment_mode="service",
             artifact_dir=tmp_path / "artifacts",  # transforms persist; store required
@@ -1211,12 +1201,10 @@ class TestServerModeConfig:
         assert config.server_transforms_enabled is True
 
     def test_server_transforms_disabled_by_default(self):
-        """server_transforms_enabled is False by default."""
         config = StrataConfig(deployment_mode="service")
         assert config.server_transforms_enabled is False
 
     def test_server_transforms_disabled_in_personal_mode(self):
-        """server_transforms_enabled is False in personal mode."""
         config = StrataConfig(
             deployment_mode="personal",
             transforms_config={"enabled": True},
@@ -1224,7 +1212,7 @@ class TestServerModeConfig:
         assert config.server_transforms_enabled is False
 
     def test_transform_registry_from_config(self):
-        """TransformRegistry.from_config parses properly."""
+        """TransformRegistry.from_config parses the config."""
         config = {
             "enabled": True,
             "registry": [
@@ -1250,10 +1238,10 @@ class TestServerModeConfig:
 
 
 class TestMixedModeScenarios:
-    """Tests for mixed scenarios (e.g., server mode with auth)."""
+    """Mixed scenarios, such as server mode with auth."""
 
     def test_materialize_without_transforms_enabled(self, tmp_path):
-        """Materialize in service mode without transforms returns 403."""
+        """Service mode without transforms returns 403."""
         from unittest.mock import MagicMock
 
         import strata.server as server_module
@@ -1297,14 +1285,12 @@ class TestMixedModeScenarios:
 
 
 class TestServiceModeReviewFindings:
-    """Regressions for the service-mode review findings (authz + manifest)."""
+    """Service-mode authz and manifest regressions."""
 
     def test_materialize_propagates_denied_input_authz(self, server_mode_app, monkeypatch):
-        """A 403 from input resolution (e.g. a table-ACL deny) must propagate.
+        """A 403 from input resolution (such as a table-ACL deny) must propagate.
 
-        Regression: ``materialize_artifact`` caught every ``HTTPException`` from
-        ``_resolve_input_version`` and fell back to the raw URI, so a denied
-        table input still created a build.
+        Falling back to the raw URI would still create a build for a denied input.
         """
         from fastapi import HTTPException
 
@@ -1326,8 +1312,7 @@ class TestServiceModeReviewFindings:
         assert response.status_code == 403
 
     def test_materialize_falls_back_on_unresolvable_input(self, server_mode_app, monkeypatch):
-        """A 400 (unresolvable / legacy fake URI) still falls back to the raw
-        URI so the build proceeds — only authz / not-found short-circuit."""
+        """A 400 still falls back to the raw URI; only authz and not-found short-circuit."""
         from fastapi import HTTPException
 
         def unresolvable(*_args, **_kwargs):
@@ -1349,12 +1334,7 @@ class TestServiceModeReviewFindings:
         assert response.json()["build_id"] is not None
 
     def test_materialize_build_carries_inputs_and_params_into_manifest(self, server_mode_auth_app):
-        """The build created by the materialize route must carry input_uris and
-        params, so the pull-model manifest isn't empty.
-
-        Regression: ``create_build`` was called without ``input_uris`` / ``params``,
-        producing an empty-input, empty-param manifest.
-        """
+        """The build carries input_uris and params, so the pull-model manifest is not empty."""
         # Artifact inputs resolve through the store (tenant-gated), so a fictional id is a
         # 404. It must carry the caller's tenant: a tenantless artifact persists with
         # tenant='', which the gate compares against the request's tenant.
@@ -1388,15 +1368,13 @@ class TestServiceModeReviewFindings:
         assert data["metadata"]["params"] == {"sql": "SELECT * FROM input"}
 
     def test_registry_reads_work_in_service_mode(self, server_mode_app):
-        """Registry read routes must serve in service mode (allow_read=True),
-        not 403 like the neighboring write routes."""
+        """Registry read routes serve in service mode (allow_read=True), unlike the write routes."""
         for path in ("/v1/names", "/v1/registry/summary", "/v1/registry/audit"):
             response = server_mode_app.get(path)
             assert response.status_code == 200, (path, response.status_code, response.text)
 
     def test_admin_tenants_requires_admin_scope(self, server_mode_auth_app):
-        """The cross-tenant admin observability routes require an admin scope
-        under trusted-proxy auth (regression: they were ungated)."""
+        """The cross-tenant admin routes require an admin scope under trusted-proxy auth."""
         # No admin scope: 403.
         denied = server_mode_auth_app.get("/v1/admin/tenants", headers=_auth_headers())
         assert denied.status_code == 403

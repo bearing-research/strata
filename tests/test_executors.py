@@ -1,7 +1,4 @@
-"""Unit tests for local executors.
-
-These tests verify embedded executor functionality.
-"""
+"""Unit tests for the embedded local executors."""
 
 import pyarrow as pa
 import pytest
@@ -11,10 +8,9 @@ from strata.transforms.base import _run_transform as run_transform
 
 
 class TestRunLocal:
-    """Tests for the run_local dispatcher."""
+    """The run_local dispatcher."""
 
     def test_duckdb_executor_dispatch(self):
-        """DuckDB executor is correctly dispatched."""
         build_spec = {
             "executor": "local://duckdb_sql@v1",
             "params": {"sql": "SELECT 1 as x"},
@@ -25,7 +21,7 @@ class TestRunLocal:
         assert result.column_names == ["x"]
 
     def test_duckdb_executor_without_prefix(self):
-        """DuckDB executor works without local:// prefix."""
+        """The DuckDB executor works without the local:// prefix."""
         build_spec = {
             "executor": "duckdb_sql@v1",
             "params": {"sql": "SELECT 42 as answer"},
@@ -35,7 +31,6 @@ class TestRunLocal:
         assert result.to_pydict() == {"answer": [42]}
 
     def test_unsupported_executor_raises(self):
-        """Unknown executor raises ValueError."""
         build_spec = {
             "executor": "local://unknown_executor@v1",
             "params": {},
@@ -47,7 +42,6 @@ class TestRunLocal:
         assert "unknown_executor" in str(exc_info.value)
 
     def test_empty_executor_raises(self):
-        """Empty executor raises ValueError."""
         build_spec = {
             "executor": "",
             "params": {},
@@ -59,10 +53,7 @@ class TestRunLocal:
 
 
 class TestDuckDBExecutor:
-    """Tests for DuckDB SQL executor."""
-
     def test_simple_query(self):
-        """Execute a simple query without inputs."""
         result = run_transform(
             "duckdb_sql@v1",
             inputs=[],
@@ -72,7 +63,6 @@ class TestDuckDBExecutor:
         assert result.to_pydict() == {"a": [1], "b": ["hello"]}
 
     def test_single_input_table(self):
-        """Execute query with one input table."""
         input_table = pa.table({"id": [1, 2, 3], "value": [10, 20, 30]})
         result = run_transform(
             "duckdb_sql@v1",
@@ -82,7 +72,6 @@ class TestDuckDBExecutor:
         assert result.to_pydict() == {"total": [60]}
 
     def test_multiple_input_tables(self):
-        """Execute query joining multiple input tables."""
         users = pa.table({"user_id": [1, 2], "name": ["Alice", "Bob"]})
         orders = pa.table({"user_id": [1, 1, 2], "amount": [100, 200, 150]})
 
@@ -102,7 +91,6 @@ class TestDuckDBExecutor:
         assert result.to_pydict() == {"name": ["Alice", "Bob"], "total": [300, 150]}
 
     def test_missing_sql_raises(self):
-        """Missing SQL parameter raises ValidationError."""
         from pydantic import ValidationError
 
         with pytest.raises(ValidationError):
@@ -113,7 +101,6 @@ class TestDuckDBExecutor:
             )
 
     def test_empty_sql_raises(self):
-        """Empty SQL parameter raises ValidationError."""
         from pydantic import ValidationError
 
         with pytest.raises(ValidationError):
@@ -124,7 +111,7 @@ class TestDuckDBExecutor:
             )
 
     def test_query_with_missing_table_raises(self):
-        """Query referencing missing table raises DuckDB error."""
+        """A query referencing a missing table raises a DuckDB error."""
         import duckdb
 
         with pytest.raises(duckdb.CatalogException):
@@ -135,7 +122,6 @@ class TestDuckDBExecutor:
             )
 
     def test_filter_and_aggregate(self):
-        """Test filtering and aggregation."""
         events = pa.table(
             {
                 "event_type": ["click", "view", "click", "purchase", "view"],
@@ -161,7 +147,6 @@ class TestDuckDBExecutor:
         }
 
     def test_preserves_arrow_types(self):
-        """DuckDB preserves Arrow types correctly."""
         input_table = pa.table(
             {
                 "int_col": pa.array([1, 2, 3], type=pa.int64()),
@@ -181,10 +166,10 @@ class TestDuckDBExecutor:
 
 
 class TestRunLocalWithBuildSpec:
-    """Tests for run_local with build_spec format (mimicking server response)."""
+    """run_local with the build_spec format the server returns."""
 
     def test_run_local_with_uri_mapping(self):
-        """Test run_local with URI -> table mapping."""
+        """run_local with a URI-to-table mapping."""
         events = pa.table({"value": [10, 20, 30]})
 
         build_spec = {
@@ -198,7 +183,6 @@ class TestRunLocalWithBuildSpec:
         assert result.column("avg_val").to_pylist() == [20.0]
 
     def test_run_local_missing_input_raises(self):
-        """Missing input table raises ValueError."""
         build_spec = {
             "executor": "duckdb_sql@v1",
             "params": {"sql": "SELECT * FROM input0"},
@@ -210,7 +194,7 @@ class TestRunLocalWithBuildSpec:
         assert "file:///warehouse#db.events" in str(exc_info.value)
 
     def test_run_local_preserves_input_order(self):
-        """Input order is preserved from input_uris, not dict order."""
+        """Input order follows input_uris, not dict order."""
         first = pa.table({"val": [1]})
         second = pa.table({"val": [2]})
 

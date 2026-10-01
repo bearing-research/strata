@@ -1,8 +1,7 @@
-"""``GET /p/{token}/archive.zip`` — the deposit copy, without the store's DSN.
+"""``GET /p/{token}/archive.zip``: the deposit copy, without the store's DSN.
 
-The bundle was built by opening the store locally, so a service that only has
-HTTP access to the central store had to be handed the store's credentials to
-produce one. Item 18.
+A service with only HTTP access to the central store can produce the bundle without the store's
+credentials.
 """
 
 from __future__ import annotations
@@ -62,9 +61,9 @@ def _fetch(base_url: str, token: str) -> httpx.Response:
 
 class TestTheBundle:
     def test_it_is_the_same_files_the_cli_writes(self, served, tmp_path):
-        """The property the item asks for. Two implementations of a set of
-        files that describe each other would drift, and the drift would be
-        silent — both would keep producing a bundle."""
+        """Two implementations of mutually describing files would drift silently, so both must
+        match.
+        """
         from strata.artifact_cli import cmd_archive
 
         base_url, publication, artifact_dir = served
@@ -113,7 +112,7 @@ class TestTheBundle:
         assert hashlib.sha256(archived).hexdigest() == publication.content_sha256
 
     def test_it_opens_on_index_html(self, served):
-        """A person who unzips this meets the page first, not a .bin."""
+        """Someone who unzips this meets the page first, not a .bin."""
         base_url, publication, _ = served
 
         with zipfile.ZipFile(io.BytesIO(_fetch(base_url, publication.token).content)) as bundle:
@@ -140,10 +139,9 @@ def _archive(artifact_dir, to, **overrides):
 
 
 class TestTheSameBytesEachTime:
-    """A depositor records the digest of the zip they received and checks it
-    after the upload. Each member used to carry the modification time of a
-    file written moments before into a fresh directory, so two archives of one
-    publication differed in bytes, and in digest, while no file inside did."""
+    """A depositor checks the zip's digest after upload, so member timestamps must not vary between
+    archives of one publication.
+    """
 
     def test_every_member_carries_a_fixed_time_and_mode(self, served):
         base_url, publication, _ = served
@@ -162,9 +160,9 @@ class TestTheSameBytesEachTime:
         assert first.headers["Content-Digest"] == second.headers["Content-Digest"]
 
     def test_the_cli_writes_the_zip_the_route_serves(self, served, tmp_path):
-        """What an archiver without HTTP access to the store produces is the
-        same deposit, authors and DOI included, since both read the stored
-        record."""
+        """An archiver without HTTP access to the store produces the same deposit, authors and DOI
+        included, since both read the stored record.
+        """
         base_url, publication, artifact_dir = served
         ArtifactStore(artifact_dir).update_publication_credits(
             publication.token,
@@ -230,9 +228,7 @@ class TestHeaders:
 
 class TestRefusals:
     def test_a_withdrawn_publication_hands_over_nothing(self, served):
-        """The page still resolves and says withdrawn, because a reader chasing
-        a footnote deserves that answer. Handing them the archive anyway would
-        undo the withdrawal."""
+        """The page still says withdrawn, but handing over the archive would undo the withdrawal."""
         base_url, publication, artifact_dir = served
         ArtifactStore(artifact_dir).revoke_publication(publication.token)
 
@@ -246,9 +242,9 @@ class TestRefusals:
         assert _fetch(base_url, "not-a-token").status_code == 404
 
     def test_upstream_bytes_are_not_in_it(self, served, tmp_path):
-        """Showing which steps produced a result is transparency; handing over
-        the upstream datasets is not the same thing, and is not what publishing
-        consented to. Same rule as ``/p/{token}/data``."""
+        """Publishing shows which steps produced a result; it does not consent to handing over
+        upstream datasets. Same rule as ``/p/{token}/data``.
+        """
         base_url, publication, _ = served
 
         with zipfile.ZipFile(io.BytesIO(_fetch(base_url, publication.token).content)) as bundle:

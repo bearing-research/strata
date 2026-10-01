@@ -1,10 +1,7 @@
 """Cancelling a remote cell stops the worker, instead of leaving it computing.
 
-The server marks the build failed and both ``finalize`` and the upload route
-refuse anything outside the active states, so a cancelled cell's result could
-never land. What was lost was the machine: it ran the cell to completion for a
-caller that had already gone, holding a slot — and, on a GPU box, the hardware
-someone is paying for.
+The cancelled result could never land anyway; the cost was the machine (a slot,
+or a paid GPU) running the cell for a caller that had gone.
 """
 
 from __future__ import annotations
@@ -31,11 +28,9 @@ def test_health_advertises_cancel(worker):
 
 
 def test_cancelling_an_unknown_execution_is_not_an_error(worker):
-    """ "Already gone" is a normal answer.
+    """Cancelling an execution that already finished is a normal answer.
 
-    The execution may have finished between the server deciding to cancel and
-    the request landing. A caller that read that as a failure would retire a
-    machine that is healthy and idle.
+    A caller reading it as failure would retire a healthy, idle machine.
     """
     response = worker.post("/v1/executions/nonexistent/cancel")
 
@@ -56,7 +51,7 @@ def test_cancel_requires_the_worker_token_when_one_is_set(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_a_registered_harness_is_killed_and_deregistered(tmp_path):
-    """The mechanism, not the response body: the process must actually die."""
+    """The process must actually die, not just the response report it."""
     script = tmp_path / "sleeper.py"
     script.write_text("import time\ntime.sleep(300)\n")
     manifest = tmp_path / "manifest.json"
@@ -89,7 +84,7 @@ async def test_a_registered_harness_is_killed_and_deregistered(tmp_path):
 
 @pytest.mark.asyncio
 async def test_an_unidentified_execution_is_simply_not_cancellable(tmp_path):
-    """No build id is the pre-existing behaviour, not an error."""
+    """No build id means not cancellable, which is not an error."""
     script = tmp_path / "quick.py"
     script.write_text("import json,sys,pathlib\n")
     manifest = tmp_path / "manifest.json"
@@ -106,9 +101,8 @@ async def test_an_unidentified_execution_is_simply_not_cancellable(tmp_path):
 async def test_the_route_kills_a_running_execution(tmp_path):
     """End to end: POST cancel, and the harness process is actually dead.
 
-    Driven with an in-process ASGI client rather than TestClient so the
-    subprocess and the route that terminates it share one event loop — an
-    asyncio subprocess is bound to the loop that created it.
+    An in-process ASGI client, not TestClient, keeps the subprocess and the route
+    on one event loop; an asyncio subprocess is bound to its creating loop.
     """
     import httpx
 
@@ -139,12 +133,10 @@ async def test_the_route_kills_a_running_execution(tmp_path):
 
 
 class TestCancelUrlMapping:
-    """The cancel URL has to land on the same worker the dispatch went to.
+    """The cancel URL lands on the worker the dispatch went to.
 
-    Executor URLs arrive in several shapes — bare base, a specific endpoint,
-    or a path prefix when a facade fronts a pool — and a cancel posted to the
-    wrong path is silently a no-op: the worker answers 404, the machine keeps
-    computing, and nothing says so.
+    Executor URLs come as a bare base, an endpoint, or a facade's path prefix; a
+    cancel to the wrong path is a silent 404 while the machine keeps computing.
     """
 
     @pytest.mark.parametrize(

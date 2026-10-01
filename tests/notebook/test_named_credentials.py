@@ -1,4 +1,4 @@
-"""Named credentials for mounts and connections. Item 23.
+"""Named credentials for mounts and connections.
 
 A notebook names a credential and never contains one. The name reaches
 provenance, the values never do, and a missing name fails the cell naming it.
@@ -141,9 +141,8 @@ class TestProvenance:
         )
 
     def test_a_mount_without_a_credential_names_no_credential(self, tmp_path):
-        """No notebook's cache moves because *this feature* exists: an
-        uncredentialed mount's fingerprint is its name, its uri and its
-        contents, with nothing about credentials in it."""
+        """An uncredentialed mount's fingerprint is its name, uri and contents, so no cache
+        moves."""
         from strata.notebook.mounts import MountFingerprinter
 
         data = tmp_path / "data"
@@ -156,12 +155,9 @@ class TestProvenance:
         )
 
     def test_two_empty_directories_are_not_one_input(self, tmp_path):
-        """A cell reads the mount's path as well as what is in it, so pointing
-        it somewhere else is a change.
+        """A cell reads the mount's path too, so pointing it elsewhere is a change.
 
-        The contents hash covers relative paths, sizes and mtimes, which tells
-        most directories apart on their own — but two empty ones hash alike,
-        and so does any pair of paths that do not exist yet.
+        The contents hash alone cannot tell two empty or not-yet-existing paths apart.
         """
         first = tmp_path / "run-a"
         second = tmp_path / "run-b"
@@ -174,7 +170,7 @@ class TestProvenance:
         ) != mount_fingerprint_sync(resolver, MountSpec(name="data", uri=f"file://{second}"))
 
     def test_staleness_and_execution_agree_on_a_credentialed_mount(self, tmp_path, monkeypatch):
-        """Or the cell never matches its own artifacts and sits stale forever."""
+        """Otherwise the cell never matches its own artifacts and stays stale forever."""
         from strata.notebook.executor import CellExecutor
         from strata.notebook.parser import parse_notebook
         from strata.notebook.session import NotebookSession
@@ -205,7 +201,7 @@ class TestProvenance:
 
 
 def test_a_remote_mount_is_fetched_with_the_credentials_secret(tmp_path, monkeypatch):
-    """Resolves with no secret in notebook.toml: fsspec is handed the values."""
+    """No secret is in notebook.toml, yet fsspec is handed the values."""
     import fsspec
 
     seen: list[dict] = []

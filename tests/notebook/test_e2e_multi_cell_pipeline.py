@@ -33,7 +33,6 @@ class TestLinearCascade:
     """Three-cell chain: c1 → c2 → c3. Execute c3 triggers cascade of c1, c2."""
 
     def test_cascade_executes_all_upstream(self, setup):
-        """Executing the leaf cell triggers full cascade."""
         client, tmp = setup
         nb = (
             NotebookBuilder(tmp)
@@ -81,7 +80,6 @@ class TestLinearCascade:
                     assert "ready" in statuses, f"{cell_id} never became ready"
 
     def test_no_cascade_when_upstream_ready(self, setup):
-        """If upstream cells are already ready, no cascade is triggered."""
         client, tmp = setup
         nb = NotebookBuilder(tmp).add_cell("c1", "x = 1").add_cell("c2", "y = x + 1", after="c1")
 
@@ -101,7 +99,6 @@ class TestBranchingDAG:
     """Branching DAG: c1 → c2, c1 → c3 (two consumers of c1's output)."""
 
     def test_shared_upstream(self, setup):
-        """Two cells consume the same upstream variable."""
         client, tmp = setup
         nb = (
             NotebookBuilder(tmp)
@@ -200,9 +197,9 @@ class TestRerunExecution:
                 assert final["payload"].get("cache_hit") is False
 
     def test_rerun_picks_up_edited_upstream_after_flush(self, setup):
-        """Editing an upstream then rerunning a downstream must re-execute the
-        upstream too — the cascade planner sees the dirty upstream as stale
-        once the source update has been flushed."""
+        """Editing an upstream then rerunning a downstream re-executes the upstream: once the source
+        update is flushed, the planner sees it as stale.
+        """
         client, tmp = setup
         nb = NotebookBuilder(tmp).add_cell("c1", "x = 1").add_cell("c2", "y = x + 1", after="c1")
 
@@ -266,8 +263,7 @@ class TestRerunExecution:
 
 
 class TestRunAllBatching:
-    """run-all/rerun-all routes batchable runs through CellExecutor.execute_batch
-    instead of N single-cell subprocesses (#26 PR-b4)."""
+    """run-all and rerun-all route batchable runs through CellExecutor.execute_batch."""
 
     def test_run_all_uses_batch_execution_method(self, setup):
         """Three Python cells in notebook order form one batch; cell_output
@@ -298,10 +294,9 @@ class TestRunAllBatching:
                     )
 
     def test_run_all_continue_on_error_runs_remaining_cells(self, setup):
-        """With continue_on_error=true (default), a failed cell mid-batch
-        doesn't stop the run. Cells after the failed one continue via
-        single-cell with skip_upstream_materialization=True; a cell that
-        doesn't depend on the failure succeeds."""
+        """With continue_on_error (the default), a failed cell mid-batch does not stop the run; a
+        cell that does not depend on the failure succeeds.
+        """
         client, tmp = setup
         nb = (
             NotebookBuilder(tmp)
@@ -330,10 +325,7 @@ class TestRunAllBatching:
                 )
 
     def test_run_all_passes_env_annotations_to_batch(self, setup):
-        """`# @env KEY=VALUE` reaches the batched cell. Regression for
-        #33 review finding #1 — the dispatcher had been dropping all env
-        when building cell_specs.
-        """
+        """`# @env KEY=VALUE` reaches the batched cell."""
         client, tmp = setup
         nb = (
             NotebookBuilder(tmp)
@@ -358,11 +350,8 @@ class TestRunAllBatching:
                 assert c1["payload"]["outputs"]["value"]["preview"] == "batched"
 
     def test_run_all_mount_failure_emits_per_cell_error_not_batch_abort(self, setup):
-        """A failed mount on one cell becomes a per-cell error broadcast;
-        the rest of the batch still runs. Regression for #34 review
-        finding #3 — mount-prep exceptions had been propagating out of
-        _run_partition_batch and killing the whole run before any cell
-        emitted any frame.
+        """A failed mount on one cell is a per-cell error broadcast; the rest of the batch runs,
+        rather than the whole run dying before any frame.
         """
         client, tmp = setup
         nb = (
@@ -392,16 +381,10 @@ class TestRunAllBatching:
     def test_rerun_all_continues_after_failure_without_re_running_failed_upstream(
         self, setup, monkeypatch
     ):
-        """rerun-all + mid-batch failure: the cell that failed is not run again
-        by the cells that continue after it.
+        """rerun-all with a mid-batch failure does not run the failed cell again.
 
-        Regression for #33 review finding #2. It used to be served by running
-        every continuation cell with upstream materialization off, which also
-        let a cell *downstream* of the failure read the artifacts from before
-        it and publish a success built on them. Now a cell the failure reached
-        does not run at all, and one it did not reach materializes its own
-        upstreams normally, which never include the failed cell. The invariant
-        is the same; what enforces it is not.
+        A cell the failure reached does not run, so it cannot publish a success built on
+        pre-failure artifacts; one it did not reach materializes its own upstreams normally.
         """
         from strata.notebook import executor as executor_mod
 

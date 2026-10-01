@@ -1,7 +1,6 @@
-"""Presigned object-store URLs against a real S3 implementation. Item 12.
+"""Presigned object-store URLs against a real S3 implementation.
 
-MinIO checks SigV4 signatures and POST policies the way S3 does, so a URL it
-accepts is one S3 would; moto accepts anything. Needs Docker.
+MinIO checks SigV4 signatures and POST policies as S3 does; moto accepts anything. Needs Docker.
 """
 
 from __future__ import annotations
@@ -97,8 +96,7 @@ def test_a_store_without_credentials_does_not_presign(minio, monkeypatch):
 
 
 def test_a_worker_runs_a_job_whose_bytes_never_touch_strata(store, monkeypatch, tmp_path):
-    """Input read from and output written to the object store; the only request
-    that reaches the server's side is finalize."""
+    """Input and output go through the object store; only finalize reaches the server."""
     import http.server
     import json
     import threading

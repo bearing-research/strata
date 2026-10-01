@@ -1,4 +1,4 @@
-"""Tests for immutability detection (M6)."""
+"""Tests for input mutation detection."""
 
 from __future__ import annotations
 
@@ -15,10 +15,8 @@ from strata.notebook.immutability import (
 
 
 class TestMutationDetection:
-    """Test mutation detection for various types."""
-
     def test_dataframe_mutation_detection(self):
-        """Test detecting DataFrame mutation via inplace operation."""
+        """A DataFrame mutated by an inplace operation is detected."""
         df = pd.DataFrame({"a": [1, 2, 3], "b": [4.0, 5.0, 6.0]})
 
         namespace = {"df": df}
@@ -36,7 +34,6 @@ class TestMutationDetection:
         assert "mutated" in warnings[0]["message"].lower()
 
     def test_no_mutation_on_reassignment(self):
-        """Test that reassignment is not detected as mutation."""
         df = pd.DataFrame({"a": [1, 2, 3]})
         namespace = {"df": df}
 
@@ -52,7 +49,6 @@ class TestMutationDetection:
         assert len(warnings) == 0
 
     def test_no_mutation_on_read_only_access(self):
-        """Test that read-only operations don't trigger warnings."""
         df = pd.DataFrame({"a": [1, 2, 3], "b": [4.0, 5.0, 6.0]})
         namespace = {"df": df}
 
@@ -67,7 +63,6 @@ class TestMutationDetection:
         assert len(warnings) == 0
 
     def test_snapshot_multiple_inputs(self):
-        """Test snapshotting multiple input variables."""
         df1 = pd.DataFrame({"x": [1, 2]})
         df2 = pd.DataFrame({"y": [3, 4]})
         scalar = 42
@@ -82,7 +77,6 @@ class TestMutationDetection:
         assert snapshots[2].var_name == "scalar"
 
     def test_deleted_input_detected(self):
-        """Test that deleted input is detected as mutation."""
         df = pd.DataFrame({"a": [1, 2, 3]})
         namespace = {"df": df}
 
@@ -97,7 +91,6 @@ class TestMutationDetection:
         assert "df" in warnings[0]["var_name"]
 
     def test_defensive_copy_arrow(self):
-        """Test defensive copy for arrow content type."""
         df = pd.DataFrame({"a": [1, 2, 3]})
 
         # Arrow IPC doesn't need a copy (deserialization produces new object)
@@ -106,7 +99,6 @@ class TestMutationDetection:
         assert copy_df is df
 
     def test_defensive_copy_json(self):
-        """Test defensive copy for JSON content type."""
         data = {"key": "value", "list": [1, 2, 3]}
 
         # JSON objects get shallow copy
@@ -119,8 +111,6 @@ class TestMutationDetection:
         assert copy_data["list"] is data["list"]
 
     def test_defensive_copy_pickle(self):
-        """Test defensive copy for pickle content type."""
-
         class CustomClass:
             def __init__(self, value):
                 self.value = value
@@ -136,10 +126,7 @@ class TestMutationDetection:
 
 
 class TestInputSnapshot:
-    """Test InputSnapshot dataclass."""
-
     def test_snapshot_creation(self):
-        """Test creating an InputSnapshot."""
         snapshot = InputSnapshot(
             var_name="test_var",
             identity=12345,
@@ -151,7 +138,6 @@ class TestInputSnapshot:
         assert snapshot.content_hash == "abc123"
 
     def test_snapshot_with_none_hash(self):
-        """Test snapshot with None content hash."""
         snapshot = InputSnapshot(
             var_name="test_var",
             identity=12345,
@@ -162,8 +148,7 @@ class TestInputSnapshot:
 
 
 class TestFingerprintRegistry:
-    """Runtime detection now covers numpy / dicts / lists / sized containers,
-    not just pandas (design-mutation-fingerprint-registry)."""
+    """Runtime detection covers numpy, dicts, lists and sized containers, not just pandas."""
 
     def _warned(self, value, mutate) -> bool:
         namespace = {"v": value}
@@ -200,8 +185,9 @@ class TestFingerprintRegistry:
         assert self._warned({1, 2, 3}, lambda s: s.add(9))
 
     def test_opaque_object_mutation_detected_via_general_fingerprint(self):
-        """An arbitrary picklable object is content-checked via the general
-        serializer fallback — no per-type rule needed (the Phase 2a fix)."""
+        """An arbitrary picklable object is content-checked through the general serializer
+        fallback, with no per-type rule.
+        """
 
         class Opaque:
             def __init__(self):
@@ -231,14 +217,15 @@ class TestFingerprintRegistry:
         assert detect_mutations(namespace, snapshots) == []
 
     def test_string_input_is_not_fingerprinted(self):
-        """str is immutable — skipped by the general fallback, identity-only."""
+        """str is immutable, so the general fallback skips it: identity-only."""
         namespace = {"v": "hello"}
         snapshots = snapshot_inputs(namespace, ["v"])
         assert snapshots[0].content_hash is None
 
     def test_exported_mutation_is_not_warned(self):
-        """A mutated input the cell also exported reaches downstream correctly —
-        only the *unexported* mutation (silent-stale) warns."""
+        """A mutated input the cell also exported reaches downstream correctly; only an unexported
+        (silently stale) mutation warns.
+        """
 
         class Opaque:
             def __init__(self):
@@ -255,8 +242,10 @@ class TestFingerprintRegistry:
 
 @pytest.fixture
 def fake_torch(monkeypatch):
-    """API-compatible torch stub (real torch is too heavy for CI). The
-    fingerprint runs through the same numpy-backed sample path as real torch."""
+    """API-compatible torch stub (real torch is too heavy for CI).
+
+    Its fingerprint takes the same numpy-backed sample path as real torch.
+    """
     import sys
     import types
 
@@ -336,8 +325,10 @@ class TestTorchFingerprint:
 
 
 class TestSharedMutableOutputs:
-    """Phase 2b — two outputs sharing a mutable object decouple once stored as
-    separate artifacts (the optimizer↔model footgun). General, no per-type rule."""
+    """Two outputs sharing a mutable object decouple once stored as separate artifacts.
+
+    The optimizer and model footgun; general, with no per-type rule.
+    """
 
     def test_two_outputs_sharing_a_list_flagged(self):
         shared = [1, 2, 3]
@@ -381,7 +372,7 @@ class TestSharedMutableOutputs:
         assert detect_shared_mutable_outputs({"a": [1, 2, 3]}) == []
 
     def test_shared_module_or_function_not_flagged(self):
-        """Imports/defs are shared by nature — never flagged."""
+        """Imports and defs are shared by nature, so they are never flagged."""
         import numpy as np
 
         def helper():

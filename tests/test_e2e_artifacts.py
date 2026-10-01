@@ -1,14 +1,6 @@
-"""End-to-end integration tests for artifact workflows.
+"""End-to-end artifact workflows against a real server and SQLite store.
 
-These tests verify complete artifact workflows including:
-1. Materialize -> Upload -> Finalize pipeline
-2. Chained artifacts (artifact as input to another artifact)
-3. Lineage traversal across multi-level dependencies
-4. Reverse dependency tracking (dependents)
-5. Staleness detection when inputs change
-6. Name pointer management
-
-These tests run against a real server instance with actual SQLite databases.
+Covers chains, lineage, dependents, staleness, name pointers and explain.
 """
 
 import httpx
@@ -24,7 +16,7 @@ from tests.conftest import (
 
 @pytest.fixture
 def e2e_server(tmp_path):
-    """Fixture providing a running server for E2E tests."""
+    """A running server for E2E tests."""
     cache_dir = tmp_path / "cache"
     artifact_dir = tmp_path / "artifacts"
     warehouse_path = tmp_path / "warehouse"
@@ -59,7 +51,6 @@ class ArtifactClient:
         params: dict | None = None,
         name: str | None = None,
     ) -> dict:
-        """Call materialize endpoint."""
         body = {
             "inputs": inputs,
             "transform": {
@@ -81,7 +72,6 @@ class ArtifactClient:
         table: pa.Table,
         name: str | None = None,
     ) -> dict:
-        """Upload blob and finalize artifact."""
         self.client.post(
             f"/v1/artifacts/upload/{artifact_id}/v/{version}",
             content=table_to_ipc_bytes(table),
@@ -111,10 +101,7 @@ class ArtifactClient:
     ) -> str:
         """Persist a specific result table via PUT /v1/artifacts.
 
-        The personal-mode build-spec → upload → finalize protocol was
-        replaced by the embedded build runner; tests that need a SPECIFIC
-        result table persist it through the direct-put path, which shares
-        the same provenance/dedup/lineage substrate.
+        Shares the provenance, dedup and lineage substrate with the build runner.
         """
         import json as json_module
         import time as time_module
@@ -155,7 +142,6 @@ class ArtifactClient:
         return resp.json()["artifact_uri"]
 
     def get_lineage(self, artifact_id: str, version: int, max_depth: int = 10) -> dict:
-        """Get artifact lineage."""
         resp = self.client.get(
             f"/v1/artifacts/{artifact_id}/v/{version}/lineage",
             params={"max_depth": max_depth},
@@ -164,7 +150,6 @@ class ArtifactClient:
         return resp.json()
 
     def get_dependents(self, artifact_id: str, version: int, limit: int = 100) -> dict:
-        """Get artifact dependents."""
         resp = self.client.get(
             f"/v1/artifacts/{artifact_id}/v/{version}/dependents",
             params={"limit": limit},
@@ -173,13 +158,13 @@ class ArtifactClient:
         return resp.json()
 
     def get_name_status(self, name: str) -> dict:
-        """Get name status including staleness info."""
+        """Name status, including staleness."""
         resp = self.client.get(f"/v1/artifacts/names/{name}/status")
         resp.raise_for_status()
         return resp.json()
 
     def fetch_artifact(self, artifact_uri: str) -> pa.Table:
-        """Fetch artifact data as Arrow table."""
+        """Fetch artifact data as an Arrow table."""
         # strata://artifact/{id}@v={version}
         import re
 
@@ -196,10 +181,7 @@ class ArtifactClient:
 
 
 class TestArtifactPipeline:
-    """Tests for basic artifact creation pipeline."""
-
     def test_create_single_artifact(self, e2e_server):
-        """Create a single artifact without inputs."""
         client = ArtifactClient(e2e_server["base_url"])
 
         try:
@@ -218,7 +200,6 @@ class TestArtifactPipeline:
             client.close()
 
     def test_create_artifact_with_name(self, e2e_server):
-        """Create artifact and assign a name."""
         client = ArtifactClient(e2e_server["base_url"])
 
         try:
@@ -238,7 +219,7 @@ class TestArtifactPipeline:
             client.close()
 
     def test_cache_hit_on_duplicate(self, e2e_server):
-        """Same inputs + transform should return cache hit."""
+        """Same inputs + transform return a cache hit."""
         client = ArtifactClient(e2e_server["base_url"])
 
         try:
@@ -262,10 +243,9 @@ class TestArtifactPipeline:
 
 
 class TestChainedArtifacts:
-    """Tests for artifact chains (artifact as input to another artifact)."""
+    """Artifacts used as inputs to other artifacts."""
 
     def test_two_level_chain(self, e2e_server):
-        """Create artifact that uses another artifact as input."""
         client = ArtifactClient(e2e_server["base_url"])
 
         try:
@@ -306,7 +286,6 @@ class TestChainedArtifacts:
             client.close()
 
     def test_three_level_chain(self, e2e_server):
-        """Create three-level artifact chain."""
         client = ArtifactClient(e2e_server["base_url"])
 
         try:
@@ -348,10 +327,7 @@ class TestChainedArtifacts:
 
 
 class TestLineageTraversal:
-    """Tests for lineage graph traversal."""
-
     def test_lineage_with_multiple_inputs(self, e2e_server):
-        """Artifact with multiple inputs shows all in lineage."""
         client = ArtifactClient(e2e_server["base_url"])
 
         try:
@@ -402,7 +378,6 @@ class TestLineageTraversal:
             client.close()
 
     def test_lineage_max_depth_limiting(self, e2e_server):
-        """Lineage respects max_depth parameter."""
         client = ArtifactClient(e2e_server["base_url"])
 
         try:
@@ -432,10 +407,9 @@ class TestLineageTraversal:
 
 
 class TestDependentsTracking:
-    """Tests for reverse dependency tracking."""
+    """Reverse dependency tracking."""
 
     def test_find_single_dependent(self, e2e_server):
-        """Find artifact that uses another as input."""
         client = ArtifactClient(e2e_server["base_url"])
 
         try:
@@ -468,7 +442,6 @@ class TestDependentsTracking:
             client.close()
 
     def test_find_multiple_dependents(self, e2e_server):
-        """Find multiple artifacts that use the same input."""
         client = ArtifactClient(e2e_server["base_url"])
 
         try:
@@ -507,7 +480,6 @@ class TestDependentsTracking:
             client.close()
 
     def test_no_dependents(self, e2e_server):
-        """Artifact with no dependents returns empty list."""
         client = ArtifactClient(e2e_server["base_url"])
 
         try:
@@ -533,10 +505,7 @@ class TestDependentsTracking:
 
 
 class TestStalenessDetection:
-    """Tests for detecting stale artifacts when inputs change."""
-
     def test_fresh_artifact_not_stale(self, e2e_server):
-        """Freshly created artifact is not stale."""
         client = ArtifactClient(e2e_server["base_url"])
 
         try:
@@ -557,10 +526,9 @@ class TestStalenessDetection:
 
 
 class TestExplainMaterialize:
-    """Tests for the explain-materialize dry-run endpoint."""
+    """The explain-materialize dry-run endpoint."""
 
     def test_explain_cache_miss(self, e2e_server):
-        """Explain shows cache miss for new computation."""
         client = ArtifactClient(e2e_server["base_url"])
 
         try:
@@ -585,7 +553,7 @@ class TestExplainMaterialize:
             client.close()
 
     def test_explain_cache_hit(self, e2e_server):
-        """Explain shows cache hit when using artifact URI as input."""
+        """An artifact URI as input gives a cache hit."""
         client = ArtifactClient(e2e_server["base_url"])
 
         try:

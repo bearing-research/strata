@@ -1,9 +1,7 @@
-"""Tests for the runtime worker-token registry + executor token resolution.
+"""Tests for the runtime worker-token registry and executor token resolution.
 
-An SSH-tunneled worker's token is generated at provisioning time and kept in the
-server process, never in notebook.toml. These cover the registry and that the
-executor's ``_resolve_worker_token`` finds it by name, without disturbing the
-existing token_env / literal precedence.
+An SSH-tunneled worker's token lives in the server process, never notebook.toml;
+``_resolve_worker_token`` must find it by name without changing token_env / literal precedence.
 """
 
 from __future__ import annotations

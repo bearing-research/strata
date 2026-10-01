@@ -20,10 +20,7 @@ from strata.transforms.build_qos import (
 
 
 class TestBuildClassification:
-    """Tests for build priority classification."""
-
     def test_classify_default_is_interactive(self):
-        """Default classification is interactive."""
         config = BuildQoSConfig()
         qos = BuildQoS(config)
 
@@ -81,8 +78,6 @@ class TestBuildClassification:
 
 
 class TestTenantQuota:
-    """Tests for per-tenant byte quota tracking."""
-
     @pytest.mark.asyncio
     async def test_quota_not_enforced_when_disabled(self):
         """Quota check passes when bytes_per_day_limit is None."""
@@ -94,7 +89,6 @@ class TestTenantQuota:
 
     @pytest.mark.asyncio
     async def test_quota_enforced_when_enabled(self):
-        """Quota check raises when limit exceeded."""
         config = BuildQoSConfig(bytes_per_day_limit=1024 * 1024)  # 1MB
         qos = BuildQoS(config)
 
@@ -112,7 +106,6 @@ class TestTenantQuota:
 
     @pytest.mark.asyncio
     async def test_quota_per_tenant_isolation(self):
-        """Each tenant has separate quota tracking."""
         config = BuildQoSConfig(bytes_per_day_limit=1024 * 1024)  # 1MB
         qos = BuildQoS(config)
 
@@ -127,11 +120,8 @@ class TestTenantQuota:
 
 
 class TestSlotAcquisition:
-    """Tests for build slot acquisition with timeouts."""
-
     @pytest.mark.asyncio
     async def test_acquire_and_release(self):
-        """Basic acquire and release flow."""
         config = BuildQoSConfig(
             interactive_slots=2,
             per_tenant_interactive=2,
@@ -150,14 +140,10 @@ class TestSlotAcquisition:
 
     @pytest.mark.asyncio
     async def test_acquire_releases_tenant_slot_on_cancel(self):
-        """Cancelling acquire while queued for a global slot must release the
-        per-tenant slot it already grabbed.
+        """Cancelling while queued for a global slot releases the per-tenant slot already taken.
 
-        Regression: the cleanup was `except Exception`, which does not catch
-        asyncio.CancelledError (a BaseException). A client disconnect / shutdown
-        while a build was queued for a global slot leaked the per-tenant slot
-        permanently, eventually returning TenantAtCapacityError for every later
-        build by that tenant (a per-tenant DoS).
+        ``except Exception`` misses CancelledError, so a disconnect leaked the tenant slot for good
+        and every later build hit TenantAtCapacityError.
         """
         config = BuildQoSConfig(
             interactive_slots=1,  # one global slot
@@ -187,7 +173,7 @@ class TestSlotAcquisition:
 
     @pytest.mark.asyncio
     async def test_per_tenant_limit_enforced(self):
-        """Per-tenant limit returns 429 when exceeded."""
+        """Exceeding the per-tenant limit returns 429."""
         config = BuildQoSConfig(
             interactive_slots=10,
             per_tenant_interactive=2,
@@ -216,7 +202,7 @@ class TestSlotAcquisition:
 
     @pytest.mark.asyncio
     async def test_global_capacity_enforced(self):
-        """Global capacity limit returns 429 when exceeded."""
+        """Exceeding global capacity returns 429."""
         config = BuildQoSConfig(
             interactive_slots=2,
             per_tenant_interactive=10,
@@ -242,7 +228,6 @@ class TestSlotAcquisition:
 
     @pytest.mark.asyncio
     async def test_interactive_and_bulk_separate_pools(self):
-        """Interactive and bulk have separate slot pools."""
         config = BuildQoSConfig(
             interactive_slots=1,
             bulk_slots=1,
@@ -265,7 +250,6 @@ class TestSlotAcquisition:
 
     @pytest.mark.asyncio
     async def test_slot_release_is_idempotent(self):
-        """Releasing a slot multiple times is safe."""
         config = BuildQoSConfig()
         qos = BuildQoS(config)
 
@@ -281,11 +265,8 @@ class TestSlotAcquisition:
 
 
 class TestContextManager:
-    """Tests for async context manager usage."""
-
     @pytest.mark.asyncio
     async def test_context_manager_releases_on_success(self):
-        """Context manager releases slot on normal exit."""
         config = BuildQoSConfig()
         qos = BuildQoS(config)
 
@@ -299,7 +280,6 @@ class TestContextManager:
 
     @pytest.mark.asyncio
     async def test_context_manager_releases_on_error(self):
-        """Context manager releases slot on exception."""
         config = BuildQoSConfig()
         qos = BuildQoS(config)
 
@@ -315,11 +295,8 @@ class TestContextManager:
 
 
 class TestMetrics:
-    """Tests for QoS metrics."""
-
     @pytest.mark.asyncio
     async def test_rejection_metrics(self):
-        """Rejection metrics are tracked."""
         config = BuildQoSConfig(
             interactive_slots=1,
             per_tenant_interactive=10,
@@ -341,7 +318,6 @@ class TestMetrics:
 
     @pytest.mark.asyncio
     async def test_per_tenant_metrics(self):
-        """Per-tenant metrics are available."""
         config = BuildQoSConfig()
         qos = BuildQoS(config)
 
@@ -363,10 +339,7 @@ class TestMetrics:
 
 
 class TestErrorResponses:
-    """Tests for error response formatting."""
-
     def test_tenant_at_capacity_error_dict(self):
-        """TenantAtCapacityError formats correctly."""
         error = TenantAtCapacityError(
             tenant_id="acme",
             limit=5,
@@ -382,7 +355,6 @@ class TestErrorResponses:
         assert d["retry_after_seconds"] == 3.0
 
     def test_global_capacity_error_dict(self):
-        """GlobalCapacityError formats correctly."""
         error = GlobalCapacityError(
             tier="interactive",
             slots=16,
@@ -400,7 +372,6 @@ class TestErrorResponses:
         assert d["retry_after_seconds"] == 5.0
 
     def test_quota_exceeded_error_dict(self):
-        """TenantQuotaExceededError formats correctly."""
         error = TenantQuotaExceededError(
             tenant_id="acme",
             used_bytes=1000000,
@@ -417,10 +388,7 @@ class TestErrorResponses:
 
 
 class TestSingleton:
-    """Tests for module-level singleton management."""
-
     def test_get_set_reset(self):
-        """Singleton get/set/reset work correctly."""
         # Should start as None
         reset_build_qos()
         assert get_build_qos() is None
@@ -435,11 +403,8 @@ class TestSingleton:
 
 
 class TestConcurrentAcquisition:
-    """Tests for concurrent slot acquisition behavior."""
-
     @pytest.mark.asyncio
     async def test_many_concurrent_requests(self):
-        """Many concurrent requests correctly share slots."""
         config = BuildQoSConfig(
             interactive_slots=4,
             per_tenant_interactive=2,
@@ -478,7 +443,6 @@ class TestConcurrentAcquisition:
 
     @pytest.mark.asyncio
     async def test_queue_wait_time_recorded(self):
-        """Queue wait time is tracked in metrics."""
         config = BuildQoSConfig(
             interactive_slots=1,
             per_tenant_interactive=10,

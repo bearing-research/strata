@@ -30,8 +30,6 @@ def setup():
 
 
 class TestSyntaxErrors:
-    """Cells with invalid Python syntax."""
-
     def test_syntax_error_reported(self, setup):
         """Syntax error → cell_error with traceback."""
         client, tmp = setup
@@ -45,7 +43,6 @@ class TestSyntaxErrors:
                 )
 
     def test_syntax_error_status(self, setup):
-        """After syntax error, cell status is 'error'."""
         client, tmp = setup
         nb = NotebookBuilder(tmp).add_cell("c1", "x = ...")
 
@@ -68,10 +65,7 @@ class TestSyntaxErrors:
 
 
 class TestRuntimeErrors:
-    """Cells that raise exceptions during execution."""
-
     def test_division_by_zero(self, setup):
-        """ZeroDivisionError is reported."""
         client, tmp = setup
         nb = NotebookBuilder(tmp).add_cell("c1", "x = 1 / 0")
 
@@ -87,7 +81,6 @@ class TestRuntimeErrors:
                 )
 
     def test_name_error(self, setup):
-        """Referencing undefined variable → NameError."""
         client, tmp = setup
         nb = NotebookBuilder(tmp).add_cell("c1", "y = undefined_var + 1")
 
@@ -101,7 +94,6 @@ class TestRuntimeErrors:
                 assert "NameError" in error_text or "undefined_var" in error_text
 
     def test_type_error(self, setup):
-        """TypeError from incompatible operation."""
         client, tmp = setup
         nb = NotebookBuilder(tmp).add_cell("c1", "x = 'hello' + 5")
 
@@ -116,7 +108,6 @@ class TestErrorRecovery:
     """After an error, the cell can be fixed and re-executed."""
 
     def test_fix_and_rerun(self, setup):
-        """Error → edit source → re-execute → success."""
         client, tmp = setup
         nb = NotebookBuilder(tmp).add_cell("c1", "x = 1 / 0")
 
@@ -134,7 +125,6 @@ class TestErrorRecovery:
                 assert "x" in result["payload"]["outputs"]
 
     def test_error_does_not_block_other_cells(self, setup):
-        """Error in c1 doesn't prevent executing independent c2."""
         client, tmp = setup
         nb = NotebookBuilder(tmp).add_cell("c1", "x = 1 / 0").add_cell("c2", "y = 42", after="c1")
 
@@ -161,8 +151,6 @@ class TestErrorRecovery:
 
 
 class TestCascadeWithError:
-    """Error during cascade execution."""
-
     def test_cascade_stops_on_error(self, setup):
         """If an upstream cell errors during cascade, downstream cells don't run."""
         client, tmp = setup

@@ -1,10 +1,7 @@
 """The import in two steps: the bytes, then the record that names them.
 
-``PUT /v1/artifacts/import/blobs/{sha256}`` uploads an artifact's bytes ahead
-of its record, and ``POST /v1/artifacts/import`` with a JSON body imports the
-record whose ``content_sha256`` names them. This is the interface a publisher
-copying a chain into a central store codes against (upstream item 1), and it
-carries a large artifact without holding it in memory.
+``PUT /v1/artifacts/import/blobs/{sha256}`` uploads bytes; ``POST /v1/artifacts/import`` then
+imports the record whose ``content_sha256`` names them. Large artifacts never sit in memory.
 """
 
 from __future__ import annotations
@@ -104,7 +101,7 @@ class TestRefusals:
         assert ArtifactStore(artifact_dir).get_artifact("fig", 1) is None
 
     def test_a_record_without_its_creation_time_is_a_400(self, served):
-        """The column is NOT NULL, so the database refused it as a 500."""
+        """The column is NOT NULL, so this must be a 400, not a database 500."""
         base, artifact_dir = served
         _stage(base)
         record = _record()
@@ -188,8 +185,9 @@ class TestInACentralStore:
         assert ArtifactStore(artifact_dir).get_artifact("fig", 1).tenant == "team-a"
 
     def test_one_tenants_upload_does_not_satisfy_anothers_import(self, central):
-        """A digest is printed on every publication's page, so knowing one is
-        no proof of holding the bytes it names."""
+        """A digest is printed on every publication page, so knowing it does not prove holding the
+        bytes.
+        """
         base, artifact_dir = central
         assert _stage(base, headers=_headers("team-a")).status_code == 201
 

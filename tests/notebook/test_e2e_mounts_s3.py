@@ -1,20 +1,9 @@
 """S3 mount integration tests against a MinIO testcontainer.
 
-Phase 1 of issue #19. Three scopes exercised against a real S3-protocol
-backend (MinIO):
-
-- **Scope A — Annotation-only.** ``# @mount data s3://bucket/key ro`` with
-  no ``[[mounts]]`` block. Credentials reach fsspec via the
-  ``CellExecutor.mount_credentials`` kwarg added in Phase 0.
-- **Scope B — Read-write.** A cell mounts ``rw`` and writes; a separate
-  cell mounts ``ro`` and reads back, asserting sync-back actually pushed
-  bytes to the backend.
-- **Scope C — Storage options via TOML.** ``[[mounts]] options = {...}``
-  carries the same ``endpoint_url`` / ``key`` / ``secret`` per-mount;
-  ``CellExecutor`` constructed *without* ``mount_credentials``.
-
-Requires Docker. Skipped at collection time when Docker or
-``testcontainers[minio]`` is unavailable.
+Covers an annotation-only mount fed by ``CellExecutor.mount_credentials``, an ``rw`` mount
+read back by a separate ``ro`` cell, and ``[[mounts]] options`` carrying the endpoint and
+keys with no ``mount_credentials``. Skipped when Docker or ``testcontainers[minio]`` is
+unavailable.
 """
 
 from __future__ import annotations
@@ -42,10 +31,7 @@ from tests.conftest import MINIO_IMAGE, start_container_or_skip
 
 
 def _docker_daemon_reachable() -> bool:
-    """Skip when the daemon is unreachable — the docker package itself is a
-    transitive dev dep, but the daemon may not be running on a contributor's
-    laptop. CI always has Docker, so this only triggers locally.
-    """
+    """Whether the Docker daemon answers; the package is installed but the daemon may not run."""
     try:
         docker.from_env().ping()
         return True
@@ -65,11 +51,7 @@ pytestmark = [pytest.mark.integration, pytest.mark.slow]
 
 @pytest.fixture(scope="module")
 def minio_container():
-    """Module-scoped MinIO container shared across mount tests.
-
-    Pinned image: matches ``tests/test_s3_integration.py`` so both modules
-    can hit the registry cache.
-    """
+    """Module-scoped MinIO container (image pinned as in ``tests/test_s3_integration.py``)."""
     container = start_container_or_skip(MinioContainer(MINIO_IMAGE), label="MinIO")
     try:
         yield container
@@ -104,7 +86,7 @@ def s3_credentials(minio_container) -> MountCredentials:
 
 @pytest.fixture
 def fresh_bucket(minio_container, request) -> str:
-    """Make-and-return a unique bucket per test, cleaned up by the container teardown."""
+    """A unique bucket per test, cleaned up by the container teardown."""
     # Bucket names: lowercase, hyphens only, ≤63 chars.
     raw = request.node.name.lower().replace("_", "-").replace(".", "-")
     bucket = f"mt-{raw}"[:63].rstrip("-")
@@ -142,7 +124,7 @@ async def test_annotation_only_mount_reads_via_credentials_kwarg(
     s3_credentials: MountCredentials,
     fresh_bucket: str,
 ) -> None:
-    """Phase 0's mount_credentials kwarg drives an annotation-only mount end-to-end."""
+    """The ``mount_credentials`` kwarg drives an annotation-only mount end to end."""
     _put(minio_container, fresh_bucket, "data/hello.txt", b"hello from minio")
 
     source = textwrap.dedent(

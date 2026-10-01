@@ -1,8 +1,6 @@
-"""What changed on a store, in order, for something following it. Item 8.
+"""What changed on a store, in order, for something following it.
 
-Publishing and withdrawing wrote ``artifact_publications`` and nothing else,
-and the registry audit could only be read newest first, so a platform that
-wanted to know what happened re-read everything and diffed.
+Without an event log a follower re-reads everything and diffs.
 """
 
 from __future__ import annotations
@@ -55,8 +53,7 @@ class TestTheSequence:
         assert (withdraw["value"], withdraw["actor"]) == (publication.token, "ben")
 
     def test_what_changes_nothing_is_not_an_event(self, store):
-        """Publishing a published version returns its grant; revoking a
-        revoked one fails. Neither happened, so neither is recorded."""
+        """Republishing returns the existing grant and re-revoking fails; neither is recorded."""
         _ready(store, "fig")
         first = store.publish_artifact("fig", 1)
         again = store.publish_artifact("fig", 1)

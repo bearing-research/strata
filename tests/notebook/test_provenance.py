@@ -10,7 +10,6 @@ from strata.notebook.provenance import (
 
 
 def test_source_hash_stability():
-    """Same source should produce same hash."""
     source = "x = 1 + 1"
     hash1 = compute_source_hash(source)
     hash2 = compute_source_hash(source)
@@ -18,7 +17,6 @@ def test_source_hash_stability():
 
 
 def test_source_hash_changes_with_source():
-    """Different source should produce different hash."""
     source1 = "x = 1 + 1"
     source2 = "x = 1 + 2"
     hash1 = compute_source_hash(source1)
@@ -27,11 +25,9 @@ def test_source_hash_changes_with_source():
 
 
 def test_source_hash_ignores_cosmetic_whitespace():
-    """Cosmetic whitespace / blank line / comment edits must NOT invalidate.
+    """Reformatting, blank lines and comments must not invalidate the cache.
 
-    The hash is taken over the AST's canonical unparse form, so reformatting
-    a cell (autoformatter, trailing newlines, extra spacing around
-    operators) keeps the cached artifact. Only semantic changes invalidate.
+    The hash covers the AST's canonical unparse, so only semantic changes count.
     """
     variants = [
         "x = 1 + 1",
@@ -46,7 +42,6 @@ def test_source_hash_ignores_cosmetic_whitespace():
 
 
 def test_provenance_hash_stability():
-    """Same inputs should produce same provenance hash."""
     input_hashes = ["hash1", "hash2"]
     source_hash = compute_source_hash("x = 1")
     env_hash = compute_source_hash("env")
@@ -58,15 +53,10 @@ def test_provenance_hash_stability():
 
 
 def test_provenance_hash_is_pinned_to_a_known_value():
-    """The provenance hash is a cache key, and every cache is keyed on it.
+    """The provenance hash is every cache's key, so pin its value, not just determinism.
 
-    The other tests here compare a hash against another hash computed the
-    same way, so they hold just as well after a change to the algorithm —
-    they pin determinism, not the value. Changing the value is not a test
-    failure in the abstract; it silently invalidates every cached artifact
-    in every existing store, including a published artifact whose recorded
-    hash a reader is being asked to trust. If this test fails, that is the
-    decision being made, and it needs to be deliberate.
+    Changing it silently invalidates every cached artifact in every store,
+    including published ones. If this fails, make that decision deliberately.
     """
     assert (
         compute_provenance_hash(["in-b", "in-a"], "src-hash", "env-hash")
@@ -75,11 +65,7 @@ def test_provenance_hash_is_pinned_to_a_known_value():
 
 
 def test_display_subkey_is_pinned_to_a_known_value():
-    """A plot's artifact id derives from its cell's hash through this.
-
-    Same stakes as above: move it and every cached display output — the
-    figures themselves — stops resolving.
-    """
+    """A plot's artifact id derives from its cell's hash; moving this orphans every figure."""
     cell_hash = compute_provenance_hash(["in-b", "in-a"], "src-hash", "env-hash")
 
     assert (
@@ -89,7 +75,6 @@ def test_display_subkey_is_pinned_to_a_known_value():
 
 
 def test_provenance_hash_ordering_invariance():
-    """Input order should not affect provenance hash."""
     input_hashes1 = ["hash1", "hash2", "hash3"]
     input_hashes2 = ["hash3", "hash1", "hash2"]
     source_hash = compute_source_hash("x = 1")
@@ -102,7 +87,6 @@ def test_provenance_hash_ordering_invariance():
 
 
 def test_provenance_hash_changes_with_source():
-    """Source hash change should affect provenance hash."""
     input_hashes = ["hash1"]
     source1 = compute_source_hash("x = 1")
     source2 = compute_source_hash("x = 2")
@@ -115,7 +99,6 @@ def test_provenance_hash_changes_with_source():
 
 
 def test_provenance_hash_changes_with_env():
-    """Env hash change should affect provenance hash."""
     input_hashes = ["hash1"]
     source_hash = compute_source_hash("x = 1")
     env1 = compute_source_hash("env1")
@@ -128,7 +111,6 @@ def test_provenance_hash_changes_with_env():
 
 
 def test_provenance_hash_changes_with_inputs():
-    """Input change should affect provenance hash."""
     source_hash = compute_source_hash("x = 1")
     env_hash = compute_source_hash("env")
 
@@ -139,7 +121,6 @@ def test_provenance_hash_changes_with_inputs():
 
 
 def test_provenance_hash_empty_inputs():
-    """Empty inputs should be valid."""
     source_hash = compute_source_hash("x = 1")
     env_hash = compute_source_hash("env")
 
@@ -153,43 +134,35 @@ def test_provenance_hash_empty_inputs():
 
 
 def test_derive_subkey_matches_legacy_inline_form():
-    """Wire stability: derive_subkey must produce byte-identical output to
-    the inline ``hashlib.sha256(f"{parent}:{label}".encode()).hexdigest()``
-    pattern callers used before the extraction. Changing the byte format
-    would invalidate every cached artifact keyed off a derived hash."""
+    """derive_subkey must equal ``sha256(f"{parent}:{label}")``; existing cache keys depend on
+    it."""
     parent = "a" * 64
     expected = hashlib.sha256(f"{parent}:varname".encode()).hexdigest()
     assert derive_subkey(parent, "varname") == expected
 
 
 def test_derive_subkey_multi_label_matches_legacy_inline_form():
-    """Multi-label variant: same byte-identity invariant for the loop
-    iter-provenance shape ``f"{parent1}:{parent2}:iter={k}"``."""
+    """Same byte identity for the loop shape ``f"{parent1}:{parent2}:iter={k}"``."""
     expected = hashlib.sha256(b"p1:p2:iter=3").hexdigest()
     assert derive_subkey("p1", "p2", "iter=3") == expected
 
 
 def test_derive_subkey_stable():
-    """Repeat calls with identical args return identical hashes."""
     assert derive_subkey("parent", "x") == derive_subkey("parent", "x")
 
 
 def test_derive_subkey_label_distinguishes_outputs():
-    """Different labels produce different hashes (the whole point — two
-    output variables of the same cell get distinct artifact keys)."""
+    """Two output variables of one cell get distinct artifact keys."""
     parent = "common"
     assert derive_subkey(parent, "x") != derive_subkey(parent, "y")
 
 
 def test_derive_subkey_parent_distinguishes_cells():
-    """Different parents produce different hashes (two cells with the
-    same output name still get distinct artifact keys)."""
+    """Two cells with the same output name get distinct artifact keys."""
     assert derive_subkey("cell_a", "result") != derive_subkey("cell_b", "result")
 
 
 def test_derive_subkey_zero_labels_is_just_parent_hash():
-    """No labels degenerates to hashing the parent alone — useful as the
-    identity element when a caller iterates over an optional label list."""
     parent = "abc"
     assert derive_subkey(parent) == hashlib.sha256(parent.encode()).hexdigest()
 
@@ -213,9 +186,7 @@ def test_safe_filename_stem_is_case_collision_proof():
 
 
 def test_serializer_copy_matches_provenance_helper():
-    """serializer._safe_filename_stem is a standalone copy (the module loads in
-    the harness venv and can't import strata) — it must not drift from the
-    canonical provenance.safe_filename_stem."""
+    """serializer._safe_filename_stem is a copy (the harness can't import strata): no drift."""
     from strata.notebook.provenance import safe_filename_stem as canonical
     from strata.notebook.serializer import _safe_filename_stem as copy
 

@@ -1,8 +1,7 @@
 """Tests for the cache-plane HTTP router (``/v1/cache/*``).
 
-Drives the real FastAPI app in-process via TestClient against a personal-mode
-``ServerState`` (real DiskCache, no lifespan so ``_cache_warmer`` stays None),
-plus targeted state patches for the error / warmer-present branches.
+Uses TestClient against a personal-mode ``ServerState`` (real DiskCache, no lifespan, so
+``_cache_warmer`` is None), plus state patches for the error and warmer-present branches.
 """
 
 from __future__ import annotations
@@ -35,7 +34,7 @@ def _progress(job_id: str = "job-1", status: WarmJobStatus = WarmJobStatus.RUNNI
 
 
 class _StubWarmer:
-    """Stand-in for a started CacheWarmer — exercises the warmer-present paths."""
+    """Stand-in for a started CacheWarmer, for the warmer-present paths."""
 
     async def start_job(self, request):
         return "job-1"
@@ -81,7 +80,7 @@ def cache_client(tmp_path):
 
 @pytest.fixture
 def warehouse_uri(tmp_path):
-    """A real single-table Iceberg warehouse the planner can scan + warm."""
+    """A real single-table Iceberg warehouse the planner can scan and warm."""
     import sys
 
     if sys.platform == "win32":
@@ -212,7 +211,7 @@ class TestWarmSync:
 
 
 class TestAsyncWarmerNotInitialized:
-    """Without lifespan startup, ``_cache_warmer`` is None → graceful 503/404/empty."""
+    """Without lifespan startup ``_cache_warmer`` is None: graceful 503/404/empty."""
 
     def test_async_warm_returns_503(self, cache_client):
         client, _ = cache_client
@@ -251,8 +250,6 @@ class TestNonDiskCache:
 
 
 class TestAsyncWarmerPresent:
-    """With a started warmer, the async endpoints take their happy paths."""
-
     @pytest.fixture
     def warmer_client(self, cache_client):
         client, state = cache_client
@@ -332,9 +329,9 @@ def _proxy_headers() -> dict[str, str]:
 
 
 def test_warm_refuses_acl_denied_table(acl_cache_client):
-    """Warming reads a table into the shared cache, so it must clear the same
-    deny-first gate as the scan path — previously it had none, letting a
-    denied principal pull the table into cache and learn its size."""
+    """Warming reads into the shared cache, so it clears the scan path's deny-first gate; otherwise
+    a denied principal learns the table's size.
+    """
     resp = acl_cache_client.post(
         "/v1/cache/warm",
         json={"tables": ["file:///wh#denied.salaries"]},
@@ -356,8 +353,7 @@ def test_warm_async_refuses_acl_denied_table(acl_cache_client):
 
 
 def test_warm_allows_permitted_table(acl_cache_client):
-    """A table the ACL permits still reaches the handler (which then fails on
-    the missing warehouse, not on authorization)."""
+    """A permitted table reaches the handler, which fails on the missing warehouse, not on auth."""
     resp = acl_cache_client.post(
         "/v1/cache/warm",
         json={"tables": ["file:///wh#allowed.events"]},
@@ -370,9 +366,7 @@ def test_warm_allows_permitted_table(acl_cache_client):
 
 @pytest.mark.parametrize("field,value", [("concurrent", 0), ("concurrent", -1)])
 def test_warm_rejects_unusable_concurrency(cache_client, field, value):
-    """``concurrent=0`` built a Semaphore(0) that every fetch blocked on
-    forever — hanging the sync request and permanently wedging an async job
-    slot (its cleanup only reaps jobs that completed)."""
+    """``concurrent=0`` made a Semaphore(0) that hung the request and wedged an async job slot."""
     client, _ = cache_client
     resp = client.post("/v1/cache/warm", json={"tables": ["file:///wh#a.b"], field: value})
     assert resp.status_code == 422
@@ -381,12 +375,8 @@ def test_warm_rejects_unusable_concurrency(cache_client, field, value):
 class TestCachePlaneInformationDisclosure:
     """Cache introspection must not hand cross-tenant metadata to anyone.
 
-    Entries are written under a per-tenant hash prefix for isolation, but
-    ``/v1/cache/entries`` and ``/v1/debug/cache/inspect`` walked all of them
-    and returned each entry's table identity, snapshot id, column projection
-    and on-disk path with no scope gate — undoing the directory isolation at
-    the read side. They are operator introspection, so they now take the same
-    ``admin:cache`` scope as ``/v1/cache/clear``.
+    ``/v1/cache/entries`` and ``/v1/debug/cache/inspect`` walk every tenant's entries (table,
+    snapshot, projection, path), so they need ``admin:cache`` like ``/v1/cache/clear``.
     """
 
     def test_cache_entries_requires_admin_scope(self, acl_cache_client):
@@ -408,10 +398,7 @@ class TestCachePlaneInformationDisclosure:
 
 
 class TestDebugInspectPrefixLayout:
-    """``?prefix=`` searched versioned_dir/hash[:2]/… but the real layout is
-    versioned_dir/{tenant_prefix}/hash[:2]/hash[2:4] — so every prefix of two
-    or more characters hit a path that cannot exist and the endpoint always
-    reported zero entries."""
+    """``?prefix=`` searches the real layout: versioned_dir/{tenant_prefix}/hash[:2]/hash[2:4]."""
 
     def test_prefix_search_finds_a_real_entry(self, cache_client, tmp_path):
         import hashlib
@@ -434,13 +421,10 @@ class TestDebugInspectPrefixLayout:
 
 
 class TestWarmDoesNotReportFailuresAsSuccess:
-    """A row group that failed to fetch was counted as one that was cached.
+    """A row group that failed to fetch must not count as cached.
 
-    ``fetch_task`` returned ``(False, 0)`` on any exception, and ``False`` is
-    the same value it returns for "fetched and written" — the aggregation loop
-    reads it as ``row_groups_cached += 1``. So a warm where every fetch raised
-    still reported row groups cached, with an empty ``errors`` list. An
-    operator warming a cache ahead of peak traffic was told it worked.
+    ``fetch_task`` returned ``(False, 0)`` on error, the same value as "fetched and written", so a
+    fully failed warm reported success with no errors.
     """
 
     def test_a_failing_fetch_is_not_counted_as_cached(self, cache_client, warehouse_uri):

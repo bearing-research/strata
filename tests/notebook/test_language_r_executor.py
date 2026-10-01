@@ -1,17 +1,7 @@
 """Tests for the R cell executor (``_execute_r_cell`` + ``_RExecutor``).
 
-Two tiers, matching ``test_language_r_analyzer.py``:
-
-- **Unit tests** monkeypatch ``shutil.which`` / ``_run_r_harness`` to
-  cover the wrapper, the registry wiring, and the dispatch surface
-  without needing R installed.
-- **Integration tests** spawn real ``Rscript`` and assert end-to-end
-  behaviour against the unmodified ``harness.R``. Gated on Rscript
-  availability so they skip cleanly on dev machines / CI variants
-  without R.
-
-The capstone real-renv + cross-language Arrow handoff tests land
-with #59.
+Unit tests fake ``shutil.which`` / ``_run_r_harness`` and run without R;
+integration tests run the real ``harness.R`` and skip when Rscript is missing.
 """
 
 from __future__ import annotations
@@ -31,11 +21,7 @@ from tests.notebook.conftest import skip_if_no_r as rscript_available
 
 
 def _make_r_notebook(tmp_path: Path, *, cells: list[tuple[str, str | None, str]]):
-    """Build an R notebook with the given (cell_id, after_id, source) cells.
-
-    Returns ``(notebook_dir, session)``. Every cell's ``language`` is forced
-    to ``CellLanguage.R`` so dispatch routes through the R executor.
-    """
+    """Build an R notebook from (cell_id, after_id, source); return ``(notebook_dir, session)``."""
     from strata.notebook.writer import add_cell_to_notebook, create_notebook, write_cell
 
     notebook_dir = create_notebook(tmp_path, "R Executor Test", initialize_environment=False)
@@ -54,28 +40,23 @@ def _make_r_notebook(tmp_path: Path, *, cells: list[tuple[str, str | None, str]]
 
 
 class TestRegistryWiring:
-    """``_RExecutor`` registers itself at import time."""
-
     def test_r_executor_is_registered(self):
         adapter = get_language_executor(CellLanguage.R)
         assert isinstance(adapter, _RExecutor)
 
     def test_behaviour_flags(self):
-        """R goes through the generic provenance + cache pipeline."""
         adapter = get_language_executor(CellLanguage.R)
         assert adapter.skips_execution_provenance is False
         assert adapter.has_alternate_cache_scheme is False
 
     def test_is_batchable_returns_false(self):
-        """Phase 1 (#57) — R is single-shot, batching deferred."""
+        """R cells run single-shot; they are never batched."""
         adapter = get_language_executor(CellLanguage.R)
         sentinel = object()
         assert adapter.is_batchable(sentinel, sentinel) is False
 
 
 class TestExecutorPaths:
-    """``r_harness_path`` is set up at executor construction."""
-
     def test_executor_has_r_harness_path(self, tmp_path):
         _, session = _make_r_notebook(tmp_path, cells=[("c1", None, "x <- 1")])
         executor = CellExecutor(session)
@@ -83,7 +64,6 @@ class TestExecutorPaths:
         assert executor.r_harness_path.exists()
 
     def test_dispatch_routes_through_r_executor(self, monkeypatch, tmp_path):
-        """``_materialize_cell`` looks up the language executor and forwards."""
         _, session = _make_r_notebook(tmp_path, cells=[("c1", None, "x <- 1")])
         executor = CellExecutor(session)
 
@@ -116,7 +96,7 @@ class TestExecutorPaths:
 
 
 class TestRunRHarnessMissingRscript:
-    """Rscript not on PATH → friendly error envelope, no subprocess attempt."""
+    """Rscript not on PATH gives a friendly error envelope with no subprocess attempt."""
 
     @pytest.mark.asyncio
     async def test_returns_failure_envelope_when_rscript_missing(self, monkeypatch, tmp_path):
@@ -139,8 +119,6 @@ class TestRunRHarnessMissingRscript:
 
 @rscript_available
 class TestExecuteSimpleRCell:
-    """Drive a single R cell through ``execute_cell``."""
-
     @pytest.mark.asyncio
     async def test_simple_assignment_emits_json_artifact(self, tmp_path):
         _, session = _make_r_notebook(tmp_path, cells=[("c1", None, "x <- 1 + 2")])
@@ -168,7 +146,6 @@ class TestExecuteSimpleRCell:
 
     @pytest.mark.asyncio
     async def test_stdout_is_captured(self, tmp_path):
-        """``cat()`` to stdout surfaces in the result envelope."""
         source = 'cat("hello from R\\n")\nresult <- 1'
         _, session = _make_r_notebook(tmp_path, cells=[("c1", None, source)])
         executor = CellExecutor(session)
@@ -180,7 +157,6 @@ class TestExecuteSimpleRCell:
 
     @pytest.mark.asyncio
     async def test_runtime_error_surfaces_as_failure(self, tmp_path):
-        """An R-side ``stop()`` is a non-success with error text."""
         source = 'stop("kaboom")'
         _, session = _make_r_notebook(tmp_path, cells=[("c1", None, source)])
         executor = CellExecutor(session)
@@ -193,17 +169,13 @@ class TestExecuteSimpleRCell:
 
 @rscript_available
 class TestHarnessVariableSelection:
-    """The harness picks rebinds and mutations, not just brand-new names.
+    """The harness emits rebinds and mutations, not just brand-new names.
 
-    Regression for the post-#57 review: ``setdiff(post_names, pre_names)``
-    dropped rebinds (``df <- transform(df, ...)``) because ``df`` was in
-    ``pre_names``, leaving the downstream cell consuming the stale
-    upstream artifact. The harness now mirrors ``harness.py``'s three-way
-    rule (new / value-changed / mutation_defines).
+    A plain ``setdiff(post_names, pre_names)`` drops ``df <- transform(df, ...)``
+    and leaves downstream cells reading the stale artifact. Mirrors ``harness.py``.
     """
 
     def _drive_harness(self, manifest_path: Path) -> dict:
-        """Run ``harness.R`` and parse the result envelope."""
         import json
         import subprocess
 
@@ -212,7 +184,6 @@ class TestHarnessVariableSelection:
         return json.loads((manifest_path.parent / "harness-result.json").read_text())
 
     def _seed_arrow_input(self, output_dir: Path, name: str) -> None:
-        """Write a small Arrow IPC stream so the harness can ingest it."""
         import pyarrow as pa
 
         tbl = pa.table({"a": [1, 2, 3], "b": [10, 20, 30]})
@@ -220,7 +191,6 @@ class TestHarnessVariableSelection:
             w.write_table(tbl)
 
     def test_rebound_upstream_is_serialized(self, tmp_path):
-        """Reassigning an upstream variable must surface as a new artifact."""
         import json
 
         self._seed_arrow_input(tmp_path, "df")
@@ -256,7 +226,7 @@ class TestHarnessVariableSelection:
         assert result["variables"]["df"]["columns"] == 3
 
     def test_rds_fallback_emits_for_r_only_values(self, tmp_path):
-        """Non-Arrow / non-JSON values are emitted as ``.rds`` with the R-only tag."""
+        """Non-Arrow, non-JSON values are emitted as ``.rds`` with the R-only tag."""
         import json
 
         manifest_path = tmp_path / "manifest.json"
@@ -283,14 +253,7 @@ class TestHarnessVariableSelection:
         assert payload.get("r_only") is True
 
     def test_mutation_defines_force_serialization(self, tmp_path):
-        """A name listed in ``mutation_defines`` is always emitted.
-
-        Even when ``identical(pre, post)`` still holds — e.g. R's
-        copy-on-modify means a column assignment on a data.frame
-        produces a structurally equivalent object that may still
-        compare ``identical`` if no actual values changed. The
-        analyzer's mutation_defines list short-circuits the check.
-        """
+        """A name in ``mutation_defines`` is emitted even when ``identical(pre, post)`` holds."""
         import json
 
         self._seed_arrow_input(tmp_path, "df")
@@ -326,15 +289,11 @@ class TestHarnessVariableSelection:
 class TestStoreOutputsRdsExtension:
     """``_store_outputs`` recognizes ``.rds`` so R-only artifacts persist.
 
-    Regression for the post-#57 review: the search list previously
-    contained only ``.arrow/.json/.pickle/.{cell_,}module.json/.cell_instance.pickle``
-    — so an R cell that produced a tagged ``.rds`` artifact (the only
-    way to round-trip an arbitrary R object) made the parent log
-    "no output file" and report ``stored_ok = False``.
+    Otherwise an R cell producing ``.rds`` logs "no output file" and reports
+    ``stored_ok = False``.
     """
 
     def test_rds_file_is_persisted_with_r_rds_content_type(self, tmp_path):
-        """Drop a ``model.rds`` into the output dir and assert it persists."""
         import json as _json
 
         from strata.notebook.dag import NotebookDag

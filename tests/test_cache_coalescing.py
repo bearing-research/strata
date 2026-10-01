@@ -1,8 +1,4 @@
-"""Concurrent cache misses on one row group share a single storage read.
-
-Scans of one table that miss at the same time used to read each row group once
-per scan: sixteen concurrent cold scans fetched 37 row groups 127 times.
-"""
+"""Concurrent cache misses on one row group share a single storage read."""
 
 from __future__ import annotations
 
@@ -90,10 +86,10 @@ def test_different_row_groups_are_read_separately(tmp_path):
 
 
 def test_a_failed_shared_read_is_retried_once_for_the_waiters(tmp_path):
-    """One transient error fails the read that hit it, not every scan waiting.
+    """One transient error fails only the read that hit it, not every waiting scan.
 
-    The retry is shared too: had each waiter read for itself, they would all
-    write the same cache entry at once, which Windows refuses.
+    The retry is shared too: separate retries would write one cache entry at once, which Windows
+    refuses.
     """
     storage = _CountingFetcher(fail_first=True)
     fetcher = _fetcher(tmp_path, storage)

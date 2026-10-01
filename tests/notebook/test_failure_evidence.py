@@ -1,10 +1,7 @@
 """What a failed cell leaves behind for whoever looks at it next.
 
-A run that fails reports its traceback and its prints to whoever started it.
-An agent that comes back a moment later -- through ``cell show``, ``get_cell``,
-or simply a reopen -- was getting an empty console, no error, and a status of
-``idle`` that reads as "never run". The only way to find out what happened was
-to run the failure again, side effects and all.
+An agent that comes back through ``cell show``, ``get_cell`` or a reopen must find the
+console and the error, not an empty ``idle`` that reads as "never run".
 """
 
 from __future__ import annotations
@@ -67,9 +64,8 @@ def test_the_failure_is_still_there_after_a_reopen(tmp_path: Path):
 def test_an_unrelated_change_does_not_erase_the_failure(tmp_path: Path):
     """Adding a cell elsewhere recomputes staleness for the whole notebook.
 
-    The failed cell stored no artifact, so that walk can only call it idle.
-    Its source has not changed and it has not been re-run, so the failure is
-    still what is true about it.
+    The failed cell stored no artifact, so the walk alone would call it idle. Its source is
+    unchanged and it has not re-run, so the failure still stands.
     """
     notebook_dir = _notebook(tmp_path)
     session, _ = _run(notebook_dir, FAILING)
@@ -87,11 +83,10 @@ FIXED = 'print("fixed")\n'
 
 
 def test_editing_the_cell_drops_the_error(tmp_path: Path):
-    """An error is about one source. Change it and the claim expires.
+    """An error is about one source: change the source and the error expires.
 
-    Status was the first half of this. The error text is the other half: a
-    traceback still reported against source it never ran on attributes a
-    failure to code that does not contain the failing operation.
+    A traceback reported against source it never ran on blames code without the failing
+    operation.
     """
     notebook_dir = _notebook(tmp_path)
     session, _ = _run(notebook_dir, FAILING)
@@ -118,12 +113,7 @@ def test_editing_the_cell_drops_the_error(tmp_path: Path):
 
 
 def test_a_comment_only_edit_keeps_the_error(tmp_path: Path):
-    """The hash is semantic, so the failing code is what the error tracks.
-
-    Adding a comment changes the text and not the behaviour. The traceback is
-    still about this cell, and withholding it there would lose the evidence
-    over an edit that cannot have fixed anything.
-    """
+    """The hash is semantic, so a comment-only edit, which cannot fix anything, keeps the error."""
     notebook_dir = _notebook(tmp_path)
     session, _ = _run(notebook_dir, FAILING)
 
@@ -151,13 +141,11 @@ def test_a_successful_run_clears_the_error(tmp_path: Path):
 
 
 def test_a_failure_over_an_older_success_survives_a_recompute(tmp_path: Path):
-    """The failure-preservation rule has to cover stale as well as idle.
+    """Failure preservation covers stale as well as idle.
 
-    ``c`` succeeded once, then failed on its next run because the fresh value
-    it reads moved. It holds an older successful result and its upstream has
-    moved since, so the walk now classifies it stale (upstream changed) rather
-    than idle. Preserving the error only over idle let any recompute (an
-    unrelated edit, a status call) turn this red cell back into a plain stale.
+    ``c`` succeeded once, then failed after the fresh value it reads moved. It holds an older
+    success and its upstream moved, so the walk classifies it stale; any recompute must still
+    leave it an error.
     """
     from tests.notebook.test_cli import _build_notebook
 

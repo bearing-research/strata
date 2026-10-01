@@ -14,7 +14,7 @@ from strata.notebook.mounts import MountResolver
 
 
 class _FakeRemoteFS:
-    """Small fake fsspec filesystem for mount resolver tests."""
+    """Small fake fsspec filesystem."""
 
     def __init__(
         self,
@@ -87,7 +87,7 @@ def _install_fake_fsspec(
 
 @pytest.mark.asyncio
 async def test_local_mount_pin_controls_fingerprint(tmp_path: Path) -> None:
-    """Pinned local mounts should use the pin value, not the local file state."""
+    """Pinned local mounts use the pin value, not the local file state."""
     data_dir = tmp_path / "data"
     data_dir.mkdir()
     (data_dir / "table.parquet").write_text("old", encoding="utf-8")
@@ -110,7 +110,7 @@ async def test_remote_ro_mount_materializes_nested_files_recursively(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Remote RO mounts should mirror nested files, not only the top level."""
+    """Remote RO mounts mirror nested files, not only the top level."""
     fs = _FakeRemoteFS(
         {
             "bucket/prefix/a.txt": {
@@ -163,7 +163,7 @@ async def test_remote_ro_mount_retries_after_partial_materialization_failure(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A failed remote mirror should be rebuilt on the next attempt."""
+    """A failed remote mirror is rebuilt on the next attempt."""
     fs = _FakeRemoteFS(
         {
             "bucket/prefix/a.txt": {
@@ -214,7 +214,6 @@ async def test_remote_ro_mount_retries_after_partial_materialization_failure(
 
 
 def test_resolver_credentials_default_to_empty_dict(tmp_path: Path) -> None:
-    """A resolver built with no credentials carries an empty dict."""
     resolver = MountResolver(cache_dir=tmp_path / "cache")
     assert resolver.credentials == {}
 
@@ -310,7 +309,7 @@ async def test_sync_back_raises_on_remote_failure(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """RW sync failures should surface as errors, not just logs."""
+    """RW sync failures raise, not just log."""
     fs = _FakeRemoteFS({}, fail_put=True)
     _install_fake_fsspec(monkeypatch, fs)
 
@@ -340,7 +339,7 @@ async def test_remote_rw_mount_replaces_staging_with_current_remote_state(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """RW staging should not preserve files deleted from the remote mount."""
+    """RW staging drops files deleted from the remote."""
     fs = _FakeRemoteFS(
         {
             "bucket/output/old.txt": {
@@ -375,10 +374,7 @@ async def test_remote_ro_mount_rejects_path_traversal_in_name(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A remote returning '..' in a file name must be rejected, not materialized
-    above the mount root — the harness only sees pathlib.Path objects rooted
-    under local_mirror and a silent escape would widen what the cell can read.
-    """
+    """A remote file name with '..' is rejected rather than written above the mount root."""
     fs = _FakeRemoteFS(
         {
             "bucket/prefix/../escape.txt": {
@@ -404,8 +400,8 @@ async def test_remote_rw_mount_rejects_path_traversal_via_symlink(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """fsspec's recursive=True is opaque about local paths; the post-fetch
-    walk must catch symlinks that point outside the staging dir.
+    """The post-fetch walk catches symlinks pointing outside staging; fsspec's
+    recursive fetch is opaque about local paths.
     """
     sentinel = tmp_path / "secret.txt"
     sentinel.write_text("not-for-cell", encoding="utf-8")
@@ -435,10 +431,9 @@ async def test_remote_rw_mount_rejects_path_traversal_via_symlink(
 def test_remote_fingerprint_without_fsspec_is_non_deterministic(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """When fsspec is missing, fingerprint_remote_sync used to return a
-    deterministic hash, causing the cell to silently cache-hit across
-    environments with completely different remote content. It must now
-    return a unique-per-call value so the cell is treated as uncacheable.
+    """Without fsspec the remote fingerprint is unique per call, so the cell never cache-hits.
+
+    A deterministic hash would hit across environments with different remote content.
     """
     from strata.notebook.mounts import MountFingerprinter
 
@@ -455,9 +450,7 @@ async def test_remote_rw_mount_rejects_traversal_name_before_any_fetch(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A remote name with `..` segments must be rejected BEFORE any bytes
-    land: the old post-hoc rglob scan only enumerated paths inside the
-    staging dir, so a file written outside it was never even seen."""
+    """A '..' name is rejected before any bytes land; a scan of staging would never see it."""
     fetched: list[str] = []
 
     class _TraversalFakeFS(_FakeRemoteFS):
@@ -483,10 +476,11 @@ async def test_remote_rw_mount_rejects_traversal_name_before_any_fetch(
 
 
 class TestGcsMountFilesystem:
-    """gcsfs 2026.6+ asks Google's Storage Control API, over gRPC, what kind of
-    bucket it is; an endpoint that is not Google's cannot answer, and gcsfs
-    retried for about two minutes per bucket. Such an endpoint gets gcsfs's
-    standard filesystem, and Google's endpoints keep the default."""
+    """A non-Google GCS endpoint gets gcsfs's standard filesystem.
+
+    gcsfs 2026.6+ probes the bucket over Google's gRPC Storage Control API, which
+    another endpoint cannot answer, so it retried for about two minutes per bucket.
+    """
 
     @staticmethod
     def _class(options: dict, monkeypatch: pytest.MonkeyPatch, emulator: str | None = None):

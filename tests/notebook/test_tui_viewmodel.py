@@ -1,8 +1,6 @@
-"""Unit tests for the notebook TUI view model — the pure dispatch core.
+"""Unit tests for the notebook TUI view model, the pure dispatch core.
 
-No Textual, no sockets: feed the view model a fake-frame stream (the same shapes
-the WS broadcasts) and assert the folded per-cell state. This is where the TUI's
-logic lives; the app is a thin renderer over it.
+Feeds fake WS frames and asserts the folded per-cell state; the app is a thin renderer over it.
 """
 
 from __future__ import annotations

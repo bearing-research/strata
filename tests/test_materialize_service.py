@@ -1,7 +1,6 @@
-"""Unit tests for MaterializeService.explain — pure dry-run logic, no server.
+"""Unit tests for MaterializeService.explain: the dry-run logic, no server.
 
-The route resolves input versions (which may 400/404) and hands the resolved map
-to the service; these tests drive the service directly with a fake store.
+The route resolves input versions and hands the map over; these tests use a fake store.
 """
 
 from __future__ import annotations
@@ -25,7 +24,7 @@ def _request(inputs, *, name=None):
 
 
 class _FakeStore:
-    """Minimal store stub for the two methods explain() touches."""
+    """Store stub for the two methods explain() touches."""
 
     def __init__(self, *, existing=None, name_status=None):
         self._existing = existing
@@ -161,10 +160,9 @@ _UNSET = object()
 
 
 class _FakeResolveStore:
-    """Store stub for resolve_input_version: ``resolve_name`` + ``get_artifact``.
+    """Store stub for resolve_input_version: ``resolve_name`` and ``get_artifact``.
 
-    ``get_artifact`` backs the artifact-URI branch, which now looks the record
-    up (rather than trusting the URI's shape) so the caller can tenant-gate it.
+    The artifact-URI branch looks the record up so the caller can tenant-gate it.
     """
 
     def __init__(self, *, named=None, artifact=_UNSET):
@@ -205,7 +203,7 @@ class _FakePlanner:
 
 
 class TestResolveInputVersion:
-    """The pure resolver (no ACL, no HTTP) — the unit the dependency wrapper wraps."""
+    """The pure resolver (no ACL, no HTTP) that the dependency wraps."""
 
     def test_artifact_uri_returns_id_and_version(self, service):
         resolved = service.resolve_input_version(
@@ -314,9 +312,10 @@ class TestRebuildArtifactId:
 
 
 class TestArtifactInputLookup:
-    """The artifact-URI branch must resolve through the store, not a regex —
-    a bare parse let a caller name any artifact id (including another
-    tenant's) and the runner then read its blob with no check."""
+    """The artifact-URI branch resolves through the store, not a regex.
+
+    A bare parse let a caller name any artifact id, including another tenant's.
+    """
 
     def test_missing_artifact_is_404(self):
         from strata.services.materialize import materialize_service

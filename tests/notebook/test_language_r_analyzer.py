@@ -1,13 +1,7 @@
 """Tests for the R DAG analyzer (``strata.notebook.languages.r``).
 
-Two tiers:
-
-- **Unit tests** monkeypatch ``subprocess.run`` / ``shutil.which`` to
-  assert wrapper behaviour without needing R installed. These run
-  everywhere — CI matrix, dev machines without R, etc.
-- **Integration tests** spawn real ``Rscript`` via the embedded helper
-  and assert end-to-end behaviour. Gated on the ``rscript_available``
-  marker so they skip cleanly when R isn't on ``PATH``.
+Unit tests fake ``subprocess.run`` / ``shutil.which`` and run without R;
+integration tests spawn real ``Rscript`` and skip when it is not on ``PATH``.
 """
 
 from __future__ import annotations
@@ -37,12 +31,7 @@ from tests.notebook.conftest import skip_if_no_r as _skip_no_rscript
 
 @pytest.fixture(autouse=True)
 def _reset_r_cache():
-    """Clear the analyzer's source-hash cache before each test.
-
-    The cache survives the session in production but tests need a fresh
-    slate so monkeypatching ``_run_rscript`` actually runs the patched
-    version instead of returning a cached real-Rscript result.
-    """
+    """Clear the analyzer's source-hash cache so patched ``_run_rscript`` actually runs."""
     r_analyzer._CACHE.clear()
     yield
     r_analyzer._CACHE.clear()
@@ -56,14 +45,11 @@ def _make_cell(source: str = "", language: CellLanguage = CellLanguage.R) -> Cel
 
 
 class TestRegistry:
-    """R analyzer must be discoverable via the same registry as the others."""
-
     def test_r_is_registered(self):
         analyzer = get_language_analyzer(CellLanguage.R)
         assert isinstance(analyzer, _RAnalyzer)
 
     def test_dispatch_routes_through_r_analyzer(self, monkeypatch):
-        """The registry-level dispatch helper hits the R adapter for ``CellLanguage.R``."""
         called_with: list[str] = []
 
         def fake_rscript(source: str) -> AnalyzedCell:
@@ -77,7 +63,6 @@ class TestRegistry:
         assert called_with == ["y <- 1"]
 
     def test_r_enum_value_round_trips(self):
-        """``CellLanguage.R`` must serialize to the expected string."""
         assert CellLanguage.R == "r"
         assert CellLanguage("r") is CellLanguage.R
 
@@ -86,7 +71,7 @@ class TestRegistry:
 
 
 class TestRscriptUnavailable:
-    """Missing ``Rscript`` surfaces as an info log + empty result, not a crash."""
+    """Missing ``Rscript`` surfaces as an info log and an empty result, not a crash."""
 
     def test_run_rscript_raises_when_missing(self, monkeypatch):
         monkeypatch.setattr(shutil, "which", lambda name: None)
@@ -96,17 +81,12 @@ class TestRscriptUnavailable:
         assert "install r" in str(excinfo.value).lower()
 
     def test_analyze_returns_empty_when_rscript_missing(self, monkeypatch):
-        """A notebook without R installed still opens cleanly."""
         monkeypatch.setattr(shutil, "which", lambda name: None)
         result = _RAnalyzer().analyze(_make_cell("y <- x + 1"), session=None)
         assert result == AnalyzedCell()
 
     def test_empty_result_not_cached_when_rscript_missing(self, monkeypatch):
-        """Once R is installed, the next analyze must actually try Rscript.
-
-        Caching the no-R fallback would mean users have to restart the
-        server after installing R for analysis to start working.
-        """
+        """Caching the no-R fallback would force a server restart after installing R."""
         monkeypatch.setattr(shutil, "which", lambda name: None)
         cell = _make_cell("y <- x + 1")
         _RAnalyzer().analyze(cell, session=None)
@@ -114,8 +94,6 @@ class TestRscriptUnavailable:
 
 
 class TestWrapperFailureModes:
-    """Wrapper handles subprocess failures gracefully."""
-
     def _fake_subprocess(
         self, monkeypatch, *, stdout: str = "", returncode: int = 0, stderr: str = ""
     ):
@@ -137,7 +115,6 @@ class TestWrapperFailureModes:
         assert result == AnalyzedCell()
 
     def test_nonzero_exit_returns_empty(self, monkeypatch):
-        """Non-zero exit logs + returns empty; doesn't crash the analyzer."""
         self._fake_subprocess(monkeypatch, returncode=1, stderr="some R error")
         result = _run_rscript("x <-")
         assert result == AnalyzedCell()
@@ -165,8 +142,6 @@ class TestWrapperFailureModes:
 
 
 class TestCaching:
-    """Source-hash cache avoids re-spawning Rscript on unchanged cells."""
-
     def _patch_with_counter(self, monkeypatch):
         """Patch ``_run_rscript`` with a counting fake; return the counter list."""
         calls: list[str] = []
@@ -193,7 +168,6 @@ class TestCaching:
         assert len(calls) == 2, "source edit forces re-analysis"
 
     def test_empty_source_short_circuits(self, monkeypatch):
-        """No source → no Rscript spawn at all."""
         calls = self._patch_with_counter(monkeypatch)
         result = _RAnalyzer().analyze(_make_cell("   \n   "), session=None)
         assert result == AnalyzedCell()
@@ -205,15 +179,10 @@ class TestCaching:
 
 @_skip_no_rscript
 class TestIntegrationRealRscript:
-    """End-to-end against a real R install.
-
-    These tests verify the embedded helper actually produces the
-    expected JSON shape on real R behaviour. They run automatically
-    when ``Rscript`` is on PATH; otherwise they skip.
-    """
+    """End-to-end against a real R install; skipped when ``Rscript`` is not on PATH."""
 
     def test_simple_assign(self):
-        """Acceptance example: ``y <- x + 1`` references only ``x``."""
+        """``y <- x + 1`` references only ``x``."""
         cell = _make_cell("y <- x + 1")
         result = _RAnalyzer().analyze(cell, session=None)
         assert "y" in result.defines
@@ -222,12 +191,7 @@ class TestIntegrationRealRscript:
         assert result.references == ["x"]
 
     def test_multiple_assigns_locally_defined_not_a_reference(self):
-        """``y <- 1; z <- y + 1`` — ``y`` is defined locally before being read.
-
-        Cross-cell DAG only cares about inputs from other cells. A name
-        that's both defined and later read in the same cell isn't a
-        cross-cell input, so it must NOT appear in references.
-        """
+        """``y <- 1; z <- y + 1``: a name defined before it is read is not a cross-cell input."""
         cell = _make_cell("y <- 1\nz <- y + 1")
         result = _RAnalyzer().analyze(cell, session=None)
         assert set(result.defines) >= {"y", "z"}
@@ -237,11 +201,8 @@ class TestIntegrationRealRscript:
     def test_read_before_write_self_assign(self):
         """``y <- y + 1`` reads the upstream ``y`` before redefining it.
 
-        Regression for PR #67 review finding: the codetools-based
-        approach used to drop self-assign reads because it treated any
-        locally-assigned name as a local-only binding. The new walker
-        applies the read-before-locally-defined rule per statement, so
-        the upstream ``y`` survives as a real DAG dependency.
+        The read-before-locally-defined rule applies per statement, so the self-assign
+        read stays a DAG dependency.
         """
         cell = _make_cell("y <- y + 1")
         result = _RAnalyzer().analyze(cell, session=None)
@@ -249,13 +210,9 @@ class TestIntegrationRealRscript:
         assert "y" in result.references
 
     def test_read_before_write_subscript_filter(self):
-        """``df <- df[complete.cases(df), ]`` keeps ``df`` as a reference.
+        """``df <- df[complete.cases(df), ]`` keeps ``df`` but not ``complete.cases``.
 
-        Same shape as the self-assign case, but with the
-        ``complete.cases`` function call inside. Confirms that the
-        walker recurses through function-arg subtrees while still
-        skipping the function name itself (no ``complete.cases`` in
-        references).
+        The walker recurses into function arguments while skipping the function name.
         """
         cell = _make_cell("df <- df[complete.cases(df), ]")
         result = _RAnalyzer().analyze(cell, session=None)
@@ -266,13 +223,9 @@ class TestIntegrationRealRscript:
         assert "[" not in result.references
 
     def test_function_call_names_not_references(self):
-        """Acceptance example: ``library(arrow); df <- read_parquet(...)``.
+        """``library(arrow); df <- read_parquet(...)``: neither name is a reference.
 
-        Neither ``arrow`` (NSE library arg) nor ``read_parquet`` (function
-        call name) is a cross-cell reference. Regression for PR #67
-        review finding: previously the codetools approach included
-        ``refs$functions`` which leaked function names like
-        ``read_parquet`` into references.
+        ``arrow`` is an NSE library argument and ``read_parquet`` a call name.
         """
         cell = _make_cell("library(arrow)\ndf <- read_parquet('a.parquet')")
         result = _RAnalyzer().analyze(cell, session=None)
@@ -283,7 +236,7 @@ class TestIntegrationRealRscript:
         assert result.references == []
 
     def test_namespace_access_not_a_reference(self):
-        """``arrow::read_parquet(path)`` — neither side of ``::`` is a reference."""
+        """``arrow::read_parquet(path)``: neither side of ``::`` is a reference."""
         cell = _make_cell("df <- arrow::read_parquet(path)")
         result = _RAnalyzer().analyze(cell, session=None)
         assert "df" in result.defines
@@ -293,7 +246,7 @@ class TestIntegrationRealRscript:
         assert "read_parquet" not in result.references
 
     def test_member_access_only_lhs_is_a_reference(self):
-        """``df$col`` — ``df`` is read; ``col`` is a slot name, not a reference."""
+        """``df$col``: ``df`` is read; ``col`` is a slot name, not a reference."""
         cell = _make_cell("x <- df$col")
         result = _RAnalyzer().analyze(cell, session=None)
         assert "x" in result.defines
@@ -303,16 +256,8 @@ class TestIntegrationRealRscript:
     def test_single_multichar_name_not_split_into_chars(self):
         """``df <- 1`` returns ``defines=['df']``, never ``['d', 'f']``.
 
-        Regression for #71: ``analyze_cell.R`` previously emitted
-        ``cat(jsonlite::toJSON(result, auto_unbox = TRUE))``, which
-        collapses 1-element character vectors to scalar JSON strings.
-        Python's ``list(payload['defines'])`` then iterated the scalar
-        ``"df"`` character-by-character. The fix wraps ``defines`` /
-        ``references`` in ``I()`` so they stay as arrays even at
-        length 1. Single-char names like ``"x"`` accidentally
-        round-trip correctly under the bug (``list("x") == ['x']``),
-        so the failure mode only shows up for multi-char names — pin
-        that here.
+        ``auto_unbox`` collapses 1-element vectors to JSON strings, which Python then
+        iterates by character. Single-char names hide the bug, so pin a multi-char one.
         """
         cell = _make_cell("df <- 1")
         result = _RAnalyzer().analyze(cell, session=None)

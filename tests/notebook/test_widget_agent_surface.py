@@ -1,11 +1,7 @@
-"""What an agent can see and do with a widget cell.
+"""What an agent can see and do with a widget cell through MCP.
 
-Round 6 had to combine a REST call, an MCP edit and a raw WebSocket frame to
-drive one slider: ``add_cell`` refused ``language="widget"``, ``get_cell``
-reported a widget's source and status but not its controls or their values, and
-no tool set one. A widget's selection is runtime state rather than source, so an
-agent reading the cell could not tell 0.9 from the declared default and editing
-the cell could not change what the notebook computed.
+A widget's selection is runtime state, not source: an agent must be able to create one, read its
+controls and current values, and set them.
 """
 
 from __future__ import annotations
@@ -52,8 +48,7 @@ def widget_nb(tmp_path):
 
 @pytest.mark.asyncio
 async def test_an_agent_can_add_a_widget_cell(tmp_path):
-    """The HTTP route took ``widget``; the shared operation contract did not,
-    so an agent had to reach past MCP to create one."""
+    """The shared operation contract must accept ``widget``, not only the HTTP route."""
     nb = create_notebook(tmp_path, "Add Widget", initialize_environment=False)
     (nb / ".venv").mkdir(exist_ok=True)
     sm, session_id, _ = _registered(nb)
@@ -134,9 +129,7 @@ async def test_a_control_the_cell_does_not_declare_is_refused(widget_nb):
 async def test_a_busy_notebook_leaves_the_stored_values_alone(widget_nb):
     """The write happens under the execution reservation, not before it.
 
-    Persisting first would leave a refused value on disk: the agent is told the
-    notebook is busy, nothing re-materializes, and the next run quietly uses the
-    value the server rejected.
+    Persisting first would leave a refused value on disk for the next run to use.
     """
     import asyncio
 
@@ -174,8 +167,9 @@ async def test_a_python_cell_is_refused(widget_nb):
 
 @pytest.mark.asyncio
 async def test_setting_a_control_tells_an_attached_viewer(widget_nb, monkeypatch):
-    """Moving the slider in the browser broadcasts; an agent doing the same
-    thing must too, or a watching human keeps the pre-change staleness badges."""
+    """Moving the slider in the browser broadcasts; an agent setting it must too, or a watcher keeps
+    stale badges.
+    """
     import strata.notebook.mcp_server as mcp_server
     import strata.notebook.ws as ws
 

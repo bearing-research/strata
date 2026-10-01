@@ -1,4 +1,4 @@
-"""Writing artifacts into Iceberg tables. Item 27."""
+"""Writing artifacts into Iceberg tables."""
 
 from __future__ import annotations
 
@@ -101,10 +101,10 @@ class TestTheWriter:
         assert store.get_tags(second.id, second.version)[EXPORT_TAG] == uri
 
     def test_a_table_strata_did_not_write_is_not_overwritten(self, tmp_path, notebook_store):
-        """A later write replaces the table's contents, which is the contract
-        for a table Strata maintains. Aimed at somebody else's production
-        table -- a mistyped or reused name -- the same write throws their rows
-        away, recoverable only by time travel until the snapshot expires."""
+        """A write replaces the table's contents, which is right only for a table Strata maintains.
+
+        Aimed at someone else's table by a mistyped name, it would throw their rows away.
+        """
         warehouse = tmp_path / "wh"
         warehouse.mkdir()
         catalog = _catalog(warehouse)
@@ -190,9 +190,11 @@ def team(tmp_path):
 
 
 class TestPromotingToATable:
-    """Promoting a dataset twice: two snapshots naming the two versions,
-    ``champion`` on the second, and a notebook reading the table goes stale
-    between them."""
+    """Promoting a dataset twice.
+
+    Two snapshots name the two versions, ``champion`` is on the second, and a notebook reading the
+    table goes stale between them.
+    """
 
     @staticmethod
     def _promote(notebook_store, artifact, team, warehouse):
@@ -337,8 +339,7 @@ def test_the_cli_writes_a_local_artifact_into_a_table(tmp_path, notebook_store, 
 
 
 class TestWhoMayExport:
-    """The export route writes a table, so it is gated like every other write:
-    the service-mode write gate, and the table ACL a scan is held to."""
+    """The export route is gated like any write: the service-mode gate and the table ACL."""
 
     @staticmethod
     def _service(monkeypatch, tmp_path, **overrides):
@@ -431,8 +432,7 @@ class TestWhoMayExport:
 
 
 def test_a_named_catalogs_table_is_written_in_that_catalog(tmp_path, notebook_store):
-    """``lake:taxi.features`` is the catalog's table, not a table called
-    ``lake:taxi.features`` in the default catalog."""
+    """``lake:taxi.features`` is the catalog's table, not one named that in the default catalog."""
     from strata.iceberg import PyIcebergCatalog
     from strata.table_export import export_artifact
 

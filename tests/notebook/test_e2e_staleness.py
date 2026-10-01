@@ -33,7 +33,6 @@ class TestStalenessDetection:
     """Editing an upstream cell marks downstream cells as stale."""
 
     def test_source_edit_sends_dag_update(self, setup):
-        """Edit c1 source → dag_update message is sent."""
         client, tmp = setup
         nb = NotebookBuilder(tmp).add_cell("c1", "x = 1").add_cell("c2", "y = x + 1", after="c1")
 
@@ -179,8 +178,6 @@ class TestAnEditDuringARun:
 
 
 class TestDAGRestructuring:
-    """Edits that change the DAG structure."""
-
     def test_add_new_dependency(self, setup):
         """Edit c2 to reference a new variable from c1."""
         client, tmp = setup

@@ -1,9 +1,8 @@
-"""Tests for the cell-test runner wrapper (cell_test_runner.py).
+"""Tests for the cell-test runner wrapper.
 
-The conftest plugin's own behaviour (assert rewriting, outcome counting) is
-covered by ``test_cell_test_conftest.py``. Here we exercise the thin wrapper:
-staging, the pytest-missing probe, and the collection-error fallback when
-pytest exits before writing ``results.json``.
+Covers staging, the pytest-missing probe, and the collection-error fallback when pytest
+exits before writing ``results.json``. The conftest plugin is covered by
+``test_cell_test_conftest.py``.
 """
 
 from __future__ import annotations

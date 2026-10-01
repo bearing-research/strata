@@ -1,12 +1,4 @@
-"""Tests for the transform system.
-
-These tests verify:
-1. Transform base class functionality
-2. Built-in transforms (scan@v1, duckdb_sql@v1)
-3. Transform registration and lookup
-4. Parameter validation
-5. Local execution via _run_local()
-"""
+"""The transform system: the base class, built-ins, registration, params and local runs."""
 
 import pyarrow as pa
 import pytest
@@ -30,11 +22,7 @@ from strata.transforms.base import _transforms
 
 
 class TestTransformBase:
-    """Tests for Transform base class."""
-
     def test_custom_transform_registration(self):
-        """Test registering a custom transform."""
-
         @register_transform("test_custom@v1")
         class CustomTransform(Transform):
             class Params:
@@ -51,7 +39,7 @@ class TestTransformBase:
         del _transforms["test_custom@v1"]
 
     def test_get_transform_strips_prefix(self):
-        """Test that get_transform strips local:// prefix."""
+        """get_transform strips the local:// prefix."""
         # Found with or without the prefix.
         t1 = get_transform("duckdb_sql@v1")
         t2 = get_transform("local://duckdb_sql@v1")
@@ -61,21 +49,19 @@ class TestTransformBase:
         assert type(t1) is type(t2)
 
     def test_get_transform_unknown(self):
-        """Test that get_transform returns None for unknown transforms."""
+        """get_transform returns None for an unknown transform."""
         assert get_transform("unknown@v1") is None
 
     def test_list_transforms_includes_builtin(self):
-        """Test that list_transforms includes built-in transforms."""
         transforms = list_transforms()
         assert "scan@v1" in transforms
         assert "duckdb_sql@v1" in transforms
 
 
 class TestScanTransform:
-    """Tests for scan@v1 transform."""
+    """The scan@v1 transform."""
 
     def test_scan_params_validation(self):
-        """Test ScanParams validation."""
         params = ScanParams(columns=["a", "b"], snapshot_id=123)
         assert params.columns == ["a", "b"]
         assert params.snapshot_id == 123
@@ -88,7 +74,6 @@ class TestScanTransform:
         assert params.snapshot_id is None
 
     def test_scan_params_with_filters(self):
-        """Test ScanParams with filters."""
         from strata.transforms.scan import FilterSpec
 
         filters = [
@@ -101,14 +86,14 @@ class TestScanTransform:
         assert params.filters[0].op == ">"
 
     def test_scan_filter_invalid_op(self):
-        """Test that invalid filter operators are rejected."""
+        """Invalid filter operators are rejected."""
         from strata.transforms.scan import FilterSpec
 
         with pytest.raises(ValidationError):
             FilterSpec(column="x", op="LIKE", value="test")
 
     def test_scan_execute_not_supported(self):
-        """Test that scan@v1 cannot be executed locally."""
+        """scan@v1 cannot run locally."""
         transform = ScanTransform()
         table = pa.table({"x": [1, 2, 3]})
 
@@ -118,7 +103,6 @@ class TestScanTransform:
         assert "handled by the Strata server" in str(exc_info.value)
 
     def test_build_scan_transform(self):
-        """Test build_scan_transform helper."""
         spec = build_scan_transform(
             columns=["a", "b"],
             filters=[{"column": "x", "op": ">", "value": 10}],
@@ -131,7 +115,7 @@ class TestScanTransform:
         assert spec["params"]["snapshot_id"] == 123
 
     def test_build_scan_transform_minimal(self):
-        """Test build_scan_transform with no arguments."""
+        """build_scan_transform with no arguments."""
         spec = build_scan_transform()
 
         assert spec["executor"] == "scan@v1"
@@ -139,15 +123,13 @@ class TestScanTransform:
 
 
 class TestDuckDBSQLTransform:
-    """Tests for duckdb_sql@v1 transform."""
+    """The duckdb_sql@v1 transform."""
 
     def test_duckdb_params_validation(self):
-        """Test DuckDBSQLParams validation."""
         params = DuckDBSQLParams(sql="SELECT * FROM input0")
         assert params.sql == "SELECT * FROM input0"
 
     def test_duckdb_params_empty_sql_rejected(self):
-        """Test that empty SQL is rejected."""
         with pytest.raises(ValidationError):
             DuckDBSQLParams(sql="")
 
@@ -155,12 +137,11 @@ class TestDuckDBSQLTransform:
             DuckDBSQLParams(sql="   ")
 
     def test_duckdb_params_sql_stripped(self):
-        """Test that SQL is stripped of whitespace."""
+        """Surrounding whitespace is stripped from the SQL."""
         params = DuckDBSQLParams(sql="  SELECT 1  ")
         assert params.sql == "SELECT 1"
 
     def test_duckdb_execute_simple(self):
-        """Test simple DuckDB execution."""
         transform = DuckDBSQLTransform()
         table = pa.table({"x": [1, 2, 3], "y": [4, 5, 6]})
 
@@ -171,7 +152,6 @@ class TestDuckDBSQLTransform:
         assert result.column("z").to_pylist() == [5, 7, 9]
 
     def test_duckdb_execute_aggregation(self):
-        """Test DuckDB aggregation."""
         transform = DuckDBSQLTransform()
         table = pa.table({"category": ["a", "a", "b"], "value": [10, 20, 30]})
 
@@ -186,7 +166,6 @@ class TestDuckDBSQLTransform:
         assert data["b"] == 30
 
     def test_duckdb_execute_multiple_inputs(self):
-        """Test DuckDB with multiple input tables."""
         transform = DuckDBSQLTransform()
         events = pa.table({"id": [1, 2, 3], "user_id": [10, 20, 10]})
         users = pa.table({"id": [10, 20], "name": ["Alice", "Bob"]})
@@ -204,7 +183,6 @@ class TestDuckDBSQLTransform:
         assert names.count("Bob") == 1
 
     def test_duckdb_execute_no_inputs(self):
-        """Test DuckDB can execute queries without inputs."""
         transform = DuckDBSQLTransform()
         result = transform.execute([], DuckDBSQLParams(sql="SELECT 42 as answer"))
 
@@ -212,7 +190,7 @@ class TestDuckDBSQLTransform:
         assert result.column("answer").to_pylist() == [42]
 
     def test_duckdb_run_method(self):
-        """Test the high-level run() method."""
+        """The high-level run() method."""
         transform = DuckDBSQLTransform()
         table = pa.table({"x": [1, 2, 3]})
 
@@ -221,7 +199,6 @@ class TestDuckDBSQLTransform:
         assert result.column("doubled").to_pylist() == [2, 4, 6]
 
     def test_build_duckdb_sql_transform(self):
-        """Test build_duckdb_sql_transform helper."""
         spec = build_duckdb_sql_transform("SELECT * FROM input0")
 
         assert spec["executor"] == "duckdb_sql@v1"
@@ -229,10 +206,8 @@ class TestDuckDBSQLTransform:
 
 
 class TestRunTransform:
-    """Tests for run_transform function."""
-
     def test_run_transform_duckdb(self):
-        """Test run_transform with duckdb_sql@v1."""
+        """run_transform with duckdb_sql@v1."""
         table = pa.table({"x": [1, 2, 3]})
 
         result = run_transform(
@@ -244,12 +219,12 @@ class TestRunTransform:
         assert result.column("total").to_pylist() == [6]
 
     def test_run_transform_unknown(self):
-        """Test run_transform with unknown executor."""
+        """run_transform with an unknown executor."""
         with pytest.raises(ValueError, match="Unknown transform"):
             run_transform("unknown@v1", inputs=[], params={})
 
     def test_run_transform_with_prefix(self):
-        """Test run_transform strips local:// prefix."""
+        """run_transform strips the local:// prefix."""
         table = pa.table({"x": [1]})
 
         result = run_transform(
@@ -262,10 +237,9 @@ class TestRunTransform:
 
 
 class TestRunLocal:
-    """Tests for run_local function (build_spec based execution)."""
+    """run_local with a build_spec."""
 
     def test_run_local_duckdb(self):
-        """Test run_local with DuckDB build_spec."""
         table_uri = "test://input"
         table = pa.table({"value": [10, 20, 30]})
 
@@ -281,7 +255,6 @@ class TestRunLocal:
         assert result.column("avg_val").to_pylist() == [20.0]
 
     def test_run_local_multiple_inputs(self):
-        """Test run_local with multiple inputs."""
         uri1 = "test://events"
         uri2 = "test://users"
         events = pa.table({"event_id": [1, 2], "user_id": [10, 20]})
@@ -304,7 +277,6 @@ class TestRunLocal:
         assert set(result.column("name").to_pylist()) == {"A", "B"}
 
     def test_run_local_missing_input(self):
-        """Test run_local fails on missing input."""
         build_spec = {
             "executor": "duckdb_sql@v1",
             "params": {"sql": "SELECT 1"},
@@ -316,7 +288,7 @@ class TestRunLocal:
             run_local(build_spec, input_tables)
 
     def test_run_local_with_local_prefix(self):
-        """Test run_local handles local:// prefix."""
+        """run_local handles the local:// prefix."""
         table = pa.table({"x": [1]})
 
         build_spec = {
@@ -331,7 +303,7 @@ class TestRunLocal:
         assert result.num_rows == 1
 
     def test_run_local_preserves_input_order(self):
-        """Test that run_local preserves input order from input_uris."""
+        """Input order follows input_uris."""
         first = pa.table({"val": [1]})
         second = pa.table({"val": [2]})
 

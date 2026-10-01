@@ -1,11 +1,6 @@
-"""Tests for QoS (Quality of Service) two-tier admission control.
+"""Two-tier QoS admission: interactive vs bulk classification, isolation and metrics.
 
-These tests verify that the QoS mechanism:
-1. Classifies queries correctly as "interactive" or "bulk"
-2. Uses separate semaphores for each tier
-3. Prevents bulk queries from starving interactive queries
-4. Tracks QoS metrics correctly
-5. Releases tier semaphores properly on completion/error/disconnect
+Also checks tier slots are released on completion, error and disconnect.
 """
 
 import time
@@ -22,7 +17,6 @@ from tests.conftest import find_free_port, run_server
 
 
 def build_materialize_request(table_uri: str, columns: list[str] | None = None) -> dict:
-    """Build a materialize request for the given table and columns."""
     params = {}
     if columns is not None:
         params["columns"] = columns
@@ -35,7 +29,7 @@ def build_materialize_request(table_uri: str, columns: list[str] | None = None) 
 
 @pytest.fixture
 def qos_warehouse(tmp_path):
-    """Create a warehouse with tables of different sizes for QoS testing."""
+    """A warehouse with tables of different sizes for QoS tests."""
     import sys
 
     if sys.platform == "win32":
@@ -118,10 +112,8 @@ def qos_warehouse(tmp_path):
 
 
 class TestQoSMetrics:
-    """Tests for QoS metrics exposure."""
-
     def test_qos_metrics_in_json_endpoint(self, qos_warehouse, tmp_path):
-        """Test that QoS metrics are exposed in /metrics JSON endpoint."""
+        """QoS metrics are exposed on the /metrics JSON endpoint."""
         port = find_free_port()
         config = StrataConfig(
             host="127.0.0.1",
@@ -153,7 +145,7 @@ class TestQoSMetrics:
                 assert qos["bulk_available"] == 4
 
     def test_qos_metrics_in_prometheus_endpoint(self, qos_warehouse, tmp_path):
-        """Test that QoS metrics are exposed in Prometheus format."""
+        """QoS metrics are exposed in Prometheus format."""
         port = find_free_port()
         config = StrataConfig(
             host="127.0.0.1",
@@ -177,10 +169,10 @@ class TestQoSMetrics:
 
 
 class TestQoSClassification:
-    """Tests for query classification as interactive or bulk."""
+    """Classification as interactive or bulk."""
 
     def test_small_query_succeeds(self, qos_warehouse, tmp_path):
-        """Test that small queries with few columns can be executed."""
+        """A small query with few columns runs."""
         port = find_free_port()
         config = StrataConfig(
             host="127.0.0.1",
@@ -212,7 +204,6 @@ class TestQoSClassification:
                 assert metrics["qos"]["bulk_active"] == 0
 
     def test_large_query_succeeds(self, qos_warehouse, tmp_path):
-        """Test that large queries can be executed."""
         port = find_free_port()
         config = StrataConfig(
             host="127.0.0.1",
@@ -244,7 +235,7 @@ class TestQoSClassification:
                 assert metrics["qos"]["bulk_active"] == 0
 
     def test_full_scan_succeeds(self, qos_warehouse, tmp_path):
-        """Test that full table scans with all columns can be executed."""
+        """A full scan with all columns runs."""
         port = find_free_port()
         config = StrataConfig(
             host="127.0.0.1",
@@ -278,10 +269,9 @@ class TestQoSClassification:
 
 
 class TestQoSTierIsolation:
-    """Tests for tier isolation (bulk doesn't starve interactive)."""
+    """Bulk queries do not starve interactive ones."""
 
     def test_interactive_query_succeeds(self, qos_warehouse, tmp_path):
-        """Test that interactive queries can be executed successfully."""
         port = find_free_port()
         config = StrataConfig(
             host="127.0.0.1",
@@ -312,10 +302,10 @@ class TestQoSTierIsolation:
 
 
 class TestQoSSemaphoreCleanup:
-    """Tests for proper semaphore cleanup in QoS tiers."""
+    """Tier semaphore cleanup."""
 
     def test_tier_semaphore_released_on_completion(self, qos_warehouse, tmp_path):
-        """Test that tier semaphore is released when stream completes normally."""
+        """The tier semaphore is released when the stream completes normally."""
         port = find_free_port()
         config = StrataConfig(
             host="127.0.0.1",
@@ -346,7 +336,7 @@ class TestQoSSemaphoreCleanup:
                 assert qos["bulk_active"] == 0
 
     def test_tier_semaphore_released_on_scan_delete(self, qos_warehouse, tmp_path):
-        """Test that tier semaphore is released when artifact is created but not streamed."""
+        """The tier semaphore is released when the artifact is created but not streamed."""
         port = find_free_port()
         config = StrataConfig(
             host="127.0.0.1",
@@ -373,7 +363,7 @@ class TestQoSSemaphoreCleanup:
                 assert qos["bulk_active"] == 0
 
     def test_multiple_scans_release_correctly(self, qos_warehouse, tmp_path):
-        """Test that multiple concurrent streams release their semaphores correctly."""
+        """Several concurrent streams each release their semaphore."""
         port = find_free_port()
         config = StrataConfig(
             host="127.0.0.1",
@@ -409,10 +399,8 @@ class TestQoSSemaphoreCleanup:
 
 
 class TestQoSConfiguration:
-    """Tests for QoS configuration options."""
-
     def test_default_qos_metrics_exposed(self, qos_warehouse, tmp_path):
-        """Test that QoS metrics are exposed with default configuration."""
+        """QoS metrics are exposed under the default configuration."""
         port = find_free_port()
         config = StrataConfig(
             host="127.0.0.1",
@@ -436,12 +424,9 @@ class TestQoSConfiguration:
                 assert qos["bulk_slots"] == 8
 
     def test_configured_slots_reach_admission_limiters(self, qos_warehouse, tmp_path):
-        """#185: interactive_slots / bulk_slots must configure the per-tenant
-        registry limiters the stream handler actually acquires — not just the
-        (former) never-acquired global limiters. Asserts directly on the registry
-        the admission path uses, with non-default values so a missing
-        init_tenant_registry wiring (registry falling back to its hard-coded
-        32/8) would fail.
+        """Configured slots reach the per-tenant limiters the stream handler acquires.
+
+        Non-default values make a missing init_tenant_registry wiring (falling back to 32/8) fail.
         """
         port = find_free_port()
         config = StrataConfig(
@@ -462,7 +447,7 @@ class TestQoSConfiguration:
             assert bulk.capacity == 3
 
     def test_query_can_be_streamed(self, qos_warehouse, tmp_path):
-        """Test that queries can be successfully streamed with QoS enabled."""
+        """A query streams with QoS enabled."""
         port = find_free_port()
         config = StrataConfig(
             host="127.0.0.1",
@@ -491,10 +476,10 @@ class TestQoSConfiguration:
 
 
 class TestQoSFastFail:
-    """Tests for QoS fast-fail behavior (429 when slots unavailable)."""
+    """Fast-fail with 429 when no slot is free."""
 
     def test_rejection_metrics_tracked(self, qos_warehouse, tmp_path):
-        """Test that rejection counts are tracked in metrics."""
+        """Rejection counts are tracked in metrics."""
         port = find_free_port()
         config = StrataConfig(
             host="127.0.0.1",
@@ -516,7 +501,7 @@ class TestQoSFastFail:
                 assert qos["bulk_rejected"] == 0
 
     def test_rejection_metrics_in_prometheus(self, qos_warehouse, tmp_path):
-        """Test that rejection metrics are in Prometheus format."""
+        """Rejection metrics appear in Prometheus format."""
         port = find_free_port()
         config = StrataConfig(
             host="127.0.0.1",
@@ -567,7 +552,7 @@ _EXPECTED_QOS_METRIC_KEYS = {
 
 
 class TestQoSCharacterization:
-    """Characterization tests pinning QoS behaviour ahead of the #302 extraction."""
+    """Characterization tests pinning QoS behaviour over HTTP."""
 
     def test_qos_metrics_golden_shape(self, qos_warehouse, tmp_path):
         """The ``/metrics`` qos block exposes exactly the documented key set."""
@@ -588,16 +573,8 @@ class TestQoSCharacterization:
     def test_no_qos_slot_active_after_abandoned_stream(self, qos_warehouse, tmp_path):
         """After a client abandons a stream, no tier slot stays active.
 
-        End-state guard: open a pass-through stream (service mode, no
-        artifact_dir), read one chunk, drop the connection, and confirm both tier
-        slots return to free. It pins "an abandoned reader leaves nothing active".
-
-        NOTE: forcing a deterministic *mid-flight* disconnect over HTTP is racy —
-        a small response is fully buffered before the client reads, so the server
-        completes normally. The precise #238 property (limiter + client-semaphore
-        released when the acquire/serve path is *cancelled*) is locked by a
-        direct unit test of ``Admission.release()`` in the extraction PR, where
-        the release closure becomes independently callable.
+        An end-state guard only: a small response is fully buffered before the client reads, so a
+        mid-flight disconnect is racy over HTTP. test_qos_admission.py covers the cancel path.
         """
         port = find_free_port()
         config = StrataConfig(

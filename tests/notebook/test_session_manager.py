@@ -1,4 +1,4 @@
-"""Tests for notebook session manager lifecycle."""
+"""Tests for the notebook session manager lifecycle."""
 
 from __future__ import annotations
 
@@ -34,7 +34,7 @@ _MARKDOWN_LITERAL = '"# Reopened\\n\\nRendered after refresh."'
 
 
 def test_close_session_without_running_loop_uses_nowait_pool_shutdown(monkeypatch, tmp_path: Path):
-    """Sync close_session should still trigger warm-pool cleanup."""
+    """Sync close_session still triggers warm-pool cleanup."""
     manager = SessionManager()
     notebook_dir = create_notebook(tmp_path, "session_close")
 
@@ -55,7 +55,7 @@ def test_close_session_without_running_loop_uses_nowait_pool_shutdown(monkeypatc
 
 
 def test_close_session_tolerates_non_pool_warm_pool(tmp_path: Path):
-    """Closing a session should tolerate test doubles without pool methods."""
+    """Closing a session tolerates warm-pool test doubles without pool methods."""
     manager = SessionManager()
     notebook_dir = create_notebook(tmp_path, "session_close_tolerant")
 
@@ -68,7 +68,7 @@ def test_close_session_tolerates_non_pool_warm_pool(tmp_path: Path):
 
 
 def test_reload_preserves_ready_leaf_runtime_state(tmp_path: Path):
-    """Metadata-only reloads should not drop an executed leaf back to idle."""
+    """Metadata-only reloads must not drop an executed leaf back to idle."""
     notebook_dir = create_notebook(tmp_path, "reload_state")
     add_cell_to_notebook(notebook_dir, "c1")
     write_cell(notebook_dir, "c1", "x = 1")
@@ -93,7 +93,6 @@ def test_reload_preserves_ready_leaf_runtime_state(tmp_path: Path):
 
 
 def test_reload_does_not_restore_ready_state_after_mount_change(tmp_path: Path):
-    """Reload should not preserve ready state when cell mount provenance changed."""
     notebook_dir = create_notebook(tmp_path, "reload_mount_state")
     add_cell_to_notebook(notebook_dir, "c1")
     write_cell(notebook_dir, "c1", "x = raw_data.name")
@@ -142,7 +141,7 @@ def test_reload_does_not_restore_ready_state_after_mount_change(tmp_path: Path):
 
 
 def _prime_env_reload_session(tmp_path: Path, source: str, notebook_env: dict[str, str]):
-    """Set up a minimal notebook with one executed cell for env-reload tests."""
+    """Set up a notebook with one executed cell for env-reload tests."""
     notebook_dir = create_notebook(tmp_path, "reload_env_state")
     add_cell_to_notebook(notebook_dir, "c1")
     write_cell(notebook_dir, "c1", source)
@@ -175,9 +174,7 @@ def _prime_env_reload_session(tmp_path: Path, source: str, notebook_env: dict[st
 
 
 def test_reload_preserves_outputs_when_referenced_env_changes(tmp_path: Path):
-    """A cell that reads ``APP_MODE`` should turn non-ready when the value
-    changes, but its historical display outputs and artifact URIs must
-    survive the reload so the UI can still render them."""
+    """A cell reading ``APP_MODE`` goes non-ready when it changes but keeps its outputs and URIs."""
     source = "import os\nmode = os.environ['APP_MODE']\nmode"
     notebook_dir, session, primed = _prime_env_reload_session(tmp_path, source, {"APP_MODE": "a"})
     previous_display_outputs = [out.model_copy(deep=True) for out in primed.display_outputs]
@@ -204,10 +201,10 @@ def test_reload_preserves_outputs_when_referenced_env_changes(tmp_path: Path):
 
 
 def test_reload_keeps_unrelated_cells_ready_after_env_change(tmp_path: Path):
-    """Adding a new notebook-level env var must not invalidate a cell
-    that neither references it nor declares it — this is the common case
-    when the user saves an ambient API key for an LLM helper and every
-    other cell previously went gray."""
+    """A new env var invalidates only cells that reference or declare it.
+
+    The common case: saving an API key for an LLM helper must not gray out every cell.
+    """
     source = "x = 1\nx"
     notebook_dir, session, primed = _prime_env_reload_session(tmp_path, source, {"APP_MODE": "a"})
     previous_display_outputs = [out.model_copy(deep=True) for out in primed.display_outputs]
@@ -229,7 +226,6 @@ def test_reload_keeps_unrelated_cells_ready_after_env_change(tmp_path: Path):
 
 
 def test_reload_does_not_restore_ready_state_after_worker_runtime_change(tmp_path: Path):
-    """Reload should not preserve ready state when worker runtime identity changes."""
     notebook_dir = create_notebook(tmp_path, "reload_worker_state")
     add_cell_to_notebook(notebook_dir, "c1")
     write_cell(notebook_dir, "c1", "x = 1")
@@ -286,7 +282,6 @@ def test_reload_does_not_restore_ready_state_after_worker_runtime_change(tmp_pat
 
 
 def test_open_notebook_can_reuse_existing_session_by_path(tmp_path: Path):
-    """Reopening the same path can reuse and refresh the existing session."""
     notebook_dir = create_notebook(tmp_path, "reuse_open")
     manager = SessionManager()
 
@@ -305,7 +300,7 @@ def test_open_notebook_can_reuse_existing_session_by_path(tmp_path: Path):
 def test_open_notebook_reuse_existing_session_keeps_pending_environment(
     monkeypatch, tmp_path: Path
 ):
-    """Reusing a live session should preserve pending env bootstrap instead of refreshing it."""
+    """Reusing a live session keeps its pending env bootstrap rather than refreshing it."""
     notebook_dir = create_notebook(tmp_path, "reuse_pending")
     manager = SessionManager()
 
@@ -334,7 +329,7 @@ def test_open_notebook_reuse_existing_session_keeps_pending_environment(
 def test_open_notebook_reuse_existing_session_does_not_reload_while_execution_active(
     monkeypatch, tmp_path: Path
 ):
-    """Reusing a live session should not reload/refresh while execution is in flight."""
+    """Reusing a live session must not reload while execution is in flight."""
     notebook_dir = create_notebook(tmp_path, "reuse_running")
     manager = SessionManager()
     session = manager.open_notebook(notebook_dir)
@@ -369,7 +364,6 @@ def test_open_notebook_reuse_existing_session_does_not_reload_while_execution_ac
 
 
 def test_open_notebook_restores_persisted_display_output(tmp_path: Path):
-    """A reopened notebook should restore persisted display output metadata."""
     notebook_dir = create_notebook(tmp_path, "restore_display")
     add_cell_to_notebook(notebook_dir, "c1")
     write_cell(
@@ -407,7 +401,6 @@ Display()
 
 
 def test_open_notebook_restores_persisted_markdown_display_output(tmp_path: Path):
-    """A reopened notebook should restore persisted markdown display output."""
     notebook_dir = create_notebook(tmp_path, "restore_markdown_display")
     add_cell_to_notebook(notebook_dir, "c1")
     write_cell(
@@ -445,7 +438,6 @@ Display()
 
 
 def test_open_notebook_restores_explicit_display_side_effect_output(tmp_path: Path):
-    """A reopened notebook should restore explicit display(...) side-effect output."""
     notebook_dir = create_notebook(tmp_path, "restore_display_side_effect")
     add_cell_to_notebook(notebook_dir, "c1")
     write_cell(
@@ -478,7 +470,7 @@ display(Markdown("# Side effect\\n\\nStill here."))
 
 
 def test_open_notebook_restores_multiple_display_outputs_in_order(tmp_path: Path):
-    """A reopened notebook should restore ordered display outputs plus the legacy last-item shim."""
+    """Ordered display outputs come back, plus the legacy last-item shim."""
     notebook_dir = create_notebook(tmp_path, "restore_multiple_displays")
     add_cell_to_notebook(notebook_dir, "c1")
     write_cell(
@@ -517,8 +509,7 @@ display(Markdown("# First"))
 
 
 def test_serialize_cell_surfaces_module_cell_status(tmp_path: Path):
-    """serialize_cell reports is_module_cell + module_exports so the UI
-    can show the "module" pill and list exported symbols in a tooltip."""
+    """serialize_cell reports is_module_cell and module_exports for the UI's module pill."""
     nb_dir = create_notebook(tmp_path, "module_flag", initialize_environment=False)
     add_cell_to_notebook(nb_dir, "mod")
     write_cell(
@@ -544,9 +535,7 @@ def test_serialize_cell_surfaces_module_cell_status(tmp_path: Path):
 
 
 def test_serialize_cell_does_not_flag_pure_data_cell_as_module(tmp_path: Path):
-    """A cell that only defines a literal constant is still "pure" source
-    but isn't a module cell — downstream consumers get the int through
-    the data path, no synthetic module involved."""
+    """A literal-constant cell is pure but not a module cell; its int goes the data path."""
     nb_dir = create_notebook(tmp_path, "pure_data", initialize_environment=False)
     add_cell_to_notebook(nb_dir, "c1")
     write_cell(nb_dir, "c1", "THRESHOLD = 42\n")
@@ -558,7 +547,7 @@ def test_serialize_cell_does_not_flag_pure_data_cell_as_module(tmp_path: Path):
 
 
 def test_variant_group_resolution_from_source_annotations(tmp_path: Path):
-    """End-to-end: cells with `# @variant` form groups; only active is in DAG."""
+    """Cells with ``# @variant`` form groups; only the active one is in the DAG."""
     nb_dir = create_notebook(tmp_path, "variants", initialize_environment=False)
     add_cell_to_notebook(nb_dir, "load")
     write_cell(nb_dir, "load", "X = 1\n")
@@ -585,7 +574,7 @@ def test_variant_group_resolution_from_source_annotations(tmp_path: Path):
 
 
 def test_remove_active_variant_promotes_sibling(tmp_path: Path):
-    """Deleting the active variant promotes the next-in-source-order survivor."""
+    """The next survivor in source order becomes active."""
     nb_dir = create_notebook(tmp_path, "variants_del_active", initialize_environment=False)
     add_cell_to_notebook(nb_dir, "a")
     write_cell(nb_dir, "a", "# @variant g a\npreds = 1\n")
@@ -607,7 +596,6 @@ def test_remove_active_variant_promotes_sibling(tmp_path: Path):
 
 
 def test_remove_inactive_variant_keeps_active(tmp_path: Path):
-    """Deleting an inactive variant leaves the active selection alone."""
     nb_dir = create_notebook(tmp_path, "variants_del_inactive", initialize_environment=False)
     add_cell_to_notebook(nb_dir, "a")
     write_cell(nb_dir, "a", "# @variant g a\npreds = 1\n")
@@ -625,7 +613,7 @@ def test_remove_inactive_variant_keeps_active(tmp_path: Path):
 
 
 def test_remove_last_variant_dissolves_group(tmp_path: Path):
-    """Deleting the last variant removes the cell *and* the variant_group entry."""
+    """Deleting the last variant removes the cell and the variant_group entry."""
     import tomllib
 
     nb_dir = create_notebook(tmp_path, "variants_del_last", initialize_environment=False)
@@ -644,7 +632,7 @@ def test_remove_last_variant_dissolves_group(tmp_path: Path):
 
 
 def test_add_variant_clones_active_and_switches(tmp_path: Path):
-    """Add a sibling variant: cloned body, auto-generated name, becomes active."""
+    """The new sibling gets the cloned body and an auto-generated name, and becomes active."""
     nb_dir = create_notebook(tmp_path, "variants_add", initialize_environment=False)
     add_cell_to_notebook(nb_dir, "load")
     write_cell(nb_dir, "load", "X = 1\n")
@@ -680,7 +668,7 @@ def test_add_variant_clones_active_and_switches(tmp_path: Path):
 
 
 def test_add_variant_collision_uses_numeric_suffix(tmp_path: Path):
-    """If <active>_copy already exists as a sibling, fall through to _copy2."""
+    """If <active>_copy already exists as a sibling, the name falls through to _copy2."""
     nb_dir = create_notebook(tmp_path, "variants_collision", initialize_environment=False)
     add_cell_to_notebook(nb_dir, "a")
     write_cell(nb_dir, "a", "# @variant model gpt4\npreds = 1\n")

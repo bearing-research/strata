@@ -1,16 +1,7 @@
-"""E2E invariant: every successful execution path must persist
-``last_provenance_hash`` / ``last_source_hash`` / ``last_env_hash``
-to ``.strata/runtime.json``.
+"""E2E invariant: every successful execution path persists its hashes to ``.strata/runtime.json``.
 
-The executor has three branches that end in ``record_successful_execution_provenance``:
-
-1. **cold** — cache miss, fresh harness run
-2. **cached** — provenance hit on a prior artifact, no subprocess
-3. **loop** — loop-cell path that emits per-iteration artifacts
-
-If any branch stops calling ``persist_cell_provenance``, reopened
-notebooks silently lose the ability to classify cells as READY/STALE
-without a re-execution. This test covers all three.
+Covers the cold, cached and loop branches. A branch that skips ``persist_cell_provenance``
+leaves a reopened notebook unable to classify cells READY or STALE without re-running.
 """
 
 from __future__ import annotations
@@ -40,8 +31,7 @@ def _provenance(nb_dir: Path, cell_id: str) -> dict[str, str]:
 
 @pytest.mark.asyncio
 async def test_cold_and_cached_paths_persist_provenance(tmp_path: Path):
-    """A second run of the same cell hits the cache branch — provenance
-    must still be persisted so a subsequent reopen sees it."""
+    """The second run takes the cache branch, which must persist provenance too."""
     nb_dir = create_notebook(tmp_path, "prov_persist_cache")
     add_cell_to_notebook(nb_dir, "c1")
     write_cell(nb_dir, "c1", "x = 1")
@@ -75,8 +65,7 @@ async def test_cold_and_cached_paths_persist_provenance(tmp_path: Path):
 
 @pytest.mark.asyncio
 async def test_loop_path_persists_provenance(tmp_path: Path):
-    """Loop cells take a separate execution branch that must also call
-    ``record_successful_execution_provenance`` on success."""
+    """Loop cells take a separate branch that must also record provenance on success."""
     nb_dir = create_notebook(tmp_path, "prov_persist_loop")
     add_cell_to_notebook(nb_dir, "seed")
     write_cell(nb_dir, "seed", "state = {'n': 0}")
@@ -101,9 +90,7 @@ async def test_loop_path_persists_provenance(tmp_path: Path):
 
 @pytest.mark.asyncio
 async def test_loop_cell_stores_non_carry_consumed_variables(tmp_path: Path):
-    """A loop cell that defines a second variable consumed downstream must
-    materialize it — only the carry used to be stored, so the downstream
-    cell ran with the name unbound (code-review finding)."""
+    """A loop cell's second variable consumed downstream is stored, not only the carry."""
     nb_dir = create_notebook(tmp_path, "prov_loop_extra_var")
     add_cell_to_notebook(nb_dir, "seed")
     write_cell(nb_dir, "seed", "state = {'n': 0}")
@@ -144,17 +131,9 @@ async def test_loop_cell_stores_non_carry_consumed_variables(tmp_path: Path):
 async def test_executed_cells_record_lineage_the_graph_walk_can_resolve(tmp_path: Path):
     """A three-cell chain must produce a lineage graph three artifacts deep.
 
-    ``input_versions`` is what both the lineage API and ``strata artifact
-    lineage`` walk, and both resolve an input only when its key is a
-    ``strata://artifact/`` URI. The executor recorded raw provenance digests
-    instead, so a notebook artifact's ancestry stopped one hop out at a node
-    the reader could not identify — the entire graph a published artifact
-    would show.
-
-    Asserted through ``build_lineage`` against a real execution rather than on
-    the recorded dict: the format only matters insofar as the walk consumes
-    it, and only the executor can prove the refs are recorded where the
-    resolution actually happens.
+    The walk resolves an ``input_versions`` key only when it is a ``strata://artifact/`` URI,
+    not a raw provenance digest. Asserted through ``build_lineage`` on a real execution,
+    since only the walk shows whether the recorded refs resolve.
     """
     from strata.services.artifact import ArtifactService
 
@@ -213,12 +192,8 @@ async def test_executed_cells_record_lineage_the_graph_walk_can_resolve(tmp_path
 async def test_stored_artifact_carries_the_source_that_produced_it(tmp_path: Path):
     """The artifact records the executed source, and keeps it after an edit.
 
-    A reader outside the notebook has no ``cells/{id}.py`` to check a digest
-    against, so ``source_hash`` alone explains nothing to them. What makes the
-    recorded text trustworthy is *when* it is captured: the cell can be edited
-    after the run, and reading the source back at publish time would pair a
-    cached artifact with code that did not produce it. So the edit below is
-    the point of the test, not decoration.
+    Reading the source back at publish time would pair a cached artifact with code that did
+    not produce it, so the edit is the point of the test.
     """
     import json
 

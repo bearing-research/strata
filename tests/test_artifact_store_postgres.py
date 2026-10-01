@@ -1,12 +1,7 @@
 """The artifact store running on Postgres instead of SQLite.
 
-These exercise the dialect seam end to end: the same ``ArtifactStore`` methods
-personal mode uses, against a real server, so the port is proven by the store's
-own behavior rather than by asserting on rendered SQL.
-
-Requirements:
-    - Docker must be running
-    - The ``postgres`` extra (psycopg)
+Exercises the same ``ArtifactStore`` methods personal mode uses against a real server, so the port
+is proven by behaviour rather than rendered SQL. Requires Docker and the ``postgres`` extra.
 """
 
 from __future__ import annotations
@@ -23,10 +18,7 @@ from strata.sql_backend import PostgresDialect, advisory_lock_id
 
 
 def _docker_daemon_reachable() -> bool:
-    """Skip when the daemon is unreachable. ``docker`` itself is a transitive
-    dev dep via testcontainers, but the daemon may not be running on a
-    contributor's laptop. CI always has Docker; this only triggers locally.
-    """
+    """Skip when the Docker daemon is unreachable (only possible locally; CI always has Docker)."""
     try:
         docker.from_env().ping()
         return True
@@ -49,11 +41,7 @@ def postgres_dsn():
 
 @pytest.fixture
 def store(postgres_dsn, tmp_path):
-    """A store whose metadata is on Postgres and whose blobs are local.
-
-    Each test gets a clean schema: the module-scoped container is reused for
-    speed, so state has to be dropped between tests rather than recreated.
-    """
+    """A store with metadata on Postgres and local blobs; each test gets a clean schema."""
     dialect = PostgresDialect(postgres_dsn)
     conn = dialect.connect()
     try:
@@ -320,9 +308,9 @@ class TestGarbageCollection:
             conn.close()
 
     def test_retention_runs_its_queries_on_postgres(self, store):
-        """The minted clause, least-recently-used order under a cap, the
-        version-gap check's GROUP BY and keep-superseded, on the dialect that
-        runs them only here."""
+        """The minted clause, LRU order under a cap, the version-gap GROUP BY and keep-superseded,
+        on the only dialect that runs them here.
+        """
         oldest = "0b6f2a4e-6d1a-4c0e-9b1e-2f8d6a3c1e01"
         newer = "0b6f2a4e-6d1a-4c0e-9b1e-2f8d6a3c1e02"
         self._ready(store, oldest, "prov-old", minted=True)
@@ -486,12 +474,7 @@ class TestConnectionPool:
 
 
 class TestConfigurationSelectsTheBackend:
-    """The wiring, end to end: a DSN in config produces a Postgres-backed store.
-
-    Until this existed the backend was reachable only from direct
-    instantiation, so a green test suite said nothing about whether an
-    operator could actually turn it on.
-    """
+    """The wiring end to end: a DSN in config produces a Postgres-backed store."""
 
     def test_a_configured_dsn_produces_a_postgres_backed_store(self, postgres_dsn, tmp_path):
         from strata.artifact_store import get_artifact_store, reset_artifact_store
@@ -548,9 +531,8 @@ class TestConfigurationSelectsTheBackend:
 class TestBuildStoreSharesTheBackend:
     """Build rows live in the artifact store's database, so they follow it.
 
-    Left on a node-local SQLite file, a build claimed on one node would be
-    invisible to ``GET /v1/builds/{id}`` on another -- which defeats the point
-    of moving the artifact store off local disk in the first place.
+    On a node-local SQLite file, a build claimed on one node would be invisible to ``GET
+    /v1/builds/{id}`` on another.
     """
 
     def test_build_created_on_one_node_is_visible_on_another(self, postgres_dsn, tmp_path):
@@ -641,9 +623,9 @@ class TestBuildStoreSharesTheBackend:
 
 
 class TestTheAttemptLedgerOnPostgres:
-    """``build_attempts`` is created apart from ``artifact_builds``, so a
-    database that already has builds gains it, and its deadlines keep their
-    sub-second part (a REAL column would round them to minutes)."""
+    """``build_attempts`` is created apart from ``artifact_builds``, so an existing database gains
+    it, and deadlines keep sub-second precision (REAL would round them to minutes).
+    """
 
     def test_an_existing_database_gains_the_ledger(self, postgres_dsn, tmp_path):
         from strata.transforms.build_store import BuildStore
@@ -692,9 +674,9 @@ class TestTheAttemptLedgerOnPostgres:
 
 
 class TestTheCliOnAPostgresStore:
-    """The artifact CLI opened only a SQLite file in the artifact directory, so
-    with a service store's settings every command looked at an empty store:
-    `strata artifact archive --token` answered "No such publication"."""
+    """With a service store's settings, the artifact CLI must open Postgres, not an empty SQLite
+    file.
+    """
 
     def test_archive_by_token_writes_the_zip_the_route_serves(
         self, postgres_dsn, tmp_path, monkeypatch
@@ -811,9 +793,7 @@ class TestWriterSerialization:
 class TestSchemaMigrations:
     """Evolving a Postgres store that already holds data.
 
-    This is the case that had no mechanism at all: ``_init_schema`` returned as
-    soon as the schema existed, so a column added to the constants reached
-    fresh databases and never reached a deployed one.
+    ``_init_schema`` must carry new columns to a deployed database, not only to fresh ones.
     """
 
     def test_a_fresh_database_is_stamped_and_complete(self, store):
@@ -833,7 +813,7 @@ class TestSchemaMigrations:
         assert has_column is not None
 
     def test_an_existing_database_is_carried_forward(self, postgres_dsn, tmp_path, store):
-        """The whole point: a column reaches a store that already has rows."""
+        """A new column reaches a store that already has rows."""
         from strata.artifact_store import _LATEST_SCHEMA_VERSION
         from strata.sql_backend import PostgresDialect
 

@@ -1,4 +1,4 @@
-"""Tests for the dialect-aware ``:name`` → positional rewriter."""
+"""Tests for the dialect-aware ``:name`` to positional rewriter."""
 
 from __future__ import annotations
 
@@ -18,16 +18,14 @@ def test_rewrite_sqlite_uses_qmark():
 
 
 def test_rewrite_unknown_dialect_falls_back_to_qmark():
-    """ADBC drivers default to qmark; unknown dialects should match
-    that default rather than guess at numeric form."""
+    """Unknown dialects fall back to qmark, the ADBC default, rather than numeric form."""
     sql = "SELECT :a, :b"
     assert rewrite_named_to_positional(sql, dialect=None) == "SELECT ?, ?"
     assert rewrite_named_to_positional(sql, dialect="duckdb") == "SELECT ?, ?"
 
 
 def test_rewrite_duplicates_emit_one_position_per_occurrence():
-    """Each ``:foo`` occurrence becomes a fresh positional bind so
-    the executor's bind tuple lines up position-for-position."""
+    """Each ``:foo`` occurrence gets its own position so the bind tuple lines up."""
     sql = "SELECT :foo + :foo + :bar"
     pg = rewrite_named_to_positional(sql, dialect="postgres")
     assert pg == "SELECT $1 + $2 + $3"
@@ -36,10 +34,7 @@ def test_rewrite_duplicates_emit_one_position_per_occurrence():
 
 
 def test_rewrite_does_not_touch_strings_or_comments():
-    """Crucial: ``:foo`` inside ``'literal :foo'`` or ``-- :foo``
-    must not be rewritten. The bind layer would otherwise see a
-    bogus parameter and the user's query would silently change
-    semantics."""
+    """``:foo`` in a string or comment is not rewritten, or the query's meaning changes."""
     sql = "SELECT 'hello :foo', :real -- :ignored\nFROM t"
     out = rewrite_named_to_positional(sql, dialect="postgres")
     # Original string and comment unchanged; only :real becomes $1.
@@ -50,9 +45,7 @@ def test_rewrite_does_not_touch_strings_or_comments():
 
 
 def test_rewrite_does_not_touch_postgres_dollar_quotes():
-    """Codex-flagged territory: ``$$ ... $$`` and ``$tag$ ... $tag$``
-    are dollar-quoted strings, not placeholders. Their bodies must
-    survive untouched."""
+    """Postgres dollar-quoted bodies (``$$`` and ``$tag$``) survive untouched."""
     sql = "SELECT $$:foo$$, $body$:bar$body$, :real FROM t"
     out = rewrite_named_to_positional(sql, dialect="postgres")
     assert "$$:foo$$" in out
@@ -61,8 +54,6 @@ def test_rewrite_does_not_touch_postgres_dollar_quotes():
 
 
 def test_rewrite_skips_postgres_cast_operator():
-    """``::int`` is the cast operator; the leading ``:`` is part of
-    a larger token and shouldn't trigger a placeholder rewrite."""
     sql = "SELECT id::int, value::text, :user_id FROM t"
     out = rewrite_named_to_positional(sql, dialect="postgres")
     assert "id::int" in out
@@ -77,9 +68,7 @@ def test_rewrite_no_placeholders_returns_input_unchanged():
 
 
 def test_rewrite_preserves_whitespace_and_punctuation():
-    """The rewriter is byte-exact outside placeholder positions —
-    important so query-plan caches at the backend stay warm across
-    Strata runs."""
+    """Output is byte-exact outside placeholders, keeping backend plan caches warm."""
     sql = "SELECT\n  :a,\n  :b\nFROM t\nWHERE x = :a"
     out = rewrite_named_to_positional(sql, dialect="postgres")
     assert out == "SELECT\n  $1,\n  $2\nFROM t\nWHERE x = $3"

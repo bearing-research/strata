@@ -1,8 +1,7 @@
-"""Unit tests for the run-all batching partitioner (PR-b3 of issue #26).
+"""Unit tests for the run-all batching partitioner.
 
-Pure-logic tests — build a session, write cells with various
-batchability-disqualifying shapes, and assert the partitioner
-classifies each correctly.
+Each test writes cells with a batching-disqualifying shape and checks how the partitioner
+classifies them.
 """
 
 from __future__ import annotations
@@ -112,10 +111,7 @@ def test_partition_worker_cell_splits_into_three_runs(tmp_path: Path):
 
 
 def test_partition_preserves_notebook_order(tmp_path: Path):
-    """Topologically equivalent ordering must not be applied — partitioner
-    walks the cells *in the order given*. (Important per issue #26 round-2
-    finding #4 — notebook order, not topological order.)
-    """
+    """The partitioner walks cells in the order given, not in topological order."""
     session = _make_session(
         tmp_path,
         [
@@ -139,7 +135,7 @@ def test_partition_preserves_notebook_order(tmp_path: Path):
 
 
 def test_non_python_cell_blocks_batching(tmp_path: Path):
-    """Prompt cells already run in-process — orthogonal to batching."""
+    """Prompt cells run in-process without a harness, so they are never batched."""
     from strata.notebook.models import CellLanguage
 
     session = _make_session(tmp_path, [("c1", "a = 1\n")])
@@ -151,9 +147,9 @@ def test_non_python_cell_blocks_batching(tmp_path: Path):
 
 
 def test_notebook_level_worker_blocks_batching(tmp_path: Path):
-    """When the notebook-level default worker is non-local, every cell
-    inherits it via _resolve_effective_worker and becomes non-batchable
-    (even with no per-cell annotation)."""
+    """A non-local notebook default worker makes every cell non-batchable, with no per-cell
+    annotation.
+    """
     session = _make_session(tmp_path, [("c1", "a = 1\n")])
     session.notebook_state.worker = "gpu-fly"
     executor = CellExecutor(session)

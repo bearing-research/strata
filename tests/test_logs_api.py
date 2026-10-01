@@ -1,4 +1,4 @@
-"""Tests for the log ring buffer + /v1/logs endpoints (observability, B1)."""
+"""The log ring buffer and the /v1/logs endpoints."""
 
 import logging
 

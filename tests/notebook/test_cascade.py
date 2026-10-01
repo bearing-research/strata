@@ -13,7 +13,7 @@ from strata.notebook.writer import add_cell_to_notebook, create_notebook, write_
 
 @pytest.fixture
 def temp_pipeline():
-    """Create a 4-cell pipeline for testing."""
+    """A 4-cell pipeline notebook."""
     with tempfile.TemporaryDirectory() as tmpdir:
         tmpdir = Path(tmpdir)
 
@@ -38,7 +38,7 @@ def temp_pipeline():
 
 
 def test_cascade_planner_no_cascade_needed(temp_pipeline):
-    """Test that no cascade is needed when upstream is ready."""
+    """Upstream ready: no cascade."""
     session, _ = temp_pipeline
 
     session.notebook_state.cells[0].status = "ready"
@@ -52,7 +52,7 @@ def test_cascade_planner_no_cascade_needed(temp_pipeline):
 
 
 def test_cascade_planner_cascade_needed(temp_pipeline):
-    """Test that cascade is detected when upstream is stale."""
+    """Upstream stale: a cascade."""
     session, _ = temp_pipeline
 
     session.notebook_state.cells[0].status = "stale"
@@ -67,7 +67,6 @@ def test_cascade_planner_cascade_needed(temp_pipeline):
 
 
 def test_cascade_plan_structure(temp_pipeline):
-    """Test that cascade plan has correct structure."""
     session, _ = temp_pipeline
 
     planner = CascadePlanner(session)
@@ -90,7 +89,6 @@ def test_cascade_plan_structure(temp_pipeline):
 
 
 def test_cascade_plan_topological_order(temp_pipeline):
-    """Test that cascade plan steps are in topological order."""
     session, _ = temp_pipeline
 
     session.notebook_state.cells[0].status = "stale"
@@ -116,7 +114,7 @@ def test_cascade_plan_topological_order(temp_pipeline):
 
 
 def test_cascade_plan_includes_target(temp_pipeline):
-    """Test that cascade plan always includes the target cell."""
+    """The plan always includes the target cell."""
     session, _ = temp_pipeline
 
     planner = CascadePlanner(session)
@@ -136,7 +134,7 @@ def test_cascade_plan_includes_target(temp_pipeline):
 
 
 def test_cascade_plan_skip_ready_cells(temp_pipeline):
-    """Test that ready (cached) cells are marked to skip."""
+    """Ready (cached) cells are marked to skip."""
     session, _ = temp_pipeline
 
     session.notebook_state.cells[0].status = "ready"
@@ -174,7 +172,6 @@ def test_cascade_uses_last_non_cached_duration(temp_pipeline):
 
 
 def test_cascade_planner_no_dag(temp_pipeline):
-    """Test cascade planner behavior when DAG is None."""
     session, _ = temp_pipeline
     session.dag = None  # Simulate no DAG
 
@@ -185,7 +182,6 @@ def test_cascade_planner_no_dag(temp_pipeline):
 
 
 def test_cascade_step_initialization():
-    """Test CascadeStep initialization."""
     step = CascadeStep(
         cell_id="test_cell",
         cell_name="Test Cell",
@@ -202,7 +198,6 @@ def test_cascade_step_initialization():
 
 
 def test_cascade_plan_initialization():
-    """Test CascadePlan initialization."""
     steps = [
         CascadeStep(cell_id="c1", cell_name="C1"),
         CascadeStep(cell_id="c2", cell_name="C2"),
@@ -222,7 +217,7 @@ def test_cascade_plan_initialization():
 
 
 def test_cascade_plan_auto_generated_id():
-    """Test that CascadePlan generates ID if not provided."""
+    """CascadePlan generates an ID when none is given."""
     plan = CascadePlan(plan_id="", target_cell_id="test")
 
     assert plan.plan_id

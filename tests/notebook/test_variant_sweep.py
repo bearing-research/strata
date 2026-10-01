@@ -1,9 +1,7 @@
-"""Variant sweep mode — backend foundation (PR1).
+"""Variant sweep mode: the model field, notebook.toml round-trip, ``set_variant_mode``, parser,
+annotation diagnostics, DAG and execution.
 
-Covers the model field, notebook.toml round-trip + ``set_variant_mode``, the
-parser, and the two new annotation-validation diagnostics. Execution behavior
-(DAG / executor / provenance) lands in later PRs; mode defaults to ``switch``
-so nothing here changes existing notebooks.
+Mode defaults to ``switch``, so existing notebooks are unchanged.
 """
 
 from __future__ import annotations
@@ -75,7 +73,7 @@ class TestSetVariantMode:
             assert self._read(nb) == [{"group": "model", "active": "gpt4", "mode": "sweep"}]
 
     def test_switch_mode_not_emitted_for_switch_group(self):
-        """A plain switch group never writes a `mode` key (no churn)."""
+        """A plain switch group never writes a `mode` key, to avoid churn."""
         with tempfile.TemporaryDirectory() as tmp:
             nb = create_notebook(Path(tmp), "Variants")
             from strata.notebook.writer import set_variant_active
@@ -218,8 +216,9 @@ class TestSweepDag:
 
 
 class TestSweepEndToEnd:
-    """A sweep group executes all variants and the downstream cell receives a
-    {variant: value} dict — driven through ``strata run`` (real harness)."""
+    """A sweep group runs every variant and the downstream cell receives a {variant: value} dict,
+    through ``strata run`` and the real harness.
+    """
 
     def test_downstream_receives_variant_dict(self, tmp_path, capsys):
         import json as _json
@@ -255,9 +254,9 @@ class TestSweepEndToEnd:
 
 
 class TestPerVariantEndToEnd:
-    """A @per_variant cell runs once per variant (scalar-bound), and a
-    downstream collapse consumer receives the {variant: value} dict — driven
-    through ``strata run`` (real harness). Sweep v2 phase 3."""
+    """A @per_variant cell runs once per variant (scalar-bound), and a downstream collapse consumer
+    receives the {variant: value} dict, through ``strata run`` and the real harness.
+    """
 
     def test_fanout_then_collapse(self, tmp_path, capsys):
         import json as _json
@@ -298,8 +297,9 @@ class TestPerVariantEndToEnd:
 
 
 class TestPerVariantProgressFrames:
-    """The fan-out orchestrator fires on_variant_complete per variant (the
-    WS layer forwards it as cell_variant_progress). Sweep v2 phase 4."""
+    """The fan-out orchestrator fires on_variant_complete per variant; WS forwards it as
+    cell_variant_progress.
+    """
 
     def test_on_variant_complete_fires_per_variant(self, tmp_path):
         import asyncio
@@ -359,8 +359,7 @@ class TestPerVariantProgressFrames:
 
 
 class TestSweepDagReviewFixes:
-    """Regression for the review findings #6 (asymmetric defines) and
-    #7 (intra-group self-reference)."""
+    """Asymmetric defines across variants and intra-group self-reference."""
 
     def _dag(self, cells):
         from strata.notebook.dag import NotebookDag
@@ -425,7 +424,7 @@ class TestSweepDagReviewFixes:
 
 
 def test_sweep_cells_are_not_batchable(tmp_path):
-    """Review #3: sweep members and sweep-consumers run single-cell, not batched."""
+    """Sweep members and sweep consumers run single-cell, not batched."""
     from unittest.mock import MagicMock
 
     from strata.notebook.dag import SweepProducer
@@ -448,7 +447,7 @@ def test_sweep_cells_are_not_batchable(tmp_path):
 
 
 class TestSweepApi:
-    """session.set_variant_mode + the mode surfaced on VariantGroupState."""
+    """session.set_variant_mode and the mode surfaced on VariantGroupState."""
 
     def _session(self, tmp_path):
         from strata.notebook.parser import parse_notebook
@@ -770,10 +769,11 @@ class TestPerVariantDag:
 
 
 class TestFanoutBaseProvenance:
-    """A successful fan-out must record the BASE cell provenance (review
-    finding): each variant instance records its variant-scoped hash as it
-    runs, which compute_staleness's base-hash recompute can never match —
-    so the fan-out cell read as perpetually stale on re-open."""
+    """A successful fan-out records the base cell provenance.
+
+    Instances record variant-scoped hashes, which the base-hash recompute in compute_staleness can
+    never match, so the cell read as stale forever on reopen.
+    """
 
     def _run_fanout(self, tmp_path):
         import asyncio
