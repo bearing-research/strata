@@ -41,7 +41,7 @@ a wall of JSON.
 ## Point an agent at it
 
 Install it as a one-command [Claude Code plugin](plugins/strata-scratchpad/)
-(needs the `strata` CLI on `PATH`; `uv tool install strata-notebook`):
+(needs the `strata` CLI on `PATH`; `uv tool install "strata-notebook[mcp,tui]"`):
 
 ```
 /plugin marketplace add bearing-research/strata
@@ -73,7 +73,7 @@ whether an un-primed session uses the notebook at all. See
 
 **Why nothing runs twice**
 
-- **results are keyed by what made them:** a cell's source, its inputs and its environment decide its identity, so identical work is a cache hit forever
+- **results are keyed by what made them:** a cell's source, its inputs and its environment decide its identity, so identical work is a cache hit and no result ever needs invalidating
 - **only what changed re-runs:** edit one cell and Strata re-runs the cells below it and nothing else
 - **no wiring:** Strata reads each cell to find what it uses and what it defines, so there are no decorators and no edges to maintain by hand
 - **readable in git:** a notebook is plain `.py` files plus a TOML manifest, so a diff shows the code that changed
@@ -132,7 +132,8 @@ docker compose up -d --build
 
 # Or install via uv (recommended). Puts the CLI on PATH in a uv-managed
 # tool env. `pip install` is not supported; see Requirements below.
-uv tool install strata-notebook
+# The mcp and tui extras are what `strata agent` and `strata watch` need.
+uv tool install "strata-notebook[mcp,tui]"
 strata-notebook
 # Then open http://localhost:8765
 ```
@@ -243,8 +244,9 @@ mode = "ro"
 options = { anon = true }
 ```
 
-Inside the cell, `taxi_zones` is a `pathlib.Path`. Strata materializes
-it on first read and caches the bytes locally for the session.
+Inside the cell, `taxi_zones` is a `pathlib.Path`. Strata mirrors the
+remote prefix to a local cache before the cell runs, and reuses that copy
+while the remote fingerprint is unchanged.
 
 ## Examples
 
@@ -315,6 +317,12 @@ artifact = client.materialize(
 )
 table = client.fetch(artifact.uri)  # Arrow table, cached by provenance
 ```
+
+A result never goes stale, but an unnamed one is a cache entry: the server
+keeps it while it is used, and its retention sweep (in personal mode, 30 idle
+days or a 20 GiB store cap) may collect it later, after which the same call
+computes it again. Name it (`name=` on `materialize`) or pin it to keep it. See
+[retention](https://bearing-research.github.io/strata/latest/deployment/lifecycle/#cleaning-up-the-core-artifact-store).
 
 The server provides: provenance-based deduplication, immutable
 versioned artifacts, lineage tracking, Iceberg table scanning with

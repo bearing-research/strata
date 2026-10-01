@@ -14,9 +14,9 @@ watchable in a live terminal viewer, and unchanged runs are instant.
 
 ## Prerequisites
 
-The `strata` CLI must be installed and on `PATH` (`uv tool install strata-notebook`,
-or `pip install strata-notebook`), version with `strata cell add --run` (the
-one-call add-and-run primitive).
+The `strata` CLI must be installed and on `PATH`, version with `strata cell add --run`
+(the one-call add-and-run primitive). `uv tool install "strata-notebook[mcp,tui]"`
+installs it with what `strata agent` needs.
 
 ## Install
 

@@ -28,10 +28,12 @@ The pipeline below is the one in that screenshot.
     run it:
 
     ```bash
-    uv tool install strata-notebook
+    uv tool install "strata-notebook[mcp,tui]"
     strata-notebook
     ```
 
+    The `mcp` and `tui` extras are for `strata agent` and `strata watch`
+    (see [What's next](#whats-next)); the web UI needs neither.
     Personal mode is the default (single-user, writes enabled); no
     config needed for a local run. Re-run `strata-notebook` to start it
     again on later sessions. Requires [uv](https://docs.astral.sh/uv/);
@@ -220,9 +222,13 @@ header shows a **cached** badge alongside the duration ("cached ·
 
 The cache is content-addressed: the cache key is a hash of the
 cell's source, its upstream artifacts, and the environment lockfile.
-Re-running with the same three is always a cache hit. No `@memoize`,
+Re-running with the same three is a cache hit. No `@memoize`,
 no manual invalidation, and the cached result is byte-identical to
-what produced it the first time. Even a cell that only `print`s and
+what produced it the first time. The notebook keeps each cell's
+current value plus its last 3 earlier ones
+([`STRATA_NOTEBOOK_KEEP_SUPERSEDED_VERSIONS`](../reference/configuration.md#notebook)),
+so reverting a recent edit is a hit too and an older value is
+computed again. Even a cell that only `print`s and
 feeds nothing downstream is cached: its console output is keyed by
 the same hash and replayed on a warm re-run. A cell that must always
 run (a side effect, a live API call, a fresh random draw) opts out

@@ -19,6 +19,31 @@ Windows: source builds work via WSL2 (smoother) or native Windows
 (uv + rustup + Node have Windows installers). Day-to-day dev is on
 macOS/Linux; WSL2 is the better-trodden path.
 
+## From PyPI (recommended)
+
+```bash
+uv tool install strata-notebook
+strata-notebook
+```
+
+This puts `strata-notebook`, `strata`, `strata-notebook-tui` and
+`strata-worker` on `PATH` in a uv-managed tool environment. The wheel
+ships the Rust extension and the frontend prebuilt. Plain `pip install`
+is not supported; see the uv requirement above.
+
+Add extras in brackets, for example
+`uv tool install "strata-notebook[mcp,tui]"` for `strata agent`:
+
+| Extra | Enables |
+| --- | --- |
+| `mcp` | The `/mcp` endpoint a coding agent connects to. `strata agent` needs it. |
+| `tui` | The terminal viewer: `strata watch`, `strata-notebook-tui`, and `strata agent` unless you pass `--no-tui`. |
+| `sql` | SQL cells. Add a driver extra for each database you connect to: `sql-duckdb`, `sql-sqlite`, `sql-postgres`, `sql-snowflake`, `sql-bigquery`. |
+| `postgres` | A Postgres metadata database for the artifact store (`STRATA_ARTIFACT_METADATA_DSN`), for several nodes sharing one store. |
+| `azure` | The Azure Blob Storage artifact backend. |
+| `otel` | OpenTelemetry tracing. |
+| `notebook` | The cell runtime libraries (pandas, numpy, orjson, cloudpickle, matplotlib, Pillow) in Strata's own environment. A remote worker image needs it; a local server does not, since each notebook gets its own venv. |
+
 ## GitHub Codespaces (zero setup)
 
 Click **"Open in Codespaces"** on the [repo](https://github.com/bearing-research/strata)
@@ -85,6 +110,10 @@ curl http://localhost:8765/health
 The PyPI package is `strata-notebook`; the installed Python module
 and CLI binary are both named `strata`.
 
+The table assumes a source checkout, where `uv run` resolves each command
+inside the project venv. After `uv tool install`, drop the `uv run` prefix
+and call `strata-notebook` / `strata` / `strata-worker` directly.
+
 | Command | What it does |
 | --- | --- |
 | `uv run strata-notebook` | Start the HTTP server (notebook UI + REST API). Same as `uv run python -m strata`. |
@@ -96,7 +125,7 @@ and CLI binary are both named `strata`.
 | `uv run strata agent <notebook-dir>` | One-command on-ramp for driving a notebook with a coding agent: create-or-open the notebook, start (or reuse) a server with the MCP endpoint enabled, open a session, write the `.mcp.json` + `CLAUDE.md` the agent needs, and attach the TUI (skip it with `--no-tui` and watch in the web UI instead). Then run `claude` in the notebook directory to drive it live. Needs the `[mcp]` extra, plus `[tui]` unless you pass `--no-tui`. See [Driving a notebook with a coding agent](../notebook/agent.md). |
 | `uv run strata export <notebook-dir>` | Render a notebook to markdown or HTML (add `--app-view` for a frozen dashboard snapshot), or write a portable snapshot zip with `--to snapshot`. See [Export](../notebook/export.md). |
 | `uv run strata import <file>` | Convert a Jupyter `.ipynb` into a Strata notebook directory, or unpack a snapshot zip back into one. See [Import](../notebook/import.md). |
-| `uv run strata artifact <cmd> [dir]` | Inspect a local artifact store without a server: `list`, `show <ref>`, `lineage <ref>` (renders model ← features ← scan ← table @ snapshot), `pull <ref> --to FILE`, `audit [name]` (registry history), `pending` (approval queue), `verify`. Also publishes and moves results: `publish` / `unpublish` (a link anyone can open), `promote` (copy an artifact and its chain to the team store and name it there), `export` (write a tabular artifact into an Iceberg table), `archive` (a self-contained bundle: page, bytes, manifest, README). `<ref>` is a name, `id@v=N`, or bare id. |
+| `uv run strata artifact <cmd> [dir]` | Inspect a local artifact store without a server: `list`, `show <ref>`, `lineage <ref>` (renders model ← features ← scan ← table @ snapshot), `pull <ref> --to FILE`, `audit [name]` (registry history), `pending` (approval queue), `verify`, `gc` (collect what nothing holds, least recently used first; `--dry-run` to preview, `--max-bytes`, `--max-idle-days`). Also publishes and moves results: `publish` / `unpublish` (a link anyone can open), `promote` (copy an artifact and its chain to the team store and name it there), `export` (write a tabular artifact into an Iceberg table), `archive` (a self-contained bundle: page, bytes, manifest, README). `<ref>` is a name, `id@v=N`, or bare id. |
 | `uv run strata migrate --to-dsn <dsn>` | Copy artifact-store metadata from SQLite to Postgres. Setting `STRATA_ARTIFACT_METADATA_DSN` alone starts an empty store; this carries an existing one across. Metadata only: blobs are configured separately. |
 | `uv run strata apikey <cmd>` | Mint, list and revoke API keys for a server running with `auth_mode="api_key"`: `create`, `list` (never shows secrets), `revoke <id>`. |
 | `uv run strata env gc` | Remove shared environments no notebook links to. Only relevant with the shared environment backend. See [Environments](../notebook/environment.md). |
@@ -104,10 +133,8 @@ and CLI binary are both named `strata`.
 | `uv run strata-notebook-tui` | Read-only terminal viewer that attaches to a running notebook session. Needs the `[tui]` extra. See [Terminal Viewer](../notebook/tui.md). |
 | `uv run strata-worker --port 9000` | Start a remote worker for `# @worker` cells. See [Distributed Workers](../notebook/workers.md). |
 
-The `uv run` prefix ensures the command resolves to the binary
-inside the uv-managed venv. If you've activated the venv
-(`source .venv/bin/activate`), you can drop the prefix and call
-`strata-notebook` / `strata` / `strata-worker` directly.
+In a checkout with the venv activated (`source .venv/bin/activate`),
+you can drop the prefix too.
 
 ## Development Commands
 

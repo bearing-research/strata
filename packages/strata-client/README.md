@@ -34,6 +34,10 @@ with StrataClient() as client:  # resolves the server URL from STRATA_SERVER_URL
     client.set_alias("team/dataset/clean", "champion", clean.artifact_id, clean.version)
 ```
 
+An unnamed result such as `art` is a cache entry: the server keeps it while it
+is used and its retention sweep may collect it later, after which the same call
+computes it again. A named one (`clean`) is kept.
+
 The client and the server distribution (`strata-notebook`) are independent:
 they share only the JSON wire protocol, and neither depends on the other. Code
 written against the old `strata.client` module imports `strata_client` instead.
