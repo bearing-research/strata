@@ -816,11 +816,26 @@ def _renv_restore_locked(
     if harness_user is not None:
         renv_dir = notebook_dir / "renv"
         renv_dir.mkdir(exist_ok=True)
-        hand_over(renv_dir, harness_user)
         library = renv_dir / "library"
-        if library.is_symlink():
-            hand_over(library.resolve(), harness_user)
         cache = (env or {}).get("RENV_PATHS_CACHE")
+        if library.is_symlink():
+            # Read before renv/ is handed over, and checked rather than trusted:
+            # cell code runs as the harness user, which owns renv/ after a
+            # restore and so can repoint this link. Handing over whatever it
+            # names would give that user any directory the server owns. Only a
+            # library in the shared store (beside its package cache) is ours.
+            target = library.resolve()
+            store = Path(cache).resolve().parent if cache else None
+            if store is None or target.parent != store:
+                _logger.warning(
+                    "renv restore skipped in %s: renv/library points outside the "
+                    "shared R library store (%s)",
+                    notebook_dir,
+                    target,
+                )
+                return False
+            hand_over(target, harness_user)
+        hand_over(renv_dir, harness_user)
         if cache:
             Path(cache).mkdir(parents=True, exist_ok=True)
             hand_over(Path(cache), harness_user)

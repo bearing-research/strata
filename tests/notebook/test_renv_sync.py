@@ -785,6 +785,42 @@ class TestRCodeRunsAsTheHarnessUser:
         assert recorded() is None
         assert "STRATA_NOTEBOOK_HARNESS_USER" in caplog.text
 
+    @pytest.mark.parametrize("points_into_the_store", [True, False])
+    def test_a_library_link_is_handed_over_only_inside_the_shared_store(
+        self, tmp_path, recorded, monkeypatch, points_into_the_store
+    ):
+        """Cell code runs as the harness user, which owns renv/ after a restore
+        and can repoint renv/library. The next restore runs as the server and
+        hands the link's target to the harness user: anywhere the link names
+        would become that user's, so only the shared store's libraries are."""
+        from strata.notebook import writer
+        from strata.notebook.harness_user import HarnessUser
+
+        me = self._me()
+        user = HarnessUser(name=me.pw_name, uid=me.pw_uid, gid=me.pw_gid, home=me.pw_dir)
+        store = tmp_path / "envs" / "r"
+        (store / "cache").mkdir(parents=True)
+        target = store / "abc123" if points_into_the_store else tmp_path / "server-state"
+        target.mkdir()
+        notebook_dir = tmp_path / "nb"
+        (notebook_dir / "renv").mkdir(parents=True)
+        (notebook_dir / "renv.lock").write_text("{}")
+        (notebook_dir / "renv" / "library").symlink_to(target, target_is_directory=True)
+        handed: list[Path] = []
+        monkeypatch.setattr(writer, "hand_over", lambda path, _user: handed.append(Path(path)))
+
+        restored = writer._renv_restore_locked(
+            notebook_dir,
+            timeout=30,
+            env={"RENV_PATHS_CACHE": str(store / "cache")},
+            harness_user=user,
+        )
+
+        assert restored is points_into_the_store
+        assert (target.resolve() in [h.resolve() for h in handed]) is points_into_the_store
+        if not points_into_the_store:
+            assert recorded() is None
+
     def test_personal_mode_restores_as_the_server(self, tmp_path, recorded, monkeypatch):
         notebook_dir = tmp_path / "nb"
         notebook_dir.mkdir()
