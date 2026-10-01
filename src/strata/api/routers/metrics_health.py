@@ -1,14 +1,8 @@
 """Health probes and metrics: liveness/readiness, the JSON ``/metrics`` summary,
 per-table metrics, and the Prometheus exposition endpoint.
 
-Moved verbatim from ``server.py`` (P3, router split). These handlers are thin
-projections of ``ServerState`` internals, so they reach into a handful of
-server-private helpers (``_get_qos_metrics``, ``_get_cache_size_bytes``,
-``_get_cache_entry_count``, ``_check_readiness``, ``_get_active_scan_count``) via
-a lazy ``from strata.server import ...`` inside the body — the same leaf pattern
-the other routers use for ``get_state``. Those helpers stay in ``server.py``:
-they read limiter/scan internals and ``_get_active_scan_count`` is also used by
-the shutdown path.
+Handlers import server-private helpers lazily from ``strata.server`` so this module stays a
+leaf; those helpers stay in ``server.py`` because the shutdown path also uses them.
 """
 
 from __future__ import annotations
@@ -29,13 +23,8 @@ router = APIRouter(tags=["metrics"])
 def _prom_label(value: object) -> str:
     """Escape a Prometheus label value per the exposition format.
 
-    Backslash, double quote and newline must be escaped. The table-metric
-    lines carried a comment claiming to escape ``table_id`` and then
-    interpolated it raw, so a table (or tenant) name containing a quote
-    emitted ``…{table="a"b"} 5``, which fails the scrape parse and drops the
-    **entire** metrics payload — not just that series. A name containing a
-    newline could inject arbitrary fabricated series into the operator's TSDB.
-    Tenant ids are validated elsewhere; table identities are not.
+    Table identities are not validated, so an unescaped quote fails the whole scrape and a
+    newline could inject fabricated series.
     """
     text = str(value)
     return text.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
@@ -43,37 +32,17 @@ def _prom_label(value: object) -> str:
 
 @router.get("/health")
 async def health():
-    """Basic health check endpoint (liveness probe).
-
-    Returns 200 if the server process is running.
-    Use /health/ready for readiness checks that verify dependencies.
-    """
+    """Liveness probe: 200 while the process is running; see ``/health/ready`` for readiness."""
     return {"status": "ok"}
 
 
 @router.get("/health/dependencies")
 async def health_dependencies():
-    """Comprehensive health check for all dependencies.
+    """Check every dependency: disk cache, metadata store, Arrow memory, thread pools, rate
+    limiter and eviction pressure.
 
-    Checks the health of:
-    - disk_cache: Cache directory accessibility and disk space
-    - metadata_store: SQLite connectivity and entry counts
-    - arrow_memory: PyArrow memory pool usage
-    - thread_pools: Planning and fetch executor utilization
-    - rate_limiter: Rate limiting status and rejection rate
-    - cache_evictions: Cache eviction pressure level
-
-    Each check returns:
-    - status: healthy, degraded, or unhealthy
-    - latency_ms: Time taken to perform the check
-    - details: Check-specific information
-
-    Overall status is the worst of all individual checks.
-
-    Returns:
-    - 200 if all dependencies are healthy
-    - 200 with degraded status if some checks show degraded state
-    - 503 if any dependency is unhealthy
+    Overall status is the worst individual status; 503 only when one is unhealthy (degraded
+    still returns 200).
     """
     from strata.server import get_state
 
@@ -97,16 +66,10 @@ async def health_dependencies():
 
 @router.get("/health/ready")
 async def health_ready():
-    """Readiness probe - checks if server can handle requests.
+    """Readiness probe; 503 when the server cannot take requests.
 
-    This is the Kubernetes readiness probe endpoint. Returns 503 when:
-    - Server is draining (shutting down)
-    - Both QoS tiers saturated for >30 seconds (no capacity)
-    - Scans stuck with no progress for >60 seconds
-    - Metadata store inaccessible
-
-    Returns 200 if ready, 503 if not ready.
-    Use this as your Kubernetes readiness probe.
+    Not ready when draining, when both QoS tiers stay saturated past the threshold, when
+    scans are stuck, or when the metadata store is unreachable.
     """
     import json
 
@@ -237,19 +200,8 @@ async def metrics():
 
 @router.get("/metrics/tables")
 async def metrics_tables(limit: int = 10):
-    """Get per-table metrics for the most accessed tables.
-
-    Returns metrics aggregated by table including:
-    - scan_count: Number of scans for this table
-    - avg_latency_ms: Average scan latency
-    - p50_ms, p95_ms, p99_ms: Latency percentiles
-    - cache_hit_rate: Cache hit ratio for this table
-    - bytes_from_cache/storage: Data transfer breakdown
-    - rows_returned: Total rows returned
-    - row_groups_pruned: Total row groups skipped by filters
-
-    Query params:
-    - limit: Max number of tables to return (default 10)
+    """Get per-table metrics (scans, latency percentiles, cache hit rate, bytes, pruning) for the
+    most accessed tables.
     """
     from strata.server import get_state
 
@@ -259,11 +211,7 @@ async def metrics_tables(limit: int = 10):
 
 @router.get("/metrics/tables/{table_id:path}")
 async def metrics_table(table_id: str):
-    """Get metrics for a specific table.
-
-    Path params:
-    - table_id: The canonical table identity (e.g., "catalog.namespace.table")
-    """
+    """Get metrics for one table by canonical identity (``catalog.namespace.table``)."""
     from strata.server import get_state
 
     state = get_state()
@@ -277,15 +225,7 @@ async def metrics_table(table_id: str):
 
 @router.get("/metrics/prometheus")
 async def metrics_prometheus():
-    """Prometheus-format metrics endpoint.
-
-    Returns metrics in Prometheus text exposition format for scraping.
-    Includes:
-    - Cache hit/miss counters
-    - Active scan gauge
-    - Request latency histograms (TODO: requires histogram support)
-    - Resource utilization gauges
-    """
+    """Metrics in Prometheus text exposition format for scraping."""
     import asyncio
 
     from strata.metadata_cache import get_metadata_store

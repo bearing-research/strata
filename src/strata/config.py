@@ -32,17 +32,10 @@ logger = logging.getLogger(__name__)
 
 
 class AclRule(BaseModel):
-    """Single ACL rule for access control.
+    """One ACL rule: matches when principal, tenant (if set) and any table glob all match.
 
-    Rules are matched in order. A rule matches if:
-    - Principal matches (or rule principal is "*" for any)
-    - Tenant matches (if specified in rule)
-    - At least one table pattern matches
-
-    Attributes:
-        principal: Principal ID pattern ("*" for any principal)
-        tenant: Optional tenant ID (None means any tenant)
-        tables: Tuple of table patterns (glob-style, e.g., "file:db.*")
+    ``principal="*"`` and ``tenant=None`` match anyone; ``tables`` holds glob
+    patterns such as ``"file:db.*"`` and must not be empty.
     """
 
     # ``extra="forbid"``: a dropped unknown key widens an access rule (``tenants = "acme"`` would
@@ -55,19 +48,10 @@ class AclRule(BaseModel):
 
     @model_validator(mode="after")
     def _reject_unmatchable_rule(self) -> AclRule:
-        """A rule with no table patterns can never match — reject it loudly.
+        """Reject a rule with no table patterns, which could never match.
 
-        ``tables`` defaulted to ``()`` and the matcher returns False on an
-        empty tuple, so ``{ principal = "bob" }`` — the natural way to write
-        "deny bob everything" — was silently inert. For a deny rule that fails
-        OPEN, and ``validate_mode_coherence`` still counted it as "acl
-        configured", so the operator got a clean boot and a false sense of
-        protection.
-
-        Defaulting empty to "all tables" would fix deny rules but silently
-        widen every *allow* rule written the same way, so the safe reading is
-        that this is a configuration error: say so, and let the operator write
-        ``tables = ["*"]`` when that is what they mean.
+        An inert deny rule fails open, and defaulting to all tables would widen
+        allow rules, so the operator must write ``tables = ["*"]`` explicitly.
         """
         if not self.tables:
             raise ValueError(
@@ -86,22 +70,10 @@ class AclRule(BaseModel):
 
 
 class AclConfig(BaseModel):
-    """Access control list configuration.
+    """Access control list, evaluated deny rules first, then allow rules, then ``default``.
 
-    ACL evaluation order:
-    1. Deny rules are checked first - if any match, access is denied
-    2. Allow rules are checked - if any match, access is allowed
-    3. Default action is applied (allow or deny)
-
-    Attributes:
-        default: Default action when no rules match ("allow" or "deny")
-        deny_rules: List of deny rules (checked first)
-        allow_rules: List of allow rules (checked second)
-
-    Rules are written as ``deny`` / ``allow`` in both pyproject and
-    ``STRATA_ACL_CONFIG``, so those are accepted as aliases for the field
-    names. Unknown keys are rejected rather than ignored: the failure mode of
-    ignoring one is an ACL that boots clean and enforces nothing.
+    ``deny`` / ``allow`` are accepted as aliases for the rule fields. Unknown keys
+    are rejected: ignoring one would boot an ACL that enforces nothing.
     """
 
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
@@ -138,32 +110,11 @@ def _load_from_pyproject() -> dict:
 
 
 def _parse_acl_config(raw: dict) -> AclConfig:
-    """Parse ACL configuration from pyproject.toml [tool.strata.acl] section.
+    """Parse a ``[tool.strata.acl]`` table, e.g.::
 
-    Expected format:
-        [tool.strata.acl]
-        default = "deny"
-
-        deny = [
-          { principal = "*", tables = ["file:finance.*", "s3:pii.*"] }
-        ]
-
-        allow = [
-          { principal = "bi-dashboard", tables = ["file:db.*"] },
-          { tenant = "data-platform", tables = ["file:analytics.*"] }
-        ]
-
-    Args:
-        raw: Dictionary from pyproject.toml acl section
-
-    Returns:
-        Parsed AclConfig object
-
-    This hand-unpacked ``deny``/``allow`` itself, which meant the wire shape
-    was understood *here* and not by the model. Anything reaching AclConfig by
-    another route — ``STRATA_ACL_CONFIG`` goes straight to pydantic's env
-    source, never through this function — had its rules dropped. The model
-    owns the shape now, so every path agrees.
+    default = "deny"
+    deny = [{ principal = "*", tables = ["file:finance.*"] }]
+    allow = [{ tenant = "data-platform", tables = ["file:analytics.*"] }]
     """
     return AclConfig.model_validate(raw)
 
@@ -178,45 +129,21 @@ _PERSONAL_GC_MAX_BYTES = 20 * 1024 * 1024 * 1024
 class StrataConfig(BaseSettings):
     """Configuration for Strata server and client.
 
-    Configuration is loaded from pyproject.toml [tool.strata] section,
-    environment variables (STRATA_* prefix), and programmatic overrides.
+    Precedence: defaults < pyproject.toml ``[tool.strata]`` < ``STRATA_*`` env vars
+    < overrides passed to :meth:`load`.
 
-    Precedence: defaults < pyproject.toml < env vars < overrides
+    Examples
+    --------
+    ::
 
-    Example pyproject.toml:
         [tool.strata]
-        host = "0.0.0.0"
         port = 8765
         cache_dir = "/tmp/strata-cache"
-        max_cache_size_bytes = 10737418240
-        cache_granularity = "row_group_projection"  # or "row_group"
-        batch_size = 65536
-        fetch_parallelism = 4  # Max concurrent row group fetches
-        catalog_name = "default"
-
-        # Resource limits (backpressure)
-        max_concurrent_scans = 100
-        max_tasks_per_scan = 1000
-        plan_timeout_seconds = 30.0
-        scan_timeout_seconds = 300.0
-        max_response_bytes = 536870912  # 512 MB
-        max_equality_delete_rows = 10000000
-
-        # Metadata persistence
-        metadata_db = "/var/lib/strata/meta.sqlite"
-
-        # S3 storage backend (optional)
-        s3_region = "us-east-1"
-        s3_endpoint_url = "http://localhost:9000"  # For MinIO/LocalStack
-        s3_anonymous = false  # Set true for public buckets
+        s3_endpoint_url = "http://localhost:9000"
 
         [tool.strata.catalog_properties]
         type = "sql"
         uri = "sqlite:///catalog.db"
-
-    Cache granularity options:
-        - row_group_projection: Cache per row-group + projection (default, finest)
-        - row_group: Cache per row-group only, project on read (coarser, reuses cache)
     """
 
     model_config = SettingsConfigDict(
@@ -763,13 +690,8 @@ class StrataConfig(BaseSettings):
     def validate_adaptive_ranges(self) -> StrataConfig:
         """Validate the adaptive controller's bounds and its starting point.
 
-        The starting-point checks matter as much as the min<=max ones. The
-        controller seeds each tier from the configured slot count and then
-        clamps every adjustment into ``[min, max]``; starting outside that
-        range means the very first adjustment jumps to a bound, and a decrease
-        requested under load can land *above* where it started. Rejecting the
-        configuration is the honest fix — the operator picked those slot
-        counts on purpose.
+        The controller starts from the configured slot counts, so a count outside
+        ``[min, max]`` would jump to a bound on the first adjustment.
         """
         if not self.adaptive_enabled:
             return self
@@ -808,17 +730,9 @@ class StrataConfig(BaseSettings):
 
     @model_validator(mode="after")
     def validate_team_cache(self) -> StrataConfig:
-        """The team cache needs a store to be a cache *of*.
+        """Reject the team cache without ``notebook_remote_store_url``, in any mode.
 
-        Not a deployment-mode check: the notebook that reads a team store is
-        normally a personal-mode process on someone's laptop, pointed at a
-        service-mode store elsewhere. It is the pairing that has to hold, in
-        any mode.
-
-        Enabled without a URL is silently inert — every lookup would have
-        nowhere to go, so every cell would recompute and the operator would
-        conclude the shared cache does not work rather than that it was never
-        switched on. That is a worse outcome than refusing to start.
+        Without a store it is silently inert: every cell would recompute.
         """
         if self.notebook_team_cache_enabled and not self.notebook_remote_store_url:
             raise ValueError(
@@ -830,13 +744,9 @@ class StrataConfig(BaseSettings):
 
     @model_validator(mode="after")
     def reject_a_remote_store_that_is_this_server(self) -> StrataConfig:
-        """A store that is this one is not a remote store.
+        """Reject a ``notebook_remote_store_url`` naming this server.
 
-        The registry routes answer from ``notebook_remote_store_url`` when it
-        is set, so a URL naming this server's own host and port makes every
-        registry read forward to itself and recurse until it times out. It
-        reads like a working configuration right up to the first time someone
-        opens the Registry tab, which is the worst moment to find out.
+        Registry routes forward to that URL, so they would recurse until they time out.
         """
         url = (self.notebook_remote_store_url or "").strip().rstrip("/")
         if url and url == self.server_url:
@@ -849,15 +759,10 @@ class StrataConfig(BaseSettings):
 
     @model_validator(mode="after")
     def warn_on_gcs_project_id(self) -> StrataConfig:
-        """Say what STRATA_GCS_PROJECT_ID actually controls.
+        """Warn that ``STRATA_GCS_PROJECT_ID`` sets the default bucket location, not a project.
 
-        It never set a project: PyArrow's GcsFileSystem takes no project
-        parameter, so the value went to ``default_bucket_location`` — a GCS
-        location like ``US``. An operator who read the name and set a project
-        id has a bogus location configured, which is inert until something
-        creates a bucket, at which point it is not. The setting keeps working
-        under either name; this is the only place that can point out the two
-        do not mean the same thing.
+        PyArrow's GcsFileSystem takes no project, so a project id there is a bogus
+        location.
         """
         import os
 
@@ -880,11 +785,9 @@ class StrataConfig(BaseSettings):
     def validate_mode_coherence(self) -> StrataConfig:
         """Reject deployment-mode combinations that indicate misconfiguration.
 
-        Personal mode is a single-user local deployment: one identity, no tenant
-        dimension, no upstream proxy. Turning on trusted-proxy auth or
-        multi-tenancy in personal mode doesn't do anything useful and almost
-        always means the operator pulled flags from a service-mode config by
-        mistake. Failing fast at startup beats a confusing runtime.
+        Personal mode is one identity with no tenants or proxy, so auth or
+        multi-tenancy there means service-mode flags were copied by mistake.
+        Service mode rejects settings whose security or build intent would be inert.
         """
         # Service mode: reject configs whose security/build intent is silently
         # inert.
@@ -1052,13 +955,10 @@ class StrataConfig(BaseSettings):
         return self
 
     def validate_personal_mode_binding(self) -> None:
-        """Validate that personal mode binding is safe.
-
-        In personal mode, binding to non-loopback addresses exposes the server
-        to the network, which is dangerous since personal mode enables writes.
+        """Refuse a non-loopback bind in personal mode, which enables writes.
 
         Raises:
-            ValueError: If personal mode binds to non-loopback without explicit allow
+            ValueError: Unless ``allow_remote_clients_in_personal`` is set.
         """
         if self.deployment_mode != "personal":
             return
@@ -1075,11 +975,7 @@ class StrataConfig(BaseSettings):
             )
 
     def artifact_gc_policy(self) -> dict[str, Any]:
-        """The configured retention as ``garbage_collect`` keyword arguments.
-
-        One place reads "0 means off", so the scheduled sweep, the route and
-        ``strata artifact gc`` cannot disagree about what the settings mean.
-        """
+        """Return the configured retention as ``garbage_collect`` kwargs; 0 means off."""
         return {
             "max_idle_days": self.artifact_gc_max_idle_days or None,
             "max_bytes": self.artifact_gc_max_bytes or None,
@@ -1095,12 +991,8 @@ class StrataConfig(BaseSettings):
     def principal_auth_enabled(self) -> bool:
         """Whether requests carry an authenticated principal to authorize against.
 
-        Authorization gates must ask this, not ``auth_mode == "trusted_proxy"``.
-        A proxy header and a bearer key produce the same ``Principal`` — they
-        differ only in how it was established — so a gate written against one
-        mode silently opens under the other. That is what happened when
-        ``api_key`` was added: it authenticated callers and then authorized
-        none of them.
+        Gates must ask this, not ``auth_mode == "trusted_proxy"``: ``api_key``
+        produces the same ``Principal``, and a mode-specific gate opens under it.
         """
         return self.auth_mode in ("trusted_proxy", "api_key")
 
@@ -1113,11 +1005,8 @@ class StrataConfig(BaseSettings):
     def transforms_runtime_enabled(self) -> bool:
         """Whether this server executes transform builds itself.
 
-        Service mode requires the explicit transforms allowlist config.
-        Personal mode always runs the embedded transforms (duckdb_sql)
-        in-process — a single-user server that can't execute the flagship
-        artifact workflow would silently park materialize requests in
-        ``building`` forever.
+        Always in personal mode (otherwise materialize would park in ``building``);
+        service mode needs ``transforms_config`` enabled.
         """
         return self.server_transforms_enabled or self.writes_enabled
 
@@ -1132,10 +1021,8 @@ class StrataConfig(BaseSettings):
         Raises
         ------
         ValueError
-            If the DSN names a scheme this does not support, or the driver for
-            it is not installed. Both are raised at startup rather than at the
-            first query, because a store that fails on its first write has
-            already accepted work it cannot keep.
+            If the DSN is not postgresql or psycopg is missing; raised at startup
+            so the store never accepts work it cannot keep.
         """
         if not self.artifact_metadata_dsn:
             return None
@@ -1161,13 +1048,10 @@ class StrataConfig(BaseSettings):
         return PostgresDialect(dsn)
 
     def create_blob_store(self):
-        """Create blob store based on configuration.
-
-        Returns:
-            BlobStore instance for artifact storage.
+        """Create the artifact blob store for ``artifact_blob_backend``.
 
         Raises:
-            ValueError: If required configuration is missing.
+            ValueError: If the backend's bucket, container or ``artifact_dir`` is unset.
         """
         from strata.blob_store import (
             AzureBlobStore,
@@ -1214,11 +1098,7 @@ class StrataConfig(BaseSettings):
         return LocalBlobStore(blobs_dir)
 
     def get_build_qos_config(self):
-        """Create BuildQoSConfig from Strata configuration.
-
-        Returns:
-            BuildQoSConfig instance for initializing BuildQoS.
-        """
+        """Create a ``BuildQoSConfig`` from the ``build_qos_*`` settings."""
         from strata.transforms.build_qos import BuildQoSConfig
 
         return BuildQoSConfig(
@@ -1236,14 +1116,7 @@ class StrataConfig(BaseSettings):
 
     @classmethod
     def load(cls, **overrides) -> StrataConfig:
-        """Load configuration with precedence: defaults < pyproject.toml < env vars < overrides.
-
-        Args:
-            **overrides: Values that override all other settings
-
-        Returns:
-            StrataConfig instance
-        """
+        """Load configuration with precedence: defaults < pyproject.toml < env vars < overrides."""
         file_config = _load_from_pyproject()
         env_config = _get_env_overrides()
 
@@ -1321,11 +1194,7 @@ class StrataConfig(BaseSettings):
         return f"http://{self.host}:{self.port}"
 
     def get_timeout_config(self) -> dict:
-        """Get all timeout-related configuration as a dictionary.
-
-        Returns:
-            Dictionary with all timeout settings organized by category.
-        """
+        """Return the timeout settings grouped by category."""
         return {
             "planning": {
                 "plan_timeout_seconds": self.plan_timeout_seconds,
@@ -1347,14 +1216,7 @@ class StrataConfig(BaseSettings):
         }
 
     def get_s3_filesystem(self):
-        """Create a PyArrow S3FileSystem from configuration.
-
-        Returns:
-            Configured S3FileSystem for reading Parquet files from S3
-
-        Raises:
-            ImportError: If pyarrow.fs is not available
-        """
+        """Create a PyArrow S3FileSystem from the ``s3_*`` settings."""
         import pyarrow.fs as pafs
 
         kwargs = {}
@@ -1378,16 +1240,13 @@ class StrataConfig(BaseSettings):
         return pafs.S3FileSystem(**kwargs)
 
     def configure_arrow_memory_pool(self) -> str | None:
-        """Configure PyArrow's global memory pool based on settings.
-
-        This affects all PyArrow allocations in the process. Should be called
-        once at server startup before any Arrow operations.
+        """Set PyArrow's process-wide memory pool; call once at startup before Arrow work.
 
         Returns:
-            The name of the configured pool, or None if no change was made.
+            The pool's name, or None when ``arrow_memory_pool`` is unset.
 
         Raises:
-            ValueError: If the specified pool is not available.
+            ValueError: If the pool is unknown or not available in this build.
         """
         import pyarrow as pa
 
@@ -1426,17 +1285,10 @@ class StrataConfig(BaseSettings):
 
 
 def _get_env_overrides() -> dict[str, Any]:
-    """Get configuration overrides from environment variables.
+    """Collect env overrides pydantic-settings cannot express on its own.
 
-    This function handles AWS_* fallbacks and complex parsing that
-    pydantic-settings doesn't handle automatically.
-
-    Supported environment variables with special handling:
-    - AWS_REGION / STRATA_S3_REGION: S3 region (AWS fallback)
-    - AWS_ACCESS_KEY_ID / STRATA_S3_ACCESS_KEY: S3 access key (AWS fallback)
-    - AWS_SECRET_ACCESS_KEY / STRATA_S3_SECRET_KEY: S3 secret key (AWS fallback)
-    - GOOGLE_APPLICATION_CREDENTIALS: GCS credentials fallback
-    - STRATA_CATALOG_URI: Catalog database URI (merged into catalog_properties)
+    AWS_* and GOOGLE_APPLICATION_CREDENTIALS fall back behind their STRATA_*
+    names; STRATA_CATALOG_URI and STRATA_TRANSFORMS_ENABLED fold into nested dicts.
     """
     overrides: dict[str, Any] = {}
 

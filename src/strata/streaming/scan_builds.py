@@ -1,18 +1,9 @@
-"""Scan-build manager — active scan table, prefetch, and the background build.
+"""Scan-build manager: active scan table, first-row-group prefetch, and the background build.
 
-Owns the ``scan_id -> ReadPlan`` table, the best-effort first-row-group prefetch,
-and the write-through scan@v1 background build that ``server.py`` held as
-``ServerState.scans`` / ``_prefetch_*`` and the free ``_start_prefetch`` /
-``_discard_prefetch`` / ``_build_identity_artifact`` / ``_finalize_written_blob``
-/ ``_mark_stream_artifact_failed`` helpers. Held on ``ServerState`` as
-``state.scan_builds``.
-
-Phases 2a + 2b of the stream-runtime extraction (#302). Methods that need shared
-infra (config, fetcher, fetch executor, draining flag, artifact store, the stream
-registry) take ``state`` per-call, so the manager owns the scan/prefetch *state*
-without a back-reference to ``ServerState``. The build stays the SHIELDED,
-decoupled task (#165) — the manager creates it, the handler shields it. See
-``docs/internal/design-stream-runtime-extraction.md``.
+Held on ``ServerState`` as ``state.scan_builds``. Methods that need shared
+infra take ``state`` per call, so there is no back-reference to
+``ServerState``. The manager creates the background build task; the handler
+shields it.
 """
 
 from __future__ import annotations
@@ -139,10 +130,8 @@ class ScanBuildManager:
     async def consume_prefetched_first(self, plan: ReadPlan, scan_id: str) -> bytes | None:
         """Return the prefetched first row group if one is (or becomes) warm, else None.
 
-        Called by the background build at row-group index 0. Consumes the eagerly
-        prefetched chunk (counting it ``used``), briefly waiting on an in-flight
-        prefetch; if none materializes, discards it (counting it ``wasted``) so the
-        build falls back to a direct fetch.
+        Waits briefly on an in-flight prefetch and counts it ``used``; otherwise
+        discards it as ``wasted`` and the build fetches directly.
         """
         if plan.prefetched_first is not None:
             chunk = plan.prefetched_first
@@ -164,7 +153,7 @@ class ScanBuildManager:
         return None
 
     def prefetch_metrics(self) -> dict[str, int]:
-        """Prefetch counters for observability (``/metrics`` + prometheus)."""
+        """Prefetch counters for ``/metrics`` and Prometheus."""
         return {
             "started": self._started,
             "used": self._used,
@@ -176,10 +165,7 @@ class ScanBuildManager:
     # --- cleanup callback ---
 
     def expire_scan(self, scan_id: str) -> None:
-        """Scan-side cleanup for an expired stream (the registry's ``on_expire``).
-
-        Discards any prefetched first chunk and drops the scan from the table.
-        """
+        """Discard any prefetch and drop the scan (the registry's ``on_expire`` hook)."""
         self.discard_prefetch(scan_id, count_wasted=True)
         self.pop_scan(scan_id)
 
@@ -204,12 +190,11 @@ class ScanBuildManager:
             )
 
     async def build_identity_artifact(self, state: ServerState, stream_state: StreamState) -> None:
-        """Build a scan@v1 artifact in the background for artifact-mode requests.
+        """Build a scan@v1 artifact in the background.
 
-        The build is the SHIELDED, decoupled task (#165): it scans row group by
-        row group straight to the blob (write-through, bounded memory) and
-        finalizes ready/failed on its own merits, so a slow or dropped reader can
-        never poison the cache entry.
+        Runs as a shielded task decoupled from readers: it writes row group by row
+        group straight to the blob (bounded memory) and finalizes ready/failed on its
+        own, so a slow or dropped reader cannot poison the cache entry.
         """
         from strata.artifact_store import get_artifact_store
         from strata.transforms.build_qos import record_build_output_bytes
@@ -332,13 +317,10 @@ class ScanBuildManager:
         row_count: int,
         byte_size: int,
     ) -> None:
-        """Finalize a scan artifact whose blob was already **written through**.
+        """Finalize a scan artifact whose blob is already written, then mark it ``ready``.
 
-        The blob is on disk by the time this runs; re-read it in bounded memory
-        (one record batch at a time, in a worker thread) for the integrity gate
-        (#124), then flip state to ``ready``. The sole finalizer for scan builds —
-        both the stream and artifact materialize paths route through the
-        write-through build. See docs/internal/design-streaming-decouple.md.
+        Re-reads the blob one record batch at a time in a worker thread for the
+        integrity gate. The sole finalizer for scan builds.
         """
         from strata.artifact_store import get_artifact_store
 

@@ -1,12 +1,7 @@
-"""Filter types — the dependency-free slice of the type system.
+"""Filter wire types, standard library only.
 
-These are wire-format value types (serialized to/from JSON when they cross the
-client↔server boundary), so the client and the server each own their own copy:
-neither package depends on the other. ``strata-client`` has the identical types
-in ``strata_client.filters``. ``strata.types`` re-exports these for backward
-compatibility, so ``from strata.types import Filter`` keeps working.
-
-Standard library only — no third-party dependencies.
+``strata_client.filters`` holds an identical copy so neither package depends on
+the other; keep the two in sync. ``strata.types`` re-exports these.
 """
 
 import base64
@@ -57,9 +52,9 @@ class Filter:
     value: FilterValue
 
     def matches_stats(self, min_val: FilterValue | None, max_val: FilterValue | None) -> bool:
-        """Check if this filter could match given min/max statistics.
+        """Return True if a row group with these min/max stats might contain matching rows.
 
-        Returns True if the row group might contain matching rows.
+        Missing stats never prune.
         """
         if min_val is None or max_val is None:
             return True  # No stats, can't prune
@@ -141,17 +136,10 @@ def deserialize_filter_value(value: str | bool | int | float) -> FilterValue:
 
 
 def compute_filter_fingerprint(filters: list[Filter] | None) -> str:
-    """Compute a stable fingerprint for a list of filters.
-
-    Used for cache keying when filters affect file-level pruning, and for
-    identity-materialize provenance. Returns a deterministic hash that is stable
-    across runs and order-independent.
-
-    Args:
-        filters: List of Filter objects (may be None or empty)
+    """Compute an order-independent fingerprint for cache keys and provenance.
 
     Returns:
-        16-character hex string, or "nofilter" if no filters
+        16-character hex string, or ``"nofilter"`` for None or empty.
     """
     if not filters:
         return "nofilter"

@@ -57,17 +57,7 @@ CompiledFilters = list[tuple[int, Filter]]
 
 
 def _build_column_index_map(schema) -> dict[str, int]:
-    """Build a mapping from column name to Parquet leaf column index.
-
-    Only includes flat (non-nested) columns that can be reliably used
-    for row group pruning via statistics.
-
-    Args:
-        schema: Parquet schema from file metadata
-
-    Returns:
-        Dict mapping column name to its physical column index
-    """
+    """Map column name to Parquet leaf column index, for flat columns only (prunable by stats)."""
     col_map: dict[str, int] = {}
     for i in range(len(schema)):
         col = schema.column(i)
@@ -79,17 +69,7 @@ def _build_column_index_map(schema) -> dict[str, int]:
 
 
 def _compile_filters(filters: list[Filter], col_index_map: dict[str, int]) -> CompiledFilters:
-    """Compile filters into (column_index, filter) pairs for fast evaluation.
-
-    Filters referencing columns not in the map (nested or missing) are dropped.
-
-    Args:
-        filters: List of Filter objects
-        col_index_map: Mapping from column name to Parquet column index
-
-    Returns:
-        List of (column_index, filter) tuples for columns that exist
-    """
+    """Compile filters into ``(column_index, filter)`` pairs, dropping those on unmapped columns."""
     compiled: CompiledFilters = []
     for f in filters:
         col_idx = col_index_map.get(f.column)
@@ -99,14 +79,7 @@ def _compile_filters(filters: list[Filter], col_index_map: dict[str, int]) -> Co
 
 
 def _normalize_s3_path(path: str) -> str:
-    """Normalize an S3 path by removing redundant slashes and path components.
-
-    Args:
-        path: S3 URI (s3://bucket/path)
-
-    Returns:
-        Normalized S3 path with clean path components
-    """
+    """Normalize an ``s3://`` URI by removing redundant slashes and path components."""
     if not path.startswith("s3://"):
         return path
 
@@ -133,25 +106,16 @@ def _normalize_s3_path(path: str) -> str:
 
 
 def _join_s3_path(base: str, relative: str) -> str:
-    """Join an S3 base path with a relative path.
-
-    Args:
-        base: S3 base URI (s3://bucket/path)
-        relative: Relative path to append
-
-    Returns:
-        Joined and normalized S3 path
-    """
+    """Join an S3 base URI with a relative path and normalize the result."""
     base = base.rstrip("/")
     relative = relative.lstrip("/")
     return _normalize_s3_path(f"{base}/{relative}")
 
 
 def _delete_files(positional_deletes, table_identity: str) -> tuple[DeleteFileEntry, ...]:
-    """A data file's positional deletes: Parquet delete files or Puffin deletion vectors.
+    """Return a data file's positional deletes: Parquet delete files or Puffin deletion vectors.
 
-    ORC and Avro delete files are valid Iceberg but not readable here, and
-    skipping one would return the rows it deletes.
+    ORC and Avro delete files are refused, since skipping one would return the rows it deletes.
     """
     entries = []
     for delete_file in positional_deletes:
@@ -170,10 +134,10 @@ def _delete_files(positional_deletes, table_identity: str) -> tuple[DeleteFileEn
 def _equality_deletes(
     equality_deletes, table, table_identity: str, resolve: Callable[[str], str]
 ) -> tuple[EqualityDeleteEntry, ...]:
-    """A data file's equality deletes, with what planning needs to prune and limit them.
+    """Return a data file's equality deletes, with what planning needs to prune and limit them.
 
-    Keys are matched by field id against the data file's top-level columns; a
-    key inside a struct is refused, as is a delete file Strata cannot read.
+    Keys match by field id against top-level columns; a key inside a struct, or an
+    unreadable delete file, is refused.
     """
     top_level = {
         field.field_id: field.field_type
@@ -225,13 +189,12 @@ def _equality_deletes(
 def _partition_values(
     data_file, table, top_level: dict[int, IcebergType]
 ) -> tuple[tuple[int, str, str], ...]:
-    """*data_file*'s identity-partition values, for a source column the file omits.
+    """Return *data_file*'s identity-partition values, for a source column the file omits.
 
-    A Hive-layout file registered with add_files often omits its identity
-    partition column; pyiceberg reads it as the file's partition value. Each
-    is kept with its type in Iceberg's single-value encoding, which the
-    persisted manifest holds exactly. *top_level* is the table's top-level
-    field types by id; a nested source column is not filled.
+    Hive-layout files registered with add_files often omit the partition column;
+    pyiceberg reads it as the partition value. Values keep their type in Iceberg's
+    single-value encoding. *top_level* maps field id to type; nested source columns
+    are not filled.
     """
     spec = table.metadata.specs()[data_file.spec_id or 0]
     values = []
@@ -249,7 +212,7 @@ def _partition_values(
 
 
 def _decode_partition_values(values: tuple[tuple[int, str, str], ...]) -> dict[int, Any]:
-    """The values ``_partition_values`` kept, by source field id."""
+    """Return the values ``_partition_values`` kept, by source field id."""
     return {
         field_id: from_bytes(IcebergType.model_validate(type_name), bytes.fromhex(encoded))
         for field_id, type_name, encoded in values
@@ -263,13 +226,8 @@ def _assert_projection_exists(
 ) -> None:
     """Raise when a requested column is absent from the table schema.
 
-    Nothing checked this once: a single-file table validated nothing at all.
-    The projection was then applied by ``CachedFetcher._project_batch``
-    via ``schema.get_field_index(name)``, which returns ``-1`` for a name it
-    does not know, and ``batch.column(-1)`` is the LAST column. So scanning a
-    column that does not exist returned the last column's data under the
-    requested name, silently and with no error: exactly the "quietly wrong
-    rows" outcome this codebase refuses everywhere else.
+    Without this, ``schema.get_field_index`` returns -1 for an unknown name and
+    ``batch.column(-1)`` silently returns the last column under the requested name.
     """
     if not columns:
         return
@@ -296,24 +254,12 @@ def _project_schema(schema, columns: list[str] | None):
 def _estimate_row_group_bytes(
     rg_meta, columns: list[str] | None, col_index_map: dict[str, int]
 ) -> int:
-    """Estimate the bytes a row group contributes to the response.
+    """Estimate the bytes a row group contributes to the response, for the pre-flight 413.
 
-    This feeds the pre-flight 413, so it has to describe the response the
-    limit governs. It used to be ``total_byte_size``, the size of the WHOLE
-    row group, which ignores the projection entirely: scanning two columns of
-    a forty-column table was estimated as if all forty were read, and a
-    perfectly reasonable projected scan was rejected as oversized.
-
-    Summing only the projected columns' chunks fixes that exactly. It falls
-    back to the whole-row-group size whenever the per-column sizes are not
-    available -- a nested projection (absent from ``col_index_map``), or a
-    metadata cache entry written before the sizes were recorded -- because
-    over-estimating is the safe direction for a guard.
-
-    Note this is Parquet's uncompressed-but-ENCODED size, which still
-    under-states Arrow's in-memory size for dictionary-encoded columns.
-    Narrowing that gap is a separate question about how strict the limit
-    should be, not something to settle inside an estimator.
+    Sums only the projected columns' chunks, falling back to the whole row group
+    when per-column sizes are unavailable (nested projection, older cache entry),
+    since over-estimating is the safe direction. This is Parquet's encoded size,
+    which can under-state Arrow's in-memory size for dictionary-encoded columns.
     """
     total = getattr(rg_meta, "total_byte_size", 0)
     if not columns:
@@ -334,12 +280,8 @@ def _estimate_row_group_bytes(
 class ReadPlanner:
     """Plans reads from Iceberg tables with row-group pruning.
 
-    Uses metadata caches to avoid redundant reads:
-    - ParquetMetadataCache: Caches Parquet file metadata (schema, row groups, stats)
-    - ManifestCache: Caches Iceberg manifest resolution per snapshot
-
-    When cache_dir is provided, metadata is persisted to SQLite for fast
-    planning after server restarts.
+    Caches Parquet file metadata and manifest resolution per snapshot; with
+    ``cache_dir`` they persist to SQLite across restarts.
     """
 
     def __init__(
@@ -383,16 +325,10 @@ class ReadPlanner:
         columns: list[str] | None = None,
         filters: list[Filter] | None = None,
     ) -> ReadPlan:
-        """Create a read plan for the given table and options.
+        """Create a read plan with one task per row group to read.
 
-        Args:
-            table_uri: Table identifier (path#namespace.table or just namespace.table)
-            snapshot_id: Specific snapshot to read (None for current)
-            columns: Columns to project (None for all)
-            filters: Filters for row-group pruning
-
-        Returns:
-            ReadPlan with tasks for each row group to read
+        ``table_uri`` is ``path#namespace.table`` or ``namespace.table``;
+        ``snapshot_id`` None reads the current snapshot, ``columns`` None reads all.
         """
         start_time = time.perf_counter()
         filters = filters or []
@@ -677,15 +613,7 @@ class ReadPlanner:
         return plan
 
     def _resolve_file_path(self, table_uri: str, file_path: str) -> str:
-        """Resolve a file path from the table metadata to an actual path.
-
-        Args:
-            table_uri: Table URI in format warehouse_path#namespace.table
-            file_path: File path from Iceberg manifest (absolute or relative)
-
-        Returns:
-            Resolved absolute path (local or S3)
-        """
+        """Resolve a manifest file path (absolute or relative) to a local or S3 path."""
         if file_path.startswith("s3://"):
             return _normalize_s3_path(file_path)
 
@@ -710,7 +638,7 @@ class ReadPlanner:
     def _key_stats(
         self, rg_meta: RowGroupMeta | pq.RowGroupMetaData, column_index: int | None
     ) -> tuple[object, object, int | None] | None:
-        """A key column's ``(min, max, null_count)`` in a row group, when recorded."""
+        """Return a key column's ``(min, max, null_count)`` in a row group, when recorded."""
         if column_index is None:
             return None
         column = rg_meta.column(column_index)
@@ -724,29 +652,10 @@ class ReadPlanner:
         rg_meta: RowGroupMeta | pq.RowGroupMetaData,
         compiled_filters: CompiledFilters,
     ) -> bool:
-        """Check if a row group can be pruned based on compiled filters and stats.
+        """Return True only if stats prove the row group has no matching rows.
 
-        Uses pre-compiled filters with resolved column indices for efficient
-        row group pruning. Column index mapping is done once per file, not per
-        row group.
-
-        Args:
-            rg_meta: Row group metadata from Parquet file (PyArrow RowGroupMetaData)
-            compiled_filters: List of (column_index, Filter) tuples pre-compiled
-                by _compile_filters()
-
-        Returns:
-            True if the row group can be safely pruned (no matching rows),
-            False if the row group should be read.
-
-        Note:
-            Limitations:
-            - Only flat, primitive columns are supported for pruning
-            - Complex Parquet timestamps may not convert correctly; use int64 epoch
-            - Filters use AND semantics (all must match for row to be included)
-
-            If pruning cannot be safely determined, we err on the side of NOT
-            pruning (i.e., we read the row group rather than risk missing data).
+        Filters are ANDed and only flat primitive columns prune. When safety cannot be
+        determined the row group is read, never pruned.
         """
         if not compiled_filters:
             return False
@@ -776,30 +685,11 @@ class ReadPlanner:
         return False
 
     def _convert_stats(self, min_val, max_val):
-        """Convert statistics to comparable types.
+        """Convert Parquet min/max statistics (possibly PyArrow scalars) to Python values.
 
-        Converts PyArrow scalar values to Python types for comparison with
-        filter values during row group pruning.
-
-        Args:
-            min_val: Minimum value from Parquet column statistics (may be PyArrow scalar)
-            max_val: Maximum value from Parquet column statistics (may be PyArrow scalar)
-
-        Returns:
-            Tuple of (min_val, max_val) converted to Python types
-
-        Note:
-            Limitations:
-            - Only basic type conversions are supported
-            - Numeric types (int, float) work directly with Parquet stats
-            - String comparisons work if both filter and stats are strings
-            - Timestamp pruning:
-              * For int64 epoch micros (recommended): use int filter values
-              * For datetime filters: stats must return datetime-compatible objects
-              * Type mismatches will raise and be caught (no pruning, safe)
-            - Decimals, bytes, and complex types may not compare correctly
-
-            Future: use Iceberg schema for type-aware conversions.
+        Numbers and strings compare directly; for timestamps prefer int64 epoch
+        micros with int filters. Mismatched types raise and the caller does not prune.
+        Decimals, bytes and complex types may not compare correctly.
         """
         if hasattr(min_val, "as_py"):
             min_val = min_val.as_py()

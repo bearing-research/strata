@@ -1,15 +1,10 @@
 """Iceberg schema evolution: reading an older data file as the snapshot's schema.
 
-Iceberg names a column by field id, not by name, and changing a table's schema
-rewrites no data files. So an older file may lack a column the table added
-since (it reads as nulls), hold a column the table renamed under its old name,
-hold a dropped column whose name a new column reuses (that is not the new
-column, which also reads as nulls), or store a narrower type than the one the
-table promoted it to (int to long, float to double, a wider decimal). The same
-holds for the fields inside a struct, list or map column. Iceberg's Parquet
-files record the field id of every column and nested field, which is what
-matches a file's columns to the snapshot's; a file without them is matched
-through the table's name mapping, or by name when it has none.
+Columns are identified by field id, and schema changes rewrite no data files,
+so an older file may lack added columns (read as nulls), carry renamed or
+dropped-and-reused names, or store narrower promoted types, at any nesting
+depth. Files are matched by their recorded field ids, else the table's name
+mapping, else by name.
 """
 
 from typing import Any, NamedTuple, cast
@@ -46,7 +41,7 @@ class Column(NamedTuple):
 
 
 def _small(data_type: pa.DataType) -> pa.DataType:
-    """*data_type* with Arrow's 32-bit offset types, which is what Parquet reads give."""
+    """Return *data_type* with Arrow's 32-bit offset types, as Parquet reads give."""
     if pa.types.is_large_string(data_type):
         return pa.string()
     if pa.types.is_large_binary(data_type):
@@ -74,7 +69,7 @@ def _children(iceberg_type: IcebergType) -> list[NestedField]:
 
 
 def _same_type(file_type: IcebergType, table_type: IcebergType) -> bool:
-    """Whether the file stores exactly the table's type: same nested ids, names and types.
+    """Return whether the file stores exactly the table's type (nested ids, names, types).
 
     Nullability is not compared: making a column optional rewrites no file.
     """
@@ -90,12 +85,10 @@ def _same_type(file_type: IcebergType, table_type: IcebergType) -> bool:
 
 
 def _as_table(data_type: pa.DataType, table_type: IcebergType) -> pa.DataType:
-    """*data_type*, the file's Arrow form of *table_type*, with the table's
-    nullability and timestamp unit at every depth.
+    """Return the file's Arrow *data_type* with *table_type*'s nullability and timestamp unit.
 
-    The file's own offset widths are kept: only what the table decides changes.
-    A v1 or v2 table allows only microseconds, but a file can hold nanoseconds
-    (or INT96, read as nanoseconds), inside a struct, list or map too.
+    Applied at every depth; the file's offset widths are kept. A v1/v2 table
+    allows only microseconds, but a file can hold nanoseconds (or INT96).
     """
     if isinstance(table_type, StructType):
         return pa.struct(
@@ -126,10 +119,9 @@ def _as_table(data_type: pa.DataType, table_type: IcebergType) -> pa.DataType:
 
 
 def _unreadable(file_type: IcebergType, table_type: IcebergType) -> str | None:
-    """Why a file's *file_type* cannot be read as *table_type*, or None when it can.
+    """Return why *file_type* cannot be read as *table_type*, or None when it can.
 
-    Nested fields are matched by id: one the file lacks reads as nulls, and
-    each one it has must be readable in turn.
+    Nested fields match by id: one the file lacks reads as nulls.
     """
     if isinstance(file_type, PrimitiveType) and isinstance(table_type, PrimitiveType):
         if file_type == table_type:
@@ -152,7 +144,7 @@ def _unreadable(file_type: IcebergType, table_type: IcebergType) -> str | None:
 def _reshape(
     array: pa.Array, file_type: IcebergType, table_type: IcebergType, target: pa.DataType
 ) -> pa.Array:
-    """*array*, stored as *file_type*, rebuilt as *table_type* (in Arrow, *target*)."""
+    """Rebuild *array*, stored as *file_type*, as *table_type* (Arrow *target*)."""
     if isinstance(table_type, PrimitiveType):
         # Not a safe cast: a finer timestamp is truncated to the table's unit.
         return array.cast(target, safe=False)
@@ -201,13 +193,13 @@ def _reshape(
 
 
 def snapshot_arrow_field(field: NestedField) -> pa.Field:
-    """The Arrow field a column the file lacks reads as: nulls of the table's type."""
+    """Return the Arrow field for a column the file lacks: nulls of the table's type."""
     data_type = _small(schema_to_pyarrow(field.field_type, include_field_ids=False))
     return pa.field(field.name, data_type, nullable=True)
 
 
 def snapshot_arrow_schema(schema: Schema) -> pa.Schema:
-    """*schema* in Arrow, typed as a Parquet read gives it."""
+    """Return *schema* in Arrow, typed as a Parquet read gives it."""
     return pa.schema(
         pa.field(
             field.name,
@@ -228,16 +220,14 @@ def file_columns(
     format_version: int,
     partition_values: dict[int, Any],
 ) -> tuple[Column, ...] | None:
-    """How a file with *file_schema* reads as *snapshot_schema*, or None when it already does.
+    """Return how a file with *file_schema* reads as *snapshot_schema*, or None if it does.
 
-    Every column takes its nullability from the snapshot, so files written on
-    either side of a required column becoming optional stream as one schema.
-    A column the file lacks reads its value in *partition_values* (the file's
-    identity partition, by source field id), else its initial-default, as
-    pyiceberg reads it.
+    Nullability comes from the snapshot, so files from either side of a column
+    becoming optional stream as one schema. A missing column reads its
+    *partition_values* entry (identity partition, by source field id), else its
+    initial-default, as pyiceberg does.
 
-    Raises ``UnsupportedTableFormatError`` for a type change Iceberg does not
-    allow, at any depth.
+    Raises ``UnsupportedTableFormatError`` for a type change Iceberg does not allow, at any depth.
     """
     stored = {
         field.field_id: field
@@ -303,10 +293,9 @@ def _file_schema(
     name_mapping: NameMapping | None,
     format_version: int,
 ) -> Schema:
-    """The Iceberg schema a data file holds (by the name mapping when it has no ids).
+    """Return the Iceberg schema a data file holds (via the name mapping when it has no ids).
 
-    Nanosecond timestamps are read as microseconds in a v1 or v2 table, the
-    only unit those formats allow; pyiceberg's own reader does the same.
+    Nanosecond timestamps read as microseconds in v1/v2 tables, as pyiceberg's reader does.
     """
     return pyarrow_to_schema(
         file_schema,
@@ -322,14 +311,16 @@ def stored_columns(
     name_mapping: NameMapping | None,
     format_version: int,
 ) -> dict[int, str]:
-    """The file's top-level columns by field id."""
+    """Return the file's top-level columns by field id."""
     schema = _file_schema(file_schema, snapshot_schema, name_mapping, format_version)
     return {field.field_id: field.name for field in schema.fields}
 
 
 def absent_column(num_rows: int, data_type: pa.DataType, default: Any) -> pa.Array:
-    """A column the data file lacks: *default* (its identity-partition value or v3
-    initial-default) on every row, else nulls."""
+    """Return a column the file lacks: *default* on every row, else nulls.
+
+    *default* is its identity-partition value or v3 initial-default.
+    """
     if default is None:
         return pa.nulls(num_rows, data_type)
     return pa.repeat(pa.scalar(default, type=data_type), num_rows)
@@ -338,7 +329,7 @@ def absent_column(num_rows: int, data_type: pa.DataType, default: Any) -> pa.Arr
 def read_as_snapshot(
     table: pa.Table, columns: tuple[Column, ...], names: list[str] | None
 ) -> pa.Table:
-    """*table*, read from the file, as the snapshot's *names* (all of them when None)."""
+    """Return *table*, read from the file, as the snapshot's *names* (all when None)."""
     wanted = [c for c in columns if names is None or c.name in names]
     if names is not None:
         order = {name: i for i, name in enumerate(names)}
@@ -366,7 +357,7 @@ def read_as_snapshot(
 
 
 def source_columns(columns: tuple[Column, ...], names: list[str] | None) -> list[str]:
-    """The file's columns to read for the snapshot's *names* (all of them when None)."""
+    """Return the file columns to read for the snapshot's *names* (all when None)."""
     return [
         c.source for c in columns if c.source is not None and (names is None or c.name in names)
     ]

@@ -1,9 +1,6 @@
-"""Pure parsing for Strata artifact and name URIs.
+"""Pure parsing for Strata artifact and name URIs (no store or server access).
 
-These helpers are the stateless half of URI handling: string → identifiers,
-with no artifact-store or server-state access. Store-backed *resolution*
-(latest-version lookup, name resolution) lives in ``server._resolve_artifact_uri``,
-which builds on these parsers.
+Store-backed resolution lives in ``server._resolve_artifact_uri``.
 
 URI grammar:
     strata://artifact/{id}@v={version}   -> pinned version
@@ -27,9 +24,8 @@ LATEST_VERSION = -1
 def parse_artifact_uri(uri: str) -> tuple[str, int] | None:
     """Parse an artifact URI into ``(artifact_id, version)``.
 
-    Returns ``version == LATEST_VERSION`` for the unpinned
-    ``strata://artifact/{id}`` form, or ``None`` when ``uri`` is not an
-    artifact URI.
+    ``version`` is ``LATEST_VERSION`` for the unpinned form; returns ``None`` when
+    ``uri`` is not an artifact URI.
     """
     match = _ARTIFACT_PINNED.match(uri)
     if match:
@@ -43,10 +39,7 @@ def parse_artifact_uri(uri: str) -> tuple[str, int] | None:
 
 
 def parse_name_uri(uri: str) -> str | None:
-    """Parse a name URI (``strata://name/{name}``) into its name.
-
-    Returns ``None`` when ``uri`` is not a name URI.
-    """
+    """Return the name in ``strata://name/{name}``, or ``None`` when ``uri`` is not one."""
     match = _NAME.match(uri)
     if match:
         return match.group(1)

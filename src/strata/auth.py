@@ -1,31 +1,13 @@
-"""Trusted proxy authentication and authorization.
+"""Trusted-proxy authentication and authorization.
 
-This module implements a trusted proxy authentication model where Strata
-delegates authentication to an upstream proxy (e.g., NGINX, Envoy, Kong)
-and trusts identity headers injected by that proxy.
+Strata does not authenticate: an upstream proxy (NGINX, Envoy, Kong) does, and
+Strata trusts its identity headers. The proxy MUST strip client-supplied
+``X-Strata-*`` headers, set ``X-Strata-Principal`` to the authenticated id, and
+set ``X-Strata-Proxy-Token`` to the shared secret. For example (NGINX)::
 
-Security model:
-1. Proxy authenticates users (OIDC, API keys, etc.)
-2. Proxy strips any client-supplied X-Strata-* headers
-3. Proxy injects trusted identity headers
-4. Proxy sets X-Strata-Proxy-Token for verification
-5. Strata verifies token and extracts principal
-
-The proxy MUST:
-- Remove all client-supplied X-Strata-* headers before forwarding
-- Set X-Strata-Principal to the authenticated user/service ID
-- Set X-Strata-Proxy-Token to the shared secret
-
-Example NGINX configuration:
     location /strata/ {
-        # Strip client headers
-        proxy_set_header X-Strata-Principal "";
-        proxy_set_header X-Strata-Proxy-Token "";
-
-        # Inject trusted values
         proxy_set_header X-Strata-Principal $authenticated_user;
         proxy_set_header X-Strata-Proxy-Token "secret-token";
-
         proxy_pass http://strata:8765/;
     }
 """
@@ -50,11 +32,7 @@ _principal_ctx: ContextVar[Principal | None] = ContextVar("principal", default=N
 
 
 def get_principal() -> Principal | None:
-    """Get the current request's authenticated principal.
-
-    Returns:
-        Principal if authenticated, None if auth is disabled or not authenticated.
-    """
+    """Return the current request's principal, or None if auth is disabled or unauthenticated."""
     return _principal_ctx.get()
 
 
@@ -62,14 +40,12 @@ _FORWARDED_PRINCIPAL = "X-Strata-Principal"
 
 
 def remote_store_headers(config: Any) -> dict[str, str]:
-    """What a request from this server to the team store carries.
+    """Return the headers a request from this server to the team store carries.
 
-    ``notebook_remote_store_headers`` authenticates the server. With a caller
-    in context and ``notebook_remote_store_forward_principal`` on, the caller's
-    id replaces whatever principal those headers name, so a result offered,
-    a promotion or an approval from a shared server is attributed to the
-    member who made it rather than to the server. Personal mode has no caller
-    and sends the static headers unchanged.
+    With a caller in context and ``notebook_remote_store_forward_principal`` on,
+    the caller's id replaces the principal in ``notebook_remote_store_headers``, so
+    work done through a shared server is attributed to the member. Personal mode
+    sends the static headers unchanged.
     """
     headers = dict(getattr(config, "notebook_remote_store_headers", {}) or {})
     principal = get_principal()
@@ -83,9 +59,10 @@ def remote_store_headers(config: Any) -> dict[str, str]:
 
 @contextmanager
 def principal_context(principal: Principal | None) -> Iterator[None]:
-    """Make *principal* the current caller for a block, restoring the previous
-    one after. For work that runs outside the request task that authenticated
-    it, such as an MCP tool call served from its session's own task."""
+    """Make *principal* the current caller for a block, restoring the previous one after.
+
+    For work outside the request task that authenticated it, such as an MCP tool call.
+    """
     token = _principal_ctx.set(principal)
     try:
         yield
@@ -94,20 +71,12 @@ def principal_context(principal: Principal | None) -> Iterator[None]:
 
 
 def set_principal(principal: Principal | None) -> None:
-    """Set the current request's authenticated principal.
-
-    Called by auth middleware after parsing identity headers.
-    """
+    """Set the current request's principal (called by the auth middleware)."""
     _principal_ctx.set(principal)
 
 
 class AuthError(Exception):
-    """Authentication or authorization error.
-
-    Attributes:
-        message: Human-readable error description
-        status_code: HTTP status code to return (401 or 403)
-    """
+    """Authentication or authorization error carrying the HTTP status (401 or 403)."""
 
     def __init__(self, message: str, status_code: int = 401):
         self.message = message
@@ -119,17 +88,7 @@ class AuthError(Exception):
 
 
 def verify_proxy_token(request_token: str | None, expected_token: str | None) -> bool:
-    """Verify that the request came from a trusted proxy.
-
-    Uses constant-time comparison to prevent timing attacks.
-
-    Args:
-        request_token: Token from the request header
-        expected_token: Expected token from configuration
-
-    Returns:
-        True if token matches or no token is configured (auth disabled)
-    """
+    """Check the proxy token in constant time; True when no token is configured."""
     if expected_token is None:
         # No token configured: verification is off.
         return True
@@ -142,17 +101,10 @@ def verify_proxy_token(request_token: str | None, expected_token: str | None) ->
 
 
 def parse_principal(headers: dict[str, str], config: StrataConfig) -> Principal:
-    """Parse Principal from request headers.
-
-    Args:
-        headers: Request headers dictionary
-        config: Strata configuration
-
-    Returns:
-        Parsed Principal object
+    """Parse the Principal from request headers.
 
     Raises:
-        AuthError: If required principal header is missing
+        AuthError: If the required principal header is missing.
     """
     from strata.types import Principal
 
@@ -173,17 +125,14 @@ def parse_principal(headers: dict[str, str], config: StrataConfig) -> Principal:
 def parse_api_key_principal(headers: dict[str, str], config: StrataConfig) -> Principal:
     """Resolve an ``Authorization: Bearer`` API key to a principal.
 
-    The counterpart to :func:`parse_principal` for ``auth_mode='api_key'``,
-    and it returns the same type deliberately: ACL evaluation, tenant scoping
-    and scope checks all consume only ``Principal``, so nothing downstream
-    needs to know which mode produced it.
+    Returns the same ``Principal`` as :func:`parse_principal`, so nothing downstream
+    depends on the auth mode.
 
     Raises
     ------
     AuthError
-        If the header is absent or the key does not resolve. Both give the
-        same message -- a caller learns that they are unauthenticated, not
-        whether the key was malformed, unknown, revoked or expired.
+        If the header is absent or the key does not resolve; one message for both,
+        so a caller cannot tell malformed, unknown, revoked or expired keys apart.
     """
     from strata.api_keys import get_api_key_store
 
@@ -207,25 +156,14 @@ def parse_api_key_principal(headers: dict[str, str], config: StrataConfig) -> Pr
 
 
 class AclEvaluator:
-    """Evaluates access control rules against principals and tables.
+    """Evaluates ACL rules against principals and tables, deny-first.
 
-    ACL evaluation order:
-    1. Deny rules are checked first - if any match, access is DENIED
-    2. Allow rules are checked - if any match, access is ALLOWED
-    3. Default action is applied (allow or deny)
-
-    Table patterns use glob-style matching (fnmatch):
-    - "file:db.*" matches "file:db.events", "file:db.users"
-    - "s3:*.*" matches any S3 table
-    - "*:*.*" matches all tables
+    Deny rules win, then allow rules, then the default. Table patterns are fnmatch
+    globs, e.g. ``"file:db.*"``, ``"s3:*.*"``, ``"*:*.*"``.
     """
 
     def __init__(self, acl_config: AclConfig):
-        """Initialize the evaluator with ACL configuration.
-
-        Args:
-            acl_config: Access control list configuration
-        """
+        """Initialize the evaluator with ACL configuration."""
         self.config = acl_config
 
     def _matches_rule(
@@ -234,21 +172,7 @@ class AclEvaluator:
         principal: Principal,
         table_ref: TableRef,
     ) -> bool:
-        """Check if a rule matches the principal and table.
-
-        A rule matches if ALL conditions are satisfied:
-        - Principal matches (or rule principal is "*")
-        - Tenant matches (if specified in rule)
-        - At least one table pattern matches
-
-        Args:
-            rule: ACL rule to check
-            principal: Request principal
-            table_ref: Target table reference
-
-        Returns:
-            True if rule matches
-        """
+        """Return True if principal (or ``*``), tenant (if set) and any table pattern match."""
         from strata.config import AclRule  # noqa: F401 - for type checking
 
         # ``principal`` is a pattern; exact equality would let a deny rule like
@@ -272,23 +196,10 @@ class AclEvaluator:
         table_ref: TableRef,
         aliases: tuple[TableRef, ...] = (),
     ) -> bool:
-        """Check if principal is authorized to access table.
+        """Return whether ``principal`` may access ``table_ref`` (deny, then allow, then default).
 
-        Evaluation order:
-        1. Check deny rules first - if any match, return False
-        2. Check allow rules - if any match, return True
-        3. Return default action (True if "allow", False if "deny")
-
-        Args:
-            principal: Authenticated principal making the request
-            table_ref: Canonical table reference being accessed
-            aliases: Other names the same table answers to. A deny rule for
-                any of them refuses the table, so asking for it under another
-                address cannot step around the rule. Allow rules still match
-                only ``table_ref``, so an alias never grants anything.
-
-        Returns:
-            True if access is allowed, False if denied
+        A deny rule matching any of ``aliases`` refuses the table, so another address
+        cannot step around it; allow rules match only ``table_ref``, so an alias never grants.
         """
         # Deny first: an explicit deny beats any allow.
         for rule in self.config.deny_rules:
@@ -302,15 +213,5 @@ class AclEvaluator:
         return self.config.default == "allow"
 
     def check_scope(self, principal: Principal, required_scope: str) -> bool:
-        """Check if principal has the required scope.
-
-        The special scope 'admin:*' grants all permissions.
-
-        Args:
-            principal: Authenticated principal
-            required_scope: Scope required for the operation
-
-        Returns:
-            True if principal has the scope
-        """
+        """Return whether the principal has ``required_scope``; ``admin:*`` grants all."""
         return principal.has_scope(required_scope)

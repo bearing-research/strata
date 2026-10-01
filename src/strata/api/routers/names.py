@@ -1,23 +1,12 @@
-"""Name registry routes: names (resolve/set/delete/list/status), aliases, and tags.
-
-Moved verbatim from ``server.py`` (P3 / A1b, router split). Thin handlers over
-the P1 typed dependencies. ``get_state`` (the protected-alias config on the
-alias set/delete paths) and the governance gate ``_require_registry_approver``
-are reached via in-body lazy import and stay in ``server.py``. The shared
-table-ACL resolver used by name-status staleness is ``resolve_input_version``,
-imported from ``strata.api.dependencies`` (#295) — the same enforced unit
-materialize and explain call.
+"""Name registry routes: names, aliases and tags.
 
 With ``notebook_remote_store_url`` set, every route here answers from that
-store, as the registry routes do. These are the same registry — names, aliases
-and tags — and forwarding some of them and not others is how the dashboard came
-to read the team's registry and write its promotions to the local one, where the
-tab never showed them. See ``strata.api.remote_registry``.
+store (see ``strata.api.remote_registry``); forwarding only some of them splits
+reads and writes across two registries.
 
-Route order matters: the greedy ``/v1/names/{name:path}`` resolver MUST stay
-registered AFTER the more specific ``/v1/names/{name:path}/aliases/...`` routes,
-or ``.../aliases/x`` URLs get swallowed as part of the name — so the alias
-handlers are defined first in this module.
+Route order matters: the greedy ``/v1/names/{name:path}`` resolver must be
+registered after the ``/v1/names/{name:path}/aliases/...`` routes, or alias URLs
+are swallowed as part of the name.
 """
 
 from __future__ import annotations
@@ -79,9 +68,8 @@ async def set_alias(
 ):
     """Point ``name @ alias`` (e.g. champion) at an artifact version.
 
-    Protected aliases (``registry_protected_aliases`` config) do not apply
-    immediately: the change lands in the pending queue (202) and an
-    explicit approve applies it.
+    A protected alias (``registry_protected_aliases``) is queued as pending (202)
+    and applies only on an explicit approve.
     """
     target = remote_registry()
     if target is not None:
@@ -304,14 +292,7 @@ async def delete_tag(
 # reserved.
 @router.get("/v1/names/{name:path}", response_model=NameResolveResponse)
 async def resolve_name(name: str, store: ReadStore, principal: CurrentPrincipal):
-    """Resolve a name to its artifact.
-
-    Args:
-        name: Name to resolve (without strata://name/ prefix)
-
-    Returns:
-        NameResolveResponse with resolved artifact URI
-    """
+    """Resolve a name (without the ``strata://name/`` prefix) to its artifact URI."""
     target = remote_registry()
     if target is not None:
         return await relay(target, "GET", f"/v1/names/{quoted(name, path=True)}")
@@ -333,14 +314,7 @@ async def resolve_name(name: str, store: ReadStore, principal: CurrentPrincipal)
 
 @router.post("/v1/names", response_model=NameSetResponse)
 async def set_name(request: NameSetRequest, store: WriteStore, principal: CurrentPrincipal):
-    """Set or update a name pointer.
-
-    Args:
-        request: NameSetRequest with name, artifact_id, and version
-
-    Returns:
-        NameSetResponse with name and artifact URIs
-    """
+    """Set or update a name pointer."""
     target = remote_registry()
     if target is not None:
         return await relay(target, "POST", "/v1/names", json_body=request.model_dump())
@@ -370,14 +344,7 @@ async def set_name(request: NameSetRequest, store: WriteStore, principal: Curren
 
 @router.delete("/v1/names/{name:path}")
 async def delete_name(name: str, store: PersonalModeStore, principal: CurrentPrincipal):
-    """Delete a name pointer.
-
-    Args:
-        name: Name to delete
-
-    Returns:
-        Success status
-    """
+    """Delete a name pointer."""
     target = remote_registry()
     if target is not None:
         return await relay(target, "DELETE", f"/v1/names/{quoted(name, path=True)}")
@@ -392,11 +359,7 @@ async def delete_name(name: str, store: PersonalModeStore, principal: CurrentPri
 
 @router.get("/v1/names")
 async def list_names(store: ReadStore, principal: CurrentPrincipal):
-    """List all name pointers.
-
-    Returns:
-        List of name entries with their artifact mappings
-    """
+    """List all name pointers and their artifacts."""
     target = remote_registry()
     if target is not None:
         return await relay(target, "GET", "/v1/names")
@@ -418,20 +381,7 @@ async def list_names(store: ReadStore, principal: CurrentPrincipal):
 
 @router.get("/v1/artifacts/names/{name:path}/status", response_model=NameStatusResponse)
 async def get_name_status(name: str, store: ReadStore, principal: CurrentPrincipal):
-    """Get status of a named artifact including staleness info.
-
-    Returns the current state of a named artifact and checks whether any of its
-    input dependencies have newer versions available. This is useful for:
-    - Determining if an artifact needs to be rebuilt
-    - Understanding which specific inputs have changed
-    - Debugging dependency chains
-
-    Args:
-        name: Name to check status for
-
-    Returns:
-        NameStatusResponse with staleness information
-    """
+    """Get a named artifact's state and whether any of its inputs has a newer version."""
     target = remote_registry()
     if target is not None:
         return await relay(target, "GET", f"/v1/artifacts/names/{quoted(name, path=True)}/status")

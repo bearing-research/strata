@@ -1,19 +1,7 @@
-"""Blob storage abstraction for artifact data.
+"""Blob storage backends for artifact data: local disk, S3, GCS and Azure.
 
-This module provides a protocol for blob storage, enabling artifact data
-to be stored on different backends (local filesystem, S3, GCS, etc.).
-
-The BlobStore protocol exposes streaming and convenience operations:
-
-- ``open_blob_reader`` / ``open_blob_writer`` — chunked streaming I/O
-- ``write_blob`` / ``read_blob`` — bytes-in, bytes-out convenience wrappers
-- ``blob_exists`` / ``delete_blob`` — metadata ops
-
-Implementations:
-- LocalBlobStore: Local filesystem storage (default)
-- S3BlobStore: Amazon S3 / S3-compatible storage (MinIO, LocalStack)
-- GCSBlobStore: Google Cloud Storage
-- AzureBlobStore: Azure Blob Storage
+Blobs are keyed by ``(artifact_id, version)``; metadata lives separately in the
+artifact store's database.
 """
 
 from __future__ import annotations
@@ -61,33 +49,16 @@ def _sigv4_context(secret_key: str, region: str) -> tuple[str, str, bytes]:
 
 
 class BlobStore(ABC):
-    """Abstract base class for blob storage backends.
-
-    Blob stores persist artifact data (Arrow IPC files) separately from
-    metadata (SQLite). This separation enables:
-    - Horizontal scaling of blob storage (S3/GCS)
-    - Efficient data locality in distributed setups
-    - Independent lifecycle management of data vs metadata
-
-    All blob operations use (artifact_id, version) as the key, which maps
-    to a unique blob path/key in the underlying storage.
-    """
+    """Abstract base for blob storage backends, keyed by ``(artifact_id, version)``."""
 
     @abstractmethod
     def open_blob_reader(
         self, artifact_id: str, version: int
     ) -> AbstractContextManager[BinaryIO] | None:
-        """Open a streaming reader for a blob.
+        """Open a streaming reader for a blob, or return ``None`` if it does not exist.
 
-        Returns ``None`` if the blob does not exist. Otherwise returns a
-        context manager that yields a binary file-like object supporting
-        at least ``read(size)``. Implementations may provide additional
-        file-like methods (``seek``, iteration) but callers should only
-        rely on ``read(size)``.
-
-        Args:
-            artifact_id: Unique artifact identifier
-            version: Artifact version number
+        The context manager yields a binary file-like object; callers should rely only on
+        ``read(size)``.
         """
         ...
 
@@ -95,40 +66,17 @@ class BlobStore(ABC):
     def open_blob_writer(self, artifact_id: str, version: int) -> AbstractContextManager[BinaryIO]:
         """Open a streaming writer for a blob.
 
-        The caller writes to the yielded handle. On clean context exit
-        the blob is committed atomically; on exception the partial write
-        is discarded.
-
-        Args:
-            artifact_id: Unique artifact identifier
-            version: Artifact version number
+        Commits atomically on clean context exit; on exception the partial write is discarded.
         """
         ...
 
     def write_blob(self, artifact_id: str, version: int, data: bytes) -> None:
-        """Write artifact data to storage (bytes convenience wrapper).
-
-        Implementations should ensure atomic writes where possible (write to
-        temp location then rename) to prevent partial writes on failure.
-
-        Args:
-            artifact_id: Unique artifact identifier
-            version: Artifact version number
-            data: Arrow IPC stream bytes to store
-        """
+        """Write a blob from bytes, atomically where the backend allows."""
         with self.open_blob_writer(artifact_id, version) as writer:
             writer.write(data)
 
     def read_blob(self, artifact_id: str, version: int) -> bytes | None:
-        """Read artifact data from storage (bytes convenience wrapper).
-
-        Args:
-            artifact_id: Unique artifact identifier
-            version: Artifact version number
-
-        Returns:
-            Arrow IPC stream bytes, or None if blob doesn't exist
-        """
+        """Read a blob's bytes, or return None if it does not exist."""
         reader = self.open_blob_reader(artifact_id, version)
         if reader is None:
             return None
@@ -137,37 +85,19 @@ class BlobStore(ABC):
 
     @abstractmethod
     def blob_exists(self, artifact_id: str, version: int) -> bool:
-        """Check if a blob exists in storage.
-
-        Args:
-            artifact_id: Unique artifact identifier
-            version: Artifact version number
-
-        Returns:
-            True if the blob exists, False otherwise
-        """
+        """Return whether the blob exists."""
         ...
 
     @abstractmethod
     def blob_size(self, artifact_id: str, version: int) -> int | None:
-        """Return the size of a blob in bytes without materializing it.
-
-        Returns ``None`` if the blob does not exist.
-        """
+        """Return the blob's size in bytes without reading it, or ``None`` if it does not exist."""
         ...
 
     def publish_blob_from_path(self, artifact_id: str, version: int, source_path: Path) -> None:
-        """Atomically publish a blob from a prepared local file.
+        """Atomically publish a blob from a complete local file.
 
-        Intended for callers that already have the full payload on disk
-        (e.g. an async request handler that spooled the upload into a
-        tempfile). The default implementation pipes ``source_path``
-        through ``open_blob_writer`` so it inherits the same atomic
-        semantics. Backends may override to upload directly and skip the
-        intermediate staging copy.
-
-        The source file is not consumed — the caller retains ownership
-        and is responsible for removing it.
+        The default pipes through ``open_blob_writer``; backends may upload directly.
+        The source file is not consumed: the caller still owns and removes it.
         """
         with open(source_path, "rb") as src, self.open_blob_writer(artifact_id, version) as dst:
             while True:
@@ -178,59 +108,33 @@ class BlobStore(ABC):
 
     @abstractmethod
     def delete_blob(self, artifact_id: str, version: int) -> bool:
-        """Delete a blob from storage.
-
-        Args:
-            artifact_id: Unique artifact identifier
-            version: Artifact version number
-
-        Returns:
-            True if blob was deleted, False if it didn't exist
-        """
+        """Delete a blob; return False if it did not exist."""
         ...
 
     def presign_get(self, artifact_id: str, version: int, ttl_seconds: int) -> str | None:
-        """A URL that reads this blob straight from the object store, or ``None``.
+        """Return a URL that reads this blob straight from the object store, or ``None``.
 
-        ``None`` means the backend cannot sign one (a local disk, or an object
-        store whose credentials this process cannot sign with), and the caller
-        keeps serving the bytes through Strata.
+        ``None`` means the backend cannot sign one (local disk, or credentials this
+        process cannot sign with), and the caller keeps serving bytes through Strata.
         """
         return None
 
     def presign_post(
         self, artifact_id: str, version: int, max_bytes: int, ttl_seconds: int
     ) -> tuple[str, dict[str, str]] | None:
-        """A form upload of at most ``max_bytes`` into this blob's key, or ``None``.
+        """Return ``(url, fields)`` for a form upload of at most ``max_bytes``, or ``None``.
 
-        Returns ``(url, fields)``: POST the fields plus the body as the ``file``
-        part. A POST policy rather than a presigned PUT because a policy can
-        bound the size, so an oversized upload is refused by the object store
-        rather than stored and then rejected.
+        POST the fields plus the body as the ``file`` part. A POST policy rather than a
+        presigned PUT because it lets the object store refuse an oversized upload.
         """
         return None
 
     def _blob_key(self, artifact_id: str, version: int) -> str:
-        """Generate storage key for a blob.
+        """Return the storage key ``{artifact_id}@v={version}.arrow``.
 
-        Key format: ``{artifact_id}@v={version}.arrow`` — with a short hash of the
-        exact-case ``artifact_id`` appended when the id contains uppercase.
-
-        Without the suffix, two artifact ids that differ only in case — e.g.
-        ``…_var_Widget`` vs ``…_var_widget`` (the idiomatic ``Tikhonov`` class +
-        ``tikhonov`` instance pattern) — map to the same filename on a
-        case-insensitive filesystem (macOS/APFS, Windows), so the store writes one
-        blob and both variables read whichever was written last. The suffix keys
-        off the exact bytes, so distinct-case ids get distinct files regardless of
-        filesystem. All-lowercase ids (the common case) are left unchanged, so
-        their existing cached blobs keep resolving after an upgrade.
-
-        Args:
-            artifact_id: Unique artifact identifier
-            version: Artifact version number
-
-        Returns:
-            Storage key string
+        An id containing uppercase gets a short hash of its exact bytes appended, so
+        ids differing only in case (``Widget`` vs ``widget``) do not collide on a
+        case-insensitive filesystem. All-lowercase ids keep the plain key.
         """
         key = artifact_id
         if key != key.lower():
@@ -244,18 +148,11 @@ class BlobStore(ABC):
         *,
         prefix: str = "strata_blob_",
     ) -> Iterator[BinaryIO]:
-        """Stage writes through a local tempfile and commit atomically.
+        """Stage writes through a local tempfile and pass it to ``commit(path)`` on clean exit.
 
-        Yields a binary handle for the caller to write into. On clean
-        context exit the handle is flushed and **closed**, then the
-        tempfile is passed to ``commit(path)`` which should publish the
-        blob at its final location. On exception the tempfile is removed
-        and commit is never invoked, guaranteeing that a partial write
-        is not observable.
-
-        The handle is closed before ``commit`` runs so that backends may
-        safely reopen the tempfile on Windows, where open write handles
-        block concurrent reads of the same path.
+        On exception the tempfile is removed and ``commit`` never runs, so a partial
+        write is never observable. The handle is closed before ``commit`` so backends
+        can reopen the file on Windows.
         """
         fd, tmp_name = tempfile.mkstemp(prefix=prefix, suffix=".tmp")
         tmp_path = Path(tmp_name)
@@ -275,20 +172,13 @@ class BlobStore(ABC):
 
 
 class LocalBlobStore(BlobStore):
-    """Local filesystem blob storage.
+    """Local filesystem blob storage, written atomically.
 
-    Stores blobs in a directory structure:
-        {blobs_dir}/{artifact_id}@v={version}.arrow
-
-    Uses atomic writes (write to .tmp, then rename) to prevent partial writes.
+    Paths are ``{blobs_dir}/{artifact_id}@v={version}.arrow``.
     """
 
     def __init__(self, blobs_dir: Path):
-        """Initialize local blob store.
-
-        Args:
-            blobs_dir: Directory for storing blob files
-        """
+        """Initialize the store over ``blobs_dir``."""
         self.blobs_dir = blobs_dir
         self.blobs_dir.mkdir(parents=True, exist_ok=True)
 
@@ -357,13 +247,9 @@ class LocalBlobStore(BlobStore):
 
 
 class S3BlobStore(BlobStore):
-    """Amazon S3 / S3-compatible blob storage.
+    """S3 or S3-compatible (MinIO, LocalStack) blob storage via PyArrow's S3FileSystem.
 
-    Stores blobs in an S3 bucket with key structure:
-        {prefix}/{artifact_id}@v={version}.arrow
-
-    Uses PyArrow's S3FileSystem for efficient Arrow IPC I/O.
-    Supports S3-compatible services like MinIO, LocalStack, etc.
+    Keys are ``{prefix}/{artifact_id}@v={version}.arrow``.
     """
 
     def __init__(
@@ -376,16 +262,10 @@ class S3BlobStore(BlobStore):
         secret_key: str | None = None,
         anonymous: bool = False,
     ):
-        """Initialize S3 blob store.
+        """Initialize the S3 store.
 
-        Args:
-            bucket: S3 bucket name
-            prefix: Key prefix within bucket (default: "artifacts")
-            region: AWS region (e.g., "us-east-1")
-            endpoint_url: Custom endpoint for S3-compatible services
-            access_key: AWS access key ID (or use env/IAM)
-            secret_key: AWS secret access key (or use env/IAM)
-            anonymous: Use anonymous access for public buckets
+        Without ``access_key``/``secret_key`` credentials come from the environment or
+        IAM; ``endpoint_url`` targets an S3-compatible service.
         """
         import pyarrow.fs as pafs
 
@@ -416,11 +296,10 @@ class S3BlobStore(BlobStore):
         return f"{self.prefix}/{blob_key}" if self.prefix else blob_key
 
     def _signing_credentials(self) -> tuple[str, str, str | None] | None:
-        """Keys to sign with: the configured pair, else the standard environment.
+        """Return the keys to sign with: the configured pair, else the standard environment.
 
-        An instance role's credentials are fetched inside PyArrow's AWS SDK and
-        never reach Python, so a store running on one cannot presign and the
-        manifest keeps its Strata URLs.
+        Instance-role credentials stay inside PyArrow's AWS SDK, so a store relying on
+        them cannot presign and the manifest keeps its Strata URLs.
         """
         if self._anonymous:
             return None
@@ -441,8 +320,7 @@ class S3BlobStore(BlobStore):
         )
 
     def _object_location(self, key: str) -> tuple[str, str, str]:
-        """``(scheme, host, path)`` for an object: path-style on a custom
-        endpoint (MinIO, LocalStack), virtual-hosted on AWS."""
+        """Return ``(scheme, host, path)``: path-style on custom endpoints, else virtual-hosted."""
         from urllib.parse import quote, urlsplit
 
         quoted = quote(key, safe="/-_.~")
@@ -553,12 +431,7 @@ class S3BlobStore(BlobStore):
                 dst.write(chunk)
 
     def open_blob_writer(self, artifact_id: str, version: int) -> AbstractContextManager[BinaryIO]:
-        """Open a streaming writer for an S3 blob.
-
-        Stages writes through a local tempfile so that a failed context
-        exit discards the data before anything is pushed to S3, honoring
-        the ``BlobStore.open_blob_writer`` atomicity contract.
-        """
+        """Open a streaming writer for an S3 blob, staged locally so failed writes never upload."""
         key = self._s3_key(artifact_id, version)
         return self._staged_local_writer(
             lambda staged: self._upload_from_path(key, staged),
@@ -566,14 +439,7 @@ class S3BlobStore(BlobStore):
         )
 
     def publish_blob_from_path(self, artifact_id: str, version: int, source_path: Path) -> None:
-        """Stream ``source_path`` straight to S3, skipping the local staging copy.
-
-        The default implementation in the base class pipes through
-        ``open_blob_writer`` which would stage the already-staged source
-        file through another local tempfile. Since the caller has already
-        produced a complete local payload, we can upload it directly and
-        save one disk-to-disk copy per upload.
-        """
+        """Stream ``source_path`` straight to S3, skipping the local staging copy."""
         key = self._s3_key(artifact_id, version)
         self._upload_from_path(key, source_path)
 
@@ -629,16 +495,7 @@ class S3BlobStore(BlobStore):
     def from_config(
         cls, config: StrataConfig, bucket: str, prefix: str = "artifacts"
     ) -> S3BlobStore:
-        """Create S3BlobStore from Strata configuration.
-
-        Args:
-            config: Strata configuration with S3 settings
-            bucket: S3 bucket name
-            prefix: Key prefix within bucket
-
-        Returns:
-            Configured S3BlobStore instance
-        """
+        """Create an S3BlobStore from Strata configuration's S3 settings."""
         return cls(
             bucket=bucket,
             prefix=prefix,
@@ -651,28 +508,13 @@ class S3BlobStore(BlobStore):
 
 
 def _resolve_gcs_credentials(credentials: str) -> str:
-    """Return a filesystem path for *credentials*, writing it out if inline.
+    """Return a filesystem path for *credentials*, writing inline JSON key material to a file.
 
-    ``GOOGLE_APPLICATION_CREDENTIALS`` is a path and nothing else, so inline
-    key material handed to it fails at first blob access -- long after the
-    deployment looks healthy -- with a file-not-found that names a path the
-    operator never wrote.
-
-    A value that parses as a JSON object is key material and gets spilled to a
-    private file; anything else is passed through as the path it already is.
-    Parsing, not a ``{`` prefix, so a path is never mistaken for a key.
-
-    The filename is derived from the key's own digest rather than being random,
-    because ``atexit`` does not run on SIGKILL or an OOM kill. A random name
-    would leave one private key per hard-killed process lying in the temp
-    directory; a content-addressed one is rewritten in place by the next start,
-    so the worst case is a single file rather than an unbounded pile. It is
-    written 0600 and removed at exit when the process gets to exit normally.
-
-    The 0600 is POSIX-only. On Windows ``chmod`` reaches nothing but the
-    read-only flag, so the key lands with whatever the temp directory's ACLs
-    give it; restricting it there needs a Windows-specific ACL call. Prefer a
-    mounted credential file on Windows over inline key material.
+    ``GOOGLE_APPLICATION_CREDENTIALS`` accepts only a path. A value that parses as
+    a JSON object is spilled to a 0600 file named by the key's digest (so a
+    hard-killed process leaves one file, rewritten by the next start) and removed
+    at normal exit; anything else is passed through as a path. On Windows the 0600
+    does not apply; prefer a mounted credential file there.
     """
     import atexit
     import json
@@ -698,13 +540,10 @@ def _resolve_gcs_credentials(credentials: str) -> str:
 
 
 class GCSBlobStore(BlobStore):
-    """Google Cloud Storage blob storage.
+    """Google Cloud Storage blob storage via PyArrow's GcsFileSystem.
 
-    Stores blobs in a GCS bucket with key structure:
-        {prefix}/{artifact_id}@v={version}.arrow
-
-    Uses PyArrow's GcsFileSystem for efficient Arrow IPC I/O.
-    Supports Application Default Credentials, service account keys, or anonymous access.
+    Keys are ``{prefix}/{artifact_id}@v={version}.arrow``. Supports Application
+    Default Credentials, service-account keys, or anonymous access.
     """
 
     def __init__(
@@ -716,18 +555,11 @@ class GCSBlobStore(BlobStore):
         anonymous: bool = False,
         endpoint_override: str | None = None,
     ):
-        """Initialize GCS blob store.
+        """Initialize the GCS store.
 
-        Args:
-            bucket: GCS bucket name
-            prefix: Key prefix within bucket (default: "artifacts")
-            default_bucket_location: GCS location new buckets default to
-                (``US``, ``europe-west1``). Not a project id: GcsFileSystem
-                takes no project parameter.
-            credentials_json: Service-account key, as either a path to the
-                JSON file or the JSON itself
-            anonymous: Use anonymous access for public buckets
-            endpoint_override: Custom endpoint for GCS-compatible services (e.g., fake-gcs-server)
+        ``default_bucket_location`` is a location for new buckets (``US``,
+        ``europe-west1``), not a project id. ``credentials_json`` is a key file path
+        or the JSON itself.
         """
         import pyarrow.fs as pafs
 
@@ -783,12 +615,7 @@ class GCSBlobStore(BlobStore):
                 dst.write(chunk)
 
     def open_blob_writer(self, artifact_id: str, version: int) -> AbstractContextManager[BinaryIO]:
-        """Open a streaming writer for a GCS blob.
-
-        Stages writes through a local tempfile so that a failed context
-        exit discards the data before anything is pushed to GCS, honoring
-        the ``BlobStore.open_blob_writer`` atomicity contract.
-        """
+        """Open a streaming writer for a GCS blob, staged locally so failed writes never upload."""
         key = self._gcs_key(artifact_id, version)
         return self._staged_local_writer(
             lambda staged: self._upload_from_path(key, staged),
@@ -844,16 +671,7 @@ class GCSBlobStore(BlobStore):
     def from_config(
         cls, config: StrataConfig, bucket: str, prefix: str = "artifacts"
     ) -> GCSBlobStore:
-        """Create GCSBlobStore from Strata configuration.
-
-        Args:
-            config: Strata configuration with GCS settings
-            bucket: GCS bucket name
-            prefix: Key prefix within bucket
-
-        Returns:
-            Configured GCSBlobStore instance
-        """
+        """Create a GCSBlobStore from Strata configuration's GCS settings."""
         return cls(
             bucket=bucket,
             prefix=prefix,
@@ -865,11 +683,9 @@ class GCSBlobStore(BlobStore):
 
 
 class _AzureDownloadReader(io.RawIOBase):
-    """A raw stream over an Azure ``StorageStreamDownloader``'s chunks.
+    """Raw stream over an Azure ``StorageStreamDownloader``'s chunks.
 
-    Wrapped in ``io.BufferedReader`` it is a real binary file, not a lookalike:
-    ``read(size)`` fills up to *size* across chunks, and ``read()``, iteration
-    and ``shutil.copyfileobj`` work as on any file.
+    Wrapped in ``io.BufferedReader`` it behaves as a real binary file.
     """
 
     def __init__(self, downloader: StorageStreamDownloader) -> None:
@@ -904,17 +720,9 @@ class _AzureDownloadReader(io.RawIOBase):
 class AzureBlobStore(BlobStore):
     """Azure Blob Storage backend.
 
-    Stores blobs in an Azure Storage container with key structure:
-        {prefix}/{artifact_id}@v={version}.arrow
-
-    Supports multiple authentication methods:
-    - Connection string (easiest for local development)
-    - Account key (account name + key)
-    - SAS token (shared access signature)
-    - DefaultAzureCredential (managed identity, environment vars, CLI, etc.)
-
-    Requires the `azure` optional dependency:
-        pip install strata-notebook[azure]
+    Keys are ``{prefix}/{artifact_id}@v={version}.arrow``. Authenticates with a
+    connection string, account key, SAS token, or DefaultAzureCredential. Requires
+    the ``azure`` extra.
     """
 
     def __init__(
@@ -928,18 +736,7 @@ class AzureBlobStore(BlobStore):
         use_default_credential: bool = False,
         endpoint_url: str | None = None,
     ):
-        """Initialize Azure Blob Storage backend.
-
-        Args:
-            account_name: Azure Storage account name
-            container_name: Azure Blob container name
-            prefix: Key prefix within container (default: "artifacts")
-            account_key: Account access key (or use connection_string/sas_token)
-            connection_string: Full connection string (alternative to account_key)
-            sas_token: Shared Access Signature token (alternative to account_key)
-            use_default_credential: Use Azure DefaultAzureCredential for auth
-            endpoint_url: Custom endpoint URL (for Azurite emulator)
-        """
+        """Initialize the Azure store; ``endpoint_url`` targets the Azurite emulator."""
         try:
             from azure.storage.blob import ContainerClient
         except ImportError as e:
@@ -998,11 +795,7 @@ class AzureBlobStore(BlobStore):
     def open_blob_reader(
         self, artifact_id: str, version: int
     ) -> AbstractContextManager[BinaryIO] | None:
-        """Open a streaming reader for an Azure blob.
-
-        Wraps the SDK's ``StorageStreamDownloader`` chunk iterator in a
-        minimal file-like so callers can use ``f.read(size)`` / iterate.
-        """
+        """Open a streaming reader for an Azure blob."""
         from azure.core.exceptions import ResourceNotFoundError
 
         key = self._azure_key(artifact_id, version)
@@ -1029,13 +822,10 @@ class AzureBlobStore(BlobStore):
             blob_client.upload_blob(src, overwrite=True)
 
     def open_blob_writer(self, artifact_id: str, version: int) -> AbstractContextManager[BinaryIO]:
-        """Open a streaming writer for an Azure blob.
+        """Open a streaming writer for an Azure blob, uploaded on clean exit.
 
-        Stages writes through a local tempfile and uploads via the SDK
-        on clean context exit. The Azure SDK supports streaming uploads
-        from a file handle but not from a caller-written stream, so the
-        staging write keeps peak RAM at one chunk while still honoring
-        the discard-on-exception contract.
+        Staged through a local tempfile because the SDK streams uploads from a file
+        handle, not from a caller-written stream.
         """
         key = self._azure_key(artifact_id, version)
         return self._staged_local_writer(
@@ -1083,16 +873,7 @@ class AzureBlobStore(BlobStore):
     def from_config(
         cls, config: StrataConfig, container_name: str, prefix: str = "artifacts"
     ) -> AzureBlobStore:
-        """Create AzureBlobStore from Strata configuration.
-
-        Args:
-            config: Strata configuration with Azure settings
-            container_name: Azure Blob container name
-            prefix: Key prefix within container
-
-        Returns:
-            Configured AzureBlobStore instance
-        """
+        """Create an AzureBlobStore from Strata configuration's Azure settings."""
         return cls(
             account_name=config.azure_account_name or "",
             container_name=container_name,
@@ -1106,39 +887,19 @@ class AzureBlobStore(BlobStore):
 
 
 def create_blob_store(config: StrataConfig) -> BlobStore:
-    """Create a blob store from the ``STRATA_ARTIFACT_*`` environment variables.
+    """Create a blob store from the ``STRATA_ARTIFACT_*`` environment variables only.
 
     .. warning::
 
-       This reads the environment **only** — it ignores ``config``'s own
-       ``artifact_blob_backend`` / bucket fields, so a backend set in
-       ``pyproject.toml`` under ``[tool.strata]`` is not honored here and the
-       result silently falls back to local disk. Which loses every artifact
-       when the pod is replaced.
+       ``config``'s own backend fields are ignored (it supplies credentials only),
+       so a backend set in ``pyproject.toml`` silently falls back to local disk.
+       The server uses :meth:`StrataConfig.create_blob_store` instead; prefer it.
 
-       The server does not use this function; it calls
-       :meth:`StrataConfig.create_blob_store`, which reads the config fields
-       (and therefore both ``pyproject.toml`` and the environment, since
-       ``StrataConfig.load`` populates fields from ``STRATA_*``). Prefer that
-       method. ``config`` is used here only for backend credentials.
-
-    Environment variables:
-        STRATA_ARTIFACT_BLOB_BACKEND: "local" | "s3" | "gcs" | "azure"
-        STRATA_ARTIFACT_S3_BUCKET: S3 bucket name
-        STRATA_ARTIFACT_S3_PREFIX: Key prefix in bucket
-        STRATA_ARTIFACT_GCS_BUCKET: GCS bucket name
-        STRATA_ARTIFACT_GCS_PREFIX: Key prefix in bucket
-        STRATA_ARTIFACT_AZURE_CONTAINER: Azure Blob container name
-        STRATA_ARTIFACT_AZURE_PREFIX: Key prefix in container
-
-    Args:
-        config: Strata configuration
-
-    Returns:
-        Configured BlobStore instance
+    Reads ``STRATA_ARTIFACT_BLOB_BACKEND`` (``local``, ``s3``, ``gcs``, ``azure``)
+    and the matching ``*_BUCKET``/``*_CONTAINER`` and ``*_PREFIX`` variables.
 
     Raises:
-        ValueError: If required configuration is missing
+        ValueError: If required configuration is missing.
     """
     backend = os.environ.get("STRATA_ARTIFACT_BLOB_BACKEND", "local").lower()
 

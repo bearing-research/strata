@@ -1,10 +1,7 @@
-"""Scan data-plane streaming runtime (#302).
+"""Scan data-plane streaming runtime.
 
-Collaborators extracted from ``server.py`` so the materialize/streams routes can
-move into ``api/routers/*`` without a ``from strata.server import _private``
-runtime scatter. Phase 1: the stream registry + ``StreamState``. Phase 2: the scan-build/prefetch
-manager. Phase 3: the two-tier QoS admission (``QoSAdmission``). See
-``docs/internal/design-stream-runtime-extraction.md``.
+Stream registry, scan-build/prefetch manager, stream ownership and two-tier
+QoS admission, kept out of ``server.py`` so the routers can import them.
 """
 
 from strata.streaming.qos import Admission, QoSAdmission, QoSRejected

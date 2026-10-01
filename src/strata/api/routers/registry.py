@@ -1,20 +1,8 @@
-"""Registry routes: audit, dashboard summary, and the protected-alias
-approval queue (pending / approve / reject).
+"""Registry routes: audit, events, dashboard summary, and the protected-alias approval queue.
 
-Moved verbatim from ``server.py`` (P3, router split). Unlike the other routers
-this one needs no ``server`` import at all — every handler takes its store and
-principal through the typed dependencies in ``strata.api.dependencies`` and
-delegates aggregation to ``registry_service``. The governance gate body
-(``_require_registry_approver``) stays in ``server.py``; the
-``RegistryDecisionContext`` dependency delegates to it.
-
-All registry reads are tenant-scoped: a principal sees only its own tenant;
-personal mode (no principal) and ``admin:*`` see the whole store.
-
-When ``notebook_remote_store_url`` is configured, every route here answers from
-that store instead: it is where the notebook's names, aliases and pending
-changes actually live, so reading the local one would describe an empty
-registry. See ``strata.api.remote_registry``.
+Reads are tenant-scoped; personal mode (no principal) and ``admin:*`` see the whole
+store. With ``notebook_remote_store_url`` set, routes that call ``remote_registry()``
+answer from that store, where the notebook's names actually live.
 """
 
 from __future__ import annotations
@@ -37,12 +25,7 @@ async def registry_audit(
     artifact_id: str | None = None,
     limit: int = 100,
 ):
-    """Read the append-only registry audit, newest first.
-
-    Scoped to the caller's tenant: a principal sees only its own tenant's
-    history. ``admin:*`` (and personal mode, where there is no principal)
-    sees the whole store — every other registry route scopes the same way.
-    """
+    """Read the append-only registry audit, newest first, scoped to the caller's tenant."""
     target = remote_registry()
     if target is not None:
         return await forward(
@@ -68,13 +51,11 @@ async def store_events(
     since: int = 0,
     limit: int = 100,
 ):
-    """Everything that changed on the store after ``since``, oldest first.
+    """List store events after ``since``, oldest first.
 
-    Registry moves, protected-alias requests and their outcomes, and
-    publications and withdrawals, in the one sequence the audit keeps. A
-    follower passes back ``next`` and never misses or repeats an event.
-    Scoped like the audit: a principal sees its tenant, ``admin:*`` and
-    personal mode see the whole store.
+    Registry moves, alias requests and outcomes, publications and withdrawals.
+
+    Pass back ``next`` as ``since`` to follow without missing or repeating an event.
     """
     limit = max(1, min(limit, 1000))
     target = remote_registry()
@@ -90,10 +71,7 @@ async def store_events(
 
 @router.get("/v1/registry/summary")
 async def registry_summary(store: ReadStore, principal: CurrentPrincipal):
-    """Registry state for the dashboard names table: each name with its
-    aliases (``alias -> version``), current version, and that version's tags.
-    One call instead of ``/v1/names`` + a per-name alias fetch. Tenant-scoped
-    like the other registry reads (personal mode / ``admin:*`` see all)."""
+    """List each name with its aliases (``alias -> version``), current version and its tags."""
     target = remote_registry()
     if target is not None:
         return await forward(target, "GET", "/v1/registry/summary")
@@ -109,15 +87,10 @@ async def registry_artifacts_by_tag(
     tag_key: str,
     tag_value: str | None = None,
 ):
-    """Ready artifacts carrying one tag, with their names and tags.
+    """List ready artifacts carrying one tag, with their names and tags.
 
-    Exists so the notebook's per-cell strip can be answered by whichever store
-    the cells write to. The strip finds a cell's published artifacts by the
-    ``nb_cell=<id>`` stamp, which was a direct store read and therefore only
-    ever saw the local store; over HTTP it works against the team's too.
-
-    Without ``tag_value`` every artifact carrying the key comes back, each row
-    naming its own — one request for a notebook rather than one per cell.
+    Without ``tag_value``, every artifact carrying the key comes back. Lets the
+    notebook find a cell's published artifacts (``nb_cell=<id>``) on any store.
     """
     tenant = None if (principal is None or principal.has_scope("admin:*")) else principal.tenant
     return {
@@ -145,16 +118,9 @@ async def registry_pending(store: ReadStore, principal: CurrentPrincipal):
 async def approve_pending(request: PendingDecisionRequest, decision: RegistryDecisionContext):
     """Apply a pending alias change; the approver becomes the audit actor.
 
-    Requires the ``admin:registry`` scope under trusted-proxy auth, and
-    enforces separation of duty — the requester cannot self-approve unless
-    they hold the ``admin:*`` break-glass scope.
-
-    With a team store configured the change lives there, so the decision is
-    forwarded with this server's remote-store headers. On a personal server
-    those headers *are* the caller: one person, one machine, their identity.
-    Which is what makes separation of duty work across servers — the requester
-    filed from theirs and the approver decides from their own, so the far side
-    sees two principals rather than one.
+    Requires ``admin:registry`` under trusted-proxy auth. The requester cannot
+    self-approve (403) without ``admin:*``. With a team store, the decision is
+    forwarded under this server's remote-store identity.
     """
     target = remote_registry()
     if target is not None:
@@ -195,8 +161,7 @@ async def approve_pending(request: PendingDecisionRequest, decision: RegistryDec
 async def reject_pending(request: PendingDecisionRequest, decision: RegistryDecisionContext):
     """Discard a pending alias change (audited).
 
-    Requires the ``admin:registry`` scope under trusted-proxy auth so a
-    tenant member cannot quietly drop a colleague's pending promotion.
+    Requires ``admin:registry`` under trusted-proxy auth.
     """
     target = remote_registry()
     if target is not None:

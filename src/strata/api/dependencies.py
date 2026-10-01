@@ -1,21 +1,8 @@
-"""Typed FastAPI dependencies for the data/artifact plane.
+"""Typed FastAPI dependencies for the data/artifact plane's mode/auth/tenant gates.
 
-Each route used to hand-wire its own mode/auth/tenant gate by calling free
-helpers (``_get_artifact_store(allow_read=True)`` and friends) directly. That
-made the gate a convention the handler had to *remember* — the root cause of the
-service-mode findings in #184 and the registry approve/reject/pending bug fixed
-in df50987 (handlers that reached ``_get_artifact_store()`` with the wrong flags
-and 403'd in the deployment they were built for).
-
-Exposing the gates as ``Depends(...)`` makes the access a handler *declares* in
-its signature, enforced before the body runs, instead of a step it can forget or
-get wrong. A read route asks for ``ReadStore`` and structurally cannot have
-opened the write gate.
-
-This is phase 1 of ``docs/internal/design-server-decomposition.md``: the gate
-bodies still live in ``strata.server`` and are delegated to here via lazy import
-(server imports this module at load time, so the import must stay one-way). Later
-phases move the bodies inward and split routers.
+A handler declares its access in its signature (``ReadStore`` cannot open the write
+gate), enforced before the body runs. Gate bodies live in ``strata.server`` and are
+imported lazily: server imports this module at load time, so the import stays one-way.
 """
 
 from __future__ import annotations
@@ -33,12 +20,10 @@ from strata.types import Principal
 
 
 def read_store() -> ArtifactStore:
-    """Artifact store for a read-only endpoint.
+    """Artifact store for a read-only endpoint; opens in both modes.
 
-    Opens in personal mode and in service mode (``allow_read``) — reads are
-    shared-cache results, ACL-gated at retrieval, not blocked by mode. The
-    handler is still responsible for tenant scoping + ``_authorize_artifact_read``
-    on the concrete record.
+    The handler still owns tenant scoping and ``_authorize_artifact_read`` on the
+    concrete record.
     """
     from strata.server import _get_artifact_store
 
@@ -49,14 +34,10 @@ ReadStore = Annotated[ArtifactStore, Depends(read_store)]
 
 
 def personal_mode_store() -> ArtifactStore:
-    """Artifact store for endpoints available in personal mode only.
+    """Artifact store for personal-mode-only endpoints; service mode 403s.
 
-    The bare gate (no ``allow_read``/``allow_write``): personal mode (always
-    ``writes_enabled``) opens it, service mode 403s. Used by the deliberately
-    personal-only management endpoints — list, delete, GC — which expose or
-    mutate the whole store and have no tenant-scoped service-mode semantics.
-    Stats and usage used to be among them; they gained a tenant-scoped service
-    path (``usage_scope`` in the artifacts router).
+    For management endpoints (list, delete, GC) that expose or mutate the whole
+    store and have no tenant-scoped meaning.
     """
     from strata.server import _get_artifact_store
 
@@ -69,11 +50,9 @@ PersonalModeStore = Annotated[ArtifactStore, Depends(personal_mode_store)]
 def store_for_scope(scope: str):
     """Artifact store for a retention endpoint, in either mode.
 
-    Personal mode opens it, as ``PersonalModeStore`` does. Service mode opens it
-    only for a principal holding ``scope`` (``admin:*`` grants it), so not at
-    all without principal auth, where there is no one to hold it: these
-    endpoints delete data or decide what may never be deleted. The handler
-    still scopes the work to the caller's tenant.
+    Service mode opens it only for a principal holding ``scope`` (``admin:*``
+    grants it), so never without principal auth. The handler still scopes the
+    work to the caller's tenant.
     """
 
     def _store() -> ArtifactStore:
@@ -95,15 +74,9 @@ def store_for_scope(scope: str):
 def write_store() -> ArtifactStore:
     """Artifact store for a write endpoint (put / set_name / set_alias / tags).
 
-    Opens in personal mode, or in service mode with ``service_writes_enabled``
-    AND the ``artifacts:write`` scope (authenticated write-back) — the write
-    stamps the caller's tenant/principal, so it lands in their namespace and
-    can't target another tenant. Binds the mode gate and the scope check
-    together so a write route can't open one without the other.
-
-    Note: the registry approve/reject routes deliberately do NOT use this — a
-    governance decision opens the write *mode* gate but is authorized by the
-    approver scope, not ``artifacts:write`` (see ``registry_decision``).
+    Service mode requires ``service_writes_enabled`` and the ``artifacts:write``
+    scope; both gates open together. Registry approve/reject uses
+    ``registry_decision`` instead (approver scope, not ``artifacts:write``).
     """
     from strata.server import _authorize_artifact_write, _get_artifact_store
 
@@ -118,10 +91,8 @@ WriteStore = Annotated[ArtifactStore, Depends(write_store)]
 def current_tenant() -> str | None:
     """Tenant filter for direct artifact endpoints, or ``None`` for unscoped.
 
-    Under trusted-proxy auth, scopes reads/writes to the caller's tenant
-    (``admin:*`` and tenantless legacy artifacts stay unscoped); ``None`` when
-    auth is off. The handler passes this to the store and to
-    ``_ensure_artifact_access`` on the concrete record.
+    Set under trusted-proxy auth (``admin:*`` stays unscoped); ``None`` when auth
+    is off.
     """
     from strata.server import _get_artifact_request_tenant
 
@@ -132,11 +103,9 @@ CurrentTenant = Annotated[str | None, Depends(current_tenant)]
 
 
 def current_principal() -> Principal | None:
-    """The request's authenticated principal, or ``None`` when auth is disabled.
+    """The request's principal, or ``None`` when auth is disabled.
 
-    Optional by design: registry reads and personal-mode operations have no
-    principal. Routes that *require* one raise their own 401 (or use a stricter
-    dependency once those land).
+    Routes that require one raise their own 401.
     """
     from strata.auth import get_principal
 
@@ -156,13 +125,8 @@ class RegistryDecision(NamedTuple):
 def registry_decision() -> RegistryDecision:
     """Authorize a protected-alias decision and open the registry write gate.
 
-    Approving/rejecting a protected alias is a *governance* write. Under
-    trusted-proxy auth it requires the approver scope (``admin:registry``;
-    ``admin:*`` is break-glass) and opens the service-mode write gate
-    (``service_writes_enabled``) — but deliberately NOT the ``artifacts:write``
-    scope, because approvers govern, they need not be publishers. That
-    distinction is exactly what the hand-wired routes got wrong; binding both
-    halves here keeps them from drifting apart again.
+    Requires the approver scope (``admin:registry``; ``admin:*`` is break-glass)
+    but not ``artifacts:write``: approvers govern, they need not publish.
     """
     from strata.server import _get_artifact_store, _require_registry_approver
 
@@ -175,15 +139,10 @@ RegistryDecisionContext = Annotated[RegistryDecision, Depends(registry_decision)
 
 
 def require_scope(scope: str):
-    """Path-operation dependency: require ``scope`` under trusted-proxy auth.
+    """Path-operation dependency: require ``scope`` under principal auth.
 
-    Under ``trusted_proxy`` the caller must hold ``scope`` (``admin:*`` grants
-    it); in personal / no-auth mode there is no principal and the endpoint stays
-    open — matching the hand-written admin gates this replaces. Gates by side
-    effect, so use it in the route decorator's ``dependencies=[...]`` rather than
-    as a signature parameter:
-
-        @app.post("/v1/cache/clear", dependencies=[require_scope("admin:cache")])
+    Without principal auth the endpoint stays open. Use it in the decorator's
+    ``dependencies=[...]``, e.g. ``dependencies=[require_scope("admin:cache")]``.
     """
 
     def _require() -> None:
@@ -200,10 +159,10 @@ def require_scope(scope: str):
 
 
 def require_notebook_worker_admin() -> None:
-    """Path-operation dependency for the server-managed notebook worker registry.
+    """Gate the server-managed notebook worker registry.
 
-    Service-mode only (409 otherwise) plus the ``admin:notebook-workers`` scope
-    under trusted-proxy auth. Use via ``dependencies=[Depends(...)]``.
+    Service mode only (409 otherwise), plus ``admin:notebook-workers`` under
+    trusted-proxy auth.
     """
     from strata.server import _require_notebook_worker_admin_access
 
@@ -215,11 +174,7 @@ def require_notebook_worker_admin() -> None:
 
 
 def build_transport_available() -> bool:
-    """Whether signed build-transport APIs are available in the current mode.
-
-    True in personal mode (``writes_enabled``) or when server-mode transforms are
-    enabled — the two modes that can issue and honor signed build URLs.
-    """
+    """Whether signed build-transport APIs are available (writes or server transforms on)."""
     from strata.server import get_state
 
     state = get_state()
@@ -227,11 +182,7 @@ def build_transport_available() -> bool:
 
 
 def runtime_build_store() -> BuildStore | None:
-    """Resolve the runtime build store, or ``None`` when no ``artifact_dir`` is set.
-
-    The signed-transport build store is the SQLite registry under the artifact
-    directory; a deployment without one has nowhere to track builds.
-    """
+    """Resolve the runtime build store, or ``None`` when no ``artifact_dir`` is set."""
     from strata.artifact_store import get_artifact_store
     from strata.server import get_state
     from strata.transforms.build_store import get_build_store
@@ -251,11 +202,10 @@ def runtime_build_store() -> BuildStore | None:
 
 
 def require_build_store() -> BuildStore:
-    """Param dependency: the resolved build store, 500 if uninitialized.
+    """Param dependency: the build store, 500 if uninitialized.
 
-    No transport-mode gate — for the signature-authed upload route, which must
-    not 404 on mode (the signature is the authorization). Routes that *should*
-    404 when transport is off use :data:`BuildTransportStore` instead.
+    No transport-mode gate: the signature-authed upload route must not 404 on mode.
+    Routes that should 404 use :data:`BuildTransportStore`.
     """
     store = runtime_build_store()
     if store is None:
@@ -267,13 +217,7 @@ RequiredBuildStore = Annotated[BuildStore, Depends(require_build_store)]
 
 
 def require_build_transport_store() -> BuildStore:
-    """Param dependency: 404 if transport is unavailable, else the build store (500 if None).
-
-    Binds the transport-mode gate and the store resolution so the manifest +
-    finalize routes can't open one without the other. The 404 here is the single
-    message for what were three per-route variants ("polling"/"manifest"/
-    "finalize"); it is executor-facing and unasserted.
-    """
+    """Param dependency: 404 if transport is unavailable, else the build store (500 if None)."""
     if not build_transport_available():
         raise HTTPException(
             status_code=404,
@@ -295,17 +239,14 @@ BuildTransportStore = Annotated[BuildStore, Depends(require_build_transport_stor
 
 
 def authorize_table_access(table_uri: str, table_identity) -> None:
-    """Enforce table-level ACL under trusted-proxy auth; no-op otherwise.
+    """Enforce table-level ACL under principal auth; no-op otherwise.
 
-    The direct scan path (``scan@v1``) and every path that resolves a *table*
-    URI as a transform input share this one gate, so a table input can't be used
-    to read a table the caller is denied on the direct scan path.
-
-    ``table_identity`` ``None`` (a URI that does not name a table) is denied.
+    Shared by the scan path and every table-as-input path. A ``None``
+    ``table_identity`` (URI names no table) is denied.
 
     Raises:
-        HTTPException: 401 if no principal; 403/404 (per
-        ``hide_forbidden_as_not_found``) if the ACL denies the table.
+        HTTPException: 401 if no principal; 403, or 404 under
+        ``hide_forbidden_as_not_found``, if the ACL denies the table.
     """
     from strata.auth import AclEvaluator, get_principal
     from strata.iceberg import named_catalog, shared_catalog_stores
@@ -343,19 +284,12 @@ def authorize_table_access(table_uri: str, table_identity) -> None:
 
 
 def resolve_input_version(input_uri: str, tenant: str | None = None) -> str:
-    """Resolve an input URI to its current version string, ACL-gating tables.
+    """Resolve an input URI to its current version, enforcing table ACL and artifact access.
 
-    The single enforced unit for materialize, explain, and name-status
-    staleness: it resolves via the pure
-    :meth:`MaterializeService.resolve_input_version` (mapping the domain
-    :class:`~strata.services.materialize.InputResolutionError` back to its HTTP
-    status), then runs :func:`authorize_table_access` for table inputs — so the
-    deny-first-on-every-input invariant is enforced here, once, rather than
-    re-implemented per handler.
+    Side effect: records a use of an artifact input for retention.
 
     Raises:
-        HTTPException: 400/404 for an unresolvable URI; 401/403/404 for an
-        ACL-denied table.
+        HTTPException: 400/404 for an unresolvable URI; 401/403/404 for a denied input.
     """
     from strata.server import (
         _authorize_artifact_read,

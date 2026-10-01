@@ -1,8 +1,6 @@
-"""Rate limiting for request throttling.
+"""Token-bucket request rate limiting (global, per-client, per-endpoint).
 
-Implements a token bucket algorithm for per-client rate limiting.
-This complements the existing QoS admission control by adding
-request-rate throttling to prevent abuse and ensure fair usage.
+Complements QoS admission control, which bounds concurrency rather than request rate.
 """
 
 import time
@@ -28,21 +26,9 @@ class SystemClock:
 
 @dataclass
 class TokenBucket:
-    """Token bucket for rate limiting.
+    """Token bucket: refills at ``refill_rate`` tokens/second up to ``capacity`` (the burst).
 
-    Tokens refill at a fixed rate up to ``capacity``; each request consumes one
-    token, and a request with no token available is rejected.
-
-    Attributes
-    ----------
-    capacity : float
-        Maximum tokens (the burst ceiling).
-    refill_rate : float
-        Tokens added per second.
-    tokens : float
-        Current token count (initialized to ``capacity``).
-    last_update : float
-        Timestamp of the last refill.
+    Starts full; a request with no token available is rejected.
     """
 
     capacity: float
@@ -63,18 +49,7 @@ class TokenBucket:
         self.last_update = now
 
     def acquire(self, tokens: float = 1.0) -> bool:
-        """Try to consume ``tokens``, refilling first.
-
-        Parameters
-        ----------
-        tokens : float, optional
-            Tokens to consume (default 1.0).
-
-        Returns
-        -------
-        bool
-            ``True`` if enough tokens were available and consumed.
-        """
+        """Try to consume ``tokens`` after refilling; return whether they were available."""
         self._refill()
         if self.tokens >= tokens:
             self.tokens -= tokens
@@ -87,18 +62,7 @@ class TokenBucket:
         return self.tokens
 
     def time_until_available(self, tokens: float = 1.0) -> float:
-        """Return seconds until ``tokens`` will have refilled.
-
-        Parameters
-        ----------
-        tokens : float, optional
-            Tokens needed (default 1.0).
-
-        Returns
-        -------
-        float
-            Seconds to wait (0.0 if already available).
-        """
+        """Return seconds until ``tokens`` will have refilled (0.0 if available now)."""
         self._refill()
         if self.tokens >= tokens:
             return 0.0
@@ -138,17 +102,8 @@ class RateLimitConfig:
 class RateLimitResult:
     """Outcome of a rate-limit check.
 
-    Attributes
-    ----------
-    allowed : bool
-        Whether the request may proceed.
-    limit_type : str or None
-        Which limit rejected the request: ``"global"`` / ``"client"`` /
-        ``"endpoint"`` (``None`` when allowed).
-    retry_after_seconds : float or None
-        Seconds to wait before retrying, when rejected.
-    tokens_remaining : float or None
-        Client tokens left after the check.
+    ``limit_type`` is the limit that rejected the request (``"global"``, ``"client"`` or
+    ``"endpoint"``), ``None`` when allowed.
     """
 
     allowed: bool
@@ -192,14 +147,9 @@ class RateLimiter:
     def _get_client_bucket(self, client_id: str) -> TokenBucket:
         """Get or create a bucket for a client, reclaiming idle ones first.
 
-        ``cleanup_stale_clients`` existed with a TTL config but had no caller
-        anywhere in the codebase, and nothing else bounded these two dicts. The
-        client id comes from ``X-Forwarded-For``, which the caller controls
-        whenever a proxy appends rather than replaces it — so a client sending
-        a distinct forwarded address per request created a permanent bucket
-        plus a timestamp entry every time. Unbounded RSS growth, and (because
-        each new id starts with a full burst) a per-client limit that never
-        actually limited.
+        The client id can come from a caller-controlled ``X-Forwarded-For``, so without
+        reclamation a client minting a new id per request grows memory without bound and gets a
+        fresh full burst every time.
         """
         self._maybe_cleanup()
         if client_id not in self._client_buckets:
@@ -215,9 +165,8 @@ class RateLimiter:
     def _maybe_cleanup(self) -> None:
         """Run the idle sweep at most once per ``cleanup_interval_seconds``.
 
-        Called on the request path rather than from a background task so the
-        reclamation cannot be forgotten again — the previous sweep was correct
-        code that simply nothing invoked. Caller holds ``self._lock``.
+        Runs on the request path rather than a background task so it cannot go uncalled. Caller
+        holds ``self._lock``.
         """
         now = self._clock.time()
         if now - self._last_cleanup < self.config.cleanup_interval_seconds:
@@ -228,8 +177,8 @@ class RateLimiter:
     def _evict_if_over_capacity(self) -> None:
         """Drop least-recently-seen clients once the ceiling is reached.
 
-        The TTL sweep alone is not a bound: ids can be minted faster than they
-        age out. Caller holds ``self._lock``.
+        The TTL sweep alone is not a bound: ids can be minted faster than they age out. Caller
+        holds ``self._lock``.
         """
         overflow = len(self._client_buckets) - self.config.max_tracked_clients
         if overflow < 0:
@@ -280,19 +229,10 @@ class RateLimiter:
         client_id: str,
         endpoint: str | None = None,
     ) -> RateLimitResult:
-        """Check a request against the global, per-client, and endpoint limits.
+        """Check a request against the global, per-client and endpoint limits.
 
-        Parameters
-        ----------
-        client_id : str
-            Unique client identifier (e.g. IP address).
-        endpoint : str or None, optional
-            Endpoint path for endpoint-specific limits.
-
-        Returns
-        -------
-        RateLimitResult
-            Whether the request is allowed, and why if not.
+        ``client_id`` identifies the client (e.g. IP address); ``endpoint`` selects any
+        endpoint-specific limit.
         """
         if not self.config.enabled:
             return RateLimitResult(allowed=True)
@@ -337,24 +277,13 @@ class RateLimiter:
             )
 
     def cleanup_stale_clients(self) -> int:
-        """Drop per-client buckets idle longer than ``client_ttl_seconds``.
-
-        Returns
-        -------
-        int
-            Number of client buckets removed.
-        """
+        """Drop client buckets idle longer than ``client_ttl_seconds``; return how many."""
         with self._lock:
             return self._drop_stale_clients_locked()
 
     def get_stats(self) -> dict[str, Any]:
-        """Return request/rejection counters and current bucket state.
-
-        Returns
-        -------
-        dict
-            Counters plus ``active_clients``, ``global_tokens_available``, and
-            ``enabled``.
+        """Return request/rejection counters plus ``active_clients``, ``global_tokens_available``
+        and ``enabled``.
         """
         with self._lock:
             return {
@@ -380,13 +309,7 @@ _rate_limiter: RateLimiter | None = None
 
 
 def get_rate_limiter() -> RateLimiter | None:
-    """Return the global rate limiter, or ``None`` if not initialized.
-
-    Returns
-    -------
-    RateLimiter or None
-        The process-wide limiter.
-    """
+    """Return the process-wide rate limiter, or ``None`` if not initialized."""
     return _rate_limiter
 
 
@@ -396,21 +319,8 @@ def init_rate_limiter(
 ) -> RateLimiter:
     """Create and install the global rate limiter.
 
-    Parameters
-    ----------
-    config : RateLimitConfig or None, optional
-        Configuration; defaults are used when ``None``.
-    clock : Clock or None, optional
-        Time source, forwarded to ``RateLimiter``. The system clock is used
-        when ``None``. Passing a fixed clock is how a test pins a bucket's
-        refill: buckets refill on wall-clock time, so a test that drains one
-        and expects the next request to be rejected is otherwise racing the
-        refill interval.
-
-    Returns
-    -------
-    RateLimiter
-        The newly installed limiter.
+    ``clock`` defaults to the system clock; tests pass a fixed one so a drained bucket does
+    not refill mid-test.
     """
     global _rate_limiter
     _rate_limiter = RateLimiter(config, clock=clock)

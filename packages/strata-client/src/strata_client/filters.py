@@ -1,13 +1,6 @@
-"""Filter types — the client-facing, dependency-free slice of the type system.
+"""Filter types: the client-facing, standard-library-only slice of the type system.
 
-Carved out of :mod:`strata.types` so the client (and the future standalone
-``strata-client`` distribution) can use ``Filter`` / ``FilterOp`` /
-``FilterValue`` without importing the server's ``types`` module, which pulls in
-pydantic and other server-only machinery. ``strata.types`` re-exports these for
-backward compatibility, so existing ``from strata.types import Filter`` imports
-keep working.
-
-Standard library only — no third-party dependencies.
+``strata.types`` re-exports these, so the client never imports server-only modules.
 """
 
 import base64
@@ -58,9 +51,9 @@ class Filter:
     value: FilterValue
 
     def matches_stats(self, min_val: FilterValue | None, max_val: FilterValue | None) -> bool:
-        """Check if this filter could match given min/max statistics.
+        """Return True if a row group with these min/max stats might contain matching rows.
 
-        Returns True if the row group might contain matching rows.
+        Missing stats never prune.
         """
         if min_val is None or max_val is None:
             return True  # No stats, can't prune
@@ -142,17 +135,10 @@ def deserialize_filter_value(value: str | bool | int | float) -> FilterValue:
 
 
 def compute_filter_fingerprint(filters: list[Filter] | None) -> str:
-    """Compute a stable fingerprint for a list of filters.
-
-    Used for cache keying when filters affect file-level pruning, and for
-    identity-materialize provenance. Returns a deterministic hash that is stable
-    across runs and order-independent.
-
-    Args:
-        filters: List of Filter objects (may be None or empty)
+    """Compute an order-independent fingerprint for cache keys and provenance.
 
     Returns:
-        16-character hex string, or "nofilter" if no filters
+        16-character hex string, or ``"nofilter"`` for None or empty.
     """
     if not filters:
         return "nofilter"

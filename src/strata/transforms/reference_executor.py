@@ -1,32 +1,8 @@
-"""Reference executor implementation for Strata Protocol v1.
+"""Reference executor for Strata executor protocol v1, a template for external executors.
 
-This module provides a reference implementation of a Strata executor that can
-be used as a template for building external executors. It demonstrates:
-
-1. Protocol v1 request/response handling
-2. Multipart form parsing for inputs
-3. Arrow IPC stream processing
-4. Error handling and logging
-
-Usage:
-    # Run as a standalone server (for development/testing)
-    uvicorn strata.transforms.reference_executor:app --port 8080
-
-    # Or import the executor class for embedding in your own application
-    from strata.transforms.reference_executor import DuckDBExecutor
-    executor = DuckDBExecutor()
-    result = executor.execute(metadata, inputs)
-
-Protocol v1 Endpoints:
-    POST /v1/execute      - Execute a transform (multipart/form-data)
-    GET  /health          - Health check with capabilities
-
-See strata.types for protocol type definitions:
-    - ExecutorRequestMetadata: Request metadata schema
-    - ExecutorInputDescriptor: Input descriptor schema
-    - ExecutorTransformSpec: Transform specification schema
-    - ExecutorResponse: Error response schema
-    - ExecutorHealthResponse: Health check response schema
+Serves ``POST /v1/execute`` (multipart: ``metadata`` JSON plus ``input0``...) and
+``GET /health``. Run with ``uvicorn strata.transforms.reference_executor:get_app
+--factory --port 8080``. Protocol types live in ``strata.types`` (``Executor*``).
 """
 
 from __future__ import annotations
@@ -49,17 +25,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class ExecutionResult:
-    """Result from executor execution.
-
-    Attributes:
-        success: Whether execution succeeded
-        output_bytes: Arrow IPC stream bytes (on success)
-        error_code: Machine-readable error code (on failure)
-        error_message: Human-readable error message (on failure)
-        logs: Executor logs (stdout/stderr)
-        duration_ms: Execution time in milliseconds
-        output_rows: Number of rows in output
-    """
+    """Outcome of one execution: Arrow IPC ``output_bytes`` on success, error fields otherwise."""
 
     success: bool
     output_bytes: bytes | None = None
@@ -72,45 +38,18 @@ class ExecutionResult:
 
 @dataclass
 class ExecutorInput:
-    """Input data for executor.
-
-    Attributes:
-        name: Input name (e.g., "input0", "input1")
-        data: Arrow IPC stream bytes
-    """
+    """One named input (``input0``, ...) as Arrow IPC stream bytes."""
 
     name: str
     data: bytes
 
 
 class BaseExecutor(ABC):
-    """Abstract base class for Strata executors.
-
-    Implement this interface to create a new executor type.
-    The execute() method receives parsed metadata and input data,
-    and returns an ExecutionResult.
-
-    Example:
-        class MyCustomExecutor(BaseExecutor):
-            def get_transform_refs(self) -> list[str]:
-                return ["my_transform@v1", "my_transform@v2"]
-
-            def execute(
-                self,
-                transform_ref: str,
-                params: dict[str, Any],
-                inputs: list[ExecutorInput],
-            ) -> ExecutionResult:
-                # Your transform logic here
-                ...
-    """
+    """Base class for executors: implement ``get_transform_refs`` and ``execute``."""
 
     @abstractmethod
     def get_transform_refs(self) -> list[str]:
-        """Return list of transform references this executor supports.
-
-        Examples: ["duckdb_sql@v1"], ["pandas_transform@v1", "pandas_transform@v2"]
-        """
+        """Return the transform refs this executor supports, e.g. ``["duckdb_sql@v1"]``."""
         pass
 
     @abstractmethod
@@ -120,23 +59,11 @@ class BaseExecutor(ABC):
         params: dict[str, Any],
         inputs: list[ExecutorInput],
     ) -> ExecutionResult:
-        """Execute the transform.
-
-        Args:
-            transform_ref: Transform reference (e.g., "duckdb_sql@v1")
-            params: Transform parameters (e.g., {"sql": "SELECT ..."})
-            inputs: List of input data (Arrow IPC stream bytes)
-
-        Returns:
-            ExecutionResult with output or error
-        """
+        """Run ``transform_ref`` with ``params`` over ``inputs``; report failure in the result."""
         pass
 
     def health_check(self) -> dict:
-        """Return health status and capabilities.
-
-        Override this to add custom health checks.
-        """
+        """Return health status and capabilities; override to add checks."""
         from strata.types import EXECUTOR_PROTOCOL_VERSION
 
         return {
@@ -152,24 +79,10 @@ class BaseExecutor(ABC):
 
 
 class DuckDBExecutor(BaseExecutor):
-    """DuckDB SQL executor - reference implementation.
-
-    This executor runs DuckDB SQL queries on Arrow input tables.
-    Inputs are registered as 'input0', 'input1', etc. in DuckDB.
-
-    Example SQL:
-        SELECT a.id, b.value
-        FROM input0 a
-        JOIN input1 b ON a.id = b.id
-        WHERE a.timestamp > '2024-01-01'
-    """
+    """Reference executor running DuckDB SQL over inputs registered as ``input0``, ``input1``."""
 
     def __init__(self, max_memory_mb: int = 1024):
-        """Initialize DuckDB executor.
-
-        Args:
-            max_memory_mb: Maximum memory for DuckDB (default 1GB)
-        """
+        """Create the executor with a DuckDB memory limit in megabytes."""
         self.max_memory_mb = max_memory_mb
 
     def get_transform_refs(self) -> list[str]:
@@ -181,16 +94,7 @@ class DuckDBExecutor(BaseExecutor):
         params: dict[str, Any],
         inputs: list[ExecutorInput],
     ) -> ExecutionResult:
-        """Execute DuckDB SQL query.
-
-        Args:
-            transform_ref: Must be "duckdb_sql@v1"
-            params: Must contain "sql" key with the query
-            inputs: Arrow IPC stream inputs
-
-        Returns:
-            ExecutionResult with Arrow IPC output
-        """
+        """Run ``params["sql"]`` in a fresh in-memory DuckDB; errors become a failed result."""
         import io
         import time
 
@@ -266,14 +170,7 @@ class DuckDBExecutor(BaseExecutor):
 
 
 def create_executor_app(executor: BaseExecutor | None = None):
-    """Create FastAPI application for an executor.
-
-    Args:
-        executor: Executor instance to use. Defaults to DuckDBExecutor.
-
-    Returns:
-        FastAPI application
-    """
+    """Create the FastAPI app serving ``executor`` (a DuckDBExecutor by default)."""
     from fastapi import FastAPI, HTTPException
     from fastapi.responses import Response
 
@@ -299,19 +196,9 @@ def create_executor_app(executor: BaseExecutor | None = None):
 
     @app.post("/v1/execute")
     async def execute(http_request: FastAPIRequest):
-        """Execute a transform with the given inputs.
+        """Execute a transform from a multipart ``metadata`` part and ``input0``..``input4``.
 
-        Request:
-            Content-Type: multipart/form-data
-            X-Strata-Executor-Protocol: v1
-
-            Parts:
-                - metadata: JSON with ExecutorRequestMetadata schema
-                - input0, input1, ...: Arrow IPC stream bytes
-
-        Response:
-            - 200: Arrow IPC stream (application/vnd.apache.arrow.stream)
-            - 4xx/5xx: JSON error (ExecutorResponse schema)
+        Returns an Arrow IPC stream, or a 400 JSON error (``ExecutorResponse`` shape).
         """
         import json
 
@@ -391,7 +278,7 @@ def create_executor_app(executor: BaseExecutor | None = None):
 
 # Lazy so that importing this module (e.g. in tests) does not build the app.
 def get_app():
-    """Get the default executor app (lazy initialization)."""
+    """Build the default executor app (uvicorn ``--factory`` entry point)."""
     return create_executor_app()
 
 
@@ -404,14 +291,7 @@ def get_app():
 def parse_arrow_inputs(
     file_parts: dict[str, bytes],
 ) -> list[ExecutorInput]:
-    """Parse Arrow IPC inputs from multipart form data.
-
-    Args:
-        file_parts: Mapping of part name -> bytes
-
-    Returns:
-        List of ExecutorInput sorted by name
-    """
+    """Collect non-empty ``input*`` parts as ExecutorInputs, sorted by name."""
     inputs = []
     for name, data in file_parts.items():
         if name.startswith("input") and data:
@@ -421,14 +301,7 @@ def parse_arrow_inputs(
 
 
 def serialize_arrow_output(table) -> bytes:
-    """Serialize Arrow table to IPC stream bytes.
-
-    Args:
-        table: PyArrow Table
-
-    Returns:
-        Arrow IPC stream bytes
-    """
+    """Serialize a PyArrow table to IPC stream bytes."""
     import io
 
     import pyarrow.ipc as ipc
@@ -440,24 +313,10 @@ def serialize_arrow_output(table) -> bytes:
 
 
 def encode_logs_header(logs: str) -> str:
-    """Encode logs for X-Strata-Logs header.
-
-    Args:
-        logs: Log text
-
-    Returns:
-        Base64-encoded string
-    """
+    """Base64-encode log text for the logs header."""
     return base64.b64encode(logs.encode("utf-8")).decode("ascii")
 
 
 def decode_logs_header(header: str) -> str:
-    """Decode X-Strata-Logs header.
-
-    Args:
-        header: Base64-encoded log header
-
-    Returns:
-        Decoded log text
-    """
+    """Decode a base64 logs header back to text."""
     return base64.b64decode(header).decode("utf-8")

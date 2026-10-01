@@ -21,25 +21,7 @@ LATENCY_BUCKETS = [10, 25, 50, 100, 250, 500, 1000, 2500, 5000]
 
 @dataclass
 class TableMetrics:
-    """Per-table aggregated scan metrics.
-
-    Attributes
-    ----------
-    table_id : str
-        Canonical table identity.
-    scan_count : int
-        Scans recorded against this table.
-    total_latency_ms : float
-        Sum of scan latencies, in milliseconds.
-    cache_hits, cache_misses : int
-        Aggregate cache outcomes.
-    bytes_from_cache, bytes_from_storage : int
-        Aggregate bytes served from each source.
-    rows_returned : int
-        Total rows returned.
-    row_groups_pruned : int
-        Total row groups skipped by pruning.
-    """
+    """Per-table aggregated scan metrics (latencies in milliseconds)."""
 
     table_id: str
     scan_count: int = 0
@@ -58,13 +40,7 @@ class TableMetrics:
     last_access: float = field(default_factory=time.time, repr=False)
 
     def record_scan(self, metrics: "ScanMetrics") -> None:
-        """Fold a completed scan's metrics into this table's aggregates.
-
-        Parameters
-        ----------
-        metrics : ScanMetrics
-            The completed scan's metrics.
-        """
+        """Fold a completed scan's metrics into this table's aggregates."""
         self.scan_count += 1
         self.total_latency_ms += metrics.total_time_ms
         self.cache_hits += metrics.cache_hits
@@ -80,13 +56,9 @@ class TableMetrics:
         self._latencies.append(metrics.total_time_ms)
 
     def get_latency_percentiles(self) -> dict[str, float]:
-        """Return p50/p95/p99 latency (ms) from the recent-sample buffer.
+        """Return ``{p50_ms, p95_ms, p99_ms}`` from the recent-sample buffer.
 
-        Returns
-        -------
-        dict
-            ``{p50_ms, p95_ms, p99_ms}`` at full precision (zeros when no
-            samples have been recorded).
+        Unrounded; zeros when no samples have been recorded.
         """
         if not self._latencies:
             return {"p50_ms": 0.0, "p95_ms": 0.0, "p99_ms": 0.0}
@@ -105,13 +77,7 @@ class TableMetrics:
         }
 
     def get_latency_histogram(self) -> dict[str, int]:
-        """Return the latency distribution as counts per bucket.
-
-        Returns
-        -------
-        dict
-            Count per ``le_{bucket}ms`` threshold plus ``le_inf``.
-        """
+        """Return counts per ``le_{bucket}ms`` threshold plus ``le_inf``."""
         buckets = {f"le_{b}ms": 0 for b in LATENCY_BUCKETS}
         buckets["le_inf"] = 0
 
@@ -126,17 +92,9 @@ class TableMetrics:
         return buckets
 
     def to_dict(self) -> dict[str, Any]:
-        """Return the API-facing projection (derived fields, no internals).
+        """Return the API-facing projection with derived average latency, hit rate and percentiles.
 
-        Adds derived ``avg_latency_ms`` / ``cache_hit_rate`` and the latency
-        percentiles; the recent-sample buffer and ``last_access`` are omitted.
-        Values are full precision; rounding for display is the consumer's
-        concern.
-
-        Returns
-        -------
-        dict
-            Counters plus derived rate, average latency, and percentiles.
+        The sample buffer and ``last_access`` are omitted; values are unrounded.
         """
         total_requests = self.cache_hits + self.cache_misses
         avg_latency = self.total_latency_ms / self.scan_count if self.scan_count > 0 else 0.0
@@ -158,28 +116,9 @@ class TableMetrics:
 
 @dataclass
 class ScanMetrics:
-    """Metrics for a single scan operation.
+    """Metrics for a single scan operation (timings in milliseconds).
 
-    Attributes
-    ----------
-    scan_id : str
-        Unique id for the scan.
-    snapshot_id : int
-        Iceberg snapshot scanned.
-    table_id : str
-        Canonical table identity (``catalog.namespace.table``).
-    request_id : str
-        Correlation id for request tracing (omitted from ``to_dict`` when empty).
-    planning_time_ms, fetch_time_ms, total_time_ms : float
-        Phase and total timings, in milliseconds.
-    cache_hits, cache_misses : int
-        Cache outcomes for the scan.
-    bytes_from_cache, bytes_from_storage : int
-        Bytes served from each source.
-    total_row_groups, pruned_row_groups : int
-        Row groups considered and skipped by pruning.
-    rows_returned : int
-        Rows returned by the scan.
+    ``request_id`` is omitted from ``to_dict`` when empty.
     """
 
     scan_id: str
@@ -200,17 +139,7 @@ class ScanMetrics:
     rows_returned: int = 0
 
     def to_dict(self) -> dict[str, Any]:
-        """Return the API/log projection of this scan.
-
-        Adds the derived ``cache_hit_rate`` and includes ``request_id`` only
-        when set. Values are full precision; rounding for display is the
-        consumer's concern.
-
-        Returns
-        -------
-        dict
-            Scan identity, timings, cache/row-group counters, and hit rate.
-        """
+        """Return the API/log projection, with derived ``cache_hit_rate`` (unrounded)."""
         total_requests = self.cache_hits + self.cache_misses
         result = {
             "scan_id": self.scan_id,
@@ -235,11 +164,10 @@ class ScanMetrics:
 
 @dataclass
 class MetricsCollector:
-    """Collects and logs metrics for Strata operations.
+    """Collects metrics and writes structured log entries.
 
-    Logging is non-blocking: log entries are queued and written by a background
-    thread. If the queue is full, logs are dropped (not blocked) to prevent
-    request latency impact. The dropped_logs counter tracks how many were dropped.
+    Logging is non-blocking: entries go through a bounded queue to a background
+    thread, and are dropped (counted in ``dropped_logs``) when it is full.
     """
 
     output: TextIO = field(default_factory=lambda: sys.stdout)
@@ -288,9 +216,7 @@ class MetricsCollector:
     def _writer_loop(self) -> None:
         """Drain the queue to ``output`` until shutdown, then flush the rest.
 
-        A single bad entry never crashes the writer: a write/serialize failure
-        (broken pipe, closed stream, or a non-serializable value) drops that
-        entry and continues.
+        A write or serialization failure drops that entry; the writer keeps running.
         """
         while not self._shutdown.is_set():
             try:
@@ -336,19 +262,7 @@ class MetricsCollector:
         elapsed_ms: float,
         from_cache: bool,
     ) -> None:
-        """Record one fetch's outcome into the aggregate counters.
-
-        Parameters
-        ----------
-        bytes_read : int
-            Bytes read for the fetch.
-        rows_read : int
-            Rows read for the fetch.
-        elapsed_ms : float
-            Fetch duration in milliseconds.
-        from_cache : bool
-            Whether the fetch was served from cache.
-        """
+        """Record one fetch's bytes, rows, duration (ms) and cache outcome."""
         with self._counter_lock:
             self.total_fetches += 1
             self.total_rows_fetched += rows_read
@@ -361,13 +275,7 @@ class MetricsCollector:
                 self.total_bytes_from_storage += bytes_read
 
     def record_cache_write(self, bytes_written: int) -> None:
-        """Record bytes written to the cache.
-
-        Parameters
-        ----------
-        bytes_written : int
-            Bytes written.
-        """
+        """Record bytes written to the cache."""
         with self._counter_lock:
             self.total_bytes_written_to_cache += bytes_written
 
@@ -387,27 +295,13 @@ class MetricsCollector:
             self.client_disconnects += 1
 
     def record_cache_eviction(self, count: int, bytes_evicted: int) -> None:
-        """Record a batch of cache evictions.
-
-        Parameters
-        ----------
-        count : int
-            Number of entries evicted.
-        bytes_evicted : int
-            Bytes freed.
-        """
+        """Record ``count`` cache evictions freeing ``bytes_evicted`` bytes."""
         with self._counter_lock:
             self.cache_evictions_count += count
             self.cache_evicted_bytes += bytes_evicted
 
     def log_scan_complete(self, metrics: ScanMetrics) -> None:
-        """Update aggregates/per-table metrics and emit a ``scan_complete`` log.
-
-        Parameters
-        ----------
-        metrics : ScanMetrics
-            The completed scan's metrics.
-        """
+        """Update aggregate and per-table metrics and emit a ``scan_complete`` log."""
         with self._counter_lock:
             self.total_scans += 1
             self.total_row_groups_pruned += metrics.pruned_row_groups
@@ -428,12 +322,7 @@ class MetricsCollector:
     def _record_table_metrics(self, metrics: ScanMetrics) -> None:
         """Fold a scan into its table's metrics, evicting the LRU table if full.
 
-        Must be called with ``_counter_lock`` held.
-
-        Parameters
-        ----------
-        metrics : ScanMetrics
-            The completed scan's metrics.
+        Caller must hold ``_counter_lock``.
         """
         table_id = metrics.table_id
 
@@ -450,30 +339,12 @@ class MetricsCollector:
         self._table_metrics[table_id].record_scan(metrics)
 
     def get_table_metrics(self, table_id: str) -> TableMetrics | None:
-        """Return the metrics for ``table_id``, or ``None`` if untracked.
-
-        Parameters
-        ----------
-        table_id : str
-            Table to look up.
-
-        Returns
-        -------
-        TableMetrics or None
-            The table's metrics, or ``None``.
-        """
+        """Return the metrics for ``table_id``, or ``None`` if untracked."""
         with self._counter_lock:
             return self._table_metrics.get(table_id)
 
     def get_all_table_metrics(self) -> list[dict[str, Any]]:
-        """Return every tracked table's projection, hottest first.
-
-        Returns
-        -------
-        list of dict
-            ``TableMetrics.to_dict`` for each table, sorted by scan count
-            descending.
-        """
+        """Return every tracked table's ``to_dict``, most scanned first."""
         with self._counter_lock:
             tables = list(self._table_metrics.values())
 
@@ -481,31 +352,12 @@ class MetricsCollector:
         return [t.to_dict() for t in tables]
 
     def get_top_tables(self, limit: int = 10) -> list[dict[str, Any]]:
-        """Return the ``limit`` most-scanned tables.
-
-        Parameters
-        ----------
-        limit : int, optional
-            Maximum number of tables to return (default 10).
-
-        Returns
-        -------
-        list of dict
-            The hottest tables' projections.
-        """
+        """Return the ``limit`` most-scanned tables' projections."""
         all_tables = self.get_all_table_metrics()
         return all_tables[:limit]
 
     def log_event(self, event: str, **kwargs) -> None:
-        """Emit a generic timestamped log event.
-
-        Parameters
-        ----------
-        event : str
-            Event name.
-        **kwargs
-            Additional JSON-serializable fields to include.
-        """
+        """Emit a timestamped log event with extra JSON-serializable fields."""
         if not self.enabled:
             return
 
@@ -517,13 +369,7 @@ class MetricsCollector:
         self._write_log(log_entry)
 
     def _write_log(self, entry: dict) -> None:
-        """Queue a log entry for the writer thread, dropping it if the queue is full.
-
-        Parameters
-        ----------
-        entry : dict
-            The log entry to enqueue.
-        """
+        """Queue a log entry for the writer thread, dropping it if the queue is full."""
         try:
             self._log_queue.put_nowait(entry)
         except queue.Full:
@@ -532,16 +378,7 @@ class MetricsCollector:
                 self.dropped_logs += 1
 
     def get_aggregate_stats(self) -> dict[str, Any]:
-        """Return a snapshot of the aggregate counters.
-
-        The derived ``cache_hit_rate`` is full precision; rounding for display
-        is the consumer's concern.
-
-        Returns
-        -------
-        dict
-            Lifetime cache / fetch / stream-abort / eviction / logging counters.
-        """
+        """Return a snapshot of the lifetime counters, with unrounded ``cache_hit_rate``."""
         with self._counter_lock:
             total_requests = self.total_cache_hits + self.total_cache_misses
             return {

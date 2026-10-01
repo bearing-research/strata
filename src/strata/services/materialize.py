@@ -1,11 +1,8 @@
-"""Materialize-plane services extracted from ``server.py`` handlers.
+"""Materialize-plane services: input-version resolution and provenance hashing.
 
-Stateless; methods receive an already-resolved artifact store (+ planner +
-tenant) from the route's dependencies. No FastAPI/HTTP coupling: the pure
-input-version *resolution* lives here and signals failure with the plain
-:class:`InputResolutionError` (a status hint, not an ``HTTPException``); the
-thin wrapper in ``strata.api.dependencies`` maps that to HTTP and applies the
-table ACL. See ``docs/internal/design-server-decomposition.md`` (phase 2/3).
+Stateless and HTTP-free: failures raise :class:`InputResolutionError` carrying
+a status hint, which the wrapper in ``strata.api.dependencies`` maps to HTTP
+after applying the table ACL.
 """
 
 from __future__ import annotations
@@ -29,9 +26,8 @@ if TYPE_CHECKING:
 def table_input_version(plan: ReadPlan) -> str:
     """The version a table input records: its snapshot and schema id.
 
-    A schema change (a rename, a dropped column) makes no snapshot, so the
-    snapshot id alone would let a transform over the table hit the artifact it
-    built before the change, with the old column names.
+    A schema change makes no snapshot, so the snapshot alone would let a transform
+    hit an artifact built against the old columns.
     """
     return f"{plan.snapshot_id}:{plan.schema_id}"
 
@@ -39,11 +35,9 @@ def table_input_version(plan: ReadPlan) -> str:
 class InputResolutionError(Exception):
     """An input URI could not be resolved to a version.
 
-    Carries the HTTP ``status_code`` + ``detail`` the original inline resolver
-    raised (400 for a malformed/unknown URI or a failed table plan, 404 for an
-    unknown name, 422 for a table Strata refuses to read) so the
-    dependency-layer wrapper can reproduce the exact response without the
-    service importing FastAPI.
+    Carries ``status_code`` and ``detail`` (400 malformed/unknown URI or failed
+    plan, 404 unknown name, 422 table Strata refuses to read) for the dependency
+    layer to raise as HTTP.
     """
 
     def __init__(self, status_code: int, detail: str):
@@ -55,10 +49,8 @@ class InputResolutionError(Exception):
 class ResolvedInput(NamedTuple):
     """A resolved input version, plus what the caller needs to authorize it.
 
-    ``table_identity`` is set for table URIs and ``artifact`` for
-    artifact/name inputs — the wrapper uses them to run the table ACL
-    (deny-first on every table input) and the artifact tenant/ACL gate as
-    visible steps, which the pure resolver deliberately does not do.
+    ``table_identity`` is set for table URIs and ``artifact`` for artifact/name
+    inputs; the wrapper runs the table ACL and artifact tenant gate on them.
     """
 
     version: str
@@ -77,19 +69,17 @@ class MaterializeService:
         planner,
         tenant: str | None = None,
     ) -> ResolvedInput:
-        """Resolve an input URI to its current version (pure; no ACL, no HTTP).
+        """Resolve an input URI to its current version (no ACL, no HTTP).
 
-        - ``strata://artifact/{id}@v={n}`` → ``"{id}@v={n}"``
-        - ``strata://name/{name}`` → the named artifact's ``"{id}@v={version}"``
-        - ``file://…`` / ``s3://…`` table → the current snapshot and schema id
-          (:func:`table_input_version`), plus the plan's ``table_identity`` so
-          the caller can ACL-gate it.
+        - ``strata://artifact/{id}@v={n}`` -> ``"{id}@v={n}"``
+        - ``strata://name/{name}`` -> the named artifact's ``"{id}@v={version}"``
+        - ``file://`` / ``s3://`` table -> :func:`table_input_version`, plus the
+          plan's ``table_identity`` for the caller's ACL check.
 
         Raises:
-            InputResolutionError: malformed/unknown URI, unknown name, or a table
-                whose plan fails — carrying the status the wrapper re-raises. A
-                table Strata refuses to read is 422 with the planner's message,
-                as on the scan path.
+            InputResolutionError: malformed/unknown URI, unknown name, or a failed
+                table plan; a table Strata refuses to read is 422 with the planner's
+                message.
         """
         if input_uri.startswith("strata://artifact/"):
             match = re.match(r"^strata://artifact/([^@]+)@v=(\d+)$", input_uri)
@@ -137,9 +127,7 @@ class MaterializeService:
     ) -> str:
         """Provenance hash for a transform over already-resolved input versions.
 
-        Inputs are sorted before hashing, so the hash is independent of input
-        ordering — the invariant that keeps the same computation from hashing to
-        two different cache keys.
+        Input versions are sorted before hashing.
         """
         input_hashes = [f"{uri}:{version}" for uri, version in sorted(resolved_versions.items())]
         return compute_provenance_hash(input_hashes, transform_spec)
@@ -154,11 +142,9 @@ class MaterializeService:
     ) -> str:
         """Provenance hash for a ``scan@v1`` identity transform.
 
-        Uniquely identifies a table scan by table identity + snapshot, the
-        (sorted) column projection, and the normalized row filters — so the same
-        query dedups to the same artifact. ``schema_id`` is the schema the scan
-        read (``ReadPlan.schema_id``): a schema change makes no snapshot. Pure;
-        no HTTP, no store.
+        Covers table identity, snapshot, ``schema_id`` (a schema change makes no
+        snapshot), the sorted projection and the normalized filters, so the same query
+        dedups to the same artifact.
         """
         import hashlib
 
@@ -185,9 +171,9 @@ class MaterializeService:
     ) -> str:
         """Artifact id for a build: reuse the existing id on a refresh rebuild.
 
-        A refresh rebuild becomes a new *version* of the same artifact so
-        finalize supersedes the old ready version and provenance lookups resolve
-        to the rebuild (#123). Every other miss mints a fresh id.
+        A refresh becomes a new version of the same artifact, so finalize supersedes
+        the old one and provenance lookups resolve to the rebuild. Other misses mint a
+        fresh id.
         """
         if refresh and existing is not None:
             return existing.id
@@ -203,10 +189,9 @@ class MaterializeService:
     ) -> ExplainMaterializeResponse:
         """Explain what materialize would do, given already-resolved input versions.
 
-        Computes the provenance hash, checks for a cache hit, and — when a name is
-        supplied — reports staleness against the name's recorded input versions.
-        Version resolution (which can fail with HTTP errors) is the caller's job;
-        *resolved_versions* is passed in verbatim, error markers and all.
+        Reports the provenance hash, any cache hit and, when a name is requested,
+        staleness against that name's recorded inputs. ``resolved_versions`` is used
+        verbatim, error markers included.
         """
         transform = request.transform
         transform_spec = TransformSpec(

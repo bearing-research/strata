@@ -1,13 +1,7 @@
-"""Materialize-plane routes.
+"""Materialize-plane routes whose gates live entirely in the dependency/service layer.
 
-Holds the routes whose gates are fully lifted into the dependency/service layer
-(#295). ``explain-materialize`` is pure dependency + service today; the stateful
-materialize/streams handlers (``unified_materialize`` / ``materialize_artifact``
-/ ``get_stream``) stay in ``server.py`` for now — they are entangled with the
-live stream-state registry, two-tier QoS admission, and the background build /
-prefetch runtime, which is a separate extraction (see
-``docs/internal/design-server-decomposition.md`` phase 3). They join this router
-once that runtime is lifted.
+The stateful materialize/streams handlers stay in ``server.py`` until the
+stream-state, QoS and build runtime is extracted.
 """
 
 from __future__ import annotations
@@ -24,20 +18,7 @@ router = APIRouter(tags=["materialize"])
 async def explain_materialize(
     request: ExplainMaterializeRequest, store: ReadStore, principal: CurrentPrincipal
 ):
-    """Explain what materialize would do without actually doing it (dry run).
-
-    This endpoint is useful for:
-    - Checking if a computation would be a cache hit or miss
-    - Understanding why a rebuild is needed
-    - Debugging provenance and staleness issues
-    - Scripts that want to print "Rebuild needed: raw_q1 moved from v12 → v13"
-
-    Args:
-        request: ExplainMaterializeRequest with inputs, transform, and optional name
-
-    Returns:
-        ExplainMaterializeResponse explaining what would happen
-    """
+    """Dry-run materialize: report hit or miss and why a rebuild would be needed."""
     from strata.services.materialize import materialize_service
 
     tenant_id = principal.tenant if principal else None

@@ -1,12 +1,7 @@
-"""Logs viewer routes (observability, B1).
+"""Read-only routes over the in-memory structured log ring buffer.
 
-Read-only, system-scoped access to the recent structured log stream, backed by
-the in-memory ring buffer (``strata.log_buffer``). ``GET /v1/logs`` pages by
-cursor; ``GET /v1/logs/stream`` tails via SSE (polls the buffer by cursor).
-
-v1 is unauthenticated system-wide read — fine behind a loopback personal
-deployment; a scope gate is required before service mode exposes it (design
-open-question #4).
+Unauthenticated and system-wide: fine on a loopback personal deployment, but
+service mode needs a scope gate before exposing it.
 """
 
 from __future__ import annotations
@@ -62,10 +57,9 @@ async def stream_logs(
     notebook: str | None = None,
     regex: str | None = None,
 ) -> StreamingResponse:
-    """Server-Sent Events tail of the log stream for the UI's "Live" mode.
+    """Tail the log stream as Server-Sent Events, one ``data:`` frame per entry.
 
-    Emits each new entry as an SSE ``data:`` frame. Reconnect with
-    ``?since=<last cursor>`` to resume without gaps.
+    Reconnect with ``?since=<last cursor>`` to resume without gaps.
     """
     # Validate the regex up front so a bad pattern is a 400, not a silently closed stream.
     if regex is not None:

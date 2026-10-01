@@ -1,10 +1,7 @@
-"""Strata: Snapshot-aware serving layer for Iceberg tables.
+"""Strata: snapshot-aware serving layer for Iceberg tables.
 
-This is the **server** distribution. The HTTP *client* is a separate, slim
-package — ``pip install strata-client`` then ``from strata_client import
-StrataClient``. The server and client are independent: they share only the JSON
-wire protocol, not code (each owns its copy of the ``Filter`` wire types).
-See docs/internal/design-strata-client.md.
+This is the server distribution. The HTTP client is the separate
+``strata-client`` package; the two share only the JSON wire protocol, not code.
 """
 
 from typing import TYPE_CHECKING

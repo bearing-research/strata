@@ -106,16 +106,10 @@ class ResourceLimitError(Exception):
 
 
 def _eager_warmup(config: StrataConfig) -> dict:
-    """Eagerly warm up expensive resources at startup.
+    """Pre-initialize expensive resources at startup and return per-step timings.
 
-    This eliminates cold-start latency by pre-initializing:
-    1. GC pause tracking (must be first to catch early GC events)
-    2. Arrow memory pool configuration (must be done before any Arrow ops)
-    3. Heavy module imports (pyiceberg, pyarrow)
-    4. SQLite metadata store (connection + schema validation)
-    5. Memory-resident caches
-
-    Returns timing information for observability.
+    GC tracking goes first to catch early GC events, and the Arrow memory pool is configured
+    before any Arrow allocation.
     """
     warmup_times = {}
     total_start = time.perf_counter()
@@ -239,8 +233,7 @@ class ServerState:
     def _ownership_store(self):
         """The stream ownership store, or None outside a multi-node setup.
 
-        ``node_advertised_url`` is the gate: unset means single node, and then
-        nothing here reads or writes, so the common case is untouched.
+        Unset ``node_advertised_url`` means single node, and nothing here reads or writes.
         """
         if not self.config.node_advertised_url:
             return None
@@ -252,9 +245,8 @@ class ServerState:
     def _claim_stream_ownership(self, stream_id: str, ttl_seconds: float) -> None:
         """Advertise that this node is serving ``stream_id``.
 
-        Best-effort: failing to record a claim costs a redirect that would
-        have been possible, which is the behavior before this existed. It must
-        not fail the materialize request that triggered it.
+        Best-effort: a failed claim only costs a possible redirect and must not fail the
+        materialize request.
         """
         store = self._ownership_store()
         if store is None:
@@ -265,11 +257,10 @@ class ServerState:
             logger.warning("stream_ownership_claim_failed", stream_id=stream_id, exc_info=True)
 
     def _release_stream_ownership(self, stream_id: str) -> None:
-        """Drop the claim when the stream ends. Best-effort for the same reason.
+        """Drop the claim when the stream ends (best-effort).
 
-        A claim that outlives its stream expires on its own, so the cost of a
-        missed release is a redirect to a node that answers 404 -- worse than
-        nothing, better than failing the request that was ending anyway.
+        A claim that outlives its stream expires on its own; until then it redirects to a node
+        that answers 404.
         """
         store = self._ownership_store()
         if store is None:
@@ -310,17 +301,10 @@ def _is_signed_data_plane_request(request: Request) -> bool:
 def _is_public_publication_request(request: Request) -> bool:
     """Return True for the read routes of an explicitly published artifact.
 
-    These self-authenticate the way the signed data-plane routes do: the token
-    in the URL *is* the credential, and it exists only because someone with
-    authority over that artifact deliberately minted it for one version.
-    Without this exemption the auth and tenant middleware would reject them,
-    and the feature would work only where nobody needs it — a published figure
-    is for a reader with no account and no tenant.
-
-    Deliberately narrow. Only GET, and only the two shapes a reader needs: the
-    page tree under ``/p/`` and the machine-readable record. Publishing,
-    revoking and listing stay behind the gate, so no unauthenticated caller can
-    mint a grant, withdraw someone else's, or enumerate what exists.
+    The token in the URL is the credential, minted deliberately for one version, so these
+    bypass the auth and tenant middleware: a published figure is for a reader with no account
+    or tenant. Only GET on the ``/p/`` page tree and the machine-readable record;
+    publishing, revoking and listing stay gated.
     """
     if request.method != "GET":
         return False
@@ -335,22 +319,11 @@ def _is_public_publication_request(request: Request) -> bool:
 
 
 def _is_public_embed_request(request: Request) -> bool:
-    """Return True for a published artifact's embed card.
+    """Return True for a published artifact's embed card, which any origin may frame.
 
-    The default ``frame-ancestors 'self'`` protects the notebook app view,
-    where framing a live session is a real clickjacking surface. An embed card
-    is the opposite case: it exists to be put in someone else's page, and one
-    that only its own origin may frame is not an embed at all.
-
-    Narrow on purpose — only this path, only for a token someone deliberately
-    published, and the card is read-only with no control to hijack.
-
-    Matched on the *shape* of the path, not on an ``/embed`` suffix. The SPA
-    catch-all serves ``index.html`` for any unmatched path, so a suffix test
-    also opened ``/anything/embed`` — and the frontend is hash-routed, so
-    framing ``/x/embed#/notebook/<session>`` from any origin would have handed
-    an attacker the live notebook app. That is the exact surface this
-    middleware exists to close.
+    Matched on the full path shape, not an ``/embed`` suffix: the SPA catch-all serves
+    ``index.html`` for any path and the frontend is hash-routed, so a suffix match would let
+    any origin frame the live notebook app.
     """
     if request.method != "GET":
         return False
@@ -435,14 +408,7 @@ def _identity_build_status(stream_state: StreamState) -> BuildStatusResponse:
 
 
 def require_writes_enabled() -> None:
-    """FastAPI dependency that requires write endpoints to be enabled.
-
-    In service mode (default), write endpoints return 403 with writes_disabled error.
-    In personal mode, write endpoints are enabled.
-
-    Raises:
-        HTTPException: 403 if writes are disabled (service mode)
-    """
+    """FastAPI dependency: 403 ``writes_disabled`` unless writes are enabled (personal mode)."""
     state = get_state()
     if not state.config.writes_enabled:
         raise HTTPException(
@@ -458,24 +424,18 @@ def require_writes_enabled() -> None:
 
 
 def _get_active_scan_count() -> int:
-    """Get authoritative active scan count from the admission limiters.
+    """Get the authoritative active scan count from the per-tenant admission limiters.
 
-    Stream admission acquires the per-tenant limiters from the tenant registry
-    — the global ServerState limiters are never acquired — so the registry is
-    the source of truth for in-flight scans (single-tenant deployments have
-    exactly one, the ``_default`` tenant). Counting the global limiters here
-    would always report 0 and let graceful shutdown drain past live streams.
+    Stream admission only acquires the tenant registry's limiters (single-tenant deployments
+    have one, ``_default``); the global ServerState limiters would always read 0 and let
+    graceful shutdown drain past live streams.
     """
     i_in_use, _, b_in_use, _ = get_tenant_registry().aggregate_limiter_usage()
     return i_in_use + b_in_use
 
 
 def _get_qos_metrics(state: ServerState) -> dict:
-    """QoS tier metrics — delegates to ``state.qos`` (#302 phase 3 extraction).
-
-    Kept as a thin module-level shim so the metrics/health router (which imports
-    it from ``strata.server``) is unchanged by the extraction.
-    """
+    """QoS tier metrics from ``state.qos``; the metrics router imports this shim."""
     return state.qos.qos_metrics()
 
 
@@ -500,12 +460,7 @@ def _get_cache_entry_count(state: ServerState) -> int:
 
 
 def _update_saturation_tracking(state: ServerState) -> None:
-    """Update saturation tracking based on current semaphore state.
-
-    Called periodically (e.g., from health checks) to track how long
-    the server has been at capacity. This is used by /health/ready to
-    detect unhealthy saturation conditions.
-    """
+    """Record when each QoS tier became saturated, for ``/health/ready``."""
     now = time.time()
 
     # Measured on the per-tenant limiters admission acquires. A server with no
@@ -526,15 +481,10 @@ def _update_saturation_tracking(state: ServerState) -> None:
 
 
 def _check_readiness(state: ServerState) -> tuple[bool, dict]:
-    """Check if server is ready to accept new requests.
+    """Check whether the server can accept new requests; returns ``(is_ready, details)``.
 
-    Returns (is_ready, details) where details contains diagnostic info.
-
-    Checks:
-    1. Server not draining (shutting down)
-    2. Has some capacity (not all slots exhausted for too long)
-    3. No stuck scans (scans making no progress for too long)
-    4. Logger queue not jammed (metrics can be written)
+    Not ready when draining, when both QoS tiers stay saturated past the threshold, or when
+    scans are stuck. Dropped logs are reported but do not fail readiness.
     """
     now = time.time()
     checks = {}
@@ -644,17 +594,12 @@ _mcp_app: Starlette | None = None
 
 
 def _init_configured_artifact_store(config: StrataConfig) -> None:
-    """Create the artifact-store singleton using the configured blob backend.
+    """Create the artifact-store singleton using the configured blob and metadata backends.
 
-    ``get_artifact_store`` caches on first call, so doing this at lifespan
-    start means every later ``get_artifact_store(artifact_dir)`` returns the
-    store bound to the operator's chosen backend (S3 / GCS / Azure) rather than
-    the ``LocalBlobStore`` fallback.
-
-    A backend that can't be constructed (missing bucket, absent SDK) is fatal:
-    silently degrading to local disk is what made the misconfiguration
-    invisible in the first place, and it loses every artifact when the pod is
-    replaced. The same reasoning covers the metadata backend below.
+    ``get_artifact_store`` caches on first call, so later calls get the operator's backend
+    rather than the ``LocalBlobStore`` fallback. A backend that cannot be constructed is
+    fatal: silently degrading to local disk hides the misconfiguration and loses every
+    artifact when the pod is replaced.
     """
     from strata.artifact_store import get_artifact_store
 
@@ -694,18 +639,10 @@ def _init_configured_artifact_store(config: StrataConfig) -> None:
 
 
 def _should_warn_unset_signing_secret(config: StrataConfig) -> bool:
-    """Whether pull-model URLs are being signed with a throwaway secret.
+    """Whether pull-model URLs are being signed with a throwaway per-process secret.
 
-    The signing secret is pinned from config when ServerState is built, so
-    signed build URLs survive restarts and match across replicas. Without it the
-    secret is a random per-process value: an executor handed a manifest by one
-    replica gets 403 "Invalid or expired signature" when its callback lands on
-    another, and every in-flight URL dies on restart.
-
-    The pull-model routes (download / upload / finalize) are registered
-    unconditionally, so nothing gates the hazard except the deployment shape.
-    Personal mode is a single loopback process, where a per-process secret is
-    fine; service mode is where restarts and replicas matter.
+    Then a callback landing on another replica gets 403, and every in-flight URL dies on
+    restart. Fine in personal mode (one loopback process); a hazard in service mode.
     """
     return not config.transform_signing_secret and config.deployment_mode == "service"
 
@@ -718,11 +655,8 @@ _FIRST_ARTIFACT_GC_DELAY_SECONDS = 60.0
 async def _artifact_gc_loop(store, interval_seconds: float, policy: dict[str, Any]) -> None:
     """Run ``garbage_collect`` every ``interval_seconds`` until cancelled.
 
-    *policy* is ``StrataConfig.artifact_gc_policy()``. The first pass runs
-    shortly after startup rather than a whole interval in, or a server
-    restarted more often than the interval would never sweep. A pass that
-    raises is logged and the loop carries on: one bad sweep must not turn
-    scheduled collection off for the life of the server.
+    The first pass runs shortly after startup, so a server restarted more often than the
+    interval still sweeps. A failing pass is logged and the loop continues.
     """
     delay = min(interval_seconds, _FIRST_ARTIFACT_GC_DELAY_SECONDS)
     while True:
@@ -1101,8 +1035,7 @@ def _configured_cors_origins() -> list[str]:
 def _origin_is_allowed(request: Request, origin: str) -> bool:
     """Whether *origin* may make cross-origin calls to this server.
 
-    Same-origin is always allowed so the bundled frontend keeps working; the
-    rest come from ``cors_allow_origins`` for separate dev servers.
+    Same-origin is always allowed (bundled frontend); others come from ``cors_allow_origins``.
     """
     host = request.headers.get("host")
     if host and origin in (f"http://{host}", f"https://{host}"):
@@ -1114,20 +1047,10 @@ def _origin_is_allowed(request: Request, origin: str) -> bool:
 async def cors_and_origin_guard(request: Request, call_next):
     """Answer CORS preflights and refuse cross-origin writes.
 
-    This replaces a blanket ``Access-Control-Allow-Origin: *``. Personal mode
-    runs with no auth on loopback, and the browser is on loopback too, so that
-    header let any page the user visited drive the whole notebook API: read
-    ``/v1/notebooks/discover``, open a notebook, add a cell holding arbitrary
-    Python and execute it. Restricting the header stops responses being read
-    and stops anything that needs a preflight.
-
-    Preflights alone are not enough, though. ``POST .../cells/{id}/execute``
-    takes no body (``mode`` is a query parameter), which makes it a CORS
-    *simple request* that a page can fire without any preflight to block. So
-    a disallowed Origin also fails closed on every unsafe method.
-
-    Requests with no ``Origin`` header are untouched: that is the CLI, the MCP
-    server, the SDK and every other non-browser caller.
+    Personal mode has no auth on loopback, so any page the user visits could otherwise drive
+    the notebook API. Preflights are not enough: ``POST .../cells/{id}/execute`` has no
+    body, making it a CORS simple request, so a disallowed Origin fails closed on every
+    unsafe method. Requests without ``Origin`` (CLI, MCP, SDK) are untouched.
     """
     origin = request.headers.get("origin")
     if origin is None:
@@ -1186,14 +1109,9 @@ async def connection_tracking_middleware(request: Request, call_next):
 
 @app.middleware("http")
 async def frame_ancestors_middleware(request: Request, call_next):
-    """Set ``Content-Security-Policy: frame-ancestors`` so operators control
-    which origins may embed a notebook's app view in an ``<iframe>``.
+    """Set ``Content-Security-Policy: frame-ancestors`` from ``embed_frame_ancestors``.
 
-    Default (no ``embed_frame_ancestors`` configured) is ``'self'`` — the app
-    is framable only from its own origin. Listing origins opts into
-    cross-origin embedding (a dashboard/wiki on another host); ``*`` allows any.
-    This also closes the prior gap where no framing header was sent at all, so
-    a stray page could silently iframe Strata.
+    Default ``'self'``; listing origins opts into cross-origin embedding, ``*`` allows any.
     """
     response = await call_next(request)
     if _is_public_embed_request(request):
@@ -1206,21 +1124,11 @@ async def frame_ancestors_middleware(request: Request, call_next):
 
 
 def _retry_after_header(seconds: float | None, fallback: float) -> str:
-    """Render a wait as a ``Retry-After`` value.
+    """Render a wait as a ``Retry-After`` value, rounded up to whole seconds.
 
-    ``Retry-After``'s delta-seconds grammar is whole seconds, so a sub-second
-    wait has to round somewhere, and it has to round *up*. Truncating with
-    ``int()`` emitted ``Retry-After: 0`` -- "retry immediately", the one
-    instruction a throttle must never give -- and not just occasionally: the
-    rate limiter's largest possible wait is one token's worth of refill, which
-    is 0.001s globally, 0.01s per client, 0.02s for materialize and 0.1s for
-    warm. Every configured rate is above 1/s, so *every* rejection truncated to
-    zero. Clients that honour the header literally (urllib3's ``Retry`` with
-    ``respect_retry_after_header``, or a curl loop) then spin, and
-    ``strata-client`` took the header branch over its own exponential backoff.
-    ``streaming/qos.py`` already floors its own ``retry_after`` at 1.
-
-    ``fallback`` applies only when the caller has no computed wait at all.
+    Truncation would emit ``Retry-After: 0`` ("retry immediately") for every rate-limit
+    rejection, since every wait is sub-second, and clients honoring the header would spin.
+    ``fallback`` applies only when the caller has no computed wait.
     """
     return str(max(1, math.ceil(fallback if seconds is None else seconds)))
 
@@ -1276,14 +1184,11 @@ async def rate_limit_middleware(request: Request, call_next):
 
 @app.middleware("http")
 async def tenant_context_middleware(request: Request, call_next):
-    """Extract tenant ID and set up tenant context for multi-tenancy.
+    """Set the request's tenant context from the tenant header (default ``X-Tenant-ID``).
 
-    Tenant identification priority:
-    1. X-Tenant-ID header (simple header-based auth for MVP)
-    2. Default tenant "_default" (backward compatibility)
-
-    Returns 403 if tenant is disabled.
-    Skips tenant setup for health/metrics endpoints.
+    Without multi-tenancy every request gets ``_default``. Missing header falls back to
+    ``_default`` unless required (400); an invalid id is 400, a disabled tenant 403. Health,
+    metrics and self-authenticating routes skip this.
     """
     path = request.url.path
     if (
@@ -1347,15 +1252,11 @@ async def tenant_context_middleware(request: Request, call_next):
 
 @app.middleware("http")
 async def auth_middleware(request: Request, call_next):
-    """Verify trusted proxy and parse principal for authorization.
+    """Verify the trusted proxy and set the principal context.
 
-    When auth_mode="trusted_proxy":
-    1. Verify X-Strata-Proxy-Token matches configured secret
-    2. Parse the principal, tenant and scopes headers (X-Strata-Principal,
-       the configured tenant_header, X-Tenant-ID by default, X-Strata-Scopes)
-    3. Set principal context for downstream use
-
-    Skips auth for health/metrics endpoints.
+    Under ``auth_mode="trusted_proxy"``, checks ``X-Strata-Proxy-Token`` and parses the
+    principal, tenant (configured ``tenant_header``) and scopes headers. Health, metrics and
+    self-authenticating routes skip this.
     """
     state = get_state()
     config = state.config
@@ -1452,10 +1353,9 @@ app.include_router(notebook_projects_router)
 
 @app.exception_handler(NotebookQuiesced)
 async def _notebook_quiesced(_request: Request, exc: NotebookQuiesced) -> JSONResponse:
-    """A write reached a notebook held still for a copy: a conflict, not a fault.
+    """Answer a write to a notebook held still for a copy with 409, not a fault.
 
-    Raised from the writers themselves, so every route that edits a notebook
-    answers the same way without each one checking.
+    The writers raise ``NotebookQuiesced`` themselves, so every editing route answers the same way.
     """
     return JSONResponse(
         status_code=409, content={"detail": {"message": str(exc), "code": exc.code}}
@@ -1478,15 +1378,11 @@ app.include_router(materialize_router)
 
 
 def _mount_mcp_if_enabled() -> None:
-    """Mount the MCP endpoint at ``/mcp`` when configured.
+    """Mount the MCP endpoint at ``/mcp`` when configured (decided once, at import).
 
-    The decision is process-level (env / pyproject), read once at import — the
-    endpoint is not toggled per request. Gated three ways: ``mcp_enabled`` set,
-    a deployment that is either personal or authenticates its callers (service
-    mode without principal auth is rejected earlier by
-    ``validate_mode_coherence``; this is defense in depth), and the ``[mcp]``
-    extra installed (``build_mcp_app`` returns ``None`` otherwise, so the server
-    still boots without the dependency).
+    Requires ``mcp_enabled``, a deployment that is personal or authenticates its callers
+    (defense in depth over ``validate_mode_coherence``), and the ``[mcp]`` extra; without the
+    extra the server still boots.
     """
     global _mcp_app
 
@@ -1555,20 +1451,13 @@ def _get_artifact_store(
     allow_read: bool = False,
     allow_write: bool = False,
 ):
-    """Get the artifact store, raising 403 if not in appropriate mode.
+    """Get the artifact store, raising 403 if the deployment mode does not allow this access.
 
-    Args:
-        allow_server_mode: If True, also allow access when server-mode
-            transforms are enabled (for materialize endpoint).
-        allow_read: If True, permit access in service mode for read-only
-            endpoints. The caller MUST then gate by tenant
-            (``_ensure_artifact_access``) and table ACL
-            (``_authorize_artifact_read``) — reads are shared-cache results, and
-            "result retrieval is ACL-gated" (not blanket-blocked by mode).
-        allow_write: If True, permit access in service mode for write endpoints
-            when ``service_writes_enabled`` (authenticated write-back). The caller
-            MUST then gate by ``_authorize_artifact_write`` (trusted-proxy auth +
-            ``artifacts:write`` scope); writes stamp the caller's tenant/principal.
+    ``allow_server_mode`` also allows it when server-mode transforms are enabled.
+    ``allow_read`` permits service-mode reads; the caller MUST then gate by tenant
+    (``_ensure_artifact_access``) and table ACL (``_authorize_artifact_read``).
+    ``allow_write`` permits service-mode writes when ``service_writes_enabled``; the caller
+    MUST then gate with ``_authorize_artifact_write``.
     """
     from strata.artifact_store import get_artifact_store
 
@@ -1602,11 +1491,10 @@ def _get_artifact_store(
 
 
 def _get_artifact_request_tenant() -> str | None:
-    """Return the tenant filter for direct artifact endpoints.
+    """Return the tenant filter for direct artifact endpoints (``None`` means unfiltered).
 
-    When trusted-proxy auth is enabled, direct artifact reads/writes should be
-    scoped to the caller's tenant unless the caller is an admin. Tenantless
-    artifacts remain visible for backwards compatibility with legacy data.
+    Under trusted-proxy auth, scoped to the caller's tenant unless it has ``admin:*``.
+    Tenantless artifacts stay visible to everyone (see ``_ensure_artifact_access``).
     """
     state = get_state()
     if not state.config.principal_auth_enabled:
@@ -1644,19 +1532,10 @@ def _ensure_artifact_access(
 
 
 def _validate_transform_allowed(executor_ref: str, principal=None):
-    """Validate transform is allowed in server mode and return its definition.
+    """Validate a transform against the server-mode registry and return its definition.
 
-    In personal mode, all transforms are allowed (returns None).
-    In server mode with transforms enabled, validates against registry.
-
-    Args:
-        executor_ref: Executor reference (e.g., "local://duckdb_sql@v1")
-
-    Returns:
-        TransformDefinition if in server mode and found, None in personal mode
-
-    Raises:
-        HTTPException: 403 if transform is not allowed in server mode
+    Returns None in personal mode, where every transform is allowed; raises 403 when the
+    transform is not allowed in server mode.
     """
     from strata.transforms.registry import get_transform_registry
 
@@ -1733,15 +1612,11 @@ _resolve_input_version = resolve_input_version
 
 
 def _authorize_artifact_read(artifact) -> None:
-    """ACL-gate reading an artifact's bytes/metadata under trusted-proxy auth.
+    """ACL-gate reading an artifact's bytes or metadata under trusted-proxy auth.
 
-    The artifact cache is shared across principals, and "result retrieval is
-    ACL-gated": a principal denied a table must not read it back via a cached
-    scan result. Re-checks the table ACL for each *table* input in the
-    artifact's provenance — the table identity is parsed straight from the
-    stored transform_spec (no Iceberg I/O), mirroring the table-input check the
-    build path applies in `_resolve_input_version`. No-op without trusted-proxy
-    auth (tenant scoping via `_ensure_artifact_access` still applies).
+    The cache is shared, so a principal denied a table must not read it back through a cached
+    result: re-checks the table ACL for each table input in the stored transform spec (no
+    Iceberg I/O). No-op without trusted-proxy auth; tenant scoping still applies.
     """
     state = get_state()
     if not state.config.principal_auth_enabled:
@@ -1765,10 +1640,8 @@ def _authorize_artifact_read(artifact) -> None:
 def _table_identity_from_uri(table_uri: str):
     """Resolve a table URI to its canonical identity without planning.
 
-    Lets the ACL run before any manifest work, so a denied caller learns
-    nothing about the table's existence or size (and cannot force unbounded
-    Iceberg reads). Returns ``None`` when the URI does not parse as a table
-    id, in which case the caller falls through to the post-plan check.
+    Lets the ACL run before manifest work, so a denied caller learns nothing about the table.
+    ``None`` when the URI does not parse; the caller then falls back to the post-plan check.
     """
     from strata.iceberg import table_identity_for
 
@@ -1785,11 +1658,9 @@ def _table_identity_from_uri(table_uri: str):
 def _authorize_artifact_write() -> None:
     """Gate a write endpoint (put / set_name / set_alias / tags).
 
-    Personal mode: unrestricted (existing behavior). Service mode (only reachable
-    with ``service_writes_enabled``, enforced by ``_get_artifact_store(allow_write
-    =True)``): require trusted-proxy auth and the ``artifacts:write`` scope. The
-    endpoint stamps the caller's tenant + principal, so the write lands in the
-    caller's team namespace and can't target another tenant.
+    Unrestricted in personal mode. In service mode, requires trusted-proxy auth and the
+    ``artifacts:write`` scope; the write is stamped with the caller's tenant and principal, so
+    it cannot target another tenant.
     """
     state = get_state()
     if state.config.writes_enabled:
@@ -1813,22 +1684,10 @@ def _authorize_artifact_write() -> None:
 
 @app.post("/v1/artifacts/materialize", response_model=MaterializeResponse)
 async def materialize_artifact(request: MaterializeRequest):
-    """Materialize a computed artifact.
+    """Materialize a computed artifact: the cached one on a provenance hit, else a build spec.
 
-    This endpoint supports two modes:
-    1. Personal mode: Returns build_spec for client-side execution
-    2. Server mode (transforms enabled): Validates transform against allowlist
-       and returns build_spec for server-orchestrated execution
-
-    Flow:
-    1. Validate transform is allowed (server mode only)
-    2. Resolve input versions (snapshot IDs for tables, artifact versions for artifacts)
-    3. Compute provenance hash from resolved versions + transform
-    4. If cached, return artifact URI (hit=True)
-    5. If not cached, create building artifact with input_versions and return build spec
-
-    Returns:
-        MaterializeResponse with hit status and artifact URI or build spec
+    In server mode the transform must be on the allowlist. On a miss, a ``building`` artifact
+    is created with the resolved input versions.
     """
     import uuid
 
@@ -2010,12 +1869,10 @@ async def materialize_artifact(request: MaterializeRequest):
 
 
 def _require_registry_approver():
-    """Authorize a registry approval decision; return the principal.
+    """Authorize a protected-alias approval decision and return the principal.
 
-    Approving/rejecting a protected-alias change is a governance action.
-    Under trusted-proxy auth it requires the ``admin:registry`` scope
-    (``admin:*`` satisfies it). Personal mode (no principal) is the single
-    operator and is allowed.
+    Under trusted-proxy auth requires ``admin:registry`` (``admin:*`` satisfies it); personal
+    mode is the single operator and is allowed.
     """
     from strata.auth import get_principal
 
@@ -2035,15 +1892,10 @@ _ACTIVE_BUILD_STATES = ("pending", "building", "running")
 
 
 def _resolve_artifact_uri(uri: str) -> tuple[str, int] | None:
-    """Resolve URI to artifact (id, version).
+    """Resolve a Strata URI to ``(artifact_id, version)``, or None if not a Strata URI.
 
-    Handles:
-        strata://artifact/{id}@v={version} -> (id, version)
-        strata://artifact/{id} -> (id, latest_version)
-        strata://name/{name} -> (resolved_id, resolved_version)
-
-    Returns:
-        Tuple of (artifact_id, version) or None if not a Strata URI
+    Accepts ``strata://artifact/{id}@v={version}``, ``strata://artifact/{id}`` (latest) and
+    ``strata://name/{name}``.
     """
     from strata.artifact_store import get_artifact_store
 
@@ -2082,28 +1934,10 @@ def _resolve_artifact_uri(uri: str) -> tuple[str, int] | None:
 
 @app.post("/v1/materialize", response_model=MaterializeResponse)
 async def unified_materialize(request: MaterializeRequest):
-    """Unified endpoint for all data access (replaces /v1/scan and /v1/artifacts/materialize).
+    """Materialize data: the single entry point, with table scans expressed as ``scan@v1``.
 
-    This is the single entry point for materializing data in Strata.
-    Scanning an Iceberg table is expressed as a materialize with scan@v1.
-
-    Modes:
-    - stream (default): Data streams immediately while artifact builds in parallel
-    - artifact: Client polls /v1/builds/{build_id} then fetches when ready
-
-    Both modes create and persist artifacts. The mode only affects how
-    the client receives data, not whether it's cached.
-
-    For scan@v1 transform:
-    - Reads from exactly one Iceberg table input
-    - Applies optional column projection and row filtering
-    - Executed internally by Strata (no external executor needed)
-
-    For other transforms:
-    - Delegates to the existing materialize flow
-
-    Returns:
-        MaterializeResponse with hit status and artifact/stream URLs
+    ``stream`` mode (default) streams data while the artifact builds; ``artifact`` mode
+    returns a build to poll at ``/v1/builds/{build_id}``. Both persist the artifact.
     """
 
     state = get_state()
@@ -2124,20 +1958,10 @@ async def unified_materialize(request: MaterializeRequest):
 async def _handle_identity_materialize(
     request: MaterializeRequest,
 ) -> MaterializeResponse | JSONResponse:
-    """Handle scan@v1 transform (internal execution).
+    """Handle ``scan@v1`` in-process: plan one table scan, return a cache hit or start a stream.
 
-    This is the fast path for table scans. The identity transform reads
-    from an Iceberg table with optional projection/filtering and returns
-    the data unchanged.
-
-    Flow:
-    1. Validate exactly one table input
-    2. Parse identity params (columns, filters, snapshot_id)
-    3. Plan the scan using existing ReadPlanner
-    4. Compute provenance hash
-    5. Check artifact cache (cache hit -> return immediately)
-    6. Cache miss -> create artifact record + stream state
-    7. Return stream_url or build_id based on mode
+    On a miss creates the artifact record and stream state, then returns ``stream_url`` or
+    ``build_id`` by mode.
     """
     import uuid
 
@@ -2409,21 +2233,15 @@ async def _handle_identity_materialize(
 
 
 async def _handle_transform_materialize(request: MaterializeRequest) -> MaterializeResponse:
-    """Handle non-identity transforms (external execution).
-
-    Delegates to the existing /v1/artifacts/materialize flow.
-    """
+    """Handle non-scan transforms via the ``/v1/artifacts/materialize`` flow."""
     return await materialize_artifact(request)
 
 
 def _resolve_stream_owner(state: ServerState, stream_id: str) -> str | None:
     """URL of another node serving ``stream_id``, or None.
 
-    Returns None whenever a redirect would be wrong or impossible: this is a
-    single-node deployment, there is no claim, the claim expired, or this node
-    holds it (in which case the stream really is gone). A lookup failure is
-    also None -- a database hiccup should degrade to today's 404 rather than
-    turn a missing stream into a 500.
+    None when single-node, unclaimed, expired, claimed by this node, or on a lookup failure,
+    which degrades to 404 rather than 500.
     """
     node_url = state.config.node_advertised_url
     if not node_url:
@@ -2443,17 +2261,9 @@ def _resolve_stream_owner(state: ServerState, stream_id: str) -> str | None:
 
 @app.get("/v1/streams/{stream_id}")
 async def get_stream(stream_id: str, request: Request):
-    """Stream Arrow IPC data for a materialize request.
+    """Stream Arrow IPC data for a materialize request while the artifact builds.
 
-    This endpoint handles streaming mode for unified materialize.
-    Data is streamed immediately while the artifact is built in parallel.
-
-    Returns:
-        StreamingResponse with Arrow IPC data
-
-    Error codes:
-        404: Stream not found
-        429: Server at capacity (QoS rate limiting)
+    404 when the stream is not found; 429 when the server is at capacity.
     """
     state = get_state()
 
@@ -2624,18 +2434,10 @@ async def get_stream(stream_id: str, request: Request):
 
 
 def _mount_frontend(application: FastAPI) -> None:
-    """Mount the frontend SPA if the dist directory exists.
+    """Mount the frontend SPA from the first dist directory that exists.
 
-    Lookup order:
-    1. ``src/strata/_frontend/`` — bundled into the wheel by the
-       release workflow (copy of ``frontend/dist`` made before
-       ``uv build``). This is the only path that works for users
-       who installed via ``pip install strata-notebook``.
-    2. ``<repo_root>/frontend/dist/`` — editable / source-tree
-       installs. ``__file__`` is ``<repo>/src/strata/server.py``,
-       so three parents up is the repo root.
-    3. ``<cwd>/frontend/dist/`` — last-resort fallback for
-       deployments that drop the dist next to the working dir.
+    Tries ``src/strata/_frontend/`` (bundled into the wheel at release), then
+    ``<repo>/frontend/dist/`` (source installs), then ``<cwd>/frontend/dist/``.
     """
     candidates = [
         Path(__file__).resolve().parent / "_frontend",
@@ -2692,9 +2494,9 @@ def _build_server_arg_parser():
 
 
 def _apply_server_cli_overrides(args) -> None:
-    """Thread CLI flags into the environment so both this process and the app's
-    config load (in the lifespan) pick them up. The flag wins over an existing
-    ``STRATA_NOTEBOOK_STORAGE_DIR`` — it's the more explicit signal.
+    """Export CLI flags as env vars so this process and the lifespan config load see them.
+
+    The flag wins over an existing ``STRATA_NOTEBOOK_STORAGE_DIR``.
     """
     from pathlib import Path
 

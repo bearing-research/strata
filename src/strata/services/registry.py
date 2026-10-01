@@ -1,10 +1,6 @@
 """Registry read services (the dashboard summary aggregation).
 
-Most registry routes are thin store delegations and stay in the handler. The
-``summary`` aggregation is the one with real shaping logic — alias grouping and
-hiding internal (``nb_``) tags from the user-facing table — so it lives here and
-is unit-testable with a fake store. Stateless; the resolved tenant filter is
-passed in by the handler.
+Stateless; the handler passes in the resolved tenant filter.
 """
 
 from __future__ import annotations
@@ -19,11 +15,10 @@ class RegistryService:
     """Stateless registry read aggregation."""
 
     def summary(self, store: ArtifactStore, *, tenant: str | None) -> list[dict]:
-        """Rows for the dashboard names table: each name with its aliases
-        (``alias -> version``), current version, that version's tags, and a URI.
+        """Rows for the dashboard names table: aliases, current version, tags and URI per name.
 
-        ``tenant`` is the already-resolved scope (``None`` = personal / ``admin:*``
-        sees all). Internal ``nb_*`` stamps are hidden from the returned tags.
+        ``tenant`` is the resolved scope (``None`` sees all). Internal ``nb_*`` tags
+        are hidden.
         """
         aliases_by_name: dict[str, dict[str, int]] = {}
         for a in store.list_aliases(None, tenant=tenant):
@@ -48,17 +43,11 @@ class RegistryService:
     def artifacts_by_tag(
         self, store: ArtifactStore, key: str, value: str | None = None, *, tenant: str | None
     ) -> list[dict]:
-        """Ready artifacts carrying ``key`` (optionally ``= value``).
+        """Ready artifacts carrying tag ``key`` (optionally ``= value``).
 
-        What the per-cell strip shows, as a store read rather than a route
-        body — the strip's data can come from this store or from the team's,
-        and the two have to describe an artifact the same way.
-
-        Omitting ``value`` returns every artifact with that key, each row
-        naming its own; the strip asks that way so a whole notebook costs one
-        query rather than one per cell. The matched tag is reported as
-        ``tag_value`` and dropped from ``tags``: ``nb_cell`` is how the strip
-        found the artifact, not something to show back to the reader.
+        With ``value`` omitted, every artifact with the key is returned, so a whole
+        notebook costs one query. The matched tag is reported as ``tag_value`` and
+        dropped from ``tags``.
         """
         if value is None:
             found = store.list_artifacts_with_tag_key(key, tenant=tenant)

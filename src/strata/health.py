@@ -1,11 +1,7 @@
-"""Health check utilities for dependency status monitoring.
+"""Dependency health checks for ``/health``.
 
-Provides comprehensive health checks for all server dependencies:
-- Disk cache (accessibility, space)
-- Metadata store (SQLite connectivity)
-- S3 connectivity (if configured)
-- Memory pressure
-- Thread pool saturation
+Disk cache, metadata store, Arrow memory, thread pools, rate limiter and cache
+evictions. A check never raises; a failure is reported as ``unhealthy``.
 """
 
 import shutil
@@ -23,11 +19,7 @@ from strata.json_types import JsonObject
 
 
 def _package_version() -> str:
-    """The installed package version, for the version field of /health.
-
-    This was hardcoded to "0.2.0" and stayed there through three releases, so
-    an operator watching a rollout saw the same string before and after it.
-    """
+    """Return the installed ``strata-notebook`` version, or ``"unknown"`` from a source tree."""
     try:
         return metadata_version("strata-notebook")
     except PackageNotFoundError:
@@ -429,7 +421,7 @@ def run_health_checks(
     planning_executor,
     fetch_executor,
 ) -> HealthReport:
-    """Run all health checks and return a comprehensive report."""
+    """Run every check; the overall status is the worst individual one."""
     checks = [
         check_disk_cache(cache_dir, max_cache_size_bytes),
         check_metadata_store(cache_dir),

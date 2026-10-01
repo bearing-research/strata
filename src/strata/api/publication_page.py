@@ -1,15 +1,8 @@
 """Server-rendered page for a published artifact.
 
-Self-contained HTML with no external requests: a page meant to outlive the
-work it documents should not depend on a CDN still being there, and a referee
-opening a link from a paper should not be reporting requests to third parties
-to read it.
-
-Everything interpolated here is attacker-controlled in the sense that matters —
-cell source, titles, variable names and table URIs are all written by whoever
-used the notebook, and this page is served unauthenticated. Every value goes
-through :func:`html.escape`; there is no path that writes a caller-supplied
-string into the document unescaped.
+Self-contained HTML with no external requests, so it outlives any CDN and leaks
+nothing to third parties. The page is served unauthenticated and every interpolated
+value is user-written: all of it must go through :func:`html.escape`.
 """
 
 from __future__ import annotations
@@ -69,11 +62,9 @@ _ID_LINKS = {
 
 
 def _byline(publication) -> str:
-    """ " by A, B and C", or the grant-maker when no authors were declared.
+    """Return ``" by A, B and C"`` in declared order, or the publisher when no authors.
 
-    Author order is meaningful, so it is preserved rather than sorted, and an
-    ORCID becomes a link because that is the only form in which a name on a
-    page disambiguates one researcher from another.
+    An ORCID becomes a link, since that is what disambiguates a researcher.
     """
     if not publication.authors:
         return f" by {escape(publication.published_by)}" if publication.published_by else ""
@@ -96,12 +87,7 @@ def _byline(publication) -> str:
 
 
 def _citation_line(publication) -> str:
-    """The identifiers a reader cites this by, as links they can follow.
-
-    Empty when there are none: a citation line saying nothing is worse than no
-    citation line, because a reader reads it as "there is no DOI for this" when
-    the truth is that nobody has recorded one yet.
-    """
+    """Render the "Cite as" line from the external ids, or '' when none are recorded."""
     if not publication.external_ids:
         return ""
     links = []
@@ -152,12 +138,10 @@ def _artifact_label(node) -> str:
 
 
 def _external_inputs(fetches, lineage) -> str:
-    """Bytes a step read from a URL, by URL, digest and when the step ran.
+    """Render the URLs steps read from, with digest and the reading step's time.
 
-    The URL is printed, never linked: it comes from the stored record, and a
-    record is not trusted to hold only ``https``. The time is the reading
-    step's, because the check before a run is what ties these bytes to that
-    URL at that moment.
+    The URL is printed, never linked: a stored record is not trusted to hold only
+    ``https``.
     """
     by_uri = {node.uri: node for node in lineage.nodes}
     parts = [
@@ -206,12 +190,9 @@ def render_publication(
 ) -> str:
     """Render the page for one published artifact.
 
-    ``bundle_filename`` switches it from *hosted* to *archival*: the same
-    document, but pointing at a file sitting next to it rather than at routes
-    on a server. That is the only difference between the two, and keeping it to
-    one branch is deliberate — a bundle that drifted from the live page would
-    make the archived copy a second, less trustworthy account of the same
-    result.
+    ``bundle_filename`` switches it from hosted to archival: the same document,
+    pointing at a sibling file instead of server routes. Keep that the only
+    difference so the archive cannot drift from the live page.
     """
     title = publication.title or f"{artifact.id}@v={artifact.version}"
 
@@ -370,12 +351,7 @@ def render_publication(
 
 
 def content_type_of(artifact) -> str:
-    """The stored ``content_type`` param, or '' when the spec says nothing.
-
-    Shared by the hosted page and the archival bundle. Two copies decided the
-    bundle's filename and the page's "Content type" row independently, which is
-    the same drift ``build_record`` exists to prevent.
-    """
+    """Return the stored ``content_type`` param, or '' when the spec says nothing."""
     import json
 
     if not artifact.transform_spec:
@@ -421,23 +397,11 @@ a.card:hover { border-color:var(--accent); }
 
 
 def render_embed(*, publication, artifact, lineage, image_src: str | None, page_url: str) -> str:
-    """A compact card for an iframe on someone else's page.
+    """Render a compact card for an iframe on someone else's page.
 
-    Not a smaller copy of the full page. An embed lives in a post or a wiki
-    where the surrounding text is doing the explaining, so it carries the
-    result, what it is, and an honest one-line summary of the chain — then
-    links out. Reproducing the claim language in a 300px card would either
-    crowd out the figure or, worse, abbreviate the caveats into the badge this
-    feature deliberately does not have.
-
-    The whole card is the link, and it opens the full page: whatever a reader
-    decides on the strength of a figure in someone else's blog, the provenance
-    is one click away rather than paraphrased here.
-
-    The figure is height-capped rather than left to its natural size. A square
-    plot at full width is taller than the frame an oEmbed consumer reserves,
-    which pushed the title and the link to the provenance below the fold — an
-    embed that is only an image, which is the one thing it must not be.
+    The result, title and a one-line chain summary; the whole card links to the
+    full page rather than abbreviating its caveats. The figure is height-capped so
+    the title and link stay inside an oEmbed frame.
     """
     # Every non-root node, matching the full page's ancestor list (table inputs included).
     root = next((node for node in lineage.nodes if node.artifact_id == artifact.id), None)
@@ -470,17 +434,10 @@ def render_embed(*, publication, artifact, lineage, image_src: str | None, page_
 def build_record(
     *, publication, artifact, lineage, content_type: str, archived: bool = False
 ) -> dict:
-    """The machine-readable account behind the page.
+    """Build the machine-readable record behind the page and the bundle manifest.
 
-    Shared by the hosted JSON route and the archival bundle's manifest so the
-    two cannot drift. A bundle that described a result differently from the
-    live page would be a second, quieter account of the same thing — exactly
-    what a reader checking a citation should never have to reconcile.
-
-    The *event* block is the one part that legitimately differs. Archiving is
-    not publishing — no link is minted and nothing is served — so a bundle
-    reporting a ``published_at`` would be dating an event that never happened,
-    to a machine consumer of a deposit that has no way to know better.
+    Only the event block differs when ``archived``: an archive mints no link, so it
+    reports ``archived_at`` rather than ``published_at``.
     """
     event = (
         {

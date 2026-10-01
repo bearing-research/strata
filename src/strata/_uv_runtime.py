@@ -1,14 +1,8 @@
-"""Strata is only supported when launched from a uv-managed Python env.
+"""Guard that Strata runs inside a uv-managed Python env.
 
-The notebook subsystem shells out to ``uv`` to manage per-notebook venvs
-(see ``strata.notebook.env_backend.UvBackend``), and the rest of the
-project's dev workflow assumes uv as the install path. We refuse to
-start outside a uv-managed runtime rather than fail later with a
-confusing subprocess error.
-
-Detection looks at ``<sys.prefix>/pyvenv.cfg`` for the ``uv = <version>``
-line that uv writes when it creates a venv. ``uv run`` and ``uvx`` both
-produce envs with this marker.
+Notebooks shell out to ``uv`` for per-notebook venvs, so we refuse to start
+elsewhere rather than fail later with a confusing subprocess error. Detection
+reads the ``uv = <version>`` line uv writes into ``<sys.prefix>/pyvenv.cfg``.
 """
 
 from __future__ import annotations

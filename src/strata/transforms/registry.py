@@ -1,15 +1,8 @@
-"""Transform registry for server-mode execution.
+"""Transform registry: the allowlist of transforms that may run in service mode.
 
-The transform registry is an allowlist of approved transforms that can be
-executed in server mode. Each transform definition specifies:
-- How to identify the transform (ref pattern matching)
-- Where to execute it (executor URL)
-- Resource limits (timeout, max output size)
-
-In service mode, only registered transforms can be materialized.
-In personal mode, the registry is bypassed (client executes locally).
-
-Example configuration in pyproject.toml:
+Each definition matches transform refs (glob, e.g. ``pandas_script@*``) and gives the
+executor URL and resource limits. Personal mode bypasses the allowlist. Configured in
+pyproject.toml:
 
     [tool.strata.transforms]
     enabled = true
@@ -19,12 +12,6 @@ Example configuration in pyproject.toml:
     executor_url = "http://executor:8080/execute"
     timeout_seconds = 300
     max_output_bytes = 1073741824  # 1 GB
-
-    [[tool.strata.transforms.registry]]
-    ref = "pandas_script@*"  # Wildcard version matching
-    executor_url = "http://python-executor:8080/execute"
-    timeout_seconds = 600
-    max_output_bytes = 536870912  # 512 MB
 """
 
 from __future__ import annotations
@@ -42,18 +29,10 @@ logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class TransformDefinition:
-    """Definition of an approved transform.
+    """An approved transform: a glob ``ref`` pattern, its executor URL, and limits.
 
-    Attributes:
-        ref: Transform reference pattern (e.g., "duckdb_sql@v1" or "pandas_*@*")
-            Supports glob-style wildcards for flexible matching.
-        executor_url: HTTP URL for the executor endpoint.
-            The executor receives input streams and returns output stream.
-        timeout_seconds: Maximum execution time in seconds.
-        max_output_bytes: Maximum output size in bytes (0 = unlimited).
-        max_input_bytes: Maximum total input size in bytes (0 = unlimited).
-        requires_scope: Optional scope required to use this transform.
-            If set, the principal must have this scope to materialize.
+    Byte limits of 0 mean unlimited. When ``requires_scope`` is set, the principal must hold
+    that scope to materialize.
     """
 
     ref: str
@@ -64,14 +43,7 @@ class TransformDefinition:
     requires_scope: str | None = None
 
     def matches(self, executor_ref: str) -> bool:
-        """Check if this definition matches an executor reference.
-
-        Args:
-            executor_ref: Executor reference to match (e.g., "duckdb_sql@v1")
-
-        Returns:
-            True if this definition matches the reference
-        """
+        """Whether *executor_ref* matches ``ref``, ignoring any scheme (``local://``)."""
         # Strip a scheme: "local://duckdb_sql@v1" -> "duckdb_sql@v1".
         if "://" in executor_ref:
             executor_ref = executor_ref.split("://", 1)[1]
@@ -81,27 +53,14 @@ class TransformDefinition:
 
 @dataclass
 class TransformRegistry:
-    """Registry of approved transforms for server-mode execution.
-
-    The registry acts as an allowlist - only transforms with matching
-    definitions can be executed in server mode.
-
-    Thread-safe: all operations are read-only after initialization.
-    """
+    """Allowlist of approved transforms; thread-safe because it is read-only after init."""
 
     enabled: bool = False
 
     definitions: list[TransformDefinition] = field(default_factory=list)
 
     def get(self, executor_ref: str) -> TransformDefinition | None:
-        """Look up a transform definition by executor reference.
-
-        Args:
-            executor_ref: Executor reference (e.g., "local://duckdb_sql@v1")
-
-        Returns:
-            Matching TransformDefinition, or None if not found
-        """
+        """Return the first definition matching *executor_ref*; None when unmatched or disabled."""
         if not self.enabled:
             return None
 
@@ -112,27 +71,12 @@ class TransformRegistry:
         return None
 
     def is_allowed(self, executor_ref: str) -> bool:
-        """Check if a transform is allowed.
-
-        Args:
-            executor_ref: Executor reference to check
-
-        Returns:
-            True if transform is registered and allowed
-        """
+        """Whether *executor_ref* is registered and the registry is enabled."""
         return self.get(executor_ref) is not None
 
     @classmethod
     def create_embedded_registry(cls) -> TransformRegistry:
-        """Create a registry with default embedded executors.
-
-        This is used for local deployment where no external executor
-        services are configured. Common transforms like duckdb_sql@v1
-        run directly in the server process.
-
-        Returns:
-            TransformRegistry with embedded executor definitions
-        """
+        """Create an enabled registry of in-process transforms (``duckdb_sql@v1``)."""
         # Transforms that can run in-process (no external HTTP calls).
         embedded_transforms = ["duckdb_sql@v1"]
 
@@ -153,29 +97,9 @@ class TransformRegistry:
 
     @classmethod
     def from_config(cls, config: dict, embedded_mode: bool = True) -> TransformRegistry:
-        """Create registry from configuration dictionary.
+        """Create a registry from the ``[tool.strata.transforms]`` dict (``enabled``, ``registry``).
 
-        Expected format (from pyproject.toml [tool.strata.transforms]):
-            {
-                "enabled": true,
-                "registry": [
-                    {
-                        "ref": "duckdb_sql@v1",
-                        "executor_url": "http://executor:8080/execute",
-                        "timeout_seconds": 300,
-                        "max_output_bytes": 1073741824
-                    },
-                    ...
-                ]
-            }
-
-        Args:
-            config: Configuration dictionary
-            embedded_mode: If True and no config provided, enable embedded
-                           executors for common transforms (default for local deployment)
-
-        Returns:
-            Configured TransformRegistry
+        An empty config gives the embedded registry when ``embedded_mode``, else a disabled one.
         """
         if not config:
             if embedded_mode:
@@ -208,11 +132,7 @@ _registry: TransformRegistry | None = None
 
 
 def get_transform_registry() -> TransformRegistry:
-    """Get the transform registry singleton.
-
-    Returns:
-        TransformRegistry instance (may be disabled if not configured)
-    """
+    """Get the transform registry singleton (disabled if not configured)."""
     global _registry
     if _registry is None:
         _registry = TransformRegistry(enabled=False, definitions=[])
@@ -220,11 +140,7 @@ def get_transform_registry() -> TransformRegistry:
 
 
 def set_transform_registry(registry: TransformRegistry) -> None:
-    """Set the transform registry singleton.
-
-    Args:
-        registry: TransformRegistry to use
-    """
+    """Set the transform registry singleton."""
     global _registry
     _registry = registry
 

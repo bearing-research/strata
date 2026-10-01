@@ -1,9 +1,6 @@
-"""Tenant types and request-scoped context for multi-tenancy.
+"""Tenant config, per-tenant runtime state, id validation and request-scoped tenant context.
 
-Provides :class:`TenantConfig` (per-tenant QoS / rate / size limits and feature
-flags), :class:`TenantQuotas` (per-tenant runtime state and metrics), tenant-id
-validation, and the request-scoped tenant context accessors. ``DEFAULT_TENANT_ID``
-is the fallback for single-tenant deployments.
+``DEFAULT_TENANT_ID`` is the fallback for single-tenant deployments.
 """
 
 from __future__ import annotations
@@ -31,22 +28,9 @@ TENANT_ID_PATTERN = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_-]*$")
 
 
 def validate_tenant_id(tenant_id: str) -> tuple[bool, str | None]:
-    """Validate a tenant id's format.
+    """Validate a tenant id: 1-64 chars, alphanumeric first, then alphanumerics, ``_`` and ``-``.
 
-    A valid id is 1–64 characters, starts with an alphanumeric, and otherwise
-    contains only alphanumerics, underscores, and hyphens (e.g. ``"acme-corp"``,
-    ``"tenant_123"``, ``"MyTenant"``). Empty, over-length, leading ``_``/``-``,
-    or special characters are rejected.
-
-    Parameters
-    ----------
-    tenant_id : str
-        The candidate tenant id.
-
-    Returns
-    -------
-    tuple of (bool, str or None)
-        ``(is_valid, error_message)``; the message is ``None`` when valid.
+    Returns ``(is_valid, error_message)``; the message is ``None`` when valid.
     """
     if not tenant_id:
         return False, "Tenant ID cannot be empty"
@@ -67,23 +51,8 @@ def validate_tenant_id(tenant_id: str) -> tuple[bool, str | None]:
 class TenantConfig:
     """Per-tenant configuration and limits.
 
-    Loaded from the tenant registry on startup or from external config. Every
-    optional field defaults to ``None``, meaning "use the global default".
-
-    Attributes
-    ----------
-    tenant_id : str
-        Tenant this config applies to.
-    interactive_slots, bulk_slots : int or None
-        QoS slot quotas; ``None`` uses the global default.
-    per_client_interactive, per_client_bulk : int or None
-        Per-client QoS limits; ``None`` uses the global default.
-    requests_per_second, burst : float or None
-        Rate-limit quota; ``None`` uses the global default.
-    max_cache_size_bytes, max_response_bytes : int or None
-        Size limits; ``None`` uses the global default.
-    enabled : bool
-        When ``False``, the tenant is disabled without being deleted.
+    Every optional limit defaults to ``None``, meaning "use the global default".
+    ``enabled=False`` disables the tenant without deleting it.
     """
 
     tenant_id: str
@@ -122,23 +91,8 @@ class TenantConfig:
 class TenantQuotas:
     """Per-tenant runtime state and aggregate metrics.
 
-    Holds the lazily-created QoS limiters and rate bucket plus running metrics.
-    Created on a tenant's first request and LRU-evictable via ``last_access``.
-
-    Attributes
-    ----------
-    tenant_id : str
-        Tenant this state belongs to.
-    interactive_limiter, bulk_limiter : ResizableLimiter or None
-        QoS limiters, created lazily by the server.
-    rate_bucket : TokenBucket or None
-        Rate-limiter bucket, created lazily.
-    total_scans, cache_hits, cache_misses : int
-        Running request counters.
-    bytes_from_cache, bytes_from_storage, rows_returned : int
-        Running data-volume counters.
-    last_access : float
-        Unix timestamp of the most recent access, used for LRU eviction.
+    Created on a tenant's first request; limiters and rate bucket are created
+    lazily by the server. ``last_access`` drives LRU eviction.
     """
 
     tenant_id: str
@@ -168,17 +122,9 @@ class TenantQuotas:
         self.last_access = time.time()
 
     def to_dict(self) -> dict[str, Any]:
-        """Return the API-facing metrics projection.
+        """Return the API-facing metrics: counters plus a derived ``cache_hit_rate``.
 
-        A curated subset — the runtime limiters / rate bucket and ``last_access``
-        are omitted, and a derived ``cache_hit_rate`` is added. The rate is
-        emitted at full precision; rounding for display is the consumer's
-        concern.
-
-        Returns
-        -------
-        dict
-            Tenant id, request/volume counters, and ``cache_hit_rate``.
+        Limiters, rate bucket and ``last_access`` are omitted; the rate is unrounded.
         """
         total_requests = self.cache_hits + self.cache_misses
         return {
@@ -194,45 +140,20 @@ class TenantQuotas:
 
 
 def get_tenant_id() -> str:
-    """Return the current request's tenant id, or ``DEFAULT_TENANT_ID``.
-
-    Reads the value set by the tenant middleware; falls back to
-    ``DEFAULT_TENANT_ID`` when no tenant context is set (single-tenant mode).
-
-    Returns
-    -------
-    str
-        The active tenant id.
-    """
+    """Return the current request's tenant id, or ``DEFAULT_TENANT_ID`` when none is set."""
     return _tenant_context.get() or DEFAULT_TENANT_ID
 
 
 def set_tenant_id(tenant_id: str) -> contextvars.Token:
-    """Set the tenant id in the request context.
+    """Bind the tenant id for the current request context.
 
-    Called by the tenant middleware at the start of each request.
-
-    Parameters
-    ----------
-    tenant_id : str
-        Tenant id to bind to the current context.
-
-    Returns
-    -------
-    contextvars.Token
-        Token for restoring the previous context via :func:`reset_tenant_id`.
+    Returns the ``contextvars.Token`` for :func:`reset_tenant_id`.
     """
     return _tenant_context.set(tenant_id)
 
 
 def reset_tenant_id(token: contextvars.Token) -> None:
-    """Restore the tenant context to its prior value.
-
-    Parameters
-    ----------
-    token : contextvars.Token
-        The token returned by :func:`set_tenant_id`.
-    """
+    """Restore the tenant context to its value before :func:`set_tenant_id`."""
     _tenant_context.reset(token)
 
 

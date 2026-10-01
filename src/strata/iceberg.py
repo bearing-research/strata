@@ -40,9 +40,8 @@ _NAMED = re.compile(r"^([A-Za-z][A-Za-z0-9_-]*):(?!//)(.+)$")
 def named_catalog(table_uri: str, config: StrataConfig) -> tuple[str | None, str]:
     """Split ``<name>:<namespace>.<table>`` into the catalog name and table id.
 
-    ``(None, table_uri)`` for anything else: a URI with a ``#`` names a
-    warehouse, and a name that is not a configured catalog is not one, so a
-    Windows path or a scheme is never taken for a catalog.
+    Returns ``(None, table_uri)`` unless ``<name>`` is a configured catalog and the
+    URI has no ``#``, so a Windows path or a scheme is never taken for a catalog.
     """
     if "#" in table_uri:
         return None, table_uri
@@ -53,11 +52,10 @@ def named_catalog(table_uri: str, config: StrataConfig) -> tuple[str | None, str
 
 
 def table_identity_for(table_uri: str, config: StrataConfig) -> TableIdentity:
-    """The canonical identity of *table_uri*, a named catalog's table included.
+    """Return the canonical identity of *table_uri*, a named catalog's table included.
 
-    The planner, and every gate that authorizes a table, name a table the same
-    way here: a table in a configured catalog is that catalog's, and one in a
-    warehouse the URI carries is ``strata``'s, as the cache keys have it.
+    A table in a configured catalog belongs to that catalog; one in a warehouse
+    the URI carries belongs to ``strata``, matching the cache keys.
     """
     named, table_id = named_catalog(table_uri, config)
     if named is not None:
@@ -68,15 +66,12 @@ def table_identity_for(table_uri: str, config: StrataConfig) -> TableIdentity:
 
 
 def shared_catalog_stores(table_uri: str, config: StrataConfig) -> tuple[str, ...]:
-    """Every store name an ACL rule can give the table *table_uri* reads.
+    """Return every store name an ACL rule can give the table *table_uri* reads.
 
-    With ``catalog_properties["uri"]`` set, every warehouse URI builds
-    ``SqlCatalog("strata")`` over that one database, whatever path or scheme
-    comes before ``#``, so ``s3:``, ``gs:``, ``az:`` and ``file:`` all name
-    the same table. A bare ``namespace.table`` reads the default catalog, which
-    is that same one when it is also named ``strata``. Otherwise the address
-    picks the catalog, and ``()`` says the table has only the name it was
-    requested under.
+    With ``catalog_properties["uri"]`` set, every warehouse URI (``s3:``, ``gs:``,
+    ``az:``, ``file:``) builds ``SqlCatalog("strata")`` over one database, so all
+    name the same table; a bare ``namespace.table`` joins them when the default
+    catalog is also ``strata``. ``()`` means the table has only its requested name.
     """
     if "uri" not in config.catalog_properties:
         return ()
@@ -89,12 +84,9 @@ def shared_catalog_stores(table_uri: str, config: StrataConfig) -> tuple[str, ..
 
 
 def _is_connection_io_error(exc: BaseException) -> bool:
-    """Whether *exc* looks like a dead catalog connection rather than a real error.
+    """Return whether *exc* is a dead catalog connection (SQLITE_IOERR or its ADBC fallout).
 
-    Matches the I/O-level failures that leave the connection unusable
-    (SQLITE_IOERR and the ADBC cursor-finalizer fallout seen alongside it), and
-    deliberately nothing else — a missing table or a malformed URI must still
-    surface on the first attempt.
+    Nothing else matches, so a missing table or malformed URI still surfaces on the first attempt.
     """
     text = str(exc).lower()
     return "disk i/o error" in text or "sqlite_ioerr" in text or "adbcstatement" in text
@@ -103,19 +95,12 @@ def _is_connection_io_error(exc: BaseException) -> bool:
 class PyIcebergCatalog:
     """Default catalog provider backed by pyiceberg.
 
-    Catalogs are created lazily per warehouse and cached. The cache is guarded
-    by a lock so concurrent planning threads don't each build a duplicate
-    catalog for the same warehouse.
+    Catalogs are built lazily per warehouse and cached under a lock, so concurrent
+    planning threads do not build duplicates.
     """
 
     def __init__(self, config: StrataConfig) -> None:
-        """Initialize the provider.
-
-        Parameters
-        ----------
-        config : StrataConfig
-            Server configuration supplying catalog properties and S3 credentials.
-        """
+        """Initialize the provider from server config (catalog properties, S3 credentials)."""
         self.config = config
         self._catalogs: dict[str, Catalog] = {}
         self._lock = Lock()
@@ -123,18 +108,8 @@ class PyIcebergCatalog:
     def _get_default_catalog_uri(self, warehouse_path: str | None = None) -> str:
         """Return the catalog URI for a warehouse.
 
-        A configured ``catalog_properties["uri"]`` (e.g. PostgreSQL) wins;
-        otherwise fall back to SQLite keyed off the warehouse path.
-
-        Parameters
-        ----------
-        warehouse_path : str or None, optional
-            Warehouse location, or ``None`` for the in-memory default.
-
-        Returns
-        -------
-        str
-            A catalog connection URI.
+        A configured ``catalog_properties["uri"]`` (e.g. PostgreSQL) wins; otherwise
+        SQLite keyed off the warehouse path, or in-memory for ``None``.
         """
         # A configured URI may name PostgreSQL, MySQL, etc.
         if "uri" in self.config.catalog_properties:
@@ -148,13 +123,7 @@ class PyIcebergCatalog:
             return "sqlite:///:memory:"
 
     def _s3_catalog_props(self) -> dict[str, str]:
-        """Return the ``s3.*`` catalog properties from configured credentials.
-
-        Returns
-        -------
-        dict
-            Only the keys whose corresponding config value is set.
-        """
+        """Return the ``s3.*`` catalog properties for the credentials that are configured."""
         props: dict[str, str] = {}
         if self.config.s3_region:
             props["s3.region"] = self.config.s3_region
@@ -167,22 +136,10 @@ class PyIcebergCatalog:
         return props
 
     def _build_catalog(self, warehouse_path: str | None) -> Catalog:
-        """Construct a catalog for a warehouse (no caching).
+        """Construct a catalog for a warehouse, uncached.
 
-        A warehouse path yields a ``SqlCatalog`` over that warehouse (with
-        ``s3.*`` props folded in for ``s3://`` paths); ``None`` yields the
-        configured default catalog, or an in-memory SQLite catalog as a
-        fallback.
-
-        Parameters
-        ----------
-        warehouse_path : str or None
-            Warehouse location, or ``None`` for the default catalog.
-
-        Returns
-        -------
-        pyiceberg.catalog.Catalog
-            The constructed catalog.
+        A warehouse path yields a ``SqlCatalog`` (with ``s3.*`` props for ``s3://``);
+        ``None`` yields the configured default catalog, else in-memory SQLite.
         """
         if warehouse_path:
             props: dict = {
@@ -203,7 +160,7 @@ class PyIcebergCatalog:
         )
 
     def _get_named_catalog(self, name: str) -> Catalog:
-        """The configured catalog *name*, built on first use and cached."""
+        """Return the configured catalog *name*, built on first use and cached."""
         key = f"catalog:{name}"
         catalog = self._catalogs.get(key)
         if catalog is not None:
@@ -216,22 +173,7 @@ class PyIcebergCatalog:
         return catalog
 
     def _get_catalog(self, warehouse_path: str | None = None) -> Catalog:
-        """Return the cached catalog for a warehouse, building it on first use.
-
-        Uses double-checked locking: the common path is a lock-free cache hit;
-        only a miss takes the lock to build (and re-checks under it so two
-        threads can't build the same catalog twice).
-
-        Parameters
-        ----------
-        warehouse_path : str or None, optional
-            Warehouse location, or ``None`` for the default catalog.
-
-        Returns
-        -------
-        pyiceberg.catalog.Catalog
-            The cached catalog.
-        """
+        """Return the cached catalog for a warehouse, building it once under a lock on a miss."""
         cache_key = warehouse_path or "default"
 
         cached = self._catalogs.get(cache_key)
@@ -255,25 +197,9 @@ class PyIcebergCatalog:
     def parse_table_uri(table_uri: str) -> tuple[str | None, str]:
         """Split a table URI into ``(warehouse_path, table_id)``.
 
-        Parameters
-        ----------
-        table_uri : str
-            One of:
-
-            - ``file:///path/to/warehouse#namespace.table``
-            - ``/path/to/warehouse#namespace.table``
-            - ``s3://bucket/path/to/warehouse#namespace.table``
-            - ``namespace.table`` (default catalog)
-
-            ``<name>:namespace.table``, a configured named catalog, is
-            resolved by :func:`named_catalog` before this is consulted.
-
-        Returns
-        -------
-        tuple of (str or None, str)
-            The warehouse path (``None`` when the URI carries no ``#`` part)
-            and the ``namespace.table`` id. ``s3://`` is preserved; ``file://``
-            is stripped.
+        Accepts ``file:///wh#ns.table``, ``/wh#ns.table``, ``s3://bucket/wh#ns.table``,
+        or ``ns.table`` (default catalog; warehouse ``None``). ``s3://`` is kept and
+        ``file://`` stripped. Named-catalog URIs are resolved by :func:`named_catalog` first.
         """
         if "#" in table_uri:
             path_part, table_id = table_uri.rsplit("#", 1)
@@ -286,20 +212,7 @@ class PyIcebergCatalog:
             return None, table_uri
 
     def load_table(self, table_uri: str) -> Table:
-        """Load an Iceberg table from a URI.
-
-        Parameters
-        ----------
-        table_uri : str
-            A table URI in any form accepted by :meth:`parse_table_uri`
-            (``file://`` / local / ``s3://`` warehouse, or bare
-            ``namespace.table`` for the default catalog).
-
-        Returns
-        -------
-        pyiceberg.table.Table
-            The loaded table.
-        """
+        """Load an Iceberg table from any URI form :meth:`parse_table_uri` accepts."""
         name, named_table_id = named_catalog(table_uri, self.config)
         if name is not None:
             return self._get_named_catalog(name).load_table(named_table_id)
@@ -325,25 +238,12 @@ class PyIcebergCatalog:
             return self._get_catalog(warehouse_path).load_table(table_id)
 
     def get_snapshot_id(self, table: Table, snapshot_id: int | None) -> int:
-        """Resolve the snapshot id to read.
-
-        Parameters
-        ----------
-        table : pyiceberg.table.Table
-            The table to read.
-        snapshot_id : int or None
-            A specific snapshot id, or ``None`` for the current snapshot.
-
-        Returns
-        -------
-        int
-            The resolved snapshot id.
+        """Resolve the snapshot id to read (the current one when ``snapshot_id`` is ``None``).
 
         Raises
         ------
         ValueError
-            If ``snapshot_id`` is given but absent from the table, or the table
-            has no snapshots.
+            If ``snapshot_id`` is absent from the table, or the table has no snapshots.
         """
         if snapshot_id is not None:
             snapshot = table.snapshot_by_id(snapshot_id)
@@ -363,26 +263,7 @@ class PyIcebergCatalog:
         table_name: str,
         schema: Schema,
     ) -> Table:
-        """Load a table, creating it (and its namespace) if absent.
-
-        Intended for demos and tests.
-
-        Parameters
-        ----------
-        warehouse_path : str
-            Warehouse to create the table in.
-        namespace : str
-            Namespace for the table.
-        table_name : str
-            Table name within the namespace.
-        schema : pyiceberg.schema.Schema
-            Schema used when the table must be created.
-
-        Returns
-        -------
-        pyiceberg.table.Table
-            The existing or newly created table.
-        """
+        """Load a table, creating it and its namespace if absent (for demos and tests)."""
         catalog = self._get_catalog(warehouse_path)
 
         try:
@@ -414,13 +295,10 @@ class TableWrite:
 
 
 def _strata_has_written(table: Table) -> bool:
-    """Whether any snapshot of *table* was written by an export.
+    """Return whether any snapshot of *table* was written by an export.
 
-    A first write appends and a later one replaces the contents, which is the
-    contract for a table Strata maintains. Aimed at a table somebody else
-    built -- a production table whose name a caller mistyped or reused -- the
-    same write throws their rows away, recoverable only by time travel until
-    the snapshot expires. The marker is the one ``tag`` already recognises.
+    Later exports overwrite, so a table Strata never wrote (e.g. a mistyped
+    production name) must not be treated as Strata's. Uses the marker ``tag`` recognises.
     """
     return any(
         snapshot.summary is not None and snapshot.summary.get(SUMMARY_ARTIFACT_ID)
@@ -431,13 +309,11 @@ def _strata_has_written(table: Table) -> bool:
 class IcebergWriter:
     """Writes artifacts into Iceberg tables as snapshots that name them.
 
-    The first write to a table appends; a later one overwrites, so the table's
-    current snapshot is always one artifact version and its history is the
-    sequence of versions written. A new version may add columns or widen a
-    type; a change Iceberg cannot evolve to is refused before anything is
-    written. Each snapshot's summary carries the artifact id, version,
-    provenance hash and who wrote it, and an alias is an Iceberg tag on the
-    snapshot of the version it names.
+    The first write appends and later ones overwrite, so the current snapshot is
+    one artifact version and history is the sequence written. Adding columns and
+    widening types evolve the schema; other changes are refused before writing.
+    Snapshot summaries carry artifact id, version, provenance hash and writer; an
+    alias is an Iceberg tag on its version's snapshot.
     """
 
     def __init__(self, catalogs: PyIcebergCatalog) -> None:
@@ -520,8 +396,10 @@ class IcebergWriter:
         return TableWrite(table=table_uri, snapshot_id=snapshot.snapshot_id, created=created)
 
     def tag(self, table_uri: str, alias: str, *, artifact_id: str, version: int) -> int | None:
-        """Point tag *alias* at the latest snapshot written from
-        ``artifact_id@v=version``; its id, or None if the table has none."""
+        """Point tag *alias* at the latest snapshot written from ``artifact_id@v=version``.
+
+        Returns the snapshot id, or None if the table has none from that version.
+        """
         catalog, table_id = self._table_id(table_uri)
         table = catalog.load_table(table_id)
         # An overwrite commits a delete and then an append, both carrying the

@@ -1,27 +1,16 @@
 """RO-Crate / JSON-LD description of a published artifact and its chain.
 
-The page says what produced a result to a person. This says the same thing to
-a machine, in the vocabulary research infrastructure already reads: RO-Crate
-1.1 for a deposited bundle, and the same graph inline on the hosted page as
-schema.org JSON-LD, which is what indexers and link unfurlers look for.
+One builder feeds both the deposited RO-Crate 1.1 bundle and the schema.org JSON-LD
+inlined on the hosted page, so the machine-readable account cannot drift from the page.
 
-One builder feeds both. A crate that described the result differently from the
-page would be a second account of the same thing, and a reader reconciling two
-accounts of a provenance record is exactly the position this feature exists to
-keep them out of.
+Mapping:
 
-The mapping, and why:
-
-- The published artifact is the crate's payload — a ``File`` that is really
-  there, with its digest.
-- Every upstream step is a ``CreativeWork``, **not** a ``File``. Their bytes
-  are deliberately not in the crate (publishing shows which steps produced a
-  result; it does not hand over the upstream datasets), and listing them as
-  files present would be a lie a validator cannot catch.
-- Each execution is a ``CreateAction`` whose ``instrument`` is the cell source
-  as ``SoftwareSourceCode``, ``object`` the inputs and ``result`` the output.
-  That is the shape PROV-O and RO-Crate both expect for "this code, on these
-  inputs, made this".
+- The published artifact is the payload: a ``File`` with its digest.
+- Every upstream step is a ``CreativeWork``, not a ``File``: its bytes are not in the
+  crate, and listing it as a present file would be a lie a validator cannot catch.
+- Each execution is a ``CreateAction`` (``instrument`` = cell source as
+  ``SoftwareSourceCode``, ``object`` = inputs, ``result`` = output), the shape PROV-O
+  and RO-Crate both expect.
 """
 
 from __future__ import annotations
@@ -47,18 +36,18 @@ def _iso(ts: float | None) -> str | None:
 
 
 def _prune(entity: dict) -> dict:
-    """Drop empty values. An absent field says "not recorded"; a null says it
-    was recorded as nothing, which is a different and false claim."""
+    """Drop empty values.
+
+    An absent field says "not recorded"; a null would falsely claim it was recorded as nothing.
+    """
     return {k: v for k, v in entity.items() if v not in (None, "", [], {})}
 
 
 def _fragment(value: str) -> str:
     """Percent-encode a value for use in a fragment identifier.
 
-    Author names and principals are free-form — ``--author "F. Li"`` produces a
-    space, which is illegal in an IRI. A strict processor drops or errors on
-    the node, and the authorship link simply vanishes from the RDF while
-    looking fine in the JSON.
+    Author names are free-form (``"F. Li"`` has a space, illegal in an IRI); a strict RDF
+    processor would silently drop the node.
     """
     from urllib.parse import quote
 
@@ -88,10 +77,9 @@ def build_crate(
 ) -> dict:
     """Build the RO-Crate graph.
 
-    ``payload_id`` is how the payload is addressed: a filename inside a bundle,
-    or the absolute ``/data`` URL for the hosted page. ``include_descriptor``
-    adds the ``ro-crate-metadata.json`` self-description a deposited crate must
-    carry and an inline page has no file to describe.
+    ``payload_id`` addresses the payload: a filename inside a bundle, or the absolute ``/data``
+    URL for the hosted page. ``include_descriptor`` adds the ``ro-crate-metadata.json``
+    self-description a deposited crate must carry.
     """
     graph: list[dict] = []
 
@@ -280,9 +268,7 @@ def build_crate(
 def _identifier_of(publication) -> str | None:
     """The publication's resolvable identifier, preferring a DOI.
 
-    ``None`` when it has none, which ``_prune`` then drops — an empty
-    ``identifier`` on the root would read as "this has no persistent id and we
-    checked", which is a different claim from not making one.
+    ``None`` when it has none, so ``_prune`` drops it rather than emitting an empty identifier.
     """
     by_scheme = {entry["scheme"]: entry["value"] for entry in publication.external_ids}
     for scheme, template in (

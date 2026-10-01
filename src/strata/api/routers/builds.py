@@ -1,18 +1,8 @@
-"""Build status + pull-model manifest routes.
+"""Build status and pull-model manifest routes.
 
-Moved verbatim from ``server.py`` (P3 / A3a, router split). The build handlers
-are thin shells over build-store lookup + post-fetch authz. The build-store /
-transport gate lives in ``strata.api.dependencies`` (#295): the manifest +
-finalize routes take the ``BuildTransportStore`` param dependency (404 if
-transport is off, else the resolved store); ``get_build_status`` and the
-signature-authed upload route resolve it in-body via ``build_transport_available``
-/ ``runtime_build_store`` to preserve their exact gate ordering. The remaining
-server-owned collaborators (``get_state``, ``_authorize_build_access``,
-``_identity_build_status``, ``_get_artifact_store``, ``_ACTIVE_BUILD_STATES``)
-are still reached via in-body lazy import; ``StreamState`` comes from
-``strata.streaming`` and ``record_build_output_bytes`` from
-``strata.transforms.build_qos`` (#302). The pure manifest assembly lives in
-``BuildService.assemble_manifest``.
+The manifest and finalize routes take ``BuildTransportStore`` (404 when signed
+transport is off). ``get_build_status`` and the signed upload route resolve the
+store in-body to keep their gate ordering. Server-owned helpers are lazy-imported.
 """
 
 from __future__ import annotations
@@ -54,17 +44,7 @@ _LEASE_MARGIN_SECONDS = 60.0
 
 @router.get("/v1/artifacts/builds/{build_id}", response_model=BuildStatusResponse)
 async def get_build_status(build_id: str):
-    """Get async build status.
-
-    Use this endpoint to poll the status of a build that was started
-    asynchronously via materialize, including scan@v1 artifact-mode builds.
-
-    Args:
-        build_id: Build ID from materialize response
-
-    Returns:
-        BuildStatusResponse with current build state
-    """
+    """Poll the state of an asynchronous build started by materialize."""
     from strata.server import (
         _authorize_build_access,
         _identity_build_status,
@@ -135,24 +115,10 @@ async def get_build_status_compat(build_id: str):
 
 @router.get("/v1/builds/{build_id}/manifest")
 async def get_build_manifest(build_id: str, request: Request, build_store: BuildTransportStore):
-    """Get build manifest with signed URLs for pull-model execution.
+    """Get the pull-model manifest of signed URLs for a build.
 
-    This endpoint returns a manifest containing:
-    - Signed download URLs for each input artifact
-    - Signed upload URL for the output
-    - Signed finalize URL to call after upload completes
-
-    Executors use this manifest to:
-    1. Pull inputs directly from Strata storage
-    2. Execute the transform
-    3. Push output directly to Strata storage
-    4. Call finalize to mark the build complete
-
-    Args:
-        build_id: Build ID from materialize response
-
-    Returns:
-        BuildManifest with all signed URLs
+    It carries download URLs for each input, an upload URL for the output, and the
+    finalize URL to call once the upload completes.
     """
     from strata.server import (
         _ACTIVE_BUILD_STATES,
@@ -276,21 +242,7 @@ async def download_artifact_signed(
     expires_at: str,
     signature: str,
 ):
-    """Download artifact blob using a signed URL.
-
-    This endpoint is called by executors to pull input artifacts.
-    The URL must be signed by Strata and not expired.
-
-    Query Parameters:
-        artifact_id: Artifact ID to download
-        version: Version number
-        build_id: Build ID this download is for (audit trail)
-        expires_at: URL expiry timestamp (Unix epoch)
-        signature: HMAC-SHA256 signature
-
-    Returns:
-        Arrow IPC stream bytes
-    """
+    """Download an input artifact's Arrow IPC bytes via a Strata-signed, unexpired URL."""
     from strata.server import _get_artifact_store, get_state
 
     try:
@@ -356,27 +308,11 @@ async def upload_artifact_signed(
     request: Request,
     attempt: str = "",
 ):
-    """Upload artifact blob using a signed URL.
+    """Upload a build's output Arrow IPC bytes via a Strata-signed, unexpired URL.
 
-    This endpoint is called by executors to push output artifacts.
-    The URL must be signed by Strata and not expired.
-    The upload size must not exceed max_bytes.
-
-    Query Parameters:
-        build_id: Build ID this upload is for
-        max_bytes: Maximum allowed upload size
-        expires_at: URL expiry timestamp (Unix epoch)
-        signature: HMAC-SHA256 signature
-        attempt: The build attempt the bytes belong to, when the manifest was
-            issued under a lease. Signed; the bytes land under that attempt's
-            own key, so an earlier manifest's URL cannot reach what finalize
-            reads.
-
-    Body:
-        Raw Arrow IPC stream bytes
-
-    Returns:
-        Upload status
+    The body may not exceed the signed ``max_bytes``. With a leased manifest, the
+    signed ``attempt`` puts the bytes under that attempt's key, so an earlier
+    manifest's URL cannot reach what finalize reads.
     """
     from strata.server import (
         _ACTIVE_BUILD_STATES,
@@ -456,16 +392,9 @@ async def append_build_log(
 ):
     """Append console output from a build that is still running.
 
-    Called by an executor as the cell produces output, so a notebook watching a
-    remote cell sees it happen rather than waiting for the bundle. The bundle
-    remains the record; this is a view of it in progress.
-
-    Advisory by design, and the response says so with 202 rather than 201:
-    nothing is persisted here and nothing downstream depends on it. A chunk for
-    a build this process is not running — a stale worker, or a replica that did
-    not dispatch it — is accepted and dropped, because the worker has no useful
-    response to a rejection and failing its cell over a console chunk would be
-    a far worse outcome than a missing line.
+    Advisory, hence 202: nothing is persisted. A chunk for a build this process is
+    not running is accepted and dropped, since failing the worker's cell over a
+    console chunk would be worse than a missing line.
     """
     from strata.notebook import console_relay
     from strata.server import get_state
@@ -498,24 +427,10 @@ async def finalize_build(
     signature: str | None = None,
     lease: str = "",
 ):
-    """Finalize a build after upload (pull-model execution).
+    """Finalize a pull-model build after its output was uploaded.
 
-    Called by executors after uploading the output artifact.
-    This endpoint:
-    1. Verifies the blob was uploaded
-    2. Reads Arrow metadata (schema, row count)
-    3. Finalizes the artifact
-    4. Marks the build as complete
-    5. Optionally sets the name pointer
-
-    Args:
-        build_id: Build ID to finalize
-
-    Body (JSON):
-        Optional fields for metadata the executor provides
-
-    Returns:
-        Finalize status with artifact URI
+    Verifies the blob, reads its Arrow schema and row count, finalizes the
+    artifact, completes the build and optionally sets the name pointer.
     """
     from strata.server import (
         _ACTIVE_BUILD_STATES,

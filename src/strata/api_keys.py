@@ -1,33 +1,13 @@
-"""API keys: authentication Strata performs itself.
+"""API keys: authentication Strata performs itself (``auth_mode = "api_key"``).
 
-Until now Strata could not identify a caller. ``auth_mode`` offered ``none``
-(everyone is anonymous) or ``trusted_proxy`` (a proxy in front asserts identity
-in headers, and the network is what stops anyone else asserting it too). That
-is a sound architecture for an internal service and a non-starter for a
-platform, where the identity *is* the account.
+A key resolves to the same :class:`~strata.types.Principal` a trusted-proxy
+header would, so ACL, tenant and scope checks are unchanged.
 
-This adds the third mode. A key resolves to the same
-:class:`~strata.types.Principal` a proxy header would have produced, so every
-downstream consumer -- ACL evaluation, tenant scoping, scope checks -- is
-unchanged.
-
-Key format::
-
-    strata_<key_id>_<secret>
-
-The two halves do different jobs. ``key_id`` is a public lookup handle: it is
-stored in the clear, indexed, and safe to log or show in a UI. ``secret`` is
-never stored -- only its SHA-256 -- so a database disclosure does not yield
-usable credentials.
-
-**Why SHA-256 and not bcrypt/argon2.** Those exist to make *low*-entropy
-secrets expensive to guess. The secret here is 256 bits from ``secrets``, so
-brute force is not the threat model, and a deliberately slow KDF would put tens
-of milliseconds on every authenticated request. The comparison is
-constant-time; that is the property that matters.
-
-Keys live in the artifact store's database, which means they are shared across
-nodes for free wherever that database is.
+Key format: ``strata_<key_id>_<secret>``. ``key_id`` is a public lookup handle,
+stored in the clear and safe to log. ``secret`` is never stored, only its
+SHA-256: it is 256 random bits, so a slow KDF would add latency without
+defending against anything; the comparison is constant-time. Keys live in the
+artifact store's database.
 """
 
 from __future__ import annotations
@@ -102,17 +82,9 @@ def format_key(key_id: str, secret: str) -> str:
 
 
 def parse_key(presented: str) -> tuple[str, str] | None:
-    """Split a presented credential into ``(key_id, secret)``.
+    """Split a presented credential into ``(key_id, secret)``, or ``None`` if malformed.
 
-    Returns ``None`` for anything that is not shaped like one of our keys, so
-    a caller cannot tell a malformed key from an unknown one -- both are just
-    "unauthenticated".
-
-    The split is bounded at two because the secret is base64url and that
-    alphabet includes ``_``: roughly half of all generated secrets contain one.
-    An unbounded ``split("_")`` would reject those as malformed, which is an
-    intermittent authentication failure on about half of every batch of keys
-    issued -- the kind that looks like a flaky client.
+    The split is bounded at two because the base64url secret can itself contain ``_``.
     """
     parts = presented.split("_", 2)
     if len(parts) != 3 or parts[0] != _KEY_PREFIX:
@@ -130,9 +102,7 @@ def _hash_secret(secret: str) -> str:
 class ApiKeyStore:
     """Storage and verification for API keys.
 
-    Shares the artifact store's dialect: keys belong in the same database, and
-    sharing the dialect shares its connection pool, so this adds no connections
-    of its own.
+    Uses the artifact store's dialect and so its connection pool.
     """
 
     def __init__(self, db_path: Path, dialect: SqlDialect | None = None):
@@ -173,9 +143,7 @@ class ApiKeyStore:
         Returns
         -------
         tuple
-            ``(presented_key, record)``. The presented key is the only time
-            the secret exists outside the caller's hands -- it is not
-            recoverable afterwards, by us or by them.
+            ``(presented_key, record)``. The secret is not recoverable afterwards.
         """
         key_id = secrets.token_hex(_KEY_ID_BYTES)
         secret = secrets.token_urlsafe(_SECRET_BYTES)
@@ -223,10 +191,7 @@ class ApiKeyStore:
     def verify(self, presented: str) -> Principal | None:
         """Resolve a presented credential to a principal, or ``None``.
 
-        Every rejection returns ``None`` rather than distinguishing malformed
-        from unknown from revoked from expired: the caller learns only that
-        they are not authenticated, which is all they are owed and all that is
-        safe to tell them.
+        Malformed, unknown, revoked and expired keys all return ``None`` alike.
         """
         from strata.types import Principal
 
@@ -265,11 +230,9 @@ class ApiKeyStore:
         )
 
     def touch(self, key_id: str) -> None:
-        """Record that a key was used.
+        """Record that a key was used. Best-effort.
 
-        Separate from :meth:`verify` and best-effort by design: writing on
-        every authenticated request would put a write in the hot path of every
-        read. Callers update on a sampled or cached schedule.
+        Kept out of :meth:`verify` so authentication does not write on every request.
         """
         conn = self._get_connection()
         try:

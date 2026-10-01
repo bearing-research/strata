@@ -1,19 +1,7 @@
-"""Scan transform (scan@v1) - identity read from Iceberg tables.
+"""The ``scan@v1`` transform: identity read from an Iceberg table.
 
-The scan transform reads data from an Iceberg table with optional:
-- Column projection
-- Row filtering
-- Snapshot pinning
-
-This is a "virtual" transform - it's handled internally by Strata's planner
-and cache, not executed as a separate step. We define it here for:
-1. Parameter validation
-2. Documentation
-3. Consistency with other transforms
-
-Note: scan@v1 cannot be executed locally via Transform.execute() because
-it requires access to the Iceberg catalog and Parquet files. The server
-handles this transform specially.
+Supports column projection, row filters and snapshot pinning. The server's
+planner and cache execute it; this module only validates parameters.
 """
 
 from __future__ import annotations
@@ -29,13 +17,7 @@ if TYPE_CHECKING:
 
 
 class FilterSpec(BaseModel):
-    """Row filter specification.
-
-    Attributes:
-        column: Column name to filter on
-        op: Comparison operator ("=", "!=", "<", "<=", ">", ">=")
-        value: Value to compare against
-    """
+    """Row filter ``column op value``; op is ``=``, ``!=``, ``<``, ``<=``, ``>`` or ``>=``."""
 
     column: str
     op: str
@@ -51,12 +33,9 @@ class FilterSpec(BaseModel):
 
 
 class ScanParams(BaseModel):
-    """Parameters for the scan@v1 transform.
+    """Parameters for ``scan@v1``.
 
-    Attributes:
-        columns: Column projection (None = all columns)
-        filters: Row filters for predicate pushdown
-        snapshot_id: Specific snapshot to read (None = current)
+    ``columns`` None projects all columns; ``snapshot_id`` None reads the current snapshot.
     """
 
     columns: list[str] | None = None
@@ -66,45 +45,27 @@ class ScanParams(BaseModel):
 
 @register_transform("scan@v1")
 class ScanTransform(Transform[ScanParams]):
-    """Identity transform that reads from Iceberg tables.
-
-    This transform is handled specially by the Strata server:
-    1. Resolves table URI to Iceberg snapshot
-    2. Plans read tasks (row groups to fetch)
-    3. Checks/populates cache
-    4. Streams cached Arrow data
-
-    It cannot be executed locally via execute() because it requires
-    server-side resources (catalog access, cache).
+    """Identity transform that reads from Iceberg tables; executed only by the server.
 
     Example:
         client.materialize(
             inputs=["file:///warehouse#db.events"],
-            transform={"executor": "scan@v1", "params": {
-                "columns": ["id", "value"],
-                "filters": [{"column": "value", "op": ">", "value": 100}],
-            }},
+            transform={"executor": "scan@v1", "params": {"columns": ["id", "value"]}},
         )
     """
 
     Params = ScanParams
 
     def validate(self, inputs: list[pa.Table], params: ScanParams) -> None:
-        """Validate scan parameters.
-
-        Note: This is only used for parameter validation, not execution.
-        """
+        """Validate scan parameters."""
         # Inputs here are already resolved tables, so there is nothing to check.
         pass
 
     def execute(self, inputs: list[pa.Table], params: ScanParams) -> pa.Table:
-        """Execute is not supported for scan@v1.
-
-        scan@v1 is handled internally by the server. If you need to
-        execute locally, use the already-fetched table data directly.
+        """Always raise: ``scan@v1`` needs server-side catalog and cache access.
 
         Raises:
-            NotImplementedError: Always (scan@v1 cannot run locally)
+            NotImplementedError: Always.
         """
         raise NotImplementedError(
             "scan@v1 is handled by the Strata server and cannot be executed locally. "
@@ -117,20 +78,16 @@ def build_scan_transform(
     filters: list[dict[str, Any]] | None = None,
     snapshot_id: int | None = None,
 ) -> dict[str, Any]:
-    """Build a scan@v1 transform specification.
+    """Build a ``scan@v1`` transform spec for ``materialize()``.
 
     Args:
-        columns: Column projection (None = all columns)
-        filters: Row filters as dicts with column, op, value
-        snapshot_id: Specific snapshot to read
-
-    Returns:
-        Transform spec dict for materialize()
+        columns: Columns to project (None for all).
+        filters: Row filters as dicts with ``column``, ``op``, ``value``.
+        snapshot_id: Snapshot to read (None for current).
 
     Example:
         transform = build_scan_transform(
-            columns=["id", "value"],
-            filters=[{"column": "value", "op": ">", "value": 100}],
+            columns=["id"], filters=[{"column": "value", "op": ">", "value": 100}]
         )
         client.materialize(inputs=[table_uri], transform=transform)
     """

@@ -1,8 +1,7 @@
 """Whether a URL is safe for this process to fetch.
 
-Shared by the worker, which fetches the URLs a manifest hands it, and by a
-notebook's ``@fetch``, which fetches the URL a cell names. Both are a request an
-untrusted party shaped aimed at whatever network this process can reach.
+Shared by the worker (URLs a manifest hands it) and a notebook's ``@fetch`` (the URL a
+cell names): both are untrusted requests aimed at whatever network this process reaches.
 """
 
 from __future__ import annotations
@@ -27,14 +26,9 @@ ALLOWED_URL_SCHEMES = frozenset({"http", "https"})
 def web_url_or_none(value: str) -> str | None:
     """*value* if it is an http(s) URL, else ``None``.
 
-    Scheme only, and no network: this answers "may I make this a link", which
-    a page render asks and which must not depend on DNS. ``url_safety_problem``
-    is the question a fetch asks and resolves the host.
-
-    A record holds whatever was written into it, so a value can be
-    ``javascript:...`` -- which survives HTML escaping and runs on the origin
-    of whoever clicks it. Testing for a leading "http" is not the same check:
-    ``httpfoo://x`` starts with it and is not a URL.
+    Scheme only, no network: this answers "may I render this as a link", which must not depend
+    on DNS. Blocks ``javascript:`` values, which survive HTML escaping; a leading-"http"
+    test would also pass ``httpfoo://x``.
     """
     try:
         scheme = urlparse(value).scheme.lower()
@@ -44,14 +38,10 @@ def web_url_or_none(value: str) -> str | None:
 
 
 def host_is_allowlisted(host: str, allowed_hosts: tuple[str, ...]) -> bool:
-    """Whether *host* is named in the allowlist.
+    """Whether *host* is named in the allowlist (by name, never by resolved address).
 
-    Matched on the name, never on the resolved address — that is the whole
-    point, since these hosts are trusted *because* an operator named them.
-
-    Suffixes are anchored on a dot, so ``.example.com`` matches
-    ``build.example.com`` and not ``evil-example.com``. Getting that wrong is
-    silent: the wrong host passes and nothing says so.
+    Suffixes are anchored on a dot: ``.example.com`` matches ``build.example.com``, not
+    ``evil-example.com``.
     """
     candidate = host.lower().rstrip(".")
     for entry in allowed_hosts:
@@ -72,55 +62,21 @@ def url_safety_problem(
 ) -> str | None:
     """Why *url* is unsafe to fetch, or ``None``.
 
-    Returned rather than raised so a worker (an HTTP 400) and a notebook
-    ``@fetch`` (a cell error) can each report it their own way.
+    Returned rather than raised so the worker (HTTP 400) and ``@fetch`` (cell error) can each
+    report it. Two rules:
 
-    A compromised or buggy orchestrator could hand the worker URLs
-    that point at internal services. Two distinct defenses:
+    1. Scheme: only http and https.
+    2. Address: every address the host resolves to must be public (not loopback,
+       link-local including cloud metadata, private, multicast, reserved or unspecified;
+       IPv4-mapped IPv6 is unmapped first). A blocklist on internal ranges rather than a host
+       allowlist, because signed S3/GCS URLs resolve to many public addresses.
 
-    1. **Scheme allowlist** — only http and https. Blocks file://,
-       data:, javascript:, ftp:// and any other scheme httpx might
-       grow plugin support for.
-    2. **Host resolution + IP-range blocklist** — the resolved IP
-       must not be loopback, link-local (incl. cloud metadata
-       169.254.169.254 / fd00:ec2::254), private, multicast,
-       reserved, or unspecified. Hostnames are resolved via
-       getaddrinfo and every returned address is checked; a
-       hostname that resolves to multiple addresses must have all
-       of them in the public range to pass. This rules out both
-       direct internal-IP URLs and hostname-based variants
-       (e.g. metadata.google.internal). Set
-       ``STRATA_WORKER_ALLOW_LOCAL_HOSTS=1`` to bypass the IP check
-       (tests / local dev with 127.0.0.1 build servers); production
-       deployments leave it unset.
+    ``STRATA_WORKER_ALLOWED_HOSTS`` exempts named hosts from the address rule (a server on a
+    private address); ``STRATA_WORKER_ALLOW_LOCAL_HOSTS=1`` exempts every host, for tests and
+    local dev, and wins when both are set. Allowlisted hosts are not resolved here.
 
-    Allowlist-on-host instead of blocklist-on-host would be more
-    restrictive but breaks real signed-URL usage where S3/GCS
-    buckets resolve to public IPs across many regions. Blocklist
-    on internal ranges is the right tradeoff.
-
-    ``STRATA_WORKER_ALLOWED_HOSTS`` names specific hosts that pass
-    the address rule anyway -- for a server on a private address,
-    which is the ordinary shape of a managed worker talking to the
-    server that dispatched it. It supersedes
-    ``STRATA_WORKER_ALLOW_LOCAL_HOSTS``, which relaxes the same rule
-    for *every* host and remains for tests and local development
-    where 127.0.0.1 really is the target. A deployment that sets
-    both gets the wholesale bypass, because that is what it asked
-    for; prefer the allowlist in production.
-
-    Caveats:
-    * This check alone is racy: a name can resolve to a public
-      address here and to 127.0.0.1 when the request connects (DNS
-      rebinding). A fetch closes that with ``guarded_transport``,
-      whose connections use only addresses validated by the lookup
-      that produced them. This check stays in front of it for the
-      scheme and host rules and for an early, specific error. An
-      allowlisted host does not resolve at all here, and is not
-      pinned either: an allowlist entry is trust in whoever controls
-      that name's resolution, which is what listing it says.
-    * IPv4-mapped IPv6 (``::ffff:127.0.0.1``) is caught — we
-      ``unmap()`` before checking.
+    This check alone is racy under DNS rebinding; fetches close that with
+    ``guarded_transport``. It stays in front for the scheme rule and an early, specific error.
     """
     parsed = urlparse(url)
     scheme = parsed.scheme.lower()
@@ -161,8 +117,8 @@ def _resolve(host: str) -> list[str]:
 def _address_problem(host: str, addresses: list[str]) -> str | None:
     """Why connecting to *host* at *addresses* is unsafe, or ``None``.
 
-    Every address has to pass, so a name that answers with one public and one
-    private address is refused rather than connected to whichever comes first.
+    Every address must pass, so a name answering with one public and one private address is
+    refused.
     """
     for address in addresses:
         try:
@@ -184,15 +140,13 @@ def _address_problem(host: str, addresses: list[str]) -> str | None:
 
 
 def _validated_addresses(host: str, allowed_hosts: tuple[str, ...]) -> list[str]:
-    """The addresses a connection to *host* may use: what one lookup returned,
-    every one of them checked.
+    """The addresses a connection to *host* may use: one lookup, every address checked.
 
-    An allowlisted host comes back as its name, for the socket layer to
-    resolve, because it is trusted by name (see ``url_safety_problem``).
+    An allowlisted host comes back as its name, for the socket layer to resolve.
 
     Raises:
-        httpcore.ConnectError: the host did not resolve, or resolved to an
-            address the guard refuses. httpx reports it as ``httpx.ConnectError``.
+        httpcore.ConnectError: the host did not resolve, or resolved to a refused address
+            (surfaces as ``httpx.ConnectError``).
     """
     if host_is_allowlisted(host, allowed_hosts):
         return [host]
@@ -209,10 +163,8 @@ def _validated_addresses(host: str, allowed_hosts: tuple[str, ...]) -> list[str]
 class _GuardedBackend(httpcore.NetworkBackend):
     """Opens a TCP connection only to an address the guard has just validated.
 
-    httpcore passes this the request's host name and, separately, uses that
-    name for TLS (SNI and certificate verification) and the ``Host`` header.
-    Only the TCP target changes: an IP literal from the checked lookup, so the
-    socket layer has no name left to look up again.
+    Only the TCP target changes (an IP literal from the checked lookup); httpcore still uses
+    the host name for TLS SNI, certificate verification and the ``Host`` header.
     """
 
     def __init__(self, allowed_hosts: tuple[str, ...]):
@@ -285,20 +237,11 @@ def guarded_transport(
 ) -> httpx.HTTPTransport | None:
     """An httpx transport whose every connection passes the address rule.
 
-    For ``httpx.Client(transport=...)``. The check and the connection use the
-    same lookup, so a name cannot answer the check with a public address and
-    the connection with 127.0.0.1. That holds for every request the client
-    makes, each redirect hop included, whatever ``follow_redirects`` says.
-
-    ``None`` when *allow_local*: there is no address rule to hold a
-    connection to, and the client keeps httpx's defaults.
-
-    Proxies: a client given a transport does not read ``HTTPS_PROXY`` and the
-    like, so a guarded client connects directly. That is deliberate: through a
-    proxy, the proxy resolves the name, and what this process checked says
-    nothing about where the proxy connects. A deployment that reaches the
-    internet only through a proxy has to make that proxy its egress control.
-    With *allow_local* set the environment's proxies apply, as before.
+    The check and the connection share one lookup, so DNS rebinding cannot swap in
+    127.0.0.1, for every request and redirect hop. ``None`` when *allow_local* (httpx
+    defaults apply). A guarded client ignores ``HTTPS_PROXY`` and connects directly, since a
+    proxy would resolve the name itself; proxy-only deployments must make the proxy their
+    egress control.
     """
     if allow_local:
         return None

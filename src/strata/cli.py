@@ -1,16 +1,7 @@
 """Top-level ``strata`` command dispatcher.
 
-Subcommands:
-    run       Execute a notebook headlessly (see :mod:`strata.notebook.cli`)
-    validate  Static checks (schema, annotations, DAG) without executing
-    new       Scaffold a notebook directory
-    export    Render a notebook to markdown or HTML for sharing
-    import    Convert a Jupyter .ipynb file into a Strata notebook directory
-    artifact  Artifact store maintenance (verify)
-
-The existing ``strata-notebook`` script and ``python -m strata`` entry
-points still start the server; they predate this CLI and stay as-is
-for back-compat.
+The ``strata-notebook`` script and ``python -m strata`` still start the server; this CLI
+does not.
 """
 
 from __future__ import annotations

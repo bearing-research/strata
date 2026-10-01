@@ -1,9 +1,4 @@
-"""Tenant registry for managing tenant configurations and runtime state.
-
-Provides:
-- TenantRegistry: Thread-safe registry with LRU eviction for tenant quotas
-- Global registry access via get_tenant_registry() / init_tenant_registry()
-"""
+"""Tenant registry: thread-safe, LRU-bounded tenant configs and runtime quotas."""
 
 from __future__ import annotations
 
@@ -23,12 +18,7 @@ MAX_TRACKED_TENANTS = 1000
 class TenantRegistry:
     """Registry for tenant configurations and runtime quotas.
 
-    Thread-safe with LRU eviction for runtime state.
-
-    Usage:
-        registry = get_tenant_registry()
-        config = registry.get_config("tenant-a")
-        quotas = registry.get_or_create_quotas("tenant-a")
+    Thread-safe; runtime state is LRU-evicted beyond ``MAX_TRACKED_TENANTS``.
     """
 
     # Static configs, from the config file.
@@ -46,22 +36,18 @@ class TenantRegistry:
     default_per_client_bulk: int = 1
 
     def __post_init__(self) -> None:
-        """Initialize with default tenant for backward compatibility."""
+        """Register the default tenant."""
         self._configs[DEFAULT_TENANT_ID] = TenantConfig(tenant_id=DEFAULT_TENANT_ID)
 
     def register_tenant(self, config: TenantConfig) -> None:
-        """Register a tenant configuration.
-
-        Can be called at startup from config file or dynamically via admin API.
-        """
+        """Register a tenant configuration, at startup or from the admin API."""
         with self._lock:
             self._configs[config.tenant_id] = config
 
     def unregister_tenant(self, tenant_id: str) -> bool:
-        """Unregister a tenant configuration.
+        """Unregister a tenant configuration; return whether it existed.
 
-        Returns True if tenant was found and removed, False otherwise.
-        Does not remove the default tenant.
+        The default tenant is never removed.
         """
         if tenant_id == DEFAULT_TENANT_ID:
             return False
@@ -74,17 +60,13 @@ class TenantRegistry:
             return False
 
     def get_config(self, tenant_id: str) -> TenantConfig | None:
-        """Get tenant configuration.
-
-        Returns None if tenant is not registered.
-        """
+        """Get a tenant's configuration, or None if it is not registered."""
         return self._configs.get(tenant_id)
 
     def get_or_create_quotas(self, tenant_id: str) -> TenantQuotas:
-        """Get or create runtime quotas for a tenant.
+        """Get or lazily create runtime quotas for a tenant.
 
-        Creates quotas lazily on first access. Uses LRU eviction
-        when more than MAX_TRACKED_TENANTS are active.
+        May LRU-evict another tenant's quotas beyond ``MAX_TRACKED_TENANTS``.
         """
         with self._lock:
             if tenant_id in self._quotas:
@@ -110,16 +92,10 @@ class TenantRegistry:
             return quotas
 
     def get_or_create_limiters(self, tenant_id: str) -> tuple[ResizableLimiter, ResizableLimiter]:
-        """Get or create per-tenant QoS limiters.
+        """Get or lazily create a tenant's ``(interactive, bulk)`` QoS limiters.
 
-        Each tenant gets their own ResizableLimiter instances for interactive
-        and bulk tiers, providing complete QoS isolation between tenants.
-
-        Limiters are created lazily on first access and stored in TenantQuotas.
-        When tenant quotas are LRU-evicted, their limiters go with them.
-
-        Returns:
-            Tuple of (interactive_limiter, bulk_limiter)
+        Each tenant has its own limiters, stored on its ``TenantQuotas``, so they are
+        evicted with it.
         """
         from strata.adaptive_concurrency import ResizableLimiter
 
@@ -151,18 +127,13 @@ class TenantRegistry:
             return interactive, bulk
 
     def aggregate_limiter_usage(self) -> tuple[int, int, int, int]:
-        """Aggregate live admission-limiter usage across all tracked tenants.
+        """Sum live admission-limiter usage across all tracked tenants.
 
-        Stream admission acquires the per-tenant limiters returned by
-        ``get_or_create_limiters`` — not the global ServerState limiters, which
-        are never acquired — so these are the real source of truth for active
-        scans and saturation. Sums in-use / available across every tenant that
-        has live limiters. Single-tenant deployments have exactly one (the
-        ``_default`` tenant), so this reduces to that tenant's limiter.
+        Stream admission acquires these per-tenant limiters, not the global
+        ``ServerState`` ones, so this is the true active-scan count.
 
-        Returns:
-            ``(interactive_in_use, interactive_available, bulk_in_use,
-            bulk_available)`` summed over live limiters.
+        Returns ``(interactive_in_use, interactive_available, bulk_in_use,
+        bulk_available)``.
         """
         from strata.adaptive_concurrency import ResizableLimiter
 
@@ -180,11 +151,7 @@ class TenantRegistry:
         return i_in_use, i_avail, b_in_use, b_avail
 
     def is_tenant_enabled(self, tenant_id: str) -> bool:
-        """Check if tenant is enabled (exists and not disabled).
-
-        Unknown tenants are allowed by default (dynamic registration).
-        Set require_tenant_registration in config to require pre-registration.
-        """
+        """Check whether a tenant may make requests: unknown tenants are allowed."""
         config = self._configs.get(tenant_id)
         if config is None:
             # Unknown tenants are allowed by default; the server config can require
@@ -205,7 +172,7 @@ class TenantRegistry:
         return list(self._configs.values())
 
     def get_all_tenant_metrics(self) -> list[dict]:
-        """Get metrics for all tracked tenants (those with runtime state)."""
+        """Get metrics for all tenants with runtime state."""
         with self._lock:
             return [q.to_dict() for q in self._quotas.values()]
 
@@ -266,11 +233,7 @@ _registry_lock = threading.Lock()
 
 
 def get_tenant_registry() -> TenantRegistry:
-    """Get the global tenant registry.
-
-    Initializes with defaults if not already initialized.
-    Thread-safe via double-checked locking.
-    """
+    """Get the global tenant registry, creating it with defaults on first use (thread-safe)."""
     global _registry
     if _registry is None:
         with _registry_lock:
@@ -286,10 +249,7 @@ def init_tenant_registry(
     default_per_client_bulk: int = 1,
     tenant_configs: list[TenantConfig] | None = None,
 ) -> TenantRegistry:
-    """Initialize the global tenant registry with custom defaults.
-
-    Should be called once at server startup before handling requests.
-    """
+    """Initialize the global tenant registry with custom defaults; call once at startup."""
     global _registry
     with _registry_lock:
         _registry = TenantRegistry(
@@ -305,7 +265,7 @@ def init_tenant_registry(
 
 
 def reset_tenant_registry() -> None:
-    """Reset the global tenant registry. Primarily for testing."""
+    """Reset the global tenant registry (for tests)."""
     global _registry
     with _registry_lock:
         _registry = None

@@ -1,14 +1,9 @@
-"""Moving an artifact and the chain behind it into another store.
+"""Copying an artifact and the chain behind it into another store.
 
-Two callers want the same walk. ``strata artifact publish`` copies a chain
-into the store that serves the link, which on a hosted deployment is a
-different machine from the one that ran the cells. ``promote`` copies a chain
-into the team's store so colleagues can find the result by name — and so the
-team cache, which is keyed by provenance, hits on every step behind it.
-
-The walk is written once, against a :class:`PublicationTarget`, so a store
-reached over HTTP and a store on this disk are two transports rather than two
-implementations of the same ancestors-first, rewrite-the-edges logic.
+``strata artifact publish`` copies a chain into the store that serves the link;
+``promote`` copies one into the team store. The ancestors-first,
+rewrite-the-edges walk is written once against :class:`PublicationTarget`, so
+local and HTTP stores are two transports of the same logic.
 """
 
 from __future__ import annotations
@@ -56,12 +51,7 @@ REMOTE_TIMEOUT_SECONDS = 300.0
 
 
 class PublicationTarget(Protocol):
-    """Where a chain is copied to and a grant is minted.
-
-    Two implementations: an ``ArtifactStore`` on this machine, and
-    ``RemoteStore`` over HTTP. Declared so the copy walk is written once
-    against a contract rather than twice against two transports.
-    """
+    """Where a chain is copied to and a grant is minted: ``ArtifactStore`` or ``RemoteStore``."""
 
     db_path: Path
 
@@ -79,13 +69,7 @@ class PublicationTarget(Protocol):
 
 
 class RemoteStore:
-    """A store on another machine, reached over HTTP.
-
-    Duck-types the two methods ``copy_chain`` uses, so copying a
-    chain to a served store on a different host is the same walk with a
-    different transport rather than a second implementation of the same
-    ancestors-first, rewrite-the-edges logic.
-    """
+    """A store on another machine, reached over HTTP; duck-types what ``copy_chain`` uses."""
 
     def __init__(self, base_url: str, headers: dict[str, str] | None = None) -> None:
         self.base_url = base_url.rstrip("/")
@@ -137,11 +121,9 @@ class RemoteStore:
         )
 
     def set_alias(self, name: str, alias: str, artifact_id: str, version: int) -> bool:
-        """Move ``name@alias``. Returns whether it applied rather than queued.
+        """Move ``name@alias``; return whether it applied rather than queued.
 
-        A protected alias answers 202 and lands in the pending queue for
-        someone else to approve, which is the point of protecting it — so that
-        is a normal outcome to report, not a failure to raise.
+        A protected alias answering 202 (pending approval) is a normal outcome, not an error.
         """
         response = self._post(
             f"/v1/names/{name}/aliases/{alias}",
@@ -207,9 +189,8 @@ class RemoteStore:
     ) -> Publication:
         """Mint the grant on the far side, where the link will resolve from.
 
-        ``tenant`` and ``published_by`` are deliberately not sent: the far side
-        takes both from the authenticated caller, so a client that could name
-        them would be claiming an identity rather than presenting one.
+        ``tenant`` and ``published_by`` are not sent: the far side takes both from the
+        authenticated caller.
         """
         import httpx
 
@@ -252,10 +233,8 @@ def detail_of(response) -> str:
 def remap_input_versions(record: ArtifactVersion, remap: dict[str, str]) -> ArtifactVersion:
     """Point a record's lineage edges at the rows its ancestors landed on.
 
-    Edges are recorded twice over, as the key ``strata://artifact/<id>@v=<n>``
-    and again as the value ``<id>@v=<n>``; the walk reads the key
-    (``_walk_lineage``) and staleness reads the value, so both have to move or
-    the two disagree about the same edge.
+    Each edge is stored as both key ``strata://artifact/<id>@v=<n>`` (read by the
+    lineage walk) and value ``<id>@v=<n>`` (read by staleness); both must move.
     """
     if not record.input_versions:
         return record
@@ -275,28 +254,16 @@ def remap_input_versions(record: ArtifactVersion, remap: dict[str, str]) -> Arti
 def copy_chain(
     source: ArtifactStore, target: PublicationTarget, artifact: ArtifactVersion, max_depth: int
 ) -> tuple[list[str], str]:
-    """Copy an artifact and everything behind it into the served store.
+    """Copy an artifact and its whole ancestry into the served store.
 
-    Notebook cells write to the notebook's own ``.strata/artifacts``; the server
-    serves whatever ``artifact_dir`` it was configured with, which by default is
-    ``~/.strata/artifacts``. Publishing a figure therefore minted a token in a
-    store the page route never reads, and the link 404'd — the primary case the
-    feature exists for, working only when the two happened to be the same
-    directory.
+    Notebook cells write to the notebook's ``.strata/artifacts``, which the server
+    does not serve, and the published page needs every upstream step. Ancestors go
+    first, so a descendant is never readable with dangling edges and can be
+    rewritten to where each ancestor landed (possibly an existing row with the same
+    computation under another id).
 
-    The ancestry goes too, and has to: the page shows the code and environment
-    of every upstream step, so copying the artifact alone would publish a
-    result whose chain resolves to nothing.
-
-    Ancestors first, so a descendant is never briefly readable with edges
-    pointing at rows that have not landed, and so each descendant can be
-    rewritten to name where its ancestors actually landed: an ancestor whose
-    computation the target already holds under another id resolves to that row,
-    and an edge still naming the source's id would resolve to nothing here.
-
-    Returns the refs this copy newly wrote on the target (in the order they
-    landed), and the ref the published artifact itself landed on, which is not
-    the caller's when it deduplicated.
+    Returns the refs newly written on the target, in landing order, and the ref the
+    artifact itself landed on, which differs from the caller's when it deduplicated.
     """
     from strata.services.artifact import ArtifactService
 
@@ -371,28 +338,15 @@ def promote_artifact(
     max_depth: int = 10,
     table: str | None = None,
 ) -> Promotion:
-    """Copy an artifact and its chain to the team store, and name it there.
+    """Copy an artifact and its chain to the team store, and name it there if ``name`` is given.
 
-    Without a name it copies the chain and names nothing. That is what a
-    platform publishing a result needs: the chain has to be in the store the
-    link is served from, and a result someone publishes is not thereby one
-    the team should find in its registry.
-
-    Publishing mints a public link. Promoting does not: it puts a result where
-    colleagues can find it by name, inside the store their own cells already
-    read from.
-
-    The chain travels for the same reason it does when publishing, and for one
-    more: the team cache is keyed by provenance, so an ancestor that arrives is
-    a cache hit for the next person whose cell computes the same thing. Sending
-    the artifact alone would share the answer and none of the work.
+    Unlike publishing, promoting mints no public link. The chain travels so each
+    ancestor becomes a provenance cache hit for colleagues.
 
     Raises:
-        ValueError: If the artifact's bytes are not readable, so what would
-            arrive is a name pointing at nothing.
-        RuntimeError: If the far side refused a copy or a registry write. The
-            chain already copied stays — it is keyed by provenance, so it is a
-            usable cache entry whether or not it ever got a name.
+        ValueError: If the artifact's bytes are not readable.
+        RuntimeError: If the far side refused a copy or a registry write. The chain
+            already copied stays as usable cache entries.
     """
     if artifact.state not in ("ready", "superseded"):
         raise ValueError(

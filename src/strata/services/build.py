@@ -1,11 +1,8 @@
-"""Build-plane services (pull-model manifest assembly).
+"""Build-plane services: pure pieces of pull-model manifest assembly.
 
-The build routes keep their orchestration in the handler — mode/transport
-checks, build-store lookup, and the post-fetch ``_authorize_build_access`` all
-stay there. ``BuildService`` holds the pure pieces: resolving a build's input
-URIs to ``(artifact_id, version)`` pairs and assembling the signed-URL manifest.
-Stateless; the resolved artifact store and config-derived limits are passed in.
-A handler maps the ``ValueError`` raised here (unresolvable input) to its 400.
+Handlers keep the mode/transport checks, build lookup and authorization;
+``BuildService`` resolves input URIs and assembles the signed-URL manifest. It
+is stateless, and handlers map its ``ValueError`` (unresolvable input) to 400.
 """
 
 from __future__ import annotations
@@ -24,10 +21,10 @@ def _resolve_to_artifact_version(
     store: ArtifactStore,
     tenant: str | None = None,
 ) -> tuple[str, int] | None:
-    """Resolve an input URI to an ``(artifact_id, version)`` tuple, or ``None``.
+    """Resolve an input URI to ``(artifact_id, version)``, or ``None``.
 
     Handles ``strata://artifact/{id}@v={n}`` directly and ``strata://name/{name}``
-    via the store; any other shape (or an unknown name) returns ``None``.
+    via the store; any other shape or an unknown name returns ``None``.
     """
     if input_uri.startswith("strata://artifact/"):
         match = re.match(r"^strata://artifact/([^@]+)@v=(\d+)$", input_uri)
@@ -58,10 +55,9 @@ class BuildService:
     ) -> str:
         """Project an identity stream/background build onto the build lifecycle.
 
-        Precedence (highest first): a stream error or a failed artifact ⇒
-        ``failed``; a ready artifact or a completed stream ⇒ ``ready``; a started
-        stream ⇒ ``building``; otherwise ``pending``. ``error_message`` wins over
-        a ready artifact, so a half-failed build never reports ``ready``.
+        Precedence: a stream error or failed artifact is ``failed``; a ready artifact
+        or completed stream is ``ready``; a started stream is ``building``; else
+        ``pending``. ``error_message`` beats a ready artifact.
         """
         if error_message or artifact_state == "failed":
             return "failed"
@@ -89,8 +85,7 @@ class BuildService:
         ``presign`` asks for object-store URLs where the store can sign them.
 
         Raises:
-            ValueError: an input URI cannot be resolved to an artifact version.
-                The handler maps this to a 400.
+            ValueError: If an input URI cannot be resolved to an artifact version.
         """
         input_artifacts: list[tuple[str, int]] = []
         for input_uri in build.input_uris or []:

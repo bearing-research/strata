@@ -1,41 +1,16 @@
 """Background build runner for server-mode transforms.
 
-The build runner is responsible for:
-1. Polling for pending builds
-2. Acquiring inputs (artifacts or Iceberg scans)
-3. Streaming inputs to external executors
-4. Persisting outputs as new artifact versions
-5. Updating build state on success/failure
+Polls for pending builds, acquires inputs (artifacts or Iceberg scans), runs the executor,
+and persists the output as a new artifact version. Concurrency is bounded globally and per
+tenant; each build has its transform's timeout.
 
-Concurrency controls:
-- Global semaphore limits total concurrent builds
-- Per-tenant semaphore limits builds per tenant
-- Build-level timeout from transform definition
+Executor protocol v1 (push; schemas in ``strata.types``):
 
-Executor HTTP Protocol v1 (Push Model):
-    See strata.types for protocol definitions:
-    - ExecutorRequestMetadata: JSON metadata schema
-    - ExecutorInputDescriptor: Input descriptor schema
-    - ExecutorTransformSpec: Transform specification schema
-
-    Request: POST {executor_url}/v1/execute
-    Headers:
-        Content-Type: multipart/form-data
-        X-Strata-Executor-Protocol: v1
-
-    Parts:
-    1. metadata (application/json): ExecutorRequestMetadata
-    2. input0, input1, ... (application/vnd.apache.arrow.stream)
-
-    Response:
-    - Status: 200
-    - Content-Type: application/vnd.apache.arrow.stream
-    - X-Strata-Logs: base64-encoded executor logs (optional)
-    - Body: Output Arrow IPC stream bytes
-
-    Error Response (4xx/5xx):
-    - Content-Type: application/json
-    - Body: ExecutorResponse with success=false
+    POST {executor_url}/v1/execute, multipart/form-data, X-Strata-Executor-Protocol: v1
+    parts: metadata (application/json, ExecutorRequestMetadata),
+           input0, input1, ... (application/vnd.apache.arrow.stream)
+    200: Arrow IPC stream body; optional X-Strata-Logs (base64 executor logs)
+    4xx/5xx: application/json ExecutorResponse with success=false
 """
 
 from __future__ import annotations
@@ -81,15 +56,8 @@ def _is_runner_managed_build(build: BuildState) -> bool:
 class RunnerConfig:
     """Configuration for the build runner.
 
-    Attributes:
-        poll_interval_ms: How often to poll for pending builds (default 500ms)
-        max_concurrent_builds: Global limit on concurrent builds
-        max_builds_per_tenant: Per-tenant limit on concurrent builds
-        default_timeout_seconds: Default build timeout if not in registry
-        default_max_output_bytes: Default max output size if not in registry
-        lease_duration_seconds: How long a build lease is valid (default 60s)
-        heartbeat_interval_seconds: How often to renew leases (default 15s)
-        runner_id: Unique identifier for this runner instance
+    Timeout and max-output defaults apply when the registry entry sets none. A lease must be
+    renewed every ``heartbeat_interval_seconds`` or it lapses after ``lease_duration_seconds``.
     """
 
     poll_interval_ms: int = 500
@@ -108,10 +76,9 @@ _SWEEP_BATCH = 100
 
 
 def sweep_settled_attempts(build_store: BuildStore, artifact_store: ArtifactStore) -> None:
-    """Delete what settled build attempts wrote, except the one published.
+    """Delete what settled build attempts wrote, except the published one.
 
-    Blob deletes are network I/O against S3 / GCS / Azure, so the runner's
-    loop calls this off the event loop.
+    Blob deletes are network I/O, so the runner loop calls this off the event loop.
     """
     while True:
         batch = build_store.settled_attempts(limit=_SWEEP_BATCH)
@@ -125,24 +92,11 @@ def sweep_settled_attempts(build_store: BuildStore, artifact_store: ArtifactStor
 
 @dataclass
 class BuildRunner:
-    """Background runner for server-mode builds.
+    """Background runner that claims pending builds and executes them.
 
-    The runner polls for pending builds and executes them asynchronously
-    using external executors. It manages concurrency limits and handles
-    errors gracefully.
-
-    Reliability features:
-    - Lease-based claiming: Each build is claimed with a lease that must be
-      renewed periodically. If the runner crashes, another runner can reclaim
-      the build after the lease expires.
-    - Heartbeat: Leases are renewed periodically during execution.
-    - Orphan recovery: Builds with expired leases are reclaimed automatically.
-
-    Usage:
-        runner = BuildRunner(config, artifact_store, build_store, registry)
-        await runner.start()
-        # ... server runs ...
-        await runner.stop()
+    Builds are claimed under a lease renewed by a heartbeat; if a runner dies, its leases
+    expire and another runner reclaims the builds. Call ``start()`` and ``stop()`` around the
+    server's lifetime.
     """
 
     config: RunnerConfig
@@ -279,9 +233,7 @@ class BuildRunner:
     async def _heartbeat_loop(self) -> None:
         """Periodically renew leases on running builds.
 
-        This keeps builds alive while they're executing. If this loop
-        stops (e.g., runner crashes), the leases will expire and the
-        builds can be reclaimed by other runners.
+        If this loop stops, the leases expire and other runners can reclaim the builds.
         """
         heartbeat_interval = self.config.heartbeat_interval_seconds
 
@@ -307,9 +259,7 @@ class BuildRunner:
     def _submit_build(self, build: BuildState, already_claimed: bool = False) -> None:
         """Submit a build for async execution.
 
-        Args:
-            build: Build to execute
-            already_claimed: If True, skip claiming (already claimed via reclaim)
+        ``already_claimed`` skips claiming, for builds already reclaimed.
         """
         if build.build_id in self._running_builds:
             return
@@ -327,12 +277,7 @@ class BuildRunner:
     async def _execute_build_with_semaphores(
         self, build: BuildState, already_claimed: bool = False
     ) -> None:
-        """Execute a build with concurrency controls.
-
-        Args:
-            build: Build to execute
-            already_claimed: If True, skip claiming (already claimed via reclaim)
-        """
+        """Execute a build under the global and per-tenant concurrency limits."""
         tenant_id = build.tenant_id or "__default__"
 
         if tenant_id not in self._tenant_sems:
@@ -345,20 +290,9 @@ class BuildRunner:
                 await self._execute_build(build, already_claimed)
 
     async def _execute_build(self, build: BuildState, already_claimed: bool = False) -> None:
-        """Execute a single build.
+        """Execute one build: claim, acquire inputs, run the executor, persist, update state.
 
-        This is the main build execution logic:
-        1. Claim build with lease (or skip if already claimed)
-        2. Get transform definition from registry
-        3. Load artifact metadata to get inputs and transform
-        4. Acquire inputs (artifacts or Iceberg scans)
-        5. Stream inputs to executor
-        6. Persist output as new artifact version
-        7. Update build state on success/failure
-
-        Args:
-            build: Build to execute
-            already_claimed: If True, skip claiming (already claimed via reclaim)
+        ``already_claimed`` skips claiming (reclaimed builds).
         """
         import time as time_mod
 
@@ -641,15 +575,10 @@ class BuildRunner:
         temp_files: list[Path],
         tenant_id: str | None = None,
     ) -> Path:
-        """Acquire an input and write it to a temp file.
+        """Write an input to a temp file as an Arrow IPC stream and return its path.
 
-        Supports:
-        - strata://artifact/{id}@v={version} - read artifact blob
-        - strata://name/{name} - resolve name and read artifact blob
-        - file:// or s3:// - Iceberg table scan (to be implemented)
-
-        Returns:
-            Path to temp file containing Arrow IPC stream
+        Accepts ``strata://artifact/{id}@v={version}``, ``strata://name/{name}``, and ``file://``
+        or ``s3://`` table URIs (scanned). Anything else raises ``ValueError``.
         """
         if input_uri.startswith("strata://artifact/"):
             import re
@@ -700,11 +629,7 @@ class BuildRunner:
         table_uri: str,
         temp_files: list[Path],
     ) -> Path:
-        """Run an Iceberg scan and write output to a temp file.
-
-        This uses the internal scan pipeline to read the table and
-        write the Arrow IPC stream to a file.
-        """
+        """Run an Iceberg scan through the internal scan pipeline into a temp Arrow IPC file."""
 
         _fd, _tmp_path = tempfile.mkstemp(suffix=".arrow", dir=self.artifact_dir)
         os.close(_fd)  # Windows: handle must be closed before rename
@@ -769,28 +694,15 @@ class BuildRunner:
         max_output_bytes: int,
         temp_files: list[Path],
     ) -> tuple[Path, str | None]:
-        """Call executor - either embedded or via HTTP.
+        """Run the executor in-process (``embedded://local`` or empty URL) or over HTTP.
 
-        For embedded execution (executor_url == "embedded://local" or empty),
-        runs the transform directly in-process. Otherwise, makes an HTTP call
-        to an external executor service.
-
-        Args:
-            executor_url: Base URL of the executor, or "embedded://local" for embedded
-            metadata: Build metadata JSON
-            input_files: List of (name, path) tuples for inputs
-            timeout: Request timeout in seconds
-            max_output_bytes: Maximum output size in bytes
-            temp_files: List to append temp files for cleanup
-
-        Returns:
-            Tuple of (Path to temp file containing output Arrow IPC stream,
-                      executor logs from X-Strata-Logs header or None)
+        Returns ``(output path, executor logs or None)``. Temp files are appended to
+        ``temp_files`` for the caller to clean up.
 
         Raises:
-            ValueError: If output exceeds max_output_bytes
-            httpx.HTTPStatusError: If executor returns non-200 status
-            asyncio.TimeoutError: If request times out
+            ValueError: output exceeds ``max_output_bytes``.
+            httpx.HTTPStatusError: the executor returned an error status.
+            asyncio.TimeoutError: the call timed out.
         """
         if executor_url == "embedded://local" or not executor_url:
             return await self._call_embedded_executor(
@@ -809,21 +721,7 @@ class BuildRunner:
         max_output_bytes: int,
         temp_files: list[Path],
     ) -> tuple[Path, str | None]:
-        """Execute transform locally using embedded executor.
-
-        This runs the transform directly in-process, without HTTP overhead.
-        Used for local deployment where no external executor service is needed.
-
-        Args:
-            metadata: Build metadata JSON with transform ref and params
-            input_files: List of (name, path) tuples for inputs
-            timeout: Execution timeout in seconds
-            max_output_bytes: Maximum output size in bytes
-            temp_files: List to append temp files for cleanup
-
-        Returns:
-            Tuple of (Path to output file, None for logs)
-        """
+        """Run the transform in-process; returns ``(output path, None)``."""
         import io
 
         import pyarrow.ipc as ipc
@@ -875,28 +773,11 @@ class BuildRunner:
         max_output_bytes: int,
         temp_files: list[Path],
     ) -> tuple[Path, str | None]:
-        """Call external executor via HTTP.
+        """Call an external executor over HTTP (protocol v1).
 
-        Uses multipart/form-data to stream inputs to the executor.
-        The executor returns an Arrow IPC stream which is written to
-        a temp file with size enforcement.
-
-        Args:
-            executor_url: Base URL of the executor
-            metadata: Build metadata JSON
-            input_files: List of (name, path) tuples for inputs
-            timeout: Request timeout in seconds
-            max_output_bytes: Maximum output size in bytes
-            temp_files: List to append temp files for cleanup
-
-        Returns:
-            Tuple of (Path to temp file containing output Arrow IPC stream,
-                      executor logs from X-Strata-Logs header or None)
-
-        Raises:
-            ValueError: If output exceeds max_output_bytes
-            httpx.HTTPStatusError: If executor returns non-200 status
-            asyncio.TimeoutError: If request times out
+        Inputs stream from disk and the response streams to a temp file, enforcing
+        ``max_output_bytes`` as it arrives. Returns ``(output path, decoded X-Strata-Logs or
+        None)``; raises as ``_call_executor`` documents.
         """
         from strata.types import EXECUTOR_PROTOCOL_HEADER, EXECUTOR_PROTOCOL_VERSION
 
@@ -974,11 +855,7 @@ class BuildRunner:
         return output_path, executor_logs
 
     def _read_arrow_metadata(self, path: Path) -> tuple[str, int]:
-        """Read Arrow IPC file metadata.
-
-        Returns:
-            Tuple of (schema_json, row_count)
-        """
+        """Read an Arrow IPC file's ``(schema_json, row_count)``."""
         import pyarrow.ipc as ipc
 
         with ipc.open_stream(str(path)) as reader:
