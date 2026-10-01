@@ -23,9 +23,8 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 DASHBOARD = REPO_ROOT / "observability/grafana/provisioning/dashboards/strata.json"
 DATASOURCES = REPO_ROOT / "observability/grafana/provisioning/datasources/datasources.yml"
 
-# Metric families emitted only under specific conditions — multi-tenant traffic,
-# per-table activity — so they are absent from an idle server's scrape.
-# Allowlisted by prefix rather than required to be live.
+# Families emitted only under specific conditions (multi-tenant traffic, per-table
+# activity), so absent from an idle server's scrape; allowlisted by prefix.
 CONDITIONAL_PREFIXES = ("strata_tenant_", "strata_table_")
 
 _METRIC_RE = re.compile(r"strata_[a-z0-9_]+")

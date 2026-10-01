@@ -83,10 +83,8 @@ def wait_for_build(base_url: str, artifact_uri: str, timeout: float = 30.0) -> N
         try:
             resp = httpx.get(f"{base_url}/v1/artifacts/{artifact_id}/v/{version}")
         except httpx.TimeoutException:
-            # One slow poll is not an answer. httpx's default read timeout is
-            # shorter than the deadline we were given, so a loaded runner
-            # could otherwise fail the whole wait with seconds still on the
-            # clock — keep asking until the deadline is actually spent.
+            # One slow poll is not an answer: httpx's default read timeout is shorter than
+            # the deadline, so keep asking until the deadline is actually spent.
             time.sleep(0.2)
             continue
         state = resp.json().get("state")
@@ -98,9 +96,7 @@ def wait_for_build(base_url: str, artifact_uri: str, timeout: float = 30.0) -> N
     raise AssertionError(f"build did not finish for {artifact_uri}")
 
 
-# =============================================================================
-# Fixtures
-# =============================================================================
+# --- Fixtures ---
 
 
 @pytest.fixture
@@ -123,11 +119,6 @@ def service_mode_server(tmp_path):
 
     with run_server_with_context(cache_dir, deployment_mode="service") as ctx:
         yield {"config": ctx.config, "port": ctx.port, "base_url": ctx.base_url}
-
-
-# =============================================================================
-# HTTP Endpoint Tests
-# =============================================================================
 
 
 class TestArtifactEndpoints:
@@ -153,7 +144,7 @@ class TestArtifactEndpoints:
         assert data["build_id"]
         assert data["state"] == "pending"
 
-        # The embedded runner executes the SQL — no client-side build needed.
+        # The embedded runner executes the SQL; no client-side build needed.
         wait_for_build(base_url, data["artifact_uri"])
 
     def test_materialize_unknown_transform_fails_fast(self, personal_mode_server):
@@ -191,7 +182,6 @@ class TestArtifactEndpoints:
         """Fetch artifact data returns Arrow IPC stream."""
         base_url = personal_mode_server["base_url"]
 
-        # Create artifact via PUT
         import re
 
         table = pa.table({"x": [1, 2, 3], "y": ["a", "b", "c"]})
@@ -199,7 +189,6 @@ class TestArtifactEndpoints:
         match = re.match(r"strata://artifact/([^@]+)@v=(\d+)", data["artifact_uri"])
         artifact_id, version = match.group(1), int(match.group(2))
 
-        # Fetch and verify
         resp = httpx.get(f"{base_url}/v1/artifacts/{artifact_id}/v/{version}/data")
         assert resp.status_code == 200
         assert resp.headers["content-type"] == "application/vnd.apache.arrow.stream"
@@ -230,22 +219,18 @@ class TestArtifactEndpoints:
         match = re.match(r"strata://artifact/([^@]+)@v=(\d+)", artifact_uri)
         artifact_id, version = match.group(1), int(match.group(2))
 
-        # Set name
         resp = httpx.post(
             f"{base_url}/v1/names",
             json={"name": "my-artifact", "artifact_id": artifact_id, "version": version},
         )
         assert resp.json()["name_uri"] == "strata://name/my-artifact"
 
-        # Resolve name
         resp = httpx.get(f"{base_url}/v1/names/my-artifact")
         assert resp.json()["artifact_uri"].startswith("strata://artifact/")
 
-        # List names
         resp = httpx.get(f"{base_url}/v1/names")
         assert resp.json()["names"][0]["name"] == "my-artifact"
 
-        # Delete name
         httpx.delete(f"{base_url}/v1/names/my-artifact")
         resp = httpx.get(f"{base_url}/v1/names/my-artifact")
         assert resp.status_code == 404
@@ -266,7 +251,7 @@ class TestArtifactEndpoints:
                 data={"x": [1, 2, 3], "y": ["a", "b", "c"]},
             )
 
-            # Name it in a SEPARATE call (not at put time) — the friction case.
+            # Name it in a SEPARATE call (not at put time): the friction case.
             client.set_name("taxi/tip-model", art.artifact_id, art.version)
 
             resolved = client.resolve_name("taxi/tip-model")
@@ -301,15 +286,10 @@ class TestServiceModeBlocking:
             ).status_code
             == 403
         )
-        # Listing and resolving names are reads — reachable, not mode-gated; 404
-        # here only because this gateway has no store.
+        # Listing and resolving names are reads, so not mode-gated; 404 here only because
+        # this gateway has no store.
         assert httpx.get(f"{base_url}/v1/names").status_code == 404
         assert httpx.get(f"{base_url}/v1/names/test").status_code == 404
-
-
-# =============================================================================
-# Contract Tests - The Core Workflow
-# =============================================================================
 
 
 class TestArtifactContract:
@@ -398,7 +378,6 @@ class TestArtifactContract:
             )
             assert aggregated2.cache_hit is True, "Aggregate stage should be cached"
 
-            # Verify names resolve to correct data
             for name, expected in [
                 ("clicks-only", filtered_data.to_pydict()),
                 ("user-totals", agg_data.to_pydict()),
@@ -438,11 +417,9 @@ class TestArtifactContract:
                 assert artifact.cache_hit is True, "Should be cache hit after restart"
                 assert artifact.uri == saved_uri
 
-                # Data should be accessible
                 data = artifact.to_table()
                 assert data.to_pydict() == expected_data
 
-                # Name should still resolve
                 resolved = client.get_artifact_by_name("persistent-artifact")
                 assert resolved.uri == saved_uri
 
@@ -454,7 +431,6 @@ class TestArtifactContract:
         from ``[a, b]`` and must NOT dedup to the same artifact.
         """
         with StrataClient(base_url=personal_mode_server["base_url"]) as client:
-            # Create real input artifacts
             input_a = client.materialize(
                 inputs=[],
                 transform={"ref": "duckdb_sql@v1", "params": {"sql": "SELECT 'a' as val"}},
@@ -470,7 +446,6 @@ class TestArtifactContract:
 
             sql = "SELECT 'dedup' as tag"
 
-            # First call with inputs [a, b]
             artifact1 = client.materialize(
                 inputs=[input_a.uri, input_b.uri],
                 transform={"ref": "duckdb_sql@v1", "params": {"sql": sql}},
@@ -522,18 +497,12 @@ class TestArtifactContract:
             assert via_artifact.to_pydict() == via_name.to_pydict()
 
 
-# =============================================================================
-# Lifecycle Management Tests
-# =============================================================================
-
-
 class TestArtifactLifecycle:
     """Tests for artifact lifecycle management: list, delete, GC, usage."""
 
     def test_list_artifacts(self, personal_mode_server):
         """List artifacts with pagination and filtering."""
         with StrataClient(base_url=personal_mode_server["base_url"]) as client:
-            # Create multiple artifacts with names
             for i in range(3):
                 materialize_and_upload(
                     client,
@@ -541,29 +510,23 @@ class TestArtifactLifecycle:
                     name=f"list-test-{i}",
                 )
 
-            # List all
             result = client.list_artifacts()
             assert len(result["artifacts"]) >= 3
 
-            # List with limit
             result = client.list_artifacts(limit=2)
             assert len(result["artifacts"]) == 2
 
-            # List only ready artifacts
             result = client.list_artifacts(state="ready")
             assert all(a["state"] == "ready" for a in result["artifacts"])
 
-            # List by name prefix - should return artifacts that have these names
             result = client.list_artifacts(name_prefix="list-test-")
             assert len(result["artifacts"]) == 3
-            # Each artifact should have a valid URI
             for a in result["artifacts"]:
                 assert a["artifact_uri"].startswith("strata://artifact/")
 
     def test_delete_artifact(self, personal_mode_server):
         """Delete an artifact version."""
         with StrataClient(base_url=personal_mode_server["base_url"]) as client:
-            # Create artifact
             artifact = client.materialize(
                 inputs=[],
                 transform={
@@ -573,14 +536,12 @@ class TestArtifactLifecycle:
                 name="delete-test",
             )
 
-            # Verify it exists
             assert artifact.to_table().to_pydict() == {"status": ["to-delete"]}
 
-            # Delete it
             result = client.delete_artifact(artifact.artifact_id, artifact.version)
             assert result["deleted"] is True
 
-            # Verify it's gone - getting artifact by name should fail
+            # Gone: resolving it by name fails.
             with pytest.raises(httpx.HTTPStatusError) as exc_info:
                 client.get_artifact_by_name("delete-test")
             assert exc_info.value.response.status_code == 404
@@ -588,18 +549,17 @@ class TestArtifactLifecycle:
     def test_garbage_collect_unreferenced(self, personal_mode_server):
         """GC removes unreferenced artifacts older than cutoff."""
         with StrataClient(base_url=personal_mode_server["base_url"]) as client:
-            # Create artifact WITHOUT a name (unreferenced)
+            # No name, so unreferenced.
             unreferenced = client.materialize(
                 inputs=[],
                 transform={
                     "ref": "duckdb_sql@v1",
                     "params": {"sql": "SELECT 'gc-candidate' as status"},
                 },
-                # No name - this artifact is unreferenced
             )
             assert unreferenced.name is None
 
-            # Create artifact WITH a name (referenced)
+            # With a name, so referenced.
             _referenced = client.materialize(
                 inputs=[],
                 transform={
@@ -609,13 +569,11 @@ class TestArtifactLifecycle:
                 name="gc-protected",
             )
 
-            # Get usage before GC
             usage_before = client.get_artifact_usage()
             assert usage_before["unreferenced_count"] >= 1
 
-            # GC with max_idle_days=0 should delete the unreferenced one immediately
-            # collect_latest: the unnamed artifact above is a single-version
-            # current value, which GC now spares by default.
+            # max_idle_days=0 deletes the unreferenced one immediately. collect_latest because
+            # GC spares a single-version current value by default.
             gc_result = client.garbage_collect(
                 max_idle_days=0, min_idle_seconds=0, collect_latest=True
             )
@@ -628,11 +586,9 @@ class TestArtifactLifecycle:
     def test_usage_metrics(self, personal_mode_server):
         """Usage metrics track artifacts correctly."""
         with StrataClient(base_url=personal_mode_server["base_url"]) as client:
-            # Get initial usage
             usage1 = client.get_artifact_usage()
             initial_versions = usage1["total_versions"]
 
-            # Create some artifacts
             for i in range(2):
                 materialize_and_upload(
                     client,
@@ -640,7 +596,6 @@ class TestArtifactLifecycle:
                     name=f"usage-{i}",
                 )
 
-            # Check usage increased
             usage2 = client.get_artifact_usage()
             assert usage2["total_versions"] >= initial_versions + 2
             assert usage2["total_bytes"] > 0
@@ -656,7 +611,6 @@ class TestArtifactLifecycle:
     def test_gc_preserves_named_artifacts(self, personal_mode_server):
         """GC never deletes artifacts with name pointers."""
         with StrataClient(base_url=personal_mode_server["base_url"]) as client:
-            # Create several named artifacts
             artifacts = []
             for i in range(3):
                 artifact = client.materialize(
@@ -669,18 +623,12 @@ class TestArtifactLifecycle:
                 )
                 artifacts.append(artifact)
 
-            # Run aggressive GC
             client.garbage_collect(max_idle_days=0, min_idle_seconds=0)
 
             # All named artifacts should still exist
             for i, artifact in enumerate(artifacts):
                 fetched = client.get_artifact_by_name(f"gc-preserve-{i}")
                 assert fetched.to_table().to_pydict() == {"idx": [i]}
-
-
-# =============================================================================
-# Staleness Detection Tests
-# =============================================================================
 
 
 class TestStalenessDetection:
@@ -705,7 +653,6 @@ class TestStalenessDetection:
                 name="fresh-artifact",
             )
 
-            # Check status
             status = client.get_name_status("fresh-artifact")
             assert status["name"] == "fresh-artifact"
             assert status["is_stale"] is False
@@ -733,13 +680,11 @@ class TestStalenessDetection:
                 name="staleness-check",
             )
 
-            # Should not be stale
             assert client.is_artifact_stale("staleness-check") is False
 
     def test_explain_materialize_hit(self, personal_mode_server):
         """Explain materialize shows would_hit for cached computation."""
         with StrataClient(base_url=personal_mode_server["base_url"]) as client:
-            # Create and finalize an artifact
             client.materialize(
                 inputs=[],
                 transform={
@@ -749,7 +694,6 @@ class TestStalenessDetection:
                 name="explain-hit-test",
             )
 
-            # Explain the same computation
             result = client.explain_materialize(
                 inputs=[],
                 transform={
@@ -792,7 +736,6 @@ class TestStalenessDetection:
         input URIs themselves differ, it's a different computation, not staleness.
         """
         with StrataClient(base_url=personal_mode_server["base_url"]) as client:
-            # Create source artifact
             source = client.materialize(
                 inputs=[],
                 transform={
@@ -802,7 +745,6 @@ class TestStalenessDetection:
                 name="stale-source",
             )
 
-            # Create dependent artifact using source
             client.materialize(
                 inputs=[source.uri],
                 transform={
@@ -812,9 +754,8 @@ class TestStalenessDetection:
                 name="stale-dependent",
             )
 
-            # Now explain a computation with DIFFERENT transform params (same inputs)
-            # This triggers cache miss + staleness check against existing named artifact
-            # Different SQL than above
+            # Same inputs, different SQL: a cache miss plus a staleness check against the
+            # existing named artifact.
             result = client.explain_materialize(
                 inputs=[source.uri],
                 transform={
@@ -824,13 +765,10 @@ class TestStalenessDetection:
                 name="stale-dependent",
             )
 
-            # Should show would_build (cache miss due to different transform)
-            # is_stale should be False since input versions haven't changed
+            # A cache miss from the different transform, but not stale: the existing
+            # artifact's input versions haven't changed.
             assert result["would_hit"] is False
             assert result["would_build"] is True
-            # The artifact exists but inputs haven't changed - it's a different transform
-            # So is_stale refers to whether the EXISTING artifact's inputs changed
-            # In this case, inputs are the same, so not stale (just a different transform)
             assert result["is_stale"] is False
 
     def test_name_status_with_artifact_dependency(self, personal_mode_server):
@@ -844,7 +782,6 @@ class TestStalenessDetection:
         a new artifact version), that's a different computation entirely.
         """
         with StrataClient(base_url=personal_mode_server["base_url"]) as client:
-            # Create base artifact
             base = client.materialize(
                 inputs=[],
                 transform={
@@ -854,7 +791,6 @@ class TestStalenessDetection:
                 name="base-artifact",
             )
 
-            # Create derived artifact that depends on base
             client.materialize(
                 inputs=[base.uri],
                 transform={
@@ -867,7 +803,6 @@ class TestStalenessDetection:
             # Verify derived is NOT stale initially
             status = client.get_name_status("derived-artifact")
             assert status["is_stale"] is False
-            # Should show the input dependency
             assert base.uri in status["input_versions"]
             # Input version should be the artifact version string
             assert "@v=" in status["input_versions"][base.uri]
@@ -875,7 +810,6 @@ class TestStalenessDetection:
     def test_name_status_reports_input_versions(self, personal_mode_server):
         """Name status reports stored input versions correctly."""
         with StrataClient(base_url=personal_mode_server["base_url"]) as client:
-            # Create two input artifacts
             input1 = client.materialize(
                 inputs=[],
                 transform={
@@ -891,7 +825,6 @@ class TestStalenessDetection:
                 },
             )
 
-            # Create artifact that depends on both
             client.materialize(
                 inputs=[input1.uri, input2.uri],
                 transform={
@@ -901,7 +834,6 @@ class TestStalenessDetection:
                 name="multi-input-artifact",
             )
 
-            # Check status shows all input versions
             status = client.get_name_status("multi-input-artifact")
             assert len(status["input_versions"]) == 2
             assert input1.uri in status["input_versions"]
@@ -911,7 +843,6 @@ class TestStalenessDetection:
     def test_explain_resolved_input_versions(self, personal_mode_server):
         """Explain returns resolved input versions."""
         with StrataClient(base_url=personal_mode_server["base_url"]) as client:
-            # Create an artifact to use as input
             input_artifact = client.materialize(
                 inputs=[],
                 transform={
@@ -920,7 +851,6 @@ class TestStalenessDetection:
                 },
             )
 
-            # Explain with that input
             result = client.explain_materialize(
                 inputs=[input_artifact.uri],
                 transform={
@@ -929,17 +859,14 @@ class TestStalenessDetection:
                 },
             )
 
-            # Should have resolved versions
             assert result["resolved_input_versions"] is not None
             assert input_artifact.uri in result["resolved_input_versions"]
-            # Version should be in format "artifact_id@v=N"
+            # Format is "artifact_id@v=N".
             version = result["resolved_input_versions"][input_artifact.uri]
             assert "@v=" in version
 
 
-# =============================================================================
-# Tests for unified materialize() API with real tables
-# =============================================================================
+# --- Unified materialize() with real tables ---
 
 
 @pytest.fixture
@@ -957,7 +884,6 @@ def iceberg_warehouse(tmp_path):
     warehouse_path = tmp_path / "warehouse"
     warehouse_path.mkdir()
 
-    # Create a SQL catalog
     catalog = SqlCatalog(
         "strata",
         **{
@@ -966,20 +892,16 @@ def iceberg_warehouse(tmp_path):
         },
     )
 
-    # Create namespace
     catalog.create_namespace("test_db")
 
-    # Define schema
     schema = Schema(
         NestedField(1, "id", LongType(), required=False),
         NestedField(2, "value", DoubleType(), required=False),
         NestedField(3, "category", StringType(), required=False),
     )
 
-    # Create table
     table = catalog.create_table("test_db.events", schema)
 
-    # Create sample data
     data = pa.table(
         {
             "id": pa.array([1, 2, 3, 4, 5], type=pa.int64()),
@@ -988,7 +910,6 @@ def iceberg_warehouse(tmp_path):
         }
     )
 
-    # Append data to table
     table.append(data)
 
     return {
@@ -1024,7 +945,6 @@ class TestUnifiedMaterializeAPI:
         base_url = artifact_server_with_warehouse["base_url"]
 
         with StrataClient(base_url=base_url) as client:
-            # Materialize with SQL transform
             artifact = client.materialize(
                 inputs=[table_uri],
                 transform={
@@ -1036,23 +956,19 @@ class TestUnifiedMaterializeAPI:
                 name="category_totals",
             )
 
-            # Check artifact metadata
             assert artifact.artifact_id is not None
             assert artifact.version >= 1
             assert artifact.cache_hit is False  # First time should be cache miss
             assert artifact.execution in ("local", "server")
             assert artifact.name == "category_totals"
 
-            # Check URI format
             assert artifact.uri.startswith("strata://artifact/")
             assert f"@v={artifact.version}" in artifact.uri
 
-            # Fetch the data and verify
             result_table = artifact.to_table()
             assert result_table.num_rows == 2  # Two categories: A and B
             assert set(result_table.column_names) == {"category", "total"}
 
-            # Verify aggregation is correct
             df = artifact.to_pandas()
             totals = dict(zip(df["category"], df["total"]))
             assert totals["A"] == 90.0  # 10 + 30 + 50
@@ -1102,7 +1018,6 @@ class TestUnifiedMaterializeAPI:
                 name="high_value",
             )
 
-            # Verify filtered data
             filtered_df = filtered.to_pandas()
             assert len(filtered_df) == 3  # values 30, 40, 50
             assert all(filtered_df["value"] > 25)
@@ -1117,7 +1032,6 @@ class TestUnifiedMaterializeAPI:
                 name="high_value_avg",
             )
 
-            # Verify aggregation
             agg_df = aggregated.to_pandas()
             assert agg_df["avg_value"].iloc[0] == 40.0  # (30 + 40 + 50) / 3
 
@@ -1200,7 +1114,6 @@ class TestUnifiedMaterializeAPI:
             )
             assert joined.cache_hit is False
 
-            # Verify the joined result
             result = joined.to_table().to_pydict()
             assert result == {
                 "name": ["Alice", "Bob"],
@@ -1242,7 +1155,6 @@ class TestUnifiedMaterializeAPI:
             assert joined2.cache_hit is True
             assert joined2.uri == joined.uri
 
-            # Verify names resolve correctly
             resolved = client.get_artifact_by_name("customer_order_totals")
             assert resolved.uri == joined.uri
             assert resolved.to_table().to_pydict() == result
@@ -1253,7 +1165,6 @@ class TestUnifiedMaterializeAPI:
         base_url = artifact_server_with_warehouse["base_url"]
 
         with StrataClient(base_url=base_url) as client:
-            # First call
             artifact1 = client.materialize(
                 inputs=[table_uri],
                 transform={
@@ -1274,7 +1185,6 @@ class TestUnifiedMaterializeAPI:
                 refresh=True,
             )
 
-            # Both should have valid data
             assert artifact1.to_pandas()["max_val"].iloc[0] == 50.0
             assert artifact2.to_pandas()["max_val"].iloc[0] == 50.0
 
@@ -1292,7 +1202,6 @@ class TestUnifiedMaterializeAPI:
                 },
             )
 
-            # Get info
             info = artifact.info()
             assert info["artifact_id"] == artifact.artifact_id
             assert info["version"] == artifact.version
@@ -1306,7 +1215,6 @@ class TestUnifiedMaterializeAPI:
         base_url = artifact_server_with_warehouse["base_url"]
 
         with StrataClient(base_url=base_url) as client:
-            # Create named artifact
             original = client.materialize(
                 inputs=[table_uri],
                 transform={
@@ -1316,13 +1224,11 @@ class TestUnifiedMaterializeAPI:
                 name="min_value",
             )
 
-            # Retrieve by name
             retrieved = client.get_artifact_by_name("min_value")
             assert retrieved.artifact_id == original.artifact_id
             assert retrieved.version == original.version
             assert retrieved.name == "min_value"
 
-            # Data should match
             assert retrieved.to_pandas()["min_val"].iloc[0] == 10.0
 
     def test_explain_materialize_with_real_table(self, artifact_server_with_warehouse):
@@ -1339,10 +1245,9 @@ class TestUnifiedMaterializeAPI:
                     "params": {"sql": "SELECT DISTINCT category FROM input0"},
                 },
             )
-            # Note: field names may vary based on server implementation
+            # Field names vary by server implementation.
             assert "cache_hit" in result or "would_hit" in result
 
-            # Actually materialize
             client.materialize(
                 inputs=[table_uri],
                 transform={
@@ -1359,14 +1264,11 @@ class TestUnifiedMaterializeAPI:
                     "params": {"sql": "SELECT DISTINCT category FROM input0"},
                 },
             )
-            # Check for cache hit indication
             hit_key = "cache_hit" if "cache_hit" in result2 else "would_hit"
             assert result2[hit_key] is True
 
 
-# =============================================================================
-# Regression tests for #121: multi-row-group scan artifact truncation
-# =============================================================================
+# --- Multi-row-group scan artifacts are not truncated ---
 
 
 @pytest.fixture
@@ -1604,7 +1506,6 @@ class TestNamespacedNames:
             resolved = client.resolve_name("team/dataset/raw")
             assert resolved["artifact_uri"] == artifact.uri
 
-            # Delete
             resp = httpx.delete(f"{base_url}/v1/names/team/dataset/raw", timeout=30.0)
             assert resp.status_code == 200
             resp = httpx.get(f"{base_url}/v1/names/team/dataset/raw", timeout=30.0)

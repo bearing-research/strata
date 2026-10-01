@@ -16,8 +16,8 @@ def _emit(handler: RingBufferLogHandler, level: int, message: str, **fields) -> 
         logger.addHandler(handler)
         logger.setLevel(logging.DEBUG)
         logger.propagate = False
-    # Use the StructuredLogger kwargs path (info/warning/…) so extra fields land
-    # in the JSON entry via structured_data — how production code logs.
+    # The StructuredLogger kwargs path puts extra fields in the JSON entry via
+    # structured_data, as production code logs.
     getattr(logger, logging.getLevelName(level).lower())(message, **fields)
 
 
@@ -30,7 +30,6 @@ class TestRingBufferLogHandler:
         result = buf.read()
         assert [e["message"] for e in result["entries"]] == ["first", "second"]
         assert result["cursor"] == 2
-        # Each entry is cursor-tagged, monotonically increasing.
         assert [e["cursor"] for e in result["entries"]] == [1, 2]
 
     def test_since_pages_forward(self):
@@ -73,7 +72,7 @@ class TestRingBufferLogHandler:
         for i in range(5):
             _emit(buf, logging.INFO, f"m{i}")
         result = buf.read()
-        # Only the last 3 remain; cursor keeps counting past evictions.
+        # Only the last 3 remain; the cursor keeps counting past evictions.
         assert [e["message"] for e in result["entries"]] == ["m2", "m3", "m4"]
         assert result["cursor"] == 5
 
@@ -90,7 +89,6 @@ class TestLogsEndpoints:
                 assert len(data["entries"]) > 0
                 entry = data["entries"][0]
                 assert {"level", "logger", "message", "cursor"} <= set(entry)
-                # Paging: since=<latest> returns nothing new.
                 assert (
                     client.get(f"{base_url}/v1/logs?since={data['cursor']}").json()["entries"] == []
                 )
@@ -108,7 +106,7 @@ class TestLogsEndpoints:
         config = StrataConfig(host="127.0.0.1", port=port, cache_dir=tmp_path / "cache")
         with run_server(config) as base_url:
             with httpx.Client(timeout=10.0) as client:
-                # since=0 → the tail replays existing buffered entries immediately.
+                # since=0: the tail replays existing buffered entries immediately.
                 with client.stream("GET", f"{base_url}/v1/logs/stream") as stream:
                     assert stream.headers["content-type"].startswith("text/event-stream")
                     first_data = None

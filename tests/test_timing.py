@@ -9,7 +9,7 @@ from strata.timing import Timer, elapsed_ms
 
 def test_elapsed_ms_returns_milliseconds():
     start = time.perf_counter()
-    # A tiny but non-zero sleep; assert correctness only (no timing thresholds).
+    # Tiny but non-zero; assert correctness only, no timing thresholds.
     time.sleep(0.005)
     ms = elapsed_ms(start)
     assert isinstance(ms, float)
@@ -17,7 +17,6 @@ def test_elapsed_ms_returns_milliseconds():
 
 
 def test_elapsed_ms_zero_for_now():
-    # Calling with "now" yields a small non-negative value.
     assert elapsed_ms(time.perf_counter()) >= 0
 
 

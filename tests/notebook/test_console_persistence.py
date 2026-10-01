@@ -17,7 +17,6 @@ def test_stdout_persists_across_reopen(tmp_path: Path):
     add_cell_to_notebook(notebook_dir, "c1")
     write_cell(notebook_dir, "c1", 'print("hello from cell")\nx = 42')
 
-    # Execute the cell
     state = parse_notebook(notebook_dir)
     session = NotebookSession(state, notebook_dir)
     session.refresh_environment_runtime()
@@ -27,11 +26,10 @@ def test_stdout_persists_across_reopen(tmp_path: Path):
     assert result.success
     assert "hello from cell" in result.stdout
 
-    # Verify stdout is on the cell state
     cell = next(c for c in session.notebook_state.cells if c.id == "c1")
     assert "hello from cell" in cell.console_stdout
 
-    # Reopen the notebook from scratch (new session, new parse)
+    # Reopen from scratch (new session, new parse).
     state2 = parse_notebook(notebook_dir)
     session2 = NotebookSession(state2, notebook_dir)
 
@@ -55,7 +53,6 @@ def test_stderr_persists_across_reopen(tmp_path: Path):
     assert result.success
     assert "warning!" in result.stderr
 
-    # Reopen
     state2 = parse_notebook(notebook_dir)
     session2 = NotebookSession(state2, notebook_dir)
 
@@ -96,7 +93,6 @@ def test_console_cleared_on_new_execution(tmp_path: Path):
     cell = next(c for c in session.notebook_state.cells if c.id == "c1")
     assert "first" in cell.console_stdout
 
-    # Re-execute with different source
     write_cell(notebook_dir, "c1", 'print("second")\nx = 2')
     session.reload()
     executor2 = CellExecutor(session)

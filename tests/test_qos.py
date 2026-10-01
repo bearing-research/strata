@@ -69,7 +69,7 @@ def qos_warehouse(tmp_path):
         NestedField(12, "extra10", StringType(), required=False),
     )
 
-    # Small table for interactive queries (~500KB)
+    # ~500KB, for interactive queries
     small_table = catalog.create_table("test_db.small_table", schema)
     small_data = pa.table(
         {
@@ -89,7 +89,7 @@ def qos_warehouse(tmp_path):
     )
     small_table.append(small_data)
 
-    # Large table for bulk queries (~15MB)
+    # ~15MB, for bulk queries
     large_table = catalog.create_table("test_db.large_table", schema)
     large_data = pa.table(
         {
@@ -138,7 +138,6 @@ class TestQoSMetrics:
                 assert resp.status_code == 200
                 metrics = resp.json()
 
-                # Check QoS metrics structure
                 assert "qos" in metrics
                 qos = metrics["qos"]
                 assert qos["interactive_slots"] == 8
@@ -148,7 +147,6 @@ class TestQoSMetrics:
                 assert "interactive_available" in qos
                 assert "bulk_available" in qos
 
-                # Initial values should show all slots available
                 assert qos["interactive_active"] == 0
                 assert qos["bulk_active"] == 0
                 assert qos["interactive_available"] == 8
@@ -170,7 +168,6 @@ class TestQoSMetrics:
                 assert resp.status_code == 200
                 content = resp.text
 
-                # Check that QoS metrics are present with correct format
                 assert "# HELP strata_qos_interactive_slots" in content
                 assert "# TYPE strata_qos_interactive_slots gauge" in content
                 assert "strata_qos_interactive_slots" in content
@@ -194,7 +191,6 @@ class TestQoSClassification:
 
         with run_server(config) as base_url:
             with httpx.Client(timeout=10.0) as client:
-                # Create materialize request with small table and few columns
                 resp = client.post(
                     f"{base_url}/v1/materialize",
                     json=build_materialize_request(
@@ -205,14 +201,12 @@ class TestQoSClassification:
                 assert resp.status_code == 200
                 stream_url = resp.json()["stream_url"]
 
-                # Stream should succeed
                 with client.stream("GET", f"{base_url}{stream_url}") as stream:
                     bytes_read = 0
                     for chunk in stream.iter_bytes():
                         bytes_read += len(chunk)
                     assert bytes_read > 0
 
-                # After streaming, no active queries
                 metrics = client.get(f"{base_url}/metrics").json()
                 assert metrics["qos"]["interactive_active"] == 0
                 assert metrics["qos"]["bulk_active"] == 0
@@ -229,7 +223,6 @@ class TestQoSClassification:
 
         with run_server(config) as base_url:
             with httpx.Client(timeout=30.0) as client:
-                # Create materialize request with large table
                 resp = client.post(
                     f"{base_url}/v1/materialize",
                     json=build_materialize_request(
@@ -240,14 +233,12 @@ class TestQoSClassification:
                 assert resp.status_code == 200
                 stream_url = resp.json()["stream_url"]
 
-                # Stream should succeed
                 with client.stream("GET", f"{base_url}{stream_url}") as stream:
                     bytes_read = 0
                     for chunk in stream.iter_bytes():
                         bytes_read += len(chunk)
                     assert bytes_read > 0
 
-                # After streaming, no active queries
                 metrics = client.get(f"{base_url}/metrics").json()
                 assert metrics["qos"]["interactive_active"] == 0
                 assert metrics["qos"]["bulk_active"] == 0
@@ -264,7 +255,7 @@ class TestQoSClassification:
 
         with run_server(config) as base_url:
             with httpx.Client(timeout=10.0) as client:
-                # Create materialize request with all columns (None)
+                # All columns (None)
                 resp = client.post(
                     f"{base_url}/v1/materialize",
                     json=build_materialize_request(
@@ -275,14 +266,12 @@ class TestQoSClassification:
                 assert resp.status_code == 200
                 stream_url = resp.json()["stream_url"]
 
-                # Stream should succeed
                 with client.stream("GET", f"{base_url}{stream_url}") as stream:
                     bytes_read = 0
                     for chunk in stream.iter_bytes():
                         bytes_read += len(chunk)
                     assert bytes_read > 0
 
-                # After streaming, no active queries
                 metrics = client.get(f"{base_url}/metrics").json()
                 assert metrics["qos"]["interactive_active"] == 0
                 assert metrics["qos"]["bulk_active"] == 0
@@ -305,7 +294,6 @@ class TestQoSTierIsolation:
 
         with run_server(config) as base_url:
             with httpx.Client(timeout=30.0) as client:
-                # Create an interactive query
                 resp = client.post(
                     f"{base_url}/v1/materialize",
                     json=build_materialize_request(
@@ -316,12 +304,11 @@ class TestQoSTierIsolation:
                 assert resp.status_code == 200
                 stream_url = resp.json()["stream_url"]
 
-                # Stream the interactive query - should work
                 with client.stream("GET", f"{base_url}{stream_url}") as stream:
                     bytes_read = 0
                     for chunk in stream.iter_bytes():
                         bytes_read += len(chunk)
-                    assert bytes_read > 0  # Successfully streamed
+                    assert bytes_read > 0
 
 
 class TestQoSSemaphoreCleanup:
@@ -339,7 +326,6 @@ class TestQoSSemaphoreCleanup:
 
         with run_server(config) as base_url:
             with httpx.Client(timeout=10.0) as client:
-                # Create and complete a stream
                 resp = client.post(
                     f"{base_url}/v1/materialize",
                     json=build_materialize_request(
@@ -350,12 +336,10 @@ class TestQoSSemaphoreCleanup:
                 assert resp.status_code == 200
                 stream_url = resp.json()["stream_url"]
 
-                # Stream to completion
                 with client.stream("GET", f"{base_url}{stream_url}") as stream:
                     for _ in stream.iter_bytes():
                         pass
 
-                # Check that semaphores are fully released
                 metrics = client.get(f"{base_url}/metrics").json()
                 qos = metrics["qos"]
                 assert qos["interactive_active"] == 0
@@ -373,7 +357,6 @@ class TestQoSSemaphoreCleanup:
 
         with run_server(config) as base_url:
             with httpx.Client(timeout=10.0) as client:
-                # Create a materialize request but don't stream it
                 resp = client.post(
                     f"{base_url}/v1/materialize",
                     json=build_materialize_request(
@@ -382,10 +365,8 @@ class TestQoSSemaphoreCleanup:
                     ),
                 )
                 assert resp.status_code == 200
-                # With unified API, streams are consumed during materialize
-                # so semaphores should already be released
+                # Materialize consumes the stream, so the semaphores are already released.
 
-                # Check that semaphores are released
                 metrics = client.get(f"{base_url}/metrics").json()
                 qos = metrics["qos"]
                 assert qos["interactive_active"] == 0
@@ -405,7 +386,6 @@ class TestQoSSemaphoreCleanup:
             with httpx.Client(timeout=10.0) as client:
                 stream_urls = []
 
-                # Create multiple materialize requests
                 for _ in range(3):
                     resp = client.post(
                         f"{base_url}/v1/materialize",
@@ -417,13 +397,11 @@ class TestQoSSemaphoreCleanup:
                     assert resp.status_code == 200
                     stream_urls.append(resp.json()["stream_url"])
 
-                # Stream each to completion
                 for stream_url in stream_urls:
                     with client.stream("GET", f"{base_url}{stream_url}") as stream:
                         for _ in stream.iter_bytes():
                             pass
 
-                # All semaphores should be released
                 metrics = client.get(f"{base_url}/metrics").json()
                 qos = metrics["qos"]
                 assert qos["interactive_active"] == 0
@@ -447,14 +425,13 @@ class TestQoSConfiguration:
             with httpx.Client(timeout=10.0) as client:
                 metrics = client.get(f"{base_url}/metrics").json()
                 qos = metrics["qos"]
-                # Check that all expected QoS metrics are present
                 assert "interactive_slots" in qos
                 assert "bulk_slots" in qos
                 assert "interactive_active" in qos
                 assert "bulk_active" in qos
                 assert "interactive_available" in qos
                 assert "bulk_available" in qos
-                # Default values (tuned for 8-16 core box supporting bursts)
+                # Defaults are tuned for an 8-16 core box with bursts.
                 assert qos["interactive_slots"] == 32
                 assert qos["bulk_slots"] == 8
 
@@ -496,7 +473,6 @@ class TestQoSConfiguration:
 
         with run_server(config) as base_url:
             with httpx.Client(timeout=10.0) as client:
-                # Create a query
                 resp = client.post(
                     f"{base_url}/v1/materialize",
                     json=build_materialize_request(
@@ -507,7 +483,6 @@ class TestQoSConfiguration:
                 assert resp.status_code == 200
                 stream_url = resp.json()["stream_url"]
 
-                # Stream should work
                 with client.stream("GET", f"{base_url}{stream_url}") as stream:
                     bytes_read = 0
                     for chunk in stream.iter_bytes():
@@ -530,7 +505,6 @@ class TestQoSFastFail:
 
         with run_server(config) as base_url:
             with httpx.Client(timeout=10.0) as client:
-                # Check that rejection metrics exist
                 resp = client.get(f"{base_url}/metrics")
                 assert resp.status_code == 200
                 metrics = resp.json()
@@ -557,23 +531,16 @@ class TestQoSFastFail:
                 assert resp.status_code == 200
                 content = resp.text
 
-                # Check that rejection metrics are present
                 assert "strata_qos_interactive_rejected_total" in content
                 assert "strata_qos_bulk_rejected_total" in content
 
 
-# The QoS admission accounting is being lifted out of server.py into a
-# QoSAdmission collaborator (#302 phase 3). These two tests pin the observable
-# contract BEFORE that move, so the extraction is proven behaviour-identical:
-#   1. the full /metrics["qos"] key set (counter-drift guard), and
-#   2. no slot leak when a client disconnects mid-stream (the #238 property).
-# They characterise current behaviour — they must stay green through the
-# extraction unchanged.
+# These two tests pin the observable QoS admission contract: the full
+# /metrics["qos"] key set, and no slot leak when a client disconnects mid-stream.
 
 
-# Every key the ``qos`` block of ``/metrics`` exposes today. The extraction
-# moves these fields behind ``QoSAdmission.qos_metrics()``; dropping or renaming
-# one would silently break the observability dashboard, so pin the exact set.
+# Every key in the ``qos`` block of ``/metrics``. Dropping or renaming one silently
+# breaks the observability dashboard, so pin the exact set.
 _EXPECTED_QOS_METRIC_KEYS = {
     "interactive_slots",
     "interactive_active",
@@ -637,7 +604,7 @@ class TestQoSCharacterization:
             host="127.0.0.1",
             port=port,
             cache_dir=tmp_path / "cache",
-            deployment_mode="service",  # no artifact_dir → pass-through streaming
+            deployment_mode="service",  # no artifact_dir: pass-through streaming
         )
         with run_server(config) as base_url:
             with httpx.Client(timeout=10.0) as client:
@@ -652,8 +619,8 @@ class TestQoSCharacterization:
                     for _ in stream.iter_bytes():
                         break  # take one chunk, then abandon the connection
 
-                # Release may land when the server observes the dropped reader;
-                # poll briefly rather than assume it's instant.
+                # Release lands when the server observes the dropped reader; poll rather than
+                # assume it is instant.
                 deadline = time.monotonic() + 10.0
                 qos = client.get(f"{base_url}/metrics").json()["qos"]
                 while (qos["interactive_active"] or qos["bulk_active"]) and (

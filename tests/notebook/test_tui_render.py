@@ -100,8 +100,8 @@ def test_single_markdown_detects_pure_markdown_output():
 
 
 def test_single_markdown_renders_markdown_language_cell_source():
-    # A markdown-language cell produces no outputs — its source IS the rendered
-    # Output (the Source tab shows the raw text).
+    # A markdown cell produces no outputs; its source is the rendered Output (the
+    # Source tab shows the raw text).
     cell = CellView(id="a", language="markdown", source="# Notes\n\nsome **bold** text")
     assert _single_markdown(cell) == "# Notes\n\nsome **bold** text"
     # Empty markdown cell → None (falls through to the "(no output)" text path).

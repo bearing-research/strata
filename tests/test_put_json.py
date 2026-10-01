@@ -75,13 +75,11 @@ class TestPutJson:
             "data": {"result": "computation output"},
         }
 
-        # First request - should not be a hit
         response1 = requests.put(f"{base_url}/v1/artifacts", json=request_body)
         assert response1.status_code == 200
         data1 = response1.json()
         assert data1["hit"] is False
 
-        # Second request - should be a cache hit
         response2 = requests.put(f"{base_url}/v1/artifacts", json=request_body)
         assert response2.status_code == 200
         data2 = response2.json()
@@ -104,7 +102,7 @@ class TestPutJson:
 
         assert response.status_code == 200
         data = response.json()
-        # Name should be set (even if resolve fails, the response should include it)
+        # The response includes the name even if resolving it fails.
         assert data["name_uri"] == "strata://name/my_artifact"
         assert data["artifact_uri"].startswith("strata://artifact/")
 
@@ -112,7 +110,6 @@ class TestPutJson:
         """Test JSON upload with input references for lineage."""
         base_url = server_with_artifacts["base_url"]
 
-        # First create a parent artifact
         parent_response = requests.put(
             f"{base_url}/v1/artifacts",
             json={
@@ -124,7 +121,6 @@ class TestPutJson:
         assert parent_response.status_code == 200
         parent_uri = parent_response.json()["artifact_uri"]
 
-        # Create child artifact with parent as input
         child_response = requests.put(
             f"{base_url}/v1/artifacts",
             json={
@@ -136,10 +132,9 @@ class TestPutJson:
         assert child_response.status_code == 200
         child_uri = child_response.json()["artifact_uri"]
 
-        # Verify both artifacts are accessible
         assert parent_uri.startswith("strata://artifact/")
         assert child_uri.startswith("strata://artifact/")
-        assert parent_uri != child_uri  # Different artifacts
+        assert parent_uri != child_uri
 
 
 class TestPutJsonClient:
@@ -182,11 +177,9 @@ class TestPutJsonClient:
             }
             data = {"validation_result": "passed"}
 
-            # First call
             artifact1 = client.put_json(inputs=[], transform=transform, data=data)
             assert artifact1.cache_hit is False
 
-            # Second call - should be cache hit
             artifact2 = client.put_json(inputs=[], transform=transform, data=data)
             assert artifact2.cache_hit is True
             assert artifact2.uri == artifact1.uri
@@ -211,7 +204,6 @@ class TestPutJsonClient:
                 data=original_data,
             )
 
-            # Retrieve the data
             retrieved_data = client.get_json(artifact.uri)
             assert retrieved_data == original_data
         finally:
@@ -244,7 +236,7 @@ class TestDeliberaIntegration:
         client = StrataClient(base_url=base_url)
 
         try:
-            # 1. Persist protocol spec (one-time)
+            # 1. Protocol spec (one-time)
             protocol = client.put_json(
                 inputs=[],
                 transform={"executor": "protocol@v1", "params": {}},
@@ -252,7 +244,7 @@ class TestDeliberaIntegration:
                 name="protocol_tree_v1",
             )
 
-            # 2. Persist constraints (per-run)
+            # 2. Constraints (per-run)
             constraints = client.put_json(
                 inputs=[],
                 transform={"executor": "constraints@v1", "params": {}},
@@ -297,13 +289,12 @@ class TestDeliberaIntegration:
                 },
             )
 
-            # Verify all artifacts exist and are readable
             assert client.get_json(protocol.uri)["version"] == "tree_v1"
             assert client.get_json(constraints.uri)["risk_tolerance"] == 0.1
             assert len(client.get_json(planner_result.uri)["branches"]) == 3
             assert "proposal" in client.get_json(proposer_result.uri)
 
-            # Verify cache hits on replay
+            # Replay should hit the cache.
             replay_planner = client.put_json(
                 inputs=[protocol.uri, constraints.uri],
                 transform={
@@ -335,7 +326,6 @@ class TestPutMultipleTypes:
         client = StrataClient(base_url=base_url)
 
         try:
-            # Create Arrow table
             table = pa.table(
                 {
                     "id": [1, 2, 3],
@@ -353,7 +343,6 @@ class TestPutMultipleTypes:
             assert artifact.uri.startswith("strata://artifact/")
             assert artifact.cache_hit is False
 
-            # Retrieve and verify
             retrieved = client.fetch(artifact.uri)
             assert retrieved.num_rows == 3
             assert retrieved.column_names == ["id", "value", "name"]
@@ -368,7 +357,6 @@ class TestPutMultipleTypes:
         client = StrataClient(base_url=base_url)
 
         try:
-            # Create Pandas DataFrame
             df = pd.DataFrame(
                 {
                     "x": [1, 2, 3, 4],
@@ -386,10 +374,9 @@ class TestPutMultipleTypes:
             assert artifact.uri.startswith("strata://artifact/")
             assert artifact.cache_hit is False
 
-            # Retrieve and verify
             retrieved = client.fetch(artifact.uri)
             assert retrieved.num_rows == 4
-            # Pandas may add __index_level_0__ column
+            # Pandas may add an __index_level_0__ column.
             assert "x" in retrieved.column_names
             assert "y" in retrieved.column_names
         finally:
@@ -401,7 +388,7 @@ class TestPutMultipleTypes:
         client = StrataClient(base_url=base_url)
 
         try:
-            # Columnar dict (all values are lists of same length)
+            # Columnar dict: every value is a list of the same length.
             data = {
                 "id": [1, 2, 3],
                 "score": [0.9, 0.8, 0.7],
@@ -413,7 +400,6 @@ class TestPutMultipleTypes:
                 data=data,
             )
 
-            # Retrieve - should be columnar
             retrieved = client.fetch(artifact.uri)
             assert retrieved.num_rows == 3
             assert set(retrieved.column_names) == {"id", "score"}
@@ -426,7 +412,7 @@ class TestPutMultipleTypes:
         client = StrataClient(base_url=base_url)
 
         try:
-            # Nested dict (not columnar)
+            # Nested dict, not columnar.
             data = {
                 "config": {"learning_rate": 0.01, "epochs": 100},
                 "results": {"accuracy": 0.95, "loss": 0.05},
@@ -438,7 +424,6 @@ class TestPutMultipleTypes:
                 data=data,
             )
 
-            # Retrieve as JSON
             retrieved = client.get_json(artifact.uri)
             assert retrieved["config"]["learning_rate"] == 0.01
             assert retrieved["results"]["accuracy"] == 0.95
@@ -456,11 +441,9 @@ class TestPutMultipleTypes:
             table = pa.table({"x": [1, 2], "y": [3, 4]})
             transform = {"executor": "dedup_test@v1", "params": {"version": 1}}
 
-            # First call
             artifact1 = client.put(inputs=[], transform=transform, data=table)
             assert artifact1.cache_hit is False
 
-            # Second call with same data - should be cache hit
             artifact2 = client.put(inputs=[], transform=transform, data=table)
             assert artifact2.cache_hit is True
             assert artifact2.uri == artifact1.uri
@@ -475,23 +458,20 @@ class TestPutMultipleTypes:
         client = StrataClient(base_url=base_url)
 
         try:
-            # First artifact: JSON config
             config = client.put(
                 inputs=[],
                 transform={"executor": "config@v1", "params": {}},
                 data={"setting": "value"},
             )
 
-            # Second artifact: Arrow table that depends on config
             table = pa.table({"result": [1, 2, 3]})
             result = client.put(
-                inputs=[config.uri],  # Lineage!
+                inputs=[config.uri],
                 transform={"executor": "process@v1", "params": {}},
                 data=table,
             )
 
             assert result.uri.startswith("strata://artifact/")
-            # Different artifacts
             assert result.uri != config.uri
         finally:
             client.close()
@@ -534,11 +514,9 @@ class TestAsyncPut:
         }
         data = {"value": 42}
 
-        # First call
         artifact1 = await async_client.put_json(inputs=[], transform=transform, data=data)
         assert artifact1.cache_hit is False
 
-        # Second call - should be cache hit
         artifact2 = await async_client.put_json(inputs=[], transform=transform, data=data)
         assert artifact2.cache_hit is True
         assert artifact2.uri == artifact1.uri
@@ -557,7 +535,6 @@ class TestAsyncPut:
             data=original_data,
         )
 
-        # Retrieve the data
         retrieved = await async_client.get_json(artifact.uri)
         assert retrieved == original_data
 
@@ -582,7 +559,6 @@ class TestAsyncPut:
         assert artifact.uri.startswith("strata://artifact/")
         assert artifact.cache_hit is False
 
-        # Retrieve and verify
         retrieved = await async_client.fetch(artifact.uri)
         assert retrieved.num_rows == 3
         assert set(retrieved.column_names) == {"id", "value"}
@@ -607,7 +583,6 @@ class TestAsyncPut:
 
         assert artifact.uri.startswith("strata://artifact/")
 
-        # Retrieve and verify
         retrieved = await async_client.fetch(artifact.uri)
         assert retrieved.num_rows == 2
         assert "x" in retrieved.column_names
@@ -629,14 +604,12 @@ class TestAsyncPut:
         """Test async client put() with lineage tracking."""
         import pyarrow as pa
 
-        # Create parent artifact
         parent = await async_client.put(
             inputs=[],
             transform={"executor": "async_parent@v1", "params": {}},
             data={"parent": True},
         )
 
-        # Create child with lineage
         child = await async_client.put(
             inputs=[parent.uri],
             transform={"executor": "async_child@v1", "params": {}},

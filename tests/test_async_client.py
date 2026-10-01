@@ -162,7 +162,6 @@ class TestAsyncConcurrency:
                 ),
             )
 
-            # Fetch all artifacts concurrently
             results = await asyncio.gather(
                 client.fetch(artifacts[0].uri),
                 client.fetch(artifacts[1].uri),
@@ -230,11 +229,9 @@ class TestAsyncClientManualClose:
         table_uri = server_with_client["warehouse"]["table_uri"]
 
         async with AsyncStrataClient(base_url=f"http://127.0.0.1:{config.port}") as client:
-            # Health check
             health = await client.health()
             assert "status" in health
 
-            # First fetch
             artifact1 = await client.materialize(
                 inputs=[table_uri],
                 transform=build_scan_transform(columns=["id"]),
@@ -242,7 +239,6 @@ class TestAsyncClientManualClose:
             table1 = await client.fetch(artifact1.uri)
             assert table1.num_rows == 500
 
-            # Second fetch
             artifact2 = await client.materialize(
                 inputs=[table_uri],
                 transform=build_scan_transform(columns=["value"]),
@@ -250,6 +246,5 @@ class TestAsyncClientManualClose:
             table2 = await client.fetch(artifact2.uri)
             assert table2.num_rows == 500
 
-            # Metrics
             metrics = await client.metrics()
             assert isinstance(metrics, dict)

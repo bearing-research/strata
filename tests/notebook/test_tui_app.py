@@ -77,7 +77,7 @@ def _select(app: NotebookTUI, cell: CellView) -> None:
 
 @pytest.mark.asyncio
 async def test_detail_panels_are_tall_and_content_overflows(monkeypatch):
-    # Don't hit the network on mount — we only exercise layout/render.
+    # Don't hit the network on mount; only layout/render is exercised.
     async def _noop(self) -> None:
         return None
 
@@ -103,9 +103,8 @@ async def test_detail_panels_are_tall_and_content_overflows(monkeypatch):
 
         from textual.containers import VerticalScroll
 
-        # Two stacked tab-groups (top: code, bottom: runtime). The active pane in
-        # each group gets that group's height (~half the column) — not the ~1-row
-        # squish that fully-stacking every panel produced on short terminals.
+        # Two stacked tab groups (top: code, bottom: runtime). The active pane in each
+        # gets about half the column, not a one-row squish on short terminals.
         tabs = (
             (None, "#source-scroll"),  # top group, default
             ("3", "#testsrc-scroll"),  # top group
@@ -639,7 +638,7 @@ async def test_panel_resize_keys_move_and_reset_boundaries(monkeypatch):
         assert app._cells_pct == 42
         assert "42" in str(app.query_one("#cells").styles.width)
 
-        for _ in range(20):  # holds at the max — never runs away
+        for _ in range(20):  # holds at the max, never runs away
             await pilot.press("ctrl+right")
         await pilot.pause()
         assert app._cells_pct == _MAX_PCT

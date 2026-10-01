@@ -114,10 +114,9 @@ class TestAclNormalization:
         self._assert_parsed(StrataConfig.load(cache_dir=tmp_path / "c"))
 
     def test_env_acl_parses_the_same_rules(self, monkeypatch, tmp_path):
-        # STRATA_ACL_CONFIG reaches pydantic's env source directly and never
-        # passes through load()'s normalization, so the rules were dropped and
-        # only `default` survived. With `default = "allow"` that fails OPEN:
-        # the operator's deny list disappears and the boot is clean.
+        # STRATA_ACL_CONFIG reaches pydantic's env source directly, bypassing load()'s
+        # normalization. Dropped rules leave only `default`, and with `default = "allow"`
+        # that fails OPEN.
         import json
 
         _pyproject(
@@ -152,8 +151,7 @@ class TestAclNormalization:
 
     @pytest.mark.parametrize("key", ["denny", "deny_rule", "rules"])
     def test_an_unknown_acl_key_is_rejected(self, monkeypatch, tmp_path, key):
-        # A mistyped rule key used to be ignored, leaving an ACL that boots
-        # clean and enforces nothing -- the same silent-disarm shape as above.
+        # An ignored rule key would leave an ACL that boots clean and enforces nothing.
         _pyproject(
             monkeypatch,
             {

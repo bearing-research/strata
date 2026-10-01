@@ -54,7 +54,7 @@ class TestLocalBlobStore:
         k_upper = store._blob_key("nb_x_cell_c_var_Widget", 1)
         k_lower = store._blob_key("nb_x_cell_c_var_widget", 1)
         assert k_upper != k_lower
-        # The real bug: they must not collide under case folding.
+        # They must not collide under case folding.
         assert k_upper.lower() != k_lower.lower()
         # All-lowercase ids keep their stable name (cached blobs survive upgrades).
         assert k_lower == "nb_x_cell_c_var_widget@v=1.arrow"
@@ -137,11 +137,9 @@ class TestLocalBlobStore:
 
         store.write_blob("artifact-1", 1, data)
 
-        # No residual ``*.tmp`` files should remain after a successful write
         residual_tmp = list((tmp_path / "blobs").glob("*.tmp"))
         assert residual_tmp == []
 
-        # The final file should exist with correct content
         assert store.read_blob("artifact-1", 1) == data
 
     def test_streaming_writer_commits_atomically(self, tmp_path: Path):
@@ -352,7 +350,7 @@ class TestPublishBlobFromPath:
         store.publish_blob_from_path("artifact-1", 1, staging)
 
         assert store.read_blob("artifact-1", 1) == payload
-        # Source is not consumed — the caller owns its lifecycle.
+        # Source is not consumed; the caller owns its lifecycle.
         assert staging.exists()
 
     def test_publish_overwrites_existing_blob(self, tmp_path: Path):
@@ -504,7 +502,7 @@ class TestS3BackendAtomicity:
         )
         sink = tmp_path / "fake-bucket_artifacts_artifact-1@v=1.arrow"
         assert sink.read_bytes() == payload
-        # Source file is not consumed — caller owns cleanup.
+        # Source file is not consumed; the caller owns cleanup.
         assert source.exists()
 
 
@@ -871,8 +869,7 @@ class TestAzureBlobStore:
         pytest.importorskip("azure.storage.blob")
         from strata.blob_store import AzureBlobStore
 
-        # Create a store using connection string (won't actually connect)
-        # We use a fake connection string format for testing key generation
+        # A fake connection string: key generation needs no real connection.
         store = AzureBlobStore(
             account_name="testaccount",
             container_name="test-container",
@@ -966,7 +963,6 @@ class TestCreateBlobStore:
 
     def test_creates_local_store_by_default(self, tmp_path: Path, monkeypatch):
         """Test that local store is created by default."""
-        # Clear any env vars
         monkeypatch.delenv("STRATA_ARTIFACT_BLOB_BACKEND", raising=False)
         monkeypatch.delenv("STRATA_ARTIFACT_S3_BUCKET", raising=False)
 

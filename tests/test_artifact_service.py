@@ -123,14 +123,14 @@ def test_lineage_traverses_transitively_and_respects_max_depth():
 
 def test_lineage_marks_cross_tenant_input_as_unknown_stub():
     root = _art("R", 1, inputs={"strata://artifact/A@v=1": "A@v=1"}, tenant="t1")
-    # A belongs to another tenant — it must not leak through lineage.
+    # A belongs to another tenant and must not leak through lineage.
     other = _art("A", 1, inputs={"strata://artifact/SECRET@v=1": "SECRET@v=1"}, tenant="t2")
     resp = _lineage(_FakeStore(root, other), root, tenant_filter="t1")
 
     by_uri = {n.uri: n for n in resp.nodes}
     a_node = by_uri["strata://artifact/A@v=1"]
     assert a_node.type == "artifact"
-    # Stub node: no transform/created_at, and traversal stopped — its own input
+    # Stub node: no transform/created_at, and traversal stopped, so its own input
     # (another tenant's SECRET artifact) is never surfaced.
     assert a_node.created_at is None
     assert "strata://artifact/SECRET@v=1" not in by_uri
@@ -318,7 +318,7 @@ def test_lineage_exposes_the_environment_identity_of_each_step():
     )
     by_uri = {n.uri: n for n in graph.nodes}
 
-    # Two steps, two environments — visible side by side, which is the point.
+    # Two steps, two environments, visible side by side.
     assert by_uri["strata://artifact/model@v=1"].env_hash == "b" * 64
     assert by_uri["strata://artifact/raw@v=1"].env_hash == "a" * 64
     assert by_uri["strata://artifact/raw@v=1"].build_env == "cpython-3.14-linux-x86_64"

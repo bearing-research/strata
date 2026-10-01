@@ -390,8 +390,8 @@ class TestModuleExportBlockedDiagnostic:
         assert len(diags) == 1
         message = diags[0].message
         assert "`scale`" in message
-        # The diagnostic now names the unresolved variable so the user
-        # knows exactly what to move or import.
+        # The diagnostic names the unresolved variable so the user knows what to
+        # move or import.
         assert "STEP" in message
 
     def test_top_level_expression_alongside_self_contained_class_is_silent(self):
@@ -611,7 +611,7 @@ class TestWidgetCellValidation:
 
     def test_widget_cell_skips_python_worker_checks(self):
         # A '@worker' line in a widget cell must not trigger the Python
-        # worker_unknown check — widget cells take the widget validation path.
+        # worker_unknown check; widget cells take the widget validation path.
         cell = self._widget("# @worker gpu\nalpha = slider(0, 1)")
         assert "worker_unknown" not in _codes(cell, _nb())
 

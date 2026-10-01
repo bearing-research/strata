@@ -534,7 +534,7 @@ class TestLineageRefShape:
             input_versions={},
         )
 
-        # Our row is still the one our cells read, by id — but it is no longer
-        # what the hash resolves to.
+        # Our row is still what our cells read by id, but the hash no longer
+        # resolves to it.
         assert mine.artifact_store.get_artifact(ours.id, ours.version).state == "superseded"
         assert mine.artifact_store.find_by_provenance(provenance).id != ours.id

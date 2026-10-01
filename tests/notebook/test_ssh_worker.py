@@ -53,9 +53,7 @@ def _fail(stderr: str = "boom", code: int = 1) -> CommandResult:
     return CommandResult(code, "", stderr)
 
 
-# ---------------------------------------------------------------------------
-# SshTarget
-# ---------------------------------------------------------------------------
+# --- SshTarget ---
 
 
 def test_ssh_target_argv_is_hardened():
@@ -63,7 +61,7 @@ def test_ssh_target_argv_is_hardened():
     assert argv[0] == "ssh"
     assert argv[-1] == "user@gpu-box"
     assert "BatchMode=yes" in argv  # key-only, never prompt for a password
-    # We never disable host-key checking — first-connect trust is the user's.
+    # Host-key checking is never disabled; first-connect trust is the user's.
     assert "StrictHostKeyChecking=no" not in argv
 
 
@@ -79,9 +77,7 @@ def test_ssh_target_strips_and_builds_runner():
     assert isinstance(target.runner(), SubprocessSshRunner)
 
 
-# ---------------------------------------------------------------------------
-# preflight / detect
-# ---------------------------------------------------------------------------
+# --- preflight / detect ---
 
 
 def test_preflight_ok():
@@ -123,9 +119,7 @@ def test_detect_failure_raises():
         RemoteWorker("gpu", runner).detect()
 
 
-# ---------------------------------------------------------------------------
-# ensure_installed
-# ---------------------------------------------------------------------------
+# --- ensure_installed ---
 
 
 def test_ensure_installed_noop_when_present():
@@ -159,9 +153,7 @@ def test_ensure_installed_surfaces_install_failure():
         RemoteWorker("gpu", runner).ensure_installed(info)
 
 
-# ---------------------------------------------------------------------------
-# launch / is_running / stop
-# ---------------------------------------------------------------------------
+# --- launch / is_running / stop ---
 
 
 def test_launch_starts_and_parses_pid():
@@ -299,9 +291,7 @@ def test_stop_when_nothing_recorded():
     assert RemoteWorker("gpu", runner).stop() is False
 
 
-# ---------------------------------------------------------------------------
-# helpers
-# ---------------------------------------------------------------------------
+# --- helpers ---
 
 
 def test_parse_kv_and_last_int():

@@ -164,9 +164,7 @@ def test_import_strips_envelope_whitespace_around_source(tmp_path: Path) -> None
     result = import_notebook(ipynb)
     nb = parse_notebook(result.notebook_dir)
     src = nb.cells[0].source
-    # No leading or trailing whitespace in the envelope.
     assert not src.startswith(" ")
-    # Body still parses as Python.
     import ast as _ast
 
     _ast.parse(src)
@@ -239,8 +237,7 @@ def test_import_rejects_non_dict_cell_entries(tmp_path: Path) -> None:
     out_dir = tmp_path / "out"
     with pytest.raises(ValueError, match=r"cells\[0\] must be a JSON object"):
         import_notebook(bad, out_dir=out_dir)
-    # No partial notebook dir was created — validation must run before
-    # create_notebook.
+    # No partial notebook dir: validation runs before create_notebook.
     assert not out_dir.exists()
 
 
@@ -328,8 +325,7 @@ def test_strata_import_cli_rejects_missing_file(tmp_path: Path) -> None:
     assert result.returncode == 2
 
 
-# ---------------------------------------------------------------------------
-# Magic translation (PR 2)
+# Magic translation
 
 
 def test_drops_matplotlib_inline_magic(tmp_path: Path) -> None:
@@ -395,7 +391,6 @@ def test_cell_magic_bash_is_dropped_with_body_preserved(tmp_path: Path) -> None:
     # Body preserved, commented out.
     assert "# echo hello" in src
     assert "# ls -la" in src
-    # Surfaced in the import report as a dropped shell.
     assert "%%bash" in result.dropped_shells
 
 
@@ -439,8 +434,8 @@ def test_drops_javascript_and_html_cell_magics(tmp_path: Path) -> None:
     )
     result = import_notebook(ipynb)
     assert len(result.dropped_magics) == 2
-    # Each entry names the actual magic, not a placeholder union — so
-    # the import report can tell the user which one was where.
+    # Each entry names the actual magic, so the import report can say which one
+    # was where.
     assert "%%javascript" in result.dropped_magics
     assert "%%html" in result.dropped_magics
     nb = parse_notebook(result.notebook_dir)
@@ -463,7 +458,6 @@ def test_inspection_magics_dropped(tmp_path: Path) -> None:
     result = import_notebook(ipynb)
     nb = parse_notebook(result.notebook_dir)
     for cell in nb.cells:
-        # No raw magic survives the conversion.
         for line in cell.source.splitlines():
             assert not line.lstrip().startswith("%"), (cell.source, line)
     # Translated_magics carries the per-magic record (every entry above
@@ -529,7 +523,6 @@ def test_unsupported_line_magic_dropped_with_comment(tmp_path: Path) -> None:
     assert "x = 1" in src
 
 
-# ---------------------------------------------------------------------------
 # Shell commands + pip-install dep capture
 
 
@@ -617,7 +610,6 @@ def test_other_shell_commands_dropped_with_comment(tmp_path: Path) -> None:
     assert "import sys" in src
 
 
-# ---------------------------------------------------------------------------
 # Sibling-file dep capture
 
 
@@ -680,9 +672,8 @@ def test_shell_assignment_form_does_not_produce_invalid_python(tmp_path: Path) -
 
     nb = parse_notebook(result.notebook_dir)
     src = nb.cells[0].source
-    # Must not contain raw '!ls' — that's a SyntaxError.
+    # Raw '!ls' would be a SyntaxError.
     assert "= !" not in src
-    # Cell parses.
     import ast as _ast
 
     _ast.parse(src)
@@ -718,10 +709,9 @@ def test_run_magic_generates_self_contained_path_import(tmp_path: Path) -> None:
     result = import_notebook(ipynb)
     nb = parse_notebook(result.notebook_dir)
     src = nb.cells[0].source
-    # No bare Path — must be either an import or an alias.
+    # No bare Path: either an import or an alias.
     assert "from pathlib import Path" in src
     assert "exec(" in src
-    # Cell parses cleanly.
     import ast as _ast
 
     _ast.parse(src)
@@ -740,7 +730,7 @@ def test_pyproject_serialization_handles_specs_with_quotes(tmp_path: Path) -> No
 
     result = import_notebook(ipynb)
     pyproject_text = (result.notebook_dir / "pyproject.toml").read_text()
-    # Resulting TOML must parse — manual interpolation would have produced
+    # Resulting TOML must parse: manual interpolation would have produced
     # `"importlib-metadata; python_version < "3.10""` which is invalid.
     parsed = tomllib.loads(pyproject_text)
     deps = parsed["project"]["dependencies"]
@@ -764,7 +754,6 @@ def test_pyproject_skips_pip_only_specs(tmp_path: Path) -> None:
     result = import_notebook(ipynb)
 
     assert "requests==2.31.0" in result.captured_deps
-    # All four pip-only forms are filtered out.
     for bad in (
         "-e .",
         "git+https://github.com/psf/requests",
@@ -778,11 +767,9 @@ def test_pyproject_skips_pip_only_specs(tmp_path: Path) -> None:
     assert "-e ." not in pyproject_text
     assert "git+https" not in pyproject_text
 
-    # The user is told what was skipped.
     assert any("pip-only" in w for w in result.warnings)
 
 
-# ---------------------------------------------------------------------------
 # Import-name → pip-name auto-capture (source 3 of dep capture)
 
 
@@ -826,7 +813,6 @@ def test_import_name_to_pip_name_override(tmp_path: Path) -> None:
     assert "scikit-learn" in deps
     assert "beautifulsoup4" in deps
     assert "PyYAML" in deps
-    # Original import names should NOT have leaked through.
     assert "cv2" not in deps
     assert "sklearn" not in deps
 
@@ -865,7 +851,6 @@ def test_import_name_pip_overrides_extended(tmp_path: Path) -> None:
     }
     missing = expected - deps
     assert not missing, f"missing pip-name mappings: {missing}"
-    # Original import names must not leak.
     leaked = {"skimage", "attr", "Crypto", "OpenSSL", "MySQLdb", "Bio", "gym"} & deps
     assert not leaked, f"raw import names leaked into deps: {leaked}"
 
@@ -900,9 +885,8 @@ def test_local_module_imports_not_captured(tmp_path: Path) -> None:
     )
     result = import_notebook(ipynb)
     deps = set(result.captured_deps)
-    # numpy survives — it's not a sibling file.
+    # numpy is not a sibling file, so it survives.
     assert "numpy" in deps
-    # The two locals are filtered.
     assert "my_helpers" not in deps
     assert "my_package" not in deps
     assert "my-helpers" not in deps
@@ -921,7 +905,7 @@ def test_explicit_version_pin_shadows_inferred_bare_name(tmp_path: Path) -> None
     deps = result.captured_deps
     assert "pandas==2.0.1" in deps
     assert "pandas" not in deps  # bare version got deduped out
-    # numpy survives — only source 3 supplied it.
+    # numpy survives; only source 3 supplied it.
     assert "numpy" in deps
 
 
@@ -937,7 +921,6 @@ def test_pep503_normalization_dedupes_underscore_dash_variants(tmp_path: Path) -
     )
     result = import_notebook(ipynb)
     deps = result.captured_deps
-    # Only one canonical entry.
     assert deps.count("scikit-learn") == 1
     # The import-mapped name shouldn't have produced a duplicate.
     assert "sklearn" not in deps
@@ -957,8 +940,7 @@ def test_relative_imports_not_captured(tmp_path: Path) -> None:
     assert "pkg" not in deps
 
 
-# ---------------------------------------------------------------------------
-# Import report (PR 3)
+# Import report
 
 
 def test_report_is_written_next_to_notebook_toml(tmp_path: Path) -> None:
@@ -1003,7 +985,6 @@ def test_report_lists_translated_and_dropped_magics(tmp_path: Path) -> None:
     assert "## Magics translated" in text
     assert "%matplotlib" in text
     assert "## Magics dropped" in text
-    # The unsupported %who is one of the dropped ones.
     assert "%who" in text
 
 
@@ -1016,7 +997,6 @@ def test_report_lists_dropped_shells(tmp_path: Path) -> None:
     text = result.report_text
     assert "## Shell commands dropped" in text
     assert "!ls /data" in text
-    # Assignment-form shell escape also appears.
     assert "files = !find" in text or "= !find" in text
 
 
@@ -1055,7 +1035,6 @@ def test_report_omits_empty_sections_for_clean_notebook(tmp_path: Path) -> None:
     result = import_notebook(ipynb)
     text = result.report_text
     assert "## Counts" in text
-    # No optional sections.
     assert "## Magics translated" not in text
     assert "## Magics dropped" not in text
     assert "## Shell commands dropped" not in text
@@ -1069,7 +1048,7 @@ def test_format_import_report_is_callable_directly(tmp_path: Path) -> None:
     ipynb = _make_ipynb(tmp_path, [_code_cell("x = 1\n")])
     result = import_notebook(ipynb)
     rendered = format_import_report(result, ipynb)
-    # Same prose layout — deterministic from the result.
+    # Same prose layout: deterministic from the result.
     assert rendered == result.report_text
 
 
@@ -1112,7 +1091,6 @@ def test_import_openable_check_passes_for_clean_notebook(tmp_path: Path) -> None
         ],
     )
     result = import_notebook(ipynb)
-    # No analyze / DAG failures.
     assert not any(
         "fails to analyze" in w or "DAG build fails" in w or "fails to parse" in w
         for w in result.warnings

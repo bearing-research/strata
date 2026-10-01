@@ -128,8 +128,8 @@ class TestUpstreamInvalidation:
 
         staleness = session.compute_staleness()
         assert staleness["c1"].status == "idle"
-        # c2 ran and holds a result that c1's changed mount invalidated →
-        # STALE with an upstream reason (#361), not a bare idle.
+        # c2 ran and holds a result that c1's changed mount invalidated, so it is STALE
+        # with an upstream reason, not a bare idle.
         assert staleness["c2"].status == "stale"
         assert StalenessReason.UPSTREAM in staleness["c2"].reasons
 
@@ -169,12 +169,11 @@ class TestUpstreamInvalidation:
         """After editing c1 from x=1 to x=2, c2 must not cache hit."""
         session = pipeline_notebook
 
-        # Verify DAG is correct
         assert session.dag is not None
         assert "c1" in session.dag.variable_producer.get("x", "")
         assert "c2" in session.dag.variable_producer.get("y", "")
 
-        # Step 1: Execute all three cells in order
+        # Step 1: run all three cells.
         executor = CellExecutor(session)
         r1 = await executor.execute_cell("c1", "x = 1")
         assert r1.success, f"c1 failed: {r1.error}"
@@ -187,22 +186,22 @@ class TestUpstreamInvalidation:
         r3 = await executor.execute_cell("c3", "print(y)")
         assert r3.success, f"c3 failed: {r3.error}"
 
-        # Step 2: Verify cache works (re-run c2 without changes → cache hit)
+        # Step 2: re-running c2 unchanged is a cache hit.
         executor2 = CellExecutor(session)
         r2_cached = await executor2.execute_cell("c2", "y = x + 1")
         assert r2_cached.success
         assert r2_cached.cache_hit is True, "Expected cache hit when nothing changed"
 
-        # Step 3: Edit c1 source from x=1 to x=2
+        # Step 3: edit c1 from x=1 to x=2.
         cell1 = next(c for c in session.notebook_state.cells if c.id == "c1")
         cell1.source = "x = 2"
         write_cell(session.path, "c1", "x = 2")
 
-        # Re-analyze DAG (simulates what cell_source_update does)
+        # Re-analyze as cell_source_update does.
         session.re_analyze_cell("c1")
         session.compute_staleness()
 
-        # Step 4: Re-run c2 — must NOT be a cache hit
+        # Step 4: re-run c2; it must NOT be a cache hit.
         executor3 = CellExecutor(session)
         r2_after_edit = await executor3.execute_cell("c2", "y = x + 1")
         assert r2_after_edit.success, f"c2 failed after edit: {r2_after_edit.error}"
@@ -260,8 +259,8 @@ class TestUpstreamInvalidation:
         session.compute_staleness()
 
         staleness = session.compute_staleness()
-        # c2 ran and its cached result is now invalid because c1's exported
-        # function changed → STALE with an upstream reason (#361).
+        # c2's cached result is invalid because c1's exported function changed, so it is
+        # STALE with an upstream reason.
         assert staleness["c2"].status == "stale"
         assert StalenessReason.UPSTREAM in staleness["c2"].reasons
 
@@ -337,8 +336,8 @@ class TestUpstreamInvalidation:
         staleness = session.compute_staleness()
 
         assert staleness["c1"].status == "idle"
-        # c2 ran; deleting one of c1's consumed artifacts invalidates c2's
-        # cached result → STALE with an upstream reason (#361), not idle.
+        # Deleting one of c1's consumed artifacts invalidates c2's cached result, so it is
+        # STALE with an upstream reason, not idle.
         assert staleness["c2"].status == "stale"
         assert StalenessReason.UPSTREAM in staleness["c2"].reasons
 
@@ -347,7 +346,6 @@ class TestUpstreamInvalidation:
         """After editing c1, c2's output should reflect the new value."""
         session = pipeline_notebook
 
-        # Run pipeline
         executor = CellExecutor(session)
         await executor.execute_cell("c1", "x = 1")
         r2 = await executor.execute_cell("c2", "y = x + 1")
@@ -355,14 +353,13 @@ class TestUpstreamInvalidation:
         # y should be 2 (x=1, y=x+1=2)
         assert r2.outputs.get("y", {}).get("preview") == 2
 
-        # Edit c1 to x = 100
         cell1 = next(c for c in session.notebook_state.cells if c.id == "c1")
         cell1.source = "x = 100"
         write_cell(session.path, "c1", "x = 100")
         session.re_analyze_cell("c1")
         session.compute_staleness()
 
-        # Re-run c2 — y should now be 101
+        # Re-run c2: y is now 101.
         executor2 = CellExecutor(session)
         r2_new = await executor2.execute_cell("c2", "y = x + 1")
         assert r2_new.success, f"c2 failed: {r2_new.error}"
@@ -399,7 +396,7 @@ class TestUpstreamInvalidationE2E:
 
         with open_notebook_session(client, nb.path) as (sid, session):
             with ws_connect(client, sid) as ws:
-                # Step 1: Run all 3 cells
+                # Step 1: run all 3 cells.
                 r1 = execute_cell_and_wait(ws, "c1")
                 assert r1["payload"].get("cache_hit") is not True
 
@@ -408,13 +405,12 @@ class TestUpstreamInvalidationE2E:
 
                 execute_cell_and_wait(ws, "c3")
 
-                # Step 2: Edit c1 via REST (like the UI does)
+                # Step 2: edit c1 via REST, as the UI does.
                 resp = client.put(
                     f"/v1/notebooks/{sid}/cells/c1",
                     json={"source": "x = 2"},
                 )
                 assert resp.status_code == 200
-                # The REST response includes updated statuses
                 data = resp.json()
                 # Cell 1 should now be idle/stale
                 c1_status = None
@@ -427,7 +423,7 @@ class TestUpstreamInvalidationE2E:
 
                 ws.clear()
 
-                # Step 3: Run c2 via WS (like clicking Run in the UI)
+                # Step 3: run c2 via WS, as clicking Run does.
                 r2_after = execute_cell_and_wait(ws, "c2")
                 assert r2_after["type"] == "cell_output"
                 assert r2_after["payload"].get("cache_hit") is not True, (
@@ -441,12 +437,10 @@ class TestUpstreamInvalidationE2E:
 
         with open_notebook_session(client, nb.path) as (sid, session):
             with ws_connect(client, sid) as ws:
-                # Run both cells
                 execute_cell_and_wait(ws, "c1")
                 r2 = execute_cell_and_wait(ws, "c2")
                 assert r2["payload"]["outputs"]["y"]["preview"] == 2
 
-                # Edit c1 via REST
                 resp = client.put(
                     f"/v1/notebooks/{sid}/cells/c1",
                     json={"source": "x = 100"},
@@ -454,7 +448,7 @@ class TestUpstreamInvalidationE2E:
                 assert resp.status_code == 200
                 ws.clear()
 
-                # Run c2 via WS — should produce y=101
+                # Run c2 via WS; it should produce y=101.
                 r2_new = execute_cell_and_wait(ws, "c2")
                 assert r2_new["type"] == "cell_output"
                 assert r2_new["payload"].get("cache_hit") is not True

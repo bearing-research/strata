@@ -49,9 +49,8 @@ def test_inputs_are_injected(tmp_path):
 
 
 def test_collection_error_becomes_one_error(tmp_path):
-    # A syntax error in the test file means pytest never reaches
-    # sessionfinish, so results.json is absent — the wrapper synthesizes a
-    # single error carrying the captured output.
+    # A syntax error means pytest never reaches sessionfinish, so results.json is
+    # absent; the wrapper synthesizes a single error carrying the captured output.
     res = run_cell_tests_in_dir(
         rundir=tmp_path / "run",
         venv_python=_PY,

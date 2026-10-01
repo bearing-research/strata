@@ -12,19 +12,15 @@ def three_cell_notebook(tmp_path):
     notebook_dir = tmp_path / "notebook"
     notebook_dir.mkdir()
 
-    # Create cells directory
     cells_dir = notebook_dir / "cells"
     cells_dir.mkdir()
 
-    # Create cell files
     (cells_dir / "load.py").write_text("df = [1, 2, 3]")
     (cells_dir / "clean.py").write_text("cleaned = [x for x in df]")
     (cells_dir / "explore.py").write_text("print(cleaned)")
 
-    # Create pyproject.toml
     (notebook_dir / "pyproject.toml").write_text("[project]\nname = 'test'\n")
 
-    # Create NotebookState
     notebook_state = NotebookState(
         id="test_nb",
         name="Test",

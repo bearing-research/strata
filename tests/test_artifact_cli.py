@@ -511,8 +511,8 @@ class TestArchive:
 
         dest = self._archive(chain_store, tmp_path)
         manifest = jsonlib.loads((dest / "manifest.json").read_text())
-        # The record names its payload: a tabular bundle also carries a
-        # Parquet rendering, so "the artifact file" is no longer a guess.
+        # The record names its payload: a tabular bundle also carries a Parquet rendering,
+        # so "the artifact file" would be ambiguous.
         payload = dest / manifest["content_file"]
 
         assert manifest["content_sha256"] == hashlib.sha256(payload.read_bytes()).hexdigest()

@@ -23,10 +23,8 @@ def test_parse_empty_notebook():
     with tempfile.TemporaryDirectory() as tmpdir:
         tmpdir_path = Path(tmpdir)
 
-        # Create a notebook
         notebook_dir = create_notebook(tmpdir_path, "Test Notebook")
 
-        # Parse it
         notebook_state = parse_notebook(notebook_dir)
 
         assert isinstance(notebook_state.id, str) and len(notebook_state.id) > 0
@@ -40,10 +38,8 @@ def test_parse_notebook_with_cells():
     with tempfile.TemporaryDirectory() as tmpdir:
         tmpdir_path = Path(tmpdir)
 
-        # Create a notebook
         notebook_dir = create_notebook(tmpdir_path, "Multi-cell Notebook")
 
-        # Add cells
         from strata.notebook.writer import add_cell_to_notebook
 
         cell1_id = "cell-1"
@@ -52,11 +48,9 @@ def test_parse_notebook_with_cells():
         cell2_id = "cell-2"
         add_cell_to_notebook(notebook_dir, cell2_id, after_cell_id=cell1_id)
 
-        # Write source for cells
         write_cell(notebook_dir, cell1_id, "x = 1 + 1")
         write_cell(notebook_dir, cell2_id, "y = x * 2")
 
-        # Parse it
         notebook_state = parse_notebook(notebook_dir)
 
         assert notebook_state.name == "Multi-cell Notebook"
@@ -72,13 +66,11 @@ def test_parse_notebook_missing_cells_directory():
     with tempfile.TemporaryDirectory() as tmpdir:
         tmpdir_path = Path(tmpdir)
 
-        # Create notebook directory structure manually
         notebook_dir = tmpdir_path / "test_notebook"
         notebook_dir.mkdir()
         cells_dir = notebook_dir / "cells"
         cells_dir.mkdir()
 
-        # Create notebook.toml with cell reference
         now = datetime.now(tz=UTC)
         notebook_toml = NotebookToml(
             notebook_id="test-123",
@@ -89,9 +81,8 @@ def test_parse_notebook_missing_cells_directory():
         )
         write_notebook_toml(notebook_dir, notebook_toml)
 
-        # Note: we don't create the actual cell file
+        # The cell file is deliberately missing.
 
-        # Parse it - should gracefully handle missing file
         notebook_state = parse_notebook(notebook_dir)
 
         assert notebook_state.name == "Missing Cell Notebook"
@@ -111,7 +102,6 @@ def test_parse_and_reload_after_edit():
     with tempfile.TemporaryDirectory() as tmpdir:
         tmpdir_path = Path(tmpdir)
 
-        # Create notebook
         notebook_dir = create_notebook(tmpdir_path, "Editable Notebook")
 
         from strata.notebook.writer import add_cell_to_notebook
@@ -120,14 +110,11 @@ def test_parse_and_reload_after_edit():
         add_cell_to_notebook(notebook_dir, cell_id)
         write_cell(notebook_dir, cell_id, "original code")
 
-        # Parse it
         notebook_state1 = parse_notebook(notebook_dir)
         assert notebook_state1.cells[0].source == "original code"
 
-        # Edit cell
         write_cell(notebook_dir, cell_id, "modified code")
 
-        # Reload
         notebook_state2 = parse_notebook(notebook_dir)
         assert notebook_state2.cells[0].source == "modified code"
 

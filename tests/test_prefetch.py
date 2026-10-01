@@ -60,7 +60,7 @@ def prefetch_warehouse(tmp_path):
 
     table = catalog.create_table("test_db.prefetch_test", schema)
 
-    # Create enough data to make prefetch meaningful
+    # Enough data to make prefetch meaningful.
     num_rows = 5000
     data = pa.table(
         {
@@ -93,12 +93,10 @@ class TestPrefetchBasics:
 
         with run_server(config) as base_url:
             with httpx.Client(timeout=10.0) as client:
-                # Get initial metrics
                 resp = client.get(f"{base_url}/metrics")
                 assert resp.status_code == 200
                 metrics = resp.json()
 
-                # Check prefetch metrics structure
                 assert "prefetch" in metrics
                 prefetch = metrics["prefetch"]
                 assert "started" in prefetch
@@ -106,7 +104,6 @@ class TestPrefetchBasics:
                 assert "wasted" in prefetch
                 assert "in_flight" in prefetch
 
-                # Initial values should be 0
                 assert prefetch["started"] == 0
                 assert prefetch["used"] == 0
                 assert prefetch["wasted"] == 0
@@ -126,7 +123,6 @@ class TestPrefetchBasics:
             table_uri = prefetch_warehouse["table_uri"]
 
             with httpx.Client(timeout=10.0) as client:
-                # Create materialize request
                 resp = client.post(
                     f"{base_url}/v1/materialize",
                     json=build_materialize_request(table_uri),
@@ -134,15 +130,13 @@ class TestPrefetchBasics:
                 assert resp.status_code == 200
                 stream_url = resp.json()["stream_url"]
 
-                # Small delay to let prefetch complete
+                # Let the prefetch complete.
                 time.sleep(0.2)
 
-                # Consume the stream
                 with client.stream("GET", f"{base_url}{stream_url}") as stream:
                     for _ in stream.iter_bytes():
                         pass
 
-                # Check metrics - prefetch should be used
                 resp = client.get(f"{base_url}/metrics")
                 metrics = resp.json()
                 prefetch = metrics["prefetch"]
@@ -169,7 +163,7 @@ class TestPrefetchBasics:
             assert server_module._state is not None
 
             with httpx.Client(timeout=10.0) as client:
-                # Create materialize request but don't stream it
+                # Materialize but never stream it.
                 resp = client.post(
                     f"{base_url}/v1/materialize",
                     json=build_materialize_request(table_uri),
@@ -179,7 +173,6 @@ class TestPrefetchBasics:
                 # Wait for prefetch and TTL cleanup to run.
                 time.sleep(0.4)
 
-                # Check metrics
                 resp = client.get(f"{base_url}/metrics")
                 metrics = resp.json()
                 prefetch = metrics["prefetch"]
@@ -208,7 +201,6 @@ class TestPrefetchSemaphore:
             with httpx.Client(timeout=10.0) as client:
                 stream_urls = []
 
-                # Create many materialize requests rapidly
                 for _ in range(10):
                     resp = client.post(
                         f"{base_url}/v1/materialize",
@@ -217,15 +209,13 @@ class TestPrefetchSemaphore:
                     assert resp.status_code == 200
                     stream_urls.append(resp.json()["stream_url"])
 
-                # Check that in-flight prefetches are bounded
                 resp = client.get(f"{base_url}/metrics")
                 metrics = resp.json()
                 prefetch = metrics["prefetch"]
 
-                # Max 4 concurrent prefetches (semaphore limit)
+                # The prefetch semaphore caps this at 4.
                 assert prefetch["in_flight"] <= 4
 
-                # Consume all streams
                 for stream_url in stream_urls:
                     try:
                         with client.stream("GET", f"{base_url}{stream_url}") as stream:
@@ -252,17 +242,15 @@ class TestPrefetchCancellation:
             table_uri = prefetch_warehouse["table_uri"]
 
             with httpx.Client(timeout=10.0) as client:
-                # Create materialize request (prefetch may start)
                 resp = client.post(
                     f"{base_url}/v1/materialize",
                     json=build_materialize_request(table_uri),
                 )
                 assert resp.status_code == 200
 
-                # Wait a bit for cleanup
+                # Wait for cleanup.
                 time.sleep(0.2)
 
-                # Check that no prefetches are in flight
                 resp = client.get(f"{base_url}/metrics")
                 metrics = resp.json()
                 prefetch = metrics["prefetch"]
@@ -289,7 +277,6 @@ class TestPrefetchPrometheusMetrics:
                 assert resp.status_code == 200
                 content = resp.text
 
-                # Check that prefetch metrics are present
                 assert "strata_prefetch_started_total" in content
                 assert "strata_prefetch_used_total" in content
                 assert "strata_prefetch_wasted_total" in content
@@ -313,24 +300,20 @@ class TestPrefetchNoLeak:
             table_uri = prefetch_warehouse["table_uri"]
 
             with httpx.Client(timeout=10.0) as client:
-                # Create and abandon many materialize requests
+                # Create and abandon many materialize requests.
                 for _ in range(20):
                     resp = client.post(
                         f"{base_url}/v1/materialize",
                         json=build_materialize_request(table_uri),
                     )
-                    # Don't consume the stream
 
-                # Wait for cleanup
+                # Wait for cleanup.
                 time.sleep(0.5)
 
-                # Check metrics
                 resp = client.get(f"{base_url}/metrics")
                 metrics = resp.json()
                 prefetch = metrics["prefetch"]
 
-                # No prefetches should be in flight
                 assert prefetch["in_flight"] == 0
 
-                # Started count should be tracked
                 assert prefetch["started"] >= 0

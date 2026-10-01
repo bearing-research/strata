@@ -276,8 +276,8 @@ class TestPerVariantEndToEnd:
             ("load", "X = [1.0, 2.0, 3.0]\n", None),
             ("vdouble", "# @variant model double\npreds = [v * 2 for v in X]\n", "load"),
             ("vtriple", "# @variant model triple\npreds = [v * 3 for v in X]\n", "vdouble"),
-            # Fan-out: runs once per variant with `preds` bound to that variant's
-            # list (a scalar, not the dict) — `sum` over a dict would raise.
+            # Fan-out: runs once per variant with `preds` bound to that variant's list (a
+            # scalar, not the dict); `sum` over a dict would raise.
             ("ev", "# @per_variant\nscore = sum(preds)\n", "vtriple"),
             # Collapse consumer: `score` arrives as {variant: value}.
             ("report", 'print("REPORT", {n: s for n, s in score.items()})\n', "ev"),
@@ -314,8 +314,8 @@ class TestPerVariantProgressFrames:
         session = NotebookSession(parse_notebook(nb), nb)
         executor = CellExecutor(session)
 
-        # Stub the per-variant run so no harness subprocess is needed; the
-        # signature must mirror the real one (see the monkeypatch-sweep lesson).
+        # Stub the per-variant run so no harness subprocess is needed; the signature must
+        # mirror the real one.
         async def fake_run(
             self,
             cell_id,
@@ -527,9 +527,7 @@ class TestSweepRestEndpoint:
             assert bad.status_code == 422
 
 
-# ---------------------------------------------------------------------------
-# v2: @per_variant fan-out — Phase 1 (annotation parsing + validation only)
-# ---------------------------------------------------------------------------
+# --- @per_variant fan-out ---
 
 
 class TestPerVariantParsing:
@@ -829,7 +827,7 @@ class TestFanoutBaseProvenance:
 
         cell = session.notebook_state.get_cell("ev")
         assert cell.last_provenance_hash is not None
-        # The recorded hash is the BASE provenance — exactly what
-        # compute_staleness recomputes — not a variant-scoped subkey.
+        # The recorded hash is the BASE provenance (what compute_staleness recomputes),
+        # not a variant-scoped subkey.
         prov = asyncio.run(executor._compute_cell_provenance("ev", src))
         assert cell.last_provenance_hash == prov.provenance_hash

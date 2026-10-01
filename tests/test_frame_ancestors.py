@@ -30,7 +30,7 @@ def _client(tmp_path, **overrides) -> Iterator[TestClient]:
     original = server_module._state
     server_module._state = ServerState(config)
     try:
-        # No ``with`` — lifespan never runs; the middleware reads _state directly.
+        # No ``with``: lifespan never runs; the middleware reads _state directly.
         yield TestClient(app)
     finally:
         server_module._state = original

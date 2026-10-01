@@ -24,7 +24,6 @@ class TestTracingModule:
         """Test that get_tracer returns None when tracing is disabled."""
         monkeypatch.setenv("STRATA_TRACING_ENABLED", "false")
 
-        # Reset module state
         import strata.tracing
 
         strata.tracing._tracer = None
@@ -39,7 +38,6 @@ class TestTracingModule:
         """Test that trace_span yields a NoOpSpan when tracing is disabled."""
         monkeypatch.setenv("STRATA_TRACING_ENABLED", "false")
 
-        # Reset module state
         import strata.tracing
 
         strata.tracing._tracer = None
@@ -49,7 +47,7 @@ class TestTracingModule:
 
         with trace_span("test_operation", attr1="value1") as span:
             assert isinstance(span, NoOpSpan)
-            # NoOpSpan methods should be no-ops (not raise)
+            # NoOpSpan methods must not raise.
             span.set_attribute("key", "value")
             span.add_event("event_name")
             span.record_exception(ValueError("test"))
@@ -59,7 +57,6 @@ class TestTracingModule:
         from strata.tracing import NoOpSpan
 
         span = NoOpSpan()
-        # All methods should be no-ops
         span.set_attribute("key", "value")
         span.set_attribute("int_key", 42)
         span.set_attribute("float_key", 3.14)
@@ -71,7 +68,6 @@ class TestTracingModule:
         """Test that init_tracing returns False when tracing is disabled."""
         monkeypatch.setenv("STRATA_TRACING_ENABLED", "false")
 
-        # Reset module state
         import strata.tracing
 
         strata.tracing._tracer = None
@@ -91,7 +87,6 @@ class TestTracingModule:
         from strata.tracing import instrument_fastapi
 
         app = FastAPI()
-        # Should not raise
         instrument_fastapi(app)
 
 
@@ -102,7 +97,6 @@ class TestTracingContextManager:
         """Test that exceptions are propagated from trace_span."""
         monkeypatch.setenv("STRATA_TRACING_ENABLED", "false")
 
-        # Reset module state
         import strata.tracing
 
         strata.tracing._tracer = None
@@ -118,7 +112,6 @@ class TestTracingContextManager:
         """Test that trace_span accepts initial attributes."""
         monkeypatch.setenv("STRATA_TRACING_ENABLED", "false")
 
-        # Reset module state
         import strata.tracing
 
         strata.tracing._tracer = None
@@ -154,20 +147,16 @@ class TestTracingWithOTelEnabled:
         """Reset tracing state and enable tracing."""
         import strata.tracing
 
-        # Store original state
         original_tracer = strata.tracing._tracer
         original_initialized = strata.tracing._initialized
 
-        # Reset state
         strata.tracing._tracer = None
         strata.tracing._initialized = False
 
-        # Enable tracing
         monkeypatch.setenv("STRATA_TRACING_ENABLED", "true")
 
         yield
 
-        # Restore state
         strata.tracing._tracer = original_tracer
         strata.tracing._initialized = original_initialized
 
@@ -175,7 +164,7 @@ class TestTracingWithOTelEnabled:
         """Test that is_tracing_available returns True when OTel is installed."""
         from strata.tracing import is_tracing_available
 
-        # OTel should be installed in test environment with extras
+        # OTel is installed in the test environment with extras.
         assert is_tracing_available() is True
 
     def test_is_tracing_enabled_returns_true_when_enabled(self, reset_tracing):
@@ -213,7 +202,6 @@ class TestTracingWithOTelEnabled:
         with trace_span("test_operation", key="value") as span:
             assert not isinstance(span, NoOpSpan)
             assert isinstance(span, Span)
-            # Real span methods should work
             span.set_attribute("dynamic_attr", 42)
             span.add_event("test_event", {"event_key": "event_value"})
 
@@ -237,30 +225,26 @@ class TestTracingWithOTelEnabled:
 
         import strata.tracing
 
-        # Reset module state
         strata.tracing._tracer = None
         strata.tracing._initialized = False
         monkeypatch.setenv("STRATA_TRACING_ENABLED", "true")
 
-        # Set up in-memory exporter with a fresh provider
+        # In-memory exporter with a fresh provider.
         exporter = InMemorySpanExporter()
         provider = TracerProvider()
         provider.add_span_processor(SimpleSpanProcessor(exporter))
 
-        # Create tracer directly from this provider (don't use global)
+        # Tracer straight from this provider, not the global one.
         tracer = provider.get_tracer("strata", "0.1.0")
 
-        # Inject the tracer directly
         strata.tracing._tracer = tracer
         strata.tracing._initialized = True
 
         from strata.tracing import trace_span
 
-        # Create a span
         with trace_span("test_operation", table_id="ns.table") as span:
             span.set_attribute("rows_count", 100)
 
-        # Verify span was captured
         spans = exporter.get_finished_spans()
         assert len(spans) == 1
         assert spans[0].name == "test_operation"
@@ -276,7 +260,6 @@ class TestTracingWithOTelEnabled:
         init_tracing()
         app = FastAPI()
 
-        # Should not raise
         instrument_fastapi(app)
 
 
@@ -293,7 +276,6 @@ class TestTracingIntegration:
         config = StrataConfig(cache_dir=tmp_path / "cache")
         state = ServerState(config)
 
-        # Server state should be initialized
         assert state.config == config
         assert state.planner is not None
         assert state.fetcher is not None

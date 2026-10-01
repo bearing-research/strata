@@ -45,8 +45,7 @@ class TestDispatch:
     """The dispatch helper returns the language-specific analysis."""
 
     def test_python_extracts_defines_and_references(self, monkeypatch):
-        # No need for a NotebookSession — the Python adapter ignores it,
-        # so any object that satisfies the call signature is fine.
+        # The Python adapter ignores the session, so no NotebookSession is needed.
         cell = _make_cell(CellLanguage.PYTHON, "y = x + 1")
         analyzed = analyze_cell_by_language(cell, session=object())
         assert "y" in analyzed.defines
@@ -64,8 +63,6 @@ class TestErrors:
     """Missing-language path must fail loudly, not silently empty out."""
 
     def test_unregistered_language_raises_unknownlanguageerror(self):
-        # Create a fake language value that the registry doesn't know about.
-        # Using a sentinel-ish object that won't equal any CellLanguage member.
         fake_lang = "totally-not-a-real-language"
         with pytest.raises(UnknownLanguageError):
             get_language_analyzer(fake_lang)  # type: ignore[arg-type]

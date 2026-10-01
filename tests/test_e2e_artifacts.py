@@ -34,7 +34,6 @@ def e2e_server(tmp_path):
     warehouse_path.mkdir()
 
     with run_server_with_context(cache_dir, artifact_dir, "personal") as ctx:
-        # Add warehouse_path to context
         yield {
             "config": ctx.config,
             "port": ctx.port,
@@ -83,14 +82,12 @@ class ArtifactClient:
         name: str | None = None,
     ) -> dict:
         """Upload blob and finalize artifact."""
-        # Upload
         self.client.post(
             f"/v1/artifacts/upload/{artifact_id}/v/{version}",
             content=table_to_ipc_bytes(table),
             headers={"Content-Type": "application/vnd.apache.arrow.stream"},
         )
 
-        # Finalize
         body = {
             "artifact_id": artifact_id,
             "version": version,
@@ -123,10 +120,8 @@ class ArtifactClient:
         import time as time_module
 
         if name:
-            # Named artifacts go through the embedded runner so the name is
-            # set by the same flow users hit (and the SQL actually runs).
-            # Put-created names currently land in tenant "_default" while
-            # name reads resolve None — unification is Phase 1 item 4.
+            # Named artifacts go through the embedded runner so the name is set by the
+            # flow users hit.
             mat = self.materialize(inputs, executor, params, name)
             if mat["hit"]:
                 return mat["artifact_uri"]
@@ -185,7 +180,7 @@ class ArtifactClient:
 
     def fetch_artifact(self, artifact_uri: str) -> pa.Table:
         """Fetch artifact data as Arrow table."""
-        # Parse artifact URI: strata://artifact/{id}@v={version}
+        # strata://artifact/{id}@v={version}
         import re
 
         match = re.match(r"strata://artifact/([^@]+)@v=(\d+)", artifact_uri)
@@ -208,7 +203,6 @@ class TestArtifactPipeline:
         client = ArtifactClient(e2e_server["base_url"])
 
         try:
-            # Create artifact
             result_table = pa.table({"x": [1, 2, 3], "y": ["a", "b", "c"]})
             artifact_uri = client.create_artifact(
                 inputs=[],
@@ -236,7 +230,6 @@ class TestArtifactPipeline:
                 name="my_artifact",
             )
 
-            # Verify name resolves
             status = client.get_name_status("my_artifact")
             assert status["name"] == "my_artifact"
             assert status["artifact_uri"] == artifact_uri
@@ -251,14 +244,12 @@ class TestArtifactPipeline:
         try:
             result_table = pa.table({"x": [1]})
 
-            # First call - cache miss
             uri1 = client.create_artifact(
                 inputs=["table://source"],
                 result_table=result_table,
                 params={"sql": "SELECT 1 as x"},
             )
 
-            # Second call with same inputs - should hit
             resp = client.materialize(
                 inputs=["table://source"],
                 params={"sql": "SELECT 1 as x"},
@@ -278,17 +269,15 @@ class TestChainedArtifacts:
         client = ArtifactClient(e2e_server["base_url"])
 
         try:
-            # Level 1: Base artifact from table
             base_table = pa.table({"id": [1, 2, 3], "value": [10, 20, 30]})
-            # Base persists via PUT (its declared table input is synthetic);
-            # the derived level below genuinely executes against it.
+            # Base persists via PUT (its table input is synthetic); the derived level
+            # below really executes against it.
             base_uri = client.create_artifact(
                 inputs=["file:///warehouse#db.source"],
                 result_table=base_table,
                 params={"sql": "SELECT * FROM input0"},
             )
 
-            # Level 2: Derived artifact using base as input
             derived_table = pa.table({"id": [1, 2, 3], "doubled": [20, 40, 60]})
             derived_uri = client.create_artifact(
                 inputs=[base_uri],
@@ -300,8 +289,6 @@ class TestChainedArtifacts:
             assert derived_uri != base_uri
             assert derived_uri.startswith("strata://artifact/")
 
-            # Verify chain via lineage
-            # Parse derived artifact ID
             import re
 
             match = re.match(r"strata://artifact/([^@]+)@v=(\d+)", derived_uri)
@@ -310,10 +297,9 @@ class TestChainedArtifacts:
 
             lineage = client.get_lineage(derived_id, derived_ver)
 
-            # Should have 3 nodes: derived, base, table
+            # derived, base, table
             assert len(lineage["nodes"]) == 3
 
-            # Direct inputs should only be base artifact
             assert len(lineage["direct_inputs"]) == 1
             assert base_uri in lineage["direct_inputs"][0]
         finally:
@@ -324,7 +310,6 @@ class TestChainedArtifacts:
         client = ArtifactClient(e2e_server["base_url"])
 
         try:
-            # Level 1: Raw data
             raw_table = pa.table({"x": [1, 2, 3]})
             raw_uri = client.create_artifact(
                 inputs=["file:///data#raw"],
@@ -332,7 +317,6 @@ class TestChainedArtifacts:
                 params={"sql": "SELECT * FROM input0"},
             )
 
-            # Level 2: Cleaned data
             clean_table = pa.table({"x": [1, 2, 3], "is_valid": [True, True, True]})
             clean_uri = client.create_artifact(
                 inputs=[raw_uri],
@@ -340,7 +324,6 @@ class TestChainedArtifacts:
                 params={"sql": "SELECT *, true as is_valid FROM input0"},
             )
 
-            # Level 3: Aggregated data
             agg_table = pa.table({"total": [6]})
             agg_uri = client.create_artifact(
                 inputs=[clean_uri],
@@ -348,7 +331,6 @@ class TestChainedArtifacts:
                 params={"sql": "SELECT SUM(x) as total FROM input0"},
             )
 
-            # Parse agg artifact ID
             import re
 
             match = re.match(r"strata://artifact/([^@]+)@v=(\d+)", agg_uri)
@@ -357,10 +339,9 @@ class TestChainedArtifacts:
 
             lineage = client.get_lineage(agg_id, agg_ver)
 
-            # Should have 4 nodes: agg, clean, raw, table
+            # agg, clean, raw, table
             assert len(lineage["nodes"]) == 4
-            # Depth is the max BFS level: agg=0, clean=1, raw=2, table=2 (sibling)
-            # so max depth reached is 2
+            # Depth is the max BFS level: agg=0, clean=1, raw=2, table=2 (sibling).
             assert lineage["depth"] == 2
         finally:
             client.close()
@@ -374,7 +355,6 @@ class TestLineageTraversal:
         client = ArtifactClient(e2e_server["base_url"])
 
         try:
-            # Create two base artifacts
             users_table = pa.table({"user_id": [1, 2], "name": ["Alice", "Bob"]})
             users_uri = client.create_artifact(
                 inputs=["file:///db#users"],
@@ -389,7 +369,6 @@ class TestLineageTraversal:
                 params={"sql": "SELECT * FROM input0"},
             )
 
-            # Create joined artifact using both
             joined_table = pa.table(
                 {
                     "name": ["Alice", "Bob"],
@@ -405,7 +384,6 @@ class TestLineageTraversal:
                 },
             )
 
-            # Parse joined artifact ID
             import re
 
             match = re.match(r"strata://artifact/([^@]+)@v=(\d+)", joined_uri)
@@ -414,14 +392,12 @@ class TestLineageTraversal:
 
             lineage = client.get_lineage(joined_id, joined_ver)
 
-            # Should have 5 nodes: joined, users, orders, users_table, orders_table
+            # joined, users, orders, users_table, orders_table
             assert len(lineage["nodes"]) == 5
 
-            # Direct inputs should be users and orders artifacts
             assert len(lineage["direct_inputs"]) == 2
 
-            # Should have edges from both inputs
-            assert len(lineage["edges"]) >= 4  # At least 4 edges in the graph
+            assert len(lineage["edges"]) >= 4
         finally:
             client.close()
 
@@ -430,7 +406,6 @@ class TestLineageTraversal:
         client = ArtifactClient(e2e_server["base_url"])
 
         try:
-            # Create 4-level chain
             prev_uri = "file:///source#table"
             result_table = pa.table({"x": [1]})
 
@@ -441,20 +416,16 @@ class TestLineageTraversal:
                     params={"sql": f"SELECT x FROM input0 -- level {i}"},
                 )
 
-            # Parse final artifact
             import re
 
             match = re.match(r"strata://artifact/([^@]+)@v=(\d+)", prev_uri)
             assert match is not None
             art_id, art_ver = match.group(1), int(match.group(2))
 
-            # Full lineage
             full_lineage = client.get_lineage(art_id, art_ver, max_depth=10)
             assert len(full_lineage["nodes"]) == 5  # 4 artifacts + 1 table
 
-            # Limited lineage
             limited_lineage = client.get_lineage(art_id, art_ver, max_depth=2)
-            # Should have fewer nodes due to depth limit
             assert len(limited_lineage["nodes"]) <= len(full_lineage["nodes"])
         finally:
             client.close()
@@ -468,7 +439,6 @@ class TestDependentsTracking:
         client = ArtifactClient(e2e_server["base_url"])
 
         try:
-            # Create base artifact
             base_table = pa.table({"x": [1, 2, 3]})
             base_uri = client.create_artifact(
                 inputs=[],
@@ -476,7 +446,6 @@ class TestDependentsTracking:
                 params={"sql": "SELECT 1 as x UNION ALL SELECT 2 UNION ALL SELECT 3"},
             )
 
-            # Create dependent artifact
             dep_table = pa.table({"x_doubled": [2, 4, 6]})
             dep_uri = client.create_artifact(
                 inputs=[base_uri],
@@ -484,7 +453,6 @@ class TestDependentsTracking:
                 params={"sql": "SELECT x * 2 as x_doubled FROM input0"},
             )
 
-            # Parse base artifact ID
             import re
 
             match = re.match(r"strata://artifact/([^@]+)@v=(\d+)", base_uri)
@@ -504,7 +472,6 @@ class TestDependentsTracking:
         client = ArtifactClient(e2e_server["base_url"])
 
         try:
-            # Create base artifact
             base_table = pa.table({"value": [100]})
             base_uri = client.create_artifact(
                 inputs=[],
@@ -512,7 +479,6 @@ class TestDependentsTracking:
                 params={"sql": "SELECT 100 as value"},
             )
 
-            # Create multiple dependents
             dep_uris = []
             for i in range(3):
                 dep_table = pa.table({"result": [100 * (i + 1)]})
@@ -523,7 +489,6 @@ class TestDependentsTracking:
                 )
                 dep_uris.append(dep_uri)
 
-            # Parse base artifact ID
             import re
 
             match = re.match(r"strata://artifact/([^@]+)@v=(\d+)", base_uri)
@@ -546,7 +511,6 @@ class TestDependentsTracking:
         client = ArtifactClient(e2e_server["base_url"])
 
         try:
-            # Create standalone artifact
             table = pa.table({"x": [1]})
             artifact_uri = client.create_artifact(
                 inputs=[],
@@ -554,7 +518,6 @@ class TestDependentsTracking:
                 params={"sql": "SELECT 1 as x"},
             )
 
-            # Parse artifact ID
             import re
 
             match = re.match(r"strata://artifact/([^@]+)@v=(\d+)", artifact_uri)
@@ -601,7 +564,7 @@ class TestExplainMaterialize:
         client = ArtifactClient(e2e_server["base_url"])
 
         try:
-            # Explain a new computation (never run before)
+            # Never run before
             resp = client.client.post(
                 "/v1/artifacts/explain-materialize",
                 json={
@@ -626,23 +589,22 @@ class TestExplainMaterialize:
         client = ArtifactClient(e2e_server["base_url"])
 
         try:
-            # First, create a base artifact (no inputs so hash is stable)
+            # No inputs, so the hash is stable.
             base_table = pa.table({"y": [10, 20]})
             base_uri = client.create_artifact(
-                inputs=[],  # No inputs to avoid resolution issues
+                inputs=[],
                 result_table=base_table,
                 params={"sql": "SELECT 10 as y UNION SELECT 20 as y"},
             )
 
-            # Now create a second artifact that uses the base artifact
             derived_table = pa.table({"x": [1]})
             derived_uri = client.create_artifact(
-                inputs=[base_uri],  # Use artifact URI which resolves cleanly
+                inputs=[base_uri],
                 result_table=derived_table,
                 params={"sql": "SELECT 1 as x FROM input0 LIMIT 1"},
             )
 
-            # Explain the same computation - should hit
+            # Same computation, so it should hit.
             resp = client.client.post(
                 "/v1/artifacts/explain-materialize",
                 json={

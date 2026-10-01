@@ -28,9 +28,8 @@ def test_the_committed_typescript_matches_the_models() -> None:
         text=True,
         cwd=_REPO,
     )
-    # Distinguish the two ways this exits nonzero. The generator raises
-    # UnsupportedSchema on a construct it cannot render, and telling that
-    # developer to regenerate sends them to run the same crash again.
+    # Tell the two nonzero exits apart: on UnsupportedSchema the generator crashes,
+    # and "regenerate" would just send the developer to the same crash.
     crashed = "Traceback" in result.stderr
     assert result.returncode == 0, (
         f"the generator failed on a schema it cannot render:\n{result.stderr}"
@@ -61,11 +60,9 @@ def test_every_payload_model_is_registered() -> None:
     import strata.notebook.ws_payloads as module
 
     registered = set(FRAME_PAYLOADS.values())
-    # Reachability, not a name suffix. "endswith('Model')" happens to match
-    # today's nested models, but it would fail a future nested payload named
-    # otherwise, and would silently skip the guard for a frame payload that
-    # happened to end in Model -- exempting exactly the case the test exists
-    # to catch.
+    # Reachability, not a name suffix: "endswith('Model')" would miss a nested model
+    # named otherwise and would skip a frame payload that ends in Model, the exact case
+    # this test exists to catch.
     reachable: set[str] = set()
     for model in registered:
         reachable.update(model.model_json_schema().get("$defs", {}))

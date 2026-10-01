@@ -29,9 +29,7 @@ from strata.notebook.ws import (
     router as notebook_ws_router,
 )
 
-# ============================================================================
-# WebSocket Test Helper
-# ============================================================================
+# WebSocket test helper
 
 
 class FakeNotebookWebSocket:
@@ -202,9 +200,7 @@ class WebSocketTestHelper:
         self.send("notebook_rerun_all")
 
 
-# ============================================================================
-# Notebook Builder
-# ============================================================================
+# Notebook builder
 
 
 class NotebookBuilder:
@@ -226,9 +222,7 @@ class NotebookBuilder:
         return self.notebook_dir
 
 
-# ============================================================================
 # Fixtures
-# ============================================================================
 
 
 def _reset_ws_globals():
@@ -298,8 +292,8 @@ def execute_cell_and_wait(
     saw_error = False
     terminal_message: dict[str, Any] | None = None
 
-    # Collect messages until we see cell_status(ready) or cell_status(error)
-    # for the target cell. Handle cascade_prompt by auto-accepting.
+    # Collect until the target cell reaches ready or error, auto-accepting
+    # cascade prompts.
     while True:
         msg = helper.receive()
 
@@ -321,21 +315,16 @@ def execute_cell_and_wait(
                 terminal_message = msg
                 if saw_running or p.get("status") == "error":
                     break
-            # A target cell can be STALE for two reasons now: it was
-            # skipped mid-cascade because an upstream errored (terminal —
-            # it will never run), or it is simply out of date and about to
-            # cascade-and-run (#361 — not terminal). Only the skip case is
-            # terminal, and it's distinguished by an error having occurred.
+            # STALE is terminal only when the cell was skipped because an upstream
+            # errored; otherwise it is out of date and about to cascade-and-run.
             if p.get("cell_id") == cell_id and p.get("status") == "stale" and saw_error:
                 terminal_message = msg
                 break
 
-    # Find the output/error message for this cell
     for m in reversed(helper.messages):
         if m["type"] in ("cell_output", "cell_error") and m["payload"].get("cell_id") == cell_id:
             return m
 
-    # If no output found, return the last status message
     return terminal_message or msg
 
 

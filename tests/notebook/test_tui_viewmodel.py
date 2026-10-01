@@ -302,7 +302,7 @@ def test_agent_note_renders_mcp_action_and_explicit_note():
 def test_agent_frames_are_notebook_level():
     vm = NotebookViewModel()
     vm.apply_notebook_state(_state({"id": "a"}))
-    # No cell id returned — agent activity isn't tied to one cell row.
+    # No cell id returned: agent activity isn't tied to one cell row.
     assert vm.apply_frame("agent_note", {"source": "agent", "text": "hi"}) == set()
 
 

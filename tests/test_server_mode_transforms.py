@@ -26,7 +26,7 @@ def server_mode_config(tmp_path):
     return StrataConfig(
         host="127.0.0.1",
         port=8765,
-        deployment_mode="service",  # Server mode
+        deployment_mode="service",
         cache_dir=tmp_path / "cache",
         artifact_dir=artifact_dir,
         notebook_storage_dir=tmp_path,
@@ -101,23 +101,18 @@ def server_mode_app(server_mode_config):
     import strata.server as server_module
     from strata.server import app
 
-    # Reset singletons
     reset_artifact_store()
     reset_transform_registry()
     reset_build_store()
 
-    # Initialize transform registry
     transform_registry = TransformRegistry.from_config(server_mode_config.transforms_config)
     set_transform_registry(transform_registry)
 
-    # Initialize artifact store
     get_artifact_store(server_mode_config.artifact_dir)
 
-    # Initialize build store
     db_path = server_mode_config.artifact_dir / "artifacts.sqlite"
     get_build_store(db_path)
 
-    # Set up server state with mock planner
     from unittest.mock import MagicMock
 
     from strata.transforms.signed_urls import URLSigner
@@ -128,17 +123,15 @@ def server_mode_app(server_mode_config):
     mock_state.fetcher = MagicMock()
     mock_state.scans = {}
     mock_state.metrics = MagicMock()
-    # A real signer so signed-URL routes produce a verifiable manifest (a bare
-    # MagicMock would serialize to a non-manifest blob).
+    # A real signer so signed-URL routes produce a verifiable manifest (a MagicMock
+    # would serialize to a non-manifest blob).
     mock_state.url_signer = URLSigner(b"test-secret-key-12345678901234")
 
-    # Patch get_state
     original_state = server_module._state
     server_module._state = mock_state
 
     yield TestClient(app)
 
-    # Restore
     server_module._state = original_state
     reset_artifact_store()
     reset_transform_registry()
@@ -151,20 +144,17 @@ def personal_mode_app(personal_mode_config):
     import strata.server as server_module
     from strata.server import app
 
-    # Reset singletons
     reset_artifact_store()
     reset_transform_registry()
     reset_build_store()
 
-    # Initialize artifact store
     get_artifact_store(personal_mode_config.artifact_dir)
 
-    # Personal mode ships the embedded registry (real lifespan does this)
+    # Personal mode ships the embedded registry (the real lifespan does this).
     from strata.transforms.registry import TransformRegistry, set_transform_registry
 
     set_transform_registry(TransformRegistry.create_embedded_registry())
 
-    # Set up server state with mock planner
     from unittest.mock import MagicMock
 
     mock_state = MagicMock()
@@ -174,13 +164,11 @@ def personal_mode_app(personal_mode_config):
     mock_state.scans = {}
     mock_state.metrics = MagicMock()
 
-    # Patch get_state
     original_state = server_module._state
     server_module._state = mock_state
 
     yield TestClient(app)
 
-    # Restore
     server_module._state = original_state
     reset_artifact_store()
     reset_transform_registry()
@@ -212,8 +200,8 @@ def server_mode_auth_app(server_mode_auth_config):
     mock_state.fetcher = MagicMock()
     mock_state.scans = {}
     mock_state.metrics = MagicMock()
-    # A real signer so signed-URL routes produce a verifiable manifest (a bare
-    # MagicMock would serialize to a non-manifest blob).
+    # A real signer so signed-URL routes produce a verifiable manifest (a MagicMock
+    # would serialize to a non-manifest blob).
     mock_state.url_signer = URLSigner(b"test-secret-key-12345678901234")
 
     original_state = server_module._state
@@ -828,7 +816,7 @@ class TestTransformValidation:
         assert data["hit"] is False
         assert data["build_id"] is not None
         assert data["state"] == "pending"
-        # In server mode, no build_spec (server executes)
+        # In server mode the server executes, so there is no build_spec.
         assert data["build_spec"] is None
 
     def test_unregistered_transform_rejected(self, server_mode_app):
@@ -926,8 +914,8 @@ class TestTransformValidation:
         response = server_mode_auth_app.post(
             "/v1/artifacts/materialize",
             json={
-                # A URI that names a table, so the table ACL (default allow) can
-                # admit it: one that names none is denied under trusted-proxy auth.
+                # A URI that names a table, so the table ACL (default allow) can admit it; one that
+                # names none is denied under trusted-proxy auth.
                 "inputs": ["file:///fake/warehouse#fake.table"],
                 "transform": {
                     "executor": "local://restricted_transform@v1",
@@ -1053,7 +1041,6 @@ class TestAsyncBuildFlow:
 
     def test_poll_build_status(self, server_mode_app):
         """Can poll build status using build_id."""
-        # Create a build
         create_resp = server_mode_app.post(
             "/v1/artifacts/materialize",
             json={
@@ -1067,7 +1054,6 @@ class TestAsyncBuildFlow:
 
         build_id = create_resp.json()["build_id"]
 
-        # Poll status
         status_resp = server_mode_app.get(f"/v1/artifacts/builds/{build_id}")
 
         assert status_resp.status_code == 200
@@ -1097,7 +1083,6 @@ class TestProvenanceDeduplication:
 
     def test_same_inputs_same_provenance(self, server_mode_app):
         """Same inputs + transform should have same provenance."""
-        # First materialize
         resp1 = server_mode_app.post(
             "/v1/artifacts/materialize",
             json={
@@ -1111,13 +1096,12 @@ class TestProvenanceDeduplication:
 
         artifact_uri = resp1.json()["artifact_uri"]
 
-        # Simulate build completion by directly updating the artifact store
+        # Simulate build completion directly in the artifact store.
         from strata.artifact_store import get_artifact_store
 
         store = get_artifact_store()
         assert store is not None
 
-        # Parse artifact_id and version from URI
         import re
 
         match = re.match(r"strata://artifact/([^@]+)@v=(\d+)", artifact_uri)
@@ -1125,11 +1109,9 @@ class TestProvenanceDeduplication:
         artifact_id = match.group(1)
         version = int(match.group(2))
 
-        # Write dummy blob and finalize
         store.write_blob(artifact_id, version, b"dummy data")
         store.finalize_artifact(artifact_id, version, "{}", 10, 10)
 
-        # Second materialize with same inputs
         resp2 = server_mode_app.post(
             "/v1/artifacts/materialize",
             json={
@@ -1141,7 +1123,6 @@ class TestProvenanceDeduplication:
             },
         )
 
-        # Should be a cache hit
         data2 = resp2.json()
         assert data2["hit"] is True
         assert data2["artifact_uri"] == artifact_uri
@@ -1278,17 +1259,14 @@ class TestMixedModeScenarios:
         import strata.server as server_module
         from strata.server import app
 
-        # Reset singletons
         reset_artifact_store()
         reset_transform_registry()
         reset_build_store()
 
-        # Config: service mode, no transforms
         config = StrataConfig(
             deployment_mode="service",
             cache_dir=tmp_path / "cache",
             artifact_dir=tmp_path / "artifacts",
-            # transforms_config not enabled
         )
         (tmp_path / "artifacts").mkdir()
 
@@ -1377,10 +1355,9 @@ class TestServiceModeReviewFindings:
         Regression: ``create_build`` was called without ``input_uris`` / ``params``,
         producing an empty-input, empty-param manifest.
         """
-        # Seed a real input artifact: artifact inputs are now resolved through
-        # the store (and tenant-gated), so a fictional id is a 404. It must
-        # carry the caller's tenant — a tenantless artifact is persisted with
-        # tenant='' and the gate compares that against the request's tenant.
+        # Artifact inputs resolve through the store (tenant-gated), so a fictional id is a
+        # 404. It must carry the caller's tenant: a tenantless artifact persists with
+        # tenant='', which the gate compares against the request's tenant.
         store = get_artifact_store()
         store.create_artifact(artifact_id="seed", provenance_hash="seed-prov", tenant="team-a")
 
@@ -1405,11 +1382,9 @@ class TestServiceModeReviewFindings:
         assert manifest.status_code == 200, manifest.text
         data = manifest.json()
 
-        # Inputs flow through (was empty before the fix).
         assert len(data["inputs"]) == 1
         assert data["inputs"][0]["artifact_id"] == "seed"
         assert data["inputs"][0]["version"] == 1
-        # Params flow through.
         assert data["metadata"]["params"] == {"sql": "SELECT * FROM input"}
 
     def test_registry_reads_work_in_service_mode(self, server_mode_app):
@@ -1422,7 +1397,7 @@ class TestServiceModeReviewFindings:
     def test_admin_tenants_requires_admin_scope(self, server_mode_auth_app):
         """The cross-tenant admin observability routes require an admin scope
         under trusted-proxy auth (regression: they were ungated)."""
-        # No admin scope -> 403.
+        # No admin scope: 403.
         denied = server_mode_auth_app.get("/v1/admin/tenants", headers=_auth_headers())
         assert denied.status_code == 403
         denied_one = server_mode_auth_app.get("/v1/admin/tenants/team-a", headers=_auth_headers())

@@ -80,7 +80,7 @@ class CorpusScore:
     dag: bool = False
     failed_at: str = ""
     error: str = ""
-    # PR 6+: filled in when STRATA_CORPUS_RUN=1.
+    # Filled in when STRATA_CORPUS_RUN=1.
     run: bool | None = None
     artifact: bool | None = None
     # Bookkeeping surfaced for verifying the converter actually did work
@@ -127,10 +127,9 @@ def _score(ipynb_path: Path, out_dir: Path, *, full: bool = False) -> CorpusScor
         score.error = f"{type(exc).__name__}: {exc}"
         return score
 
-    # dag — analyze each python cell, build the dependency graph. This
-    # mirrors what session._analyze_and_build_dag does for python cells,
-    # without spinning up a Session (which would drag in the process
-    # pool and venv machinery).
+    # dag: analyze each python cell and build the graph as
+    # session._analyze_and_build_dag does, without a Session (which would drag in
+    # the process pool and venv machinery).
     dag = None
     analyses: list[CellAnalysisWithId] = []
     try:
@@ -158,11 +157,8 @@ def _score(ipynb_path: Path, out_dir: Path, *, full: bool = False) -> CorpusScor
     if not full:
         return score
 
-    # run — actually execute the notebook end-to-end. Sync the notebook
-    # venv first; we passed initialize_environment=False through the
-    # import path so the venv doesn't exist yet. ``strata run``
-    # invocation goes through the same CLI users hit, so any breakage
-    # here is breakage the user would see.
+    # run: execute end-to-end through the same `strata run` CLI users hit. Sync
+    # the venv first, since the import passed initialize_environment=False.
     notebook_dir = result.notebook_dir
     try:
         uv_sync = subprocess.run(
@@ -206,10 +202,8 @@ def _score(ipynb_path: Path, out_dir: Path, *, full: bool = False) -> CorpusScor
         score.error = f"strata run timed out after {_STRATA_RUN_TIMEOUT_S}s"
         return score
 
-    # ``strata run --format json`` writes per-cell results to stdout
-    # even when it exits non-zero (one or more cells failed). Parse
-    # stdout first so the cell-level error makes it into the score;
-    # only fall back to stderr if stdout isn't JSON at all.
+    # ``strata run --format json`` writes per-cell results to stdout even on a
+    # non-zero exit, so parse stdout first; fall back to stderr only if it is not JSON.
     payload: dict | None = None
     try:
         payload = json.loads(run.stdout)
@@ -231,13 +225,9 @@ def _score(ipynb_path: Path, out_dir: Path, *, full: bool = False) -> CorpusScor
         return score
     score.run = True
 
-    # artifact — per the design rubric: "do leaf cells produce
-    # non-empty artifacts?". Leaf cells are the DAG terminals — the
-    # ones nothing else depends on, which is where a missing output
-    # would mean nothing downstream covered for it. For each leaf, an
-    # observable trace must exist: an Arrow artifact whose filename
-    # carries the cell_id, a console snapshot, or a display output in
-    # runtime.json.
+    # artifact: every leaf cell (nothing depends on it) must leave a trace: an
+    # Arrow artifact whose filename carries the cell_id, a console snapshot, or a
+    # display output in runtime.json.
     artifact_dir = notebook_dir / ".strata" / "artifacts"
     console_dir = notebook_dir / ".strata" / "console"
     runtime_path = notebook_dir / ".strata" / "runtime.json"
@@ -254,14 +244,13 @@ def _score(ipynb_path: Path, out_dir: Path, *, full: bool = False) -> CorpusScor
         if dag is not None
         else []
     )
-    # Restrict to python leaves — markdown cells never persist anything.
+    # Python leaves only; markdown cells never persist anything.
     python_cell_ids = {a.id for a in analyses}
     leaf_python_ids = [cid for cid in leaf_ids if cid in python_cell_ids]
 
     if not leaf_python_ids:
-        # No python leaves (notebook is markdown-only or every python cell
-        # has downstream consumers — both are fine). Artifact step is
-        # vacuously satisfied.
+        # No python leaves (markdown-only, or every python cell has consumers), so
+        # the artifact step is vacuously satisfied.
         score.artifact = True
         return score
 
@@ -327,8 +316,7 @@ def test_corpus_exercises_converter_translations(tmp_path: Path) -> None:
     assert saw_deps, "no smoke notebook exercises dep capture"
 
 
-# ---------------------------------------------------------------------------
-# Extended corpus — fetched from pinned URLs in extended.yaml
+# Extended corpus: fetched from pinned URLs in extended.yaml
 
 
 @dataclass

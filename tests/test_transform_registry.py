@@ -16,7 +16,7 @@ class TestTransformDefinition:
         """Exact ref matches correctly."""
         defn = TransformDefinition(ref="duckdb_sql@v1", executor_url="http://exec:8080")
         assert defn.matches("duckdb_sql@v1")
-        assert defn.matches("local://duckdb_sql@v1")  # Strips URI prefix
+        assert defn.matches("local://duckdb_sql@v1")  # Strips the URI prefix
         assert not defn.matches("duckdb_sql@v2")
         assert not defn.matches("pandas_script@v1")
 
@@ -75,7 +75,7 @@ class TestTransformRegistry:
         defn2 = TransformDefinition(ref="duckdb_sql@v1", executor_url="http://duck:8080")
         registry = TransformRegistry(enabled=True, definitions=[defn1, defn2])
 
-        # First definition (catch-all) wins
+        # The first definition (catch-all) wins.
         result = registry.get("duckdb_sql@v1")
         assert result is defn1
 
@@ -91,7 +91,6 @@ class TestTransformRegistry:
         """from_config with empty config returns embedded registry by default."""
         registry = TransformRegistry.from_config({})
         assert registry.enabled
-        # Should have embedded duckdb_sql@v1
         assert registry.is_allowed("duckdb_sql@v1")
         defn = registry.get("duckdb_sql@v1")
         assert defn is not None
@@ -127,7 +126,6 @@ class TestTransformRegistry:
         assert registry.enabled
         assert len(registry.definitions) == 2
 
-        # Check first definition
         defn1 = registry.definitions[0]
         assert defn1.ref == "duckdb_sql@v1"
         assert defn1.executor_url == "http://executor:8080/execute"
@@ -135,7 +133,6 @@ class TestTransformRegistry:
         assert defn1.max_output_bytes == 1073741824
         assert defn1.requires_scope is None
 
-        # Check second definition
         defn2 = registry.definitions[1]
         assert defn2.ref == "pandas_script@*"
         assert defn2.max_input_bytes == 536870912
@@ -178,6 +175,6 @@ class TestSingletons:
 
         reset_transform_registry()
 
-        # After reset, get returns a new disabled registry
+        # After reset, get returns a new disabled registry.
         registry = get_transform_registry()
         assert not registry.enabled

@@ -51,7 +51,7 @@ class _FakeRegistry:
 
 
 class _FakePlan:
-    # Small + few columns → classifies "interactive".
+    # Small + few columns classifies as "interactive".
     estimated_bytes = 100
     columns = ["a"]
 
@@ -93,9 +93,8 @@ async def test_admit_then_release_frees_limiter_and_counters(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_client_semaphore_released_when_limiter_acquire_cancelled(monkeypatch):
-    # #238: if the tenant-limiter acquire is cancelled (client disconnect /
-    # shutdown while queued) while the per-client semaphore is already held, the
-    # semaphore must be released before the CancelledError propagates — else that
+    # If the tenant-limiter acquire is cancelled while the per-client semaphore is
+    # held, the semaphore must be released before CancelledError propagates, or that
     # client leaks a slot forever.
     limiter = _FakeLimiter(raise_cancel=True)
     _install_registry(monkeypatch, limiter, _FakeLimiter())
@@ -104,19 +103,18 @@ async def test_client_semaphore_released_when_limiter_acquire_cancelled(monkeypa
     with pytest.raises(asyncio.CancelledError):
         await qos.admit(_FakePlan(), _FakeRequest(), "scan-1")
 
-    # The per-client semaphore is back to full capacity — not stranded.
+    # The per-client semaphore is back to full capacity, not stranded.
     sem = qos._get_client_semaphore("test-client", "interactive")
     assert sem is not None
     assert sem._value == 1
-    # No admission was recorded.
     assert qos.active_scans == 0
     assert "scan-1" not in qos._scan_tier
 
 
 @pytest.mark.asyncio
 async def test_queue_timeout_rejects_and_releases_client_semaphore(monkeypatch):
-    # Limiter acquire returns False (queue deadline exceeded) → 429, and the
-    # per-client semaphore grabbed first must be released, not leaked.
+    # Limiter acquire returns False (queue deadline exceeded): 429, and the per-client
+    # semaphore grabbed first must be released.
     limiter = _FakeLimiter(acquire_result=False)
     _install_registry(monkeypatch, limiter, _FakeLimiter())
     qos = QoSAdmission(StrataConfig(per_client_interactive=1))
@@ -134,9 +132,8 @@ async def test_queue_timeout_rejects_and_releases_client_semaphore(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_per_client_cap_rejects_second_concurrent_admit(monkeypatch):
-    # With per_client_interactive=1, a second admit from the same client while
-    # the first still holds its slot is rejected (per_client_limit), and the
-    # rejection counter increments.
+    # With per_client_interactive=1, a second admit from the same client while the first
+    # holds its slot is rejected and counted.
     _install_registry(monkeypatch, _FakeLimiter(), _FakeLimiter())
     qos = QoSAdmission(StrataConfig(per_client_interactive=1))
 
@@ -146,7 +143,6 @@ async def test_per_client_cap_rejects_second_concurrent_admit(monkeypatch):
     assert excinfo.value.error == "per_client_limit"
     assert qos._client_rejected == 1
 
-    # The first admission still releases cleanly.
     await first.release()
     assert qos.active_scans == 0
 
@@ -233,7 +229,7 @@ class _SlowLimiter(_FakeLimiter):
 
 
 class _BulkPlan:
-    # No projection → all columns → classifies "bulk".
+    # No projection means all columns, which classifies as "bulk".
     estimated_bytes = 100
     columns = None
 

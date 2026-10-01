@@ -68,7 +68,6 @@ def test_write_agent_config_is_idempotent(tmp_path) -> None:
     # The managed block is rewritten in place, not duplicated.
     assert text.count(agent_launch._BLOCK_START) == 1
     assert text.count(agent_launch._BLOCK_END) == 1
-    # And it reflects the latest launch's session id.
     assert "sess-bbb222" in text
     assert "sess-aaa111" not in text
 
@@ -115,7 +114,7 @@ def test_mcp_mounted_true_for_json_4xx(monkeypatch, status) -> None:
 
 
 def test_mcp_mounted_false_for_spa_html(monkeypatch) -> None:
-    # The regression: MCP not mounted -> /mcp/ hits the SPA -> 200 text/html.
+    # MCP not mounted: /mcp/ falls through to the SPA and returns 200 text/html.
     resp = _Resp(200, "text/html; charset=utf-8")
     monkeypatch.setattr(agent_launch.httpx, "get", lambda *a, **k: resp)
     assert agent_launch._mcp_mounted("http://localhost:8765") is False

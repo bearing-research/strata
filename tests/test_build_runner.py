@@ -158,7 +158,6 @@ def create_test_artifact(artifact_store, build_store, executor_ref="test_sql@v1"
     """
     artifact_id = str(uuid.uuid4())
 
-    # Create transform spec with inputs
     transform_spec = TransformSpec(
         executor=f"service://{executor_ref}",
         params={"query": "SELECT * FROM input0"},
@@ -174,7 +173,6 @@ def create_test_artifact(artifact_store, build_store, executor_ref="test_sql@v1"
         input_versions={},
     )
 
-    # Create pending build
     build_id = str(uuid.uuid4())
     build_store.create_build(
         build_id=build_id,
@@ -417,7 +415,6 @@ class TestBuildRunnerBasics:
         await build_runner.start()
         task2 = build_runner._task
 
-        # Should be the same task
         assert task1 is task2
 
         await build_runner.stop()
@@ -494,18 +491,15 @@ class TestBuildExecution:
     @pytest.mark.asyncio
     async def test_successful_build(self, build_runner, artifact_store, build_store, artifact_dir):
         """Test successful build execution with mocked executor."""
-        # Create a pending build
         artifact_id, version, build_id = create_test_artifact(artifact_store, build_store)
 
-        # Create mock response with Arrow data
         output_data = {"id": [1, 2, 3], "value": ["a", "b", "c"]}
         output_bytes = create_arrow_ipc_bytes(output_data)
 
-        # Mock the httpx response
         mock_response = MagicMock()
         mock_response.status_code = 200
         mock_response.raise_for_status = MagicMock()
-        # Mock headers to return None for logs header (avoid MagicMock leaking to SQLite)
+        # Empty headers, so no MagicMock leaks into SQLite.
         mock_response.headers = {}
 
         async def mock_aiter_bytes(chunk_size=65536):
@@ -525,18 +519,15 @@ class TestBuildExecution:
             mock_client.__aexit__ = AsyncMock(return_value=None)
             MockClient.return_value = mock_client
 
-            # Execute the build
             build = build_store.get_build(build_id)
             await build_runner._execute_build(build)
 
-        # Verify build completed successfully
         build = build_store.get_build(build_id)
         assert build.state == "ready"
         assert build.completed_at is not None
         assert build.output_byte_count == len(output_bytes)
         assert build.error_message is None
 
-        # Verify artifact was finalized
         artifact = artifact_store.get_artifact(artifact_id, version)
         assert artifact.state == "ready"
         assert artifact.row_count == 3
@@ -667,24 +658,21 @@ class TestBuildExecution:
     @pytest.mark.asyncio
     async def test_build_max_output_bytes_exceeded(self, build_runner, artifact_store, build_store):
         """Test build failure when output exceeds max_output_bytes."""
-        # Create a pending build with small_output transform (100 byte limit)
+        # small_output has a 100-byte limit.
         artifact_id, version, build_id = create_test_artifact(
             artifact_store, build_store, executor_ref="small_output@v1"
         )
 
-        # Create mock response with large output (>100 bytes)
         output_data = {"id": list(range(1000)), "value": ["x" * 100] * 1000}
         output_bytes = create_arrow_ipc_bytes(output_data)
 
-        # Mock the httpx response that streams large output
         mock_response = MagicMock()
         mock_response.status_code = 200
         mock_response.raise_for_status = MagicMock()
-        # Mock headers to return None for logs header (avoid MagicMock leaking to SQLite)
+        # Empty headers, so no MagicMock leaks into SQLite.
         mock_response.headers = {}
 
         async def mock_aiter_bytes(chunk_size=65536):
-            # Stream in chunks
             for i in range(0, len(output_bytes), chunk_size):
                 yield output_bytes[i : i + chunk_size]
 
@@ -702,27 +690,22 @@ class TestBuildExecution:
             mock_client.__aexit__ = AsyncMock(return_value=None)
             MockClient.return_value = mock_client
 
-            # Execute the build
             build = build_store.get_build(build_id)
             await build_runner._execute_build(build)
 
-        # Verify build failed
         build = build_store.get_build(build_id)
         assert build.state == "failed"
         assert build.error_message is not None
         assert "exceeds maximum size" in build.error_message
 
-        # Verify artifact was marked as failed
         artifact = artifact_store.get_artifact(artifact_id, version)
         assert artifact.state == "failed"
 
     @pytest.mark.asyncio
     async def test_build_executor_non_200(self, build_runner, artifact_store, build_store):
         """Test build failure when executor returns non-200 status."""
-        # Create a pending build
         artifact_id, version, build_id = create_test_artifact(artifact_store, build_store)
 
-        # Mock the httpx response with 500 status
         mock_response = MagicMock()
         mock_response.status_code = 500
         mock_response.headers = {}  # Avoid MagicMock leaking to SQLite
@@ -746,29 +729,25 @@ class TestBuildExecution:
             mock_client.__aexit__ = AsyncMock(return_value=None)
             MockClient.return_value = mock_client
 
-            # Execute the build
             build = build_store.get_build(build_id)
             await build_runner._execute_build(build)
 
-        # Verify build failed
         build = build_store.get_build(build_id)
         assert build.state == "failed"
         assert build.error_message is not None
         assert build.error_code == "HTTPStatusError"
 
-        # Verify artifact was marked as failed
         artifact = artifact_store.get_artifact(artifact_id, version)
         assert artifact.state == "failed"
 
     @pytest.mark.asyncio
     async def test_build_executor_timeout(self, build_runner, artifact_store, build_store):
         """Test build failure when executor times out."""
-        # Create a pending build with slow_transform (0.1s timeout)
+        # slow_transform has a 0.1s timeout.
         artifact_id, version, build_id = create_test_artifact(
             artifact_store, build_store, executor_ref="slow_transform@v1"
         )
 
-        # Mock the httpx client to simulate timeout
         async def mock_post(*args, **kwargs):
             # Sleep longer than timeout
             await asyncio.sleep(1.0)
@@ -783,25 +762,21 @@ class TestBuildExecution:
             mock_client.__aexit__ = AsyncMock(return_value=None)
             MockClient.return_value = mock_client
 
-            # Execute the build
             build = build_store.get_build(build_id)
             await build_runner._execute_build(build)
 
-        # Verify build failed due to timeout
         build = build_store.get_build(build_id)
         assert build.state == "failed"
         assert build.error_message is not None
         # The error could be TimeoutError or asyncio.TimeoutError
         assert "Timeout" in build.error_code or "timeout" in build.error_message.lower()
 
-        # Verify artifact was marked as failed
         artifact = artifact_store.get_artifact(artifact_id, version)
         assert artifact.state == "failed"
 
     @pytest.mark.asyncio
     async def test_build_transform_not_in_registry(self, build_runner, artifact_store, build_store):
         """Test build failure when transform is not in registry."""
-        # Create a pending build with unknown transform
         artifact_id = str(uuid.uuid4())
 
         transform_spec = TransformSpec(
@@ -827,11 +802,9 @@ class TestBuildExecution:
             executor_url=None,
         )
 
-        # Execute the build
         build = build_store.get_build(build_id)
         await build_runner._execute_build(build)
 
-        # Verify build failed
         build = build_store.get_build(build_id)
         assert build.state == "failed"
         assert "not found in registry" in build.error_message
@@ -850,7 +823,6 @@ class TestConcurrencyControls:
             artifact_id, version, build_id = create_test_artifact(artifact_store, build_store)
             builds.append(build_id)
 
-        # Track concurrent executions
         max_concurrent = 0
         current_concurrent = 0
         lock = asyncio.Lock()
@@ -866,14 +838,11 @@ class TestConcurrencyControls:
                 async with lock:
                     current_concurrent -= 1
 
-        # Patch _execute_build to track concurrency
         with patch.object(build_runner, "_execute_build", counting_execute):
-            # Start the runner and wait for builds
             await build_runner.start()
             await asyncio.sleep(0.5)  # Let builds run
             await build_runner.stop()
 
-        # Should not exceed global limit
         assert max_concurrent <= build_runner.config.max_concurrent_builds
 
     @pytest.mark.asyncio
@@ -882,7 +851,6 @@ class TestConcurrencyControls:
         tenant_id = "test-tenant"
         num_builds = 5
 
-        # Create builds for same tenant
         builds = []
         for i in range(num_builds):
             artifact_id, version, build_id = create_test_artifact(
@@ -890,7 +858,6 @@ class TestConcurrencyControls:
             )
             builds.append(build_id)
 
-        # Track concurrent executions per tenant
         tenant_concurrent = {}
         max_tenant_concurrent = 0
         lock = asyncio.Lock()
@@ -907,13 +874,11 @@ class TestConcurrencyControls:
                 async with lock:
                     tenant_concurrent[tid] -= 1
 
-        # Patch _execute_build to track tenant concurrency
         with patch.object(build_runner, "_execute_build", counting_execute):
             await build_runner.start()
             await asyncio.sleep(0.5)
             await build_runner.stop()
 
-        # Should not exceed per-tenant limit
         assert max_tenant_concurrent <= build_runner.config.max_builds_per_tenant
 
 
@@ -925,12 +890,10 @@ class TestInputAcquisition:
         self, build_runner, artifact_store, build_store, artifact_dir
     ):
         """Test acquiring an artifact as input."""
-        # Create a ready artifact as input
         input_artifact_id = str(uuid.uuid4())
         input_data = {"x": [1, 2, 3]}
         input_bytes = create_arrow_ipc_bytes(input_data)
 
-        # Create and finalize input artifact
         input_version = artifact_store.create_artifact(
             artifact_id=input_artifact_id,
             provenance_hash=f"input-hash-{input_artifact_id}",
@@ -947,17 +910,14 @@ class TestInputAcquisition:
             byte_size=len(input_bytes),
         )
 
-        # Acquire the input
         temp_files = []
         input_uri = f"strata://artifact/{input_artifact_id}@v={input_version}"
         result_path = await build_runner._acquire_input(input_uri, temp_files)
 
-        # Verify temp file was created
         assert result_path.exists()
         assert result_path in temp_files
         assert result_path.read_bytes() == input_bytes
 
-        # Clean up
         for f in temp_files:
             if f.exists():
                 f.unlink()
@@ -1048,10 +1008,8 @@ class TestBuildPolling:
     @pytest.mark.asyncio
     async def test_pending_builds_picked_up(self, build_runner, artifact_store, build_store):
         """Test that pending builds are picked up by the polling loop."""
-        # Create a pending build
         artifact_id, version, build_id = create_test_artifact(artifact_store, build_store)
 
-        # Mock successful execution
         executed_builds = []
 
         async def mock_execute(build, already_claimed=False):
@@ -1064,16 +1022,14 @@ class TestBuildPolling:
             await asyncio.sleep(0.2)  # Wait for polling
             await build_runner.stop()
 
-        # Verify build was executed
         assert build_id in executed_builds
 
     @pytest.mark.asyncio
     async def test_shutdown_cancels_builds(self, build_runner, artifact_store, build_store):
         """Test that shutdown cancels in-progress builds."""
-        # Create a pending build
         artifact_id, version, build_id = create_test_artifact(artifact_store, build_store)
 
-        # Mock slow execution, claimed the way _execute_build claims it
+        # Slow execution, claimed the way _execute_build claims it.
         async def slow_execute(build, already_claimed=False):
             build_store.claim_build(build.build_id, build_runner._runner_id)
             await asyncio.sleep(10.0)  # Long sleep
@@ -1094,14 +1050,12 @@ class TestArrowMetadataExtraction:
 
     def test_read_arrow_metadata(self, build_runner, artifact_dir):
         """Test reading Arrow IPC metadata."""
-        # Create test Arrow file
         data = {"id": [1, 2, 3], "name": ["a", "b", "c"]}
         arrow_bytes = create_arrow_ipc_bytes(data)
 
         temp_file = artifact_dir / "test.arrow"
         temp_file.write_bytes(arrow_bytes)
 
-        # Read metadata
         schema_json, row_count = build_runner._read_arrow_metadata(temp_file)
 
         assert row_count == 3

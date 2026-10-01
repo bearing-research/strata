@@ -70,7 +70,7 @@ def test_get_notebook_returns_cells_in_order(sm_with_session):
     result = _get_notebook(sm, session_id)
     assert [c["id"] for c in result["cells"]] == ["a", "b"]
     assert result["cells"][0]["source"] == "x = 1"
-    # Curated view — internal bookkeeping doesn't leak to the agent.
+    # Curated view: internal bookkeeping doesn't leak to the agent.
     assert "last_provenance_hash" not in result["cells"][0]
 
 
@@ -111,7 +111,7 @@ def test_from_session_reuses_the_live_session(sm_with_session):
     sm, session_id, _ = sm_with_session
     live = sm.get_session(session_id)
     ops = LocalNotebookOps.from_session(live)
-    # Same underlying session object — the warm state, not an offline reopen.
+    # Same session object: the warm state, not an offline reopen.
     assert ops._session is live
     assert ops.notebook_dir == live.path
 
@@ -139,15 +139,15 @@ async def test_run_cell_broadcasts_and_maps(sm_with_session, monkeypatch):
 
         return _Result()
 
-    # Patch the shared broadcast path — _run_cell imports it at call time, so
-    # patching the source module is enough. No subprocess, no real WS.
+    # _run_cell imports the broadcast at call time, so patching the source module
+    # is enough. No subprocess, no real WS.
     monkeypatch.setattr("strata.notebook.ws.execute_cell_and_broadcast", fake_broadcast)
     # A directly-built test session has no synced venv, so the env-ready guard
     # would refuse; a UI/CLI-opened session in production is ready. Simulate that.
     monkeypatch.setattr(
         sm.get_session(session_id), "environment_execution_block_message", lambda: None
     )
-    # Capture the agent_note the run narrates into the Agent panel (#393).
+    # Capture the agent_note the run narrates into the Agent panel.
     notes = []
 
     async def fake_note_broadcast(notebook_id, message):
@@ -393,7 +393,7 @@ async def test_add_and_remove_dependency_and_broadcast(sm_with_session, monkeypa
         )
         return SimpleNamespace(result=result, staleness_map={})
 
-    # No real `uv add` — stub the session's dependency mutation.
+    # No real `uv add`: stub the session's dependency mutation.
     monkeypatch.setattr(sm.get_session(session_id), "mutate_dependency", fake_mutate)
 
     added = await _add_dependency(sm, session_id, "polars")
@@ -589,9 +589,7 @@ def test_mcp_without_distribution_metadata_still_warns(sm_with_session, monkeypa
     assert "'mcp.server.mcpserver'" in caplog.text
 
 
-# ---------------------------------------------------------------------------
-# Registry / publication tools (item 32)
-# ---------------------------------------------------------------------------
+# Registry / publication tools
 
 
 @pytest.fixture
@@ -710,7 +708,7 @@ class TestPromoteReaches:
         sm, session_id, _ = sm_with_a_stored_output
         base_url, team_dir = team
         # The team store here is a real server in this process, so its own
-        # ``_state`` has to stay intact — patch what this module reads, not
+        # ``_state`` has to stay intact: patch what this module reads, not
         # the state the server is running on.
         monkeypatch.setattr(
             mcp_module,

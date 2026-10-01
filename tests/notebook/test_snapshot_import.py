@@ -66,10 +66,9 @@ class TestAFullSnapshot:
 
         before = _statuses(ran)
         after = _statuses(imported.notebook_dir)
-        # Non-vacuity first: two notebooks that are both entirely idle are
-        # "equivalent" and prove nothing. A first version of this test compared
-        # only cells in the artifact index and passed that way, because a
-        # print-only leaf has a console artifact but reopens idle regardless.
+        # Non-vacuity first: two all-idle notebooks are "equivalent" and prove nothing.
+        # Comparing only cells in the artifact index passes that way, because a print-only
+        # leaf has a console artifact but reopens idle regardless.
         ready = {c for c, status in before.items() if status == "ready"}
         assert {"rows", "total", "shown"} <= ready
         assert after == before
@@ -457,8 +456,8 @@ class TestWidgetSelections:
         entry = load_runtime_state(imported.notebook_dir).cells["controls"]
         assert entry.widget_values == {"alpha": 0.25}
 
-        # And the imported notebook reports it, rather than the 0.5 its source
-        # declares — the difference an importer would otherwise silently run.
+        # And the imported notebook reports it, not the 0.5 its source declares (the
+        # difference an importer would otherwise silently run).
         opened = NotebookSession(parse_notebook(imported.notebook_dir), imported.notebook_dir)
         payload = opened.serialize_notebook_state()
         controls = next(c for c in payload["cells"] if c["id"] == "controls")

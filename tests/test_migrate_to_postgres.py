@@ -114,8 +114,8 @@ class TestPlanning:
         assert plan.total_rows > 0
 
     def test_plan_names_tables_the_target_lacks(self, populated_sqlite, postgres_dsn, tmp_path):
-        # A database Strata has never booted against has no schema, and the
-        # migration must say so rather than invent the DDL from a second place.
+        # A database Strata never booted against has no schema; the migration must say so
+        # rather than invent the DDL from a second place.
         dialect = PostgresDialect(postgres_dsn)
         try:
             conn = dialect.connect()
@@ -152,8 +152,8 @@ class TestMigration:
         migrate(self._source(tmp_path), target)
 
         migrated = ArtifactStore(tmp_path / "tgt", dialect=target).get_latest_version("a1")
-        # Would fail under a single-precision column: created_at is an epoch
-        # value and rounds to whole minutes in 32 bits.
+        # Fails under a single-precision column: created_at is an epoch value and rounds to
+        # whole minutes in 32 bits.
         assert migrated.created_at == original.created_at
 
     def test_rerunning_copies_nothing_twice(self, populated_sqlite, target, tmp_path):
@@ -172,9 +172,8 @@ class TestMigration:
     def test_the_audit_sequence_is_moved_past_the_migrated_rows(
         self, populated_sqlite, target, tmp_path
     ):
-        # registry_audit.seq is BIGSERIAL on Postgres. Inserting explicit ids
-        # does not advance the sequence, so without a resync the next audited
-        # mutation collides on the primary key.
+        # registry_audit.seq is BIGSERIAL on Postgres. Explicit ids do not advance the
+        # sequence, so without a resync the next audited mutation collides on the key.
         migrate(self._source(tmp_path), target)
 
         migrated = ArtifactStore(tmp_path / "tgt", dialect=target)
@@ -185,10 +184,9 @@ class TestMigration:
     def test_the_audit_sequence_is_resynced_on_a_resumed_run(
         self, populated_sqlite, target, tmp_path
     ):
-        # A run killed between the last commit and the resync leaves the rows
-        # in place with the sequence still at 1. The resumed run copies
-        # nothing, so gating the resync on "did this run copy" would skip it
-        # forever and reintroduce the collision.
+        # A run killed between the last commit and the resync leaves the sequence at 1.
+        # The resumed run copies nothing, so gating the resync on "did this run copy"
+        # would skip it forever.
         migrate(self._source(tmp_path), target)
         conn = target.connect()
         try:
@@ -207,16 +205,15 @@ class TestMigration:
         assert len(migrated.read_audit()) == before + 1
 
     def test_a_dangling_build_row_is_reported_not_fatal(self, populated_sqlite, target, tmp_path):
-        # garbage_collect, cleanup_failed, and delete_artifact all remove
-        # artifact_versions rows without touching artifact_builds, so a real
-        # store accumulates references Postgres will refuse and SQLite never
-        # checked. One bad row must not strand the whole migration.
+        # garbage_collect, cleanup_failed and delete_artifact remove artifact_versions
+        # rows without touching artifact_builds, so a real store holds references Postgres
+        # refuses and SQLite never checked. One bad row must not strand the migration.
         from strata.transforms.build_store import BuildStore
 
         BuildStore(tmp_path / "src" / "artifacts.sqlite")
         _insert_dangling_build(tmp_path / "src" / "artifacts.sqlite", "orphan")
-        # The target needs the table too: a deployment with builds has booted
-        # its build store on both sides.
+        # The target needs the table too: a deployment with builds has booted its build
+        # store on both sides.
         BuildStore(tmp_path / "tgt" / "artifacts.sqlite", dialect=target)
 
         result = migrate(self._source(tmp_path), target)
@@ -225,16 +222,15 @@ class TestMigration:
         assert result.total_rejected == 1
         table, _key, _reason = result.rejected[0]
         assert table == "artifact_builds"
-        # And the artifact itself arrived regardless.
+        # The artifact itself arrived regardless.
         assert ArtifactStore(tmp_path / "tgt", dialect=target).get_latest_version("a1") is not None
 
     def test_a_target_missing_only_unused_tables_is_fine(
         self, populated_sqlite, postgres_dsn, tmp_path
     ):
-        # The documented flow: boot the artifact store against the target.
-        # Personal mode forbids auth_mode='api_key', so api_keys is never
-        # created -- and artifact_builds only appears when the build store is
-        # constructed. Refusing on those made the documented path exit 1.
+        # The documented flow boots only the artifact store against the target. Personal
+        # mode never creates api_keys, and artifact_builds appears only with the build
+        # store, so their absence must not be refused.
         dialect = PostgresDialect(postgres_dsn)
         try:
             conn = dialect.connect()
@@ -259,9 +255,8 @@ class TestMigration:
     def test_a_blocking_table_is_refused_before_anything_is_written(
         self, populated_sqlite, postgres_dsn, tmp_path
     ):
-        # Discovering this mid-loop would leave earlier tables committed, so
-        # the retry would then need allow_nonempty_target for a mistake the
-        # caller never made.
+        # Discovering this mid-loop would leave earlier tables committed, and the retry
+        # would need allow_nonempty_target for a mistake the caller never made.
         dialect = PostgresDialect(postgres_dsn)
         try:
             conn = dialect.connect()
@@ -283,7 +278,6 @@ class TestMigration:
             with pytest.raises(ValueError, match="missing"):
                 migrate(self._source(tmp_path), dialect)
 
-            # Nothing was written on the way to that refusal.
             conn = dialect.connect()
             try:
                 remaining = conn.execute("SELECT COUNT(*) FROM artifact_names").fetchone()[0]
@@ -326,15 +320,13 @@ class TestMigration:
 
         assert result.total_rejected == 1
         assert result.copied["artifact_builds"] == 99
-        # The count reported has to be the count that arrived.
         assert actual == result.copied["artifact_builds"]
 
     def test_a_value_postgres_refuses_is_rejected_not_fatal(
         self, populated_sqlite, target, tmp_path
     ):
-        # A NUL byte inside TEXT: SQLite stores it, Postgres refuses it. That
-        # is a DataError, not an IntegrityError, so catching only the latter
-        # let it escape and abort the run with earlier tables committed.
+        # A NUL byte inside TEXT: SQLite stores it, Postgres refuses it with a DataError,
+        # not an IntegrityError, so both must be caught or the run aborts mid-way.
         conn = SqliteDialect(tmp_path / "src" / "artifacts.sqlite").connect()
         try:
             conn.execute(
@@ -349,7 +341,7 @@ class TestMigration:
         result = migrate(self._source(tmp_path), target)
         assert result.total_rejected == 1
         assert result.rejected[0][0] == "artifact_tags"
-        # And the run still finished the tables after it.
+        # The run still finished the tables after it.
         assert ArtifactStore(tmp_path / "tgt", dialect=target).get_latest_version("a1") is not None
 
     def test_stream_owners_is_not_migrated(self):

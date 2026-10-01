@@ -15,8 +15,7 @@ from strata.config import StrataConfig
 
 class TestMetadataDialectFactory:
     def test_unset_dsn_keeps_sqlite(self):
-        # Every existing deployment: no DSN, no dialect, SQLite under
-        # artifact_dir exactly as before.
+        # The default deployment: no DSN, no dialect, SQLite under artifact_dir.
         assert StrataConfig().create_metadata_dialect() is None
 
     def test_postgres_dsn_builds_a_postgres_dialect(self):
@@ -100,8 +99,8 @@ class TestSharedMetadataRequiresSharedBlobs:
         ],
     )
     def test_a_configured_store_without_artifact_dir_is_rejected(self, store):
-        # The store is only created when artifact_dir is set, so this booted
-        # and then answered every artifact route with a 404 or a 500.
+        # The store exists only when artifact_dir is set; without it the server would
+        # boot and then answer every artifact route with a 404 or a 500.
         config = self._service(**store)
         del config["artifact_dir"]
         with pytest.raises(ValueError, match="without artifact_dir"):

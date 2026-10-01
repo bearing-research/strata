@@ -272,8 +272,7 @@ async def test_a_teammates_result_is_served_instead_of_running_the_cell(
     alice_blob = alice_store.load_artifact_data(alice_artifact_id, alice_artifact.version)
 
     # --- Her result reaches the shared store, keyed by provenance ---
-    # (Publishing it from the notebook is the next slice; what matters here is
-    # that the bytes and the key are the real ones she produced.)
+    # (Put there directly; what matters is that the bytes and key are the ones she produced.)
     shared = ArtifactStore(team_store_server["artifact_dir"])
     shared_id = "nb_alice_cell_up_var_value"
     version = shared.create_artifact(
@@ -353,10 +352,8 @@ async def test_a_result_alice_never_published_by_hand_reaches_bob(
         add_cell_to_notebook(notebook_dir, "down", "up")
         write_cell(notebook_dir, "down", "doubled = value * 2")
         session = NotebookSession(parse_notebook(notebook_dir), notebook_dir)
-        # Opening a notebook syncs its environment. Publishing requires that
-        # attestation — an unsynced session cannot say the venv matches
-        # uv.lock — so a test that constructs a session directly has to do
-        # what opening one does.
+        # Opening a notebook syncs its environment and publishing requires that
+        # attestation, so a session constructed directly must sync too.
         session.ensure_venv_synced()
         return session
 
@@ -597,10 +594,8 @@ async def test_a_pulled_result_says_where_it_was_computed(tmp_path, team_store_s
         add_cell_to_notebook(notebook_dir, "down", "up")
         write_cell(notebook_dir, "down", "doubled = value * 2")
         session = NotebookSession(parse_notebook(notebook_dir), notebook_dir)
-        # Opening a notebook syncs its environment. Publishing requires that
-        # attestation — an unsynced session cannot say the venv matches
-        # uv.lock — so a test that constructs a session directly has to do
-        # what opening one does.
+        # Opening a notebook syncs its environment and publishing requires that
+        # attestation, so a session constructed directly must sync too.
         session.ensure_venv_synced()
         return session
 
@@ -621,8 +616,8 @@ async def test_a_pulled_result_says_where_it_was_computed(tmp_path, team_store_s
     hit = await CellExecutor(bob).execute_cell("up", source)
 
     assert hit.cache_hit is True
-    # The venv here shims to the dev interpreter, so the harness reports this
-    # process's identity — which is what makes the expected value knowable.
+    # The venv shims to the dev interpreter, so the harness reports this process's
+    # identity, which makes the expected value knowable.
     assert hit.team_cache_build_env == build_env_identity()
     assert hit.team_cache_build_env != ""
 
@@ -704,10 +699,8 @@ async def test_a_team_hit_is_priced_by_the_run_it_replaced(
         add_cell_to_notebook(notebook_dir, "down", "up")
         write_cell(notebook_dir, "down", "doubled = value * 2")
         session = NotebookSession(parse_notebook(notebook_dir), notebook_dir)
-        # Opening a notebook syncs its environment. Publishing requires that
-        # attestation — an unsynced session cannot say the venv matches
-        # uv.lock — so a test that constructs a session directly has to do
-        # what opening one does.
+        # Opening a notebook syncs its environment and publishing requires that
+        # attestation, so a session constructed directly must sync too.
         session.ensure_venv_synced()
         return session
 
@@ -730,8 +723,8 @@ async def test_a_team_hit_is_priced_by_the_run_it_replaced(
 
     assert hit.cache_hit is True
     assert hit.team_cache_saved_ms > 0, "a team hit that reports no saving is not legible"
-    # It is *her* run being reported, not his instant one. No timing threshold
-    # here — only that the number came from the run that actually happened.
+    # It is *her* run being reported, not his instant one: the number must come from
+    # the run that actually happened.
     assert hit.team_cache_saved_ms == int(alice_run.duration_ms)
 
     # And it reaches the profiling summary as team savings, not just total.
@@ -948,8 +941,8 @@ def test_a_stale_r_library_does_not_publish(tmp_path):
     """
     session = _synced_notebook(tmp_path, "rnotebook")
 
-    # An R lockfile appears and was never restored. The Python side re-syncs
-    # happily — its own install genuinely succeeded.
+    # An R lockfile appears and was never restored. The Python side re-syncs happily,
+    # since its own install genuinely succeeded.
     (session.path / "renv.lock").write_text('{"Packages": {"jsonlite": {"Version": "1.8.0"}}}')
     session.ensure_venv_synced()
 

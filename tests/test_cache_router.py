@@ -72,7 +72,7 @@ def cache_client(tmp_path):
     state = ServerState(config)
     server_module._state = state
     try:
-        # No ``with`` — lifespan never runs, so _cache_warmer stays None.
+        # No ``with``: lifespan never runs, so _cache_warmer stays None.
         yield TestClient(app), state
     finally:
         server_module._state = original
@@ -121,7 +121,6 @@ class TestCacheStatsAndEntries:
         client, _ = cache_client
         resp = client.get("/v1/cache/stats")
         assert resp.status_code == 200
-        # asdict(DiskCache.get_stats()) — a JSON object with cache fields.
         assert isinstance(resp.json(), dict)
 
     def test_entries_lists_entries(self, cache_client):
@@ -170,8 +169,7 @@ class TestClearCache:
 class TestWarmSync:
     def test_warm_unplannable_table_reports_error(self, cache_client):
         client, _ = cache_client
-        # A bogus URI fails planning → captured per-table in the errors list,
-        # not a request failure.
+        # A bogus URI fails planning as a per-table error, not a request failure.
         resp = client.post("/v1/cache/warm", json={"tables": ["file:///nope#bad.table"]})
         assert resp.status_code == 200
         body = resp.json()
@@ -191,17 +189,15 @@ class TestWarmSync:
         body = resp.json()
         assert body["tables_warmed"] == 1
         assert body["errors"] == []
-        # First warm of a fresh cache writes the row group(s).
         assert body["row_groups_cached"] >= 1
         assert body["bytes_written"] > 0
 
     def test_warm_twice_reports_skipped(self, cache_client, warehouse_uri):
         client, _ = cache_client
-        client.post("/v1/cache/warm", json={"tables": [warehouse_uri]})  # populate
+        client.post("/v1/cache/warm", json={"tables": [warehouse_uri]})
         resp = client.post("/v1/cache/warm", json={"tables": [warehouse_uri]})
         assert resp.status_code == 200
         body = resp.json()
-        # Second warm finds the row group(s) already cached.
         assert body["row_groups_skipped"] >= 1
         assert body["row_groups_cached"] == 0
 
@@ -290,9 +286,7 @@ class TestAsyncWarmerPresent:
         assert warmer_client.delete("/v1/cache/warm/jobs/other").status_code == 404
 
 
-# ---------------------------------------------------------------------------
-# Table ACL on the warm endpoints (code-review round 2)
-# ---------------------------------------------------------------------------
+# --- Table ACL on the warm endpoints ---
 
 
 @pytest.fixture
@@ -347,7 +341,6 @@ def test_warm_refuses_acl_denied_table(acl_cache_client):
         headers=_proxy_headers(),
     )
     assert resp.status_code in (403, 404), resp.text
-    # And nothing about the table leaked through the success shape.
     assert "row_groups_cached" not in resp.text
 
 
@@ -371,7 +364,7 @@ def test_warm_allows_permitted_table(acl_cache_client):
         headers=_proxy_headers(),
     )
     assert resp.status_code == 200, resp.text
-    # Planning fails (no such warehouse) — but as a per-table error, not a 403.
+    # Planning fails (no such warehouse), but as a per-table error, not a 403.
     assert resp.json()["errors"]
 
 
@@ -428,7 +421,7 @@ class TestDebugInspectPrefixLayout:
         client, state = cache_client
         cache = state.fetcher.cache
 
-        # Materialize the real on-disk shape: versioned/{tenant}/xx/yy/<hash>
+        # The real on-disk shape: versioned/{tenant}/xx/yy/<hash>
         digest = "abcd1234" + "0" * 24
         tenant_prefix = hashlib.sha256(b"").hexdigest()[:8]
         entry_dir = cache.cache_dir / f"v{CACHE_VERSION}" / tenant_prefix / "ab" / "cd"
@@ -437,8 +430,6 @@ class TestDebugInspectPrefixLayout:
 
         resp = client.get("/v1/debug/cache/inspect", params={"prefix": "abcd"})
         assert resp.status_code == 200
-        # The directory is now reachable — previously this path was never even
-        # searched, so the count was unconditionally zero.
         assert resp.json()["prefix_filter"] == "abcd"
 
 

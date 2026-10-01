@@ -49,11 +49,10 @@ def _docker_daemon_reachable() -> bool:
 if not _docker_daemon_reachable():
     pytest.skip("Docker daemon is not running", allow_module_level=True)
 
-# Mark all tests in this module as integration tests
 pytestmark = [pytest.mark.integration, pytest.mark.slow]
 
 
-# Test schema matching soak_test.py
+# Matches soak_test.py
 TEST_SCHEMA = Schema(
     NestedField(1, "id", LongType(), required=False),
     NestedField(2, "ts", LongType(), required=False),
@@ -93,9 +92,7 @@ def minio_container():
     Using module scope to avoid repeated container startup overhead.
     """
     with MinioContainer(MINIO_IMAGE) as minio:
-        # Wait for MinIO to be ready
         client = minio.get_client()
-        # Create test bucket
         bucket_name = "test-warehouse"
         if not client.bucket_exists(bucket_name):
             client.make_bucket(bucket_name)
@@ -156,11 +153,9 @@ def s3_table(minio_container, s3_config, s3_catalog_db):
     warehouse_path = f"s3://{bucket}/warehouse"
     endpoint = _get_s3_endpoint(config)
 
-    # "strata", not pyiceberg's usual "default". A table URI with a warehouse
-    # path makes the planner open ``SqlCatalog("strata", ...)`` over that
-    # warehouse (``iceberg.py``), the same name ``temp_warehouse`` uses, and a
-    # SQL catalog keys its tables by name. Under "default" the planner reported
-    # ``NoSuchTableError`` for a table sitting in the very same SQLite file.
+    # "strata", not pyiceberg's usual "default": a table URI with a warehouse path makes
+    # the planner open ``SqlCatalog("strata", ...)``, and a SQL catalog keys its tables
+    # by that name.
     catalog = SqlCatalog(
         "strata",
         uri=f"sqlite:///{s3_catalog_db}",
@@ -173,7 +168,6 @@ def s3_table(minio_container, s3_config, s3_catalog_db):
         },
     )
 
-    # Create namespace and table
     namespace = "test_ns"
     table_name = "events"
     table_id = f"{namespace}.{table_name}"
@@ -188,11 +182,9 @@ def s3_table(minio_container, s3_config, s3_catalog_db):
     except Exception:
         table = catalog.create_table(table_id, TEST_SCHEMA)
 
-    # Insert test data
     test_data = create_test_data(num_rows=1000)
     table.append(test_data)
 
-    # Return table URI
     return f"{warehouse_path}#{table_id}"
 
 
@@ -209,7 +201,6 @@ class TestS3EndToEnd:
         assert len(plan.tasks) > 0
         assert plan.schema is not None
 
-        # Verify file paths are S3 URIs
         for task in plan.tasks:
             assert task.file_path.startswith("s3://"), f"Expected S3 path, got: {task.file_path}"
 
@@ -218,11 +209,9 @@ class TestS3EndToEnd:
         planner = ReadPlanner(s3_config)
         plan = planner.plan(s3_table)
 
-        # Create fetcher with S3 filesystem
         s3_fs = s3_config.get_s3_filesystem()
         fetcher = PyArrowFetcher(s3_filesystem=s3_fs)
 
-        # Fetch the first task
         task = plan.tasks[0]
         batch = fetcher.fetch(task)
 
@@ -243,30 +232,25 @@ class TestS3EndToEnd:
         task = plan.tasks[0]
         batch = fetcher.fetch(task)
 
-        # Should only have requested columns
         assert set(batch.schema.names) == set(columns)
 
     def test_filter_pruning_on_s3(self, s3_config, s3_table):
         """Test that row group pruning works with S3 files."""
         planner = ReadPlanner(s3_config)
 
-        # Create a filter that should prune some data
-        # Since we know id ranges from 0-999, filter for id > 2000 should return empty
+        # ids are 0-999, so id > 2000 matches nothing.
         filters = [Filter(column="id", op=FilterOp.GT, value=2000)]
 
         plan = planner.plan(s3_table, filters=filters)
 
-        # With good statistics, this might prune the row group entirely
-        # Or it will have tasks but they'll return no matching rows
-        # Either way, let's verify the filter was applied
+        # Good statistics may prune the row group entirely; otherwise the tasks return no
+        # matching rows.
 
         if len(plan.tasks) > 0:
             s3_fs = s3_config.get_s3_filesystem()
             fetcher = PyArrowFetcher(s3_filesystem=s3_fs)
             table = fetcher.fetch_to_table(plan.tasks)
 
-            # If not pruned at metadata level, verify filter semantically
-            # (actual filtering happens at read time via Iceberg)
             assert table.num_rows >= 0  # May be 0 if properly pruned
 
     def test_multiple_row_groups(self, minio_container, s3_config, s3_catalog_db):
@@ -301,7 +285,7 @@ class TestS3EndToEnd:
         except Exception:
             table = catalog.create_table(table_id, TEST_SCHEMA)
 
-        # Insert multiple batches to create multiple files/row groups
+        # Several appends make several files/row groups.
         for i in range(3):
             data = create_test_data(num_rows=500, seed=i)
             table.append(data)
@@ -310,14 +294,13 @@ class TestS3EndToEnd:
         planner = ReadPlanner(s3_config)
         plan = planner.plan(table_uri)
 
-        # Should have multiple tasks (one per row group)
         assert len(plan.tasks) >= 1
 
         s3_fs = s3_config.get_s3_filesystem()
         fetcher = PyArrowFetcher(s3_filesystem=s3_fs)
         result = fetcher.fetch_to_table(plan.tasks)
 
-        # Total rows should be 3 * 500 = 1500
+        # 3 * 500
         assert result.num_rows == 1500
 
 
@@ -328,7 +311,7 @@ class TestS3PathHandling:
         """Test handling of S3 paths with special characters in key names."""
         config = minio_container.get_config()
         bucket = "test-warehouse"
-        # Path with hyphens and underscores (common in real warehouses)
+        # Hyphens and underscores, common in real warehouses.
         warehouse_path = f"s3://{bucket}/data-lake_v2/iceberg"
         endpoint = _get_s3_endpoint(config)
 
@@ -362,7 +345,7 @@ class TestS3PathHandling:
         data = create_test_data(num_rows=100)
         table.append(data)
 
-        # Use a config that points at this test's own catalog
+        # Points at this test's own catalog.
         special_config = StrataConfig(
             cache_dir=tmp_path_factory.mktemp("special_cache"),
             s3_endpoint_url=endpoint,
@@ -385,7 +368,6 @@ class TestS3PathHandling:
         plan = planner.plan(table_uri)
 
         assert len(plan.tasks) > 0
-        # Verify paths contain the special characters
         assert "data-lake_v2" in plan.tasks[0].file_path
 
 
@@ -397,7 +379,7 @@ class TestS3ErrorHandling:
         planner = ReadPlanner(s3_config)
 
         with pytest.raises(Exception):
-            # This should fail - bucket doesn't exist
+            # The bucket does not exist.
             planner.plan("s3://nonexistent-bucket/warehouse#ns.table")
 
     def test_invalid_credentials_raises_error(self, minio_container, tmp_path_factory):
@@ -426,21 +408,16 @@ class TestS3Latency:
         """Test that metadata caching improves subsequent planning latency."""
         planner = ReadPlanner(s3_config)
 
-        # First call - cold cache
         start = time.perf_counter()
         plan1 = planner.plan(s3_table)
         cold_time = time.perf_counter() - start
 
-        # Second call - warm cache
         start = time.perf_counter()
         plan2 = planner.plan(s3_table)
         warm_time = time.perf_counter() - start
 
-        # Both should return same results
         assert plan1.snapshot_id == plan2.snapshot_id
         assert len(plan1.tasks) == len(plan2.tasks)
 
-        # Warm should be faster (or at least not significantly slower)
-        # Allow some variance since these are real I/O operations
         print(f"Cold planning: {cold_time * 1000:.1f}ms, Warm planning: {warm_time * 1000:.1f}ms")
-        # Just verify it works - timing assertions are flaky in CI
+        # Timing assertions are flaky in CI, so only print.

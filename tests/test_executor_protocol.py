@@ -201,7 +201,6 @@ class TestReferenceExecutor:
 
         executor = DuckDBExecutor()
 
-        # Create input table
         input_table = pa.table({"x": [1, 2, 3], "y": ["a", "b", "c"]})
         input_data = table_to_ipc_bytes(input_table)
 
@@ -216,7 +215,6 @@ class TestReferenceExecutor:
         assert result.output_rows == 3
         assert result.logs is not None
 
-        # Verify output
         output_table = ipc_bytes_to_table(result.output_bytes)
         assert output_table.num_rows == 3
         assert output_table.column("doubled").to_pylist() == [2, 4, 6]
@@ -227,7 +225,6 @@ class TestReferenceExecutor:
 
         executor = DuckDBExecutor()
 
-        # Create input tables
         users = pa.table({"id": [1, 2], "name": ["Alice", "Bob"]})
         orders = pa.table({"user_id": [1, 1, 2], "amount": [100, 200, 150]})
 
@@ -263,7 +260,7 @@ class TestReferenceExecutor:
 
         result = executor.execute(
             transform_ref="duckdb_sql@v1",
-            params={},  # Missing SQL
+            params={},
             inputs=[],
         )
 
@@ -282,7 +279,7 @@ class TestReferenceExecutor:
 
         result = executor.execute(
             transform_ref="duckdb_sql@v1",
-            params={"sql": "SELEC * FROM input0"},  # Invalid SQL
+            params={"sql": "SELEC * FROM input0"},
             inputs=[ExecutorInput(name="input0", data=table_to_ipc_bytes(input_table))],
         )
 
@@ -302,7 +299,7 @@ class TestUtilityFunctions:
         table2 = pa.table({"b": [2]})
 
         file_parts = {
-            "metadata": b"{}",  # Should be ignored
+            "metadata": b"{}",  # ignored
             "input1": table_to_ipc_bytes(table2),
             "input0": table_to_ipc_bytes(table1),
         }
@@ -320,7 +317,6 @@ class TestUtilityFunctions:
         table = pa.table({"x": [1, 2, 3]})
         data = serialize_arrow_output(table)
 
-        # Verify we can read it back
         result = ipc_bytes_to_table(data)
         assert result.equals(table)
 
@@ -383,7 +379,7 @@ class TestBaseExecutorInterface:
                 return ExecutionResult(
                     success=True,
                     output_bytes=inputs[0].data,
-                    output_rows=1,  # Simplified
+                    output_rows=1,
                 )
 
         executor = IdentityExecutor()
@@ -402,9 +398,7 @@ class TestBaseExecutorInterface:
         assert output.column("x").to_pylist() == [42]
 
 
-# ---------------------------------------------------------------------------
-# HTTP Integration Tests (Full Server)
-# ---------------------------------------------------------------------------
+# --- HTTP integration tests (full server) ---
 
 
 @pytest.fixture
@@ -420,8 +414,8 @@ def executor_server():
         host="127.0.0.1",
         port=port,
         log_level="warning",
-        # Avoid uvicorn's legacy websockets backend (default ws="auto"), which
-        # emits a DeprecationWarning and is broken on CPython 3.14.
+        # uvicorn's legacy websockets backend (ws="auto") emits a DeprecationWarning
+        # and is broken on CPython 3.14.
         ws="websockets-sansio",
     )
     server_instance = uvicorn.Server(server_config)
@@ -455,11 +449,9 @@ class TestExecutorHTTPIntegration:
         """Execute simple SQL query via HTTP."""
         base_url = executor_server["base_url"]
 
-        # Create input table
         input_table = pa.table({"value": [10, 20, 30]})
         input_bytes = table_to_ipc_bytes(input_table)
 
-        # Build multipart request
         metadata = json.dumps(
             {
                 "protocol_version": "v1",
@@ -484,7 +476,6 @@ class TestExecutorHTTPIntegration:
         assert resp.status_code == 200
         assert resp.headers.get(EXECUTOR_PROTOCOL_HEADER) == EXECUTOR_PROTOCOL_VERSION
 
-        # Parse response as Arrow IPC
         output_table = ipc_bytes_to_table(resp.content)
         assert output_table.num_rows == 1
         assert output_table.column("total").to_pylist() == [60]
@@ -493,7 +484,6 @@ class TestExecutorHTTPIntegration:
         """Execute query with multiple inputs via HTTP."""
         base_url = executor_server["base_url"]
 
-        # Create input tables
         products = pa.table({"id": [1, 2], "name": ["Widget", "Gadget"], "price": [9.99, 19.99]})
         orders = pa.table({"product_id": [1, 1, 2], "qty": [2, 1, 3]})
 
@@ -536,8 +526,7 @@ class TestExecutorHTTPIntegration:
         output_table = ipc_bytes_to_table(resp.content)
         assert output_table.num_rows == 2
         assert output_table.column("name").to_pylist() == ["Gadget", "Widget"]
-        # Widget: 2*9.99 + 1*9.99 = 29.97
-        # Gadget: 3*19.99 = 59.97
+        # Widget: 2*9.99 + 1*9.99 = 29.97; Gadget: 3*19.99 = 59.97
         revenues = output_table.column("revenue").to_pylist()
         assert abs(revenues[0] - 59.97) < 0.01  # Gadget
         assert abs(revenues[1] - 29.97) < 0.01  # Widget
@@ -574,7 +563,6 @@ class TestExecutorHTTPIntegration:
         resp = httpx.post(f"{base_url}/v1/execute", files=files)
         assert resp.status_code == 200
 
-        # Check logs header
         logs_header = resp.headers.get(EXECUTOR_LOGS_HEADER)
         assert logs_header is not None
 
@@ -597,7 +585,7 @@ class TestExecutorHTTPIntegration:
                 "provenance_hash": "test-hash-4",
                 "transform": {
                     "ref": "duckdb_sql@v1",
-                    "params": {"sql": "SELEC * FROM invalid_table"},  # Typo in SELECT
+                    "params": {"sql": "SELEC * FROM invalid_table"},
                 },
                 "inputs": [
                     {"name": "input0", "size_bytes": len(input_bytes)},
@@ -632,7 +620,7 @@ class TestExecutorHTTPIntegration:
                 "provenance_hash": "test-hash-5",
                 "transform": {
                     "ref": "duckdb_sql@v1",
-                    "params": {},  # Missing sql
+                    "params": {},
                 },
                 "inputs": [
                     {"name": "input0", "size_bytes": len(input_bytes)},
@@ -685,7 +673,7 @@ class TestExecutorHTTPIntegration:
 
         metadata = json.dumps(
             {
-                "protocol_version": "v99",  # Invalid version
+                "protocol_version": "v99",
                 "build_id": "test-build-007",
                 "provenance_hash": "test-hash-7",
                 "transform": {

@@ -29,7 +29,6 @@ from typing import Any
 
 import pytest
 
-# Skip the suite if optional ADBC packages are missing.
 adbc_sqlite = pytest.importorskip("adbc_driver_sqlite")
 
 
@@ -233,20 +232,16 @@ async def test_sql_cache_keyed_on_upstream_bind_value_not_rerun(tmp_path):
         "different bind value must produce a different provenance hash"
     )
 
-    # Run 3: re-run upstream with the SAME value (25). The
-    # upstream's source_hash is unchanged here, so it cache-hits.
-    # The SQL cell should also cache-hit — same bind ⇒ same hash.
+    # Run 3: re-run the upstream with the same value. Its source_hash is unchanged,
+    # so it cache-hits, and so must the SQL cell (same bind, same hash).
     third = await executor.execute_cell("sql", sql_src)
     assert third.success
     assert third.cache_hit is True
     assert _provenance_hash_for(third.artifact_uri) == second_hash
 
-    # Run 4: round-trip back to min_value=15. The SQL cell's
-    # provenance hash must equal the first run's hash — proving
-    # the cache key is a pure function of the upstream value, not
-    # "did the upstream re-run between SQL invocations". (The
-    # artifact-store may assign a fresh version number, but the
-    # hash is the cache-key contract; same hash ⇒ same data.)
+    # Run 4: back to min_value=15. The SQL hash must equal the first run's, so the
+    # cache key is a pure function of the upstream value, not of whether the upstream
+    # re-ran. (The store may assign a new version; the hash is the cache-key contract.)
     fourth = await set_upstream_and_run_sql("min_value = 15\n")
     assert fourth.success
     assert _load_arrow(session, fourth.artifact_uri).num_rows == 2
@@ -367,10 +362,8 @@ async def test_sql_null_bind_param_via_none_upstream(tmp_path):
         f"got {table.column('sentinel_back').to_pylist()!r}"
     )
 
-    # Run 2: change the upstream to a non-None value and verify the
-    # same query now returns that value, not NULL. Same query +
-    # different bind ⇒ different result, isolating that the bind
-    # path actually feeds the column.
+    # Run 2: a non-None upstream now comes back as that value, not NULL. Same query,
+    # different bind, different result isolates that the bind feeds the column.
     py_cell = next(c for c in session.notebook_state.cells if c.id == "py")
     new_src = "sentinel = 'hello'\n"
     (nb_dir / "cells" / "py.py").write_text(new_src)
@@ -418,8 +411,7 @@ async def test_sql_empty_result_set_produces_valid_artifact(tmp_path):
     assert result.success, result.error
     table = _load_arrow(session, result.artifact_uri)
     assert table.num_rows == 0
-    # Schema preserved even with no rows — downstream cells can
-    # still inspect column names / types.
+    # Schema survives with no rows, so downstream cells can still inspect columns.
     assert set(table.schema.names) == {"id", "name"}
 
 

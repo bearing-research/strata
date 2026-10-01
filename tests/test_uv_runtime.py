@@ -44,7 +44,6 @@ def test_assert_uv_managed_runtime_passes_with_marker(tmp_path, monkeypatch):
     _write_pyvenv(tmp_path, "uv = 0.8.13\n")
     monkeypatch.setattr("sys.prefix", str(tmp_path))
 
-    # No exception, no exit
     assert_uv_managed_runtime()
 
 

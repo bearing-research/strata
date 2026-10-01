@@ -70,7 +70,7 @@ def test_personal_mode_opens_both_gates(tmp_path):
     assert decision.principal is None  # no auth in personal mode
 
 
-# --- Build-store / signed-transport gate (#295) -----------------------------
+# --- Build-store / signed-transport gate ---
 
 
 def test_build_transport_gate_open_in_personal_mode(tmp_path):

@@ -26,12 +26,10 @@ def test_artifact_manager_store_and_load(tmp_path):
     """Should be able to store and load artifact data."""
     mgr = NotebookArtifactManager("test_nb", artifact_dir=tmp_path)
 
-    # Create provenance hash
     source_hash = compute_source_hash("x = 1")
     env_hash = compute_source_hash("env")
     prov_hash = compute_provenance_hash([], source_hash, env_hash)
 
-    # Store artifact
     blob_data = b"test data"
     artifact = mgr.store_cell_output(
         cell_id="cell1",
@@ -44,6 +42,5 @@ def test_artifact_manager_store_and_load(tmp_path):
     assert artifact is not None
     assert artifact.state == "ready"
 
-    # Load it back
     loaded = mgr.load_artifact_data(artifact.id, artifact.version)
     assert loaded == blob_data

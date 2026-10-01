@@ -27,8 +27,7 @@ class TestExecuteHarnessRdsInput:
 
     def test_rds_input_surfaces_structured_error(self, tmp_path: Path) -> None:
         rds_path = tmp_path / "fit.rds"
-        # Dispatch rejects on content_type, not file shape — these bytes
-        # never get parsed.
+        # Dispatch rejects on content_type, not file shape; these bytes are never parsed.
         rds_path.write_bytes(b"\x1f\x8b\x08\x00fakerds")
 
         manifest = {
@@ -45,17 +44,14 @@ class TestExecuteHarnessRdsInput:
         result = execute_harness(manifest)
 
         assert result["success"] is False
-        # The structured message — variable name + saveRDS + data.frame
-        # suggestion — gives the user the actionable fix instead of a
-        # bare NameError.
+        # The structured message (variable name, saveRDS, data.frame suggestion)
+        # gives the user the actionable fix instead of a bare NameError.
         error = result["error"]
         assert "fit" in error
         assert "saveRDS" in error
         assert "data.frame" in error
-        # Critical regression assertion: the previous behaviour swallowed
-        # the deserialize error into stderr and the cell body then raised
-        # NameError. The fix must surface the structured error type
-        # instead.
+        # The deserialize error must surface as the structured error, not be
+        # swallowed into stderr so the cell body raises NameError.
         assert "NameError" not in error
         assert "StrataRArtifactError" in error
 

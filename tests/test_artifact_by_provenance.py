@@ -122,8 +122,8 @@ def test_a_stored_result_is_findable_by_its_provenance_hash(personal_server):
 
     assert found.status_code == 200, found.text
     body = found.json()
-    # The id is returned, not supplied — that is the whole point. A caller with
-    # only a hash learns where the result lives.
+    # The id is returned, not supplied: a caller with only a hash learns where the
+    # result lives.
     assert (body["artifact_id"], body["version"]) == (artifact_id, version)
     assert body["state"] == "ready"
     assert body["row_count"] == 3
@@ -141,7 +141,7 @@ def test_a_hash_nobody_computed_is_a_miss_not_an_error(personal_server):
     "bad_hash",
     [
         "not-a-hash",
-        "ABC" * 21 + "D",  # right length, uppercase — digests are lowercase hex
+        "ABC" * 21 + "D",  # right length, uppercase; digests are lowercase hex
         "0" * 63,  # one short
         "0" * 65,  # one long
     ],
@@ -371,8 +371,8 @@ def test_an_admin_hits_on_what_it_just_published(team_server):
     uri = _publish(base_url, pa.table({"id": [1, 2, 3]}), admin)
     provenance = _provenance_of(team_server["artifact_dir"], uri)
 
-    # By id the admin can already read it — so a miss below is this route's
-    # scoping being wrong, not the artifact being unreachable.
+    # The admin can already read it by id, so a miss below is this route's scoping
+    # being wrong, not the artifact being unreachable.
     artifact_id, version = _ref(uri)
     assert (
         httpx.get(f"{base_url}/v1/artifacts/{artifact_id}/v/{version}", headers=admin).status_code
@@ -491,8 +491,8 @@ def test_the_build_environment_travels_with_the_result(personal_server):
 
     found = httpx.get(f"{base_url}/v1/artifacts/by-provenance/{provenance}").json()
     assert found["build_env"] == "cpython-3.12-linux-x86_64"
-    # Distinct fields, not one read twice — this is the bug the notebook-side
-    # test caught first, where a shared param reader ignored its key argument.
+    # Distinct fields, not one read twice: a shared param reader that ignored its key
+    # argument would fail here.
     assert found["content_type"] == "arrow/ipc"
 
 

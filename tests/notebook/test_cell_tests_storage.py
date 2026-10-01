@@ -50,7 +50,7 @@ def test_empty_test_source_removes_file(notebook_dir):
     test_file = notebook_dir / "cells" / "cell1.test.py"
     assert test_file.exists()
 
-    # Clearing the editor (whitespace only) deletes the file — no empty commits.
+    # Clearing the editor (whitespace only) deletes the file: no empty commits.
     write_cell_tests(notebook_dir, "cell1", "   \n")
     assert not test_file.exists()
 

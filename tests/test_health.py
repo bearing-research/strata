@@ -96,7 +96,7 @@ class TestDiskCacheCheck:
         result = check_disk_cache(cache_dir, max_size_bytes=1024 * 1024 * 1024)
 
         assert result.name == "disk_cache"
-        # May be DEGRADED if disk is >90% full
+        # DEGRADED if the disk is >90% full
         assert result.status in (HealthStatus.HEALTHY, HealthStatus.DEGRADED)
         assert result.latency_ms >= 0
         assert "path" in result.details
@@ -258,10 +258,9 @@ class TestRunHealthChecks:
                 fetch_executor=fetch,
             )
 
-            # May be DEGRADED if disk is >90% full, but should not be UNHEALTHY
+            # DEGRADED if the disk is >90% full, but never UNHEALTHY.
             assert report.status in (HealthStatus.HEALTHY, HealthStatus.DEGRADED)
             assert len(report.checks) == 6
-            # No check should be UNHEALTHY
             assert not any(c.status == HealthStatus.UNHEALTHY for c in report.checks)
         finally:
             planning.shutdown(wait=False)
@@ -304,10 +303,8 @@ class TestHealthEndpointIntegration:
                 assert "summary" in data
                 assert "timestamp" in data
 
-                # Should have all 6 checks
                 assert data["summary"]["total"] == 6
 
-                # Check each dependency is present
                 check_names = {c["name"] for c in data["checks"]}
                 assert "disk_cache" in check_names
                 assert "metadata_store" in check_names

@@ -28,8 +28,8 @@ class TestOwnershipStore:
         )
 
     def test_the_owning_node_resolves_to_nothing(self, owners):
-        # Asked for its own claim, a node must 404 rather than redirect to
-        # itself: the stream is genuinely gone, not elsewhere.
+        # Asked for its own claim, a node must 404 rather than redirect to itself: the
+        # stream is gone, not elsewhere.
         owners.claim("s1", "https://node-a:8765", ttl_seconds=60)
         assert owners.resolve("s1", exclude_node_url="https://node-a:8765") is None
 
@@ -43,9 +43,8 @@ class TestOwnershipStore:
         assert owners.resolve("s1", exclude_node_url="https://node-b:8765") is None
 
     def test_reclaiming_moves_ownership(self, owners):
-        # stream_id is usually the artifact id, so a refresh can legitimately
-        # re-stream the same artifact from a different node. Newest wins,
-        # because the newest planner is the one holding a live plan.
+        # stream_id is usually the artifact id, so a refresh can re-stream it from another
+        # node. Newest wins, because the newest planner holds a live plan.
         owners.claim("s1", "https://node-a:8765", ttl_seconds=60)
         owners.claim("s1", "https://node-b:8765", ttl_seconds=60)
         assert owners.resolve("s1", exclude_node_url="https://node-c:8765") == (
@@ -103,8 +102,8 @@ class TestRegistryHooks:
         assert released == []
 
     def test_single_node_registries_do_no_ownership_work(self):
-        # Without the callbacks -- the default, and every single-node
-        # deployment -- register and pop must behave exactly as before.
+        # Without the callbacks (the default, and every single-node deployment), register
+        # and pop do no ownership work.
         registry = StreamRegistry(ttl_seconds=30.0)
         registry.register(self._state())
         assert registry.get("s1") is not None
@@ -133,9 +132,8 @@ class TestRedirectTargetConstruction:
         ["a?x=1", "a#frag", "a/b", "../../etc", "a b"],
     )
     def test_the_id_stays_one_path_segment(self, stream_id):
-        # A raw '?' or '#' would silently turn the rest into a query or
-        # fragment, sending the client somewhere other than the stream it
-        # asked for; a '/' would change the path shape.
+        # A raw '?' or '#' would turn the rest into a query or fragment, sending the client
+        # elsewhere; a '/' would change the path shape.
         target = self._target("https://node-a:8765", stream_id)
         assert target.startswith("https://node-a:8765/v1/streams/")
         tail = target[len("https://node-a:8765/v1/streams/") :]
@@ -144,8 +142,8 @@ class TestRedirectTargetConstruction:
         assert "/" not in tail
 
     def test_the_origin_cannot_be_moved_by_the_id(self):
-        # The host comes from operator config and the id only ever lands after
-        # a fixed prefix, so no id makes this an open redirect.
+        # The host comes from operator config and the id only lands after a fixed prefix,
+        # so no id makes this an open redirect.
         for hostile in ["@evil.com", "//evil.com", "https://evil.com"]:
             assert self._target("https://node-a:8765", hostile).startswith(
                 "https://node-a:8765/v1/streams/"
@@ -162,8 +160,8 @@ class TestOwnerResolution:
             self.config = StrataConfig(node_advertised_url=node_url)
 
     def test_unconfigured_node_never_redirects(self, owners, monkeypatch):
-        # Single node: no lookup at all, so the common case pays nothing even
-        # if an ownership table happens to exist.
+        # Single node: no lookup at all, so the common case pays nothing even if an
+        # ownership table exists.
         from strata.server import _resolve_stream_owner
 
         owners.claim("s1", "https://node-a:8765", ttl_seconds=60)
@@ -185,8 +183,8 @@ class TestOwnerResolution:
         )
 
     def test_lookup_failure_degrades_to_no_redirect(self, monkeypatch):
-        # A database hiccup must produce today's 404, not a 500: the caller
-        # asked for a stream, not for the ownership table's health.
+        # A database hiccup must produce a 404, not a 500: the caller asked for a stream,
+        # not for the ownership table's health.
         from strata.server import _resolve_stream_owner
 
         class _Broken:

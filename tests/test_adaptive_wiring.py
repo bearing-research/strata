@@ -41,8 +41,8 @@ def test_admission_feeds_the_controller_when_adaptive_is_on(booted):
     state = booted(STRATA_ADAPTIVE_ENABLED="true")
 
     assert state._adaptive_controller is not None
-    # The single fact that #549 was about: admission holds the same controller
-    # object the lifespan started, so its two signals reach the control loop.
+    # Admission holds the same controller object the lifespan started, so its two
+    # signals reach the control loop.
     assert state.qos._controller is state._adaptive_controller
 
 

@@ -171,7 +171,6 @@ class TestStrataScanner:
             reader = scanner.to_reader()
             assert isinstance(reader, pa.RecordBatchReader)
 
-            # Read from the reader
             table = reader.read_all()
             assert table.num_rows == 500
         finally:
@@ -189,11 +188,10 @@ class TestStrataScanner:
 
         ds = StrataDataset(table_uri, base_url=f"http://127.0.0.1:{config.port}")
         try:
-            # Filter is accepted and passed to server for pruning
+            # The filter is passed to the server for pruning.
             scanner = ds.scanner(filter=lt("id", 100))
             table = scanner.to_table()
-            # Row-group pruning doesn't filter individual rows
-            # Just verify the scan succeeds
+            # Row-group pruning doesn't filter individual rows, so only check the scan works.
             assert isinstance(table, pa.Table)
         finally:
             ds.close()
@@ -211,7 +209,6 @@ class TestStrataScanner:
             # Multiple filters are passed for pruning
             scanner = ds.scanner(filter=[gt("id", 99), lt("id", 200)])
             table = scanner.to_table()
-            # Verify scan succeeds with filters
             assert isinstance(table, pa.Table)
         finally:
             ds.close()
@@ -283,7 +280,6 @@ class TestIntegrationWithOtherLibraries:
         with StrataDataset(table_uri, base_url=f"http://127.0.0.1:{config.port}") as ds:
             reader = ds.scanner(columns=["id", "value"]).to_reader()
 
-            # Convert to Polars
             df = pl.from_arrow(reader.read_all())
             assert df.height == 500
             assert df.columns == ["id", "value"]
@@ -298,7 +294,6 @@ class TestIntegrationWithOtherLibraries:
         with StrataDataset(table_uri, base_url=f"http://127.0.0.1:{config.port}") as ds:
             table = ds.scanner(columns=["id", "value"]).to_table()
 
-            # Register with DuckDB
             conn = duckdb.connect()
             conn.register("events", table)
 

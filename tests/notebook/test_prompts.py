@@ -169,7 +169,7 @@ class TestEvaluatorRaises:
             _resolve_prompt_expression("o._hidden()", {"o": object()})
 
     def test_calling_a_non_callable_attribute_is_unsafe(self):
-        # ``df.shape`` is a tuple, not a method — calling it must be rejected.
+        # ``df.shape`` is a tuple, not a method, so calling it must be rejected.
         df = pd.DataFrame({"a": [1]})
         with pytest.raises(ValueError, match="[Uu]nsafe"):
             _resolve_prompt_expression("df.shape()", {"df": df})

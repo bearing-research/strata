@@ -121,9 +121,8 @@ class TestTheTable:
         from strata.notebook.routes import _require_notebook_scope
         from strata.server import app
 
-        # iter_route_contexts: since FastAPI 0.141 an included router is one
-        # entry in app.routes, so walking app.routes found no notebook route at
-        # all and this passed while checking nothing.
+        # iter_route_contexts: since FastAPI 0.141 an included router is one entry in
+        # app.routes, so walking app.routes finds no notebook route and checks nothing.
         notebook_routes = [
             route
             for route in iter_route_contexts(app.routes)

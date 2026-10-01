@@ -137,8 +137,8 @@ def test_e2e_add_cell_bad_after_is_ops_error(remote):
 
 def test_e2e_set_cell_tests(remote):
     ops, _ = remote
-    # Author a cell's test source over the wire (the gap the live demo exposed):
-    # the round-trip writes cells/a.test.py and returns the cell.
+    # Author a cell's test source over the wire: the round-trip writes
+    # cells/a.test.py and returns the cell.
     src = "def test_x(cell):\n    assert cell.x == 1\n"
     cell = ops.set_cell_tests("a", src)
     assert cell.id == "a"

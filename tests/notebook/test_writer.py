@@ -42,10 +42,8 @@ def test_create_notebook():
     with tempfile.TemporaryDirectory() as tmpdir:
         tmpdir_path = Path(tmpdir)
 
-        # Create notebook
         notebook_dir = create_notebook(tmpdir_path, "New Notebook")
 
-        # Verify structure
         assert notebook_dir.exists()
         assert (notebook_dir / "notebook.toml").exists()
         assert (notebook_dir / "pyproject.toml").exists()
@@ -114,18 +112,14 @@ def test_write_cell():
     with tempfile.TemporaryDirectory() as tmpdir:
         tmpdir_path = Path(tmpdir)
 
-        # Create notebook
         notebook_dir = create_notebook(tmpdir_path, "Cell Write Test")
 
-        # Add a cell
         cell_id = "test-cell"
         add_cell_to_notebook(notebook_dir, cell_id)
 
-        # Write source
         source = "x = 1 + 1\ny = x * 2"
         write_cell(notebook_dir, cell_id, source)
 
-        # Verify file was written
         cells_dir = notebook_dir / "cells"
         cell_file = cells_dir / f"{cell_id}.py"
         assert cell_file.exists()
@@ -137,10 +131,8 @@ def test_write_cell_not_found():
     with tempfile.TemporaryDirectory() as tmpdir:
         tmpdir_path = Path(tmpdir)
 
-        # Create notebook
         notebook_dir = create_notebook(tmpdir_path, "Cell Write Test")
 
-        # Try to write to non-existent cell
         with pytest.raises(FileNotFoundError, match="Cell .* not found"):
             write_cell(notebook_dir, "nonexistent", "code")
 
@@ -150,18 +142,14 @@ def test_add_cell():
     with tempfile.TemporaryDirectory() as tmpdir:
         tmpdir_path = Path(tmpdir)
 
-        # Create notebook
         notebook_dir = create_notebook(tmpdir_path, "Add Cell Test")
 
-        # Add first cell
         cell1_id = "cell-1"
         add_cell_to_notebook(notebook_dir, cell1_id)
 
-        # Add second cell
         cell2_id = "cell-2"
         add_cell_to_notebook(notebook_dir, cell2_id)
 
-        # Parse and verify
         notebook_state = parse_notebook(notebook_dir)
         assert len(notebook_state.cells) == 2
         assert notebook_state.cells[0].id == cell1_id
@@ -186,7 +174,7 @@ def test_add_cell_picks_extension_by_language():
         cases = [
             ("py-cell", "python", "py"),
             ("md-cell", "markdown", "md"),
-            ("sql-cell", "sql", "py"),  # SQL keeps .py historically.
+            ("sql-cell", "sql", "py"),  # SQL cells keep the .py extension.
             ("prompt-cell", "prompt", "py"),
             ("r-cell", "r", "r"),
             ("widget-cell", "widget", "widget"),
@@ -213,21 +201,17 @@ def test_add_cell_after():
     with tempfile.TemporaryDirectory() as tmpdir:
         tmpdir_path = Path(tmpdir)
 
-        # Create notebook
         notebook_dir = create_notebook(tmpdir_path, "Add Cell After Test")
 
-        # Add cells
         cell1_id = "cell-1"
         add_cell_to_notebook(notebook_dir, cell1_id)
 
         cell2_id = "cell-2"
         add_cell_to_notebook(notebook_dir, cell2_id)
 
-        # Add cell after cell1
         cell1_5_id = "cell-1.5"
         add_cell_to_notebook(notebook_dir, cell1_5_id, after_cell_id=cell1_id)
 
-        # Parse and verify order
         notebook_state = parse_notebook(notebook_dir)
         assert len(notebook_state.cells) == 3
         cell_ids = [c.id for c in notebook_state.cells]
@@ -240,20 +224,16 @@ def test_remove_cell():
     with tempfile.TemporaryDirectory() as tmpdir:
         tmpdir_path = Path(tmpdir)
 
-        # Create notebook
         notebook_dir = create_notebook(tmpdir_path, "Remove Cell Test")
 
-        # Add cells
         cell1_id = "cell-1"
         add_cell_to_notebook(notebook_dir, cell1_id)
 
         cell2_id = "cell-2"
         add_cell_to_notebook(notebook_dir, cell2_id)
 
-        # Remove first cell
         remove_cell_from_notebook(notebook_dir, cell1_id)
 
-        # Verify
         notebook_state = parse_notebook(notebook_dir)
         assert len(notebook_state.cells) == 1
         assert notebook_state.cells[0].id == cell2_id
@@ -264,10 +244,8 @@ def test_remove_cell_not_found():
     with tempfile.TemporaryDirectory() as tmpdir:
         tmpdir_path = Path(tmpdir)
 
-        # Create notebook
         notebook_dir = create_notebook(tmpdir_path, "Remove Cell Test")
 
-        # Try to remove non-existent cell
         with pytest.raises(FileNotFoundError, match="Cell .* not found"):
             remove_cell_from_notebook(notebook_dir, "nonexistent")
 
@@ -277,10 +255,8 @@ def test_reorder_cells():
     with tempfile.TemporaryDirectory() as tmpdir:
         tmpdir_path = Path(tmpdir)
 
-        # Create notebook
         notebook_dir = create_notebook(tmpdir_path, "Reorder Test")
 
-        # Add cells
         cell1_id = "cell-1"
         add_cell_to_notebook(notebook_dir, cell1_id)
 
@@ -290,10 +266,8 @@ def test_reorder_cells():
         cell3_id = "cell-3"
         add_cell_to_notebook(notebook_dir, cell3_id)
 
-        # Reorder to [2, 3, 1]
         reorder_cells(notebook_dir, [cell2_id, cell3_id, cell1_id])
 
-        # Verify
         notebook_state = parse_notebook(notebook_dir)
         cell_ids = [c.id for c in notebook_state.cells]
         assert cell_ids == [cell2_id, cell3_id, cell1_id]
@@ -304,13 +278,10 @@ def test_rename_notebook():
     with tempfile.TemporaryDirectory() as tmpdir:
         tmpdir_path = Path(tmpdir)
 
-        # Create notebook
         notebook_dir = create_notebook(tmpdir_path, "Original Name")
 
-        # Rename
         rename_notebook(notebook_dir, "New Name")
 
-        # Verify
         notebook_state = parse_notebook(notebook_dir)
         assert notebook_state.name == "New Name"
 
@@ -320,10 +291,8 @@ def test_write_notebook_toml():
     with tempfile.TemporaryDirectory() as tmpdir:
         tmpdir_path = Path(tmpdir)
 
-        # Create notebook
         notebook_dir = create_notebook(tmpdir_path, "TOML Test")
 
-        # Create a NotebookToml
         now = datetime.now(tz=UTC)
         notebook_toml = NotebookToml(
             notebook_id="custom-id",
@@ -358,10 +327,8 @@ def test_write_notebook_toml():
             ],
         )
 
-        # Write it
         write_notebook_toml(notebook_dir, notebook_toml)
 
-        # Verify by reading it back
         notebook_state = parse_notebook(notebook_dir)
         assert notebook_state.id == "custom-id"
         assert notebook_state.name == "Custom Notebook"
@@ -553,8 +520,8 @@ def test_sensitive_only_env_is_no_op_no_updated_at_bump():
         update_notebook_env(notebook_dir, {"OPENAI_API_KEY": "sk-proj-secret"})
         assert notebook_toml.read_bytes() == before
 
-        # Second call with a different sensitive-only value is also a no-op —
-        # the persisted shape is identical.
+        # A different sensitive-only value is also a no-op: the persisted shape is
+        # identical.
         update_notebook_env(notebook_dir, {"ANTHROPIC_API_KEY": "sk-ant-other"})
         assert notebook_toml.read_bytes() == before
 
@@ -595,7 +562,7 @@ def test_writer_emits_native_toml_datetime_and_array_of_tables(tmp_path: Path):
 
     text = notebook_toml.read_text(encoding="utf-8")
 
-    # Native TOML datetime — no quotes, no T separator
+    # Native TOML datetime: no quotes, no T separator
     assert 'updated_at = "' not in text, (
         f"updated_at must serialize as native TOML datetime, got: {text!r}"
     )
@@ -649,8 +616,7 @@ def test_parse_notebook_cleans_up_stale_empty_env_block(tmp_path: Path):
     an earlier Runtime-panel interaction.
     """
     notebook_dir = create_notebook(tmp_path, "Stale Env Cleanup")
-    # Simulate the pre-fix state: an empty [env] block with a blanked
-    # sensitive-key placeholder.
+    # An empty [env] block holding only a blanked sensitive-key placeholder.
     notebook_toml = notebook_dir / "notebook.toml"
     with open(notebook_toml, "a", encoding="utf-8") as f:
         f.write('\n[env]\nOPENAI_API_KEY = ""\n')
@@ -684,13 +650,11 @@ def test_sensitive_env_values_stripped_on_write():
             data = tomllib.load(f)
 
         env = data["env"]
-        # Sensitive values stripped to empty string
         assert env["OPENAI_API_KEY"] == ""
         assert env["ANTHROPIC_API_KEY"] == ""
         assert env["MY_SECRET"] == ""
         assert env["AUTH_TOKEN"] == ""
         assert env["DB_PASSWORD"] == ""
-        # Non-sensitive values preserved
         assert env["DATABASE_URL"] == "postgres://localhost/db"
         assert env["DEBUG"] == "true"
 
@@ -763,16 +727,13 @@ def test_update_notebook_connections_round_trip():
             ],
         )
 
-        # Re-read the notebook and confirm both connections are back.
         state = parse_notebook(notebook_dir)
         names = {c.name for c in state.connections}
         assert names == {"warehouse", "prod"}
 
         warehouse = next(c for c in state.connections if c.name == "warehouse")
-        # The on-disk path round-trips byte-for-byte; relative
-        # paths stay relative. The cell executor resolves against
-        # the notebook dir at adapter-open time so notebook.toml
-        # is portable across machines.
+        # Relative paths round-trip unchanged; the cell executor resolves them against the
+        # notebook dir at open time, so notebook.toml stays portable across machines.
         assert warehouse.path == "data/db.sqlite"
 
         prod = next(c for c in state.connections if c.name == "prod")
@@ -878,7 +839,6 @@ def test_update_notebook_connections_empty_drops_block():
             notebook_dir,
             [ConnectionSpec(name="db", driver="sqlite", path="db.sqlite")],
         )
-        # Confirm it landed.
         with open(notebook_dir / "notebook.toml", "rb") as f:
             assert "connections" in tomllib.load(f)
 

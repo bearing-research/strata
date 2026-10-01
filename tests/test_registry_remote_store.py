@@ -180,15 +180,15 @@ class TestPerCellStrip:
         import strata.server as server_module
         from strata.notebook.routes import list_notebook_published_artifacts
 
-        # A local store with its own answer for the same cell, so reading the
-        # wrong one is visible rather than indistinguishable.
+        # A local store with its own answer for the same cell, so reading the wrong one is
+        # visible.
         local = ArtifactStore(tmp_path / "local")
         local.create_artifact("local-only", "cc" * 32)
         local.finalize_artifact("local-only", 1, '{"fields": []}', 1, 8)
         local.set_name("scratch/local", "local-only", 1)
         local.set_tag("local-only", 1, "nb_cell", "c1")
-        # Only on this thread, for the same reason the fixture above is: the
-        # team store serves on uvicorn's and must keep its own store.
+        # Only on this thread, like the fixture above: the team store serves on uvicorn's
+        # thread and must keep its own store.
         real = server_module._get_artifact_store
         caller = threading.get_ident()
         monkeypatch.setattr(
@@ -396,7 +396,7 @@ class TestPromotingFromTheTab:
 
         assert response.status_code == 200
         assert ArtifactStore(team_dir).resolve_alias("taxi/model", "champion") is not None
-        # And the tab, which reads the team's registry, now shows it.
+        # The tab, which reads the team's registry, now shows it.
         body = asyncio.run(registry_summary(_local_store(tmp_path), None))
         assert body["names"][0]["aliases"] == {"champion": 1}
 

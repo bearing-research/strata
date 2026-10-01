@@ -95,10 +95,8 @@ class TestDetectMissingModule:
         """Empty strings return None."""
         assert _detect_missing_module("", "") is None
 
-    # ---------------------------------------------------------------------
-    # R cells emit a different shape — pinned here so the install button
-    # dispatches to install.packages() rather than uv add.
-    # ---------------------------------------------------------------------
+    # R cells emit a different shape, so the install button dispatches to
+    # install.packages() rather than uv add.
 
     def test_r_library_missing(self):
         """``library(arrow)`` failure surfaces as an R suggestion."""

@@ -17,10 +17,8 @@ def temp_pipeline():
     with tempfile.TemporaryDirectory() as tmpdir:
         tmpdir = Path(tmpdir)
 
-        # Create notebook
         notebook_dir = create_notebook(tmpdir, "test_pipeline")
 
-        # Create 4-cell pipeline:
         # root -> middle1 -> middle2 -> leaf
         cells_data = [
             ("root", "x = 1"),
@@ -33,7 +31,6 @@ def temp_pipeline():
             add_cell_to_notebook(notebook_dir, cell_id)
             write_cell(notebook_dir, cell_id, source)
 
-        # Parse and create session
         notebook_state = parse_notebook(notebook_dir)
         session = NotebookSession(notebook_state, notebook_dir)
 
@@ -44,14 +41,10 @@ def test_cascade_planner_no_cascade_needed(temp_pipeline):
     """Test that no cascade is needed when upstream is ready."""
     session, _ = temp_pipeline
 
-    # Initially, all cells are idle (no execution)
-    # Manually mark first cell as ready
     session.notebook_state.cells[0].status = "ready"
 
     planner = CascadePlanner(session)
 
-    # Planning cascade for second cell should return None
-    # (because first cell is ready)
     plan = planner.plan(session.notebook_state.cells[1].id)
 
     # Root is ready, so no cascade needed for the second cell
@@ -62,12 +55,10 @@ def test_cascade_planner_cascade_needed(temp_pipeline):
     """Test that cascade is detected when upstream is stale."""
     session, _ = temp_pipeline
 
-    # Mark upstream cells as stale
     session.notebook_state.cells[0].status = "stale"
 
     planner = CascadePlanner(session)
 
-    # Planning cascade for a downstream cell should return a plan
     plan = planner.plan(session.notebook_state.cells[2].id)  # middle2
 
     assert plan is not None, "Expected cascade plan for stale upstream"
@@ -81,19 +72,16 @@ def test_cascade_plan_structure(temp_pipeline):
 
     planner = CascadePlanner(session)
 
-    # Mark some cells as stale to trigger cascade
     session.notebook_state.cells[0].status = "stale"
 
     plan = planner.plan(session.notebook_state.cells[2].id)
 
     assert plan is not None, "Expected cascade plan for stale upstream"
-    # Check plan structure
     assert plan.plan_id
     assert plan.target_cell_id
     assert isinstance(plan.steps, list)
     assert plan.estimated_duration_ms >= 0
 
-    # Each step should be a CascadeStep
     for step in plan.steps:
         assert step.cell_id
         assert step.cell_name
@@ -105,7 +93,6 @@ def test_cascade_plan_topological_order(temp_pipeline):
     """Test that cascade plan steps are in topological order."""
     session, _ = temp_pipeline
 
-    # Mark first cell as stale
     session.notebook_state.cells[0].status = "stale"
 
     planner = CascadePlanner(session)
@@ -113,8 +100,6 @@ def test_cascade_plan_topological_order(temp_pipeline):
 
     assert plan is not None, "Expected cascade plan for stale upstream"
     if len(plan.steps) > 1:
-        # Steps should be in topological order
-        # i.e., dependencies should come before dependents
         step_indices = {step.cell_id: i for i, step in enumerate(plan.steps)}
 
         for i, step in enumerate(plan.steps):
@@ -123,7 +108,6 @@ def test_cascade_plan_topological_order(temp_pipeline):
                 None,
             )
             if cell:
-                # All upstream cells should appear before this cell
                 for upstream_id in cell.upstream_ids:
                     if upstream_id in step_indices:
                         assert step_indices[upstream_id] < i, (
@@ -137,7 +121,6 @@ def test_cascade_plan_includes_target(temp_pipeline):
 
     planner = CascadePlanner(session)
 
-    # Mark upstream as stale
     session.notebook_state.cells[0].status = "stale"
 
     target_cell_id = session.notebook_state.cells[-1].id
@@ -147,7 +130,6 @@ def test_cascade_plan_includes_target(temp_pipeline):
     cell_ids = [step.cell_id for step in plan.steps]
     assert target_cell_id in cell_ids, "Target cell should be included in cascade plan"
 
-    # Target should have reason='target'
     target_step = next((s for s in plan.steps if s.cell_id == target_cell_id), None)
     assert target_step is not None
     assert target_step.reason == "target"
@@ -157,25 +139,22 @@ def test_cascade_plan_skip_ready_cells(temp_pipeline):
     """Test that ready (cached) cells are marked to skip."""
     session, _ = temp_pipeline
 
-    # Mark some cells as ready
     session.notebook_state.cells[0].status = "ready"
 
     planner = CascadePlanner(session)
 
-    # Mark another cell as stale
     session.notebook_state.cells[1].status = "stale"
 
     plan = planner.plan(session.notebook_state.cells[-1].id)
 
     assert plan is not None, "Expected cascade plan for stale upstream"
-    # Find the ready cell in the plan — it should be present and marked skip
+    # The ready cell may be marked skip or left out of the plan entirely.
     ready_cell_step = next(
         (s for s in plan.steps if s.cell_id == session.notebook_state.cells[0].id),
         None,
     )
     if ready_cell_step is not None:
         assert ready_cell_step.skip, "Ready cell step should be marked to skip"
-    # If ready cell is excluded from plan entirely, that's also acceptable
 
 
 def test_cascade_uses_last_non_cached_duration(temp_pipeline):
@@ -202,7 +181,6 @@ def test_cascade_planner_no_dag(temp_pipeline):
     planner = CascadePlanner(session)
     plan = planner.plan(session.notebook_state.cells[0].id)
 
-    # Should return None when no DAG
     assert plan is None
 
 
@@ -247,6 +225,5 @@ def test_cascade_plan_auto_generated_id():
     """Test that CascadePlan generates ID if not provided."""
     plan = CascadePlan(plan_id="", target_cell_id="test")
 
-    # Should have auto-generated an ID
     assert plan.plan_id
     assert len(plan.plan_id) > 0

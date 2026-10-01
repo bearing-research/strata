@@ -68,8 +68,7 @@ def large_warehouse(tmp_path):
 
     table = catalog.create_table("test_db.large_events", schema)
 
-    # Create enough data to make responses take time
-    # 10K rows with 1KB payload each = ~10MB
+    # Enough data that responses take time: 10K rows of 1KB each, ~10MB.
     num_rows = 10000
     payload_size = 1000
     data = pa.table(
@@ -107,34 +106,31 @@ class TestSemaphoreLeakRegression:
             port=port,
             cache_dir=tmp_path / "cache",
             artifact_dir=tmp_path / "artifacts",
-            max_concurrent_scans=5,  # Low limit to make leak visible quickly
-            scan_timeout_seconds=300.0,  # Server-side timeout (long)
+            max_concurrent_scans=5,  # Low limit, so a leak shows quickly
+            scan_timeout_seconds=300.0,
             deployment_mode="personal",
         )
 
         with run_server(config) as base_url:
             table_uri = large_warehouse["table_uri"]
 
-            # Phase 1: Force some client-side timeouts
-            # Use very short client timeout to ensure timeout happens
+            # Phase 1: force client-side timeouts.
             timeout_count = 0
             for i in range(10):
                 try:
                     with httpx.Client(timeout=0.001) as client:  # 1ms timeout
-                        # Create materialize request
                         resp = client.post(
                             f"{base_url}/v1/materialize",
                             json=build_materialize_request(table_uri),
-                            timeout=0.5,  # Longer timeout for POST
+                            timeout=0.5,  # Longer timeout for the POST
                         )
                         if resp.status_code == 200:
                             stream_url = resp.json()["stream_url"]
-                            # Try to stream - this should timeout
                             try:
                                 with client.stream(
                                     "GET",
                                     f"{base_url}{stream_url}",
-                                    timeout=0.001,  # Very short timeout
+                                    timeout=0.001,
                                 ) as stream:
                                     for _ in stream.iter_bytes():
                                         pass
@@ -143,19 +139,14 @@ class TestSemaphoreLeakRegression:
                 except Exception:
                     timeout_count += 1
 
-            # We should have had some timeouts
             assert timeout_count > 0, "Expected some client timeouts"
 
-            # Phase 2: Verify server is still healthy
-            # If semaphores leaked, this would eventually fail with 503
-            # Poll with retries to handle cleanup timing under load
+            # Phase 2: leaked semaphores would eventually show as 503s. Poll, since cleanup
+            # can lag under load.
             with httpx.Client(timeout=30.0) as client:
-                # Health check should pass
                 resp = client.get(f"{base_url}/health")
                 assert resp.status_code == 200
 
-                # Metrics should show reasonable active_scans
-                # Poll with retries - cleanup may be delayed under load
                 active_scans = None
                 for attempt in range(10):  # Up to 5 seconds total
                     time.sleep(0.5)
@@ -167,13 +158,13 @@ class TestSemaphoreLeakRegression:
                     if active_scans == 0:
                         break
 
-                # Key invariant: active_scans should be 0 after all requests complete
+                # The key invariant: no active scans once every request is done.
                 assert active_scans == 0, (
                     f"Semaphore leak detected! active_scans={active_scans} "
                     f"(should be 0 after all requests complete)"
                 )
 
-                # New materialize should succeed (not 503)
+                # A new materialize succeeds (not 503).
                 resp = client.post(
                     f"{base_url}/v1/materialize",
                     json=build_materialize_request(table_uri),
@@ -198,7 +189,7 @@ class TestSemaphoreLeakRegression:
         with run_server(config) as base_url:
             table_uri = large_warehouse["table_uri"]
 
-            # Phase 1: Start streams and disconnect after partial read
+            # Phase 1: disconnect after a partial read.
             for i in range(10):
                 with httpx.Client(timeout=10.0) as client:
                     resp = client.post(
@@ -210,7 +201,6 @@ class TestSemaphoreLeakRegression:
 
                     stream_url = resp.json()["stream_url"]
 
-                    # Start streaming but disconnect after reading some data
                     try:
                         with client.stream(
                             "GET",
@@ -224,10 +214,10 @@ class TestSemaphoreLeakRegression:
                     except Exception:
                         pass
 
-            # Give server time to clean up
+            # Give the server time to clean up.
             time.sleep(0.5)
 
-            # Phase 2: Verify no leak
+            # Phase 2: verify no leak.
             with httpx.Client(timeout=10.0) as client:
                 resp = client.get(f"{base_url}/metrics")
                 assert resp.status_code == 200
@@ -258,8 +248,7 @@ class TestSemaphoreLeakRegression:
         with run_server(config) as base_url:
             table_uri = large_warehouse["table_uri"]
 
-            # Phase 1: Force more timeouts than max_concurrent_scans
-            # If there's a leak, we'll exhaust slots after max_scans timeouts
+            # Phase 1: more timeouts than slots; a leak exhausts the slots after max_scans.
             num_timeouts = max_scans * 3
 
             for i in range(num_timeouts):
@@ -285,13 +274,11 @@ class TestSemaphoreLeakRegression:
                 except Exception:
                     pass
 
-            # Give server time to clean up
+            # Give the server time to clean up.
             time.sleep(0.5)
 
-            # Phase 2: Verify we can still make requests (no 503)
+            # Phase 2: even after many timeouts, no 503 "Server at capacity".
             with httpx.Client(timeout=30.0) as client:
-                # This is the key assertion: even after many timeouts,
-                # we should NOT get 503 "Server at capacity"
                 resp = client.post(
                     f"{base_url}/v1/materialize",
                     json=build_materialize_request(table_uri),
@@ -342,21 +329,20 @@ class TestSemaphoreLeakRegression:
                                 async for chunk in stream.aiter_bytes(chunk_size=512):
                                     bytes_read += len(chunk)
                                     if bytes_read > 500:
-                                        # Force disconnect by breaking
                                         break
                         except Exception:
                             pass
                     except Exception:
                         pass
 
-            # Phase 1: Many concurrent disconnects
+            # Phase 1: many concurrent disconnects.
             tasks = [disconnect_after_partial_read() for _ in range(20)]
             await asyncio.gather(*tasks, return_exceptions=True)
 
-            # Give server time to clean up
+            # Give the server time to clean up.
             await asyncio.sleep(0.5)
 
-            # Phase 2: Verify no leak
+            # Phase 2: verify no leak.
             async with httpx.AsyncClient(timeout=10.0) as client:
                 resp = await client.get(f"{base_url}/metrics")
                 assert resp.status_code == 200
@@ -386,7 +372,7 @@ class TestSemaphoreInvariants:
         with run_server(config) as base_url:
             table_uri = large_warehouse["table_uri"]
 
-            # Do a bunch of requests with various outcomes
+            # Requests with mixed outcomes.
             for _ in range(20):
                 with httpx.Client(timeout=5.0) as client:
                     try:
@@ -396,7 +382,7 @@ class TestSemaphoreInvariants:
                         )
                         if resp.status_code == 200:
                             stream_url = resp.json()["stream_url"]
-                            # Sometimes complete, sometimes disconnect
+                            # Sometimes complete, sometimes disconnect.
                             try:
                                 with client.stream(
                                     "GET",
@@ -409,7 +395,7 @@ class TestSemaphoreInvariants:
                     except Exception:
                         pass
 
-                    # Check invariant after each request
+                    # Check the invariant after each request.
                     try:
                         resp = client.get(f"{base_url}/metrics")
                         if resp.status_code == 200:
@@ -433,7 +419,6 @@ class TestSemaphoreInvariants:
         )
 
         with run_server(config) as base_url:
-            # Check metrics
             with httpx.Client(timeout=5.0) as client:
                 resp = client.get(f"{base_url}/metrics")
                 assert resp.status_code == 200

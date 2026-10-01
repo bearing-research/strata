@@ -21,7 +21,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Literal
 
-# Python 3.10 compatibility: UTC is in timezone module
+# Python 3.10 has no datetime.UTC.
 try:
     from datetime import UTC
 except ImportError:
@@ -44,9 +44,7 @@ from strata_client.client import StrataClient
 
 from strata.config import StrataConfig
 
-# =============================================================================
 # Global-state isolation
-# =============================================================================
 
 
 def prepared_venv(notebook_dir: Path) -> None:
@@ -123,13 +121,9 @@ def _reset_process_globals():
     yield
     import strata.server as server_module
 
-    # Drain pending stream-cleanup tasks before dropping the state. Production
-    # does this in graceful shutdown (``_graceful_shutdown`` →
-    # ``streams.shutdown_cleanups()``), but tests that bypass the lifespan (a
-    # bare ``TestClient(app)``) would otherwise orphan the TTL tasks, which
-    # surface as "no running event loop" / "Task was destroyed but it is
-    # pending" noise once their loop closes. ``shutdown_cleanups`` only cancels
-    # tasks, so it never raises.
+    # Drain stream-cleanup tasks: tests that bypass the lifespan (a bare
+    # ``TestClient(app)``) would otherwise orphan the TTL tasks, which log "Task was
+    # destroyed but it is pending" once their loop closes. This only cancels, so it never raises.
     state = server_module._state
     if state is not None:
         streams = getattr(state, "streams", None)
@@ -144,48 +138,30 @@ def _reset_process_globals():
 
     reset_artifact_store()
     reset_tenant_registry()
-    # The metadata store is a process global, and a no-arg
-    # ``get_metadata_store()`` now returns whatever store is already installed
-    # rather than rebuilding from ``~/.strata/cache``. So a test that installs
-    # one for its own tmp_path would otherwise stay in force for every later
-    # no-arg caller on the same worker — including ``GET /metrics`` and
-    # ``POST /v1/metadata/cleanup``, which would then report on (and delete
-    # rows from) an unrelated database.
+    # The metadata store is a process global and a no-arg ``get_metadata_store()``
+    # returns the installed one, so a test's store would leak into later callers
+    # (including ``GET /metrics`` and ``POST /v1/metadata/cleanup``).
     reset_caches()
-    # The rate limiter is a process global. A server test that initializes it
-    # (e.g. via lifespan) leaves a token bucket that a later test using the app
-    # without lifespan inherits — surfacing as a spurious 429 once the bucket is
-    # drained. Reset so every test starts with rate limiting disabled (None).
+    # The rate limiter is a process global; a drained bucket left by one test
+    # shows up as a spurious 429 in the next.
     reset_rate_limiter()
     # Vended lake credentials are registered per table location by whichever
     # test planned against a named catalog; a later test must not read with them.
     from strata.lake_files import reset as reset_lake_files
 
     reset_lake_files()
-    # The build runner is a process global too, and the one whose leftovers are
-    # not merely stale but *loop-bound*: its heartbeat task belongs to the loop
-    # that started it. A test that leaves one registered hands the next
-    # lifespan on this worker a runner it cannot await, which surfaced as an
-    # intermittent "got Future ... attached to a different loop" teardown error
-    # on whichever test happened to follow.
+    # The build runner's heartbeat task is bound to the loop that started it; a
+    # leftover runner breaks the next lifespan's teardown ("attached to a different loop").
     _reset_transform_singletons()
 
 
-# =============================================================================
-# Common Utility Functions
-# =============================================================================
+# Common utility functions
 
 
-# The S3 emulator every MinIO-backed test starts, in one place. The pin used to
-# be written out in each file, and it split: three pulled from quay.io and two
-# from Docker Hub, the same tag either way. Both registries have since stopped
-# serving MinIO without credentials (every tag, ``latest`` included), which
-# failed Integration Tests on every branch.
-#
-# Chainguard still publishes it anonymously. Its free tier offers only
-# ``latest``, which would let CI change underneath a passing commit, so this is
-# pinned by digest instead. To move it: ``docker pull cgr.dev/chainguard/minio``
-# and take the digest from ``docker inspect --format '{{index .RepoDigests 0}}'``.
+# Chainguard still serves MinIO anonymously (quay.io and Docker Hub no longer do).
+# Its free tier only has ``latest``, so pin by digest. To move it:
+# ``docker pull cgr.dev/chainguard/minio`` and take the digest from
+# ``docker inspect --format '{{index .RepoDigests 0}}'``.
 _MINIO_DIGEST = "sha256:bd014394a80898e68c149f2311fdf8d5a2c2f3bb2c33b9327ae6d02b4b065ae1"
 MINIO_IMAGE = f"cgr.dev/chainguard/minio@{_MINIO_DIGEST}"
 
@@ -280,9 +256,7 @@ def wait_for_server(
     return False
 
 
-# =============================================================================
-# IPC Conversion Helpers
-# =============================================================================
+# IPC conversion helpers
 
 
 def table_to_ipc_bytes(table: pa.Table) -> bytes:
@@ -313,9 +287,7 @@ def ipc_bytes_to_table(data: bytes) -> pa.Table:
     return reader.read_all()
 
 
-# =============================================================================
-# Server Context Managers
-# =============================================================================
+# Server context managers
 
 
 @dataclass
@@ -358,25 +330,19 @@ def run_server(config: StrataConfig, reset_caches: bool = False) -> Iterator[str
     from strata.artifact_store import reset_artifact_store
     from strata.server import ServerState, app
 
-    # Reset global caches if requested (for test isolation)
     if reset_caches:
         from strata.metadata_cache import reset_caches as do_reset_caches
 
         do_reset_caches()
 
-    # Reset artifact store singleton for test isolation across server runs.
     reset_artifact_store()
     _reset_transform_singletons()
 
-    # Initialize server state
     server_module._state = ServerState(config)
 
-    # Start server in background thread. Use a uvicorn.Server handle (not
-    # uvicorn.run) so teardown can actually STOP it — orphaned daemon
-    # servers accumulate across the suite, each carrying a live build
-    # runner poll loop since personal mode gained the embedded runner,
-    # and that load made loaded CI runners (Windows 3.13/3.14) start
-    # refusing connections mid-suite.
+    # A uvicorn.Server handle (not uvicorn.run) so teardown can stop it: orphaned
+    # servers each keep a build-runner poll loop, and that load makes busy CI runners
+    # refuse connections mid-suite.
     server_config = uvicorn.Config(
         app=app,
         host=config.host,
@@ -390,10 +356,8 @@ def run_server(config: StrataConfig, reset_caches: bool = False) -> Iterator[str
     server_thread = threading.Thread(target=server_instance.run, daemon=True)
     server_thread.start()
 
-    # Wait for server to be ready. The window is generous because every
-    # personal-mode server also spins up the embedded build-runner poll loop, and
-    # under CI load (notably the new Windows 3.14 runner) startup can lag well past
-    # a few seconds — a too-tight timeout turns that into a spurious failure.
+    # Generous window: the embedded build-runner poll loop can delay startup well
+    # past a few seconds under CI load.
     base_url = f"http://{config.host}:{config.port}"
     for _ in range(200):  # 20 second timeout
         try:
@@ -411,8 +375,7 @@ def run_server(config: StrataConfig, reset_caches: bool = False) -> Iterator[str
         yield base_url
     finally:
         # Join generously so the lifespan shutdown (which stops the build runner)
-        # actually completes — a 2s join abandoned slow-stopping threads, and the
-        # orphaned runners accumulated and starved later servers' startup.
+        # completes; abandoned threads leave runners that starve later servers' startup.
         server_instance.should_exit = True
         server_thread.join(timeout=15.0)
         server_module._state = None
@@ -451,14 +414,9 @@ def run_server_with_context(
 
     port = find_free_port()
 
-    # Request-rate limiting off unless a test asks for it. The limiter defends
-    # a real deployment from a hostile caller; in-process it just polices the
-    # test itself, and every fixture server sees one client (127.0.0.1) making
-    # a burst of legitimate requests. With the default 20-token burst, a test
-    # that materializes an artifact and then drives the registry can exhaust
-    # it, and the 429 lands on whichever request happens to be next — which is
-    # how test_reject_discards_change reported a 404 ("no pending change")
-    # after its setup PUT was silently rejected (#627).
+    # Rate limiting off unless a test asks for it: every fixture server sees one
+    # client making bursts of legitimate requests, and the default 20-token burst
+    # can 429 a test's own setup requests.
     config_overrides.setdefault("rate_limit_enabled", False)
     config = StrataConfig(
         host="127.0.0.1",
@@ -509,9 +467,7 @@ def run_server_with_context(
         _reset_transform_singletons()
 
 
-# =============================================================================
 # Fixtures
-# =============================================================================
 
 
 @pytest.fixture
@@ -540,10 +496,9 @@ def temp_warehouse(tmp_path):
         },
     )
 
-    # Create namespace
     catalog.create_namespace("test_db")
 
-    # Define schema - use optional fields to match PyArrow defaults
+    # Optional fields to match PyArrow defaults.
     schema = Schema(
         NestedField(1, "id", LongType(), required=False),
         NestedField(2, "value", DoubleType(), required=False),
@@ -551,10 +506,8 @@ def temp_warehouse(tmp_path):
         NestedField(4, "timestamp", LongType(), required=False),  # Epoch micros
     )
 
-    # Create table
     table = catalog.create_table("test_db.events", schema)
 
-    # Create sample data with multiple row groups
     num_rows = 500
     base_ts = int(datetime(2024, 1, 1, tzinfo=UTC).timestamp() * 1_000_000)
     data = pa.table(
@@ -569,17 +522,11 @@ def temp_warehouse(tmp_path):
         }
     )
 
-    # Append data to table
     table.append(data)
 
-    # Release the fixture's write connection to catalog.db. Otherwise it stays
-    # open for the whole test while the *server* opens a second SqlCatalog on
-    # the same SQLite file — and on tmpfs + Python 3.14 that two-connection
-    # overlap intermittently trips ``SQLITE_IOERR`` ("disk I/O error") in the
-    # server's catalog read (the test_cache_warm_endpoint flake). Disposing the
-    # engine flushes and closes the write connection so the server reads a
-    # clean, single-owner file; the returned ``catalog`` reconnects lazily if a
-    # test uses it again.
+    # Close the fixture's write connection to catalog.db: overlapping with the
+    # server's own SqlCatalog connection intermittently trips ``SQLITE_IOERR`` on
+    # tmpfs + Python 3.14. The returned ``catalog`` reconnects lazily.
     catalog.engine.dispose()
 
     return {
@@ -619,7 +566,6 @@ def server_with_client(temp_warehouse, tmp_path):
         deployment_mode="personal",
     )
 
-    # Initialize state manually for testing
     server_module._state = ServerState(config)
 
     # uvicorn.Server handle so teardown can stop it (see run_server).
@@ -636,7 +582,6 @@ def server_with_client(temp_warehouse, tmp_path):
     server_thread = threading.Thread(target=server_instance.run, daemon=True)
     server_thread.start()
 
-    # Wait for server to start
     if not wait_for_server(port, thread=server_thread):
         raise RuntimeError(
             f"Server failed to start on port {port} "

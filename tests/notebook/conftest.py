@@ -15,15 +15,8 @@ import uvicorn
 from strata.config import StrataConfig
 from tests.conftest import find_free_port, prepared_venv, wait_for_server
 
-# ---------------------------------------------------------------------------
-# R availability — central skip markers for integration tests
-# ---------------------------------------------------------------------------
-#
-# R-based tests live in a few spots (analyzer integration, executor
-# integration, the cross-language capstone in #59). Each one used to
-# roll its own ``shutil.which("Rscript")`` skipif; consolidate them
-# here so the skip reason wording stays consistent and the arrow-
-# package probe doesn't get duplicated across files.
+# R availability: central skip markers, so the skip wording and the arrow
+# package probe live in one place.
 
 
 def _r_package_available(package: str) -> bool:
@@ -183,10 +176,9 @@ def fast_notebook_env(monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRe
         _advertises = _workers.worker_advertises
         monkeypatch.setattr(_workers, "worker_advertises", _no_locked_environments)
 
-    # The production WS handler holds onto execution + inspect state for
-    # 60s after the last disconnect so a reconnecting client doesn't lose
-    # a running cell. In tests we want the teardown to fire immediately
-    # on context exit unless a specific test exercises the grace window.
+    # Production keeps execution state 60s after the last disconnect so a
+    # reconnecting client can resume; tests tear down on context exit unless they
+    # exercise the grace window.
     monkeypatch.setattr("strata.notebook.ws._GRACE_CANCEL_SECONDS", 0.0)
 
     if request.node.get_closest_marker("integration"):
@@ -230,7 +222,6 @@ def notebook_executor_server(monkeypatch):
         log_level="warning",
         # Match production (server.main): default ws="auto" imports uvicorn's
         # legacy websockets backend (DeprecationWarning; broken on CPython 3.14).
-        # These notebook fixtures serve the live WS surface, so use sans-I/O.
         ws="websockets-sansio",
     )
     server = uvicorn.Server(server_config)
@@ -283,7 +274,6 @@ def notebook_build_server(tmp_path: Path):
         log_level="warning",
         # Match production (server.main): default ws="auto" imports uvicorn's
         # legacy websockets backend (DeprecationWarning; broken on CPython 3.14).
-        # These notebook fixtures serve the live WS surface, so use sans-I/O.
         ws="websockets-sansio",
     )
     server = uvicorn.Server(server_config)
@@ -337,7 +327,6 @@ def notebook_personal_server(tmp_path: Path):
         log_level="warning",
         # Match production (server.main): default ws="auto" imports uvicorn's
         # legacy websockets backend (DeprecationWarning; broken on CPython 3.14).
-        # These notebook fixtures serve the live WS surface, so use sans-I/O.
         ws="websockets-sansio",
     )
     server = uvicorn.Server(server_config)
@@ -362,9 +351,7 @@ def notebook_personal_server(tmp_path: Path):
         reset_build_store()
 
 
-# ---------------------------------------------------------------------------
 # R-enabled notebook factory
-# ---------------------------------------------------------------------------
 
 
 @pytest.fixture
@@ -431,11 +418,9 @@ def r_notebook(tmp_path: Path):
     return _make
 
 
-# Canonical minimal renv project committed under tests/notebook/fixtures/.
-# Pins only ``jsonlite`` (binary, restores in seconds from CRAN/RSPM or
-# renv's global cache) so a real ``renv::restore`` stays fast in CI. The
-# built ``renv/library`` is deliberately absent — restoring it is the
-# point of the integration test.
+# Minimal renv project pinning only ``jsonlite`` (a fast binary restore), so a
+# real ``renv::restore`` stays quick in CI. ``renv/library`` is absent on
+# purpose: restoring it is the point of the integration test.
 _RENV_JSONLITE_FIXTURE = Path(__file__).parent / "fixtures" / "renv_jsonlite"
 
 

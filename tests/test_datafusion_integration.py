@@ -28,7 +28,6 @@ class TestRegisterStrataTable:
 
         assert "events" in ctx.catalog().schema("public").table_names()
 
-        # Query the table
         result = ctx.sql("SELECT COUNT(*) as cnt FROM events").collect()
         assert len(result) == 1
         assert result[0].column("cnt")[0].as_py() == 500
@@ -45,7 +44,6 @@ class TestRegisterStrataTable:
             base_url=f"http://127.0.0.1:{config.port}",
         )
 
-        # Query should work with projected columns
         result = ctx.sql("SELECT id, value FROM events LIMIT 5").collect()
         assert len(result) == 1
         assert result[0].num_rows == 5
@@ -55,11 +53,9 @@ class TestRegisterStrataTable:
         config = server_with_client["config"]
         table_uri = server_with_client["warehouse"]["table_uri"]
 
-        # Create context first
         ctx = datafusion.SessionContext()
         assert len(ctx.catalog().schema("public").table_names()) == 0
 
-        # Register table
         returned_ctx = register_strata_table(
             "events",
             table_uri,
@@ -67,7 +63,6 @@ class TestRegisterStrataTable:
             base_url=f"http://127.0.0.1:{config.port}",
         )
 
-        # Should be same context
         assert returned_ctx is ctx
         assert "events" in ctx.catalog().schema("public").table_names()
 
@@ -83,7 +78,6 @@ class TestRegisterStrataTable:
             base_url=f"http://127.0.0.1:{config.port}",
         )
 
-        # Verify table is queryable
         result = ctx.sql("SELECT * FROM events").collect()
         assert len(result) > 0
 
@@ -103,7 +97,6 @@ class TestStrataQuery:
         )
 
         assert len(result) > 0
-        # DataFusion returns RecordBatches
         total_rows = sum(batch.num_rows for batch in result)
         assert total_rows == 10
 
@@ -155,7 +148,6 @@ class TestStrataDataFusionContext:
         table_uri = server_with_client["warehouse"]["table_uri"]
 
         with StrataDataFusionContext(base_url=f"http://127.0.0.1:{config.port}") as ctx:
-            # Register same table twice with different names for testing
             ctx.register("events1", table_uri, columns=["id"])
             ctx.register("events2", table_uri, columns=["value"])
 
@@ -180,7 +172,6 @@ class TestStrataDataFusionContext:
             ctx.register("events", table_uri)
             df = ctx.table("events")
 
-            # Should be a DataFusion DataFrame
             assert hasattr(df, "select")
             assert hasattr(df, "filter")
             assert hasattr(df, "collect")
@@ -238,7 +229,6 @@ class TestDataFusionDataFrameAPI:
         with StrataDataFusionContext(base_url=f"http://127.0.0.1:{config.port}") as ctx:
             ctx.register("events", table_uri)
 
-            # Filter using DataFusion expressions
             result = ctx.table("events").filter(datafusion.col("id") < datafusion.lit(10)).collect()
 
             total_rows = sum(batch.num_rows for batch in result)

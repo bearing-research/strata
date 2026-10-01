@@ -106,7 +106,6 @@ class TestCacheStatsHistogram:
 
         histogram = CacheStatsHistogram()
 
-        # 3 hits, 1 miss = 75% hit rate
         histogram.record_hit(bytes_accessed=100)
         histogram.record_hit(bytes_accessed=100)
         histogram.record_hit(bytes_accessed=100)
@@ -123,11 +122,9 @@ class TestCacheStatsHistogram:
 
         histogram = CacheStatsHistogram()
 
-        # Record some events
         histogram.record_hit(bytes_accessed=100)
         histogram.record_miss(bytes_accessed=200)
 
-        # Get 60-second window stats
         window_stats = histogram.get_window_stats(60)
 
         assert window_stats.window_seconds == 60
@@ -156,7 +153,6 @@ class TestCacheStatsHistogram:
 
         histogram = CacheStatsHistogram()
 
-        # Record accesses for different tables
         histogram.record_hit(bytes_accessed=100, table_id="db.table1")
         histogram.record_hit(bytes_accessed=100, table_id="db.table1")
         histogram.record_miss(bytes_accessed=100, table_id="db.table1")
@@ -164,7 +160,6 @@ class TestCacheStatsHistogram:
 
         table_stats = histogram.get_table_stats()
 
-        # table1 has more accesses, should be first
         assert len(table_stats) >= 2
         assert table_stats[0]["table_id"] == "db.table1"
         assert table_stats[0]["total"] == 3
@@ -226,13 +221,11 @@ class TestGlobalHistogram:
         hist1 = get_cache_histogram()
         hist2 = get_cache_histogram()
 
-        # Should return same instance
         assert hist1 is hist2
 
         reset_cache_histogram()
         hist3 = get_cache_histogram()
 
-        # After reset, should be new instance
         assert hist3 is not hist1
 
 
@@ -277,7 +270,6 @@ class TestCacheHistogramIntegration:
                 assert "misses" in data["lifetime"]
                 assert "hit_rate" in data["lifetime"]
 
-                # Should have 3 default windows
                 assert len(data["windows"]) == 3
         finally:
             server_module._state._planning_executor.shutdown(wait=False)
@@ -301,8 +293,8 @@ class TestWindowsCoverTheirFullDuration:
 
         histogram = CacheStatsHistogram()
 
-        # Comfortably past the old 10,000-event buffer. These all land within
-        # a second or two, so every one of them is inside the 60s window.
+        # Well past a 10,000-event buffer. These all land within a second or
+        # two, so every one is inside the 60s window.
         for i in range(25_000):
             if i % 10:
                 histogram.record_hit(bytes_accessed=100)
@@ -316,7 +308,7 @@ class TestWindowsCoverTheirFullDuration:
         assert window.misses == 2_500
         assert window.bytes_from_cache == 22_500 * 100
         assert window.bytes_from_storage == 2_500 * 100
-        # And it agrees with the lifetime counters, which were always exact.
+        # It must agree with the lifetime counters, which are exact.
         assert window.total == histogram.get_lifetime_stats()["total"]
 
     def test_buckets_older_than_the_window_are_excluded(self):
@@ -333,8 +325,8 @@ class TestWindowsCoverTheirFullDuration:
         histogram.record_hit(bytes_accessed=100)
 
         now_second = int(time.time())
-        # The slot for "one full ring ago" is the same slot as now, one lap
-        # back. Stamp it as that older second with counts nothing should see.
+        # The slot for "one full ring ago" is the same slot as now, one lap back.
+        # Stamp it as that older second with counts nothing should see.
         stale_second = now_second - histogram._depth
         slot = stale_second % histogram._depth
         histogram._bucket_second[slot] = stale_second

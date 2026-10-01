@@ -19,25 +19,19 @@ class TestMutationDetection:
 
     def test_dataframe_mutation_detection(self):
         """Test detecting DataFrame mutation via inplace operation."""
-        # Create a DataFrame
         df = pd.DataFrame({"a": [1, 2, 3], "b": [4.0, 5.0, 6.0]})
 
-        # Create namespace with the DataFrame
         namespace = {"df": df}
 
-        # Take snapshot
         snapshots = snapshot_inputs(namespace, ["df"])
         assert len(snapshots) == 1
         assert snapshots[0].var_name == "df"
         assert snapshots[0].content_hash is not None
 
-        # Mutate the DataFrame
         df.drop("a", axis=1, inplace=True)
 
-        # Detect mutations
         warnings = detect_mutations(namespace, snapshots)
 
-        # Should detect the mutation
         assert len(warnings) > 0
         assert "mutated" in warnings[0]["message"].lower()
 
@@ -46,17 +40,14 @@ class TestMutationDetection:
         df = pd.DataFrame({"a": [1, 2, 3]})
         namespace = {"df": df}
 
-        # Take snapshot
         snapshots = snapshot_inputs(namespace, ["df"])
         original_id = snapshots[0].identity
 
-        # Reassign the variable
         namespace["df"] = df.drop("a", axis=1)
 
-        # The new DataFrame has a different id
         assert id(namespace["df"]) != original_id
 
-        # Should NOT detect mutation (identity changed)
+        # No mutation: the identity changed.
         warnings = detect_mutations(namespace, snapshots)
         assert len(warnings) == 0
 
@@ -65,15 +56,13 @@ class TestMutationDetection:
         df = pd.DataFrame({"a": [1, 2, 3], "b": [4.0, 5.0, 6.0]})
         namespace = {"df": df}
 
-        # Take snapshot
         snapshots = snapshot_inputs(namespace, ["df"])
 
-        # Read-only operations (these don't mutate)
+        # Read-only operations
         _ = df.describe()
         _ = df.shape
         _ = df.loc[0]
 
-        # Should NOT detect mutations
         warnings = detect_mutations(namespace, snapshots)
         assert len(warnings) == 0
 
@@ -85,7 +74,6 @@ class TestMutationDetection:
 
         namespace = {"df1": df1, "df2": df2, "scalar": scalar}
 
-        # Take snapshot of all inputs
         snapshots = snapshot_inputs(namespace, ["df1", "df2", "scalar"])
 
         assert len(snapshots) == 3
@@ -98,10 +86,8 @@ class TestMutationDetection:
         df = pd.DataFrame({"a": [1, 2, 3]})
         namespace = {"df": df}
 
-        # Take snapshot
         snapshots = snapshot_inputs(namespace, ["df"])
 
-        # Delete the variable
         del namespace["df"]
 
         # detect_mutations flags deleted variables as mutations
@@ -117,7 +103,6 @@ class TestMutationDetection:
         # Arrow IPC doesn't need a copy (deserialization produces new object)
         copy_df = apply_defensive_copy(df, "arrow/ipc")
 
-        # For arrow, we return the same object (no copy needed)
         assert copy_df is df
 
     def test_defensive_copy_json(self):
@@ -127,7 +112,6 @@ class TestMutationDetection:
         # JSON objects get shallow copy
         copy_data = apply_defensive_copy(data, "json/object")
 
-        # Should be a different object
         assert copy_data is not data
 
         # But shallow copy means nested objects are shared
@@ -146,10 +130,8 @@ class TestMutationDetection:
         # Pickle objects get deep copy
         copy_obj = apply_defensive_copy(obj, "pickle/object")
 
-        # Should be a different object
         assert copy_obj is not obj
 
-        # But values should be equal
         assert copy_obj.value == obj.value
 
 
@@ -345,7 +327,7 @@ class TestTorchFingerprint:
         assert not self._warned(fake_torch.Tensor([1.0, 2.0, 3.0]), lambda t: t.numpy().sum())
 
     def test_torch_detected_without_importing_torch(self, fake_torch):
-        # The rule probes sys.modules — a tensor implies torch is already there.
+        # The rule probes sys.modules; a tensor implies torch is already imported.
         import sys
 
         snapshots = snapshot_inputs({"v": fake_torch.Tensor([1, 2, 3])}, ["v"])
@@ -365,7 +347,7 @@ class TestSharedMutableOutputs:
         assert "'b'" in warnings[0]["message"]
 
     def test_independent_outputs_not_flagged(self):
-        # Equal but not identical — no shared identity, no decoupling risk.
+        # Equal but not identical: no shared identity, no decoupling risk.
         assert detect_shared_mutable_outputs({"a": {"d": [1, 2]}, "b": {"d": [1, 2]}}) == []
 
     def test_optimizer_model_analog_flagged(self):

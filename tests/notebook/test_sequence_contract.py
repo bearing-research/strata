@@ -28,9 +28,8 @@ from strata.notebook.parser import parse_notebook
 from strata.notebook.session import NotebookSession
 from strata.notebook.writer import add_cell_to_notebook, create_notebook, write_cell
 
-# Both streams: an execution emits a console frame per stream plus its result,
-# and those three are what used to share one number. A cell writing to only one
-# of them leaves the grouping invisible.
+# Print to both streams: a run emits a console frame per stream plus its result,
+# and a cell writing to only one stream hides the grouping.
 PRINTS_AND_SUCCEEDS = (
     "import sys\nprint('from a')\nprint('a warning', file=sys.stderr)\nrows = [1, 2, 3]\nrows\n"
 )
@@ -66,9 +65,8 @@ def _assert_one_sequence_each(observer: Observer, label: str) -> None:
         raise AssertionError(f"{label}: frames share a sequence: {shared}")
     assert seqs == sorted(seqs), f"{label}: frames went out of order: {seqs}"
 
-    # And no number without a frame behind it. A sequence drawn and not sent
-    # reads as a gap, which the reference tells a client to resync on, so
-    # burning one on every run would replace its whole state each time.
+    # No number without a frame behind it: an unsent sequence reads as a gap, which
+    # clients resync on, so burning one per run would reset their state each time.
     missing = sorted(set(range(seqs[0], seqs[-1] + 1)) - set(seqs))
     assert not missing, f"{label}: numbers drawn with no frame sent: {missing}"
 

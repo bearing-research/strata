@@ -58,7 +58,7 @@ class TestNameInPromptAnalyzer:
         from strata.notebook.prompt_analyzer import analyze_prompt_cell
 
         result = analyze_prompt_cell("# @name Research Themes\nHello {{ x }}")
-        # Non-identifier name is rejected — falls back to default "result"
+        # A non-identifier name is rejected and falls back to the default "result".
         assert result.name == "result"
 
 

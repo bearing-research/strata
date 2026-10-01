@@ -76,8 +76,7 @@ def test_capabilities_match_design_doc():
     assert a.sqlglot_dialect == "postgres"
     assert a.capabilities.per_table_freshness is True
     assert a.capabilities.supports_snapshot is False
-    # Postgres stats freeze inside an open txn — probe needs its own
-    # connection.
+    # Postgres stats freeze inside an open txn, so the probe needs its own connection.
     assert a.capabilities.needs_separate_probe_conn is True
 
 
@@ -437,8 +436,8 @@ def test_probe_freshness_lets_search_path_resolve_unqualified_name():
     a.probe_freshness(conn, [QualifiedTable(catalog=None, schema=None, name="events")])
     sql, params = cursor.executions[0]
     assert "to_regclass" in sql
-    # Single-component identifier — Postgres resolves it through the
-    # connection's actual search_path, not a hardcoded "public".
+    # A single-component identifier resolves through the connection's search_path,
+    # not a hardcoded "public".
     assert params == ('"events"',)
 
 
@@ -661,9 +660,7 @@ def test_every_advertised_builtin_driver_registers():
         register_default_adapters()
         registered = set(known_drivers())
         for module_name in builtin_driver_names():
-            # The module name in drivers/ is also the adapter's
-            # registered name — this is a convention every built-in
-            # driver follows.
+            # Every built-in driver registers under its module name in drivers/.
             assert module_name in registered, (
                 f"built-in driver module {module_name!r} did not "
                 f"register its adapter; known after register: {registered}"

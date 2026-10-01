@@ -33,7 +33,7 @@ def temp_warehouse(tmp_path):
     warehouse_path = tmp_path / "warehouse"
     warehouse_path.mkdir()
 
-    # Create a SQL catalog - use "strata" to match PyIcebergCatalog
+    # "strata" matches PyIcebergCatalog.
     catalog = SqlCatalog(
         "strata",
         **{
@@ -42,10 +42,9 @@ def temp_warehouse(tmp_path):
         },
     )
 
-    # Create namespace
     catalog.create_namespace("test_db")
 
-    # Define schema - use optional fields to match PyArrow defaults
+    # Optional fields match PyArrow defaults.
     schema = Schema(
         NestedField(1, "id", LongType(), required=False),
         NestedField(2, "value", DoubleType(), required=False),
@@ -53,10 +52,8 @@ def temp_warehouse(tmp_path):
         NestedField(4, "timestamp", LongType(), required=False),  # Epoch micros
     )
 
-    # Create table
     table = catalog.create_table("test_db.events", schema)
 
-    # Create sample data with multiple row groups
     num_rows = 500
     base_ts = int(datetime(2024, 1, 1, tzinfo=UTC).timestamp() * 1_000_000)
     data = pa.table(
@@ -71,15 +68,11 @@ def temp_warehouse(tmp_path):
         }
     )
 
-    # Append data to table
     table.append(data)
 
-    # Dispose the SQLAlchemy engine now (not at teardown). The server
-    # under test opens its own SqlCatalog against the same catalog.db,
-    # and on Linux + Python 3.14 + tmpfs the dual-connection pattern
-    # intermittently surfaces SQLITE_IOERR during the server's planner
-    # read (see test_cache_warm_endpoint flakes 2026-05-20). Tests
-    # never use catalog/table from the yielded dict after this point.
+    # Dispose the engine now, not at teardown: the server opens its own SqlCatalog on
+    # the same catalog.db, and on Linux + Python 3.14 + tmpfs the two connections
+    # intermittently hit SQLITE_IOERR. Nothing uses catalog/table after this point.
     catalog.engine.dispose()
 
     yield {
@@ -136,7 +129,6 @@ class TestCacheKey:
         hex_digest = key.to_hex()
         assert len(hex_digest) == 64  # SHA-256 hex digest
         assert hex_digest == key.to_hex()  # Deterministic
-        # table_id property should return canonical string
         assert key.table_id == "strata.test_db.events"
 
     def test_projection_fingerprint(self):
@@ -146,18 +138,16 @@ class TestCacheKey:
         fp_same = CacheKey.compute_projection_fingerprint(["a", "b", "c"])
         fp_all = CacheKey.compute_projection_fingerprint(None)
 
-        # Column order matters - different order means different fingerprint
+        # Column order matters.
         assert fp1 != fp2
-        # Same columns in same order should have same fingerprint
         assert fp1 == fp_same
-        # Different columns should have different fingerprint
         assert fp1 != fp3
-        # None means all columns
+        # None means all columns.
         assert fp_all == "*"
 
     def test_a_comma_in_a_column_name_is_not_a_separator(self):
-        # Iceberg and Parquet both allow "a,b" as one column name, and it
-        # used to share a fingerprint, so a cache key, with ["a", "b"].
+        # Iceberg and Parquet both allow "a,b" as one column name; it must not share a
+        # fingerprint (and so a cache key) with ["a", "b"].
         fp = CacheKey.compute_projection_fingerprint
         assert fp(["a,b"]) != fp(["a", "b"])
 
@@ -211,7 +201,7 @@ class TestDiskCache:
         assert retrieved.num_rows == 3
         assert retrieved.column("id").to_pylist() == [1, 2, 3]
 
-        # Verify metadata uses canonical identity
+        # Metadata uses the canonical identity.
         stats = cache.get_stats()
         assert stats.total_entries == 1
         assert "strata.test_db.events" in stats.entries_by_table
@@ -263,10 +253,8 @@ class TestReadPlanner:
     def test_plan_with_filter_pruning(self, temp_warehouse, strata_config):
         planner = ReadPlanner(strata_config)
 
-        # Get baseline without filters
         planner.plan(temp_warehouse["table_uri"])
 
-        # With filter that should prune some row groups
         # value ranges from 0 to 748.5 (500 rows * 1.5)
         filters = [Filter(column="value", op=FilterOp.LT, value=100.0)]
         plan_filtered = planner.plan(
@@ -274,7 +262,6 @@ class TestReadPlanner:
             filters=filters,
         )
 
-        # Should have pruned some row groups
         assert plan_filtered.pruned_row_groups >= 0
 
 
@@ -288,12 +275,10 @@ class TestCachedFetcher:
         plan = planner.plan(temp_warehouse["table_uri"])
         task = plan.tasks[0]
 
-        # First fetch - should not be cached
         batch1 = fetcher.fetch(task)
         assert not task.cached
         assert batch1.num_rows > 0
 
-        # Second fetch with same task - should be cached
         task2 = plan.tasks[0]  # Same task
         batch2 = fetcher.fetch(task2)
         assert task2.cached
@@ -306,7 +291,6 @@ class TestEndToEnd:
     @pytest.fixture
     def server_with_client(self, temp_warehouse, strata_config, tmp_path):
         """Start a server and provide a client."""
-        # Update config to use a free port
         import socket
 
         from strata.artifact_store import reset_artifact_store
@@ -322,11 +306,9 @@ class TestEndToEnd:
             port=port,
             cache_dir=tmp_path / "cache",
             artifact_dir=tmp_path / "artifacts",
-            deployment_mode="personal",  # Enable artifact store for unified API
+            deployment_mode="personal",  # Enables the artifact store for the unified API
         )
 
-        # Start server in a thread
-        # Initialize state manually for testing
         import strata.server as server_module
         from strata.server import ServerState, app
 
@@ -342,9 +324,8 @@ class TestEndToEnd:
                 host=config.host,
                 port=config.port,
                 log_level="error",
-                # Match production (server.main): default ws="auto" imports
-                # uvicorn's legacy websockets backend (DeprecationWarning; broken
-                # on CPython 3.14). Use the sans-I/O backend.
+                # Match production (server.main): default ws="auto" imports uvicorn's legacy
+                # websockets backend (DeprecationWarning; broken on CPython 3.14).
                 ws="websockets-sansio",
             )
         )
@@ -354,7 +335,6 @@ class TestEndToEnd:
         )
         server_thread.start()
 
-        # Wait for server to start
         deadline = time.time() + 10
         while not server.started:
             if not server_thread.is_alive():
@@ -383,7 +363,6 @@ class TestEndToEnd:
         client = server_with_client["client"]
         table_uri = server_with_client["warehouse"]["table_uri"]
 
-        # First fetch - cache miss
         artifact1 = client.materialize(
             inputs=[table_uri],
             transform={"executor": "scan@v1", "params": {}},
@@ -392,17 +371,15 @@ class TestEndToEnd:
         assert table1.num_rows == 500
         assert artifact1.cache_hit is False
 
-        # Small delay for artifact finalization
+        # Let the artifact finalize.
         time.sleep(0.5)
 
-        # Second fetch - should have artifact cache hit
         artifact2 = client.materialize(
             inputs=[table_uri],
             transform={"executor": "scan@v1", "params": {}},
         )
         table2 = client.fetch(artifact2.uri)
         assert table2.num_rows == 500
-        # Artifact cache hit means we found an existing artifact with same provenance
         assert artifact2.cache_hit is True
         assert artifact2.artifact_id == artifact1.artifact_id
 
@@ -411,7 +388,6 @@ class TestEndToEnd:
         client = server_with_client["client"]
         table_uri = server_with_client["warehouse"]["table_uri"]
 
-        # Fetch with filter using identity transform params
         filters = [{"column": "value", "op": "<", "value": 100.0}]
         artifact = client.materialize(
             inputs=[table_uri],
@@ -422,9 +398,7 @@ class TestEndToEnd:
         )
         table = client.fetch(artifact.uri)
 
-        # Should have rows (exact count depends on row group pruning)
-        # May include all rows if row groups aren't pruned,
-        # but the filter is at least accepted
+        # The exact count depends on row-group pruning; this checks the filter is accepted.
         assert table.num_rows >= 0
 
     def test_duckdb_integration(self, server_with_client):
@@ -432,17 +406,14 @@ class TestEndToEnd:
         config = server_with_client["config"]
         table_uri = server_with_client["warehouse"]["table_uri"]
 
-        # Use StrataScanner for DuckDB queries
         scanner = StrataScanner(base_url=f"http://127.0.0.1:{config.port}")
 
         try:
             scanner.register("events", table_uri, columns=["id", "value"])
 
-            # Query with DuckDB
             result = scanner.query("SELECT COUNT(*) as cnt FROM events")
             assert result.column("cnt")[0].as_py() == 500
 
-            # Query with aggregation
             result = scanner.query("SELECT AVG(value) as avg_val FROM events")
             avg_val = result.column("avg_val")[0].as_py()
             # Average of 0*1.5, 1*1.5, ..., 499*1.5 = 1.5 * 249.5 = 374.25
@@ -459,7 +430,6 @@ class TestEndToEnd:
         config = server_with_client["config"]
         table_uri = server_with_client["warehouse"]["table_uri"]
 
-        # Do a fetch to populate caches
         artifact = client.materialize(
             inputs=[table_uri],
             transform={"executor": "scan@v1", "params": {}},
@@ -467,30 +437,26 @@ class TestEndToEnd:
         table = client.fetch(artifact.uri)
         assert table.num_rows > 0
 
-        # Check metadata stats endpoint
         response = requests.get(f"http://127.0.0.1:{config.port}/v1/metadata/stats")
         assert response.status_code == 200
 
         stats = response.json()
 
-        # Check structure
         assert "parquet_cache" in stats
         assert "manifest_cache" in stats
         assert "metadata_store" in stats
 
-        # Parquet cache should have some activity
         pq_stats = stats["parquet_cache"]
         assert "hits" in pq_stats
         assert "misses" in pq_stats
 
-        # Manifest cache should have some activity (two-level: unfiltered and filtered)
+        # Two levels: unfiltered and filtered.
         manifest_stats = stats["manifest_cache"]
         assert "unfiltered" in manifest_stats
         assert "filtered" in manifest_stats
         assert "hits" in manifest_stats["unfiltered"]
         assert "misses" in manifest_stats["unfiltered"]
 
-        # Metadata store stats (if available)
         store_stats = stats["metadata_store"]
         if store_stats is not None:
             assert "manifest_hits" in store_stats
@@ -503,7 +469,6 @@ class TestEndToEnd:
 
         config = server_with_client["config"]
 
-        # Call cleanup endpoint
         response = requests.post(f"http://127.0.0.1:{config.port}/v1/metadata/cleanup")
         assert response.status_code == 200
 
@@ -528,8 +493,8 @@ class TestEndToEnd:
         checks = result["checks"]
         assert checks["server_initialized"] is True
         assert checks["draining"] is False
-        assert checks["capacity_exhausted"] is False  # Not saturated
-        assert checks["stuck_scans"] == 0  # No stuck scans
+        assert checks["capacity_exhausted"] is False
+        assert checks["stuck_scans"] == 0
         assert "metadata_store" in checks
         assert "interactive_available" in checks
         assert "bulk_available" in checks
@@ -543,7 +508,6 @@ class TestEndToEnd:
         config = server_with_client["config"]
         table_uri = server_with_client["warehouse"]["table_uri"]
 
-        # Do a fetch to generate some metrics
         artifact = client.materialize(
             inputs=[table_uri],
             transform={"executor": "scan@v1", "params": {}},
@@ -551,25 +515,21 @@ class TestEndToEnd:
         table = client.fetch(artifact.uri)
         assert table.num_rows > 0
 
-        # Fetch Prometheus metrics
         response = requests.get(f"http://127.0.0.1:{config.port}/metrics/prometheus")
         assert response.status_code == 200
         assert "text/plain" in response.headers["content-type"]
 
         content = response.text
 
-        # Check for expected metrics
         assert "strata_cache_hits_total" in content
         assert "strata_cache_misses_total" in content
         assert "strata_scans_total" in content
         assert "strata_active_scans" in content
         assert "strata_draining" in content
 
-        # Check for in-memory cache metrics
         assert "strata_parquet_cache_hits_total" in content
         assert "strata_manifest_cache_hits_total" in content
 
-        # Verify Prometheus format (HELP and TYPE comments)
         assert "# HELP strata_cache_hits_total" in content
         assert "# TYPE strata_cache_hits_total counter" in content
 
@@ -581,7 +541,6 @@ class TestEndToEnd:
         config = server_with_client["config"]
         table_uri = server_with_client["warehouse"]["table_uri"]
 
-        # Do a fetch to populate cache
         artifact = client.materialize(
             inputs=[table_uri],
             transform={"executor": "scan@v1", "params": {}},
@@ -589,7 +548,6 @@ class TestEndToEnd:
         table = client.fetch(artifact.uri)
         assert table.num_rows > 0
 
-        # Test basic inspect (no filters)
         response = requests.get(f"http://127.0.0.1:{config.port}/v1/debug/cache/inspect")
         assert response.status_code == 200
 
@@ -600,11 +558,9 @@ class TestEndToEnd:
         assert "total_matched" in result
         assert "truncated" in result
 
-        # Should have at least one entry from the scan
         assert result["total_matched"] > 0
         assert len(result["entries"]) > 0
 
-        # Check entry structure
         entry = result["entries"][0]
         assert "hash" in entry
         assert "hash_prefix" in entry
@@ -612,13 +568,12 @@ class TestEndToEnd:
         assert "file_exists" in entry
         assert "metadata" in entry
 
-        # Test with limit
         response = requests.get(f"http://127.0.0.1:{config.port}/v1/debug/cache/inspect?limit=1")
         assert response.status_code == 200
         result = response.json()
         assert len(result["entries"]) <= 1
 
-        # Test with prefix filter (use hash from first entry)
+        # Prefix taken from the first entry's hash.
         first_hash = result["entries"][0]["hash"][:4] if result["entries"] else "0000"
         response = requests.get(
             f"http://127.0.0.1:{config.port}/v1/debug/cache/inspect?prefix={first_hash}"
@@ -627,7 +582,6 @@ class TestEndToEnd:
         result = response.json()
         assert "prefix_filter" in result
 
-        # Test with non-matching prefix
         response = requests.get(
             f"http://127.0.0.1:{config.port}/v1/debug/cache/inspect?prefix=zzzz"
         )
@@ -649,32 +603,25 @@ class TestEndToEnd:
             "concurrent": 2,
         }
 
-        # Clear cache first
         response = requests.post(f"http://127.0.0.1:{config.port}/v1/cache/clear")
         assert response.status_code == 200
 
-        # This clear-then-warm sequence is what used to make this test flaky
-        # with "disk I/O error". It was never environmental: ``cache/clear``
-        # deleted the metadata database's -wal and -shm sidecars, and the warm
-        # that followed read that database through a now-broken connection.
-        # The retry-with-backoff that used to live here could not have helped,
-        # because SQLITE_IOERR poisons the connection for good. Fixed in
-        # ``DiskCache.clear``; no retry, so a recurrence is visible instead of
-        # absorbed.
+        # Clear-then-warm breaks if ``cache/clear`` deletes the metadata DB's -wal and -shm
+        # sidecars. No retry: SQLITE_IOERR poisons the connection for good, so a recurrence
+        # must be visible rather than absorbed.
         response = requests.post(warm_url, json=warm_payload)
         assert response.status_code == 200
         result = response.json()
 
-        # Surface the planner / fetcher error first so a CI failure
-        # shows the actual exception text instead of just "0 == 1".
+        # Assert errors first so a CI failure shows the exception text, not "0 == 1".
         assert result["errors"] == [], result
         assert result["tables_warmed"] == 1
-        assert result["row_groups_cached"] > 0  # Should have cached some
+        assert result["row_groups_cached"] > 0
         assert result["row_groups_skipped"] == 0  # Cache was cleared
         assert result["bytes_written"] > 0
         assert result["elapsed_ms"] > 0
 
-        # Warm again - should skip cached row groups
+        # Warm again: cached row groups are skipped.
         response = requests.post(
             f"http://127.0.0.1:{config.port}/v1/cache/warm",
             json={
@@ -688,9 +635,9 @@ class TestEndToEnd:
 
         result2 = response.json()
         assert result2["tables_warmed"] == 1
-        assert result2["row_groups_cached"] == 0  # Nothing new to cache
-        assert result2["row_groups_skipped"] > 0  # All skipped (already cached)
-        assert result2["bytes_written"] == 0  # No new bytes
+        assert result2["row_groups_cached"] == 0
+        assert result2["row_groups_skipped"] > 0
+        assert result2["bytes_written"] == 0
 
     def test_cache_warm_with_invalid_table(self, server_with_client):
         """Test cache warming with an invalid table URI."""
@@ -698,7 +645,6 @@ class TestEndToEnd:
 
         config = server_with_client["config"]
 
-        # Try to warm a non-existent table
         response = requests.post(
             f"http://127.0.0.1:{config.port}/v1/cache/warm",
             json={
@@ -710,7 +656,7 @@ class TestEndToEnd:
 
         result = response.json()
         assert result["tables_warmed"] == 0
-        assert len(result["errors"]) == 1  # Should have an error for the bad table
+        assert len(result["errors"]) == 1
 
 
 class TestEagerWarmup:
@@ -724,24 +670,20 @@ class TestEagerWarmup:
         config = StrataConfig(cache_dir=tmp_path / "cache")
         warmup_times = _eager_warmup(config)
 
-        # Should have timing info for each phase
         assert "total_ms" in warmup_times
         assert "imports_ms" in warmup_times
         assert "sqlite_ms" in warmup_times
         assert "caches_ms" in warmup_times
 
-        # Timings should be non-negative
         assert warmup_times["total_ms"] >= 0
         assert warmup_times["imports_ms"] >= 0
         assert warmup_times["sqlite_ms"] >= 0
         assert warmup_times["caches_ms"] >= 0
 
-        # Should track sqlite entries
         assert "sqlite_entries" in warmup_times
 
     def test_warmup_initializes_metadata_store(self, tmp_path):
         """Test that warmup initializes the metadata store."""
-        # Reset global state
         import strata.metadata_cache
         from strata.config import StrataConfig
         from strata.metadata_cache import get_metadata_store
@@ -752,7 +694,6 @@ class TestEagerWarmup:
         config = StrataConfig(cache_dir=tmp_path / "cache")
         _eager_warmup(config)
 
-        # Metadata store should now be accessible
         store = get_metadata_store(config.cache_dir)
         assert store is not None
         stats = store.stats()

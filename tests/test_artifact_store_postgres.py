@@ -153,10 +153,9 @@ class TestColumnWidths:
     """Both numeric column types are narrower in Postgres than in SQLite."""
 
     def test_byte_size_holds_an_artifact_over_two_gigabytes(self, store):
-        # Postgres INTEGER is int4, capped at 2147483647. Under it this raises
-        # NumericValueOutOfRange -- a DataError, not an IntegrityError, so the
-        # finalize handler does not catch it: the blob is already written and
-        # the row is stranded in 'building' forever.
+        # Postgres INTEGER is int4, capped at 2147483647. Overflow raises
+        # NumericValueOutOfRange, a DataError the finalize handler does not catch, so the
+        # blob is written and the row is stranded in 'building' forever.
         version = store.create_artifact("big", "prov-big", _spec())
         three_gib = 3 * 1024**3
         store.finalize_artifact("big", version, "{}", row_count=1, byte_size=three_gib)
@@ -177,11 +176,9 @@ class TestConcurrentSchemaInitialization:
     """Every node runs _init_schema at startup, against one database."""
 
     def test_simultaneous_first_boots_all_succeed(self, postgres_dsn, tmp_path):
-        # CREATE TABLE IF NOT EXISTS is not concurrency-safe in Postgres: it
-        # checks and then creates without a lock, so simultaneous creators race
-        # in the system catalog and all but one fail with a duplicate key on
-        # pg_type_typname_nsp_index. Observed 7 of 8 failing before the schema
-        # advisory lock; multi-node boot is the whole point of this backend.
+        # CREATE TABLE IF NOT EXISTS is not concurrency-safe in Postgres: simultaneous
+        # creators race in the system catalog and all but one fail with a duplicate key on
+        # pg_type_typname_nsp_index. Multi-node boot is the whole point of this backend.
         dialect = PostgresDialect(postgres_dsn)
         conn = dialect.connect()
         try:
@@ -245,10 +242,9 @@ class TestConnectionLimits:
     """SQLite's timeouts had to be carried over, not dropped."""
 
     def test_lock_timeout_matches_the_sqlite_busy_timeout(self, postgres_dsn):
-        # pg_advisory_xact_lock waits forever by default, so a node stalling
-        # while holding the global schema lock would hang every other node
-        # with no error and no bound. sqlite3.connect(timeout=30.0) failed
-        # loudly after 30s; this restores the same ceiling.
+        # pg_advisory_xact_lock waits forever by default, so a node stalling while holding
+        # the global schema lock would hang every other node with no error. The bound
+        # matches SQLite's 30s connect timeout.
         dialect = PostgresDialect(postgres_dsn)
         try:
             conn = dialect.connect()
@@ -429,10 +425,9 @@ class TestConnectionPool:
             dialect.close()
 
     def test_releasing_after_close_does_not_resurrect_a_pool(self, postgres_dsn):
-        # close() used to null _pool while _release() went through _get_pool(),
-        # which rebuilt one -- so returning a still-checked-out connection
-        # opened fresh sockets and then raised
-        # "can't return connection to pool 'pool-2', it comes from 'pool-1'".
+        # Releasing a still-checked-out connection after close() must not rebuild the
+        # pool through _get_pool(): that opens fresh sockets and then raises "can't return
+        # connection to pool 'pool-2', it comes from 'pool-1'".
         dialect = PostgresDialect(postgres_dsn)
         conn = dialect.connect()
         conn.execute("SELECT 1").fetchone()
@@ -452,8 +447,8 @@ class TestConnectionPool:
             dialect.connect()
 
     def test_release_from_a_non_owning_thread_is_ignored(self, postgres_dsn):
-        # Previously an AttributeError on a thread that never acquired, or a
-        # putconn(None) that lost the real connection from a bounded pool.
+        # A release from a thread that never acquired must not raise AttributeError or
+        # putconn(None), which would lose the real connection from a bounded pool.
         dialect = PostgresDialect(postgres_dsn)
         try:
             conn = dialect.connect()
@@ -573,13 +568,10 @@ class TestBuildStoreSharesTheBackend:
             conn.commit()
             conn.close()
 
-            # The artifact store first: artifact_builds carries a FOREIGN KEY
-            # to artifact_versions, and Postgres both requires the referenced
-            # table to exist at CREATE time and enforces the reference on
-            # insert. SQLite did neither -- it never turns foreign_keys on
-            # (issue #555) -- so this ordering is newly load-bearing. The
-            # server's call sites now build the artifact store first for
-            # exactly this reason.
+            # The artifact store first: artifact_builds has a FOREIGN KEY to
+            # artifact_versions, and Postgres requires the referenced table at CREATE time and
+            # enforces it on insert (SQLite never turns foreign_keys on). The server's call
+            # sites build the artifact store first for this reason.
             store_a = ArtifactStore(tmp_path / "a", dialect=dialect_a)
             version = store_a.create_artifact("art-1", "prov-1", _spec())
 

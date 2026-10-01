@@ -627,7 +627,7 @@ class TestImportAcrossStores:
         published = served.list_publications()
         assert len(published) == 1, "the token must be minted in the store that serves it"
 
-        # And the chain came with it, resolvable from the served store alone.
+        # The chain came with it, resolvable from the served store alone.
         copied = served.get_artifact(figure.id, figure.version)
         assert copied is not None
         lineage = ArtifactService().build_lineage(
@@ -714,7 +714,7 @@ class TestImportAcrossStores:
             "a failed import must not leave a row claiming to be ready"
         )
 
-        # And the retry that a live store would make now succeeds.
+        # The retry a live store would make now succeeds.
         assert target.import_artifact(record, b"x").written is True
         reader = target.open_blob_reader("fig", version)
         assert reader is not None
@@ -1241,7 +1241,7 @@ class TestRoCrate:
         block = re.search(r"<script type='application/ld\+json'>(.*?)</script>", html, re.S)
         assert block is not None
         assert "</script>" not in block.group(1)
-        # …and the escaping must leave valid JSON behind, not just safe text.
+        # The escaping must leave valid JSON behind, not just safe text.
         assert isinstance(jsonlib.loads(block.group(1).replace("<\\/", "</")), dict)
 
 

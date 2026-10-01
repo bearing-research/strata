@@ -50,7 +50,7 @@ async def test_schedule_cleanup_expires_stream_and_runs_on_expire():
     reg.schedule_cleanup("s1", scan_id="scan-s1")
     await asyncio.sleep(0.05)
 
-    # TTL elapsed → stream dropped + scan-side cleanup ran with the scan id.
+    # TTL elapsed: stream dropped, and scan-side cleanup ran with the scan id.
     assert reg.get("s1") is None
     assert expired == ["scan-s1"]
 
@@ -98,7 +98,7 @@ async def test_cancel_cleanup_keeps_the_stream():
     reg.cancel_cleanup("s1")
     await asyncio.sleep(0.08)
 
-    # Cleanup was cancelled before the TTL elapsed → stream survives, no expire.
+    # Cancelled before the TTL elapsed: the stream survives, no expire.
     assert reg.get("s1") is not None
     assert expired == []
 
@@ -109,7 +109,7 @@ async def test_reschedule_supersedes_the_prior_timer():
     reg.register(_stream())
 
     reg.schedule_cleanup("s1", scan_id="scan-s1")
-    # Re-arm before the first fires; only the latest timer should remain.
+    # Re-arm before the first fires; only the latest timer remains.
     reg.schedule_cleanup("s1", scan_id="scan-s1")
     await asyncio.sleep(0.09)
 
@@ -126,14 +126,14 @@ async def test_shutdown_cleanups_cancels_pending_timers():
     reg.shutdown_cleanups()
     await asyncio.sleep(0.08)
 
-    # Pending cleanup cancelled at shutdown → stream not expired by the timer.
+    # Pending cleanup cancelled at shutdown, so the timer never expires the stream.
     assert reg.get("s1") is not None
     assert expired == []
 
 
 def test_shutdown_cleanups_is_safe_with_no_tasks():
     reg = StreamRegistry(ttl_seconds=60)
-    reg.shutdown_cleanups()  # no pending tasks → no error
+    reg.shutdown_cleanups()  # no pending tasks, no error
 
 
 if __name__ == "__main__":  # pragma: no cover

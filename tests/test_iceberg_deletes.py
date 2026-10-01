@@ -112,7 +112,7 @@ def test_deleted_rows_are_absent_and_stay_absent_from_the_cache(tmp_path, table,
     assert [task.num_rows for task in tasks] == [3, 3, 1]
     assert not any(task.cached for task in tasks)
 
-    # Served from the cache, which holds the row groups without the rows,
+    # Served from the cache (which holds the row groups without the rows),
     # through both the batch path and the stream-bytes path.
     ids, tasks = _scan(config, table["uri"])
     assert ids == [0, 2, 3, 4, 6, 7, 9]
@@ -243,7 +243,7 @@ def _read_local(path):
 
 def test_a_delete_file_over_many_data_files_splits_per_data_file(tmp_path):
     # Spark sorts a delete file by path; interleave the rows so the split cannot
-    # lean on that, and read it in several row groups.
+    # rely on that, and read it in several row groups.
     rng = random.Random(0)
     rows = [(f"file:///data/{rng.randrange(300):04d}.parquet", n) for n in range(5000)]
     rng.shuffle(rows)

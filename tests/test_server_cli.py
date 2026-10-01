@@ -35,8 +35,8 @@ def test_flag_threads_into_loaded_config(tmp_path):
     target = tmp_path / "nbs"
     args = server._build_server_arg_parser().parse_args(["--notebook-dir", str(target)])
     server._apply_server_cli_overrides(args)
-    # env beats pyproject, so the loaded config reflects the flag regardless of
-    # any [tool.strata] in the repo's pyproject.
+    # env beats pyproject, so the loaded config reflects the flag whatever the repo's
+    # [tool.strata] says.
     config = StrataConfig.load(cache_dir=tmp_path / "cache")
     assert config.notebook_storage_dir == target.resolve()
 

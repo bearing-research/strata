@@ -117,8 +117,8 @@ class TestTableStaleness:
                 again = execute_cell_and_wait(ws, "c1")
                 assert again["payload"]["cache_hit"] is True
 
-                # New data lands → snapshot moves → provenance changes →
-                # the same execute request recomputes against the new snapshot
+                # New data moves the snapshot, which changes provenance, so the same execute
+                # request recomputes against the new snapshot.
                 _append_row(table)
                 new_snapshot = table.current_snapshot().snapshot_id
                 assert new_snapshot != first_snapshot

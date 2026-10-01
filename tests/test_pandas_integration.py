@@ -40,14 +40,13 @@ class TestScanToPandas:
         config = server_with_client["config"]
         table_uri = server_with_client["warehouse"]["table_uri"]
 
-        # Filters are for row-group pruning, not row-level filtering
+        # Filters prune row groups; they do not filter rows.
         df = scan_to_pandas(
             table_uri,
             filters=[lt("id", 100)],
             base_url=f"http://127.0.0.1:{config.port}",
         )
 
-        # Just verify scan succeeds with filters
         assert isinstance(df, pd.DataFrame)
 
 
@@ -113,7 +112,6 @@ class TestStrataPandasScanner:
                 for batch in scanner.scan_batches(table_uri, columns=["id", "value"])
             ]
 
-            # Concatenate all batches
             result = pd.concat(dfs, ignore_index=True)
             assert len(result) == 500
             assert list(result.columns) == ["id", "value"]
@@ -133,7 +131,6 @@ class TestPandasDataTypes:
             base_url=f"http://127.0.0.1:{config.port}",
         )
 
-        # Should be numeric type
         assert pd.api.types.is_integer_dtype(df["id"]) or pd.api.types.is_numeric_dtype(df["id"])
 
     def test_float_columns(self, server_with_client):
@@ -160,5 +157,4 @@ class TestPandasDataTypes:
             base_url=f"http://127.0.0.1:{config.port}",
         )
 
-        # Should be object or string dtype
         assert df["name"].dtype == object or pd.api.types.is_string_dtype(df["name"])

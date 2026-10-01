@@ -175,7 +175,7 @@ class TestTenantRegistry:
         assert quotas.tenant_id == "new-tenant"
         assert quotas.total_scans == 0
 
-        # Second call should return same object (after LRU move)
+        # Same object again (after the LRU move).
         quotas2 = registry.get_or_create_quotas("new-tenant")
         assert quotas2.tenant_id == quotas.tenant_id
 
@@ -183,10 +183,8 @@ class TestTenantRegistry:
         """is_tenant_enabled should check enabled flag."""
         registry = TenantRegistry()
 
-        # Unknown tenant is enabled by default
         assert registry.is_tenant_enabled("unknown-tenant") is True
 
-        # Disabled tenant should return False
         disabled_config = TenantConfig(tenant_id="disabled-tenant", enabled=False)
         registry.register_tenant(disabled_config)
         assert registry.is_tenant_enabled("disabled-tenant") is False
@@ -212,11 +210,10 @@ class TestTenantRegistry:
         """Registry should evict oldest tenants when over limit."""
         registry = TenantRegistry()
 
-        # Create more tenants than max to trigger eviction
+        # More tenants than the max, to trigger eviction.
         for i in range(MAX_TRACKED_TENANTS + 100):
             registry.get_or_create_quotas(f"tenant-{i}")
 
-        # Should be at or below max
         assert len(registry._quotas) <= MAX_TRACKED_TENANTS
 
     def test_global_registry(self):
@@ -228,7 +225,6 @@ class TestTenantRegistry:
         assert registry.default_interactive_slots == 16
         assert registry.default_bulk_slots == 4
 
-        # get_tenant_registry should return same instance
         assert get_tenant_registry() is registry
 
 
@@ -326,7 +322,6 @@ class TestCacheKeyTenantIsolation:
             projection_fingerprint="abc",
         )
 
-        # Same data but different tenants = different cache keys
         assert key_a.to_hex() != key_b.to_hex()
 
     def test_same_tenant_same_cache_key(self):
@@ -484,7 +479,6 @@ class TestPerTenantQoS:
         lim_a_int, lim_a_bulk = registry.get_or_create_limiters("tenant-a")
         lim_b_int, lim_b_bulk = registry.get_or_create_limiters("tenant-b")
 
-        # Different tenants should get different instances
         assert lim_a_int is not lim_b_int
         assert lim_a_bulk is not lim_b_bulk
 
@@ -495,7 +489,6 @@ class TestPerTenantQoS:
         lim1_int, lim1_bulk = registry.get_or_create_limiters("tenant-a")
         lim2_int, lim2_bulk = registry.get_or_create_limiters("tenant-a")
 
-        # Same tenant should get same instances
         assert lim1_int is lim2_int
         assert lim1_bulk is lim2_bulk
 
@@ -506,7 +499,6 @@ class TestPerTenantQoS:
             default_bulk_slots=8,
         )
 
-        # Register tenant with custom slots
         config = TenantConfig(
             tenant_id="premium",
             interactive_slots=64,
@@ -544,16 +536,12 @@ class TestPerTenantQoS:
         """Limiters should persist when quotas are accessed multiple times."""
         registry = TenantRegistry()
 
-        # Create limiters
         lim1_int, lim1_bulk = registry.get_or_create_limiters("tenant-a")
 
-        # Access quotas separately
         quotas = registry.get_or_create_quotas("tenant-a")
 
-        # Get limiters again
         lim2_int, lim2_bulk = registry.get_or_create_limiters("tenant-a")
 
-        # Should be same instances
         assert lim1_int is lim2_int
         assert lim1_bulk is lim2_bulk
         assert quotas.interactive_limiter is lim1_int
@@ -566,14 +554,13 @@ class TestPerTenantQoS:
             default_bulk_slots=8,
         )
 
-        # Register tenant with only interactive slots override
         config = TenantConfig(
             tenant_id="partial",
-            interactive_slots=100,  # Override
-            # bulk_slots=None means use default
+            interactive_slots=100,
+            # bulk_slots=None means use the default.
         )
         registry.register_tenant(config)
 
         lim_int, lim_bulk = registry.get_or_create_limiters("partial")
-        assert lim_int.capacity == 100  # Custom
+        assert lim_int.capacity == 100
         assert lim_bulk.capacity == 8  # Default

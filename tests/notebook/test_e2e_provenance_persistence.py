@@ -135,8 +135,7 @@ async def test_loop_cell_stores_non_carry_consumed_variables(tmp_path: Path):
     assert latest is not None
     assert _json.loads(artifact_mgr.load_artifact_data(canonical_id, latest.version)) == 30
 
-    # And the downstream consumer resolves it and runs successfully
-    # (previously `summary` was never materialized → NameError).
+    # The downstream consumer resolves it and runs (no NameError on `summary`).
     use_result = await executor.execute_cell("use", use_src)
     assert use_result.success, use_result.error
 

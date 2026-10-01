@@ -143,7 +143,6 @@ def test_writer_roundtrip_preserves_connections():
     """
     with tempfile.TemporaryDirectory() as tmp:
         nb = create_notebook(Path(tmp), "roundtrip")
-        # First add a connection by editing TOML directly...
         body = _read_raw_toml(nb)
         body["connections"] = {
             "warehouse": {
@@ -154,11 +153,9 @@ def test_writer_roundtrip_preserves_connections():
         }
         _write_raw_toml(nb, body)
 
-        # ...parse it...
         state = parse_notebook(nb)
         assert len(state.connections) == 1
 
-        # ...and re-serialize via the writer (using the parsed NotebookToml).
         from strata.notebook.models import NotebookToml
 
         toml_obj = NotebookToml(
@@ -169,7 +166,6 @@ def test_writer_roundtrip_preserves_connections():
         )
         write_notebook_toml(nb, toml_obj)
 
-        # The connections block survived the round trip.
         body_after = _read_raw_toml(nb)
         assert "connections" in body_after
         assert body_after["connections"]["warehouse"]["driver"] == "postgresql"
@@ -199,7 +195,6 @@ def test_writer_elides_connections_block_when_empty():
     with tempfile.TemporaryDirectory() as tmp:
         nb = create_notebook(Path(tmp), "no_conns")
         body = _read_raw_toml(nb)
-        # create_notebook should not emit a [connections] block by default.
         assert "connections" not in body
 
 
@@ -245,7 +240,6 @@ def test_malformed_connection_block_is_preserved_across_writer_roundtrip():
         write_notebook_toml(nb, toml_obj)
 
         body_after = _read_raw_toml(nb)
-        # All three blocks survive the round trip.
         assert set(body_after["connections"]) == {
             "good",
             "missing_driver",
@@ -304,7 +298,7 @@ def test_writer_scrubs_literal_auth_values():
                     driver="postgresql",
                     auth={
                         "user": "${PGUSER}",
-                        "password": "hunter2",  # literal — should be blanked
+                        "password": "hunter2",  # literal: should be blanked
                     },
                 )
             ],
@@ -332,7 +326,7 @@ def test_writer_scrubs_literal_auth_in_malformed_blocks():
                 "host": "localhost",
                 "auth": {
                     "user": "${PGUSER}",
-                    "password": "hunter2",  # literal — must be blanked
+                    "password": "hunter2",  # literal: must be blanked
                 },
             }
         }
@@ -414,8 +408,7 @@ def test_relative_path_resolves_at_adapter_open_time(tmp_path):
     spec = ConnectionSpec(name="db", driver="sqlite", path="analytics.db")
     runtime = _resolve_runtime_spec(spec, tmp_path)
     assert runtime.path == str((tmp_path / "analytics.db").resolve())
-    # The original is unchanged — important for round-tripping
-    # through the writer.
+    # The original is unchanged, so it round-trips through the writer.
     assert spec.path == "analytics.db"
 
 

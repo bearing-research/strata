@@ -60,9 +60,7 @@ if not _docker_daemon_reachable():
 pytestmark = [pytest.mark.integration, pytest.mark.slow]
 
 
-# ---------------------------------------------------------------------------
 # Fixtures
-# ---------------------------------------------------------------------------
 
 
 @pytest.fixture(scope="module")
@@ -134,9 +132,7 @@ def _make_session(tmp_path: Path, cells: list[tuple[str, str]]) -> NotebookSessi
     return session
 
 
-# ---------------------------------------------------------------------------
-# Scope A — Annotation-only mount, credentials via mount_credentials kwarg
-# ---------------------------------------------------------------------------
+# Scope A: annotation-only mount, credentials via mount_credentials kwarg
 
 
 @pytest.mark.asyncio
@@ -164,9 +160,7 @@ async def test_annotation_only_mount_reads_via_credentials_kwarg(
     assert result.outputs["content"]["preview"] == "hello from minio"
 
 
-# ---------------------------------------------------------------------------
-# Scope B — Read-write mount: write in one cell, read in another
-# ---------------------------------------------------------------------------
+# Scope B: read-write mount, write in one cell and read in another
 
 
 @pytest.mark.asyncio
@@ -202,9 +196,7 @@ async def test_rw_mount_writes_then_separate_ro_cell_reads_back(
     assert read_result.outputs["content"]["preview"] == "hello from rw"
 
 
-# ---------------------------------------------------------------------------
-# Scope C — Storage options via TOML [[mounts]] (no mount_credentials kwarg)
-# ---------------------------------------------------------------------------
+# Scope C: storage options via TOML [[mounts]] (no mount_credentials kwarg)
 
 
 @pytest.mark.asyncio
@@ -234,7 +226,7 @@ async def test_toml_mount_options_carry_endpoint_credentials(
 
     session = NotebookSession(parse_notebook(notebook_dir), notebook_dir)
     session.refresh_environment_runtime()
-    executor = CellExecutor(session)  # no mount_credentials kwarg — TOML carries it
+    executor = CellExecutor(session)  # no mount_credentials kwarg; TOML carries it
 
     result = await executor.execute_cell("c1", source)
 

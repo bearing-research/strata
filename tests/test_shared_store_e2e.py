@@ -63,7 +63,7 @@ def test_shared_research_store_publish_resolve_read_isolation(tmp_path):
         base = ctx.base_url
         dataset = pa.table({"id": [1, 2, 3], "value": [10.0, 20.0, 30.0]})
 
-        # --- Researcher A publishes (has the write scope) ---
+        # Researcher A publishes (has the write scope).
         pub = _publish(
             base,
             dataset,
@@ -72,7 +72,7 @@ def test_shared_research_store_publish_resolve_read_isolation(tmp_path):
         )
         assert pub.status_code == 200, pub.text
 
-        # --- Teammate B (same team, read-only) resolves the name ---
+        # Teammate B (same team, read-only) resolves the name...
         resolved = httpx.get(
             f"{base}/v1/names/team/cleaned-events",
             headers=_headers("team-a", "bob"),
@@ -83,7 +83,7 @@ def test_shared_research_store_publish_resolve_read_isolation(tmp_path):
         ref = artifact_uri.removeprefix("strata://artifact/")
         art_id, version = ref.split("@v=")
 
-        # --- ... and reads the data back ---
+        # ...and reads the data back.
         data_resp = httpx.get(
             f"{base}/v1/artifacts/{art_id}/v/{version}/data",
             headers=_headers("team-a", "bob"),
@@ -92,14 +92,14 @@ def test_shared_research_store_publish_resolve_read_isolation(tmp_path):
         round_trip = ipc.open_stream(data_resp.content).read_all()
         assert round_trip.equals(dataset)
 
-        # --- Other-team C cannot resolve team-a's name (tenant isolation) ---
+        # Other-team C cannot resolve team-a's name (tenant isolation).
         cross = httpx.get(
             f"{base}/v1/names/team/cleaned-events",
             headers=_headers("team-b", "carol"),
         )
         assert cross.status_code == 404
 
-        # --- A team-a member WITHOUT the write scope cannot publish ---
+        # A team-a member WITHOUT the write scope cannot publish.
         denied = _publish(
             base,
             dataset,
@@ -162,18 +162,18 @@ def test_protected_alias_approval_requires_scope_and_distinct_approver(tmp_path)
         req = _request_champion(
             base, art_id, version, _headers("team-a", "alice", "artifacts:write")
         )
-        assert req.status_code == 202  # protected → queued, not applied
+        assert req.status_code == 202  # protected, so queued rather than applied
         assert req.json()["status"] == "pending"
 
         body = {"name": "team/model", "alias": "champion"}
 
-        # (1) Approve without admin:registry → 403.
+        # (1) Approve without admin:registry: 403.
         no_scope = httpx.post(
             f"{base}/v1/registry/pending/approve", json=body, headers=_headers("team-a", "frank")
         )
         assert no_scope.status_code == 403
 
-        # (2) The requester cannot self-approve, even with admin:registry → 403.
+        # (2) The requester cannot self-approve, even with admin:registry: 403.
         self_app = httpx.post(
             f"{base}/v1/registry/pending/approve",
             json=body,
@@ -182,7 +182,6 @@ def test_protected_alias_approval_requires_scope_and_distinct_approver(tmp_path)
         assert self_app.status_code == 403
         assert "Separation of duty" in self_app.json()["detail"]
 
-        # The alias is still not applied.
         with httpx.Client() as c:
             still_pending = c.get(
                 f"{base}/v1/names/team/model/aliases/champion", headers=_headers("team-a", "bob")
@@ -198,7 +197,6 @@ def test_protected_alias_approval_requires_scope_and_distinct_approver(tmp_path)
         assert ok.status_code == 200, ok.text
         assert ok.json()["status"] == "approved"
 
-        # Now champion resolves for the team.
         resolved = httpx.get(
             f"{base}/v1/names/team/model/aliases/champion", headers=_headers("team-a", "bob")
         )
@@ -232,7 +230,7 @@ def test_protected_alias_admin_star_is_break_glass_self_approve(tmp_path):
         art_id, version = _name_ref(base, "team/model", admin)
         assert _request_champion(base, art_id, version, admin).status_code == 202
 
-        # Same principal self-approves — allowed because admin:* is break-glass.
+        # Self-approval is allowed here because admin:* is break-glass.
         ok = httpx.post(
             f"{base}/v1/registry/pending/approve",
             json={"name": "team/model", "alias": "champion"},
@@ -287,7 +285,6 @@ def test_reject_requires_registry_scope(tmp_path):
         )
         assert denied.status_code == 403
 
-        # An approver can reject it.
         ok = httpx.post(
             f"{base}/v1/registry/pending/reject",
             json=body,
@@ -295,7 +292,7 @@ def test_reject_requires_registry_scope(tmp_path):
         )
         assert ok.status_code == 200
         assert ok.json()["status"] == "rejected"
-        # And the alias never resolves — the change was discarded.
+        # The alias never resolves: the change was discarded.
         gone = httpx.get(
             f"{base}/v1/names/team/model/aliases/champion",
             headers=_headers("team-a", "alice"),

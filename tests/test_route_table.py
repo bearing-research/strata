@@ -20,8 +20,8 @@ from fastapi.routing import APIRoute, iter_route_contexts
 
 from strata.server import app
 
-# The frontend SPA fallback is conditionally mounted (bundle-dependent); exclude
-# it so the snapshot is deterministic across dev and CI.
+# The SPA fallback mounts only when the frontend bundle exists; exclude it so the
+# snapshot matches across dev and CI.
 _EXCLUDED_PATHS = {"/{full_path:path}"}
 
 EXPECTED_ROUTES = [
@@ -84,8 +84,8 @@ EXPECTED_ROUTES = [
     ("/v1/builds/{build_id}/log", "POST", 0),
     ("/v1/builds/{build_id}/manifest", "GET", 0),
     ("/v1/cache/clear", "POST", 1),
-    # 1 dependency: require_scope("admin:cache") — the listing is cache-wide
-    # and exposes every tenant's entry metadata.
+    # 1 dependency: require_scope("admin:cache"); the listing is cache-wide and exposes
+    # every tenant's entry metadata.
     ("/v1/cache/entries", "GET", 1),
     ("/v1/cache/evictions", "GET", 0),
     ("/v1/cache/histogram", "GET", 0),
@@ -96,7 +96,7 @@ EXPECTED_ROUTES = [
     ("/v1/cache/warm/jobs/{job_id}", "DELETE", 0),
     ("/v1/cache/warm/jobs/{job_id}", "GET", 0),
     ("/v1/config/timeouts", "GET", 0),
-    # 1 dependency: require_scope("admin:cache") — same cross-tenant exposure.
+    # 1 dependency: require_scope("admin:cache"), for the same cross-tenant exposure.
     ("/v1/debug/cache/inspect", "GET", 1),
     ("/v1/debug/connections", "GET", 0),
     ("/v1/debug/gc/pauses", "GET", 0),
@@ -196,9 +196,9 @@ EXPECTED_ROUTES = [
 
 
 def _current_routes():
-    # iter_route_contexts, not app.routes: since FastAPI 0.141 an included
-    # router is one entry in app.routes, and its routes (with the dependencies
-    # they get at include time) are only reachable through their contexts.
+    # iter_route_contexts, not app.routes: since FastAPI 0.141 an included router is
+    # one entry in app.routes, and its routes (with their include-time dependencies)
+    # are only reachable through their contexts.
     return sorted(
         (route.path, ",".join(sorted(route.methods)), len(route.dependencies))
         for route in iter_route_contexts(app.routes)

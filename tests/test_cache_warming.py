@@ -70,7 +70,7 @@ class TestCacheWarmer:
         assert progress.row_groups_skipped == 2
         assert progress.bytes_written == 1024
         assert progress.current_table == "table1"
-        assert progress.elapsed_ms >= 1000  # At least 1 second
+        assert progress.elapsed_ms >= 1000
 
 
 @pytest.fixture
@@ -81,7 +81,6 @@ def temp_warehouse(tmp_path):
     warehouse_path = tmp_path / "warehouse"
     warehouse_path.mkdir()
 
-    # Create a SQL catalog
     catalog = SqlCatalog(
         "strata",
         **{
@@ -90,10 +89,8 @@ def temp_warehouse(tmp_path):
         },
     )
 
-    # Create namespace
     catalog.create_namespace("test_db")
 
-    # Define schema
     schema = Schema(
         NestedField(1, "id", LongType(), required=False),
         NestedField(2, "value", DoubleType(), required=False),
@@ -101,10 +98,8 @@ def temp_warehouse(tmp_path):
         NestedField(4, "timestamp", LongType(), required=False),
     )
 
-    # Create table
     table = catalog.create_table("test_db.events", schema)
 
-    # Create sample data
     num_rows = 100
     base_ts = int(datetime(2024, 1, 1, tzinfo=UTC).timestamp() * 1_000_000)
     data = pa.table(
@@ -119,7 +114,6 @@ def temp_warehouse(tmp_path):
         }
     )
 
-    # Append data to table
     table.append(data)
 
     return {
@@ -148,7 +142,6 @@ class TestCacheWarmerIntegration:
         config = StrataConfig(cache_dir=tmp_path)
         server_module._state = ServerState(config)
 
-        # Initialize cache warmer
         server_module._state._cache_warmer = CacheWarmer(
             planner=server_module._state.planner,
             fetcher=server_module._state.fetcher,
@@ -160,7 +153,7 @@ class TestCacheWarmerIntegration:
             async with AsyncClient(
                 transport=ASGITransport(app=app), base_url="http://test"
             ) as client:
-                # Start async warming job (will fail since no real tables)
+                # The table does not exist, so the job fails.
                 response = await client.post(
                     "/v1/cache/warm/async",
                     json={
@@ -177,16 +170,13 @@ class TestCacheWarmerIntegration:
 
                 job_id = data["job_id"]
 
-                # Wait a bit for job to process
                 await asyncio.sleep(0.1)
 
-                # Get job status
                 response = await client.get(f"/v1/cache/warm/jobs/{job_id}")
                 assert response.status_code == 200
 
                 progress = response.json()
                 assert progress["job_id"] == job_id
-                # Job should be completed or failed (table doesn't exist)
                 assert progress["status"] in ["running", "completed", "failed"]
 
         finally:
@@ -220,18 +210,15 @@ class TestCacheWarmerIntegration:
             async with AsyncClient(
                 transport=ASGITransport(app=app), base_url="http://test"
             ) as client:
-                # List jobs (should be empty initially)
                 response = await client.get("/v1/cache/warm/jobs")
                 assert response.status_code == 200
                 assert response.json()["jobs"] == []
 
-                # Start a job
                 await client.post(
                     "/v1/cache/warm/async",
                     json={"tables": ["table1"]},
                 )
 
-                # List jobs including completed
                 await asyncio.sleep(0.1)
                 response = await client.get("/v1/cache/warm/jobs?include_completed=true")
                 assert response.status_code == 200
@@ -269,7 +256,6 @@ class TestCacheWarmerIntegration:
             async with AsyncClient(
                 transport=ASGITransport(app=app), base_url="http://test"
             ) as client:
-                # Cancel nonexistent job
                 response = await client.delete("/v1/cache/warm/jobs/nonexistent")
                 assert response.status_code == 404
 
@@ -435,7 +421,6 @@ class TestCacheWarmingRealTables:
             async with AsyncClient(
                 transport=ASGITransport(app=app), base_url="http://test"
             ) as client:
-                # Start warming job on real table
                 response = await client.post(
                     "/v1/cache/warm/async",
                     json={"tables": [temp_warehouse["table_uri"]]},
@@ -443,7 +428,6 @@ class TestCacheWarmingRealTables:
                 assert response.status_code == 200
                 job_id = response.json()["job_id"]
 
-                # Wait for job to complete
                 for _ in range(50):
                     await asyncio.sleep(0.1)
                     response = await client.get(f"/v1/cache/warm/jobs/{job_id}")
@@ -451,7 +435,6 @@ class TestCacheWarmingRealTables:
                     if progress["status"] in ["completed", "failed"]:
                         break
 
-                # Job should complete successfully
                 assert progress["status"] == "completed"
                 assert progress["tables_completed"] == 1
                 assert progress["row_groups_total"] >= 1
@@ -492,14 +475,12 @@ class TestCacheWarmingRealTables:
             async with AsyncClient(
                 transport=ASGITransport(app=app), base_url="http://test"
             ) as client:
-                # First warming job
                 response = await client.post(
                     "/v1/cache/warm/async",
                     json={"tables": [temp_warehouse["table_uri"]]},
                 )
                 job_id1 = response.json()["job_id"]
 
-                # Wait for first job to complete
                 for _ in range(50):
                     await asyncio.sleep(0.1)
                     response = await client.get(f"/v1/cache/warm/jobs/{job_id1}")
@@ -510,14 +491,12 @@ class TestCacheWarmingRealTables:
                 assert progress1["status"] == "completed"
                 first_cached = progress1["row_groups_cached"]
 
-                # Second warming job on same table
                 response = await client.post(
                     "/v1/cache/warm/async",
                     json={"tables": [temp_warehouse["table_uri"]]},
                 )
                 job_id2 = response.json()["job_id"]
 
-                # Wait for second job to complete
                 for _ in range(50):
                     await asyncio.sleep(0.1)
                     response = await client.get(f"/v1/cache/warm/jobs/{job_id2}")
@@ -526,9 +505,8 @@ class TestCacheWarmingRealTables:
                         break
 
                 assert progress2["status"] == "completed"
-                # Second run should skip all row groups (already cached)
+                # Second run skips every row group: they are already cached.
                 assert progress2["row_groups_skipped"] >= first_cached
-                # No new row groups should be cached
                 assert progress2["row_groups_cached"] == 0
 
         finally:
@@ -564,7 +542,6 @@ class TestCacheWarmingRealTables:
             async with AsyncClient(
                 transport=ASGITransport(app=app), base_url="http://test"
             ) as client:
-                # Warm with subset of columns
                 response = await client.post(
                     "/v1/cache/warm/async",
                     json={
@@ -574,7 +551,6 @@ class TestCacheWarmingRealTables:
                 )
                 job_id1 = response.json()["job_id"]
 
-                # Wait for job to complete
                 for _ in range(50):
                     await asyncio.sleep(0.1)
                     response = await client.get(f"/v1/cache/warm/jobs/{job_id1}")
@@ -586,7 +562,7 @@ class TestCacheWarmingRealTables:
                 first_cached = progress1["row_groups_cached"]
                 assert first_cached >= 1
 
-                # Warm with different columns - should cache again (different projection)
+                # Different columns are a different projection, so they cache again.
                 response = await client.post(
                     "/v1/cache/warm/async",
                     json={
@@ -596,7 +572,6 @@ class TestCacheWarmingRealTables:
                 )
                 job_id2 = response.json()["job_id"]
 
-                # Wait for job to complete
                 for _ in range(50):
                     await asyncio.sleep(0.1)
                     response = await client.get(f"/v1/cache/warm/jobs/{job_id2}")
@@ -605,7 +580,6 @@ class TestCacheWarmingRealTables:
                         break
 
                 assert progress2["status"] == "completed"
-                # Different projection means new cache entries
                 assert progress2["row_groups_cached"] >= 1
                 assert progress2["row_groups_skipped"] == 0
 
@@ -626,7 +600,6 @@ class TestCacheWarmingRealTables:
         from strata.pool_metrics import reset_metrics
         from strata.server import ServerState, app
 
-        # Create a second table
         catalog = temp_warehouse["catalog"]
         schema = Schema(
             NestedField(1, "id", LongType(), required=False),
@@ -658,7 +631,6 @@ class TestCacheWarmingRealTables:
             async with AsyncClient(
                 transport=ASGITransport(app=app), base_url="http://test"
             ) as client:
-                # Warm both tables
                 response = await client.post(
                     "/v1/cache/warm/async",
                     json={"tables": [temp_warehouse["table_uri"], table2_uri]},
@@ -668,7 +640,6 @@ class TestCacheWarmingRealTables:
                 assert data["tables_count"] == 2
                 job_id = data["job_id"]
 
-                # Wait for job to complete
                 for _ in range(50):
                     await asyncio.sleep(0.1)
                     response = await client.get(f"/v1/cache/warm/jobs/{job_id}")
@@ -679,7 +650,7 @@ class TestCacheWarmingRealTables:
                 assert progress["status"] == "completed"
                 assert progress["tables_total"] == 2
                 assert progress["tables_completed"] == 2
-                assert progress["row_groups_cached"] >= 2  # At least 1 per table
+                assert progress["row_groups_cached"] >= 2
 
         finally:
             await server_module._state._cache_warmer.stop()

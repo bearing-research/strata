@@ -57,7 +57,7 @@ class TestResolveLlmConfig:
             },
             clear=True,
         ):
-            # No notebook, no server config — process env must not rescue this.
+            # No notebook, no server config: process env must not rescue this.
             assert resolve_llm_config() is None
 
     def test_notebook_env_anthropic(self):
@@ -168,8 +168,8 @@ class TestResponseFormatFor:
             output_type="json",
             output_schema=self._SCHEMA,
         )
-        # OpenAI strict mode demands ``additionalProperties: false`` on
-        # every object — we inject it automatically.
+        # OpenAI strict mode demands ``additionalProperties: false`` on every object;
+        # it is injected automatically.
         expected_schema = {
             **self._SCHEMA,
             "additionalProperties": False,
@@ -332,11 +332,10 @@ class TestAnthropicToolUseBody:
             output_schema=_SIMPLE_SCHEMA,
         )
         assert body["system"] == "You are an extractor."
-        # System must be pulled out of messages — native API rejects
-        # role=system inside the messages array.
+        # System is pulled out of messages: the native API rejects role=system inside
+        # the messages array.
         assert all(m["role"] != "system" for m in body["messages"])
         assert len(body["messages"]) == 1
-        # Temperature omitted when not specified
         assert "temperature" not in body
 
     def test_multiple_system_messages_are_joined(self):

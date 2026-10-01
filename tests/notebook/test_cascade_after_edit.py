@@ -48,16 +48,14 @@ class TestCascadeAfterEdit:
 
         with open_notebook_session(client, nb.path) as (sid, session):
             with ws_connect(client, sid) as ws:
-                # 1. Run all cells in order so they become "ready"
                 execute_cell_and_wait(ws, "c1")
                 ws.clear()
                 execute_cell_and_wait(ws, "c2")
                 ws.clear()
                 result3 = execute_cell_and_wait(ws, "c3")
 
-                # Verify initial output: print(y) where y=1+1=2
+                # c3 prints y = x + 1 = 2.
                 assert result3["type"] == "cell_output" or result3["type"] == "cell_status"
-                # Check stdout from c3 messages
                 c3_outputs = [
                     m
                     for m in ws.messages
@@ -68,23 +66,20 @@ class TestCascadeAfterEdit:
 
                 ws.clear()
 
-                # 2. Edit c1 to x = 2
                 ws.update_source("c1", "x = 2")
-                # Wait for dag_update
                 ws.receive_until("dag_update")
                 ws.clear()
 
-                # 3. Now run c3 — should trigger cascade (c1 → c2 → c3)
+                # Running c3 must cascade c1 → c2 → c3.
                 execute_cell_and_wait(ws, "c3")
 
-                # 4. Verify cascade happened — look for cascade_prompt
                 cascade_msgs = ws.messages_of_type("cascade_prompt")
                 assert len(cascade_msgs) > 0, (
                     "Expected cascade_prompt but got none. "
                     f"Message types: {[m['type'] for m in ws.messages]}"
                 )
 
-                # 5. Verify c3's output is now "3" (x=2, y=x+1=3)
+                # x=2, y=x+1=3
                 c3_outputs = [
                     m
                     for m in ws.messages
@@ -109,17 +104,15 @@ class TestCascadeAfterEdit:
 
         with open_notebook_session(client, nb.path) as (sid, session):
             with ws_connect(client, sid) as ws:
-                # Run c1 and c2 BEFORE c3 exists in consumed_variables
-                # (c3 already exists in the fixture, but simulate the scenario
-                #  where c2 was first run when c3 wasn't yet referencing y)
+                # c3 exists in the fixture already; this replays c2 running before c3
+                # referenced y, so y was never stored.
 
-                # Step 1: Run c1 and c2
                 execute_cell_and_wait(ws, "c1")
                 ws.clear()
                 execute_cell_and_wait(ws, "c2")
                 ws.clear()
 
-                # Step 2: Run c3 — first run of c3, should resolve y
+                # c3's first run resolves y.
                 execute_cell_and_wait(ws, "c3")
                 c3_out = [
                     m
@@ -132,12 +125,11 @@ class TestCascadeAfterEdit:
                 )
                 ws.clear()
 
-                # Step 3: Edit c1 to x = 2
                 ws.update_source("c1", "x = 2")
                 ws.receive_until("dag_update")
                 ws.clear()
 
-                # Step 4: Run c3 — should cascade c1→c2→c3 and print 3
+                # c3 must cascade c1→c2→c3 and print 3.
                 execute_cell_and_wait(ws, "c3")
 
                 cascade_msgs = ws.messages_of_type("cascade_prompt")
@@ -156,7 +148,6 @@ class TestCascadeAfterEdit:
                 stdout = c3_out[-1]["payload"].get("stdout", "")
                 assert "3" in stdout, f"Expected '3' in stdout but got: {stdout!r}"
 
-                # Also verify no cell_error messages
                 errors = [m for m in ws.messages if m["type"] == "cell_error"]
                 assert not errors, f"Unexpected errors during cascade: {errors}"
 
@@ -170,13 +161,11 @@ class TestCascadeAfterEdit:
 
         with open_notebook_session(client, nb.path) as (sid, session):
             with ws_connect(client, sid) as ws:
-                # Don't run any cells first — simulate fresh open
-                # Edit c1 to x = 2
+                # No prior runs, as on a fresh open.
                 ws.update_source("c1", "x = 2")
                 ws.receive_until("dag_update")
                 ws.clear()
 
-                # Run c3 — should cascade c1→c2→c3
                 execute_cell_and_wait(ws, "c3")
 
                 cascade_msgs = ws.messages_of_type("cascade_prompt")
@@ -195,7 +184,6 @@ class TestCascadeAfterEdit:
                 stdout = c3_out[-1]["payload"].get("stdout", "")
                 assert "3" in stdout, f"Expected '3' in stdout but got: {stdout!r}"
 
-                # No errors should have occurred
                 errors = [m for m in ws.messages if m["type"] == "cell_error"]
                 assert not errors, f"Unexpected errors: {errors}"
 
@@ -205,7 +193,6 @@ class TestCascadeAfterEdit:
 
         with open_notebook_session(client, nb.path) as (sid, session):
             with ws_connect(client, sid) as ws:
-                # Run all cells
                 execute_cell_and_wait(ws, "c1")
                 ws.clear()
                 execute_cell_and_wait(ws, "c2")
@@ -213,18 +200,15 @@ class TestCascadeAfterEdit:
                 execute_cell_and_wait(ws, "c3")
                 ws.clear()
 
-                # Verify all are ready
                 for cell in session.notebook_state.cells:
                     assert cell.status == "ready", (
                         f"Cell {cell.id} should be ready, got {cell.status}"
                     )
 
-                # Edit c1
                 ws.update_source("c1", "x = 2")
                 ws.receive_until("dag_update")
 
-                # After the edit, c1 should NOT be ready, and c2/c3 should
-                # also NOT be ready since their upstream changed
+                # The edit invalidates c1 and, through it, c2 and c3.
                 c1 = next(c for c in session.notebook_state.cells if c.id == "c1")
                 c2 = next(c for c in session.notebook_state.cells if c.id == "c2")
                 c3 = next(c for c in session.notebook_state.cells if c.id == "c3")
@@ -248,7 +232,6 @@ class TestCascadeAfterEdit:
 
         with open_notebook_session(client, nb.path) as (sid, session):
             with ws_connect(client, sid) as ws:
-                # 1. Run all cells initially
                 execute_cell_and_wait(ws, "c1")
                 ws.clear()
                 execute_cell_and_wait(ws, "c2")
@@ -256,7 +239,6 @@ class TestCascadeAfterEdit:
                 execute_cell_and_wait(ws, "c3")
                 ws.clear()
 
-                # Verify artifact store has c1's x artifact
                 artifact_mgr = session.get_artifact_manager()
                 notebook_id = session.notebook_state.id
                 c1_x_id = f"nb_{notebook_id}_cell_c1_var_x"
@@ -275,19 +257,15 @@ class TestCascadeAfterEdit:
                     f"Expected artifact for c2:y after initial run. artifact_id={c2_y_id}"
                 )
 
-                # 2. Edit c1 and trigger cascade
                 ws.update_source("c1", "x = 2")
                 ws.receive_until("dag_update")
                 ws.clear()
 
-                # 3. Run c3 — triggers cascade c1→c2→c3
                 execute_cell_and_wait(ws, "c3")
 
-                # 4. Verify no errors
                 errors = [m for m in ws.messages if m["type"] == "cell_error"]
                 assert not errors, f"Unexpected errors during cascade: {errors}"
 
-                # 5. Verify artifact store has UPDATED c1:x artifact
                 art_x_v2 = artifact_mgr.artifact_store.get_latest_version(c1_x_id)
                 assert art_x_v2 is not None, (
                     f"Expected artifact for c1:x after cascade. artifact_id={c1_x_id}"
@@ -295,25 +273,22 @@ class TestCascadeAfterEdit:
                 assert art_x_v2.state == "ready", (
                     f"Expected c1:x artifact to be ready after cascade, got {art_x_v2.state}"
                 )
-                # Should be a NEW version (different provenance from v1)
+                # A new version (different provenance from v1).
                 assert art_x_v2.version >= art_x_v1.version, (
                     f"Expected new version for c1:x, "
                     f"got v{art_x_v2.version} (was v{art_x_v1.version})"
                 )
 
-                # 6. Verify c2:y also has updated artifact
                 art_y_v2 = artifact_mgr.artifact_store.get_latest_version(c2_y_id)
                 assert art_y_v2 is not None, (
                     f"Expected artifact for c2:y after cascade. artifact_id={c2_y_id}"
                 )
 
-                # 7. Verify cell artifact_uri fields are set
                 c1 = next(c for c in session.notebook_state.cells if c.id == "c1")
                 c2 = next(c for c in session.notebook_state.cells if c.id == "c2")
                 assert c1.artifact_uri is not None, "c1.artifact_uri should be set after cascade"
                 assert c2.artifact_uri is not None, "c2.artifact_uri should be set after cascade"
 
-                # 8. Verify c3 printed "3"
                 c3_outputs = [
                     m
                     for m in ws.messages
@@ -334,18 +309,16 @@ class TestCascadeAfterEdit:
 
         with open_notebook_session(client, nb.path) as (sid, session):
             with ws_connect(client, sid) as ws:
-                # Run c1 so it stores an artifact for x
                 execute_cell_and_wait(ws, "c1")
                 ws.clear()
 
-                # Verify artifact exists
                 artifact_mgr = session.get_artifact_manager()
                 notebook_id = session.notebook_state.id
                 c1_x_id = f"nb_{notebook_id}_cell_c1_var_x"
                 art = artifact_mgr.artifact_store.get_latest_version(c1_x_id)
                 assert art is not None, "Precondition: c1:x artifact must exist"
 
-                # --- sabotage: delete the artifact row so it looks missing ---
+                # Delete the artifact row so it looks missing.
                 conn = artifact_mgr.artifact_store._get_connection()
                 try:
                     conn.execute(
@@ -356,20 +329,17 @@ class TestCascadeAfterEdit:
                 finally:
                     conn.close()
 
-                # Confirm it's gone
                 assert artifact_mgr.artifact_store.get_latest_version(c1_x_id) is None
 
-                # Now run c2 — it should detect the missing artifact,
-                # re-run c1, and succeed.
+                # c2 must detect the missing artifact, re-run c1, and succeed.
                 execute_cell_and_wait(ws, "c2")
 
-                # c2 should be ready (not error)
                 c2 = next(c for c in session.notebook_state.cells if c.id == "c2")
                 assert c2.status == "ready", (
                     f"c2 should be ready after auto-rerun of c1, got {c2.status}"
                 )
 
-                # c1:x artifact should now exist again (re-created by retry)
+                # Re-created by the retry.
                 art_after = artifact_mgr.artifact_store.get_latest_version(c1_x_id)
                 assert art_after is not None, "c1:x artifact should exist after auto-rerun"
 
@@ -399,13 +369,10 @@ class TestCascadeAfterEdit:
                 artifact_mgr = session.get_artifact_manager()
                 notebook_id = session.notebook_state.id
 
-                # --- Poison the artifact store ---
-                # Insert a "foreign" artifact with the SAME provenance that
-                # c1 will compute, but under a different artifact ID.
-                # This simulates leftover artifacts from a previous cell
-                # layout or a copied notebook.
+                # Poison the store: a foreign artifact with the provenance c1 will compute,
+                # under a different artifact ID (as an old cell layout or a copied notebook
+                # leaves behind).
 
-                # First, compute what c1's provenance will be.
                 import hashlib
 
                 from strata.notebook.env import compute_lockfile_hash
@@ -419,7 +386,6 @@ class TestCascadeAfterEdit:
                 cell_prov = compute_provenance_hash([], source_hash, env_hash)
                 var_prov = hashlib.sha256(f"{cell_prov}:x".encode()).hexdigest()
 
-                # Store a foreign artifact with matching provenance.
                 from strata.artifact_store import TransformSpec
 
                 foreign_id = f"nb_{notebook_id}_cell_GHOST_var_x"
@@ -445,13 +411,11 @@ class TestCascadeAfterEdit:
                     1,
                 )
 
-                # Confirm the foreign artifact is findable by provenance.
                 assert artifact_mgr.find_cached(var_prov) is not None
-                # Confirm canonical ID does NOT exist yet.
                 canonical_id = f"nb_{notebook_id}_cell_c1_var_x"
                 assert artifact_mgr.artifact_store.get_latest_version(canonical_id) is None
 
-                # --- Now run c3 — should cascade c1→c2→c3 ---
+                # c3 cascades c1→c2→c3.
                 execute_cell_and_wait(ws, "c3")
 
                 cascade_msgs = ws.messages_of_type("cascade_prompt")
@@ -459,7 +423,7 @@ class TestCascadeAfterEdit:
                     f"Expected cascade. Types: {[m['type'] for m in ws.messages]}"
                 )
 
-                # c3 should print 2 (x=1, y=x+1=2)
+                # x=1, y=x+1=2
                 c3_out = [
                     m
                     for m in ws.messages
@@ -471,7 +435,6 @@ class TestCascadeAfterEdit:
                 stdout = c3_out[-1]["payload"].get("stdout", "")
                 assert "2" in stdout, f"Expected '2' in stdout but got: {stdout!r}"
 
-                # Canonical artifact must now be ready.
                 art = artifact_mgr.artifact_store.get_latest_version(
                     canonical_id,
                 )
@@ -480,7 +443,6 @@ class TestCascadeAfterEdit:
                 )
                 assert art.state == "ready"
 
-                # No errors should have occurred.
                 errors = [m for m in ws.messages if m["type"] == "cell_error"]
                 assert not errors, f"Unexpected errors: {errors}"
 
@@ -497,7 +459,6 @@ class TestCascadeAfterEdit:
 
         with open_notebook_session(client, nb.path) as (sid, session):
             with ws_connect(client, sid) as ws:
-                # 1. Run all cells so they become "ready"
                 execute_cell_and_wait(ws, "c1")
                 ws.clear()
                 execute_cell_and_wait(ws, "c2")
@@ -505,13 +466,12 @@ class TestCascadeAfterEdit:
                 execute_cell_and_wait(ws, "c3")
                 ws.clear()
 
-                # Verify all are ready
                 for cell in session.notebook_state.cells:
                     assert cell.status == "ready", (
                         f"Cell {cell.id} should be ready, got {cell.status}"
                     )
 
-                # 2. Edit c1 via REST API (not WebSocket!)
+                # Edit c1 via REST, not the WebSocket.
                 resp = client.put(
                     f"/v1/notebooks/{sid}/cells/c1",
                     json={"source": "x = 2"},
@@ -519,14 +479,11 @@ class TestCascadeAfterEdit:
                 assert resp.status_code == 200
                 rest_data = resp.json()
 
-                # Verify the REST response includes updated cell statuses
                 assert "cells" in rest_data, "REST response should include 'cells' with statuses"
 
-                # Verify c1 is no longer "ready" on the backend
                 c1 = next(c for c in session.notebook_state.cells if c.id == "c1")
                 assert c1.status != "ready", f"c1 should be stale after REST edit, got {c1.status}"
 
-                # 3. Run c3 via WebSocket — should trigger cascade
                 execute_cell_and_wait(ws, "c3")
 
                 cascade_msgs = ws.messages_of_type("cascade_prompt")
@@ -534,7 +491,6 @@ class TestCascadeAfterEdit:
                     f"Expected cascade after REST edit. Types: {[m['type'] for m in ws.messages]}"
                 )
 
-                # 4. Verify c3 prints "3"
                 c3_out = [
                     m
                     for m in ws.messages

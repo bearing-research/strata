@@ -193,7 +193,6 @@ class TestS3URIParsing:
         """S3 table URIs are parsed correctly."""
         from strata.iceberg import PyIcebergCatalog
 
-        # S3 URI with warehouse path
         warehouse, table_id = PyIcebergCatalog.parse_table_uri("s3://my-bucket/warehouse#db.table")
         assert warehouse == "s3://my-bucket/warehouse"
         assert table_id == "db.table"
@@ -229,7 +228,6 @@ class TestS3PathResolution:
         config = StrataConfig(cache_dir=tmp_path)
         planner = ReadPlanner(config)
 
-        # S3 absolute path
         resolved = planner._resolve_file_path(
             "s3://bucket/warehouse#db.table",
             "s3://bucket/warehouse/data/file.parquet",
@@ -244,7 +242,6 @@ class TestS3PathResolution:
         config = StrataConfig(cache_dir=tmp_path)
         planner = ReadPlanner(config)
 
-        # Relative path in S3 table
         resolved = planner._resolve_file_path(
             "s3://bucket/warehouse#db.table",
             "data/file.parquet",
