@@ -1,10 +1,8 @@
-"""Several pool processes over one store. Item 37.
+"""Several pool processes over one store.
 
-Each test runs against SQLite (two connections to one file) and, when
-`STRATA_POOL_POSTGRES_DSN` names a database, Postgres. The two pools stand in
-for two processes: separate store connections, separate backends, separate
-instance ids, one database. Killing a process is cancelling its tasks without
-letting them write anything, which is what a process that dies leaves behind.
+Runs on SQLite (two connections to one file) and, when `STRATA_POOL_POSTGRES_DSN`
+is set, Postgres. Two pools with separate connections, backends and instance ids
+stand in for two processes; killing one cancels its tasks before they write.
 """
 
 import asyncio
@@ -323,8 +321,7 @@ class TestTheStore:
         assert second.get_worker("w2").state is WorkerState.WARM, "the losing claim rolled back"
 
     def test_concurrent_reservations_never_exceed_demand(self, open_store):
-        """Threads with their own connections, so the store's own
-        serialization is what is under test, not the event loop's."""
+        """Threads with their own connections, so the store's serialization is under test."""
         setup = open_store()
         for i in range(5):
             setup.save_job(
@@ -395,8 +392,7 @@ class TestTheStore:
 
 
 class TestTwoProcessesAreTwoNames:
-    """Every lease predicate matches the holder's name, so two processes under
-    one name each take the other's machines and jobs for their own."""
+    """Leases match by name, so two processes under one name would take each other's rows."""
 
     def test_a_pool_without_a_name_does_not_share_one(self, tmp_path):
         types = [MachineType(name="cpu", image="w")]
@@ -410,8 +406,7 @@ class TestTwoProcessesAreTwoNames:
     async def test_a_second_pool_does_not_stop_the_first_ones_busy_machine(
         self, open_store, make_pool
     ):
-        """What the shared-store docstring promises: a machine another live
-        process holds is left alone."""
+        """A machine another live process holds is left alone."""
         workers = FakeWorkers()
         clock = Clock()
         first = make_pool("a", workers=workers, wall=clock)
@@ -441,9 +436,7 @@ class TestTwoProcessesAreTwoNames:
 class TestAJobTakenOverStaysTakenOver:
     @pytest.mark.asyncio
     async def test_a_stalled_process_does_not_resurrect_a_failed_job(self, open_store, make_pool):
-        """The task dispatched the job, then this process stalled past its
-        lease and another failed the job and stopped the machine. When the task
-        finally runs it must not write ``running`` back over that."""
+        """After another process failed the job, the stalled task must not write ``running``."""
         workers = FakeWorkers()
         clock = Clock()
         pool = make_pool("a", workers=workers, wall=clock)
@@ -533,8 +526,7 @@ class TestAMachineBeingStoppedStillCounts:
 class TestAStopThatFailsKeepsTheRow:
     @pytest.mark.asyncio
     async def test_a_provider_error_does_not_orphan_the_machine(self, open_store, make_pool):
-        """Deleting the row would leave a machine running, billing, with
-        nothing naming it. It stays, in ``stopping``, to be stopped again."""
+        """A failed provider stop keeps the row in ``stopping`` to be retried, not deleted."""
 
         class _Failing(FakeBackend):
             async def stop(self, backend_id: str) -> None:
@@ -567,9 +559,7 @@ class TestAStopThatFailsKeepsTheRow:
 class TestAStopThatFailedIsTriedAgain:
     @pytest.mark.asyncio
     async def test_the_fleet_slot_comes_back_once_the_provider_answers(self, open_store, make_pool):
-        """Keeping the row holds the machine's place against the fleet cap, so
-        something has to revisit it — otherwise a provider blip costs a slot for
-        the life of the process."""
+        """A retried stop frees the fleet slot, so a provider blip does not cost it forever."""
 
         class _FlakyBackend(FakeBackend):
             def __init__(self):

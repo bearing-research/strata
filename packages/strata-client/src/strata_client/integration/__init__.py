@@ -1,17 +1,7 @@
 """Integration modules for Arrow, DataFusion, DuckDB, pandas, and Polars.
 
-Each integration is loaded on first use rather than at import time.
-
-This module used to import all five eagerly, which quietly made the package's
-four optional extras unusable on their own: ``pip install
-"strata-client[pandas]"`` followed by ``from strata_client.integration.pandas
-import scan_to_pandas`` raised ``ModuleNotFoundError: No module named
-'duckdb'``, because importing any submodule runs this file first and this file
-imported duckdb. Only ``[all]`` worked, so the separate extras were misleading.
-
-Names re-exported from here still resolve exactly as before (PEP 562), and the
-error a caller gets for a genuinely missing dependency now names the extra they
-actually need.
+Each integration loads on first use (PEP 562), so installing one extra (say
+``strata-client[pandas]``) works without the others' dependencies.
 """
 
 from typing import TYPE_CHECKING, Any

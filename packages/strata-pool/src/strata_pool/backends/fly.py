@@ -1,25 +1,9 @@
-"""Run workers as Fly Machines.
+"""Run workers as Fly Machines, reachable only on the organization's private network.
 
-A Fly machine lives in an app's private network (6PN): it is reachable from
-anything else in the same organization at `{machine_id}.vm.{app}.internal`, and
-from nothing on the public internet unless the app publishes a service. So a
-pool running next to its notebook servers on Fly can hand them workers that
-never face the internet — which the RunPod backend, whose pods are published
-through a public proxy, cannot.
-
-The worker credential still matters: every machine in the organization's
-network can reach every other, so a worker without one would run code for any
-of them.
-
-**Not yet verified against a live account.** The request shapes follow the
-Machines API documentation — `POST /apps/{app}/machines` with `name`, `region`
-and `config` (`image`, `env`, `guest`, `restart`, `auto_destroy`); `id`,
-`region` and `state` in the response; `GET /apps/{app}/machines/{id}` for state;
-`DELETE /apps/{app}/machines/{id}?force=true`. As with RunPod, every field lives
-in `_create_body` and is asserted by a test, `provider_options` overrides
-anything in `config`, and `base_url` can be repointed, so a wrong shape is a
-small visible edit. `tests/test_fly_live.py` closes the gap when run with a
-token.
+Workers still need their credential: every machine in the organization can
+reach every other. Not yet verified against a live account: request shapes
+follow the Machines API docs and live in `_create_body`; `tests/test_fly_live.py`
+checks them when run with a token.
 """
 
 import logging
@@ -64,14 +48,13 @@ class FlyBackend:
         api: httpx.AsyncClient | None = None,
         probe: httpx.AsyncClient | None = None,
     ):
-        """
+        """Configure the backend for one Fly app and region.
+
         Args:
-            app: The Fly app machines are created in. Its private network is
-                the one the workers are reachable on, so it belongs to the
-                same organization as whatever dispatches to them.
-            region: Where machines are placed, e.g. ``"sjc"``. Next to the
-                notebook servers, so a job's inputs do not cross regions.
-            worker_port: The port the image listens on inside the machine.
+            app: Fly app the machines are created in; must share an organization
+                with whatever dispatches to them.
+            region: Where machines are placed, e.g. ``"sjc"``; best next to the notebook servers.
+            worker_port: Port the image listens on inside the machine.
         """
         self.app = app
         self.region = region
@@ -119,13 +102,7 @@ class FlyBackend:
         )
 
     async def stop(self, backend_id: str) -> None:
-        """Destroy a machine. Idempotent.
-
-        Destroy rather than stop: a stopped machine keeps its root filesystem
-        and its place in the app, and the pool means gone when it says gone.
-        ``force`` because the machine may still be running a job the pool has
-        already given up on.
-        """
+        """Destroy (not merely stop) a machine, forcibly, even mid-job. Idempotent."""
         removed = await self._api.delete(
             f"/apps/{self.app}/machines/{backend_id}",
             params={"force": "true"},
@@ -135,11 +112,10 @@ class FlyBackend:
             raise FlyError(f"could not destroy {backend_id}: {_message(removed)}")
 
     async def health(self, endpoint: str) -> bool:
-        """Ready when Fly reports the machine started and the worker answers.
+        """Ready when Fly reports the machine started and the worker answers. Never raises.
 
-        Never raises. The machine state comes first because it is cheap and
-        final: a machine Fly has stopped or destroyed is not coming back, and
-        its private address may already belong to another.
+        The Fly state is checked first: a stopped machine's private address may
+        already belong to another.
         """
         match = _ENDPOINT.match(endpoint)
         if match is not None:
@@ -166,8 +142,7 @@ class FlyBackend:
 def private_url(machine_id: str, app: str, port: int) -> str:
     """Where a machine's port is reachable on the organization's private network.
 
-    Derived, not read back: Fly's internal DNS answers for a machine as soon as
-    it exists, so the pool can start polling before it reports started.
+    Derived rather than read back: internal DNS answers as soon as the machine exists.
     """
     return f"http://{machine_id}.vm.{app}.internal:{port}"
 
@@ -211,9 +186,7 @@ def _create_body(spec: MachineType, env: dict[str, str] | None, region: str) -> 
 def _restore_credential(config: dict, env: dict[str, str] | None) -> None:
     """Put the worker credential back after a `provider_options` override.
 
-    Fly's `env` is a flat string map; an override that replaced it with
-    anything else cannot carry the credential, and a machine without one runs
-    code for anything on the organization's network.
+    Raises FlyError if the override made `env` something other than a dict.
     """
     token = (env or {}).get(WORKER_TOKEN_ENV)
     if token is None:

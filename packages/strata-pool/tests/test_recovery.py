@@ -1,9 +1,4 @@
-"""Restarting the pool process.
-
-The claim is that pool state lives on disk and a restart resumes rather than
-forgets. These tests build a second `Pool` over the first one's database,
-which is what a restart actually is.
-"""
+"""Restarting the pool process: a second `Pool` over the first one's database resumes."""
 
 from conftest import FakeBackend
 from strata_pool import JobState, WorkerState
@@ -46,11 +41,7 @@ async def test_a_machine_that_did_not_survive_is_stopped_and_dropped(make_pool):
 
 
 async def test_a_machine_still_running_our_orphaned_job_is_retired(make_pool):
-    """The pool died, not the worker: it may still be computing.
-
-    Nothing can tell it to stop, so returning it to the fleet would run the
-    next job alongside the orphan on hardware sized for one.
-    """
+    """The worker may still compute the orphan, so it must not take the next job."""
     first = make_pool(db_name="shared.sqlite")
     await _one_completed_job(first)
 
@@ -69,9 +60,7 @@ async def test_a_machine_still_running_our_orphaned_job_is_retired(make_pool):
 
 
 async def test_a_machine_that_finished_booting_while_we_were_down_is_put_to_work(make_pool):
-    """Answering a health check is the promotion criterion, and no boot task
-    survived the restart to apply it. Left STARTING it bills forever and holds
-    a slot against max_workers without ever accepting a job."""
+    """No boot task survives a restart; left STARTING, the machine would bill forever."""
     first = make_pool(db_name="shared.sqlite")
     await _one_completed_job(first)
 

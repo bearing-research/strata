@@ -1,49 +1,21 @@
-"""Python client for Strata server.
+"""Sync and async Python clients for a Strata server.
 
-Provides both sync and async clients for interacting with Strata:
-
-    # Sync client (for scripts, notebooks, CLI tools)
     from strata_client import StrataClient
 
     with StrataClient() as client:
-        # Materialize creates/finds an artifact
         artifact = client.materialize(
             inputs=["file:///warehouse#db.events"],
             transform={"executor": "scan@v1", "params": {}},
         )
-        # Fetch downloads the data
         table = client.fetch(artifact.uri)
 
-    # Async client (for FastAPI, asyncio applications)
-    from strata_client import AsyncStrataClient
+``AsyncStrataClient`` has the same shape with ``await``.
 
-    async with AsyncStrataClient() as client:
-        artifact = await client.materialize(
-            inputs=["file:///warehouse#db.events"],
-            transform={"executor": "scan@v1", "params": {}},
-        )
-        table = await client.fetch(artifact.uri)
-
-Retry Behavior:
-    Both clients implement automatic retry with exponential backoff and jitter
-    for 429 (Too Many Requests) responses. This turns server overload from a
-    hard failure into self-throttling behavior.
-
-    Default settings:
-    - max_retries: 3 (total attempts = 4)
-    - base_delay: 1.0 seconds
-    - max_delay: 30.0 seconds
-    - jitter: 0.0-1.0 seconds random addition
-
-    Backoff formula: min(base_delay * 2^attempt + jitter, max_delay)
-
-    Example with defaults:
-    - Attempt 1 fails: wait 1.0-2.0s
-    - Attempt 2 fails: wait 2.0-3.0s
-    - Attempt 3 fails: wait 4.0-5.0s
-    - Attempt 4 fails: raise exception
-
-    To disable retries, set max_retries=0.
+Retry behavior:
+    Stream fetches retry 429 responses, honoring ``Retry-After`` when present and
+    otherwise waiting ``min(base_delay * 2**attempt + jitter, max_delay)``. With the
+    defaults (3 retries, 1s base, 30s cap, up to 1s jitter) the waits are 1-2s,
+    2-3s and 4-5s before the 429 is raised. ``max_retries=0`` disables retries.
 """
 
 import asyncio
@@ -84,19 +56,11 @@ PROVENANCE_MISS_HEADER = "X-Strata-Provenance-Miss"
 
 
 def _provenance_miss(response: httpx.Response) -> bool:
-    """Is this 404 the store saying "no result", or the store not answering?
+    """Whether this 404 is a genuine provenance miss rather than the store not answering.
 
-    A provenance lookup gets 404 for at least three unrelated reasons: the
-    hash is genuinely unknown; the server predates the route and 404s the
-    path; a service-mode gateway has no artifact store configured and 404s
-    with "Artifact store not available in this deployment". Only the first is
-    a cache miss. Reading the other two as misses recomputes forever while
-    every response still looks like a normal, healthy "no".
-
-    So the route marks the real miss with a header. Matching on that rather
-    than on the status keeps the distinction out of response prose, and makes
-    an older server — which cannot set it — raise rather than quietly answer
-    "no" to every question it is asked.
+    A 404 can also mean the server lacks the route or has no artifact store;
+    reading those as misses would recompute forever. Only the route's miss
+    header counts, so an older server raises instead of answering "no".
     """
     return response.status_code == 404 and PROVENANCE_MISS_HEADER in response.headers
 
@@ -115,11 +79,8 @@ _JSON_BLOB_KEY = b"strata.json.blob"
 def _is_json_blob(table: "pa.Table") -> bool:
     """Whether *table* holds a JSON document rather than columnar data.
 
-    New writes carry an explicit marker. Artifacts written before the marker
-    existed are recognised the way they always were — one column named
-    ``data`` — but only with a single row, which is the shape the blob
-    encoding actually produces. That narrowing is what stops a genuine
-    columnar ``{"data": [...]}`` being misread as a document.
+    The schema marker decides when present. Unmarked tables count as a blob only
+    with one ``data`` column and one row, so a columnar ``{"data": [...]}`` is not misread.
     """
     metadata = table.schema.metadata or {}
     if _JSON_BLOB_KEY in metadata:
@@ -128,11 +89,7 @@ def _is_json_blob(table: "pa.Table") -> bool:
 
 
 def _dict_to_ipc(data: JsonArtifactInput) -> bytes:
-    """Convert a dict to Arrow IPC stream bytes.
-
-    If all values are equal-length lists the dict is treated as columnar
-    and converted directly. Otherwise it's stored as a single JSON column.
-    """
+    """Convert a dict to Arrow IPC: columnar if values are equal-length lists, else JSON."""
     list_values = [value for value in data.values() if isinstance(value, list)]
     if data and len(list_values) == len(data):
         lengths = [len(value) for value in list_values]
@@ -155,11 +112,10 @@ def _dict_to_ipc(data: JsonArtifactInput) -> bytes:
 
 
 def _convert_to_arrow_ipc(data: PutData) -> bytes:
-    """Convert various supported data types to Arrow IPC bytes.
+    """Convert a dict, ``pa.Table``, pandas or polars DataFrame to Arrow IPC bytes.
 
-    Supports: ``dict`` (treated columnar or stored as JSON), ``pa.Table``,
-    pandas DataFrame, polars DataFrame, and pre-encoded ``bytes`` (assumed
-    to already be Arrow IPC).
+    ``bytes`` pass through unchanged and are assumed to be Arrow IPC already.
+    Raises ``TypeError`` for anything else.
     """
     if isinstance(data, bytes):
         return data
@@ -220,13 +176,13 @@ class ArtifactUploadMetadata(TypedDict, total=False):
 
 @dataclass
 class RetryConfig:
-    """Configuration for retry behavior on 429 responses.
+    """Retry policy for 429 responses.
 
     Attributes:
-        max_retries: Maximum number of retry attempts (0 to disable)
-        base_delay: Initial delay in seconds before first retry
-        max_delay: Maximum delay between retries (caps exponential growth)
-        jitter: Maximum random jitter to add (spreads out retries)
+        max_retries: Retry attempts after the first try (0 disables retries).
+        base_delay: Seconds before the first retry.
+        max_delay: Cap in seconds on any single wait.
+        jitter: Maximum random seconds added to each wait.
     """
 
     max_retries: int = 3
@@ -235,11 +191,7 @@ class RetryConfig:
     jitter: float = 1.0
 
     def calculate_delay(self, attempt: int) -> float:
-        """Calculate delay for a given retry attempt (0-indexed).
-
-        Uses exponential backoff: base_delay * 2^attempt + random_jitter
-        Capped at max_delay.
-        """
+        """Return the wait in seconds before retry *attempt* (0-indexed), capped at max_delay."""
         exponential = self.base_delay * (2**attempt)
         jitter = random.uniform(0, self.jitter)
         return min(exponential + jitter, self.max_delay)
@@ -247,29 +199,22 @@ class RetryConfig:
 
 @dataclass
 class Artifact:
-    """An immutable, versioned artifact from Strata.
-
-    Returned by `client.materialize()`. Provides access to artifact data and metadata.
+    """An immutable, versioned artifact, as returned by ``StrataClient.materialize()``.
 
     Attributes:
-        artifact_id: Unique artifact identifier
-        version: Artifact version number
-        cache_hit: True if artifact was returned from cache
-        execution: How the artifact was obtained ("cache", "local", "server", "stream")
-        build_id: Build ID if artifact was built asynchronously
-        name: Name pointer if one was assigned
+        artifact_id: Unique artifact identifier.
+        version: Artifact version number.
+        cache_hit: True if the server returned an existing result.
+        execution: How it was obtained: "cache", "local", "server" or "stream".
+        build_id: Build ID when the artifact was built asynchronously.
+        name: Name pointer, if one was assigned.
 
     Example:
         artifact = client.materialize(
             inputs=["file:///warehouse#db.events"],
             transform={"executor": "scan@v1", "params": {}},
         )
-        print(f"Artifact: {artifact.uri}")
-        print(f"Cache hit: {artifact.cache_hit}")
-
-        # Download the data
-        table = client.fetch(artifact.uri)
-        df = table.to_pandas()
+        df = artifact.to_pandas()
     """
 
     _client: "StrataClient"
@@ -295,15 +240,14 @@ class Artifact:
         """Get artifact metadata.
 
         Returns:
-            Dict with artifact_id, version, state, size_bytes, row_count,
-            created_at, arrow_schema, etc.
+            Dict with artifact_id, version, state, row_count, arrow_schema, and more.
         """
         response = self._client._client.get(f"/v1/artifacts/{self.artifact_id}/v/{self.version}")
         response.raise_for_status()
         return response.json()
 
     def to_table(self) -> pa.Table:
-        """Download artifact data as Arrow Table."""
+        """Return the data as an Arrow Table, reusing bytes already streamed by materialize."""
         if self._stream_data is not None:
             if not self._stream_data:
                 return pa.table({})
@@ -325,11 +269,11 @@ class Artifact:
         """Get artifact lineage (dependency graph).
 
         Args:
-            direction: "upstream" (inputs) or "downstream" (dependents)
-            max_depth: Maximum traversal depth
+            direction: "upstream" (inputs) or "downstream" (dependents).
+            max_depth: Maximum traversal depth.
 
         Returns:
-            Dict with 'nodes' and 'edges' describing the lineage graph
+            Dict with 'nodes' and 'edges'.
         """
         response = self._client._client.get(
             f"/v1/artifacts/{self.artifact_id}/v/{self.version}/lineage",
@@ -342,10 +286,10 @@ class Artifact:
         """Get artifacts that depend on this artifact.
 
         Args:
-            max_depth: Maximum traversal depth
+            max_depth: Maximum traversal depth.
 
         Returns:
-            Dict with 'dependents' list
+            Dict with a 'dependents' list.
         """
         response = self._client._client.get(
             f"/v1/artifacts/{self.artifact_id}/v/{self.version}/dependents",
@@ -356,25 +300,15 @@ class Artifact:
 
 
 class StrataClient:
-    """Client for interacting with a Strata server.
-
-    Implements automatic retry with exponential backoff for 429 responses,
-    turning server overload into self-throttling behavior.
+    """Synchronous client for a Strata server; stream fetches retry 429 with backoff.
 
     Example:
-        client = StrataClient()
-
-        # Materialize creates/finds an artifact
-        artifact = client.materialize(
-            inputs=["file:///warehouse#db.events"],
-            transform={"executor": "scan@v1", "params": {}},
-        )
-
-        # Fetch downloads the data (blocks until artifact is ready)
-        table = client.fetch(artifact.uri)
-
-        # Disable retries
-        client = StrataClient(retry_config=RetryConfig(max_retries=0))
+        with StrataClient() as client:
+            artifact = client.materialize(
+                inputs=["file:///warehouse#db.events"],
+                transform={"executor": "scan@v1", "params": {}},
+            )
+            table = client.fetch(artifact.uri)
     """
 
     def __init__(
@@ -386,12 +320,9 @@ class StrataClient:
         """Initialize the client.
 
         Args:
-            config: Strata configuration. If omitted, the server URL is resolved
-                from ``STRATA_SERVER_URL`` / ``STRATA_HOST`` / ``STRATA_PORT`` /
-                ``pyproject.toml`` without loading the full ``StrataConfig`` (so
-                the client needs none of the server's config dependencies).
-            base_url: Override the server URL from config
-            retry_config: Retry configuration for 429 responses (uses defaults if None)
+            config: Anything with ``server_url``; if omitted, resolved from env and pyproject.toml.
+            base_url: Server URL; overrides ``config``.
+            retry_config: Retry policy for 429 responses (defaults if None).
         """
         self.config = config
         if base_url is not None:
@@ -411,15 +342,9 @@ class StrataClient:
         base_url: str = "http://test",
         retry_config: RetryConfig | None = None,
     ) -> "StrataClient":
-        """Build a client backed by a custom ``httpx`` transport.
+        """Build a client on a custom ``httpx`` transport, such as ``httpx.MockTransport``.
 
-        Intended for tests that want to inject ``httpx.MockTransport``
-        without firing ``StrataConfig.load()`` (which reads pyproject /
-        env vars). The returned client is fully constructed; close it
-        via ``client.close()`` or use it as a context manager.
-
-        ``config`` is left as ``None`` since transport-injected clients
-        bypass the normal config-load path.
+        Skips server-URL resolution (env vars, pyproject.toml); ``config`` is None.
         """
         client = cls.__new__(cls)
         client.config = None
@@ -457,27 +382,20 @@ class StrataClient:
         artifact_uri: str,
         timeout: float = 300.0,
     ) -> pa.Table:
-        """Fetch data from an artifact URI.
-
-        Blocks until the artifact is ready, then downloads and returns the data.
-        This is the second step after materialize() - it retrieves data from
-        an already-materialized artifact.
+        """Fetch an artifact's data, blocking until it is ready.
 
         Args:
-            artifact_uri: Artifact URI (e.g., "strata://artifact/{id}@v={version}")
-            timeout: Maximum seconds to wait for artifact to be ready (default 300)
+            artifact_uri: ``strata://artifact/{id}@v={version}``.
+            timeout: Seconds to wait for a building artifact.
 
         Returns:
-            Arrow Table containing the artifact data
+            Arrow Table with the artifact data.
+
+        Raises:
+            RuntimeError: If the build failed.
+            TimeoutError: If the artifact is still building after ``timeout``.
 
         Example:
-            # Step 1: Materialize creates/finds an artifact
-            artifact = client.materialize(
-                inputs=["file:///warehouse#db.events"],
-                transform={"executor": "scan@v1", "params": {}},
-            )
-
-            # Step 2: Fetch downloads the data
             table = client.fetch(artifact.uri)
         """
         artifact_id, version = _parse_artifact_uri(artifact_uri)
@@ -563,34 +481,26 @@ class StrataClient:
         poll_interval: float = 0.5,
         timeout: float = 300.0,
     ) -> Artifact:
-        """Materialize a computed artifact.
-
-        This is the main entry point for creating artifacts. Sends a request
-        to the unified /v1/materialize endpoint.
+        """Find or compute an artifact via ``POST /v1/materialize``.
 
         Args:
-            inputs: List of input URIs (table URIs or artifact URIs)
-            transform: Transform specification with "executor" and "params"
-                Example: {"executor": "scan@v1", "params": {}}
-            name: Optional name to assign to the result
-            mode: "stream" (default) for immediate data, "artifact" for async build
-            refresh: Force recompute even if cached
-            wait: Wait for async builds to complete
-            poll_interval: Seconds between build status polls
-            timeout: Maximum seconds to wait for build
+            inputs: Input URIs (table URIs or artifact URIs).
+            transform: ``{"executor": "scan@v1", "params": {...}}`` (``ref`` works too).
+            name: Optional name to point at the result.
+            mode: "stream" fetches the data now; "artifact" starts an async build.
+            refresh: Recompute even if a cached result exists.
+            wait: Poll an async build until it finishes.
+            poll_interval: Seconds between build status polls.
+            timeout: Seconds to wait for the build.
 
         Returns:
-            Artifact object with access to metadata and data
+            The resulting Artifact.
+
+        Raises:
+            RuntimeError: If the build failed.
+            TimeoutError: If the build did not finish within ``timeout``.
 
         Example:
-            # Identity transform (read from table)
-            artifact = client.materialize(
-                inputs=["file:///warehouse#db.events"],
-                transform={"executor": "scan@v1", "params": {}},
-            )
-            table = client.fetch(artifact.uri)
-
-            # With column projection and filters
             artifact = client.materialize(
                 inputs=["file:///warehouse#db.events"],
                 transform={
@@ -625,7 +535,7 @@ class StrataClient:
         poll_interval: float,
         timeout: float,
     ) -> Artifact:
-        """Request server-side execution via unified /v1/materialize endpoint."""
+        """Post to /v1/materialize and turn the response into an Artifact."""
         # The public API documents ``ref``; the server only accepts ``executor``.
         # Keep the rename until ``ref`` goes through a deprecation cycle.
         server_transform = dict(transform)
@@ -756,14 +666,14 @@ class StrataClient:
         """Get an existing artifact by ID and version.
 
         Args:
-            artifact_id: Artifact ID
-            version: Version number
+            artifact_id: Artifact ID.
+            version: Version number.
 
         Returns:
-            Artifact object
+            The Artifact.
 
         Raises:
-            httpx.HTTPStatusError: If artifact not found (404)
+            httpx.HTTPStatusError: If the artifact is not found (404).
         """
         response = self._client.get(f"/v1/artifacts/{artifact_id}/v/{version}")
         response.raise_for_status()
@@ -772,24 +682,14 @@ class StrataClient:
     def find_by_provenance(self, provenance_hash: str) -> dict | None:
         """Ask a shared store whether this computation already has a result.
 
-        Returns the match's metadata, or ``None`` when nobody has computed it.
-        A miss is the ordinary case, so it is a return value rather than an
-        exception — callers use this on the hot path of "should I run this?"
-        and would otherwise wrap every call in try/except.
-
-        Everything else raises. A 403, a timeout, or a 500 means the store
-        could not answer, which is different from answering "no": treating
-        them the same turns an expired token into a recomputation nobody can
-        explain. See :func:`_provenance_miss` for why the status alone is not
-        enough to tell those apart.
+        A miss returns None. Any other failure (403, timeout, 500, a server
+        without the route) raises: "could not answer" is not "no".
 
         Args:
             provenance_hash: The sha256 provenance hash to look up.
 
         Returns:
-            Dict with artifact_id, version, provenance_hash, content_type,
-            state, arrow_schema, row_count, byte_size, created_at, principal —
-            or None if the store holds no result for that hash.
+            Dict with artifact_id, version, content_type, state, and more; None on a miss.
         """
         response = self._client.get(f"/v1/artifacts/by-provenance/{provenance_hash}")
         if _provenance_miss(response):
@@ -805,20 +705,15 @@ class StrataClient:
         content_type: str,
         variable_name: str | None = None,
     ) -> dict:
-        """Store a result under a provenance key you computed yourself.
+        """Store an opaque blob under a provenance key the server cannot compute itself.
 
-        For callers whose provenance formula the server cannot reproduce — a
-        notebook cell hashes its own source and environment, which the store
-        never sees. The blob is opaque bytes, so any content type round-trips.
-
-        First writer wins: publishing a hash the store already holds returns
-        the incumbent with ``hit=True`` rather than replacing it.
+        First writer wins: a hash the store already holds returns the incumbent
+        with ``hit=True`` rather than replacing it.
 
         Args:
             provenance_hash: The sha256 key to store under.
             blob: The serialized value, exactly as it should come back.
-            content_type: How to decode it — the reader has no other source
-                for this.
+            content_type: How readers decode the blob; nothing else records it.
             variable_name: Optional label, recorded for readability.
 
         Returns:
@@ -838,16 +733,16 @@ class StrataClient:
         return response.json()
 
     def get_artifact_by_name(self, name: str) -> Artifact:
-        """Get an artifact by its name.
+        """Get the artifact a name points to.
 
         Args:
-            name: Artifact name
+            name: Artifact name.
 
         Returns:
-            Artifact object
+            The Artifact.
 
         Raises:
-            httpx.HTTPStatusError: If name not found (404)
+            httpx.HTTPStatusError: If the name is not found (404).
         """
         resolved = self.resolve_name(name)
         artifact_id, version = _parse_artifact_uri(resolved["artifact_uri"])
@@ -862,10 +757,10 @@ class StrataClient:
         """Resolve a name to its artifact.
 
         Args:
-            name: Name to resolve
+            name: Name to resolve.
 
         Returns:
-            Dict with artifact_uri, version, updated_at
+            Dict with artifact_uri, version, updated_at.
         """
         response = self._client.get(f"/v1/names/{name}")
         response.raise_for_status()
@@ -875,12 +770,12 @@ class StrataClient:
         """Set or update a name pointer.
 
         Args:
-            name: Name to set
-            artifact_id: Target artifact ID
-            version: Target version
+            name: Name to set.
+            artifact_id: Target artifact ID.
+            version: Target version.
 
         Returns:
-            Dict with name_uri and artifact_uri
+            Dict with name_uri and artifact_uri.
         """
         response = self._client.post(
             "/v1/names",
@@ -894,9 +789,7 @@ class StrataClient:
     def set_alias(self, name: str, alias: str, artifact_id: str, version: int) -> dict:
         """Point ``name @ alias`` (e.g. champion) at an artifact version.
 
-        Aliases are mutable intent pointers on a registry name — a name can
-        hold several (champion, candidate, baseline). Every move is recorded
-        in the append-only registry audit.
+        A name can hold several aliases; every move is recorded in the registry audit.
         """
         response = self._client.put(
             f"/v1/names/{name}/aliases/{alias}",
@@ -972,10 +865,9 @@ class StrataClient:
         artifact_id: str | None = None,
         limit: int = 100,
     ) -> list[dict]:
-        """Read the append-only registry audit (newest first).
+        """Read the append-only registry audit, newest first.
 
-        Answers "what did this name point to before?" — every name, alias,
-        and tag mutation is recorded with actor, from/to versions, and time.
+        Every name, alias and tag change is recorded with actor, from/to versions and time.
         """
         params: dict = {"limit": limit}
         if name is not None:
@@ -995,52 +887,25 @@ class StrataClient:
         data: PutData,
         name: str | None = None,
     ) -> Artifact:
-        """Directly upload and persist an artifact with provenance tracking.
+        """Upload a locally computed result as an artifact, deduplicated by provenance.
 
-        This is for clients that execute transforms locally and want to persist
-        the result with full provenance tracking and deduplication.
-
-        Supports multiple data types with automatic detection:
-        - dict: JSON data (nested dicts, lists, primitives)
-        - pa.Table: Arrow Table (efficient for columnar data)
-        - pd.DataFrame: Pandas DataFrame (converted to Arrow)
-        - pl.DataFrame: Polars DataFrame (converted to Arrow)
-        - bytes: Raw Arrow IPC bytes (for pre-serialized data)
+        A dict whose values are equal-length lists is stored as columns; any
+        other dict is stored as one JSON document.
 
         Args:
-            inputs: List of input URIs (artifact URIs or table URIs) for lineage
-            transform: Transform specification (executor + params) for provenance
-                The params are opaque to Strata and used only for deduplication.
-            data: Data to persist (dict, Arrow Table, DataFrame, or bytes)
-            name: Optional name to assign to the artifact
+            inputs: Input URIs (artifact or table URIs), recorded for lineage.
+            transform: Executor and params; opaque to Strata, used only for dedup.
+            data: dict, ``pa.Table``, pandas or polars DataFrame, or Arrow IPC bytes.
+            name: Optional name to assign to the artifact.
 
         Returns:
-            Artifact object with access to metadata and data
+            The Artifact; ``cache_hit`` is True if an identical one already existed.
 
         Example:
-            # Persist JSON data
             artifact = client.put(
                 inputs=[],
                 transform={"executor": "my_step@v1", "params": {}},
                 data={"result": "value", "scores": [1, 2, 3]},
-            )
-
-            # Persist an Arrow Table
-            import pyarrow as pa
-            table = pa.table({"id": [1, 2, 3], "value": [10, 20, 30]})
-            artifact = client.put(
-                inputs=[],
-                transform={"executor": "compute@v1", "params": {}},
-                data=table,
-            )
-
-            # Persist a Pandas DataFrame
-            import pandas as pd
-            df = pd.DataFrame({"x": [1, 2], "y": [3, 4]})
-            artifact = client.put(
-                inputs=[],
-                transform={"executor": "analyze@v1", "params": {}},
-                data=df,
             )
         """
         arrow_bytes = _convert_to_arrow_ipc(data)
@@ -1087,38 +952,30 @@ class StrataClient:
         data: JsonArtifactInput,
         name: str | None = None,
     ) -> Artifact:
-        """Directly upload and persist a JSON artifact with provenance tracking.
-
-        This is a convenience wrapper around put() for JSON data.
-        See put() for full documentation.
+        """Upload a JSON-able dict as an artifact; same as :meth:`put`.
 
         Args:
-            inputs: List of input URIs for lineage
-            transform: Transform specification for provenance
-            data: JSON data to persist
-            name: Optional name to assign
+            inputs: Input URIs, recorded for lineage.
+            transform: Executor and params, used for dedup.
+            data: JSON data to persist.
+            name: Optional name to assign.
 
         Returns:
-            Artifact object
+            The Artifact.
         """
         return self.put(inputs=inputs, transform=transform, data=data, name=name)
 
     def get_json(self, artifact_uri: str) -> JsonArtifactData:
-        """Get JSON data from an artifact.
-
-        Fetches the artifact data and returns it as a Python dict.
-        If the artifact was stored as columnar data, returns the columns.
-        If it was stored as a single JSON column, returns the parsed JSON.
+        """Fetch an artifact as a dict: the parsed JSON document, or ``{column: values}``.
 
         Args:
-            artifact_uri: Artifact URI (e.g., "strata://artifact/{id}@v={version}")
+            artifact_uri: ``strata://artifact/{id}@v={version}``.
 
         Returns:
-            The artifact data as a Python dict
+            The artifact data as a dict.
 
         Example:
             data = client.get_json("strata://artifact/abc@v=1")
-            print(data["proposal"])
         """
         table = self.fetch(artifact_uri)
 
@@ -1142,13 +999,13 @@ class StrataClient:
         """List artifacts with optional filtering.
 
         Args:
-            limit: Maximum number of artifacts to return (default 100)
-            offset: Number of artifacts to skip for pagination
-            state: Filter by state ("ready", "building", "failed")
-            name_prefix: Filter by artifacts with names starting with prefix
+            limit: Maximum number of artifacts to return.
+            offset: Number of artifacts to skip, for pagination.
+            state: Only this state ("ready", "building", "failed").
+            name_prefix: Only artifacts with a name starting with this prefix.
 
         Returns:
-            Dict with 'artifacts' list and pagination info
+            Dict with an 'artifacts' list and pagination info.
         """
         params: dict[str, str | int | float | None] = {"limit": limit, "offset": offset}
         if state is not None:
@@ -1161,17 +1018,14 @@ class StrataClient:
         return response.json()
 
     def delete_artifact(self, artifact_id: str, version: int) -> dict:
-        """Delete an artifact version.
-
-        Deletes the artifact blob and metadata. Also removes any name pointers
-        that reference this specific version.
+        """Delete an artifact version's blob and metadata, and any names pointing at it.
 
         Args:
-            artifact_id: Artifact ID
-            version: Version number
+            artifact_id: Artifact ID.
+            version: Version number.
 
         Returns:
-            Dict with deletion status
+            Dict with the deletion status.
         """
         response = self._client.delete(f"/v1/artifacts/{artifact_id}/v/{version}")
         response.raise_for_status()
@@ -1189,24 +1043,20 @@ class StrataClient:
         """Collect the artifact versions nothing needs, least recently used first.
 
         Nothing named, aliased, pinned or published is collected, nor anything
-        those depend on, nor the current value of an id somebody chose (a
+        those depend on, nor the current value of a caller-chosen id (a
         notebook's cell outputs). An unnamed ``materialize`` result is a cache
-        entry: name or pin it to keep it. Each argument left out takes the
-        server's configured retention, so a bare call does what its scheduled
-        sweep does.
+        entry: name or pin it to keep it. Omitted arguments take the server's
+        configured retention, so a bare call matches its scheduled sweep.
 
         Args:
             max_idle_days: Collect what has not been used for this long.
-            max_bytes: Collect least recently used first until the store is
-                at 80% of this.
+            max_bytes: Collect until the store is at 80% of this many bytes.
             min_idle_seconds: Never collect anything used more recently.
-            collect_latest: Also collect the current value of caller-named
-                ids. Off by default because it deletes live state.
+            collect_latest: Also collect current values of caller-named ids (deletes live state).
             dry_run: Report what would go, and delete nothing.
 
         Returns:
-            Dict with ``deleted_count``, ``deleted_bytes``, ``store_bytes``
-            and, with ``dry_run``, the chosen versions under ``collected``.
+            Dict with deleted_count, deleted_bytes, store_bytes, and ``collected`` on a dry run.
         """
         params: dict[str, float | int | bool] = {
             "collect_latest": collect_latest,
@@ -1227,8 +1077,7 @@ class StrataClient:
         """Get artifact store usage metrics.
 
         Returns:
-            Dict with usage statistics including total_bytes, total_versions,
-            unreferenced_count, etc.
+            Dict with total_bytes, total_versions, unreferenced_count, and more.
         """
         response = self._client.get("/v1/artifacts/usage")
         response.raise_for_status()
@@ -1237,24 +1086,14 @@ class StrataClient:
     # --- Staleness Detection ---
 
     def get_name_status(self, name: str) -> dict:
-        """Get status of a named artifact including staleness info.
-
-        Checks whether the named artifact's inputs have changed since
-        it was last built. Use this to determine if a rebuild is needed.
+        """Report whether a named artifact's inputs have changed since it was built.
 
         Args:
-            name: Name to check (without strata://name/ prefix)
+            name: Name to check, without the ``strata://name/`` prefix.
 
         Returns:
-            Dict with fields:
-            - name: The artifact name
-            - artifact_uri: URI of the pinned artifact
-            - version: Pinned version number
-            - state: Artifact state
-            - input_versions: Dict mapping input URI -> version when built
-            - is_stale: True if any input has changed
-            - stale_reason: Human-readable explanation if stale
-            - changed_inputs: List of inputs that changed
+            Dict with name, artifact_uri, version, state, input_versions,
+            is_stale, stale_reason and changed_inputs.
 
         Example:
             >>> status = client.get_name_status("daily_revenue")
@@ -1272,25 +1111,16 @@ class StrataClient:
         transform: TransformSpec,
         name: str | None = None,
     ) -> dict:
-        """Explain what materialize would do without doing it (dry run).
-
-        Use this to check whether a computation would be a cache hit or miss,
-        and if stale, which specific inputs have changed.
+        """Dry-run materialize: report cache hit or miss and, if stale, which inputs changed.
 
         Args:
-            inputs: List of input URIs (table URIs or artifact URIs)
-            transform: Transform specification with "ref" and "params"
-                Example: {"ref": "duckdb_sql@v1", "params": {"sql": "..."}}
-            name: Optional name to check staleness against
+            inputs: Input URIs (table URIs or artifact URIs).
+            transform: ``{"ref": "duckdb_sql@v1", "params": {...}}``.
+            name: Optional name to check staleness against.
 
         Returns:
-            Dict with fields:
-            - cache_hit: True if result would be cached
-            - artifact_uri: URI of existing artifact if hit
-            - provenance_hash: Hash of the transform specification
-            - is_stale: True if named artifact exists but needs rebuild
-            - stale_reason: Explanation of why rebuild is needed
-            - execution: "cache", "local", or "server"
+            Dict with cache_hit, artifact_uri, provenance_hash, is_stale,
+            stale_reason and execution ("cache", "local" or "server").
 
         Example:
             >>> result = client.explain_materialize(
@@ -1317,59 +1147,31 @@ class StrataClient:
         return response.json()
 
     def is_artifact_stale(self, name: str) -> bool:
-        """Check if a named artifact is stale (convenience method).
+        """Check whether a named artifact is stale.
 
         Args:
-            name: Name to check
+            name: Name to check.
 
         Returns:
-            True if the artifact's inputs have changed since it was built
+            True if the artifact's inputs have changed since it was built.
 
         Raises:
-            httpx.HTTPStatusError: If name not found (404)
+            httpx.HTTPStatusError: If the name is not found (404).
         """
         status = self.get_name_status(name)
         return status.get("is_stale", False)
 
 
 class AsyncStrataClient:
-    """Async client for interacting with a Strata server.
-
-    Use this client in async contexts like FastAPI, asyncio applications,
-    or when you need to run multiple operations concurrently.
-
-    Implements automatic retry with exponential backoff for 429 responses,
-    turning server overload into self-throttling behavior.
+    """Async client for a Strata server; stream fetches retry 429 with backoff.
 
     Example:
         async with AsyncStrataClient() as client:
-            # Materialize creates/finds an artifact
             artifact = await client.materialize(
                 inputs=["file:///warehouse#db.events"],
                 transform={"executor": "scan@v1", "params": {}},
             )
-
-            # Fetch downloads the data
             table = await client.fetch(artifact.uri)
-
-        # Concurrent fetches:
-        async with AsyncStrataClient() as client:
-            artifact1 = await client.materialize(
-                inputs=["file:///warehouse#db.events"],
-                transform={"executor": "scan@v1", "params": {}},
-            )
-            artifact2 = await client.materialize(
-                inputs=["file:///warehouse#db.users"],
-                transform={"executor": "scan@v1", "params": {}},
-            )
-            tables = await asyncio.gather(
-                client.fetch(artifact1.uri),
-                client.fetch(artifact2.uri),
-            )
-
-        # Disable retries
-        async with AsyncStrataClient(retry_config=RetryConfig(max_retries=0)) as client:
-            ...
     """
 
     def __init__(
@@ -1381,11 +1183,9 @@ class AsyncStrataClient:
         """Initialize the async client.
 
         Args:
-            config: Strata configuration. If omitted, the server URL is resolved
-                from ``STRATA_SERVER_URL`` / ``STRATA_HOST`` / ``STRATA_PORT`` /
-                ``pyproject.toml`` without loading the full ``StrataConfig``.
-            base_url: Override the server URL from config
-            retry_config: Retry configuration for 429 responses (uses defaults if None)
+            config: Anything with ``server_url``; if omitted, resolved from env and pyproject.toml.
+            base_url: Server URL; overrides ``config``.
+            retry_config: Retry policy for 429 responses (defaults if None).
         """
         self.config = config
         if base_url is not None:
@@ -1426,27 +1226,20 @@ class AsyncStrataClient:
         artifact_uri: str,
         timeout: float = 300.0,
     ) -> pa.Table:
-        """Fetch data from an artifact URI.
-
-        Blocks until the artifact is ready, then downloads and returns the data.
-        This is the second step after materialize() - it retrieves data from
-        an already-materialized artifact.
+        """Fetch an artifact's data, waiting until it is ready.
 
         Args:
-            artifact_uri: Artifact URI (e.g., "strata://artifact/{id}@v={version}")
-            timeout: Maximum seconds to wait for artifact to be ready (default 300)
+            artifact_uri: ``strata://artifact/{id}@v={version}``.
+            timeout: Seconds to wait for a building artifact.
 
         Returns:
-            Arrow Table containing the artifact data
+            Arrow Table with the artifact data.
+
+        Raises:
+            RuntimeError: If the build failed.
+            TimeoutError: If the artifact is still building after ``timeout``.
 
         Example:
-            # Step 1: Materialize creates/finds an artifact
-            artifact = await client.materialize(
-                inputs=["file:///warehouse#db.events"],
-                transform={"executor": "scan@v1", "params": {}},
-            )
-
-            # Step 2: Fetch downloads the data
             table = await client.fetch(artifact.uri)
         """
         artifact_id, version = _parse_artifact_uri(artifact_uri)
@@ -1486,13 +1279,8 @@ class AsyncStrataClient:
     async def find_by_provenance(self, provenance_hash: str) -> dict | None:
         """Ask a shared store whether this computation already has a result.
 
-        The async twin of :meth:`StrataClient.find_by_provenance`, and the one
-        the notebook executor uses: the lookup sits on the path of every cell
-        run, inside an already-async materialize, so the sync client would
-        block the event loop on a network round-trip per cell.
-
-        Returns the match's metadata, or ``None`` for a genuine miss.
-        Everything else raises — see :func:`_provenance_miss`.
+        Returns the match's metadata, or None on a genuine miss; any other
+        failure raises (see :meth:`StrataClient.find_by_provenance`).
         """
         response = await self._client.get(f"/v1/artifacts/by-provenance/{provenance_hash}")
         if _provenance_miss(response):
@@ -1548,27 +1336,26 @@ class AsyncStrataClient:
         poll_interval: float = 0.5,
         timeout: float = 300.0,
     ) -> "AsyncArtifact":
-        """Materialize a computed artifact.
-
-        This is the main entry point for creating artifacts. Sends a request
-        to the unified /v1/materialize endpoint.
+        """Find or compute an artifact via ``POST /v1/materialize``.
 
         Args:
-            inputs: List of input URIs (table URIs or artifact URIs)
-            transform: Transform specification with "executor" and "params"
-                Example: {"executor": "scan@v1", "params": {}}
-            name: Optional name to assign to the result
-            mode: "stream" (default) for immediate data, "artifact" for async build
-            refresh: Force recompute even if cached
-            wait: Wait for async builds to complete
-            poll_interval: Seconds between build status polls
-            timeout: Maximum seconds to wait for build
+            inputs: Input URIs (table URIs or artifact URIs).
+            transform: ``{"executor": "scan@v1", "params": {...}}`` (``ref`` works too).
+            name: Optional name to point at the result.
+            mode: "stream" fetches the data now; "artifact" starts an async build.
+            refresh: Recompute even if a cached result exists.
+            wait: Poll an async build until it finishes.
+            poll_interval: Seconds between build status polls.
+            timeout: Seconds to wait for the build.
 
         Returns:
-            AsyncArtifact object with access to metadata and data
+            The resulting AsyncArtifact.
+
+        Raises:
+            RuntimeError: If the build failed.
+            TimeoutError: If the build did not finish within ``timeout``.
 
         Example:
-            # Identity transform (read from table)
             artifact = await client.materialize(
                 inputs=["file:///warehouse#db.events"],
                 transform={"executor": "scan@v1", "params": {}},
@@ -1734,42 +1521,25 @@ class AsyncStrataClient:
         data: PutData,
         name: str | None = None,
     ) -> "AsyncArtifact":
-        """Directly upload and persist an artifact with provenance tracking.
+        """Upload a locally computed result as an artifact, deduplicated by provenance.
 
-        This is for clients that execute transforms locally and want to persist
-        the result with full provenance tracking and deduplication.
-
-        Supports multiple data types with automatic detection:
-        - dict: JSON data (nested dicts, lists, primitives)
-        - pa.Table: Arrow Table (efficient for columnar data)
-        - pd.DataFrame: Pandas DataFrame (converted to Arrow)
-        - pl.DataFrame: Polars DataFrame (converted to Arrow)
-        - bytes: Raw Arrow IPC bytes (for pre-serialized data)
+        A dict whose values are equal-length lists is stored as columns; any
+        other dict is stored as one JSON document.
 
         Args:
-            inputs: List of input URIs (artifact URIs or table URIs) for lineage
-            transform: Transform specification (executor + params) for provenance
-            data: Data to persist (dict, Arrow Table, DataFrame, or bytes)
-            name: Optional name to assign to the artifact
+            inputs: Input URIs (artifact or table URIs), recorded for lineage.
+            transform: Executor and params; opaque to Strata, used only for dedup.
+            data: dict, ``pa.Table``, pandas or polars DataFrame, or Arrow IPC bytes.
+            name: Optional name to assign to the artifact.
 
         Returns:
-            AsyncArtifact object with access to metadata and data
+            The AsyncArtifact; ``cache_hit`` is True if an identical one already existed.
 
         Example:
-            # Persist JSON data
             artifact = await client.put(
                 inputs=[],
                 transform={"executor": "my_step@v1", "params": {}},
                 data={"result": "value", "scores": [1, 2, 3]},
-            )
-
-            # Persist an Arrow Table
-            import pyarrow as pa
-            table = pa.table({"id": [1, 2, 3], "value": [10, 20, 30]})
-            artifact = await client.put(
-                inputs=[],
-                transform={"executor": "compute@v1", "params": {}},
-                data=table,
             )
         """
         arrow_bytes = _convert_to_arrow_ipc(data)
@@ -1816,38 +1586,30 @@ class AsyncStrataClient:
         data: JsonArtifactInput,
         name: str | None = None,
     ) -> "AsyncArtifact":
-        """Directly upload and persist a JSON artifact with provenance tracking.
-
-        This is a convenience wrapper around put() for JSON data.
-        See put() for full documentation.
+        """Upload a JSON-able dict as an artifact; same as :meth:`put`.
 
         Args:
-            inputs: List of input URIs for lineage
-            transform: Transform specification for provenance
-            data: JSON data to persist
-            name: Optional name to assign
+            inputs: Input URIs, recorded for lineage.
+            transform: Executor and params, used for dedup.
+            data: JSON data to persist.
+            name: Optional name to assign.
 
         Returns:
-            AsyncArtifact object
+            The AsyncArtifact.
         """
         return await self.put(inputs=inputs, transform=transform, data=data, name=name)
 
     async def get_json(self, artifact_uri: str) -> JsonArtifactData:
-        """Get JSON data from an artifact.
-
-        Fetches the artifact data and returns it as a Python dict.
-        If the artifact was stored as columnar data, returns the columns.
-        If it was stored as a single JSON column, returns the parsed JSON.
+        """Fetch an artifact as a dict: the parsed JSON document, or ``{column: values}``.
 
         Args:
-            artifact_uri: Artifact URI (e.g., "strata://artifact/{id}@v={version}")
+            artifact_uri: ``strata://artifact/{id}@v={version}``.
 
         Returns:
-            The artifact data as a Python dict
+            The artifact data as a dict.
 
         Example:
             data = await client.get_json("strata://artifact/abc@v=1")
-            print(data["proposal"])
         """
         table = await self.fetch(artifact_uri)
 
@@ -1862,20 +1624,14 @@ class AsyncStrataClient:
 
 @dataclass
 class AsyncArtifact:
-    """An immutable, versioned artifact from Strata (async version).
-
-    Returned by `AsyncStrataClient.materialize()`.
-    Provides async access to artifact metadata and data.
+    """An immutable, versioned artifact, as returned by ``AsyncStrataClient.materialize()``.
 
     Example:
         artifact = await client.materialize(
             inputs=["file:///warehouse#db.events"],
             transform={"executor": "scan@v1", "params": {}},
         )
-        print(f"Artifact: {artifact.uri}")
-
-        # Download the data
-        table = await client.fetch(artifact.uri)
+        table = await artifact.to_table()
     """
 
     _client: "AsyncStrataClient"
@@ -1906,7 +1662,7 @@ class AsyncArtifact:
         return response.json()
 
     async def to_table(self) -> pa.Table:
-        """Download artifact data as Arrow Table."""
+        """Return the data as an Arrow Table, reusing bytes already streamed by materialize."""
         if self._stream_data is not None:
             if not self._stream_data:
                 return pa.table({})

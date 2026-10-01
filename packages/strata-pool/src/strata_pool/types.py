@@ -1,10 +1,7 @@
 """Value types for the worker pool.
 
-States are deliberately narrow: only the transitions the pool actually
-performs today exist here. `cold` (a stopped-but-provisioned worker) and
-`cancelled` (a job killed on request) belong to the scaler and the reaper,
-and land with them — an enum member nothing produces is an invariant nobody
-is checking.
+States hold only transitions the pool performs: an enum member nothing
+produces is an invariant nobody checks.
 """
 
 import enum
@@ -78,12 +75,7 @@ def new_auth_token() -> str:
 
 @dataclass(frozen=True)
 class MachineType:
-    """A named capability class the pool can provision.
-
-    The pool does not know what the label means — it matches a job's declared
-    requirement against a worker's capability and hands the rest to the
-    backend.
-    """
+    """A named capability class the pool can provision; the backend interprets the rest."""
 
     name: str
     image: str
@@ -225,16 +217,11 @@ class Job:
 
 @dataclass(frozen=True)
 class UsageEvent:
-    """One billable execution.
+    """One execution's machine time, recorded for every terminal job including failures.
 
-    `duration_ms` is measured on a monotonic clock while `started_at` and
-    `completed_at` are wall-clock: a clock step during a job must not be able
-    to change what a customer is charged, but the billing period a job falls
-    into is a wall-clock question.
-
-    The pool records an event for every terminal job, including failures —
-    the machine time was consumed either way. Deciding what is actually
-    billable is the metering layer's call, not the pool's.
+    `duration_ms` is monotonic so a clock step cannot change a charge;
+    `started_at` and `completed_at` are wall-clock, for billing periods. What is
+    billable is the metering layer's call.
     """
 
     id: str

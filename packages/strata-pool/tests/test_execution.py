@@ -74,11 +74,7 @@ async def test_a_job_that_runs_too_long_times_out_and_the_machine_is_retired(mak
 
 
 async def test_a_worker_that_stops_answering_is_not_mistaken_for_a_slow_job(make_pool):
-    """A wedged machine surfaces as ConnectTimeout, which is a dead machine.
-
-    Calling it a slow job would return it to the fleet, and every job after it
-    would be handed to a corpse one timeout at a time.
-    """
+    """A ConnectTimeout means a dead machine; treating it as slow would feed it every next job."""
     backend = FakeBackend()
 
     def black_hole(request: httpx.Request) -> httpx.Response:
@@ -114,11 +110,7 @@ async def test_a_job_outlives_its_deadline_even_if_bytes_keep_arriving(make_pool
 
 
 async def test_an_unexpected_failure_releases_the_machine_instead_of_wedging_it(make_pool):
-    """A worker that misbehaves in a way we cannot classify still cannot leak.
-
-    A job stuck RUNNING with a worker stuck BUSY would bill forever and hold a
-    slot against max_workers with nothing left alive to release it.
-    """
+    """An unclassified failure must not leave the worker BUSY, billing and holding a slot."""
     backend = FakeBackend()
 
     def garbled(request: httpx.Request) -> httpx.Response:
@@ -136,8 +128,7 @@ async def test_an_unexpected_failure_releases_the_machine_instead_of_wedging_it(
 
 
 async def test_a_store_that_rejects_the_bill_still_releases_the_machine(make_pool):
-    """A store that refuses a write is a problem; a machine stuck BUSY with
-    nothing left alive to release it is a permanent one."""
+    """A failed usage write must not leave the machine stuck BUSY."""
     pool = make_pool()
 
     original = pool.store.record_usage

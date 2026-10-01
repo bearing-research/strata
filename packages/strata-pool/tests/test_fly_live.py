@@ -7,15 +7,9 @@ still leave one running, so check ``fly machines list`` afterwards.
     export FLY_API_TOKEN=... STRATA_POOL_FLY_APP=... STRATA_POOL_FLY_REGION=sjc
     STRATA_POOL_FLY_LIVE=1 pytest tests/test_fly_live.py -v -s
 
-Workers are reachable only on the organization's private network. From a
-laptop that is not on it (no ``fly wireguard`` peer), this proves the API half —
-create, the machine reaching ``started``, destroy, and a repeated destroy — and
-skips the worker probe. Set ``STRATA_POOL_FLY_ON_NETWORK=1`` where
-``*.vm.<app>.internal`` resolves to probe ``/health`` through the backend too,
-which is the half item 51's "answers on the private network" needs.
-
-Never run yet: the shapes in ``backends/fly.py`` come from the Machines API
-documentation, and this is what confirms them.
+Off the organization's private network this checks only the API (create,
+``started``, destroy twice). Set ``STRATA_POOL_FLY_ON_NETWORK=1`` where
+``*.vm.<app>.internal`` resolves to also probe ``/health``.
 """
 
 import asyncio

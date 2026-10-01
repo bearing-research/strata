@@ -1,9 +1,4 @@
-"""Changing the machine-type catalogue without restarting the pool. Item 38.
-
-Machine types used to be fixed at construction, and the image was read when a
-machine started, so a new GPU type or a new image generation needed a pool
-restart, and a new image reached only machines started after it.
-"""
+"""Changing the machine-type catalogue, including images, without restarting the pool."""
 
 import os
 import sqlite3

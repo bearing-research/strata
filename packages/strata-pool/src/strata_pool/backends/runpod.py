@@ -1,30 +1,8 @@
-"""Run workers as RunPod pods.
+"""Run workers as RunPod pods, published on the public internet through RunPod's proxy.
 
-The first backend that rents real hardware, and the first whose machines are
-reachable from the public internet: a pod's HTTP port is published through
-RunPod's proxy at `https://{pod_id}-{port}.proxy.runpod.net`. The worker
-credential from the pool is doing real work here, not defence in depth — an
-unauthenticated `/execute` on a public URL is a remote code execution endpoint
-anyone can find.
-
-**Verified against a live account** on 2026-09-02 by
-`STRATA_POOL_RUNPOD_LIVE=1 pytest tests/test_runpod_live.py`: the base URL,
-`POST /pods` with `imageName` / `ports` / `env` / `containerDiskInGb` / `name`,
-the `id` in the create response, the proxy endpoint, health through that proxy,
-and `DELETE /pods/{id}` including a second delete of the same pod. A CPU pod
-booted, answered, and terminated with nothing left running.
-
-**Two things that run remains silent on**, because a CPU pod does not exercise
-them: `gpuTypeIds` + `gpuCount`, and reading a region from `machine`. Every pod
-in the account listing carried `machine: {}` with no `dataCenterId`, so
-`region` is probably always `None` today — harmless, since it is metadata, but
-do not trust it. Point `STRATA_POOL_RUNPOD_GPU` at a GPU type to close the
-first gap; it costs real money, which is why the test is opt-in and never runs
-in CI.
-
-The request shapes stay confined to `_create_body` and the three call sites in
-`start`/`stop`, and every one is asserted by a test, so a correction is still a
-small, visible edit rather than an excavation.
+The worker credential is the only thing between a public URL and remote code
+execution. `tests/test_runpod_live.py` verifies the request shapes against a live
+account, except the GPU fields and the region, which is probably always None.
 """
 
 import logging
@@ -59,13 +37,11 @@ class RunPodBackend:
         api: httpx.AsyncClient | None = None,
         probe: httpx.AsyncClient | None = None,
     ):
-        """
+        """Configure the backend.
+
         Args:
-            base_url: Overridable because RunPod has moved its API surface
-                before and the shapes here are unverified. Pointing this at a
-                corrected endpoint should not require touching the pool.
-            worker_port: The port the image listens on. RunPod publishes it
-                through its proxy; the pod itself is not directly addressable.
+            base_url: RunPod REST API base; overridable in case RunPod moves it.
+            worker_port: Port the image listens on; reachable only through RunPod's proxy.
         """
         self.worker_port = worker_port
         # Tracked per client: injecting one for retries or a proxy must not
@@ -127,22 +103,15 @@ class RunPodBackend:
         )
 
     async def stop(self, backend_id: str) -> None:
-        """Terminate a pod. Idempotent.
-
-        Terminate rather than stop: a stopped RunPod pod keeps its disk and
-        keeps charging for it, which is not what the pool means when it says
-        a machine is gone.
-        """
+        """Terminate (not stop: a stopped pod still bills for its disk) a pod. Idempotent."""
         removed = await self._api.delete(f"/pods/{backend_id}", headers=self._auth)
         if removed.status_code >= 400 and removed.status_code != 404:
             raise RunPodError(f"could not terminate {backend_id}: {_message(removed)}")
 
     async def health(self, endpoint: str) -> bool:
-        """Ask the worker, through RunPod's proxy.
+        """Ask the worker through RunPod's proxy. Never raises.
 
-        Never raises. The proxy answers 502 for a pod that has not started
-        serving yet, which is the normal state during a boot that can take
-        minutes on a large image.
+        The proxy answers 502 while a pod boots, which can take minutes.
         """
         try:
             response = await self._probe.get(f"{endpoint}/health", timeout=10.0)
@@ -152,21 +121,12 @@ class RunPodBackend:
 
 
 def proxy_url(pod_id: str, port: int) -> str:
-    """Where a pod's HTTP port is reachable.
-
-    Derived rather than read back from the API: it is available the moment
-    the pod exists, so the pool can start polling before RunPod reports the
-    pod as running.
-    """
+    """Where a pod's HTTP port is reachable; derived, so polling can start before the pod runs."""
     return f"https://{pod_id}-{port}.{PROXY_HOST}"
 
 
 def _create_body(spec: MachineType, env: dict[str, str] | None, worker_port: int) -> dict:
-    """The pod-creation request.
-
-    Every field RunPod might rename lives here, and each one is asserted by a
-    test, so a shape that turns out to be wrong is one edit and one test line.
-    """
+    """The pod-creation request. Every field RunPod might rename lives here."""
     body: dict[str, object] = {
         # Names are not unique, but one that identifies the pool makes an orphaned pod
         # findable in the console, our only backstop until the backend can list machines.
@@ -187,16 +147,10 @@ def _create_body(spec: MachineType, env: dict[str, str] | None, worker_port: int
 
 
 def _restore_credential(body: dict, env: dict[str, str] | None) -> None:
-    """Put the worker credential back after an override, and nothing else.
+    """Put the worker credential back after a `provider_options` override, and nothing else.
 
-    `provider_options` overrides everything on purpose: these request shapes
-    were written from documentation and never run live, and `env` is the field
-    most likely to be wrong — RunPod's GraphQL surface takes a list of
-    ``{key, value}``. Refusing that form would close the escape hatch on
-    exactly the field it exists for.
-
-    So the override stands, in either encoding, and only the credential is
-    restored. A pod without it is an open execute endpoint on a public URL.
+    The override's `env` stands in either encoding (a dict, or a list of
+    ``{key, value}`` as RunPod's GraphQL takes); anything else raises RunPodError.
     """
     token = (env or {}).get(WORKER_TOKEN_ENV)
     if token is None:
@@ -222,10 +176,9 @@ def _restore_credential(body: dict, env: dict[str, str] | None) -> None:
 
 
 def _orphaned(name: str, detail: str) -> RunPodError:
-    """An error raised with a pod already created and already billing.
+    """Log and build the error for a pod that exists and bills but has no usable id.
 
-    The pool will delete the row that would have held the id, so the name is
-    the only way anyone finds this again. Log it as well as raising it.
+    The pool drops the row that would have held the id, so the name is the only handle.
     """
     logger.error(
         "a created pod could not be identified and may still be billing",
@@ -235,13 +188,7 @@ def _orphaned(name: str, detail: str) -> RunPodError:
 
 
 def _message(response: httpx.Response) -> str:
-    """Format a refusal. Must never raise.
-
-    This runs on the failure path, so an exception here replaces RunPod's
-    actual complaint — "HTTP 401" — with an AttributeError traceback, and
-    in stop() that gets swallowed as "may still be billing" while the
-    operator never learns their API key is wrong.
-    """
+    """Format a refusal. Must never raise: it runs on the failure path."""
     try:
         payload = response.json()
     except ValueError:

@@ -1,9 +1,7 @@
 """A machine belongs to one tenant for its life.
 
-Reuse across tenants is the cheap thing to do and the wrong thing to do: even
-scrubbed of files, a process that ran one tenant's code is not a boundary the
-next tenant should have to trust, and GPU memory is not reliably zeroed
-between processes at all.
+A machine that ran one tenant's code is no boundary for the next, and GPU
+memory is not reliably zeroed between processes.
 """
 
 from conftest import FakeBackend
@@ -35,8 +33,7 @@ async def test_each_machine_records_who_it_belongs_to(make_pool):
 
 
 async def test_one_tenant_cannot_exhaust_another_tenants_capacity(make_pool):
-    """max_workers is a per-tenant cap, so a busy tenant cannot crowd out a
-    quiet one by filling the fleet."""
+    """max_workers is per tenant, so a busy tenant cannot crowd out a quiet one."""
     backend = FakeBackend(never_healthy=True)
     pool = make_pool(
         backend=backend,
@@ -55,8 +52,7 @@ async def test_one_tenant_cannot_exhaust_another_tenants_capacity(make_pool):
 
 
 async def test_a_tenant_that_cannot_run_does_not_block_another_tenants_queue(make_pool):
-    """Draining is per tenant. A global queue walk would stop at the first job
-    the freed machine is not allowed to run and starve everything behind it."""
+    """Draining is per tenant; a global walk would stall on a job the machine may not run."""
     backend = FakeBackend()
     pool = make_pool(
         backend=backend,
@@ -93,8 +89,7 @@ async def test_session_affinity_still_applies_within_a_tenant(make_pool):
 
 
 async def test_recovery_places_queued_work_for_every_waiting_tenant(make_pool):
-    """After a restart there is no submit to drive placement, so recovery has
-    to ask who is waiting rather than assume one tenant."""
+    """With no submit after a restart, recovery places queued work for every tenant."""
     first = make_pool(db_name="shared.sqlite")
     seed = await first.submit(tenant_id="acme", machine_type="cpu", payload=b"work")
     done = await first.wait(seed.id)

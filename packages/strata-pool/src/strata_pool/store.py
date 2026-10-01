@@ -1,30 +1,17 @@
 """Persistence for pool state: SQLite by default, Postgres for a shared store.
 
-The pool process holds no authoritative state in memory: workers, jobs, and
-usage events live here, so a restart resumes rather than forgets (see
-`Pool.recover`). SQLite is the default because self-hosting the pool should
-not require standing up a database. `PostgresPoolStore` is for more than one
-pool process over one store, so a restart of one does not pause dispatch.
+All authoritative state lives here, so a restart resumes (see `Pool.recover`).
+Every change to a row several processes may share goes through one of:
 
-Several processes over one store must not both dispatch a job, both start a
-machine for the same demand, or both act on a machine the other is using.
-Three things keep them apart, and every method that changes a job or a worker
-the pool may share goes through one of them:
+- **Claims** (`claim_dispatch`, `claim_for_stop`): conditional updates, so of
+  two processes that saw the same row, one wins.
+- **Reservations** (`reserve_worker`): demand, capacity and the new row in one
+  serialized transaction, so two processes cannot spend the same slot.
+- **Leases**: rows a process is acting on, renewed while it works; an expired
+  one belongs to whoever takes it over.
 
-- **Claims** are conditional updates (`claim_dispatch`, `claim_for_stop`):
-  the row changes only if it is still in the state the caller read, so of two
-  processes that saw the same warm machine, one wins and the other learns so.
-- **Reservations** (`reserve_worker`) count demand and capacity and insert the
-  new machine's row in one serialized transaction, so two processes cannot
-  both spend the same slot.
-- **Leases** mark the rows a process is acting on: a starting, busy or
-  stopping machine, and a dispatched or running job. The process renews them
-  while it works. A row whose lease has expired belongs to whoever takes it
-  over, which is how a surviving process finishes what a dead one left.
-
-Timestamps are REAL epoch seconds (DOUBLE PRECISION in Postgres), matching
-the artifact store. Lease expiry is compared across processes by wall clock,
-so their clocks have to agree to well within a lease.
+Timestamps are epoch seconds. Lease expiry compares wall clocks across
+processes, so they must agree to well within a lease.
 """
 
 import json
@@ -287,9 +274,8 @@ class Store(Protocol):
 class _SqlStore:
     """The pool's SQL, written once for both engines.
 
-    Statements use `?` placeholders; the Postgres store rewrites them. None of
-    this module's SQL has a `?` or a `%` inside a literal, which is what makes
-    the plain rewrite safe here.
+    Statements use `?` placeholders, which the Postgres store rewrites; that is
+    safe only while no SQL literal here contains `?` or `%`.
     """
 
     shared = False
@@ -413,20 +399,11 @@ class _SqlStore:
         session_id: str | None = None,
         image: str | None = None,
     ) -> Worker | None:
-        """The warm worker to hand the next job to.
+        """The tenant's warm worker to hand the next job to, or None.
 
-        Tenant is not optional. A machine that ran one tenant's code is never
-        offered to another, so there is no call site that legitimately wants
-        "any warm worker of this type".
-
-        With `session_id`, only a worker that already served that session
-        matches — the caller falls back to the tenant's other warm workers
-        itself, so an affinity miss is a visible decision rather than a silent
-        one.
-
-        With `image`, a machine booted with another image is not a match: it
-        is stale, and a job sent to it would run on what the catalogue no
-        longer names.
+        A machine is never offered to another tenant. With `session_id`, only a
+        worker that served that session matches (the caller does the fallback).
+        With `image`, machines booted with another image are stale and skipped.
         """
         sql = "SELECT * FROM workers WHERE machine_type = ? AND tenant_id = ? AND state = 'warm'"
         params: list[object] = [machine_type, tenant_id]
@@ -451,11 +428,10 @@ class _SqlStore:
         states: Iterable[WorkerState],
         image: str | None = None,
     ) -> int:
-        """Machines of this type belonging to this tenant. Capacity is
-        counted per tenant because `max_workers` is a per-tenant cap.
+        """Machines of this type belonging to this tenant (`max_workers` is per tenant).
 
-        With `image`, stale machines booted with another image are left out:
-        they take no new work, so they are not capacity."""
+        With `image`, stale machines on another image are left out: they are not capacity.
+        """
         state_values: list[object] = [s.value for s in states]
         if not state_values:
             return 0
@@ -470,11 +446,7 @@ class _SqlStore:
         return self._one(sql, params)["n"]
 
     def count_all_workers(self, states: Iterable[WorkerState]) -> int:
-        """Machines in these states across every tenant and machine type.
-
-        The per-tenant count is what capacity planning uses; this is what a
-        global cap needs, and the two must not be confused.
-        """
+        """Machines in these states across every tenant and type, for the global cap."""
         state_values: list[object] = [s.value for s in states]
         if not state_values:
             return 0
@@ -488,9 +460,7 @@ class _SqlStore:
     ) -> Reservation:
         """Insert *worker*, a machine about to start, if the queue needs it.
 
-        Decided and written in one serialized transaction, so two processes
-        reading the same queue cannot both start a machine for the same job,
-        and two tenants cannot both spend the fleet's last slot.
+        One serialized transaction, so no two processes or tenants spend the same slot.
         """
         live = [WorkerState.STARTING, WorkerState.WARM, WorkerState.BUSY]
         # A machine mid-stop still bills at the provider until the call returns, so the
@@ -540,8 +510,7 @@ class _SqlStore:
         )
 
     def claim_dispatch(self, worker: Worker, job: Job, owner: str, lease_expires_at: float) -> bool:
-        """Give *job* to *worker*, if the worker is still warm and the job
-        still queued. Either both change or neither does."""
+        """Give *job* to *worker* if it is still warm and the job still queued; both or neither."""
         try:
             with self._transaction():
                 if not self._changed(
@@ -660,11 +629,9 @@ class _SqlStore:
         return [_to_job(row) for row in self._all(sql, params)]
 
     def next_queued_job(self, machine_type: str, tenant_id: str) -> Job | None:
-        """Highest priority first, FIFO within a priority, one tenant only.
+        """The tenant's next queued job: highest priority first, FIFO within a priority.
 
-        Scoped by tenant because a freed machine can only serve the tenant it
-        belongs to. Draining globally would stop at the first job the machine
-        is not allowed to run and starve everything behind it.
+        Per tenant, because a machine serves only its own tenant.
         """
         row = self._one(
             "SELECT * FROM jobs WHERE machine_type = ? AND tenant_id = ? "
@@ -681,11 +648,7 @@ class _SqlStore:
         )["n"]
 
     def queued_tenants(self, machine_type: str) -> list[str]:
-        """Tenants with work waiting for this machine type.
-
-        Recovery needs it: after a restart there is no submit to drive
-        placement, so the pool has to ask who is waiting.
-        """
+        """Tenants with work waiting for this machine type."""
         rows = self._all(
             "SELECT DISTINCT tenant_id FROM jobs WHERE machine_type = ? AND state = 'queued'",
             (machine_type,),
@@ -693,8 +656,7 @@ class _SqlStore:
         return [row["tenant_id"] for row in rows]
 
     def queued_machine_types(self) -> list[str]:
-        """Machine types with work waiting, whether or not the catalogue
-        still names them."""
+        """Machine types with work waiting, whether or not the catalogue still names them."""
         rows = self._all("SELECT DISTINCT machine_type FROM jobs WHERE state = 'queued'")
         return [row["machine_type"] for row in rows]
 
@@ -806,11 +768,8 @@ class _Rollback(Exception):
 class PoolStore(_SqlStore):
     """Pool state in a SQLite file: the default.
 
-    One connection guarded by a lock. Writes are small and the pool's
-    background tasks all run on a single event loop, so the lock only ever
-    contends with a caller inspecting the pool from another thread. Several
-    processes on one host may share the file; `BEGIN IMMEDIATE` serializes
-    their transactions.
+    One lock-guarded connection. Processes on one host may share the file;
+    `BEGIN IMMEDIATE` serializes their transactions.
     """
 
     def __init__(self, db_path: Path | str):

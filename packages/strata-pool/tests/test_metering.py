@@ -1,9 +1,7 @@
 """Usage accounting.
 
-Billing numbers are asserted against independently observed time, never
-against a fixed threshold: a metering path that reports a plausible constant
-is indistinguishable from one that reports nothing, and this repo has shipped
-that bug before.
+Billing numbers are asserted against independently observed time, never a fixed
+threshold, which a plausible constant would pass.
 """
 
 import asyncio
@@ -45,11 +43,7 @@ async def test_billed_time_never_exceeds_time_that_actually_passed(make_pool):
 
 
 async def test_a_backwards_clock_step_cannot_change_the_bill(make_pool):
-    """The wall clock runs backwards for the whole job; the duration must not.
-
-    Durations come from a monotonic source for exactly this reason. Computing
-    them from the wall clock would bill this job a negative number of seconds.
-    """
+    """The wall clock runs backwards for the whole job; the monotonic duration must not."""
     backwards = itertools.count(1000.0, -1.0)
     pool = make_pool(wall=lambda: next(backwards))
 

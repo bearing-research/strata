@@ -1,17 +1,8 @@
 """Run workers as containers on a local Docker daemon.
 
-The first backend, chosen first so that dispatch, boot handling, and the
-metering path are all exercised by CI before any of them produces a number
-someone pays for.
-
-It talks to the Docker Engine API over its UNIX socket with httpx rather than
-pulling in the Docker SDK: the pool's dependency list stays at one entry, and
-every request shape is testable against `httpx.MockTransport` without a
-daemon.
-
-The backend does not care what runs inside the container. It starts an image,
-finds the host port Docker published, and reports the endpoint; whether that
-image is `strata-worker` or something else is the caller's business.
+Talks to the Docker Engine API over its UNIX socket with httpx (no Docker SDK),
+so every request is testable against `httpx.MockTransport`. Any image works;
+the backend only reports the host port Docker published.
 """
 
 import logging
@@ -45,17 +36,13 @@ class DockerBackend:
         api: httpx.AsyncClient | None = None,
         probe: httpx.AsyncClient | None = None,
     ):
-        """
+        """Configure the backend; clients passed in are not closed by `aclose`.
+
         Args:
-            worker_port: The port the image listens on inside the container.
-                Docker publishes it on an arbitrary host port, which is what
-                the pool connects to.
-            command: Overrides the image's entrypoint. For images that host
-                more than one, and for tests.
-            api: Client for the Docker Engine API. Defaults to one bound to
-                the daemon socket.
-            probe: Client for worker health checks, which go over TCP to the
-                published port rather than through the daemon.
+            worker_port: Port the image listens on inside the container.
+            command: Overrides the image's entrypoint.
+            api: Docker Engine API client (default: bound to the daemon socket).
+            probe: Health-check client; probes go over TCP to the published port.
         """
         self.worker_port = worker_port
         self.command = command
@@ -137,11 +124,7 @@ class DockerBackend:
             raise DockerError(f"could not remove {backend_id}: {_message(removed)}")
 
     async def health(self, endpoint: str) -> bool:
-        """Report whether the worker answers on its published port.
-
-        Never raises: a refused connection is the normal state of a container
-        that is still booting, and the pool polls this in a loop.
-        """
+        """Report whether the worker answers on its published port; never raises."""
         try:
             response = await self._probe.get(f"{endpoint}/health", timeout=2.0)
         except httpx.HTTPError:
@@ -164,11 +147,7 @@ class DockerBackend:
 
 
 def _socket_client(socket_path: str) -> httpx.AsyncClient:
-    """A client bound to the daemon socket.
-
-    The host in the URL is ignored for a UNIX-socket transport but httpx still
-    requires one, hence the placeholder.
-    """
+    """A client bound to the daemon socket; httpx needs a host, so it gets a placeholder."""
     return httpx.AsyncClient(
         transport=httpx.AsyncHTTPTransport(uds=socket_path),
         base_url="http://docker",

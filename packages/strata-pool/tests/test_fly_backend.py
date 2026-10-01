@@ -1,7 +1,6 @@
-"""Every request the Fly Machines backend makes.
+"""The shape of every request the Fly Machines backend makes.
 
-These assert the shape of what we send, which only a live account can confirm
-Fly wants (see ``test_fly_live.py``), and they stop it drifting afterwards.
+Only a live account confirms Fly wants it (``test_fly_live.py``); these stop drift.
 """
 
 import json
@@ -206,9 +205,7 @@ async def test_a_started_machine_whose_worker_is_not_serving_yet_is_not_healthy(
 
 
 async def test_the_pool_boots_a_fly_worker_for_a_job_and_destroys_it_after_cooldown(tmp_path):
-    """Item 51's whole loop, with Fly and the worker answered locally: a job
-    boots a machine, runs on its private endpoint, and the idle machine is
-    destroyed once its cooldown passes."""
+    """A job boots a machine and runs on its private endpoint; the idle machine is destroyed."""
     from strata_pool import JobState, Pool, PoolStore
 
     fake = FakeFly(state="started")

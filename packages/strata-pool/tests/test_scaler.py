@@ -1,12 +1,6 @@
-"""Stopping machines that are no longer earning their keep.
+"""Stopping idle machines; nothing else in the pool ever does.
 
-Nothing else in the pool ever stops a machine that finished its work, so
-without this a pool bills for every machine it ever started, forever. On a
-CPU worker that is waste; on a GPU it is the most expensive bug the system
-can produce.
-
-The clock is injected throughout: a cost control proved by sleeping is a cost
-control proved by hope.
+The clock is injected throughout rather than proved by sleeping.
 """
 
 import asyncio
@@ -111,8 +105,7 @@ async def test_cool_down_is_per_machine_type(make_pool):
 
 
 async def test_a_machine_that_never_ran_anything_still_ages_out(make_pool):
-    """A machine booted for a job that then failed would otherwise idle
-    forever with no last_active_at to age from."""
+    """With no last_active_at, a machine ages from when it booted."""
     clock = Clock()
     backend = FakeBackend()
     pool = make_pool(backend=backend, machine_types=[_spec()], wall=clock)
@@ -142,10 +135,7 @@ async def test_a_busy_machine_is_never_reaped(make_pool):
 
 
 async def test_a_backwards_clock_step_cannot_make_a_machine_immortal(make_pool):
-    """Idleness is wall-clock, because it has to survive a restart. A machine
-    last active in the future would be unreapable until the clock caught up,
-    which is unbounded idle billing — so it is clamped to now and ages from
-    there."""
+    """A machine last active in the future is clamped to now, or it would be unreapable."""
     clock = Clock()
     pool = make_pool(machine_types=[_spec()], wall=clock)
 
@@ -160,8 +150,7 @@ async def test_a_backwards_clock_step_cannot_make_a_machine_immortal(make_pool):
 
 
 async def test_reaping_frees_capacity_for_the_next_job(make_pool):
-    """A machine on its way out must not count against max_workers, or a
-    tenant at its cap cannot start the replacement."""
+    """A reaped machine stops counting against max_workers, so a capped tenant can replace it."""
     clock = Clock()
     backend = FakeBackend()
     pool = make_pool(
@@ -196,9 +185,7 @@ class SlowStopBackend(FakeBackend):
 
 
 async def test_a_machine_being_stopped_is_not_offered_to_a_dispatcher(make_pool):
-    """Stopping a machine awaits the backend. In that window the dispatcher
-    must not find it warm and hand it a job we are about to kill — so the
-    claim has to land before the await, not after it."""
+    """The stop claim lands before the backend await, so no job is dispatched to it meanwhile."""
     clock = Clock()
     backend = SlowStopBackend()
     pool = make_pool(backend=backend, machine_types=[_spec()], wall=clock)
@@ -223,8 +210,7 @@ async def test_a_machine_being_stopped_is_not_offered_to_a_dispatcher(make_pool)
 
 
 async def test_a_failing_pass_does_not_kill_the_loop(make_pool):
-    """A dead scaler loop is indistinguishable from no scaler at all, and
-    that difference is measured in dollars per hour."""
+    """A raising pass must not end the scaler loop."""
     clock = Clock()
     pool = make_pool(machine_types=[_spec()], wall=clock)
 
@@ -244,11 +230,7 @@ async def test_a_failing_pass_does_not_kill_the_loop(make_pool):
 
 
 async def test_the_scaler_actually_runs_on_its_own(make_pool):
-    """The one test that distinguishes a scaler from a scaler nobody started.
-
-    Every other test here calls the pass by hand, which a control loop that
-    is written and never wired would also survive.
-    """
+    """The loop runs passes by itself; every other test here calls the pass by hand."""
     clock = Clock()
     backend = FakeBackend()
     pool = make_pool(backend=backend, machine_types=[_spec()], wall=clock)
@@ -268,11 +250,7 @@ async def test_the_scaler_actually_runs_on_its_own(make_pool):
 
 
 async def test_a_machine_that_takes_a_job_mid_pass_is_not_stopped_under_it(make_pool):
-    """The list of idle machines is read once, and stopping each one awaits.
-
-    A machine further down that list can take a job while an earlier stop is
-    in flight, and stopping it then kills the job running on it.
-    """
+    """A listed idle machine that takes a job during an earlier stop's await is left running."""
     clock = Clock()
     backend = SlowStopBackend()
     pool = make_pool(backend=backend, machine_types=[_spec(max_workers=2)], wall=clock)
@@ -302,9 +280,7 @@ async def test_a_machine_that_takes_a_job_mid_pass_is_not_stopped_under_it(make_
 
 
 async def test_a_machine_left_mid_teardown_by_a_crash_is_finished_off(make_pool):
-    """A claimed machine whose stop never landed is invisible to everything:
-    the scaler only looks at warm machines and the dispatcher cannot see it.
-    Left alone it bills forever with nothing watching it."""
+    """A machine left in ``stopping`` by a crash is stopped by the next scaler pass."""
     clock = Clock()
     first = make_pool(machine_types=[_spec()], wall=clock, db_name="shared.sqlite")
     job = await first.submit(tenant_id="acme", machine_type="cpu", payload=b"work")

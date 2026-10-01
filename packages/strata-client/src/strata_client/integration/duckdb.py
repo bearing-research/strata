@@ -1,20 +1,10 @@
-"""DuckDB integration for Strata.
+"""Register Strata scans as DuckDB views.
 
-Provides helpers to register Strata scans as DuckDB views. Data is fetched
-from Strata once at registration time and materialized as an Arrow table.
+Data is fetched once, at registration, into an Arrow table. DuckDB WHERE
+clauses run after the fetch; pass Strata filters at registration for
+server-side pruning::
 
-Important: DuckDB SQL filters (WHERE clauses) are applied *after* the data
-is fetched from Strata. To get Strata-side pruning, pass filters to the
-register/scan functions. For example:
-
-    # Strata-side pruning (fast, reduces data transfer):
     scanner.register("events", uri, filters=[gt("value", 100)])
-
-    # DuckDB-side filtering (after full scan):
-    scanner.query("SELECT * FROM events WHERE value > 100")
-
-For best performance, use Strata filters for coarse pruning and DuckDB
-filters for fine-grained predicates.
 """
 
 from typing import Any, TypedDict
@@ -28,15 +18,13 @@ from strata_client.filters import Filter, serialize_filter_value
 
 
 class StrataTableParams(TypedDict, total=False):
-    """Parameters for registering a Strata table.
+    """Parameters for registering a Strata table; only ``table_uri`` is required.
 
-    Required:
-        table_uri: Iceberg table URI (e.g., "file:///warehouse#db.events")
-
-    Optional:
-        snapshot_id: Specific snapshot to read (default: latest)
-        columns: Columns to project (default: all)
-        filters: Filters for Strata-side pruning
+    Attributes:
+        table_uri: Iceberg table URI, e.g. "file:///warehouse#db.events".
+        snapshot_id: Snapshot to read (default: latest).
+        columns: Columns to project (default: all).
+        filters: Filters for Strata-side pruning.
     """
 
     table_uri: str
@@ -74,42 +62,26 @@ def register_strata_scan(
     config: HasServerUrl | None = None,
     base_url: str | None = None,
 ) -> pa.Table:
-    """Register a Strata scan as a DuckDB view.
-
-    Fetches data from Strata and registers it as a view that DuckDB can query.
-    Returns the Arrow table for caller to hold a reference if needed.
-
-    Note: The `filters` parameter controls Strata-side pruning. Any WHERE
-    clauses in subsequent DuckDB queries filter the already-fetched data.
+    """Fetch a Strata scan now and register it as a DuckDB view.
 
     Args:
-        conn: DuckDB connection
-        name: Name for the registered view (will overwrite if exists)
-        table_uri: Iceberg table URI
-        snapshot_id: Specific snapshot to read
-        columns: Columns to project
-        filters: Filters for Strata-side pruning
-        config: Strata configuration
-        base_url: Override server URL
+        conn: DuckDB connection.
+        name: View name; an existing view of that name is replaced.
+        table_uri: Iceberg table URI.
+        snapshot_id: Snapshot to read (None for latest).
+        columns: Columns to project.
+        filters: Filters for Strata-side pruning.
+        config: Anything with ``server_url``.
+        base_url: Server URL; overrides ``config``.
 
     Returns:
-        The Arrow table that was registered (caller can hold reference)
+        The registered Arrow table; keep a reference while the view is in use.
 
     Example:
-        import duckdb
-        from strata_client.integration.duckdb import register_strata_scan
-        from strata_client.client import gt
-
         conn = duckdb.connect()
-
-        # Strata-side filter: only fetch rows where value > 100
         register_strata_scan(
-            conn, "my_table", "file:///warehouse#db.events",
-            columns=["id", "value"],
-            filters=[gt("value", 100)],
+            conn, "my_table", "file:///warehouse#db.events", filters=[gt("value", 100)]
         )
-
-        # DuckDB-side filter: applied to already-fetched data
         result = conn.execute("SELECT * FROM my_table WHERE id < 1000").fetchall()
     """
     client = StrataClient(config=config, base_url=base_url)
@@ -136,28 +108,18 @@ def strata_query(
     config: HasServerUrl | None = None,
     base_url: str | None = None,
 ) -> pa.Table:
-    """Execute a SQL query over Strata tables.
-
-    Convenience function that registers multiple Strata scans and executes
-    a query over them.
-
-    Note: WHERE clauses in the SQL are applied *after* data is fetched from
-    Strata. Use the `filters` key in table params for Strata-side pruning.
+    """Register several Strata scans in an in-memory DuckDB and run one SQL query.
 
     Args:
-        sql: SQL query to execute
-        tables: Dict mapping view names to StrataTableParams
-        config: Strata configuration
-        base_url: Override server URL
+        sql: SQL query to execute; its WHERE runs after the fetch.
+        tables: View name to StrataTableParams (``filters`` prune server-side).
+        config: Anything with ``server_url``.
+        base_url: Server URL; overrides ``config``.
 
     Returns:
-        Arrow Table with query results
+        Arrow Table with the query result.
 
     Example:
-        from strata_client.integration.duckdb import strata_query
-        from strata_client.client import gt
-
-        # Strata-side filter via params, DuckDB-side via SQL
         result = strata_query(
             "SELECT id, value FROM events WHERE id < 1000",
             tables={
@@ -196,34 +158,12 @@ def strata_query(
 
 
 class StrataScanner:
-    """A reusable scanner for DuckDB integration.
-
-    Maintains a DuckDB connection and allows incremental registration of
-    Strata tables as views.
-
-    Note on filtering: The `filters` parameter in `register()` controls
-    Strata-side pruning (reduces data transfer). WHERE clauses in `query()`
-    are applied by DuckDB after data is fetched.
+    """An in-memory DuckDB connection with Strata tables registered as views.
 
     Example:
-        scanner = StrataScanner()
-
-        # Register with Strata-side filter
-        scanner.register(
-            "events", "file:///warehouse#db.events",
-            filters=[gt("value", 100)]
-        )
-        scanner.register("users", "file:///warehouse#db.users")
-
-        # DuckDB-side filtering in SQL
-        result = scanner.query('''
-            SELECT e.*, u.name
-            FROM events e
-            JOIN users u ON e.user_id = u.id
-            WHERE e.id < 1000
-        ''')
-
-        scanner.close()
+        with StrataScanner() as scanner:
+            scanner.register("events", "file:///warehouse#db.events", filters=[gt("value", 100)])
+            result = scanner.query("SELECT * FROM events WHERE id < 1000")
     """
 
     def __init__(
@@ -258,21 +198,21 @@ class StrataScanner:
         *,
         replace: bool = True,
     ) -> "StrataScanner":
-        """Register a Strata table for querying.
+        """Fetch a Strata table now and register it as a view.
 
         Args:
-            name: View name in DuckDB
-            table_uri: Iceberg table URI
-            snapshot_id: Specific snapshot (default: latest)
-            columns: Columns to project (default: all)
-            filters: Filters for Strata-side pruning
-            replace: If True, replace existing view with same name
+            name: View name in DuckDB.
+            table_uri: Iceberg table URI.
+            snapshot_id: Snapshot to read (default: latest).
+            columns: Columns to project (default: all).
+            filters: Filters for Strata-side pruning.
+            replace: Replace an existing view with the same name.
 
         Returns:
-            Self for method chaining
+            self, for chaining.
 
         Raises:
-            ValueError: If name exists and replace=False
+            ValueError: If the name exists and replace=False.
         """
         if not replace and name in self._tables:
             raise ValueError(f"Table '{name}' already registered. Use replace=True to overwrite.")
@@ -293,13 +233,13 @@ class StrataScanner:
         return self
 
     def unregister(self, name: str) -> "StrataScanner":
-        """Unregister a table.
+        """Unregister a table; unknown names are ignored.
 
         Args:
-            name: View name to remove
+            name: View name to remove.
 
         Returns:
-            Self for method chaining
+            self, for chaining.
         """
         if name in self._tables:
             self.conn.unregister(name)

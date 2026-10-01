@@ -36,14 +36,9 @@ class Backend(Protocol):
         spec: MachineType,
         env: dict[str, str] | None = None,
     ) -> ProvisionedWorker:
-        """Provision and start a worker.
+        """Provision and start a worker, ignoring spec fields the backend cannot express.
 
-        Takes the whole machine type rather than a name and an image: a
-        backend needs the resource limits too, and each will grow its own
-        provider-specific fields. A backend ignores what it cannot express.
-
-        Returns once the machine is booting; it does not need to be ready.
-        The pool polls `health()` until it is.
+        Returns once the machine is booting; the pool polls `health()` until it is ready.
         """
         ...
 

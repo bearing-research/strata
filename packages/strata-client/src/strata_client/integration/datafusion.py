@@ -1,30 +1,13 @@
-"""DataFusion integration for Strata.
+"""Apache DataFusion helpers over Strata scans.
 
-Provides helpers to use Strata data with Apache DataFusion, an Arrow-native
-query engine. DataFusion's execution model aligns well with Strata's
-"plan once, cache results" architecture.
+DataFusion predicates run *after* the data is fetched; pass Strata filters to
+the registration functions for server-side row-group pruning.
 
 Example:
-    from strata_client.integration.datafusion import register_strata_table, strata_query
+    from strata_client.integration.datafusion import register_strata_table
 
-    # Register a Strata table with DataFusion
-    ctx = register_strata_table(
-        "events",
-        "file:///warehouse#db.events",
-        columns=["id", "value", "timestamp"],
-    )
-
-    # Query using SQL
+    ctx = register_strata_table("events", "file:///warehouse#db.events")
     result = ctx.sql("SELECT * FROM events WHERE value > 100").collect()
-
-    # Or use the DataFrame API
-    df = ctx.table("events")
-    result = df.filter(col("value") > lit(100)).collect()
-
-Important: DataFusion filter operations are applied *after* data is fetched
-from Strata. To get Strata-side row-group pruning, pass filters to the
-registration functions. For best performance, use Strata filters for coarse
-pruning and DataFusion for fine-grained predicates.
 """
 
 from typing import TYPE_CHECKING
@@ -45,10 +28,8 @@ def _build_scan_transform(
 ) -> dict:
     """Build a scan@v1 transform specification.
 
-    ``snapshot_id`` used to be missing here while the surrounding classes
-    accepted, stored and documented it, so a scan pinned to a snapshot
-    silently read the current one — and the provenance hash recorded the
-    current snapshot too, so nothing downstream flagged the divergence.
+    ``snapshot_id`` must be passed through, or a pinned scan silently reads
+    (and records provenance for) the current snapshot.
     """
     params: dict = {}
     if columns is not None:
@@ -73,35 +54,25 @@ def register_strata_table(
     config: HasServerUrl | None = None,
     base_url: str | None = None,
 ) -> "datafusion.SessionContext":
-    """Register a Strata table with DataFusion.
-
-    Fetches data from Strata and registers it as a table in DataFusion's
-    catalog. The table can then be queried using SQL or the DataFrame API.
+    """Fetch a Strata table now and register it in a DataFusion context.
 
     Args:
-        name: Table name in DataFusion's catalog
-        table_uri: Iceberg table URI (e.g., "file:///warehouse#db.table")
-        ctx: Existing SessionContext (creates new one if None)
-        snapshot_id: Specific snapshot to read (None for latest)
-        columns: Columns to project (None for all)
-        filters: Filters for Strata-side row-group pruning
-        config: Strata configuration
-        base_url: Override server URL
+        name: Table name in DataFusion's catalog.
+        table_uri: Iceberg table URI, e.g. "file:///warehouse#db.table".
+        ctx: Existing SessionContext (a new one if None).
+        snapshot_id: Snapshot to read (None for latest).
+        columns: Columns to project (None for all).
+        filters: Filters for Strata-side row-group pruning.
+        config: Anything with ``server_url``.
+        base_url: Server URL; overrides ``config``.
 
     Returns:
-        SessionContext with the table registered
+        SessionContext with the table registered.
 
     Example:
-        from strata_client.integration.datafusion import register_strata_table
-        from strata_client.client import gt
-
         ctx = register_strata_table(
-            "events",
-            "file:///warehouse#db.events",
-            filters=[gt("value", 100)],  # Strata-side pruning
+            "events", "file:///warehouse#db.events", filters=[gt("value", 100)]
         )
-
-        # Query with SQL
         result = ctx.sql("SELECT id, value FROM events WHERE id < 10").collect()
     """
     import datafusion
@@ -133,26 +104,21 @@ def strata_query(
     config: HasServerUrl | None = None,
     base_url: str | None = None,
 ) -> list["pa.RecordBatch"]:
-    """Execute a SQL query over Strata tables using DataFusion.
-
-    Convenience function that registers multiple tables and executes a query.
+    """Register several Strata tables in a fresh DataFusion context and run one SQL query.
 
     Args:
-        sql: SQL query to execute
-        tables: Mapping of table name to Strata table URI
-        snapshot_id: Snapshot ID for all tables (None for latest)
-        columns: Per-table column projections
-        filters: Per-table Strata filters for row-group pruning
-        config: Strata configuration
-        base_url: Override server URL
+        sql: SQL query to execute.
+        tables: Table name to Strata table URI.
+        snapshot_id: Snapshot ID for all tables (None for latest).
+        columns: Per-table column projections.
+        filters: Per-table Strata filters for row-group pruning.
+        config: Anything with ``server_url``.
+        base_url: Server URL; overrides ``config``.
 
     Returns:
-        List of Arrow RecordBatches containing query results
+        Arrow RecordBatches with the query result.
 
     Example:
-        from strata_client.integration.datafusion import strata_query
-        from strata_client.client import gt
-
         result = strata_query(
             "SELECT e.id, u.name FROM events e JOIN users u ON e.user_id = u.id",
             tables={
@@ -185,24 +151,12 @@ def strata_query(
 
 
 class StrataDataFusionContext:
-    """A DataFusion context with Strata table registration.
-
-    Maintains a connection to Strata for registering multiple tables
-    and running queries.
+    """A DataFusion context plus one Strata client, for registering several tables.
 
     Example:
-        from strata_client.integration.datafusion import StrataDataFusionContext
-
         with StrataDataFusionContext() as ctx:
             ctx.register("events", "file:///warehouse#db.events")
-            ctx.register("users", "file:///warehouse#db.users")
-
-            # SQL query
             result = ctx.sql("SELECT * FROM events WHERE value > 100").collect()
-
-            # DataFrame API
-            df = ctx.table("events")
-            result = df.select("id", "value").collect()
     """
 
     def __init__(
@@ -234,17 +188,17 @@ class StrataDataFusionContext:
         columns: list[str] | None = None,
         filters: list[Filter] | None = None,
     ) -> "StrataDataFusionContext":
-        """Register a Strata table.
+        """Fetch a Strata table now and register it.
 
         Args:
-            name: Table name in DataFusion's catalog
-            table_uri: Iceberg table URI
-            snapshot_id: Specific snapshot to read
-            columns: Columns to project
-            filters: Filters for row-group pruning
+            name: Table name in DataFusion's catalog.
+            table_uri: Iceberg table URI.
+            snapshot_id: Snapshot to read (None for latest).
+            columns: Columns to project.
+            filters: Filters for row-group pruning.
 
         Returns:
-            self for method chaining
+            self, for chaining.
         """
         artifact = self.client.materialize(
             inputs=[table_uri],
@@ -261,10 +215,10 @@ class StrataDataFusionContext:
         """Execute a SQL query.
 
         Args:
-            query: SQL query string
+            query: SQL query string.
 
         Returns:
-            DataFusion DataFrame with query results
+            DataFusion DataFrame with the query results.
         """
         return self.ctx.sql(query)
 
@@ -272,10 +226,10 @@ class StrataDataFusionContext:
         """Get a registered table as a DataFrame.
 
         Args:
-            name: Table name
+            name: Table name.
 
         Returns:
-            DataFusion DataFrame for the table
+            DataFusion DataFrame for the table.
         """
         return self.ctx.table(name)
 
@@ -287,7 +241,7 @@ class StrataDataFusionContext:
         """Remove a registered table.
 
         Args:
-            name: Table name to remove
+            name: Table name to remove.
         """
         self.ctx.deregister_table(name)
         self._tables.pop(name, None)

@@ -1,8 +1,6 @@
-"""strata_client — a lightweight Python client for a Strata server.
+"""strata_client: a lightweight Python client for a Strata server.
 
-Depends only on ``httpx`` + ``pyarrow`` — none of the Strata server's stack
-(no pyiceberg / fastapi / duckdb / pydantic, no Rust extension). Install it
-anywhere you want to *use* Strata as a library::
+Depends only on ``httpx`` and ``pyarrow``, none of the server's stack::
 
     pip install strata-client
 
@@ -15,9 +13,8 @@ anywhere you want to *use* Strata as a library::
         )
         table = client.fetch(art.uri)
 
-The server distribution (``strata-notebook``) depends on this package and
-re-exports it as ``strata.client`` / ``strata.filters`` for backward
-compatibility. See docs/internal/design-strata-client.md.
+The server distribution (``strata-notebook``) re-exports it as
+``strata.client`` / ``strata.filters``.
 """
 
 from strata_client.client import (
