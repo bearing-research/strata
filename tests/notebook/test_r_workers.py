@@ -23,6 +23,7 @@ from strata.notebook.remote_executor import (
     NOTEBOOK_EXECUTOR_PROTOCOL_VERSION,
     create_notebook_executor_app,
 )
+from tests.conftest import prepared_venv
 from tests.notebook.conftest import skip_if_no_r, skip_if_no_r_arrow
 
 _REAL_WHICH = shutil.which
@@ -124,7 +125,9 @@ async def test_the_server_tells_the_worker_the_cell_is_r(
 
     calls = _stand_in_rscript(tmp_path, monkeypatch)
     notebook_dir = create_notebook(tmp_path, "r-dispatch", initialize_environment=False)
+    prepared_venv(notebook_dir)
     session = NotebookSession(parse_notebook(notebook_dir), notebook_dir)
+    session.refresh_environment_runtime()
     worker = WorkerSpec(
         name="r-worker",
         backend=WorkerBackendType.EXECUTOR,
