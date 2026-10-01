@@ -113,6 +113,18 @@ class TestRegistryTab:
 
         assert [p["name"] for p in body["pending"]] == ["taxi/model"]
 
+    def test_tagged_artifacts_come_from_the_team_store(
+        self, tmp_path, team_registry, pointed_at_team
+    ):
+        from strata.api.routers.registry import registry_artifacts_by_tag
+
+        local = _local_store(tmp_path)
+        local.set_tag("private-scratch", 1, "stage", "candidate")
+
+        body = asyncio.run(registry_artifacts_by_tag(local, None, "stage", "candidate"))
+
+        assert [row["artifact_id"] for row in body["artifacts"]] == ["shared-model"]
+
     def test_approving_moves_the_alias_in_the_team_store(
         self, tmp_path, team_dir, team_registry, pointed_at_team
     ):

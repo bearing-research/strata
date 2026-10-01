@@ -96,7 +96,6 @@ logger = get_logger(__name__)
 DRAIN_TIMEOUT_SECONDS = 30  # Max time to wait for active scans to complete
 
 SATURATION_THRESHOLD_SECONDS = 30.0  # Fail readiness if saturated for this long
-STUCK_SCAN_THRESHOLD_SECONDS = 60.0  # Fail readiness if scan makes no progress for this long
 
 
 class ResourceLimitError(Exception):
@@ -210,8 +209,6 @@ class ServerState:
         # When each tier became saturated (no slots available), for readiness.
         self._interactive_saturated_since: float | None = None
         self._bulk_saturated_since: float | None = None
-        # scan_id -> (start_time, last_bytes_streamed)
-        self._scan_progress: dict[str, tuple[float, int]] = {}
 
         pool_tracker = get_pool_tracker()
         pool_tracker.register_pool("planning", self._planning_executor)
@@ -483,8 +480,8 @@ def _update_saturation_tracking(state: ServerState) -> None:
 def _check_readiness(state: ServerState) -> tuple[bool, dict]:
     """Check whether the server can accept new requests; returns ``(is_ready, details)``.
 
-    Not ready when draining, when both QoS tiers stay saturated past the threshold, or when
-    scans are stuck. Dropped logs are reported but do not fail readiness.
+    Not ready when draining, or when both QoS tiers stay saturated past the threshold.
+    Dropped logs are reported but do not fail readiness.
     """
     now = time.time()
     checks = {}
@@ -522,17 +519,6 @@ def _check_readiness(state: ServerState) -> tuple[bool, dict]:
         )
     else:
         checks["capacity_exhausted"] = False
-
-    stuck_scans = []
-    for scan_id, (start_time, last_bytes) in list(state._scan_progress.items()):
-        age = now - start_time
-        if age > STUCK_SCAN_THRESHOLD_SECONDS:
-            stuck_scans.append({"scan_id": scan_id, "age_seconds": round(age, 1)})
-
-    checks["stuck_scans"] = len(stuck_scans)
-    if stuck_scans:
-        checks["stuck_scan_details"] = stuck_scans[:5]
-        issues.append(f"{len(stuck_scans)} scan(s) stuck with no progress")
 
     # Reported, not failed on: dropped logs are a soft limit.
     dropped_logs = state.metrics.dropped_logs

@@ -6,6 +6,7 @@ and Parquet metadata (``file_path -> schema, row groups, stats``).
 
 import json
 import sqlite3
+from contextlib import closing
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -106,7 +107,7 @@ class MetadataStore:
         Both tables are caches of immutable data, so a store from another
         version is dropped rather than migrated.
         """
-        with self._get_conn() as conn:
+        with closing(self._get_conn()) as conn, conn:
             if conn.execute("PRAGMA user_version").fetchone()[0] != METADATA_STORE_VERSION:
                 conn.execute("DROP TABLE IF EXISTS manifest_cache")
                 conn.execute("DROP TABLE IF EXISTS parquet_meta")
@@ -141,7 +142,7 @@ class MetadataStore:
         self, catalog_name: str, table_identity: str, snapshot_id: int
     ) -> list[dict[str, Any]] | None:
         """Get the data file entries ``put_manifest`` stored, or None if not cached."""
-        with self._get_conn() as conn:
+        with closing(self._get_conn()) as conn:
             row = conn.execute(
                 """SELECT data_files_json FROM manifest_cache
                    WHERE catalog_name = ? AND table_identity = ? AND snapshot_id = ?""",
@@ -182,7 +183,7 @@ class MetadataStore:
         keep reads free of write locks; the next put or
         :meth:`cleanup_stale_parquet_meta` replaces them.
         """
-        with self._get_conn() as conn:
+        with closing(self._get_conn()) as conn:
             row = conn.execute(
                 "SELECT * FROM parquet_meta WHERE file_path = ?",
                 (file_path,),
@@ -279,7 +280,7 @@ class MetadataStore:
             return {}
 
         result: dict[str, PersistedParquetMeta] = {}
-        with self._get_conn() as conn:
+        with closing(self._get_conn()) as conn:
             placeholders = ",".join("?" * len(file_paths))
             rows = conn.execute(
                 f"SELECT * FROM parquet_meta WHERE file_path IN ({placeholders})",
@@ -388,7 +389,7 @@ class MetadataStore:
 
     def stats(self) -> dict:
         """Get store statistics."""
-        with self._get_conn() as conn:
+        with closing(self._get_conn()) as conn:
             manifest_count = conn.execute("SELECT COUNT(*) FROM manifest_cache").fetchone()[0]
             parquet_count = conn.execute("SELECT COUNT(*) FROM parquet_meta").fetchone()[0]
 

@@ -215,7 +215,7 @@ checks:
 | Endpoint | Purpose |
 |---|---|
 | `GET /health` | Liveness. Returns `{"status":"ok"}` if the server is running. Used by Docker / Fly / k8s. |
-| `GET /health/ready` | Readiness. `503` while draining, when both QoS tiers have been saturated for over 30s, when scans are stuck, or when the metadata store is unreachable. |
+| `GET /health/ready` | Readiness. `503` while draining, when both QoS tiers have been saturated for over 30s, or when the metadata store is unreachable. |
 | `GET /health/dependencies` | Per-check report (disk cache, metadata store, Arrow memory, thread pools, rate limiter, eviction pressure); `503` if any check is unhealthy. |
 | `GET /metrics/prometheus` | Scrape target. Returns Prometheus textfile. |
 

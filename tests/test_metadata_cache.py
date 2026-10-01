@@ -643,6 +643,38 @@ class TestMetadataStore:
             files.append(str(file_path))
         return files
 
+    def test_every_connection_it_opens_is_closed(self, tmp_path, sample_parquet_files, monkeypatch):
+        """``with conn:`` only commits; a connection left open waits on garbage collection."""
+        import sqlite3
+
+        from strata.metadata_store import MetadataStore, extract_parquet_meta
+
+        opened = []
+        real_connect = sqlite3.connect
+
+        def recording_connect(*args, **kwargs):
+            conn = real_connect(*args, **kwargs)
+            opened.append(conn)
+            return conn
+
+        monkeypatch.setattr(sqlite3, "connect", recording_connect)
+
+        store = MetadataStore(tmp_path / "closing.sqlite")
+        store.put_manifest("default", "ns.table", 1, [])
+        store.get_manifest("default", "ns.table", 1)
+        path = sample_parquet_files[0]
+        store.put_parquet_meta(path, extract_parquet_meta(path))
+        store.get_parquet_meta(path)
+        store.get_parquet_meta_many([path])
+        store.stats()
+        store.cleanup_stale_parquet_meta()
+        store.clear()
+
+        assert opened
+        for conn in opened:
+            with pytest.raises(sqlite3.ProgrammingError):
+                conn.execute("SELECT 1")
+
     def test_manifest_put_and_get(self, store):
         data_files = [
             {"file_path": "/data/f1.parquet", "actual_path": "/abs/f1.parquet"},

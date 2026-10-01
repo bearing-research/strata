@@ -1,8 +1,9 @@
 """Registry routes: audit, events, dashboard summary, and the protected-alias approval queue.
 
 Reads are tenant-scoped; personal mode (no principal) and ``admin:*`` see the whole
-store. With ``notebook_remote_store_url`` set, routes that call ``remote_registry()``
-answer from that store, where the notebook's names actually live.
+store, except the approval queue, which stays in the caller's tenant because approval
+does. With ``notebook_remote_store_url`` set, every route answers from that store,
+where the notebook's names actually live.
 """
 
 from __future__ import annotations
@@ -92,6 +93,13 @@ async def registry_artifacts_by_tag(
     Without ``tag_value``, every artifact carrying the key comes back. Lets the
     notebook find a cell's published artifacts (``nb_cell=<id>``) on any store.
     """
+    target = remote_registry()
+    if target is not None:
+        params = {"tag_key": tag_key}
+        if tag_value is not None:
+            params["tag_value"] = tag_value
+        return await forward(target, "GET", "/v1/registry/artifacts", params=params)
+
     tenant = None if (principal is None or principal.has_scope("admin:*")) else principal.tenant
     return {
         "artifacts": registry_service.artifacts_by_tag(store, tag_key, tag_value, tenant=tenant)
