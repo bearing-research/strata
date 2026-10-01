@@ -27,19 +27,17 @@ from strata.notebook.worker_env import ENV_ROOT_VAR, REGISTRY_VAR
 _REPO = Path(__file__).resolve().parent.parent
 _DOC = _REPO / "docs" / "reference" / "configuration.md"
 _SRC = _REPO / "src"
-# The client finds its server from the environment too (STRATA_SERVER_URL).
 _CLIENT_SRC = _REPO / "packages" / "strata-client" / "src"
 
-# Vars read straight from ``os.environ`` rather than declared on StrataConfig
-# (logging and tracing initialize before config exists; the worker vars are
-# read by ``strata-worker``, a separate process with no StrataConfig at all).
+# Read straight from ``os.environ``, not declared on StrataConfig: logging and
+# tracing initialize before config exists, and ``strata-worker`` has no StrataConfig.
 _ENV_LOOKUP = re.compile(
     r"""(?:os\.environ(?:\.get)?[(\[]|os\.getenv\(|_positive_int_env\()\s*["'](STRATA_[A-Z0-9_]+)["']"""
 )
 _DOCUMENTED = re.compile(r"`(STRATA_[A-Z0-9_]+)`")
 
-# Internal plumbing, not settings: the parent process hands these to its harness
-# child to wire up batch execution. An operator has nothing to set here.
+# Internal plumbing the parent hands its harness child for batch execution;
+# not operator settings.
 _NOT_OPERATOR_FACING = {
     "STRATA_BATCH_FRAME_FD",
     "STRATA_BATCH_RESP_FD",
@@ -48,8 +46,8 @@ _NOT_OPERATOR_FACING = {
 
 
 def _read(path: Path) -> str:
-    # Explicit encoding: the default is locale-dependent, and two TUI modules
-    # carry non-cp1252 bytes, so every Windows CI job errored on this test.
+    # Explicit encoding: the default is locale-dependent and two TUI modules carry
+    # non-cp1252 bytes, which breaks Windows.
     return path.read_text(encoding="utf-8")
 
 
@@ -66,12 +64,10 @@ def _from_environ_lookups() -> set[str]:
     for root in (_SRC, _CLIENT_SRC):
         for path in root.rglob("*.py"):
             found |= set(_ENV_LOOKUP.findall(_read(path)))
-    # A worker takes its secrets out of the environment at startup and reads
-    # them from memory afterwards, so the only ``os.environ`` call naming them
-    # takes the name as a variable. They are set by an operator like any other.
+    # A worker reads its secrets from the environment once at startup, so the only
+    # ``os.environ`` call naming them takes the name as a variable.
     found |= set(_WORKER_SECRETS)
-    # The locked-environment settings are named once, as constants, and read
-    # through them.
+    # These settings are read through named constants.
     found |= {ENV_ROOT_VAR, REGISTRY_VAR, OBJECT_CODEC_ENV_VAR}
     return found
 
@@ -98,8 +94,8 @@ def test_every_real_variable_is_documented(real):
 
 
 def test_the_scan_finds_the_variables_it_claims_to():
-    # Guards the regexes themselves: a pattern that silently matched nothing
-    # would make both assertions above pass forever.
+    # Guards the regexes: a pattern that matched nothing would make both
+    # assertions above pass forever.
     assert "STRATA_HOST" in _from_config()
     assert "STRATA_LOG_LEVEL" in _from_environ_lookups()
     assert "STRATA_SERVER_URL" in _from_environ_lookups()
@@ -129,8 +125,8 @@ def test_the_documented_acl_example_actually_loads():
 
     from strata.config import AclConfig
 
-    # Newlines normalized: a Windows checkout has CRLF, and a regex anchored
-    # on "\n" then matches nothing and the test passes by finding no block.
+    # Normalize newlines: on a CRLF checkout a regex anchored on "\n" matches
+    # nothing and the test passes by finding no block.
     doc = _service_mode_doc()
     block = re.search(r"```toml\n(\[tool\.strata\.acl_config\].*?)```", doc, re.DOTALL)
     assert block is not None, "the ACL example block is gone or no longer TOML"

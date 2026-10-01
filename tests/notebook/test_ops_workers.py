@@ -58,7 +58,7 @@ def test_add_worker_appends_and_persists(nb):
     # Local is no longer the default once an explicit default is set.
     assert next(w for w in view.workers if w.name == "local").is_default is False
 
-    # Persisted to notebook.toml — a fresh parse sees it.
+    # Persisted to notebook.toml: a fresh parse sees it.
     state = parse_notebook(nb)
     assert state.worker == "gpu"
     assert [w.name for w in state.workers] == ["gpu"]
@@ -122,9 +122,7 @@ def test_set_default_worker_unknown_and_clear(nb):
     assert ops.set_default_worker(None).default is None
 
 
-# ---------------------------------------------------------------------------
-# CLI — `strata worker …`
-# ---------------------------------------------------------------------------
+# CLI: `strata worker …`
 
 
 def test_cli_worker_add_ls_default_rm(nb, capsys):
@@ -175,9 +173,7 @@ def test_cli_worker_bad_dir(capsys, tmp_path):
     assert "not a Strata notebook" in capsys.readouterr().err
 
 
-# ---------------------------------------------------------------------------
 # RemoteNotebookOps SSH-worker verbs + `strata worker add-ssh|rm-ssh` CLI
-# ---------------------------------------------------------------------------
 
 
 def _ssh_ops(handler):

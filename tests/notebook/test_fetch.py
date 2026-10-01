@@ -448,9 +448,8 @@ class TestOnARemoteWorker:
         from strata.notebook.session import NotebookSession
         from strata.notebook.writer import add_cell_to_notebook, create_notebook, write_cell
 
-        # The seam the guard reads now: allow this origin by name, and keep
-        # the loopback rule on, so what is exercised here is the allowlist
-        # rather than the personal-mode exemption.
+        # Allow this origin by name and keep the loopback rule on, so this exercises
+        # the allowlist rather than the personal-mode exemption.
         monkeypatch.setattr(
             "strata.notebook.fetch.guard_settings", lambda config: (("127.0.0.1",), False)
         )
@@ -499,9 +498,8 @@ class TestOtherCellKinds:
         from strata.notebook.session import NotebookSession
         from strata.notebook.writer import add_cell_to_notebook, create_notebook, write_cell
 
-        # The seam the guard reads now: allow this origin by name, and keep
-        # the loopback rule on, so what is exercised here is the allowlist
-        # rather than the personal-mode exemption.
+        # Allow this origin by name and keep the loopback rule on, so this exercises
+        # the allowlist rather than the personal-mode exemption.
         monkeypatch.setattr(
             "strata.notebook.fetch.guard_settings", lambda config: (("127.0.0.1",), False)
         )
@@ -536,9 +534,8 @@ class TestOtherCellKinds:
         from strata.notebook.session import NotebookSession
         from strata.notebook.writer import add_cell_to_notebook, create_notebook, write_cell
 
-        # The seam the guard reads now: allow this origin by name, and keep
-        # the loopback rule on, so what is exercised here is the allowlist
-        # rather than the personal-mode exemption.
+        # Allow this origin by name and keep the loopback rule on, so this exercises
+        # the allowlist rather than the personal-mode exemption.
         monkeypatch.setattr(
             "strata.notebook.fetch.guard_settings", lambda config: (("127.0.0.1",), False)
         )

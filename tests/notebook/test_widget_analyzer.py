@@ -48,8 +48,8 @@ class TestAnalyzeWidgetCell:
         assert defaults == {"a": 2, "b": "x", "c": False, "d": ""}
 
     def test_slider_step_defaulted_from_range(self):
-        # Omitting step fills in a ~100-tick, 1/2/5 x 10^n increment; explicit
-        # step is left untouched. slider(0, 1) keeps the historic 0.01.
+        # Omitting step fills in a ~100-tick, 1/2/5 x 10^n increment; an explicit step is
+        # left untouched. slider(0, 1) gets 0.01.
         steps = {}
         for src in (
             "u = slider(0, 1)",
@@ -123,9 +123,8 @@ class TestRegistryDispatch:
 
 class TestWidgetDagParticipation:
     def test_widget_cell_wires_edges_to_downstream_consumers(self):
-        # The DAG is language-agnostic — a widget cell is just a producer whose
-        # defines come from analyze_widget_cell. A downstream Python cell that
-        # references the widget variable gets an edge.
+        # The DAG is language-agnostic: a widget cell is a producer whose defines come
+        # from analyze_widget_cell, so a Python cell referencing its variable gets an edge.
         widget = analyze_widget_cell("alpha = slider(0, 1, default=0.5)")
         cells = [
             CellAnalysisWithId(id="controls", defines=widget.defines, references=[]),

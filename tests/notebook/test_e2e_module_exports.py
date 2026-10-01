@@ -151,8 +151,7 @@ class TestLocalModuleExports:
             with ws_connect(client, sid) as ws:
                 result1 = execute_cell_and_wait(ws, "c1")
                 assert result1["type"] == "cell_output"
-                # Both the def and the literal-constant ride the same
-                # synthetic module.
+                # The def and the literal constant ride the same synthetic module.
                 assert result1["payload"]["outputs"]["scaled"]["content_type"] == "module/cell"
                 assert result1["payload"]["outputs"]["STEP_SIZE"]["content_type"] == "module/cell"
 
@@ -176,7 +175,7 @@ class TestLocalModuleExports:
             with ws_connect(client, sid) as ws:
                 result1 = execute_cell_and_wait(ws, "c1")
                 assert result1["type"] == "cell_output"
-                # json/object, not module/cell — constant flows as data.
+                # json/object, not module/cell: the constant flows as data.
                 assert result1["payload"]["outputs"]["THRESHOLD"]["content_type"] != "module/cell"
                 assert result1["payload"]["outputs"]["THRESHOLD"]["preview"] == 42
 
@@ -202,11 +201,9 @@ def is_big(n):
     return n > THRESHOLD
 """.strip(),
             )
-            # Downstream consumes both the runtime variable (df_size,
-            # via the regular artifact path) and the def (via module
-            # export). THRESHOLD is referenced in c2 to verify the
-            # literal-const-alongside-def path still works under
-            # slicing.
+            # c2 consumes the runtime variable (df_size, via the regular artifact path)
+            # and the def (via module export); THRESHOLD exercises the
+            # literal-const-alongside-def path under slicing.
             .add_cell(
                 "c2",
                 "result = [df_size, is_big(df_size), THRESHOLD]",

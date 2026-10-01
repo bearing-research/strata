@@ -59,17 +59,13 @@ class TestDiskCacheGetAsStreamBytes:
         """Test that get_as_stream_bytes returns valid stream bytes for cached data."""
         cache = DiskCache(strata_config)
 
-        # Store data in cache
         cache.put(cache_key, sample_batch)
 
-        # Get as stream bytes
         stream_bytes = cache.get_as_stream_bytes(cache_key)
 
-        # Should return bytes
         assert isinstance(stream_bytes, bytes)
         assert len(stream_bytes) > 0
 
-        # Should be valid Arrow IPC stream format
         reader = ipc.open_stream(pa.BufferReader(stream_bytes))
         batches = list(reader)
         assert len(batches) == 1
@@ -82,7 +78,6 @@ class TestDiskCacheGetAsStreamBytes:
 
         stream_bytes = cache.get_as_stream_bytes(cache_key)
 
-        # Parse and verify data
         reader = ipc.open_stream(pa.BufferReader(stream_bytes))
         result_batch = list(reader)[0]
 
@@ -218,7 +213,6 @@ class TestCachedFetcherFetchAsStreamBytes:
 
         fetcher = CachedFetcher(strata_config, cache=cache)
 
-        # Create a mock task
         from strata.types import Task
 
         task = Task(
@@ -229,18 +223,14 @@ class TestCachedFetcherFetchAsStreamBytes:
             num_rows=sample_batch.num_rows,
         )
 
-        # Fetch as stream bytes
         stream_bytes = fetcher.fetch_as_stream_bytes(task)
 
-        # Should return valid stream bytes
         assert isinstance(stream_bytes, bytes)
         assert len(stream_bytes) > 0
 
-        # Task should be marked as cached
         assert task.cached is True
         assert task.bytes_read > 0
 
-        # Should be valid Arrow IPC stream
         reader = ipc.open_stream(pa.BufferReader(stream_bytes))
         batches = list(reader)
         assert len(batches) == 1
@@ -255,13 +245,10 @@ class TestRustAccelerationIntegration:
         cache = DiskCache(strata_config)
         cache.put(cache_key, sample_batch)
 
-        # Get stream bytes (uses Rust if available)
         stream_bytes = cache.get_as_stream_bytes(cache_key)
 
-        # Should work regardless of Rust availability
         assert stream_bytes is not None
 
-        # Verify the data is correct
         reader = ipc.open_stream(pa.BufferReader(stream_bytes))
         result_batch = list(reader)[0]
 
@@ -270,12 +257,10 @@ class TestRustAccelerationIntegration:
 
     def test_rust_availability_is_reported(self):
         """Test that Rust availability is correctly reported."""
-        # This should not raise
         is_available = fast_io.is_rust_available()
         assert isinstance(is_available, bool)
 
-        # If CI has Rust, it should be available
-        # This is informational - test passes either way
+        # Informational only; the test passes either way.
         print(f"Rust acceleration available: {is_available}")
 
 
@@ -295,7 +280,6 @@ class TestMmapFileReading:
     def test_read_file_mmap_with_binary_data(self, tmp_path):
         """Test that read_file_mmap handles binary data correctly."""
         test_file = tmp_path / "binary.bin"
-        # Binary data with null bytes and various byte values
         test_data = bytes(range(256)) * 10
         test_file.write_bytes(test_data)
 
@@ -307,7 +291,6 @@ class TestMmapFileReading:
     def test_read_file_mmap_large_file(self, tmp_path):
         """Test that read_file_mmap handles larger files."""
         test_file = tmp_path / "large.bin"
-        # 1 MB of data
         test_data = b"x" * (1024 * 1024)
         test_file.write_bytes(test_data)
 
@@ -321,14 +304,11 @@ class TestMmapFileReading:
         cache = DiskCache(strata_config)
         cache.put(cache_key, sample_batch)
 
-        # Get the cache file path
         path = cache.get_path(cache_key)
         assert path is not None
 
-        # Read using mmap
         stream_bytes = fast_io.read_file_mmap(str(path))
 
-        # Verify it's valid Arrow IPC data
         reader = ipc.open_stream(pa.BufferReader(stream_bytes))
         result_batch = list(reader)[0]
 
@@ -343,18 +323,16 @@ class TestMmapFileReading:
         path = cache.get_path(cache_key)
         assert path is not None
 
-        # Read both ways
         mmap_result = fast_io.read_file_mmap(str(path))
         read_bytes_result = path.read_bytes()
 
-        # Results should be identical
         assert mmap_result == read_bytes_result
 
     def test_read_file_mmap_nonexistent_file(self, tmp_path):
         """Test that read_file_mmap raises on nonexistent file."""
         nonexistent = tmp_path / "does_not_exist.txt"
 
-        # Should raise an exception (IOError from Rust or FileNotFoundError from Python)
+        # IOError from Rust or FileNotFoundError from Python.
         with pytest.raises(Exception):
             fast_io.read_file_mmap(str(nonexistent))
 
@@ -419,7 +397,6 @@ class TestDamagedEntriesSelfHeal:
         )
 
         DiskCache(strata_config).put(cache_key, sample_batch)
-        # The data file and its metadata sidecar.
         assert len(synced) == 2
 
 

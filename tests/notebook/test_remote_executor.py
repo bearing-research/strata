@@ -636,10 +636,8 @@ def test_manifest_rejects_upload_url_with_disallowed_scheme(notebook_executor_se
 
 
 def test_manifest_rejects_finalize_url_with_disallowed_scheme(notebook_executor_server):
-    # example.com is the only sanctioned "real but uninteresting" host
-    # that resolves to a public IP; the validator now requires hosts
-    # to resolve to a non-private address, so example.invalid would
-    # fail at host resolution before reaching the scheme check.
+    # example.com resolves to a public IP; the validator requires hosts to resolve
+    # to a non-private address, so example.invalid would fail before the scheme check.
     manifest = {
         "schema_version": NOTEBOOK_EXECUTOR_MANIFEST_VERSION,
         "metadata": {

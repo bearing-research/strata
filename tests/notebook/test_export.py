@@ -140,7 +140,6 @@ def test_export_code_fence_grows_when_body_contains_triple_backticks(
     # Outer fence is four backticks; inner ```python survives intact.
     assert "````python" in rendered
     assert "```python\nx = 1\n```" in rendered  # inner fence untouched
-    # And the outer fence properly closes
     assert rendered.rstrip().endswith("````\n") or "\n````" in rendered
 
 
@@ -332,8 +331,8 @@ def test_export_sanitizes_active_html_in_markdown_cells(tmp_path: Path) -> None:
 
     rendered = export_notebook(nb_dir)
 
-    # Heading still survives — sanitizer must be surgical, not nuke
-    # benign markdown formatting around it.
+    # The heading survives: the sanitizer must be surgical, not strip benign
+    # markdown formatting around it.
     assert "## Sanitization" in rendered
 
     # All four attack vectors are neutralized: script/iframe tags
@@ -398,7 +397,7 @@ def test_export_renders_readme_intro_when_present(tmp_path: Path) -> None:
     rendered = export_notebook(nb_dir)
     assert "# My Demo Notebook" in rendered
     assert "Walks through the cool feature." in rendered
-    # Don't add a duplicate H1 — README already owns the page title.
+    # No duplicate H1; the README already owns the page title.
     assert "# Notebook:" not in rendered
 
 
@@ -435,7 +434,6 @@ def test_export_truncates_console_over_byte_cap(tmp_path: Path) -> None:
 
     rendered = export_notebook(nb_dir, ExportOptions(max_output_bytes=1024))
     assert "more bytes truncated" in rendered
-    # The "noise" prefix still appears
     assert "noise" in rendered
 
 
@@ -544,7 +542,6 @@ def test_export_html_escapes_user_content(tmp_path: Path) -> None:
     write_cell(nb_dir, "c1", 'print("<script>alert(1)</script>")\n')
 
     rendered = export_notebook(nb_dir, ExportOptions(output_format="html"))
-    # Raw script tag must not survive the escape pass
     assert "<script>alert(1)</script>" not in rendered
     assert "&lt;script&gt;" in rendered or "&lt;span" in rendered  # escaped
 
@@ -562,9 +559,8 @@ def test_export_renders_against_existing_example(tmp_path: Path, monkeypatch) ->
     for nb_dir in notebooks:
         rendered = export_notebook(nb_dir)
         assert rendered.strip(), f"export produced empty output for {nb_dir.name}"
-        # Every export carries at least one heading — either from the
-        # README's h1 or from the fallback "Notebook: <name>" we emit
-        # when there's no README.
+        # Every export has a heading: the README's h1, or the fallback
+        # "Notebook: <name>" when there is no README.
         assert "\n# " in rendered or rendered.startswith("# "), (
             f"export for {nb_dir.name} has no top-level heading"
         )
@@ -703,7 +699,6 @@ def test_export_never_emits_prompt_response_marker_for_real_examples() -> None:
         )
 
 
-# ---------------------------------------------------------------------------
 # App-view snapshot profile (ExportOptions.app_view)
 
 

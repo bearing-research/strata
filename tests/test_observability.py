@@ -31,7 +31,7 @@ class TestGCTracker:
 
         tracker = GCTracker()
         tracker.install()
-        tracker.install()  # Should not raise or add duplicate
+        tracker.install()  # Must not raise or add a duplicate.
         assert gc.callbacks.count(tracker._gc_callback) == 1
         tracker.uninstall()
 
@@ -43,18 +43,15 @@ class TestGCTracker:
         tracker.install()
 
         try:
-            # Force a GC collection
-            gc.collect(0)  # Gen 0
-            gc.collect(1)  # Gen 1
-            gc.collect(2)  # Gen 2
+            gc.collect(0)
+            gc.collect(1)
+            gc.collect(2)
 
             stats = tracker.get_stats()
 
-            # Should have recorded at least one pause
             assert stats.total_pauses >= 1
             assert stats.total_pause_ms >= 0
 
-            # At least gen0 should have run
             assert stats.gen0_count >= 1 or stats.gen1_count >= 1 or stats.gen2_count >= 1
         finally:
             tracker.uninstall()
@@ -83,12 +80,12 @@ class TestGCTracker:
                 done.append(True)
 
             with ThreadPoolExecutor(max_workers=1) as ex:
-                # Run from another thread so a true deadlock would hang the
-                # future; a blocking acquire on the held lock would never return.
+                # Run on another thread so a deadlock hangs the future instead of the test; a
+                # blocking acquire on the held lock would never return.
                 ex.submit(_fire).result(timeout=5)
 
             assert done == [True]
-            # The sample was dropped (lock was contended), not recorded.
+            # The sample was dropped (lock contended), not recorded.
             assert tracker._total_pauses == 0
         finally:
             tracker._lock.release()
@@ -101,7 +98,6 @@ class TestGCTracker:
         tracker.install()
 
         try:
-            # Force some collections
             for _ in range(5):
                 gc.collect(0)
 
@@ -159,7 +155,7 @@ class TestGCTracker:
         assert d["max_pause_ms"] == 5.0
         assert d["gen0"]["count"] == 10
         assert d["gen0"]["avg_ms"] == 1.5
-        assert "recent" in d  # Should have percentiles with 15 samples
+        assert "recent" in d  # 15 samples is enough for percentiles.
         assert "p50_ms" in d["recent"]
 
     def test_global_functions(self):
@@ -197,7 +193,6 @@ class TestSlowOps:
 
         hist = LatencyHistogram()
 
-        # Record various latencies
         hist.record("plan", 5)  # 0-10ms bucket
         hist.record("plan", 25)  # 10-50ms bucket
         hist.record("plan", 75)  # 50-100ms bucket
@@ -228,7 +223,6 @@ class TestSlowOps:
 
         hist = LatencyHistogram()
 
-        # Test each bucket boundary
         test_values = [
             (5, "0-10ms"),
             (25, "10-50ms"),
@@ -255,13 +249,13 @@ class TestSlowOps:
         tracker.start(scan_id="test-123", table_id="db.schema.table")
 
         with tracker.time_stage("plan"):
-            time.sleep(0.01)  # 10ms
+            time.sleep(0.01)
 
         timings = tracker.finish(bytes_streamed=1000, rows_streamed=100)
 
         assert timings.scan_id == "test-123"
         assert timings.table_id == "db.schema.table"
-        assert timings.plan_ms >= 10  # At least 10ms
+        assert timings.plan_ms >= 10
         assert timings.total_ms >= 10
         assert timings.bytes_streamed == 1000
         assert timings.rows_streamed == 100
@@ -323,17 +317,15 @@ class TestSlowOps:
 
         reset_latency_stats()
 
-        # Record enough samples for percentile estimation
         for i in range(100):
             record_latency("test", i)  # 0-99ms
 
         percentiles = get_latency_percentiles("test")
-        # Keys are p50_ms, p95_ms, p99_ms (with _ms suffix)
         assert "p50_ms" in percentiles
         assert "p95_ms" in percentiles
         assert "p99_ms" in percentiles
 
-        # p50 should be around 50ms (in 50-100ms bucket)
+        # p50 falls in the 50-100ms bucket.
         assert percentiles["p50_ms"] <= 100
 
 
@@ -386,15 +378,13 @@ class TestPoolMetrics:
         executor = ThreadPoolExecutor(max_workers=2)
         tracker.register_pool("test", executor)
 
-        # Submit more work than workers
         futures = [executor.submit(time.sleep, 0.1) for _ in range(6)]
 
-        # Check queue depth while running
         time.sleep(0.01)
         stats = tracker.get_pool_stats("test")
         assert stats is not None
-        # Queue depth should be at least some (6 tasks - 2 workers = 4 queued)
-        # But timing is tricky, so just check it's non-negative
+        # 6 tasks on 2 workers should queue ~4, but timing is racy, so only check it is
+        # non-negative.
         assert stats.queue_depth >= 0
 
         for f in futures:
@@ -465,7 +455,6 @@ class TestPoolMetrics:
 
         metrics = ConnectionMetrics()
 
-        # Simulate requests
         metrics.request_started(has_keepalive=True)
         metrics.request_started(has_keepalive=True)
         metrics.request_started(has_keepalive=False)
@@ -481,7 +470,7 @@ class TestPoolMetrics:
 
         stats = metrics.get_stats()
         assert stats["active_requests"] == 1
-        assert stats["total_requests"] == 3  # Total doesn't decrease
+        assert stats["total_requests"] == 3  # Total does not decrease.
 
     def test_connection_metrics_reset(self):
         """Test resetting connection metrics."""
@@ -513,7 +502,6 @@ class TestPoolMetrics:
         conn = get_connection_metrics()
         assert conn is not None
 
-        # Should return same instances
         assert get_pool_tracker() is tracker
         assert get_connection_metrics() is conn
 
@@ -595,7 +583,6 @@ class TestMemoryProfiler:
         """Test that healthy memory state gets appropriate recommendation."""
         from strata.memory_profiler import MemorySnapshot, _get_memory_recommendations
 
-        # Create a healthy snapshot
         snapshot = MemorySnapshot(
             arrow_bytes_allocated=100 * 1024 * 1024,  # 100MB
             arrow_max_memory=150 * 1024 * 1024,  # 150MB
@@ -615,7 +602,6 @@ class TestMemoryProfiler:
         """Test recommendation for high Arrow memory."""
         from strata.memory_profiler import MemorySnapshot, _get_memory_recommendations
 
-        # Create snapshot with high Arrow allocation
         snapshot = MemorySnapshot(
             arrow_bytes_allocated=2 * 1024**3,  # 2GB
             arrow_max_memory=2 * 1024**3,
@@ -647,7 +633,6 @@ class TestDebugEndpoints:
         from strata.server import ServerState, app
         from strata.slow_ops import reset_latency_stats
 
-        # Reset global state
         reset_metrics()
         reset_latency_stats()
 
@@ -660,7 +645,6 @@ class TestDebugEndpoints:
             ) as client:
                 yield client
 
-        # Return a simple wrapper that runs async code
         return server_module, app
 
     @pytest.mark.asyncio
@@ -740,7 +724,6 @@ class TestDebugEndpoints:
             async with AsyncClient(
                 transport=ASGITransport(app=app), base_url="http://test"
             ) as client:
-                # Test basic mode
                 response = await client.get("/v1/debug/memory")
                 assert response.status_code == 200
 
@@ -749,7 +732,6 @@ class TestDebugEndpoints:
                 assert "python" in data
                 assert "process" in data
 
-                # Test detailed mode
                 response = await client.get("/v1/debug/memory?detailed=true")
                 assert response.status_code == 200
 
@@ -777,7 +759,6 @@ class TestDebugEndpoints:
         config = StrataConfig(cache_dir=tmp_path)
         server_module._state = ServerState(config)
 
-        # Record some latencies
         record_latency("plan", 50)
         record_latency("ttfb", 100)
 
@@ -810,7 +791,7 @@ class TestDebugEndpoints:
 
         reset_metrics()
         install_gc_tracker()
-        gc.collect()  # Generate some data
+        gc.collect()
 
         config = StrataConfig(cache_dir=tmp_path)
         server_module._state = ServerState(config)

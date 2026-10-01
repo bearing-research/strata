@@ -39,8 +39,8 @@ class TestTranslatePlaceholders:
         )
 
     def test_doubled_quote_does_not_end_the_literal(self):
-        # 'it''s ?' is one literal containing an apostrophe, so its question
-        # mark stays data. Treating '' as a close would convert it.
+        # 'it''s ?' is one literal containing an apostrophe, so its question mark stays
+        # data. Treating '' as a close would convert it.
         assert (
             translate_placeholders("SELECT * FROM t WHERE s = 'it''s ?' AND id = ?")
             == "SELECT * FROM t WHERE s = 'it''s ?' AND id = %s"
@@ -50,8 +50,8 @@ class TestTranslatePlaceholders:
         assert translate_placeholders("SELECT 5 % 2") == "SELECT 5 %% 2"
 
     def test_percent_is_escaped_inside_literals(self):
-        # The driver scans the whole statement, so a percent is a substitution
-        # marker even inside quotes.
+        # The driver scans the whole statement, so a percent is a substitution marker even
+        # inside quotes.
         assert (
             translate_placeholders("SELECT * FROM t WHERE n LIKE 'nb_%'")
             == "SELECT * FROM t WHERE n LIKE 'nb_%%'"
@@ -66,13 +66,11 @@ class TestTranslatePlaceholders:
         assert translate_placeholders(sql) == "SELECT /* a ? here */ 1 WHERE id = %s"
 
     def test_unterminated_literal_does_not_raise(self):
-        # A translator should not be the thing that reports a syntax error --
-        # the driver gives a far better message. It just must not crash.
+        # The driver gives a far better syntax error; the translator just must not crash.
         assert translate_placeholders("SELECT 'oops") == "SELECT 'oops"
 
     def test_real_statement_from_the_store(self):
-        # artifact_store.py:1231, the one place the store mixes a placeholder
-        # with a quoted literal in the same statement.
+        # The one place the store mixes a placeholder with a quoted literal in a statement.
         sql = "WHERE id LIKE ? ESCAPE '\\' AND state = 'ready'"
         assert translate_placeholders(sql) == "WHERE id LIKE %s ESCAPE '\\' AND state = 'ready'"
 
@@ -92,8 +90,7 @@ class TestSqliteDialectPreservesTodaysBehavior:
     """Personal mode must not notice the seam exists."""
 
     def test_adapt_ddl_is_identity(self):
-        # The schema is already written in this dialect; rewriting it would be
-        # churn.
+        # The schema is already written in this dialect.
         ddl = "CREATE TABLE t (seq INTEGER PRIMARY KEY AUTOINCREMENT, at REAL)"
         assert SqliteDialect(Path("x.sqlite")).adapt_ddl(ddl) == ddl
 
@@ -175,8 +172,8 @@ class TestPostgresConnectionAdapter:
         assert params == (advisory_lock_id("a1"),)
 
     def test_close_returns_the_connection_instead_of_closing_it(self):
-        # The store calls close() 41 times meaning "done with this"; under a
-        # pool that has to mean "give it back", or the pool drains to nothing.
+        # The store calls close() to mean "done with this"; under a pool that must mean
+        # "give it back", or the pool drains to nothing.
         conn, inner, released = self._wrap()
         conn.close()
         assert released == [1]
@@ -234,9 +231,8 @@ class TestPostgresDialectRendering:
         assert "AUTOINCREMENT" not in adapted
 
     def test_autoincrement_is_rewritten_before_bare_integer(self):
-        # Order dependence: the autoincrement rule has to consume its own
-        # INTEGER first, or the bare-INTEGER rule turns the column into
-        # "BIGINT PRIMARY KEY AUTOINCREMENT" and the rule never matches.
+        # Order matters: the autoincrement rule must consume its own INTEGER first, or the
+        # bare-INTEGER rule makes "BIGINT PRIMARY KEY AUTOINCREMENT" and the rule never matches.
         adapted = PostgresDialect("postgresql:///x").adapt_ddl(
             "CREATE TABLE t (seq INTEGER PRIMARY KEY AUTOINCREMENT)"
         )
@@ -247,8 +243,8 @@ class TestPostgresDialectRendering:
         assert PostgresDialect("postgresql:///x").adapt_ddl(ddl) == ddl
 
     def test_integer_widens_to_bigint(self):
-        # Postgres INTEGER is int4 (max 2147483647), which is smaller than
-        # byte_size for any artifact at or above 2 GiB.
+        # Postgres INTEGER is int4 (max 2147483647), smaller than byte_size for any artifact
+        # of 2 GiB or more.
         assert PostgresDialect("postgresql:///x").integer_type == "BIGINT"
         assert SqliteDialect(Path("x")).integer_type == "INTEGER"
 
@@ -261,11 +257,9 @@ class TestPostgresDialectRendering:
         assert PostgresDialect("postgresql:///x").float_type == "DOUBLE PRECISION"
 
     def test_real_would_lose_timestamp_precision(self):
-        # Why float_type exists. Postgres REAL is single precision, and the
-        # store keeps epoch seconds in these columns. Round-tripping a
-        # realistic created_at through 32 bits loses the sub-second part
-        # entirely -- silently, and only visible much later as artifacts that
-        # appear to have been created at the same instant.
+        # Why float_type exists: Postgres REAL is single precision, and these columns hold
+        # epoch seconds. A realistic created_at loses its sub-second part in 32 bits,
+        # silently.
         created_at = 1787000000.123456
         through_single = struct.unpack("f", struct.pack("f", created_at))[0]
         assert through_single != created_at
@@ -277,8 +271,8 @@ class TestPostgresDialectRendering:
         assert PostgresDialect("postgresql:///x").supports_legacy_migration is False
 
     def test_lock_ids_are_stable_and_distinct(self):
-        # Recomputed at every call site, so drift would silently stop
-        # serializing the writers the lock exists to serialize.
+        # Recomputed at every call site, so drift would silently stop serializing the
+        # writers the lock exists for.
         assert advisory_lock_id("a1") == advisory_lock_id("a1")
         assert advisory_lock_id("a1") != advisory_lock_id("a2")
         assert -(2**63) <= advisory_lock_id("a1") < 2**63

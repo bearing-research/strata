@@ -55,7 +55,6 @@ class TestTokenBucket:
         clock = MockClock()
         bucket = TokenBucket(capacity=10.0, refill_rate=1.0, _clock=clock)
 
-        # Exhaust tokens
         for _ in range(10):
             bucket.acquire()
 
@@ -69,11 +68,10 @@ class TestTokenBucket:
         clock = MockClock()
         bucket = TokenBucket(capacity=10.0, refill_rate=2.0, _clock=clock)
 
-        # Exhaust tokens
         bucket.acquire(10.0)
         assert bucket.tokens_available() == 0.0
 
-        # Advance time by 3 seconds (should add 6 tokens at 2/s)
+        # 3 seconds at 2/s adds 6 tokens.
         clock.advance(3.0)
         assert bucket.tokens_available() == 6.0
 
@@ -97,10 +95,10 @@ class TestTokenBucket:
         bucket = TokenBucket(capacity=10.0, refill_rate=2.0, _clock=clock)
 
         bucket.acquire(10.0)
-        # Need 1 token, refill rate is 2/s, so 0.5s
+        # 1 token at 2/s takes 0.5s.
         assert bucket.time_until_available(1.0) == pytest.approx(0.5)
 
-        # Need 4 tokens, so 2s
+        # 4 tokens takes 2s.
         assert bucket.time_until_available(4.0) == pytest.approx(2.0)
 
 
@@ -124,7 +122,7 @@ class TestRateLimiter:
         config = RateLimitConfig(enabled=False)
         limiter = RateLimiter(config)
 
-        # Even with aggressive limits, disabled should allow
+        # Even aggressive limits allow everything when disabled.
         for _ in range(1000):
             result = limiter.check("client1")
             assert result.allowed is True
@@ -137,16 +135,15 @@ class TestRateLimiter:
         config = RateLimitConfig(
             global_requests_per_second=1.0,
             global_burst=2.0,
-            client_requests_per_second=1000.0,  # High to not interfere
+            client_requests_per_second=1000.0,  # High, so it does not interfere
             client_burst=1000.0,
         )
         limiter = RateLimiter(config, clock=clock)
 
-        # First 2 requests allowed (burst)
+        # First 2 allowed (burst).
         assert limiter.check("client1").allowed is True
         assert limiter.check("client1").allowed is True
 
-        # Third request rejected
         result = limiter.check("client1")
         assert result.allowed is False
         assert result.limit_type == "global"
@@ -157,23 +154,20 @@ class TestRateLimiter:
 
         clock = MockClock()
         config = RateLimitConfig(
-            global_requests_per_second=1000.0,  # High to not interfere
+            global_requests_per_second=1000.0,  # High, so it does not interfere
             global_burst=1000.0,
             client_requests_per_second=1.0,
             client_burst=2.0,
         )
         limiter = RateLimiter(config, clock=clock)
 
-        # First 2 requests from client1 allowed
         assert limiter.check("client1").allowed is True
         assert limiter.check("client1").allowed is True
 
-        # Third request from client1 rejected
         result = limiter.check("client1")
         assert result.allowed is False
         assert result.limit_type == "client"
 
-        # Different client still allowed
         assert limiter.check("client2").allowed is True
 
     def test_endpoint_limit_rejection(self):
@@ -191,16 +185,13 @@ class TestRateLimiter:
         )
         limiter = RateLimiter(config, clock=clock)
 
-        # First 2 materialize requests allowed
         assert limiter.check("client1", endpoint="/v1/materialize").allowed is True
         assert limiter.check("client1", endpoint="/v1/materialize").allowed is True
 
-        # Third materialize request rejected
         result = limiter.check("client1", endpoint="/v1/materialize")
         assert result.allowed is False
         assert result.limit_type == "endpoint"
 
-        # Other endpoints still allowed
         assert limiter.check("client1", endpoint="/health").allowed is True
 
     def test_retry_after_header(self):
@@ -214,7 +205,7 @@ class TestRateLimiter:
         )
         limiter = RateLimiter(config, clock=clock)
 
-        limiter.check("client1")  # Use the one token
+        limiter.check("client1")  # Uses the one token
         result = limiter.check("client1")  # Rejected
 
         assert result.allowed is False
@@ -253,16 +244,14 @@ class TestRateLimiter:
         limiter.check("client2")
         assert limiter.get_stats()["active_clients"] == 2
 
-        # Advance time past TTL
         clock.advance(61.0)
 
-        # Adding a new client now sweeps the idle ones on the request path —
-        # cleanup_stale_clients used to have no caller at all, so buckets
-        # accumulated forever.
+        # Adding a new client sweeps the idle ones on the request path, so buckets do
+        # not accumulate forever.
         limiter.check("client3")
         assert limiter.get_stats()["active_clients"] == 1
 
-        # The explicit sweep is still available and idempotent.
+        # The explicit sweep still works and is idempotent.
         assert limiter.cleanup_stale_clients() == 0
         assert limiter.get_stats()["active_clients"] == 1
 
@@ -342,7 +331,6 @@ class TestRateLimiterIntegration:
         config = StrataConfig(cache_dir=cache_dir)
         server_module._state = ServerState(config)
 
-        # Initialize rate limiter manually for test
         from strata.rate_limiter import RateLimitConfig, init_rate_limiter
 
         init_rate_limiter(RateLimitConfig())
@@ -387,13 +375,12 @@ class TestRateLimiterIntegration:
             async with AsyncClient(
                 transport=ASGITransport(app=app), base_url="http://test"
             ) as client:
-                # Multiple requests should be allowed
                 for _ in range(5):
                     response = await client.get("/health")
-                    # Health endpoint skips rate limiting
+                    # Health skips rate limiting.
                     assert response.status_code == 200
 
-                # Check rate limit stats endpoint (not skipped)
+                # The stats endpoint is not skipped.
                 response = await client.get("/v1/debug/rate-limits")
                 assert response.status_code == 200
                 assert "X-RateLimit-Remaining" in response.headers
@@ -421,11 +408,9 @@ class TestRateLimiterIntegration:
         config = StrataConfig(cache_dir=cache_dir)
         server_module._state = ServerState(config)
 
-        # Very restrictive config, on a clock the test steps by hand. The
-        # bucket refills on wall-clock time, so against a real clock the second
-        # request is only rejected if it arrives within a second of the first —
-        # a slow ASGI startup between them refills the token and the request
-        # legitimately succeeds (#627).
+        # Restrictive config on a hand-stepped clock. The bucket refills on wall-clock
+        # time, so with a real clock a slow ASGI startup between the two requests refills
+        # the token and the second legitimately succeeds.
         clock = _SteppableClock()
         init_rate_limiter(
             RateLimitConfig(
@@ -439,20 +424,18 @@ class TestRateLimiterIntegration:
             async with AsyncClient(
                 transport=ASGITransport(app=app), base_url="http://test"
             ) as client:
-                # First request takes the bucket's only token.
                 response = await client.get("/v1/debug/rate-limits")
                 assert response.status_code == 200
 
-                # Second one finds it empty, and no time has passed.
+                # The bucket is empty, and no time has passed.
                 response = await client.get("/v1/debug/rate-limits")
                 assert response.status_code == 429
                 assert "Retry-After" in response.headers
                 assert "Rate limit exceeded" in response.text
 
-                # One token per second: advancing past the refill re-admits.
-                # This is also what proves the injected clock is the one the
-                # limiter reads — a frozen clock alone would pass even if the
-                # limiter had ignored it and used the system time.
+                # One token per second, so advancing past the refill re-admits. This also proves
+                # the limiter reads the injected clock: a frozen clock alone would pass even if
+                # the limiter used system time.
                 clock.advance(1.0)
                 response = await client.get("/v1/debug/rate-limits")
                 assert response.status_code == 200
@@ -586,11 +569,9 @@ class TestRetryAfterIsNeverZero:
         config = StrataConfig(cache_dir=cache_dir)
         server_module._state = ServerState(config)
 
-        # The default refill rate, not the 1/sec the older test uses -- the bug
-        # only appears once the rate is above one token per second. At 100/sec
-        # the single token refills in 10ms, so a fixed clock pins the bucket
-        # empty rather than racing the refill between the two requests (this
-        # test failed on a slow Windows runner when it used the real clock).
+        # The default refill rate, not 1/sec: the bug only appears above one token per
+        # second. At 100/sec the token refills in 10ms, so a fixed clock pins the bucket
+        # empty rather than racing the refill between the two requests.
         init_rate_limiter(
             RateLimitConfig(
                 client_requests_per_second=100.0,

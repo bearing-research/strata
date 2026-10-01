@@ -39,10 +39,8 @@ class TestStalenessDetection:
 
         with open_notebook_session(client, nb.path) as (sid, session):
             with ws_connect(client, sid) as ws:
-                # Edit c1 source
                 ws.update_source("c1", "x = 100")
 
-                # Should receive dag_update
                 dag_msg = ws.receive_until("dag_update")
                 assert "edges" in dag_msg["payload"]
                 assert "topological_order" in dag_msg["payload"]
@@ -54,19 +52,16 @@ class TestStalenessDetection:
 
         with open_notebook_session(client, nb.path) as (sid, session):
             with ws_connect(client, sid) as ws:
-                # Run pipeline
                 execute_cell_and_wait(ws, "c1")
                 execute_cell_and_wait(ws, "c2")
 
-                # Edit c1 via WebSocket
                 ws.update_source("c1", "x = 100")
                 ws.receive_until("dag_update")
                 ws.clear()
 
-                # Re-execute c1 with new source
                 execute_cell_and_wait(ws, "c1")
 
-                # Re-execute c2 — should use x=100
+                # c2 must see x=100.
                 r2 = execute_cell_and_wait(ws, "c2")
                 assert r2["type"] == "cell_output"
                 assert "y" in r2["payload"]["outputs"]
@@ -80,19 +75,16 @@ class TestStalenessDetection:
 
         with open_notebook_session(client, nb.path) as (sid, session):
             with ws_connect(client, sid) as ws:
-                # Run both cells
                 execute_cell_and_wait(ws, "c1")
                 execute_cell_and_wait(ws, "c2")
 
-                # Edit c1 source (but don't re-execute c1)
+                # Edit c1 without re-executing it.
                 ws.update_source("c1", "x = 999")
                 ws.receive_until("dag_update")
-                # Note: cell statuses may follow but we don't need to drain them
-                # The cell_status messages will just accumulate in the message buffer
+                # Status frames may follow; they just accumulate in the buffer.
                 ws.clear()
 
-                # Now execute c2 — should trigger cascade since c1's source changed
-                # and status was reset
+                # c1's source changed and its status was reset, so c2 cascades.
                 result = execute_cell_and_wait(ws, "c2")
                 assert result["type"] == "cell_output"
                 assert "y" in result["payload"]["outputs"]
@@ -121,8 +113,8 @@ class TestStalenessDetection:
 
                 data = resp.json()
                 c2 = next(cell for cell in data["cells"] if cell["id"] == "c2")
-                # c2 ran, so it holds a result that the c1 edit invalidated →
-                # STALE with an UPSTREAM reason (#361), not a bare idle.
+                # c2 ran, so the c1 edit invalidated its result: STALE with an UPSTREAM
+                # reason, not a bare idle.
                 assert c2["status"] == "stale"
                 assert "upstream" in c2.get("staleness_reasons", [])
 
@@ -200,7 +192,6 @@ class TestDAGRestructuring:
 
         with open_notebook_session(client, nb.path) as (sid, session):
             with ws_connect(client, sid) as ws:
-                # Change c2 to also reference z
                 ws.update_source("c2", "y = x + z")
                 dag_msg = ws.receive_until("dag_update")
 
@@ -221,7 +212,6 @@ class TestDAGRestructuring:
 
         with open_notebook_session(client, nb.path) as (sid, session):
             with ws_connect(client, sid) as ws:
-                # Change c2 to be independent
                 ws.update_source("c2", "y = 999")
                 dag_msg = ws.receive_until("dag_update")
 

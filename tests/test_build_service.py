@@ -121,15 +121,11 @@ def _state(**kw):
 
 
 def test_derive_build_state_precedence():
-    # Nothing happened yet.
     assert _state() == "pending"
-    # Started but not done.
     assert _state(started=True) == "building"
-    # Completed stream, or a ready artifact.
     assert _state(completed=True) == "ready"
     assert _state(artifact_state="ready") == "ready"
-    # Failure wins over everything, incl. a ready artifact / completed stream.
+    # Failure wins over everything, incl. a ready artifact or completed stream.
     assert _state(error_message="boom", artifact_state="ready") == "failed"
     assert _state(artifact_state="failed", completed=True) == "failed"
-    # error_message takes precedence over a started/completed stream too.
     assert _state(error_message="boom", started=True, completed=True) == "failed"

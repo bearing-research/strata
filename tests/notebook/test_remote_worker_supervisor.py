@@ -84,9 +84,7 @@ def _supervisor(runner=None, *, healthy=True, launcher=None):
     return sup, launcher, the_runner
 
 
-# ---------------------------------------------------------------------------
 # establish
-# ---------------------------------------------------------------------------
 
 
 def test_establish_happy_path():
@@ -176,9 +174,7 @@ def test_re_establish_publishes_a_token_the_remote_worker_actually_has():
     assert launched[-1].strip() == sup.token_for("gpu")
 
 
-# ---------------------------------------------------------------------------
 # reconcile / status / teardown / shutdown
-# ---------------------------------------------------------------------------
 
 
 def test_reconcile_respawns_a_dead_tunnel():
@@ -263,10 +259,8 @@ def test_shutdown_clears_runtime_tokens():
         clear_runtime_worker_token("gpu")
 
 
-# ---------------------------------------------------------------------------
-# Thread-safety (the supervisor is a process-wide singleton driven from
-# asyncio.to_thread workers — genuinely concurrent OS threads)
-# ---------------------------------------------------------------------------
+# Thread-safety: the supervisor is a process-wide singleton driven from
+# asyncio.to_thread workers (genuinely concurrent OS threads).
 
 
 def test_concurrent_establish_same_name_is_rejected():
@@ -282,7 +276,7 @@ def test_concurrent_establish_same_name_is_rejected():
 
     class _BlockingRunner(ScriptedSshRunner):
         def run(self, command, *, timeout=None, stdin_data=None):
-            if command == "true":  # preflight — hold the first establish here
+            if command == "true":  # preflight: hold the first establish here
                 first_in_preflight.set()
                 assert release_first.wait(timeout=10)
             return super().run(command, timeout=timeout, stdin_data=stdin_data)
@@ -312,7 +306,7 @@ def test_concurrent_establish_same_name_is_rejected():
         record = first.result(timeout=10)
 
     assert record.name == "gpu"
-    assert len(launcher.spawns) == 1  # exactly one tunnel — no orphan
+    assert len(launcher.spawns) == 1  # exactly one tunnel, no orphan
 
 
 def test_failed_establish_releases_the_name():
@@ -327,8 +321,8 @@ def test_failed_establish_releases_the_name():
     )
     with pytest.raises(SshWorkerError):
         sup.establish("gpu", "user@box")  # no uv, no worker → refuses
-    # The name is free again — a second attempt gets past the reservation
-    # (and fails the same way, not with "already in progress").
+    # The name is free again: a second attempt gets past the reservation (and
+    # fails the same way, not with "already in progress").
     with pytest.raises(SshWorkerError) as excinfo:
         sup.establish("gpu", "user@box")
     assert "already in progress" not in str(excinfo.value)
@@ -340,9 +334,8 @@ def test_shutdown_snapshot_tolerates_concurrent_teardown():
     sup, launcher, _ = _supervisor()
     sup.establish("a", "user@box")
     sup.establish("b", "user@box")
-    # Interleave: teardown one while shutdown holds its snapshot. (The
-    # snapshot semantics make the interleaving safe regardless of timing;
-    # this asserts both paths complete and everything is terminated.)
+    # Teardown one while shutdown holds its snapshot. The snapshot makes this safe
+    # regardless of timing; this checks both paths complete and all is terminated.
     sup.teardown("a")
     sup.shutdown()
     assert sup.status() == []

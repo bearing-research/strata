@@ -48,8 +48,8 @@ async def test_prometheus_scrape_does_not_block_the_event_loop(monkeypatch, tmp_
     finally:
         beat.cancel()
 
-    # If the walk ran inline, the loop would have been frozen for ~0.4s and the
-    # heartbeat could not have advanced. Offloaded, it keeps ticking.
+    # Run inline, the walk would freeze the loop for ~0.4s and the heartbeat could not
+    # advance.
     assert ticks >= 5, f"event loop appears to have been blocked (ticks={ticks})"
 
 

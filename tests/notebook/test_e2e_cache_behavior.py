@@ -43,14 +43,13 @@ class TestCacheHit:
 
         with open_notebook_session(client, nb.path) as (sid, session):
             with ws_connect(client, sid) as ws:
-                # First execution — run c1 then c2
                 r1 = execute_cell_and_wait(ws, "c1")
                 assert r1["type"] == "cell_output"
 
                 execute_cell_and_wait(ws, "c2")
                 ws.clear()
 
-                # Re-execute c1 — same source, same inputs
+                # Same source, same inputs.
                 r2 = execute_cell_and_wait(ws, "c1")
                 assert r2["type"] == "cell_output"
                 assert r2["payload"].get("cache_hit") is True
@@ -114,16 +113,14 @@ class TestCacheMiss:
 
         with open_notebook_session(client, nb.path) as (sid, session):
             with ws_connect(client, sid) as ws:
-                # Execute both
                 execute_cell_and_wait(ws, "c1")
                 execute_cell_and_wait(ws, "c2")
 
-                # Update source via WebSocket
                 ws.update_source("c1", "x = 2")
                 ws.receive_until("dag_update")
                 ws.clear()
 
-                # Re-execute — should be cache miss
+                # New source, so a cache miss.
                 r2 = execute_cell_and_wait(ws, "c1")
                 assert r2["type"] == "cell_output"
                 assert r2["payload"].get("cache_hit") is not True
@@ -139,11 +136,11 @@ class TestCascadeCache:
 
         with open_notebook_session(client, nb.path) as (sid, session):
             with ws_connect(client, sid) as ws:
-                # First: cascade execution (c2 triggers c1)
+                # Cascade execution (c2 triggers c1).
                 execute_cell_and_wait(ws, "c2")
                 ws.clear()
 
-                # Re-execute c1 directly — should be cache hit
+                # Re-executing c1 directly is a cache hit.
                 r = execute_cell_and_wait(ws, "c1")
                 assert r["type"] == "cell_output"
                 assert r["payload"].get("cache_hit") is True

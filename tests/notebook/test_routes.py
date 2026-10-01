@@ -17,9 +17,7 @@ from strata.notebook.writer import (
     write_cell,
 )
 
-# ---------------------------------------------------------------------------
 # Fixtures + helpers
-# ---------------------------------------------------------------------------
 
 
 @pytest.fixture(autouse=True)
@@ -110,9 +108,7 @@ def deployment_mode_state(monkeypatch):
     return _configure
 
 
-# ---------------------------------------------------------------------------
 # Open / create / delete
-# ---------------------------------------------------------------------------
 
 
 def test_open_notebook(client, tmp_path):
@@ -646,9 +642,7 @@ def test_get_notebook_runtime_config_endpoint(client, monkeypatch):
     }
 
 
-# ---------------------------------------------------------------------------
 # Environment endpoints
-# ---------------------------------------------------------------------------
 
 
 def test_get_environment_status_endpoint(client, tmp_path):
@@ -853,9 +847,7 @@ def test_submit_environment_job_endpoint_conflict_when_execution_running(client,
     assert detail["code"] == "ENVIRONMENT_BUSY"
 
 
-# ---------------------------------------------------------------------------
 # Sessions discovery / reconnect
-# ---------------------------------------------------------------------------
 
 
 def test_list_sessions_personal_mode(client, deployment_mode_state, tmp_path):
@@ -921,9 +913,7 @@ def test_session_endpoints_blocked_in_service_mode(client, deployment_mode_state
     assert "personal mode" in get_response.json()["detail"]
 
 
-# ---------------------------------------------------------------------------
 # Cell CRUD
-# ---------------------------------------------------------------------------
 
 
 def test_list_cells(client, tmp_path):
@@ -1279,8 +1269,8 @@ def test_update_notebook_env_restores_sensitive_values_on_cells(client, tmp_path
     assert data["cells"][0]["env"]["ALPACA_API_KEY"] == "AKXYZ123"
     assert data["cells"][0]["env"]["DEBUG"] == "true"
 
-    # Server-side state the executor actually reads — cell.env — must match
-    # too, otherwise the executor sees a blanked value.
+    # The executor reads cell.env, so it must match too or the executor sees a
+    # blanked value.
     session = get_session_manager().get_session(session_id)
     assert session is not None
     cell = session.notebook_state.cells[0]
@@ -1431,9 +1421,7 @@ def test_rename_notebook_rejects_blank_name(client, tmp_path):
     assert response.status_code == 422
 
 
-# ---------------------------------------------------------------------------
 # Cell execution (REST)
-# ---------------------------------------------------------------------------
 
 
 def test_execute_cell(client, tmp_path):
@@ -1489,9 +1477,7 @@ def test_execute_cell_not_found(client, tmp_path):
     assert response.status_code == 404
 
 
-# ---------------------------------------------------------------------------
 # Cell iterations
-# ---------------------------------------------------------------------------
 
 
 class TestCellIterationsEndpoint:
@@ -1597,9 +1583,7 @@ class TestCellIterationsEndpoint:
         assert payload["iterations"][0]["iteration"] == 0
 
 
-# ---------------------------------------------------------------------------
 # Personal mode per-user scoping
-# ---------------------------------------------------------------------------
 
 
 class TestPersonalModeUserScoping:
@@ -1791,9 +1775,8 @@ class TestPersonalModeUserScoping:
         )
         assert ok.status_code == 200
 
-        # Bob (non-owner) with a valid session_id: 404 — same shape the
-        # dep returns for a genuinely missing notebook so probes can't
-        # enumerate owners.
+        # Bob (non-owner) with a valid session_id gets the same 404 as a missing
+        # notebook, so probes can't enumerate owners.
         denied = client.get(
             f"/v1/notebooks/{session_id}/cells",
             headers={self.HEADER: "bob@example.com"},
@@ -1801,11 +1784,9 @@ class TestPersonalModeUserScoping:
         assert denied.status_code == 404
         assert denied.json() == {"detail": "Notebook not found"}
 
-        # Missing identity header: must NOT silently bypass the gate.
-        # ``_caller_identity`` returns None for both "header unset" and
-        # "header omitted from this request"; the second case must close
-        # on owned notebooks — otherwise the bypass is "just don't send
-        # the header."
+        # A missing identity header must not bypass the gate. ``_caller_identity``
+        # returns None both when the header is unconfigured and when this request
+        # omits it; the latter must close on owned notebooks.
         bypass = client.get(f"/v1/notebooks/{session_id}/cells")
         assert bypass.status_code == 404
         assert bypass.json() == {"detail": "Notebook not found"}
@@ -1824,9 +1805,8 @@ class TestPersonalModeUserScoping:
         configured_state(tmp_path)
         alice_root = self._user_subdir(tmp_path, "alice@example.com")
 
-        # Pre-scoping notebooks were created without ``owner``; mimic
-        # that by stamping it then stripping the field on disk before
-        # opening the session.
+        # Notebooks created before scoping have no ``owner``; mimic that by stripping
+        # the field on disk before opening the session.
         create_resp = client.post(
             "/v1/notebooks/create",
             json={"parent_path": str(alice_root), "name": "Legacy NB"},
@@ -1859,9 +1839,7 @@ class TestPersonalModeUserScoping:
         assert wrong_header.status_code == 200
 
 
-# ---------------------------------------------------------------------------
 # Connections
-# ---------------------------------------------------------------------------
 
 
 def test_list_and_update_notebook_connections(client, tmp_path):
@@ -1876,12 +1854,10 @@ def test_list_and_update_notebook_connections(client, tmp_path):
     notebook_dir = create_notebook(tmp_path, "Conn Routes Test")
     nb_id = open_session_id(client, notebook_dir)
 
-    # Initially empty.
     resp = client.get(f"/v1/notebooks/{nb_id}/connections")
     assert resp.status_code == 200
     assert resp.json()["connections"] == []
 
-    # PUT a SQLite + Postgres pair.
     payload = {
         "connections": [
             {"name": "warehouse", "driver": "sqlite", "path": "analytics.db"},
@@ -1899,14 +1875,13 @@ def test_list_and_update_notebook_connections(client, tmp_path):
     names = sorted(c["name"] for c in body["connections"])
     assert names == ["prod", "warehouse"]
 
-    # The relative path survives the round-trip exactly. (The
-    # cell executor resolves against the notebook dir at
-    # adapter-open time; notebook.toml stays portable.)
+    # The relative path round-trips exactly; the executor resolves it against the
+    # notebook dir at adapter-open time, so notebook.toml stays portable.
     warehouse = next(c for c in body["connections"] if c["name"] == "warehouse")
     assert warehouse["path"] == "analytics.db"
 
-    # Literal "hunter2" is blanked — UI sees the slot is set
-    # but value isn't viable until ${PGPASS} is provided.
+    # Literal "hunter2" is blanked: the UI sees the slot is set, but the value
+    # isn't viable until ${PGPASS} is provided.
     prod = next(c for c in body["connections"] if c["name"] == "prod")
     assert prod["auth"]["user"] == "${PGUSER}"
     assert prod["auth"]["password"] == ""
@@ -1964,9 +1939,8 @@ def test_update_notebook_connections_preserves_malformed_blocks(client, tmp_path
     nb_id = open_session_id(client, notebook_dir)
 
     # The list endpoint exposes only valid connections; the malformed sibling
-    # is preserved on disk and surfaced via parse_notebook's
-    # malformed_connections field. Pin the latter directly — that's the
-    # contract the route should honor when wiring the writer.
+    # stays on disk and surfaces via parse_notebook's malformed_connections,
+    # pinned directly here.
     before = parse_notebook(notebook_dir)
     assert "broken" in {m.name for m in before.malformed_connections}
 
@@ -2106,9 +2080,7 @@ def test_get_connection_schema_endpoint_unknown_connection_404(client, tmp_path)
     assert "nope" in resp.json()["detail"]
 
 
-# ---------------------------------------------------------------------------
 # Export
-# ---------------------------------------------------------------------------
 
 
 def test_export_endpoint_defaults_to_zip(client, tmp_path):
@@ -2169,9 +2141,7 @@ def test_export_endpoint_missing_notebook_404(client):
     assert resp.status_code == 404
 
 
-# ---------------------------------------------------------------------------
-# POST /v1/notebooks/import — Jupyter notebook upload + convert
-# ---------------------------------------------------------------------------
+# POST /v1/notebooks/import: Jupyter notebook upload + convert
 
 
 def _ipynb_bytes(cells: list[dict]) -> bytes:
@@ -2316,7 +2286,7 @@ def test_import_endpoint_enforces_upload_size_cap(client, monkeypatch, tmp_path)
     _import_storage(monkeypatch, tmp_path)
     monkeypatch.setattr(
         "strata.notebook.routes._MAX_IPYNB_UPLOAD_BYTES",
-        50,  # 50 bytes — too small for any real .ipynb
+        50,  # 50 bytes: too small for any real .ipynb
     )
 
     payload = _ipynb_bytes([_code("x = 1\n")])
@@ -2366,7 +2336,7 @@ def test_import_endpoint_rejects_structurally_invalid_notebook(client, monkeypat
         b'"a string"',
         b"null",
         b"42",
-        # ``cells`` entry isn't a dict — the reported regression case.
+        # A ``cells`` entry isn't a dict.
         b'{"cells":[1],"metadata":{},"nbformat":4,"nbformat_minor":5}',
         # ``cells`` itself isn't a list.
         b'{"cells":"oops","metadata":{},"nbformat":4,"nbformat_minor":5}',
@@ -2425,9 +2395,7 @@ def test_import_endpoint_uses_custom_name_form_field(client, monkeypatch, tmp_pa
     assert (storage / "renamed_notebook").is_dir()
 
 
-# ---------------------------------------------------------------------------
-# POST /v1/notebooks/import-snapshot — snapshot bundle upload
-# ---------------------------------------------------------------------------
+# POST /v1/notebooks/import-snapshot: snapshot bundle upload
 
 
 def _snapshot_bytes(tmp_path: Path, owner: str | None = None) -> tuple[bytes, str]:
@@ -2592,9 +2560,7 @@ def test_import_snapshot_rejects_path_traversal_in_name(client, monkeypatch, tmp
     assert not (tmp_path / "escaped").exists()
 
 
-# ---------------------------------------------------------------------------
 # PUT /v1/notebooks/{id}/python-version
-# ---------------------------------------------------------------------------
 
 
 def _open_for_python_version_tests(client, parent_dir: Path) -> tuple[str, Path]:
@@ -2666,8 +2632,8 @@ def test_python_version_update_rejects_malformed_version(client, monkeypatch, tm
     )
     session_id, _ = _open_for_python_version_tests(client, tmp_path)
 
-    # ``3.13.5`` has a patch component — must be rejected before reaching
-    # the runtime-config allowlist check.
+    # ``3.13.5`` has a patch component; it must be rejected before the
+    # runtime-config allowlist check.
     resp = client.put(
         f"/v1/notebooks/{session_id}/python-version",
         json={"python_version": "3.13.5"},
@@ -2711,9 +2677,7 @@ class TestRuntimeConfigRegistryFlag:
         assert _serialize_notebook_runtime_config()["team_store_configured"] is offered
 
 
-# ---------------------------------------------------------------------------
 # Cell tests endpoint (REST twin of WS cell_run_tests)
-# ---------------------------------------------------------------------------
 
 
 def test_set_cell_tests_endpoint(client, tmp_path):
@@ -2728,7 +2692,7 @@ def test_set_cell_tests_endpoint(client, tmp_path):
     assert resp.status_code == 200, resp.text
     # written to its committed sibling file …
     assert (notebook_dir / "cells" / "feat.test.py").read_text() == src
-    # … and the in-memory session reflects it (the run endpoint no longer 400s).
+    # … and the in-memory session reflects it.
     assert resp.json().get("test_source") == src
 
     # Unknown cell → 404; non-Python cell → 400.
@@ -2780,7 +2744,6 @@ def test_run_cell_tests_endpoint(client, tmp_path, monkeypatch):
     assert [t["outcome"] for t in body["tests"]] == ["passed", "failed"]
     assert body["tests"][1]["message"] == "boom"
 
-    # Unknown cell → 404.
     assert client.post(f"/v1/notebooks/{session_id}/cells/ghost/tests").status_code == 404
 
 
@@ -2880,9 +2843,7 @@ def test_rest_execute_broadcasts_to_ws_spectators(client, tmp_path, monkeypatch)
     assert len(sent) >= 2
 
 
-# ---------------------------------------------------------------------------
-# GET /{id}/cells/{cell_id}/data — interactive data-viewer paging
-# ---------------------------------------------------------------------------
+# GET /{id}/cells/{cell_id}/data: interactive data-viewer paging
 
 
 def _store_table_artifact(session, cell_id, dataframe):

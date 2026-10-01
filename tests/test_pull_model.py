@@ -58,11 +58,9 @@ def config(temp_dir):
         transforms_config={"enabled": True},
         artifact_dir=temp_dir / "artifacts",
         signed_url_expiry_seconds=600.0,
-        # The signed build-transport routes mint upload + finalize
-        # capabilities, so in service mode they require trusted-proxy auth
-        # (an unauthenticated, network-reachable server would let anyone who
-        # learned a build id forge an artifact). The client below sends the
-        # matching headers.
+        # The signed build-transport routes mint upload + finalize capabilities, so in
+        # service mode they need trusted-proxy auth; otherwise anyone who learned a build
+        # id could forge an artifact.
         auth_mode="trusted_proxy",
         proxy_token="test-token",
     )
@@ -90,9 +88,7 @@ def build_store(config):
 @pytest.fixture
 def client(config, artifact_store, build_store):
     """Create a test client with pull model enabled."""
-    # Set signing secret for reproducible tests
 
-    # Create mock state
     mock_state = MagicMock()
     mock_state.config = config
     mock_state.planner = MagicMock()
@@ -101,12 +97,11 @@ def client(config, artifact_store, build_store):
     mock_state.metrics = MagicMock()
     mock_state.url_signer = _TEST_SIGNER
 
-    # Patch _state on server module
     original_state = server_module._state
     server_module._state = mock_state
 
-    # admin:* so these transport tests exercise the routes rather than the
-    # per-build ownership rules (builds here are created without an owner).
+    # admin:* so these tests exercise the transport, not per-build ownership (builds
+    # here have no owner).
     yield TestClient(
         app,
         headers={
@@ -116,7 +111,6 @@ def client(config, artifact_store, build_store):
         },
     )
 
-    # Restore
     server_module._state = original_state
 
 
@@ -211,13 +205,10 @@ class TestBuildManifestEndpoint:
 
     def test_get_manifest_for_pending_build(self, client, build_store, artifact_store):
         """Can get manifest for a pending build."""
-        # Create an input artifact first
         input_version = create_test_artifact(artifact_store, "input1", finalize=True)
 
-        # Create output artifact placeholder
         output_version = create_test_artifact(artifact_store, "output1", finalize=False)
 
-        # Create a build with input_uris
         build_store.create_build(
             build_id="build-001",
             artifact_id="output1",
@@ -227,7 +218,6 @@ class TestBuildManifestEndpoint:
             params={"sql": "SELECT * FROM input"},
         )
 
-        # Get manifest
         response = client.get("/v1/builds/build-001/manifest")
         assert response.status_code == 200
 
@@ -329,7 +319,6 @@ class TestBuildManifestEndpoint:
             version=version,
             executor_ref="duckdb_sql@v1",
         )
-        # Mark as running then complete
         build_store.start_build("build-002")
         build_store.complete_build("build-002")
 
@@ -343,13 +332,10 @@ class TestDownloadEndpoint:
 
     def test_download_with_valid_signature(self, client, artifact_store):
         """Can download artifact with valid signed URL."""
-        # Create artifact
         version = create_test_artifact(artifact_store, "dl-test", finalize=True)
 
-        # Read the blob that was written
         blob = artifact_store.read_blob("dl-test", version)
 
-        # Generate signed URL
         signed = _TEST_SIGNER.generate_download_url(
             base_url="http://testserver",
             artifact_id="dl-test",
@@ -358,7 +344,6 @@ class TestDownloadEndpoint:
             expiry_seconds=300.0,
         )
 
-        # Extract query params
         parsed = urlparse(signed.url)
         params = parse_qs(parsed.query)
 
@@ -381,7 +366,6 @@ class TestDownloadEndpoint:
         """Expired signature is rejected."""
         version = create_test_artifact(artifact_store, "dl-test2", finalize=True)
 
-        # Generate expired URL
         signed = _TEST_SIGNER.generate_download_url(
             base_url="http://testserver",
             artifact_id="dl-test2",
@@ -422,11 +406,10 @@ class TestDownloadEndpoint:
         parsed = urlparse(signed.url)
         params = parse_qs(parsed.query)
 
-        # Tamper with artifact_id
         response = client.get(
             "/v1/artifacts/download",
             params={
-                "artifact_id": "different-artifact",  # Tampered!
+                "artifact_id": "different-artifact",
                 "version": params["version"][0],
                 "build_id": params["build_id"][0],
                 "expires_at": params["expires_at"][0],
@@ -442,7 +425,6 @@ class TestUploadEndpoint:
 
     def test_upload_with_valid_signature(self, client, build_store, artifact_store):
         """Can upload artifact with valid signed URL."""
-        # Create build
         version = create_test_artifact(artifact_store, "up-output", finalize=False)
         build_store.create_build(
             build_id="up-build-001",
@@ -451,7 +433,6 @@ class TestUploadEndpoint:
             executor_ref="test@v1",
         )
 
-        # Generate signed upload URL
         blob = create_test_arrow_blob()
         signed = _TEST_SIGNER.generate_upload_url(
             base_url="http://testserver",
@@ -479,7 +460,6 @@ class TestUploadEndpoint:
         assert data["status"] == "uploaded"
         assert data["byte_size"] == len(blob)
 
-        # Verify blob was written
         stored_blob = artifact_store.read_blob("up-output", version)
         assert stored_blob == blob
 
@@ -534,7 +514,7 @@ class TestUploadEndpoint:
         signed = _TEST_SIGNER.generate_upload_url(
             base_url="http://testserver",
             build_id="up-build-002",
-            max_bytes=10,  # Very small limit
+            max_bytes=10,
             expiry_seconds=300.0,
         )
 
@@ -605,7 +585,7 @@ class TestUploadEndpoint:
             base_url="http://testserver",
             build_id="up-build-003",
             max_bytes=10000,
-            expiry_seconds=-1.0,  # Expired
+            expiry_seconds=-1.0,
         )
 
         parsed = urlparse(signed.url)
@@ -630,7 +610,6 @@ class TestFinalizeEndpoint:
 
     def test_finalize_after_upload(self, client, build_store, artifact_store):
         """Can finalize a build after uploading blob."""
-        # Create artifact and build
         version = create_test_artifact(artifact_store, "fin-output", finalize=False)
         build_store.create_build(
             build_id="fin-build-001",
@@ -640,11 +619,9 @@ class TestFinalizeEndpoint:
             name="my-result",
         )
 
-        # Upload blob
         blob = create_test_arrow_blob()
         artifact_store.write_blob("fin-output", version, blob)
 
-        # Finalize
         response = client.post("/v1/builds/fin-build-001/finalize")
         assert response.status_code == 200
 
@@ -653,13 +630,11 @@ class TestFinalizeEndpoint:
         assert data["build_id"] == "fin-build-001"
         assert f"fin-output@v={version}" in data["artifact_uri"]
         assert data["name_uri"] == "strata://name/my-result"
-        assert data["row_count"] == 3  # Our test blob has 3 rows
+        assert data["row_count"] == 3  # The test blob has 3 rows.
 
-        # Verify build is complete
         build = build_store.get_build("fin-build-001")
         assert build.state == "ready"
 
-        # Verify artifact is ready
         artifact = artifact_store.get_artifact("fin-output", version)
         assert artifact.state == "ready"
 
@@ -829,7 +804,6 @@ class TestFinalizeEndpoint:
             executor_ref="test@v1",
         )
 
-        # Complete the build
         build_store.start_build("fin-build-003")
         build_store.complete_build("fin-build-003")
 
@@ -847,14 +821,12 @@ class TestFinalizeEndpoint:
             executor_ref="test@v1",
         )
 
-        # Write invalid Arrow data
         artifact_store.write_blob("fin-output4", version, b"not valid arrow data")
 
         response = client.post("/v1/builds/fin-build-004/finalize")
         assert response.status_code == 400
         assert "Invalid Arrow IPC format" in response.json()["detail"]
 
-        # Build should be marked as failed
         build = build_store.get_build("fin-build-004")
         assert build.state == "failed"
         assert build.error_code == "INVALID_ARROW_FORMAT"
@@ -916,11 +888,9 @@ class TestPullModelEndToEnd:
 
     def test_complete_pull_model_flow(self, client, build_store, artifact_store):
         """Test the complete pull model workflow."""
-        # Step 1: Create input artifact
         input_version = create_test_artifact(artifact_store, "e2e-input", finalize=True)
         input_blob = artifact_store.read_blob("e2e-input", input_version)
 
-        # Step 2: Create build with input_uris
         output_version = create_test_artifact(artifact_store, "e2e-output", finalize=False)
         build_store.create_build(
             build_id="e2e-build-001",
@@ -932,12 +902,10 @@ class TestPullModelEndToEnd:
             name="e2e-result",
         )
 
-        # Step 3: Get manifest
         response = client.get("/v1/builds/e2e-build-001/manifest")
         assert response.status_code == 200
         manifest = response.json()
 
-        # Step 4: Download input using signed URL from manifest
         input_url = manifest["inputs"][0]["url"]
         parsed = urlparse(input_url)
         params = parse_qs(parsed.query)
@@ -945,10 +913,9 @@ class TestPullModelEndToEnd:
         assert response.status_code == 200
         assert response.content == input_blob
 
-        # Step 5: "Execute" transform (just use the same blob for testing)
+        # "Execute" the transform by reusing the same blob.
         output_blob = create_test_arrow_blob()
 
-        # Step 6: Upload output using signed URL from manifest
         output_url = manifest["output"]["url"]
         parsed = urlparse(output_url)
         params = parse_qs(parsed.query)
@@ -959,21 +926,18 @@ class TestPullModelEndToEnd:
         )
         assert response.status_code == 200
 
-        # Step 7: Finalize build
         response = client.post(manifest["finalize_url"].replace("http://testserver", ""))
         assert response.status_code == 200
         result = response.json()
         assert result["status"] == "finalized"
         assert result["name_uri"] == "strata://name/e2e-result"
 
-        # Verify final state
         build = build_store.get_build("e2e-build-001")
         assert build.state == "ready"
 
         artifact = artifact_store.get_artifact("e2e-output", output_version)
         assert artifact.state == "ready"
 
-        # Verify name pointer was set
         name_info = artifact_store.get_name("e2e-result")
         assert name_info is not None
         assert name_info.artifact_id == "e2e-output"
@@ -1106,8 +1070,8 @@ class TestManifestMintingRequiresAuth:
         An unsigned redeem is still refused, by the signature check."""
         self._seed_build(build_store, artifact_store, build_id="build-redeem")
         resp = unauthenticated_service_client.post("/v1/builds/build-redeem/finalize")
-        # Refused for want of a signature (401/403), not for want of a principal
-        # and not with the manifest route's 404.
+        # Refused for want of a signature (401/403), not for want of a principal and not
+        # with the manifest route's 404.
         assert resp.status_code in (400, 401, 403), resp.text
 
 
@@ -1185,8 +1149,8 @@ class TestManifestClaimsTheBuild:
 
         renewed = build_store.get_build("claim-refetch")
         assert renewed.lease_owner == "external:manifest"
-        # The lease now covers the freshly minted URLs rather than expiring
-        # while they are still usable.
+        # The lease now covers the freshly minted URLs instead of expiring while they are
+        # still usable.
         assert renewed.lease_expires_at > near_expiry
         assert renewed.lease_expires_at > time.time() + 5.0
 
@@ -1212,9 +1176,9 @@ class TestManifestClaimsTheBuild:
         # The executor holds the build when its finalize request starts.
         assert build_store.claim_build("fin-fenced-001", lease_owner="external:manifest")
 
-        # The sweep reclaims it *while* that request is in flight. Artifact
-        # finalization is the real work in the middle of the handler, so a
-        # takeover landing there is the interleaving the fence exists for.
+        # The sweep reclaims it *while* that request is in flight. Artifact finalization
+        # is the real work mid-handler, so a takeover there is the interleaving the fence
+        # exists for.
         store = artifact_store
         real_finalize = store.finalize_and_set_name
 
@@ -1268,7 +1232,7 @@ class TestManifestClaimsTheBuild:
         response = client.post(finalize_url)
 
         assert response.status_code == 409
-        # The point of the change: refused *before* anything was written.
+        # Refused *before* anything was written.
         assert artifact_store.get_latest_version("out-stale-1") is None
         assert build_store.get_build("stale-1").lease_owner == "runner-9"
 
@@ -1299,8 +1263,8 @@ class TestManifestClaimsTheBuild:
         assert first != second
         _upload(client, second_manifest, create_test_arrow_blob())
 
-        # 409, not 403: the older URL is properly signed, so it is not a
-        # forgery — it names a claim that is no longer current.
+        # 409, not 403: the older URL is properly signed, so not a forgery; it names a
+        # claim that is no longer current.
         assert client.post(first).status_code == 409
         assert artifact_store.get_latest_version("out-refetch-1") is None
         assert client.post(second).status_code == 200

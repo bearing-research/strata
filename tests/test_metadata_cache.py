@@ -38,7 +38,7 @@ class TestLRUCache:
         cache = LRUCache[str, int](max_size=2)
         cache.put("a", 1)
         cache.put("b", 2)
-        cache.put("c", 3)  # This should evict "a"
+        cache.put("c", 3)  # Evicts "a"
 
         assert cache.get("a") is None
         assert cache.get("b") == 2
@@ -50,10 +50,9 @@ class TestLRUCache:
         cache.put("a", 1)
         cache.put("b", 2)
 
-        # Access "a" to make it most recently used
+        # Make "a" most recently used, so "c" evicts "b" instead.
         cache.get("a")
 
-        # Now add "c", which should evict "b" (not "a")
         cache.put("c", 3)
 
         assert cache.get("a") == 1
@@ -64,7 +63,7 @@ class TestLRUCache:
         """Test that updating an existing key works."""
         cache = LRUCache[str, int](max_size=2)
         cache.put("a", 1)
-        cache.put("a", 2)  # Update
+        cache.put("a", 2)
 
         assert cache.get("a") == 2
         assert len(cache) == 1
@@ -75,9 +74,9 @@ class TestLRUCache:
         cache.put("a", 1)
         cache.put("b", 2)
 
-        cache.get("a")  # Hit
-        cache.get("b")  # Hit
-        cache.get("c")  # Miss
+        cache.get("a")
+        cache.get("b")
+        cache.get("c")
 
         stats = cache.stats()
         assert stats["size"] == 2
@@ -113,7 +112,7 @@ class TestLRUCache:
         assert cache.get("a") == 1
         assert cache.get("b") is None
         assert cache.get("b", 42) == 42
-        assert cache.get("a", 99) == 1  # Existing value, not default
+        assert cache.get("a", 99) == 1  # Existing value, not the default
 
     def test_get_or_put(self):
         """Test get_or_put computes only on miss."""
@@ -125,15 +124,13 @@ class TestLRUCache:
             call_count += 1
             return 42
 
-        # First call should invoke factory
         result1 = cache.get_or_put("a", factory)
         assert result1 == 42
         assert call_count == 1
 
-        # Second call should return cached value, not invoke factory
         result2 = cache.get_or_put("a", factory)
         assert result2 == 42
-        assert call_count == 1  # Still 1
+        assert call_count == 1
 
     def test_resize_shrink(self):
         """Test resizing cache smaller evicts entries."""
@@ -146,7 +143,6 @@ class TestLRUCache:
         cache.resize(2)
         assert len(cache) == 2
         assert cache.stats()["max_size"] == 2
-        # Oldest entries (0, 1, 2) should be evicted
         assert "0" not in cache
         assert "1" not in cache
         assert "2" not in cache
@@ -189,9 +185,9 @@ class TestLRUCache:
         """Test updates (overwrites) are tracked in stats."""
         cache = LRUCache[str, int](max_size=10)
         cache.put("a", 1)
-        cache.put("a", 2)  # Update
-        cache.put("a", 3)  # Update
-        cache.put("b", 1)  # New entry
+        cache.put("a", 2)
+        cache.put("a", 3)
+        cache.put("b", 1)
 
         stats = cache.stats()
         assert stats["updates"] == 2
@@ -218,24 +214,21 @@ class TestParquetMetadataCache:
         """Test that get_or_load caches Parquet metadata."""
         cache = ParquetMetadataCache(max_size=10)
 
-        # First call should load
         stats_before = cache.stats()
         assert stats_before["misses"] == 0
 
         meta1 = cache.get_or_load(sample_parquet_file)
 
         stats_after = cache.stats()
-        assert stats_after["misses"] == 1  # Cache miss
+        assert stats_after["misses"] == 1
         assert stats_after["size"] == 1
 
-        # Second call should hit cache
         meta2 = cache.get_or_load(sample_parquet_file)
 
         stats_final = cache.stats()
-        assert stats_final["hits"] == 1  # Cache hit
-        assert stats_final["misses"] == 1  # No new misses
+        assert stats_final["hits"] == 1
+        assert stats_final["misses"] == 1
 
-        # Same metadata object
         assert meta1 is meta2
 
     def test_metadata_contains_expected_fields(self, sample_parquet_file):
@@ -254,10 +247,9 @@ class TestParquetMetadataCache:
         cache = ParquetMetadataCache(max_size=10)
         meta = cache.get_or_load(sample_parquet_file)
 
-        # Check we can access row group metadata
         for i, rg_meta in enumerate(meta.row_group_metadata):
             assert rg_meta.num_rows > 0
-            # First two groups have 2 rows, last has 1
+            # First two groups have 2 rows, the last has 1.
             if i < 2:
                 assert rg_meta.num_rows == 2
             else:
@@ -267,7 +259,6 @@ class TestParquetMetadataCache:
         """Test that LRU eviction works for Parquet cache."""
         cache = ParquetMetadataCache(max_size=2)
 
-        # Create 3 Parquet files
         files = []
         for i in range(3):
             table = pa.table({"x": [i]})
@@ -275,7 +266,6 @@ class TestParquetMetadataCache:
             pq.write_table(table, file_path)
             files.append(str(file_path))
 
-        # Load all 3 (should evict first)
         cache.get_or_load(files[0])
         cache.get_or_load(files[1])
         cache.get_or_load(files[2])  # Evicts files[0]
@@ -320,19 +310,15 @@ class TestManifestCache:
 
         cache.put("default", "strata.ns.table", 123, resolution)
 
-        # Same catalog+table+snapshot should hit
         cached = cache.get("default", "strata.ns.table", 123)
         assert cached is not None
         assert len(cached.data_files) == 2
         assert cached.data_files[0].file_path == "/data/file1.parquet"
 
-        # Different snapshot should miss
         assert cache.get("default", "strata.ns.table", 124) is None
 
-        # Different table should miss
         assert cache.get("default", "strata.ns.other", 123) is None
 
-        # Different catalog should miss
         assert cache.get("other_catalog", "strata.ns.table", 123) is None
 
     def test_cache_key_includes_snapshot_id(self):
@@ -441,12 +427,10 @@ class TestGlobalCaches:
 
     def test_clear_all_caches(self, tmp_path):
         """Test that clear_all_caches clears both caches."""
-        # Create a Parquet file
         table = pa.table({"x": [1]})
         file_path = tmp_path / "test.parquet"
         pq.write_table(table, file_path)
 
-        # Populate caches
         pq_cache = get_parquet_cache()
         manifest_cache = get_manifest_cache()
 
@@ -456,7 +440,6 @@ class TestGlobalCaches:
         assert len(pq_cache._cache) == 1
         assert len(manifest_cache._cache) == 1
 
-        # Clear all
         clear_all_caches()
 
         assert len(pq_cache._cache) == 0
@@ -488,7 +471,7 @@ class TestPlannerWithMetadataCache:
         warehouse_path = tmp_path / "warehouse"
         warehouse_path.mkdir()
 
-        # Use "strata" as catalog name to match what the planner expects
+        # "strata" as the catalog name matches what the planner expects.
         catalog = SqlCatalog(
             "strata",
             **{
@@ -499,14 +482,13 @@ class TestPlannerWithMetadataCache:
 
         catalog.create_namespace("test_ns")
 
-        # Use LongType to match PyArrow's default int64
+        # LongType matches PyArrow's default int64.
         schema = Schema(
             NestedField(1, "id", LongType()),
             NestedField(2, "name", StringType()),
         )
         table = catalog.create_table("test_ns.events", schema)
 
-        # Write some data
         batch = pa.RecordBatch.from_pydict({"id": [1, 2, 3], "name": ["a", "b", "c"]})
         df = pa.Table.from_batches([batch])
         table.append(df)
@@ -529,14 +511,12 @@ class TestPlannerWithMetadataCache:
 
         table_uri = warehouse_with_table["table_uri"]
 
-        # First plan - cache miss
         plan1 = planner.plan(table_uri)
         assert len(plan1.tasks) > 0
 
         pq_cache_stats = planner.parquet_cache.stats()
         assert pq_cache_stats["misses"] >= 1
 
-        # Second plan - should use cache
         plan2 = planner.plan(table_uri)
         assert len(plan2.tasks) == len(plan1.tasks)
 
@@ -555,15 +535,12 @@ class TestPlannerWithMetadataCache:
 
         table_uri = warehouse_with_table["table_uri"]
 
-        # First plan - cache miss
         plan1 = planner.plan(table_uri)
         assert len(plan1.tasks) > 0
 
         manifest_stats = planner.manifest_cache.stats()
-        # Stats are now nested: {"unfiltered": {...}, "filtered": {...}}
         assert manifest_stats["unfiltered"]["misses"] >= 1
 
-        # Second plan - should use cache
         plan2 = planner.plan(table_uri)
         assert len(plan2.tasks) == len(plan1.tasks)
 
@@ -640,12 +617,10 @@ class TestPlannerWithMetadataCache:
         catalog = warehouse_with_table["catalog"]
         table = catalog.load_table("test_ns.events")
 
-        # Add a second snapshot
         batch = pa.RecordBatch.from_pydict({"id": [4, 5, 6], "name": ["d", "e", "f"]})
         df = pa.Table.from_batches([batch])
         table.append(df)
 
-        # Get both snapshot IDs
         snapshots = list(table.history())
         assert len(snapshots) >= 2
         snap1_id = snapshots[0].snapshot_id
@@ -655,17 +630,14 @@ class TestPlannerWithMetadataCache:
         planner = ReadPlanner(config)
         table_uri = warehouse_with_table["table_uri"]
 
-        # Plan for snapshot 1
         planner.plan(table_uri, snapshot_id=snap1_id)
 
-        # Plan for snapshot 2
         planner.plan(table_uri, snapshot_id=snap2_id)
 
-        # Both should be cache misses (different snapshots)
+        # Different snapshots, so both miss.
         manifest_stats = planner.manifest_cache.stats()
         assert manifest_stats["unfiltered"]["misses"] >= 2
 
-        # Repeat - should hit cache
         planner.plan(table_uri, snapshot_id=snap1_id)
         planner.plan(table_uri, snapshot_id=snap2_id)
 
@@ -755,19 +727,15 @@ class TestMetadataStore:
         meta = extract_parquet_meta(str(file_path))
         store.put_parquet_meta(str(file_path), meta)
 
-        # Verify it's cached
         assert store.get_parquet_meta(str(file_path)) is not None
         initial_stale = store.stale_invalidations
 
-        # Modify the file. Sleep covers the coarser mtime resolution on
-        # Windows/FAT32 (~1s) so the second write definitively bumps
-        # the timestamp; POSIX tmpfs has sub-second precision so this
-        # is just generous padding.
+        # Sleep past the ~1s mtime resolution on Windows/FAT32 so the second write
+        # definitely bumps the timestamp.
         time.sleep(1.1)
         table2 = pa.table({"x": [4, 5, 6, 7]})
         pq.write_table(table2, file_path)
 
-        # Should detect staleness
         result = store.get_parquet_meta(str(file_path))
         assert result is None
         assert store.stale_invalidations == initial_stale + 1
@@ -776,12 +744,10 @@ class TestMetadataStore:
         """Test batch get for parquet metadata."""
         from strata.metadata_store import extract_parquet_meta
 
-        # Store metadata for all files
         for file_path in sample_parquet_files:
             meta = extract_parquet_meta(file_path)
             store.put_parquet_meta(file_path, meta)
 
-        # Batch get
         result = store.get_parquet_meta_many(sample_parquet_files)
 
         assert len(result) == 3
@@ -793,11 +759,9 @@ class TestMetadataStore:
         """Test batch get with some missing entries."""
         from strata.metadata_store import extract_parquet_meta
 
-        # Only store first file
         meta = extract_parquet_meta(sample_parquet_files[0])
         store.put_parquet_meta(sample_parquet_files[0], meta)
 
-        # Batch get all three
         result = store.get_parquet_meta_many(sample_parquet_files)
 
         assert len(result) == 1
@@ -812,26 +776,22 @@ class TestMetadataStore:
         """Test batch put for parquet metadata."""
         from strata.metadata_store import extract_parquet_meta
 
-        # Extract metadata for all files
         items = [(fp, extract_parquet_meta(fp)) for fp in sample_parquet_files]
 
-        # Batch put
         store.put_parquet_meta_many(items)
 
-        # Verify all stored
         for file_path in sample_parquet_files:
             result = store.get_parquet_meta(file_path)
             assert result is not None
 
     def test_put_parquet_meta_many_empty(self, store):
         """Test batch put with empty input."""
-        store.put_parquet_meta_many([])  # Should not raise
+        store.put_parquet_meta_many([])
 
     def test_stats_includes_counters(self, store, sample_parquet_files):
         """Test that stats() includes all counters."""
         from strata.metadata_store import extract_parquet_meta
 
-        # Generate some hits and misses
         store.get_manifest("default", "ns.table", 1)  # miss
         store.put_manifest("default", "ns.table", 1, [])
         store.get_manifest("default", "ns.table", 1)  # hit
@@ -854,7 +814,6 @@ class TestMetadataStore:
         """Test cleanup of stale entries."""
         from strata.metadata_store import extract_parquet_meta
 
-        # Create a file and cache its metadata
         file_path = tmp_path / "cleanup_test.parquet"
         table = pa.table({"x": [1, 2, 3]})
         pq.write_table(table, file_path)
@@ -862,14 +821,11 @@ class TestMetadataStore:
         meta = extract_parquet_meta(str(file_path))
         store.put_parquet_meta(str(file_path), meta)
 
-        # Delete the file
         file_path.unlink()
 
-        # Cleanup should remove the stale entry
         removed = store.cleanup_stale_parquet_meta()
         assert removed == 1
 
-        # Entry should be gone
         stats = store.stats()
         assert stats["parquet_entries"] == 0
 
@@ -898,7 +854,7 @@ class TestMetadataStore:
 
         db_path = tmp_path / "old_schema.sqlite"
 
-        # Create old schema without catalog_name and file_size
+        # Old schema, without catalog_name and file_size.
         conn = sqlite3.connect(str(db_path))
         conn.executescript("""
             CREATE TABLE manifest_cache (
@@ -918,10 +874,8 @@ class TestMetadataStore:
         """)
         conn.close()
 
-        # Opening with MetadataStore should migrate
         store = MetadataStore(db_path)
 
-        # Should work with new schema
         store.put_manifest("default", "ns.table", 1, [])
         result = store.get_manifest("default", "ns.table", 1)
         assert result == []
@@ -964,7 +918,7 @@ class TestNestedColumnStatsUsePaths:
 
         persisted = extract_parquet_meta(str(self._nested_file(tmp_path)))
         stats = persisted.row_groups[0].column_stats
-        # Both columns keep their own stats (the nested one used to clobber).
+        # Both columns keep their own stats; the nested one must not clobber.
         assert stats["id"]["min"] == 1 and stats["id"]["max"] == 3
         assert stats["user.id"]["min"] == 100 and stats["user.id"]["max"] == 300
 
@@ -1220,8 +1174,8 @@ class TestNoArgLookupKeepsTheConfiguredStore:
         served = get_metadata_store(configured)
 
         assert get_metadata_store() is served
-        # And a later configured lookup is still the same object, so the
-        # singleton never churned.
+        # A later configured lookup is still the same object, so the singleton never
+        # churned.
         assert get_metadata_store(configured) is served
 
     def test_no_arg_does_not_create_a_home_cache_dir(self, tmp_path):

@@ -53,9 +53,8 @@ class TestMarkdownCellAnalysis:
     def test_markdown_has_no_defines_or_references(self, tmp_path):
         """Markdown cells must not produce DAG edges — they're prose."""
         nb_dir = create_notebook(tmp_path, "md_dag")
-        # Source that *would* parse as Python with defines+references —
-        # if the analyzer mistakenly treats it as Python it would record
-        # ``x`` as a define.
+        # Source that *would* parse as Python with defines+references: treated as
+        # Python, it would record ``x`` as a define.
         add_cell_to_notebook(nb_dir, "p_cell", language="python")
         write_cell(nb_dir, "p_cell", "x = 1")
 
@@ -66,8 +65,8 @@ class TestMarkdownCellAnalysis:
         md_cell = next(c for c in session.notebook_state.cells if c.id == "md_cell")
         assert md_cell.defines == []
         assert md_cell.references == []
-        # Also: the python cell's ``x`` should still be visible in the DAG
-        # producer map — the markdown cell shouldn't shadow it.
+        # The python cell's ``x`` stays visible in the DAG producer map; the markdown
+        # cell must not shadow it.
         assert session.dag is not None
         assert session.dag.variable_producer.get("x") == "p_cell"
 
@@ -96,12 +95,9 @@ class TestMarkdownCellExecution:
         assert result.cache_hit is True
         assert result.display_outputs == []
         assert result.display_output is None
-        # Regression: the executor's start_time is wall-clock, so the markdown
-        # branch must subtract via ``time.time()`` not ``time.monotonic()`` —
-        # mixing the two yields an epoch-scale (~1.7e12 ms) or negative duration
-        # the UI renders as garbage. A sane-range bound catches that without
-        # asserting how fast the cell ran (60s is far above any real markdown
-        # render, far below the epoch-scale bug).
+        # start_time is wall-clock, so the markdown branch must subtract via
+        # ``time.time()``, not ``time.monotonic()``; mixing them yields an epoch-scale
+        # or negative duration. 60s is far above any real render, far below that bug.
         assert 0 <= result.duration_ms < 60_000
 
 
@@ -135,9 +131,8 @@ class TestHarnessCrashDiagnostic:
             json.dumps({"source": "x = 1", "inputs": {}, "output_dir": str(output_dir)})
         )
 
-        # Build a fake executor. The implementation under test
-        # (``_run_harness``) only uses ``self`` for ``self.harness_path``
-        # and ``self.session.path``, so a minimal stand-in is enough.
+        # ``_run_harness`` only uses ``self.harness_path`` and ``self.session.path``,
+        # so a minimal stand-in is enough.
         class _FakeSession:
             path = output_dir
 

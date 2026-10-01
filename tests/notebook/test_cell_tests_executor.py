@@ -95,8 +95,8 @@ async def test_run_cell_tests_persists_and_writes_test_file():
 
 @pytest.mark.asyncio
 async def test_run_cell_tests_injects_upstream_inputs():
-    # cell_b references `factor` defined in cell_a — run_cell_tests must
-    # materialize cell_a and inject its `factor` artifact as a test input.
+    # cell_b references `factor` from cell_a: run_cell_tests must materialize
+    # cell_a and inject its `factor` artifact as a test input.
     session = _session_with(
         [
             ("cell_a", "factor = 10\n", None),
@@ -193,9 +193,7 @@ async def test_run_cell_tests_auto_provision_failure_surfaces_unavailable(monkey
     assert result.auto_installed == []
 
 
-# ---------------------------------------------------------------------------
 # WebSocket handler
-# ---------------------------------------------------------------------------
 
 
 def _register_fake_ws(session: NotebookSession):

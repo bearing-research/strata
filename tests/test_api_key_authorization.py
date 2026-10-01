@@ -64,17 +64,14 @@ class TestScopeEnforcement:
 
     @pytest.mark.parametrize(("method", "path"), ADMIN_ROUTES)
     def test_no_key_is_still_unauthenticated(self, service, method, path):
-        # Authentication was never the broken half; this guards the boundary
-        # between the two so a later change can't collapse them.
+        # Guards the boundary between authentication and authorization so a later change
+        # can't collapse them.
         client, _ = service
         assert client.request(method, path).status_code == 401
 
 
 class TestTenantIsolation:
     def test_a_key_cannot_read_another_tenants_artifact(self, tmp_path, monkeypatch):
-        # Multi-tenancy was rejected outright under api_key, which failed
-        # closed -- but for the wrong reason, and it made the mode unusable
-        # for the deployments that most need it.
         monkeypatch.setenv("STRATA_DEPLOYMENT_MODE", "service")
         monkeypatch.setenv("STRATA_AUTH_MODE", "api_key")
         monkeypatch.setenv("STRATA_MULTI_TENANT_ENABLED", "true")
@@ -145,9 +142,8 @@ class TestWebSocketAuthentication:
 
     @pytest.mark.asyncio
     async def test_an_upgrade_with_no_key_is_closed(self, service):
-        # Left checking only for trusted_proxy, this returned True: every
-        # api_key deployment's socket accepted anyone, and a socket can send
-        # cell_execute -- arbitrary Python, no credential.
+        # Checking only for trusted_proxy would return True here: every api_key socket
+        # would accept anyone, and a socket can send cell_execute (arbitrary Python).
         ok, ws = await self._authenticate({})
         assert ok is False
         assert ws.closed_with == 1008
@@ -181,8 +177,6 @@ class TestWebSocketAuthentication:
 
 class TestAclUnderApiKey:
     def test_acl_rules_are_accepted_and_enforced(self, tmp_path):
-        # Configuring rules under api_key was refused at startup, with a
-        # message naming auth_mode='none' whatever the mode actually was.
         from strata.auth import AclEvaluator
         from strata.config import _parse_acl_config
         from strata.types import Principal, TableRef

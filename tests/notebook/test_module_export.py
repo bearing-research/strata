@@ -12,9 +12,7 @@ keep behaving exactly as before.
 
 from strata.notebook.module_export import build_module_export_plan
 
-# ---------------------------------------------------------------------------
 # Pure module cells: no drops, exactly the pre-slicing behavior.
-# ---------------------------------------------------------------------------
 
 
 def test_literal_int_assignment_is_exportable() -> None:
@@ -93,12 +91,8 @@ def test_pure_cell_keeps_original_source_bytes() -> None:
     assert plan.sliced is False
 
 
-# ---------------------------------------------------------------------------
-# Sliced cells: runtime statements coexist with shareable defs/classes.
-# These cases all used to be blocked outright; slicing lets the def
-# escape cleanly while the runtime statement flows through the regular
-# artifact path.
-# ---------------------------------------------------------------------------
+# Sliced cells: runtime statements coexist with shareable defs/classes. The def
+# exports while the runtime statement flows through the regular artifact path.
 
 
 def test_runtime_statement_alongside_self_contained_def_is_exportable() -> None:
@@ -158,7 +152,7 @@ def add(y):
     # Specific error pinpoints the failing symbol and the unresolved var.
     assert "function `add`" in plan.format_error()
     assert "x" in plan.format_error()
-    # `add` becomes blocking — it would break the moment downstream calls it.
+    # `add` is blocking: it would break the moment downstream calls it.
     assert "add" in plan.blocking_symbols
     # Not in exported_symbols since it can't be safely shared.
     assert "add" not in plan.exported_symbols
@@ -210,7 +204,7 @@ def f():
 """.strip()
     )
     assert plan.is_exportable is False
-    # ``my_decorator`` is referenced at module load — surfaces in the
+    # ``my_decorator`` is referenced at module load, so it surfaces in the
     # top-level reasons.
     assert "my_decorator" in plan.format_error()
 
@@ -283,9 +277,7 @@ def use():
     assert "state" in plan.format_error()
 
 
-# ---------------------------------------------------------------------------
 # Hard blockers: not even slicing makes these safe.
-# ---------------------------------------------------------------------------
 
 
 def test_top_level_lambda_assignment_is_blocking() -> None:
@@ -343,9 +335,7 @@ def test_augmented_assignment_to_kept_name_blocks_export() -> None:
     assert plan.is_exportable is False
 
 
-# ---------------------------------------------------------------------------
 # Cells with pure runtime: nothing to share, no error.
-# ---------------------------------------------------------------------------
 
 
 def test_runtime_only_cell_has_empty_slice_and_no_error() -> None:
@@ -378,15 +368,9 @@ def test_annotated_without_value_drops_silently() -> None:
     assert plan.exported_symbols == {}
 
 
-# ---------------------------------------------------------------------------
-# Single-cell scope limitations.
-#
-# These tests pin the boundaries of what slicing can do. They're not
-# bugs — they're the documented contract that the slicer treats each
-# cell as an island. If we ever extend module-export to compose across
-# cells (e.g. by passing imports/helpers from upstream cells into the
-# synthetic module), these tests should be the first place to revisit.
-# ---------------------------------------------------------------------------
+# Single-cell scope limits: the slicer treats each cell as an island (the
+# documented contract). If module export ever composes across cells, revisit
+# these first.
 
 
 def test_def_referencing_cross_cell_import_blocks_export() -> None:
@@ -477,7 +461,7 @@ def helper(x):
     assert plan.is_exportable is True
     assert plan.sliced is True
     assert "this comment is lost" not in plan.module_source
-    # The function still exports correctly — comments are cosmetic.
+    # The function still exports; comments are cosmetic.
     assert "helper" in plan.exported_symbols
 
 
@@ -558,7 +542,7 @@ def test_no_injectable_arg_is_backward_compatible() -> None:
     assert plan.injected_inputs == set()
 
 
-# --- same-cell runtime bindings (Phase 2) -----------------------------------
+# --- same-cell runtime bindings ---
 
 
 def test_runtime_binding_names_identifies_dropped_assignments() -> None:

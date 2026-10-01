@@ -67,7 +67,7 @@ async def test_graceful_termination_via_sigterm():
 
     await terminate_subprocess_tree(proc, grace_seconds=2.0)
 
-    # Exited via its SIGTERM handler (sys.exit(0)) — the graceful path, not the
+    # Exited via its SIGTERM handler (sys.exit(0)): the graceful path, not the
     # SIGKILL-after-grace fallback (which would leave returncode == -SIGKILL).
     assert proc.returncode == 0
     assert not _is_alive(pid)
@@ -93,8 +93,8 @@ async def test_sigkill_fallback_when_sigterm_ignored():
 
     await terminate_subprocess_tree(proc, grace_seconds=0.5)
 
-    # SIGTERM was ignored, so the process could only have died via the SIGKILL
-    # fallback — proven by the return code, not by timing the grace period.
+    # SIGTERM was ignored, so only the SIGKILL fallback could have killed it;
+    # proven by the return code, not by timing the grace period.
     assert proc.returncode == -signal.SIGKILL
     assert not _is_alive(pid)
 
@@ -204,8 +204,8 @@ async def test_kill_subprocess_tree_nowait_kills_tree():
     # Reap the parent so the wait state isn't ambiguous.
     await proc.wait()
 
-    # Sync variant uses SIGKILL — children should be gone too within
-    # the kernel's signal-delivery window.
+    # The sync variant uses SIGKILL; children should be gone within the kernel's
+    # signal-delivery window.
     for _ in range(20):
         if not (_is_alive(parent_pid) or _is_alive(child_pid)):
             break

@@ -40,14 +40,11 @@ def sample_notebook(tmp_path):
     """
     from strata.notebook.writer import add_cell_to_notebook, create_notebook
 
-    # Create notebook
     notebook_dir = create_notebook(tmp_path, "Test Notebook")
 
-    # Add a couple of cells
     add_cell_to_notebook(notebook_dir, "cell1", None)
     add_cell_to_notebook(notebook_dir, "cell2", "cell1")
 
-    # Parse and create session
     notebook_state = parse_notebook(notebook_dir)
     session = NotebookSession(notebook_state, notebook_dir)
     session.refresh_environment_runtime()
@@ -88,11 +85,9 @@ class TestRevertHitsTheCache:
 
         assert reverted.cache_hit is True, "revert re-executed a result already in the store"
 
-        # The safety property, and the reason the obvious fix is wrong: a
-        # downstream cell resolves its inputs through the *latest* version, so
-        # serving the cache from an older version without re-pointing latest
-        # would feed it the edited value while the cell above claims to hold
-        # the reverted one. y must be 2 (from x = 1), never 3.
+        # A downstream cell resolves inputs through the *latest* version, so serving
+        # the cache from an older version without re-pointing latest would feed it the
+        # edited value. y must be 2 (from x = 1), never 3.
         sample_notebook.re_analyze_cell("cell2")
         downstream = await executor.execute_cell("cell2", "y = x + 1")
         assert downstream.success is True
@@ -253,7 +248,6 @@ class TestCellExecutor:
         second = await executor.execute_cell("cell1", source)
         assert second.success is True
         assert second.cache_hit is True
-        # The file from the first run is still there with its output.
         assert console_file.is_file()
         assert "recoverable output" in console_file.read_text()
 
@@ -274,7 +268,7 @@ class TestCellExecutor:
         """Test executing a cell that creates a dictionary (simulates DataFrame-like output)."""
         executor = CellExecutor(sample_notebook)
 
-        # Use a dict instead of DataFrame since pandas may not be available in test venv
+        # A dict, since pandas may be absent from the test venv.
         source = 'df = {"a": [1, 2, 3], "b": [4.0, 5.0, 6.0]}'
         result = await executor.execute_cell("cell1", source)
 
@@ -630,7 +624,6 @@ result = math.pi
 
         assert result.success is True
         assert "result" in result.outputs
-        # Pi should be serialized as JSON number
         assert abs(result.outputs["result"]["preview"] - 3.14159) < 0.01
 
     @pytest.mark.asyncio
@@ -1306,8 +1299,8 @@ class Person:
         assert metadata["notebook_id"] == sample_notebook.notebook_state.id
         assert metadata["cell_id"] == "cell1"
         cell = next(c for c in sample_notebook.notebook_state.cells if c.id == "cell1")
-        # The cell's own key — the one a rerun of the same computation shares —
-        # not the transport hash the build row is keyed by.
+        # The cell's own key (the one a rerun of the same computation shares), not
+        # the transport hash the build row is keyed by.
         assert metadata["cell_provenance_hash"]
         assert metadata["cell_provenance_hash"] == cell.last_provenance_hash
         build = notebook_build_server["build_store"].get_build(result.remote_build_id)
@@ -2172,7 +2165,6 @@ class TestPromptCellExecution:
         r1 = await executor.execute_cell("c1", "x = 42")
         assert r1.success
 
-        # Mock the LLM call
         mock_result = LlmCompletionResult(
             content="42 is the answer to everything.",
             model="test-model",
@@ -2319,7 +2311,7 @@ class TestLoopCellExecution:
         # Upstream cell seeds the carry.
         add_cell_to_notebook(notebook_dir, "seed")
         write_cell(notebook_dir, "seed", "state = {'n': 0, 'history': []}")
-        # Loop cell itself — must carry `state` and rebind it each iter.
+        # The loop cell must carry `state` and rebind it each iteration.
         add_cell_to_notebook(notebook_dir, "loop", after_cell_id="seed")
 
         session = NotebookSession(parse_notebook(notebook_dir), notebook_dir)
@@ -2351,8 +2343,7 @@ class TestLoopCellExecution:
         # per-iteration artifacts live under ``@iter={k}`` suffixes.
         assert result.artifact_uri is not None
         assert "@iter=" not in result.artifact_uri
-        # Final iteration is k=2 with max_iter=3 — verify the per-iter
-        # artifact exists.
+        # Final iteration is k=2 with max_iter=3.
         artifact_mgr = session.get_artifact_manager()
         assert artifact_mgr.get_iteration_artifact("loop", "state", 2) is not None
 
@@ -2394,8 +2385,8 @@ class TestLoopCellExecution:
         from strata.notebook.writer import write_cell
 
         notebook_dir, session = loop_notebook
-        # The body mutates in place but never rebinds `state`, so the harness
-        # won't emit a fresh ``state`` output — the loop must surface this.
+        # The body mutates in place but never rebinds `state`, so the harness emits no
+        # fresh ``state`` output; the loop must surface this.
         loop_source = "# @loop max_iter=2 carry=state\nstate['n'] += 1\n"
         write_cell(notebook_dir, "loop", loop_source)
         session.reload()
@@ -2713,8 +2704,8 @@ class TestSkipUpstreamMaterialization:
 
         await executor.execute_cell("cell2", "y = x + 1")
 
-        # The recursion calls _materialize_upstreams for cell2 (target), then
-        # again for cell1 (cell2's upstream) — both should be present.
+        # The recursion calls _materialize_upstreams for cell2 (target), then for
+        # cell1 (its upstream).
         assert "cell2" in materialize_calls, (
             "Default execute_cell should call _materialize_upstreams for the target cell, "
             f"got {materialize_calls}"

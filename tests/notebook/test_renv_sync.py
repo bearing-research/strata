@@ -29,9 +29,7 @@ from strata.notebook.parser import parse_notebook
 from strata.notebook.runtime_state import RRuntime, load_runtime_state, save_runtime_state
 from strata.notebook.writer import _renv_sync, create_notebook, write_notebook_toml
 
-# ---------------------------------------------------------------------------
 # _renv_sync wrapper
-# ---------------------------------------------------------------------------
 
 
 class TestRenvSyncMissingRscript:
@@ -130,11 +128,9 @@ class TestRenvSyncHappyPath:
         assert _renv_sync(tmp_path) is True
         assert len(invocations) == 1
         args, cwd = invocations[0]
-        # Confirm we call renv::restore() with the prompt suppressed —
-        # otherwise it'd block on stdin asking for confirmation.
+        # renv::restore() must suppress the prompt, or it blocks on stdin.
         assert "renv::restore(prompt = FALSE)" in args
-        # Confirm cwd is set to the notebook dir; renv resolves the
-        # project off cwd.
+        # cwd is the notebook dir; renv resolves the project off cwd.
         assert cwd == str(tmp_path)
 
     def test_does_not_pass_vanilla_or_no_init_file(self, monkeypatch, tmp_path):
@@ -180,22 +176,16 @@ class TestRenvSyncDefaultTimeout:
         monkeypatch.setattr(subprocess, "run", fake_run)
         _renv_sync(tmp_path)
 
-        # 5 min minimum lets renv compile a handful of packages from
-        # source on platforms without wheels. ``_uv_sync``'s 60s
-        # default is fine because uv ships wheels; renv doesn't have
-        # that luxury.
+        # 5 min lets renv compile a few packages from source where there are no
+        # binaries (uv ships wheels, so ``_uv_sync`` gets by with 60s).
         assert captured["timeout"] >= 300
 
 
-# ---------------------------------------------------------------------------
-# Cross-process renv lock (issue #102)
-# ---------------------------------------------------------------------------
+# Cross-process renv lock
 
-# Holds the renv process lock from a real second process, so the
-# contention below is genuine cross-process flock contention — a
-# second FileLock instance in the same process would also conflict
-# on POSIX, but that's an implementation detail we don't want to
-# depend on.
+# A real second process holds the lock, so the contention below is genuine
+# cross-process flock contention (a same-process conflict on POSIX is an
+# implementation detail not to depend on).
 _LOCK_HOLDER_SCRIPT = """
 import sys
 from filelock import FileLock
@@ -287,9 +277,7 @@ class TestRenvCrossProcessLock:
         assert "Another process" in (result.error or "")
 
 
-# ---------------------------------------------------------------------------
 # [r] block schema
-# ---------------------------------------------------------------------------
 
 
 class TestRBlockSchema:
@@ -334,9 +322,7 @@ class TestRBlockSchema:
         assert "\nr =" not in text
 
 
-# ---------------------------------------------------------------------------
-# Session.ensure_renv_synced — wiring _renv_sync into open
-# ---------------------------------------------------------------------------
+# Session.ensure_renv_synced: wiring _renv_sync into open
 
 
 class TestEnsureRenvSynced:
@@ -435,9 +421,8 @@ class TestEnsureRenvSynced:
         assert runtime.last_synced_at > 0
         assert runtime.sync_error == ""
 
-        # The on-disk [r] block stays empty (the committed config has
-        # no opinion on runtime state) and notebook.toml is byte-
-        # identical — no churn.
+        # The on-disk [r] block stays empty (committed config has no opinion on
+        # runtime state) and notebook.toml is byte-identical.
         assert parse_notebook(notebook_dir).r == {}
         assert (notebook_dir / "notebook.toml").read_bytes() == toml_before
 
@@ -511,8 +496,7 @@ class TestEnsureRenvSynced:
         session.ensure_renv_synced()
         assert len(calls) == 1
 
-        # Recreate ``renv/library`` as an empty directory — the
-        # probe-only-checks-exists() bug would have passed this.
+        # An empty ``renv/library`` must not count as synced.
         (notebook_dir / "renv" / "library").mkdir(parents=True, exist_ok=True)
 
         session.ensure_renv_synced()
@@ -584,16 +568,14 @@ class TestEnsureRenvSynced:
         session.ensure_renv_synced()
         assert load_runtime_state(notebook_dir).r.last_synced_at > 0
 
-        # User removes renv.lock and reopens — the next ensure clears.
+        # User removes renv.lock and reopens; the next ensure clears.
         (notebook_dir / "renv.lock").unlink()
         session.ensure_renv_synced()
 
         assert load_runtime_state(notebook_dir).r == RRuntime()
 
 
-# ---------------------------------------------------------------------------
-# serialize_r_environment_state — payload shape the UI consumes
-# ---------------------------------------------------------------------------
+# serialize_r_environment_state: payload shape the UI consumes
 
 
 class TestSerializeREnvironmentState:
@@ -693,9 +675,7 @@ class TestSerializeREnvironmentState:
         assert payload["lock_hash"] == lock_hash
 
 
-# ---------------------------------------------------------------------------
 # Who builds R packages
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="the recording Rscript is a shell script")

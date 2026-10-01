@@ -44,18 +44,15 @@ class TestLinearCascade:
 
         with open_notebook_session(client, nb.path) as (sid, session):
             with ws_connect(client, sid) as ws:
-                # Execute leaf — should trigger cascade
+                # Executing the leaf triggers a cascade.
                 result = execute_cell_and_wait(ws, "c3")
 
-                # All cells should have been executed
                 assert result["type"] == "cell_output"
                 assert "z" in result["payload"]["outputs"]
 
-                # Check cascade_prompt was sent
                 cascade_prompts = ws.messages_of_type("cascade_prompt")
                 assert len(cascade_prompts) >= 1
 
-                # Check cascade_progress messages were sent
                 progress_msgs = ws.messages_of_type("cascade_progress")
                 assert len(progress_msgs) >= 1
 
@@ -73,7 +70,7 @@ class TestLinearCascade:
             with ws_connect(client, sid) as ws:
                 execute_cell_and_wait(ws, "c3")
 
-                # Verify each upstream cell went through running → output → ready
+                # Each upstream cell went running → output → ready.
                 for cell_id in ["c1", "c2", "c3"]:
                     statuses = [
                         m["payload"]["status"]
@@ -90,11 +87,10 @@ class TestLinearCascade:
 
         with open_notebook_session(client, nb.path) as (sid, session):
             with ws_connect(client, sid) as ws:
-                # Execute c1 first
                 execute_cell_and_wait(ws, "c1")
                 ws.clear()
 
-                # Execute c2 — c1 is ready, no cascade needed
+                # c1 is ready, so no cascade.
                 execute_cell_and_wait(ws, "c2")
 
                 cascade_prompts = ws.messages_of_type("cascade_prompt")
@@ -116,10 +112,8 @@ class TestBranchingDAG:
 
         with open_notebook_session(client, nb.path) as (sid, session):
             with ws_connect(client, sid) as ws:
-                # Execute c1
                 execute_cell_and_wait(ws, "c1")
 
-                # Execute c2 and c3 (both depend on c1 which is ready)
                 r2 = execute_cell_and_wait(ws, "c2")
                 assert r2["type"] == "cell_output"
                 assert "a" in r2["payload"]["outputs"]
@@ -141,7 +135,7 @@ class TestBranchingDAG:
 
         with open_notebook_session(client, nb.path) as (sid, session):
             with ws_connect(client, sid) as ws:
-                # Execute leaf c4 — triggers cascade for entire DAG
+                # Executing leaf c4 cascades the whole DAG.
                 result = execute_cell_and_wait(ws, "c4")
                 assert result["type"] == "cell_output"
                 assert "result" in result["payload"]["outputs"]
@@ -160,15 +154,13 @@ class TestForceExecution:
                 # Force-execute c2 without running c1 first
                 ws.execute_force("c2")
 
-                # Should get cell_status(running) then either output or error
                 msg = ws.receive_until("cell_status", cell_id="c2", status="running")
                 assert msg["payload"]["status"] == "running"
 
-                # Wait for completion (may error due to missing x, but no cascade)
+                # May error on the missing x, but no cascade.
                 final = ws.receive_until("cell_status", cell_id="c2")
                 assert final["payload"]["status"] in ("ready", "error")
 
-                # No cascade_prompt should have been sent
                 cascade_prompts = ws.messages_of_type("cascade_prompt")
                 assert len(cascade_prompts) == 0
 
@@ -205,7 +197,6 @@ class TestRerunExecution:
                 final = ws.receive_until("cell_output", cell_id="c2")
                 assert final["payload"]["outputs"]["y"]["preview"] == 2
 
-                # cache_hit must be False on the rerun's output frame.
                 assert final["payload"].get("cache_hit") is False
 
     def test_rerun_picks_up_edited_upstream_after_flush(self, setup):
@@ -220,13 +211,11 @@ class TestRerunExecution:
                 execute_cell_and_wait(ws, "c2")
                 ws.clear()
 
-                # Simulate the flush that the frontend does before rerun:
-                # push the new c1 source to the backend before the rerun
+                # Mirror the frontend's flush of the new c1 source before the rerun
                 # message lands.
                 ws.update_source("c1", "x = 42")
-                # Drain any dag_update / cell_status frames the source
-                # update triggers so receive_until below sees only the
-                # rerun frames.
+                # Drain the frames the source update triggers so receive_until below sees
+                # only the rerun frames.
                 ws.clear()
 
                 ws.execute_rerun("c2")
@@ -266,7 +255,6 @@ class TestRerunExecution:
                 ws.clear()
 
                 ws.rerun_all()
-                # Wait for both cells to land their final cell_output.
                 ws.receive_until("cell_output", cell_id="c1")
                 ws.receive_until("cell_output", cell_id="c2")
 
@@ -324,8 +312,7 @@ class TestRunAllBatching:
         with open_notebook_session(client, nb.path) as (sid, _session):
             with ws_connect(client, sid) as ws:
                 ws.run_all()
-                # Wait for the terminal frame from each — could be cell_output
-                # or cell_error depending on success.
+                # Wait for each cell's terminal frame: cell_output or cell_error.
                 ws.receive_until_any_of(("cell_output", "cell_error"), cell_id="c1") if hasattr(
                     ws, "receive_until_any_of"
                 ) else ws.receive_until("cell_output", cell_id="c1")
@@ -390,11 +377,9 @@ class TestRunAllBatching:
         with open_notebook_session(client, nb.path) as (sid, _session):
             with ws_connect(client, sid) as ws:
                 ws.run_all()
-                # Mount failures now broadcast AFTER batch successes (per #35
-                # review), so c_good lands first via batch + then c_bad's
-                # synthetic error broadcast. Read forward until we see
-                # c_bad's error (the last terminal frame); messages_of_type
-                # then surfaces c_good's earlier output from the buffer.
+                # Mount failures broadcast after batch successes: c_good lands first, then
+                # c_bad's synthetic error. Read until c_bad's error; messages_of_type then
+                # finds c_good's earlier output in the buffer.
                 ws.receive_until("cell_error", cell_id="c_bad")
 
                 errors = {m["payload"]["cell_id"] for m in ws.messages_of_type("cell_error")}

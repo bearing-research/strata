@@ -127,10 +127,8 @@ def test_validation_flags_invalid_ttl():
 
 
 def test_validation_clean_for_valid_cache_policies():
-    # Use a registered driver so the connection-level checks
-    # (connection_driver_unknown) don't add noise to this assertion —
-    # what we're testing is that valid cache policies don't produce a
-    # cache_policy_unknown / cache_ttl_invalid diagnostic.
+    # A registered driver keeps connection_driver_unknown out of this assertion, which
+    # is about cache_policy_unknown / cache_ttl_invalid.
     state = _state_with([ConnectionSpec(name="db", driver="postgresql")])
     for policy in ("fingerprint", "forever", "session", "snapshot", "ttl=600"):
         cell = _sql_cell(f"# @sql connection=db\n# @cache {policy}\nSELECT 1")
@@ -138,7 +136,7 @@ def test_validation_clean_for_valid_cache_policies():
         assert diags == [], f"{policy}: {diags}"
 
 
-# --- review fix: connection-level diagnostics ---------------------------
+# --- connection-level diagnostics ---
 
 
 def test_validation_flags_malformed_connection():
@@ -274,7 +272,7 @@ def test_validation_clean_when_all_auth_uses_indirection():
     assert all(d.code != "connection_auth_literal_secret" for d in diags)
 
 
-# --- review fix: SQL parse errors surface as diagnostics ---------------
+# --- SQL parse errors surface as diagnostics ---
 
 
 def test_validation_surfaces_sql_parse_error_diagnostic():

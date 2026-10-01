@@ -49,14 +49,12 @@ class TestTimeoutConfig:
         config = StrataConfig()
         timeout_config = config.get_timeout_config()
 
-        # Check structure
         assert "planning" in timeout_config
         assert "scanning" in timeout_config
         assert "qos_queue" in timeout_config
         assert "fetching" in timeout_config
         assert "s3" in timeout_config
 
-        # Check values
         assert timeout_config["planning"]["plan_timeout_seconds"] == 30.0
         assert timeout_config["scanning"]["scan_timeout_seconds"] == 300.0
         assert timeout_config["qos_queue"]["interactive_queue_timeout"] == 10.0
@@ -97,32 +95,26 @@ class TestTimeoutEndpointIntegration:
                 assert response.status_code == 200
                 data = response.json()
 
-                # Check all categories present
                 assert "planning" in data
                 assert "scanning" in data
                 assert "qos_queue" in data
                 assert "fetching" in data
                 assert "s3" in data
 
-                # Check planning timeouts
                 assert "plan_timeout_seconds" in data["planning"]
                 assert data["planning"]["plan_timeout_seconds"] == 30.0
 
-                # Check scanning timeouts
                 assert "scan_timeout_seconds" in data["scanning"]
                 assert data["scanning"]["scan_timeout_seconds"] == 300.0
 
-                # Check QoS queue timeouts
                 assert "interactive_queue_timeout" in data["qos_queue"]
                 assert "bulk_queue_timeout" in data["qos_queue"]
                 assert data["qos_queue"]["interactive_queue_timeout"] == 10.0
                 assert data["qos_queue"]["bulk_queue_timeout"] == 30.0
 
-                # Check fetch timeouts
                 assert "fetch_timeout_seconds" in data["fetching"]
                 assert data["fetching"]["fetch_timeout_seconds"] == 60.0
 
-                # Check S3 timeouts
                 assert "s3_connect_timeout_seconds" in data["s3"]
                 assert "s3_request_timeout_seconds" in data["s3"]
                 assert data["s3"]["s3_connect_timeout_seconds"] == 10.0
@@ -165,7 +157,6 @@ class TestTimeoutEndpointIntegration:
                 assert response.status_code == 200
                 data = response.json()
 
-                # Verify custom values are reflected
                 assert data["planning"]["plan_timeout_seconds"] == 45.0
                 assert data["scanning"]["scan_timeout_seconds"] == 120.0
                 assert data["fetching"]["fetch_timeout_seconds"] == 90.0

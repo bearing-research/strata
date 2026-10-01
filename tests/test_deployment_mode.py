@@ -45,13 +45,12 @@ class TestDeploymentModeConfig:
                 cache_dir=tmp_path / "cache",
                 deployment_mode=cast(Any, "invalid"),
             )
-        # Pydantic validation error includes 'service' or 'personal' in message
         error_str = str(exc_info.value)
         assert "'service'" in error_str or "'personal'" in error_str
 
     def test_personal_mode_creates_artifact_dir(self, tmp_path):
         """Personal mode creates artifact_dir if not specified."""
-        # Using a custom artifact_dir to avoid touching home directory
+        # A custom artifact_dir keeps the test out of the home directory.
         artifact_dir = tmp_path / "artifacts"
         config = StrataConfig(
             cache_dir=tmp_path / "cache",
@@ -78,7 +77,6 @@ class TestPersonalModeBinding:
             host="127.0.0.1",
             artifact_dir=tmp_path / "artifacts",
         )
-        # Should not raise
         config.validate_personal_mode_binding()
 
     def test_localhost_binding_allowed(self, tmp_path):
@@ -89,7 +87,6 @@ class TestPersonalModeBinding:
             host="localhost",
             artifact_dir=tmp_path / "artifacts",
         )
-        # Should not raise
         config.validate_personal_mode_binding()
 
     def test_ipv6_loopback_allowed(self, tmp_path):
@@ -100,7 +97,6 @@ class TestPersonalModeBinding:
             host="::1",
             artifact_dir=tmp_path / "artifacts",
         )
-        # Should not raise
         config.validate_personal_mode_binding()
 
     def test_non_loopback_blocked(self, tmp_path):
@@ -137,7 +133,6 @@ class TestPersonalModeBinding:
             allow_remote_clients_in_personal=True,
             artifact_dir=tmp_path / "artifacts",
         )
-        # Should not raise
         config.validate_personal_mode_binding()
 
     def test_service_mode_allows_any_binding(self, tmp_path):
@@ -147,7 +142,7 @@ class TestPersonalModeBinding:
             deployment_mode="service",
             host="0.0.0.0",
         )
-        # Should not raise - service mode is read-only
+        # Service mode is read-only, so any bind is allowed.
         config.validate_personal_mode_binding()
 
 

@@ -14,9 +14,7 @@ import strata
 
 SKILL = Path(strata.__file__).parent / ".agents" / "skills" / "strata-scratchpad" / "SKILL.md"
 
-# The repo also ships the same skill inside a Claude Code plugin (for marketplace
-# distribution). These paths are repo-relative (present in a checkout, absent in a
-# bare installed package).
+# The plugin's copy of the skill: present in a checkout, absent in an installed package.
 REPO_ROOT = Path(__file__).resolve().parents[2]
 PLUGIN_DIR = REPO_ROOT / "plugins" / "strata-scratchpad"
 PLUGIN_SKILL = PLUGIN_DIR / "skills" / "strata-scratchpad" / "SKILL.md"
@@ -32,7 +30,7 @@ def test_skill_has_name_and_description_frontmatter():
     assert text.startswith("---\n")
     _, frontmatter, _ = text.split("---\n", 2)
     assert "name: strata-scratchpad" in frontmatter
-    # The description is the trigger — it must mention the scratchpad intent.
+    # The description is the trigger, so it must mention the scratchpad intent.
     desc = next(ln for ln in frontmatter.splitlines() if ln.startswith("description:"))
     assert "scratchpad" in desc.lower()
 
@@ -44,8 +42,7 @@ def test_skill_points_at_the_one_call_primitive_not_bash():
 
 
 def test_plugin_skill_is_byte_identical_to_the_package_skill():
-    # The plugin bundles a copy of the skill for marketplace distribution; keep it
-    # byte-identical to the package copy so the two never drift.
+    # The plugin copy must stay byte-identical to the package copy.
     assert PLUGIN_SKILL.is_file(), f"plugin skill copy missing at {PLUGIN_SKILL}"
     assert PLUGIN_SKILL.read_bytes() == SKILL.read_bytes()
 

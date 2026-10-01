@@ -25,16 +25,10 @@ from tests.notebook.conftest import (
 )
 
 pytestmark = [skip_if_no_r, skip_if_no_r_arrow]
-# Note: deliberately NOT ``@pytest.mark.integration``. That marker
-# opts out of conftest's autouse ``fast_notebook_env`` override, which
-# replaces the Python cell's ``uv run python harness.py`` invocation
-# with a direct call to the dev interpreter (so the test gets pandas /
-# pyarrow without a per-notebook ``uv sync``). The R harness path
-# (``_run_r_harness``) is *not* overridden — it always shells out to
-# real ``Rscript`` — so leaving the autouse override active gives us
-# the natural mix: Python cells run against the dev venv, R cells run
-# against the system R install. The renv-managed library tier that
-# the issue describes lands in a follow-up PR.
+# Deliberately not ``@pytest.mark.integration``: that marker opts out of the
+# autouse ``fast_notebook_env`` override, which runs Python cells on the dev
+# interpreter. The R harness always shells out to real ``Rscript``, so Python
+# cells use the dev venv and R cells the system R install.
 
 
 @pytest.mark.asyncio
@@ -151,9 +145,8 @@ async def test_r_only_rds_artifact_rejected_by_downstream_python_cell(r_notebook
     assert "model" in err, f"variable name missing from error: {err!r}"
     assert "saveRDS" in err, f"saveRDS hint missing: {err!r}"
     assert "data.frame" in err, f"re-export hint missing: {err!r}"
-    # Critical regression assertion — pre-#58 (and pre-#72 fix-up),
-    # the deserialize error was swallowed and the cell body raised
-    # ``NameError: 'model'`` instead.
+    # The deserialize error must not be swallowed, leaving the cell body to raise
+    # ``NameError: 'model'``.
     assert "NameError" not in err, f"regressed to NameError: {err!r}"
 
 
@@ -200,13 +193,13 @@ async def test_python_only_pickle_artifact_rejected_by_downstream_r_cell(r_noteb
     assert "pyobj" in err, f"variable name missing from error: {err!r}"
     assert "pickle" in err, f"content-type hint missing: {err!r}"
     assert "DataFrame" in err or "Arrow" in err, f"re-export hint missing: {err!r}"
-    # Critical regression assertion — the error must come from the structured
-    # envelope, NOT the missing-manifest fallback that an aborted Rscript hit.
+    # The error must come from the structured envelope, not the missing-manifest
+    # fallback an aborted Rscript hits.
     assert "without producing a result manifest" not in err, (
         f"regressed to missing-manifest fallback: {err!r}"
     )
-    # And R's own "not found" must not leak through — the read fails cleanly
-    # before the cell body references the variable.
+    # R's own "not found" must not leak: the read fails cleanly before the cell
+    # body references the variable.
     assert "not found" not in err, f"regressed to R NameError: {err!r}"
 
 
@@ -240,7 +233,7 @@ async def test_python_numpy_array_into_r_warns_on_shape_flattening(r_notebook):
     assert r1.outputs["arr"]["content_type"] == "arrow/ipc"
 
     r2 = await executor.execute_cell("c2", r_c2)
-    # The cell still succeeds — flattening is a fidelity change, not an error.
+    # The cell still succeeds: flattening is a fidelity change, not an error.
     assert r2.success is True, r2.error
     warn = r2.stderr or ""
     assert "arr" in warn, f"variable name missing from warning: {warn!r}"
@@ -289,9 +282,7 @@ async def test_r_cell_mount_injects_path_and_reads_file(r_notebook, tmp_path):
     assert "hello from a mount" in str(r1.outputs["content"]["preview"])
 
 
-# ---------------------------------------------------------------------------
 # Error-shape tests
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -314,19 +305,16 @@ async def test_r_syntax_error_surfaces_as_failure(r_notebook):
     result = await executor.execute_cell("c1", src)
 
     assert result.success is False
-    # The exact R parse-error wording varies across R versions but
-    # always mentions ``unexpected`` or ``end of input``. Either is
-    # a sufficient signal that the failure surfaced from R's parser
-    # rather than from some harness layer.
+    # R's parse-error wording varies by version but always mentions
+    # ``unexpected`` or ``end of input``; either shows the failure came from R's
+    # parser rather than a harness layer.
     err = (result.error or "").lower()
     assert "unexpected" in err or "end of" in err, (
         f"expected an R parse-error message, got: {result.error!r}"
     )
 
 
-# ---------------------------------------------------------------------------
 # Provenance / cache behaviour
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -365,18 +353,16 @@ async def test_r_cell_cache_hits_on_unchanged_re_run(r_notebook):
     first = await executor.execute_cell("c1", src)
     assert first.success is True, first.error
     assert first.cache_hit is False
-    # harness.R's JSON tier formats atomic scalars via ``format()`` —
-    # ``7`` reads back as the string ``"7"``, not the int.
+    # harness.R's JSON tier formats atomic scalars via ``format()``: ``7`` reads
+    # back as the string ``"7"``, not the int.
     assert first.outputs["value"]["preview"] == "7"
 
     second = await executor.execute_cell("c1", src)
     assert second.success is True, second.error
     assert second.cache_hit is True
-    # ``CellExecutionResult.outputs`` is intentionally empty on the
-    # cache-hit branch (executor.py L1281) — the artifact is already
-    # in the store, so the result is a thin pointer. The
-    # ``execution_method == "cached"`` field is the cleanest
-    # signal that the harness was skipped.
+    # ``outputs`` is empty on the cache-hit branch (the artifact is already in
+    # the store), so ``execution_method == "cached"`` is the signal that the
+    # harness was skipped.
     assert second.execution_method == "cached"
 
 
@@ -389,10 +375,8 @@ async def test_r_cell_source_change_invalidates_cache(r_notebook):
     way it does for Python cells (and that the R harness re-runs on
     the new body).
     """
-    # Downstream Python cell pins ``value`` as a consumed variable so
-    # the cache lookup uses ``derive_subkey(provenance, "value")`` —
-    # matching the per-var write path. See the unchanged-rerun test
-    # above for the why.
+    # The downstream Python cell makes ``value`` a consumed variable, so the cache
+    # lookup uses ``derive_subkey(provenance, "value")`` like the per-var write path.
     src_v1 = "value <- 1"
     src_v2 = "value <- 2"
     py_downstream = "doubled = value\n"
@@ -416,9 +400,7 @@ async def test_r_cell_source_change_invalidates_cache(r_notebook):
     assert second.outputs["value"]["preview"] == "2"
 
 
-# ---------------------------------------------------------------------------
 # Annotation tests
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -447,9 +429,7 @@ async def test_r_cell_renv_lock_change_invalidates_cache(r_notebook):
     )
     executor = CellExecutor(session)
 
-    # Write a minimal renv.lock with one package. Bytes don't have
-    # to be a real renv lockfile — env-hash computation hashes the
-    # bytes, not the schema.
+    # A minimal renv.lock: the env hash covers the bytes, not the schema.
     renv_lock = notebook_dir / "renv.lock"
     renv_lock.write_text('{"R": {"Version": "4.4.0"}, "Packages": {"arrow": "1.0"}}\n')
 
@@ -499,7 +479,7 @@ def _assert_png_display(display: dict) -> None:
     data_url = display["inline_data_url"]
     assert data_url.startswith("data:image/png;base64,")
     raw = base64.b64decode(data_url.split(",", 1)[1])
-    # PNG magic number — proves the base64 round-trips to real image bytes.
+    # PNG magic number: the base64 round-trips to real image bytes.
     assert raw[:8] == b"\x89PNG\r\n\x1a\n"
 
 
@@ -582,7 +562,7 @@ async def test_r_cell_trailing_expression_auto_prints(r_notebook):
 
     assert result.success is True, result.error
     assert result.display_outputs == []
-    # sum(1:3) == 6 — `[1] 6` auto-printed; the assignment stays invisible.
+    # sum(1:3) == 6: `[1] 6` is auto-printed; the assignment stays invisible.
     assert "6" in result.stdout
 
 

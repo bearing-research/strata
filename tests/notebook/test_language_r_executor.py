@@ -50,9 +50,7 @@ def _make_r_notebook(tmp_path: Path, *, cells: list[tuple[str, str | None, str]]
     return notebook_dir, session
 
 
-# ---------------------------------------------------------------------------
 # Registry + dispatch
-# ---------------------------------------------------------------------------
 
 
 class TestRegistryWiring:
@@ -114,9 +112,7 @@ class TestExecutorPaths:
         assert result.success is True
 
 
-# ---------------------------------------------------------------------------
 # ``_run_r_harness`` failure shapes
-# ---------------------------------------------------------------------------
 
 
 class TestRunRHarnessMissingRscript:
@@ -138,9 +134,7 @@ class TestRunRHarnessMissingRscript:
         assert result["variables"] == {}
 
 
-# ---------------------------------------------------------------------------
-# Integration — real Rscript
-# ---------------------------------------------------------------------------
+# Integration: real Rscript
 
 
 @rscript_available

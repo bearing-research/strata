@@ -40,7 +40,6 @@ class TestSyntaxErrors:
         with open_notebook_session(client, nb.path) as (sid, session):
             with ws_connect(client, sid) as ws:
                 result = execute_cell_and_wait(ws, "c1")
-                # Should be an error
                 assert result["type"] == "cell_error" or (
                     result["type"] == "cell_status" and result["payload"]["status"] == "error"
                 )
@@ -52,10 +51,9 @@ class TestSyntaxErrors:
 
         with open_notebook_session(client, nb.path) as (sid, session):
             with ws_connect(client, sid) as ws:
-                # Ellipsis is valid syntax, try something actually broken
+                # `x = ...` is valid syntax; the real check uses nb2 below.
                 pass
 
-        # Use truly invalid syntax
         nb2 = NotebookBuilder(tmp / "nb2").add_cell("c1", "x = (]")
 
         with open_notebook_session(client, nb2.path) as (sid, session):
@@ -124,16 +122,13 @@ class TestErrorRecovery:
 
         with open_notebook_session(client, nb.path) as (sid, session):
             with ws_connect(client, sid) as ws:
-                # Execute — error
                 execute_cell_and_wait(ws, "c1")
                 assert len(ws.messages_of_type("cell_error")) >= 1
 
-                # Fix source
                 ws.update_source("c1", "x = 42")
                 ws.receive_until("dag_update")
                 ws.clear()
 
-                # Re-execute — should succeed
                 result = execute_cell_and_wait(ws, "c1")
                 assert result["type"] == "cell_output"
                 assert "x" in result["payload"]["outputs"]
@@ -145,7 +140,6 @@ class TestErrorRecovery:
 
         with open_notebook_session(client, nb.path) as (sid, session):
             with ws_connect(client, sid) as ws:
-                # c1 errors
                 execute_cell_and_wait(ws, "c1")
                 ws.clear()
 
@@ -180,10 +174,9 @@ class TestCascadeWithError:
 
         with open_notebook_session(client, nb.path) as (sid, session):
             with ws_connect(client, sid) as ws:
-                # Execute c2 — triggers cascade, c1 will error
+                # Running c2 cascades into c1, which errors.
                 execute_cell_and_wait(ws, "c2")
 
-                # c1 should have errored
                 c1_errors = [
                     m for m in ws.messages_of_type("cell_error") if m["payload"]["cell_id"] == "c1"
                 ]

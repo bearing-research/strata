@@ -48,12 +48,11 @@ class TestTransformBase:
         assert transform is not None
         assert transform.ref == "test_custom@v1"
 
-        # Cleanup
         del _transforms["test_custom@v1"]
 
     def test_get_transform_strips_prefix(self):
         """Test that get_transform strips local:// prefix."""
-        # duckdb_sql@v1 should be found with or without prefix
+        # Found with or without the prefix.
         t1 = get_transform("duckdb_sql@v1")
         t2 = get_transform("local://duckdb_sql@v1")
 
@@ -77,13 +76,12 @@ class TestScanTransform:
 
     def test_scan_params_validation(self):
         """Test ScanParams validation."""
-        # Valid params
         params = ScanParams(columns=["a", "b"], snapshot_id=123)
         assert params.columns == ["a", "b"]
         assert params.snapshot_id == 123
         assert params.filters is None
 
-        # Empty params (all optional)
+        # All fields optional
         params = ScanParams()
         assert params.columns is None
         assert params.filters is None
@@ -183,7 +181,6 @@ class TestDuckDBSQLTransform:
         )
 
         assert result.num_rows == 2
-        # Convert to dict for easier assertion
         data = {r["category"]: r["total"] for r in result.to_pylist()}
         assert data["a"] == 30
         assert data["b"] == 30
@@ -313,7 +310,7 @@ class TestRunLocal:
             "params": {"sql": "SELECT 1"},
             "input_uris": ["test://missing"],
         }
-        input_tables = {}  # No inputs provided
+        input_tables = {}
 
         with pytest.raises(ValueError, match="Missing input table"):
             run_local(build_spec, input_tables)
@@ -323,7 +320,7 @@ class TestRunLocal:
         table = pa.table({"x": [1]})
 
         build_spec = {
-            "executor": "local://duckdb_sql@v1",  # With prefix
+            "executor": "local://duckdb_sql@v1",
             "params": {"sql": "SELECT x FROM input0"},
             "input_uris": ["test://table"],
         }
@@ -338,7 +335,7 @@ class TestRunLocal:
         first = pa.table({"val": [1]})
         second = pa.table({"val": [2]})
 
-        # Intentionally use different order in dict vs input_uris
+        # Dict order differs from input_uris on purpose.
         build_spec = {
             "executor": "duckdb_sql@v1",
             "params": {
@@ -348,7 +345,7 @@ class TestRunLocal:
             },
             "input_uris": ["uri://first", "uri://second"],
         }
-        # Dict order doesn't matter - input_uris order does
+        # Dict order doesn't matter; input_uris order does.
         input_tables = {"uri://second": second, "uri://first": first}
 
         result = run_local(build_spec, input_tables)

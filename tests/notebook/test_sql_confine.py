@@ -169,9 +169,7 @@ async def test_only_service_mode_refuses_a_sqlite_write_cell_attaching_another_f
         assert "ATTACH" in (result.error or "")
 
 
-# ---------------------------------------------------------------------------
-# A local mount root is how much of the server's disk a read cell may read
-# ---------------------------------------------------------------------------
+# --- A local mount root bounds how much of the server's disk a read cell reads ---
 
 
 @pytest.mark.parametrize(

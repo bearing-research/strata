@@ -72,7 +72,7 @@ def test_cache_miss_without_name_would_build(service):
     assert resp.would_build is True
     assert resp.is_stale is False
     assert resp.changed_inputs is None
-    # No name → name lookup is skipped entirely.
+    # No name, so the name lookup is skipped entirely.
     assert store.name_calls == []
 
 
@@ -143,8 +143,8 @@ class TestComputeProvenance:
         return ArtifactTransformSpec(executor="scan@v1", params={}, inputs=inputs)
 
     def test_is_independent_of_input_ordering(self, service):
-        # The cache-integrity invariant: same computation → same hash regardless
-        # of the dict iteration order of resolved inputs.
+        # Cache integrity: the same computation hashes the same regardless of the dict
+        # iteration order of resolved inputs.
         spec = self._spec(["a", "b"])
         h1 = service.compute_provenance(spec, {"a": "1", "b": "2"})
         h2 = service.compute_provenance(spec, {"b": "2", "a": "1"})
@@ -280,7 +280,7 @@ class TestComputeIdentityProvenance:
         assert a == b
 
     def test_column_order_independent(self, service):
-        # Columns are sorted before hashing — projection order must not matter.
+        # Columns are sorted before hashing; projection order must not matter.
         a = service.compute_identity_provenance("cat.ns.t", 42, ["x", "y"], [], schema_id=0)
         b = service.compute_identity_provenance("cat.ns.t", 42, ["y", "x"], [], schema_id=0)
         assert a == b

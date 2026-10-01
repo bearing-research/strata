@@ -32,10 +32,8 @@ class TestWarmProcessPool:
         pool = WarmProcessPool(notebook_dir, pool_size=2)
         await pool.start()
 
-        # Check that pool has processes available
         assert pool._available.qsize() == 2
 
-        # Clean up
         await pool.drain()
 
     @pytest.mark.asyncio
@@ -44,14 +42,12 @@ class TestWarmProcessPool:
         pool = WarmProcessPool(notebook_dir, pool_size=1)
         await pool.start()
 
-        # Acquire a process
         warm_proc = await pool.acquire()
 
         if warm_proc is not None:  # May be None if startup failed
             assert warm_proc.process is not None
             assert warm_proc.ready is True
 
-        # Clean up
         await pool.drain()
 
     @pytest.mark.asyncio
@@ -60,17 +56,13 @@ class TestWarmProcessPool:
         pool = WarmProcessPool(notebook_dir, pool_size=1)
         await pool.start()
 
-        # Acquire a process
         warm_proc = await pool.acquire()
 
         if warm_proc is not None:
-            # Release and replace
             await pool.release_and_replace(warm_proc)
 
-            # The old process should be dead
             assert warm_proc.process.returncode is not None
 
-        # Clean up
         await pool.drain()
 
     @pytest.mark.asyncio
@@ -82,10 +74,8 @@ class TestWarmProcessPool:
         initial_size = pool._available.qsize()
         assert initial_size == 2
 
-        # Drain the pool
         await pool.drain()
 
-        # Queue should be empty
         assert pool._available.qsize() == 0
 
     @pytest.mark.asyncio
@@ -97,25 +87,22 @@ class TestWarmProcessPool:
         initial_size = pool._available.qsize()
         assert initial_size >= 1
 
-        # Invalidate (should drain and respawn)
+        # Invalidate drains and respawns.
         await pool.invalidate()
 
-        # After invalidate and respawn, should have processes again
-        # (may be async, so give it a moment)
+        # The respawn may be async.
         await asyncio.sleep(0.5)
 
         final_size = pool._available.qsize()
-        # Should have at least some processes
         assert final_size >= 0
 
-        # Clean up
         await pool.drain()
 
     @pytest.mark.asyncio
     async def test_cold_fallback_when_pool_empty(self, notebook_dir):
         """Test that acquire returns None when pool is empty."""
         pool = WarmProcessPool(notebook_dir, pool_size=0)
-        # Don't start the pool
+        # Pool not started.
 
         warm_proc = await pool.acquire()
         assert warm_proc is None

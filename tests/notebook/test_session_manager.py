@@ -578,7 +578,6 @@ def test_variant_group_resolution_from_source_annotations(tmp_path: Path):
     assert group.active_name == "gpt4"
     assert group.active_cell_id == "model_a"
 
-    # Per-cell variant flags
     cells_by_id = {c.id: c for c in session.notebook_state.cells}
     assert cells_by_id["model_a"].variant_active is True
     assert cells_by_id["model_b"].variant_active is False
@@ -661,7 +660,6 @@ def test_add_variant_clones_active_and_switches(tmp_path: Path):
     assert new_name == "gpt4_copy"
     assert new_cell_id != "model_a"
 
-    # New variant is active
     group = session.notebook_state.variant_groups[0]
     assert group.active_name == "gpt4_copy"
     assert group.active_cell_id == new_cell_id

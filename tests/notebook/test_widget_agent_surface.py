@@ -82,10 +82,8 @@ def test_get_cell_reports_the_controls_and_their_defaults(widget_nb):
     alpha = next(c for c in view["controls"] if c["name"] == "alpha")
     assert alpha["kind"] == "slider"
     assert alpha["default"] == 0.5
-    # Nothing selected yet, so the declared default is what the cell runs at,
-    # and that is what ``value`` reports. It used to be ``None`` here, which
-    # described the storage rather than the notebook: an agent looking for the
-    # input behind a result read it as "unset".
+    # Nothing selected yet, so ``value`` reports the declared default the cell runs at.
+    # ``None`` here would read to an agent as "unset".
     assert alpha["value"] == 0.5
 
 

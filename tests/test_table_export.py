@@ -424,8 +424,8 @@ class TestWhoMayExport:
 
         assert denied.status_code in (403, 404)
         assert denied.json()["detail"] in ("Table not found", "Access denied to table")
-        # The same request against a table the rules allow goes through, so the
-        # refusal above is the ACL and not a missing artifact.
+        # The same request against an allowed table goes through, so the refusal above is
+        # the ACL and not a missing artifact.
         assert allowed.status_code == 200, allowed.text
         assert _catalog(tmp_path / "wh").load_table("taxi.features") is not None
 

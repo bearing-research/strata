@@ -202,7 +202,7 @@ class TestArtifactCRUD:
         version = store.create_artifact("test-id", "hash123")
         first_result = store.finalize_artifact("test-id", version, "{}", 0, 0)
 
-        # Calling finalize again should return the same artifact (idempotent)
+        # Finalize is idempotent.
         second_result = store.finalize_artifact("test-id", version, "{}", 0, 0)
         assert second_result is not None
         assert second_result.id == first_result.id
@@ -224,18 +224,16 @@ class TestArtifactCRUD:
 
     def test_get_latest_version(self, store):
         """Get latest ready version."""
-        # Create v1 (ready)
         v1 = store.create_artifact("test-id", "hash1")
         store.finalize_artifact("test-id", v1, "{}", 100, 1000)
 
-        # Create v2 (ready)
         v2 = store.create_artifact("test-id", "hash2")
         store.finalize_artifact("test-id", v2, "{}", 200, 2000)
 
-        # Create v3 (still building)
+        # v3 is still building.
         store.create_artifact("test-id", "hash3")
 
-        # Latest should be v2 (highest ready version)
+        # Latest is v2, the highest ready version.
         latest = store.get_latest_version("test-id")
         assert latest is not None
         assert latest.version == 2
@@ -263,7 +261,7 @@ class TestProvenanceLookup:
     def test_find_by_provenance_ignores_building(self, store):
         """Find ignores artifacts in building state."""
         store.create_artifact("test-id", "hash123")
-        # Not finalized, so should not be found
+        # Not finalized, so not found.
         found = store.find_by_provenance("hash123")
         assert found is None
 
@@ -311,11 +309,9 @@ class TestBlobIO:
 
         store.write_blob("test-id", version, data)
 
-        # No temp files should remain
         temp_files = list(artifact_dir.glob("**/*.tmp"))
         assert len(temp_files) == 0
 
-        # Blob should be complete
         assert store.read_blob("test-id", version) == data
 
 
@@ -356,17 +352,14 @@ class TestNamePointers:
 
     def test_update_name(self, store):
         """Update name to point to new version."""
-        # Create v1
         v1 = store.create_artifact("test-id", "hash1")
         store.finalize_artifact("test-id", v1, "{}", 100, 1000)
         store.set_name("my-artifact", "test-id", v1)
 
-        # Create v2
         v2 = store.create_artifact("test-id", "hash2")
         store.finalize_artifact("test-id", v2, "{}", 200, 2000)
         store.set_name("my-artifact", "test-id", v2)
 
-        # Should now resolve to v2
         resolved = store.resolve_name("my-artifact")
         assert resolved.version == v2
 
@@ -398,7 +391,6 @@ class TestNamePointers:
 
     def test_list_names(self, store):
         """List all name pointers."""
-        # Create artifacts and names
         for i in range(3):
             v = store.create_artifact(f"id-{i}", f"hash-{i}")
             store.finalize_artifact(f"id-{i}", v, "{}", i * 100, i * 1000)
@@ -414,20 +406,17 @@ class TestCleanup:
 
     def test_cleanup_failed(self, store, artifact_dir):
         """Cleanup removes failed artifacts older than max age."""
-        # Create a failed artifact
         version = store.create_artifact("test-id", "hash123")
         store.write_blob("test-id", version, b"data")
         store.fail_artifact("test-id", version)
 
-        # Should not be cleaned up yet (too recent)
+        # Too recent to clean up yet.
         count = store.cleanup_failed(max_age_seconds=3600)
         assert count == 0
 
-        # Cleanup with 0 age should remove it
         count = store.cleanup_failed(max_age_seconds=0)
         assert count == 1
 
-        # Artifact and blob should be gone
         assert store.get_artifact("test-id", version) is None
         assert store.blob_exists("test-id", version) is False
 
@@ -436,7 +425,7 @@ class TestCleanup:
         version = store.create_artifact("test-id", "hash123")
         store.finalize_artifact("test-id", version, "{}", 100, 1000)
 
-        # Even with 0 age, ready artifacts should not be removed
+        # Ready artifacts survive even with 0 age.
         count = store.cleanup_failed(max_age_seconds=0)
         assert count == 0
         assert store.get_artifact("test-id", version) is not None
@@ -458,18 +447,14 @@ class TestStats:
 
     def test_stats_with_data(self, store):
         """Stats with artifacts."""
-        # Create ready artifact
         v1 = store.create_artifact("id-1", "hash1")
         store.finalize_artifact("id-1", v1, "{}", 100, 1000)
 
-        # Create building artifact
         store.create_artifact("id-2", "hash2")
 
-        # Create failed artifact
         v3 = store.create_artifact("id-3", "hash3")
         store.fail_artifact("id-3", v3)
 
-        # Create name
         store.set_name("my-name", "id-1", v1)
 
         stats = store.stats()
@@ -654,9 +639,8 @@ class TestVersionPromotion:
         assert store.get_latest_version("art-1").provenance_hash == "prov-a"
 
     def test_lookup_does_not_cross_tenants(self, store):
-        # An artifact id is not an isolation boundary, so a tenantless lookup
-        # must not select a row another tenant wrote — the reason
-        # find_by_provenance is tenant-scoped.
+        # An artifact id is not an isolation boundary, so a tenantless lookup must not
+        # select a row another tenant wrote (why find_by_provenance is tenant-scoped).
         version = store.create_artifact("art-1", "prov-a", tenant="acme")
         store.blob_store.write_blob("art-1", version, b"theirs")
         store.finalize_artifact("art-1", version, "{}", 1, 6)
@@ -850,9 +834,8 @@ class TestLegacyDefaultTenantNames:
         store.create_artifact("legacy", "prov-l", tenant="_default")
         store.finalize_artifact("legacy", 1, "{}", 1, 10)
 
-        # Pre-#126 PUT uploads stamped "_default"; the names routes resolve
-        # single-tenant requests to None. That combination must not strand
-        # the artifact as unnameable.
+        # Older PUT uploads stamped "_default" while the names routes resolve single-tenant
+        # requests to None; that combination must not leave the artifact unnameable.
         store.set_name("legacy-name", "legacy", 1, tenant=None)  # must not raise
         resolved = store.resolve_name("legacy-name")
         assert (resolved.id, resolved.version) == ("legacy", 1)
@@ -963,7 +946,7 @@ class TestRegistryAudit:
         _make_ready_artifact(store, "m1", "prov-1")
         _make_ready_artifact(store, "m2", "prov-2")
         store.set_name("demo/model", "m1", 1)
-        store.set_name("demo/model", "m2", 1)  # the silent-swap, now recorded
+        store.set_name("demo/model", "m2", 1)  # the silent swap, recorded
 
         entries = store.read_audit(name="demo/model")
         assert [e["action"] for e in entries] == ["name_set", "name_set"]
@@ -1163,7 +1146,7 @@ class TestCreateArtifactVersionRace:
             try:
                 barrier.wait()
                 versions.append(store.create_artifact("contended", f"prov-{n}"))
-            except Exception as e:  # noqa: BLE001 — collecting for assertion
+            except Exception as e:  # noqa: BLE001 (collecting for assertion)
                 errors.append(e)
 
         threads = [threading.Thread(target=create, args=(i,)) for i in range(4)]
@@ -1516,10 +1499,9 @@ class TestTenantNormalization:
         store.create_artifact("a1", "h")
         store.finalize_artifact("a1", 1, "{}", 1, 10)
 
-        # Rebuild artifact_versions as the legacy nullable-tenant table (the
-        # current fresh schema is NOT NULL), then plant NULL tenants + a second
-        # ready row with the same provenance — the duplicate the old
-        # NULL-distinctness index permitted.
+        # Rebuild artifact_versions as the legacy nullable-tenant table, then plant NULL
+        # tenants and a second ready row with the same provenance (the duplicate the old
+        # NULL-distinct index permitted).
         conn = sqlite3.connect(str(store.db_path))
         conn.executescript(
             """
@@ -1645,8 +1627,8 @@ class TestGcDeletesMetadataBeforeBlobs:
 
         result = store.garbage_collect(max_idle_days=0)
 
-        # The run completed and the metadata is gone — no ready row survives
-        # pointing at a blob we may or may not have removed.
+        # The run completed and the metadata is gone: no ready row survives pointing at a
+        # blob we may or may not have removed.
         assert result["deleted_count"] == 1
         assert store.get_artifact("model", 1) is None
 

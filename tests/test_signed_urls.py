@@ -44,7 +44,6 @@ class TestURLSigner:
 
         # A different secret (e.g. a random per-process one) rejects it.
         assert _verify(URLSigner(b"a-different-random-process-secret")) is False
-        # A fresh signer with the same secret accepts it.
         assert _verify(URLSigner(b"stable-deployment-secret-000001")) is True
 
 

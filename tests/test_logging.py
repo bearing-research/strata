@@ -11,16 +11,13 @@ class TestRequestContext:
         """Test that RequestContext properly sets and clears context."""
         from strata.logging import RequestContext, get_request_context
 
-        # Initially empty
         assert get_request_context() == {}
 
-        # Set context
         with RequestContext(request_id="test-123", scan_id="scan-456"):
             ctx = get_request_context()
             assert ctx["request_id"] == "test-123"
             assert ctx["scan_id"] == "scan-456"
 
-        # Cleared after context exit
         assert get_request_context() == {}
 
     def test_nested_request_contexts(self):
@@ -35,7 +32,6 @@ class TestRequestContext:
                 assert ctx["request_id"] == "outer"
                 assert ctx["scan_id"] == "inner-scan"
 
-            # Inner context cleared, outer restored
             ctx = get_request_context()
             assert ctx["request_id"] == "outer"
             assert "scan_id" not in ctx
@@ -49,7 +45,7 @@ class TestRequestContext:
 
         assert len(id1) == 16
         assert len(id2) == 16
-        assert id1 != id2  # Should be unique
+        assert id1 != id2
 
 
 class TestStructuredFormatter:
@@ -114,12 +110,10 @@ class TestStructuredLogger:
 
         from strata.logging import StructuredFormatter, StructuredLogger
 
-        # Set up logger with custom stream
         stream = io.StringIO()
         handler = logging.StreamHandler(stream)
         handler.setFormatter(StructuredFormatter(include_timestamp=False))
 
-        # Create a StructuredLogger directly
         logging.setLoggerClass(StructuredLogger)
         logger = cast(StructuredLogger, logging.getLogger("test.structured.data"))
         logger.handlers = [handler]
@@ -143,7 +137,6 @@ class TestTraceContextIntegration:
         """Test trace context returns empty when tracing disabled."""
         monkeypatch.setenv("STRATA_TRACING_ENABLED", "false")
 
-        # Reset tracing state
         import strata.tracing
 
         strata.tracing._tracer = None
@@ -158,7 +151,6 @@ class TestTraceContextIntegration:
         """Test trace context returns trace_id when tracing enabled."""
         monkeypatch.setenv("STRATA_TRACING_ENABLED", "true")
 
-        # Reset tracing state
         import strata.tracing
 
         strata.tracing._tracer = None
@@ -171,7 +163,6 @@ class TestTraceContextIntegration:
 
         with trace_span("test_span"):
             ctx = get_trace_context()
-            # When inside a span, should have trace_id and span_id
             if ctx:  # Only if OTel is installed
                 assert "trace_id" in ctx
                 assert "span_id" in ctx

@@ -62,9 +62,8 @@ def test_iteration_progress_defaults_and_validation():
 
 
 def test_cell_status_simple_omits_optional_fields():
-    # A bare status change must serialize to exactly {cell_id, status} —
-    # the optional remote/staleness fields are dropped, preserving the
-    # historical wire shape of the many simple emit sites.
+    # A bare status change serializes to exactly {cell_id, status}: the optional
+    # remote/staleness fields are dropped for the many simple emit sites.
     wire = cell_status_payload("c1", "idle")
     assert wire == {"cell_id": "c1", "status": "idle"}
 
@@ -86,8 +85,8 @@ def test_cell_status_running_includes_remote_fields():
 
 
 def test_cell_status_staleness_keeps_empty_reasons_list():
-    # The staleness builder always emits staleness_reasons, even when empty —
-    # exclude_none drops None but keeps an empty list, matching prior behavior.
+    # The staleness builder always emits staleness_reasons, even when empty:
+    # exclude_none drops None but keeps an empty list.
     wire = cell_status_payload("c1", "stale", staleness_reasons=[])
     assert wire == {"cell_id": "c1", "status": "stale", "staleness_reasons": []}
 
@@ -159,7 +158,7 @@ def test_test_results_serializes_nested_cases_and_drops_internal_hashes():
         ran_at=123,
     )
     wire = payload.model_dump(mode="json")
-    # Internal staleness hashes are not on the wire (they were a model_dump leak).
+    # Internal staleness hashes stay off the wire.
     assert "cell_source_hash" not in wire
     assert "test_source_hash" not in wire
     assert "input_fingerprint" not in wire

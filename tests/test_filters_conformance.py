@@ -161,11 +161,11 @@ class TestAdapterToServerFilterRoundTrip:
         transform = adapter._build_scan_transform(
             filters=[ClientFilter("col", ClientFilterOp.EQ, value)]
         )
-        # Simulate the JSON wire hop the client → server request makes.
+        # Simulate the JSON wire hop of the client-to-server request.
         params = json.loads(json.dumps(transform["params"]))
         identity = IdentityParams.model_validate(params)
         decoded = identity.to_strata_filters()[0].value
 
         assert decoded == value
-        # datetime is a subclass of date — assert the exact reconstructed type.
+        # datetime is a subclass of date, so assert the exact reconstructed type.
         assert type(decoded) is type(value)

@@ -112,11 +112,10 @@ class TestMultipleConnections:
         nb = NotebookBuilder(tmp).add_cell("c1", "x = 1")
 
         with open_notebook_session(client, nb.path) as (sid, session):
-            # First connection — execute cell
             with ws_connect(client, sid) as ws1:
                 execute_cell_and_wait(ws1, "c1")
 
-            # Second connection — sync should show cell as ready
+            # A second connection's sync shows the cell as ready.
             with ws_connect(client, sid) as ws2:
                 state = ws2.sync()
                 cells = state["payload"]["cells"]

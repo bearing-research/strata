@@ -18,9 +18,7 @@ import pytest
 
 from strata.notebook.harness import execute_batch
 
-# ---------------------------------------------------------------------------
 # Pipe / thread plumbing
-# ---------------------------------------------------------------------------
 
 
 def _read_frame(stream: Any) -> dict | None:
@@ -88,9 +86,7 @@ def _run_in_thread(
     return thread, errors
 
 
-# ---------------------------------------------------------------------------
 # Happy path
-# ---------------------------------------------------------------------------
 
 
 def test_batch_display_that_is_a_variable_reuses_its_payload(batch_pipes):
@@ -199,7 +195,6 @@ def test_batch_runs_two_cells_with_cache_miss_then_persist(batch_pipes):
         "batch_end",
     ], f"unexpected frame sequence: {types}"
 
-    # Persist payloads carry the outputs.
     persist_c1 = next(
         f["payload"] for f in frames if f["type"] == "persist" and f["payload"]["cell_id"] == "c1"
     )
@@ -221,9 +216,7 @@ def test_batch_runs_two_cells_with_cache_miss_then_persist(batch_pipes):
     assert end_frame["payload"]["reason"] == "complete"
 
 
-# ---------------------------------------------------------------------------
 # Cell error mid-batch
-# ---------------------------------------------------------------------------
 
 
 def test_batch_ends_on_cell_error(batch_pipes):
@@ -289,9 +282,7 @@ def test_batch_ends_on_cell_error(batch_pipes):
     assert end_frame["payload"]["failed_cell_id"] == "c2"
 
 
-# ---------------------------------------------------------------------------
 # Cache hit
-# ---------------------------------------------------------------------------
 
 
 def test_batch_cache_hit_loads_from_disk_and_continues(batch_pipes, tmp_path):
@@ -309,8 +300,7 @@ def test_batch_cache_hit_loads_from_disk_and_continues(batch_pipes, tmp_path):
     cells = [
         {
             "cell_id": "c1",
-            "source": "x = 41",  # Source differs from cached value to
-            # verify we LOAD the cached value, not execute.
+            "source": "x = 41",  # differs from the cached value, so a load is visible
             "consumed_vars": ["x"],
             "env": {},
             "mount_manifest": {},
@@ -357,13 +347,11 @@ def test_batch_cache_hit_loads_from_disk_and_continues(batch_pipes, tmp_path):
     persist_c2 = next(
         f["payload"] for f in frames if f["type"] == "persist" and f["payload"]["cell_id"] == "c2"
     )
-    # c2 used the CACHED x=7, so y = 14 — proves cache load worked.
+    # c2 used the CACHED x=7, so y = 14.
     assert persist_c2["outputs"]["y"]["preview"] == 14
 
 
-# ---------------------------------------------------------------------------
 # Mount name save/restore
-# ---------------------------------------------------------------------------
 
 
 def test_display_capture_reinstalls_per_cell(batch_pipes):
@@ -376,8 +364,8 @@ def test_display_capture_reinstalls_per_cell(batch_pipes):
     frame_r, frame_w, resp_r, resp_w, output_dir = batch_pipes
 
     cells = [
-        # ``display`` and ``Markdown`` are injected into the cell namespace
-        # by ``DisplayCapture.install`` — no import needed.
+        # ``display`` and ``Markdown`` are injected by ``DisplayCapture.install``;
+        # no import needed.
         {
             "cell_id": "c1",
             "source": "display(Markdown('cell A'))\n",
@@ -413,9 +401,8 @@ def test_display_capture_reinstalls_per_cell(batch_pipes):
     assert not errors
 
     persists = {p["payload"]["cell_id"]: p["payload"] for p in frames if p["type"] == "persist"}
-    # Each cell should have produced exactly one display output. Without the
-    # fix, cell B's display call would have hit cell A's now-orphaned capture
-    # and cell B's display_outputs would be empty.
+    # Each cell produced exactly one display output; a display call landing on the
+    # previous cell's orphaned capture would leave cell B's display_outputs empty.
     assert len(persists["c1"]["display_outputs"]) == 1, persists["c1"]["display_outputs"]
     assert len(persists["c2"]["display_outputs"]) == 1, persists["c2"]["display_outputs"]
 
@@ -522,16 +509,14 @@ def test_mount_name_save_restore(batch_pipes, tmp_path):
     )
     assert persist_c2["outputs"]["saw_path"]["preview"] is True
 
-    # c3 saw `data` restored to "user value" — mount didn't leak.
+    # c3 saw `data` restored to "user value": the mount didn't leak.
     persist_c3 = next(
         f["payload"] for f in frames if f["type"] == "persist" and f["payload"]["cell_id"] == "c3"
     )
     assert persist_c3["outputs"]["still_user"]["preview"] == "user value"
 
 
-# ---------------------------------------------------------------------------
 # R-only artifact (RDS) seeding
-# ---------------------------------------------------------------------------
 
 
 def test_batch_surfaces_rds_input_as_first_consumer_cell_error(batch_pipes):
@@ -549,7 +534,7 @@ def test_batch_surfaces_rds_input_as_first_consumer_cell_error(batch_pipes):
     frame_r, frame_w, resp_r, resp_w, output_dir = batch_pipes
 
     # Drop an RDS blob in the dir the harness reads upstream inputs from.
-    # Bytes are irrelevant — the dispatcher rejects on content_type.
+    # Bytes are irrelevant: the dispatcher rejects on content_type.
     rds_path = output_dir / "fit.rds"
     rds_path.write_bytes(b"\x1f\x8b\x08\x00fakerds")
 
@@ -561,7 +546,7 @@ def test_batch_surfaces_rds_input_as_first_consumer_cell_error(batch_pipes):
     }
 
     cells = [
-        # c1 doesn't reference `fit` — should run cleanly.
+        # c1 doesn't reference `fit`, so it runs cleanly.
         {
             "cell_id": "c1",
             "source": "x = 1",
@@ -569,7 +554,7 @@ def test_batch_surfaces_rds_input_as_first_consumer_cell_error(batch_pipes):
             "env": {},
             "mount_manifest": {},
         },
-        # c2 references `fit` — first cell that triggers the tainted error.
+        # c2 references `fit`: the first cell to hit the tainted error.
         {
             "cell_id": "c2",
             "source": "score = fit + 1",
@@ -603,8 +588,7 @@ def test_batch_surfaces_rds_input_as_first_consumer_cell_error(batch_pipes):
             break
 
     thread.join(timeout=5)
-    # Critical: no exception escaped — the previous behaviour was a raw
-    # propagation that the test thread captured here.
+    # No exception may escape execute_batch.
     assert not errors, f"execute_batch let the error escape: {errors}"
 
     types = [f["type"] for f in frames]
@@ -615,9 +599,8 @@ def test_batch_surfaces_rds_input_as_first_consumer_cell_error(batch_pipes):
     assert len(cell_errors) == 1
     err_payload = cell_errors[0]["payload"]
     assert err_payload["cell_id"] == "c2"
-    # The structured message — variable name + saveRDS + data.frame
-    # suggestion — must all be present so the UI surfaces the
-    # actionable text rather than NameError.
+    # The structured message (variable name, saveRDS, data.frame suggestion)
+    # must be present so the UI shows actionable text rather than NameError.
     assert "fit" in err_payload["error"]
     assert "saveRDS" in err_payload["error"]
     assert "data.frame" in err_payload["error"]
@@ -648,8 +631,8 @@ def test_batch_word_boundary_avoids_spurious_taint(batch_pipes):
     cells = [
         {
             "cell_id": "c1",
-            # ``unfit_data`` and ``fitness`` contain ``fit`` as a substring
-            # but neither is the bare identifier — must NOT trip taint.
+            # ``unfit_data`` and ``fitness`` contain ``fit`` as a substring but neither
+            # is the bare identifier, so neither may trip taint.
             "source": "unfit_data = 1\nfitness = unfit_data + 1",
             "consumed_vars": ["unfit_data", "fitness"],
             "env": {},
@@ -794,9 +777,7 @@ def test_batch_warns_on_inplace_mutation_of_input(batch_pipes):
         if f["type"] == "persist" and f["payload"]["cell_id"] == "mutate"
     )
 
-    # The producing cell mutated nothing it received.
     assert persist_make["mutation_warnings"] == []
-    # The mutating cell warns about df.
     warnings = persist_mutate["mutation_warnings"]
     assert len(warnings) == 1
     assert warnings[0]["var_name"] == "df"

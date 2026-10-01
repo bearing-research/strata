@@ -120,10 +120,8 @@ class TestBuildStore:
             executor_ref="duckdb_sql@v1",
         )
 
-        # Start once
         build_store.start_build(build_id)
 
-        # Try to start again (should fail)
         success = build_store.start_build(build_id)
         assert not success
 
@@ -156,7 +154,6 @@ class TestBuildStore:
             executor_ref="duckdb_sql@v1",
         )
 
-        # Try to complete without starting
         success = build_store.complete_build(build_id)
         assert not success
 
@@ -206,7 +203,6 @@ class TestBuildStore:
 
     def test_list_pending_builds(self, build_store):
         """List pending builds in order."""
-        # Create 3 builds
         ids = []
         for i in range(3):
             build_id = str(uuid.uuid4())
@@ -217,20 +213,17 @@ class TestBuildStore:
                 version=1,
                 executor_ref="duckdb_sql@v1",
             )
-            time.sleep(0.01)  # Ensure different timestamps
+            time.sleep(0.01)
 
-        # Start one build
         build_store.start_build(ids[1])
 
-        # List pending (should only have 2)
         pending = build_store.list_pending_builds()
         assert len(pending) == 2
-        assert pending[0].build_id == ids[0]  # Oldest first
+        assert pending[0].build_id == ids[0]
         assert pending[1].build_id == ids[2]
 
     def test_list_builds_by_tenant(self, build_store):
         """List builds for a specific tenant."""
-        # Create builds for different tenants
         build_store.create_build(
             build_id=str(uuid.uuid4()),
             artifact_id="art-1",
@@ -253,11 +246,9 @@ class TestBuildStore:
             tenant_id="tenant-1",
         )
 
-        # List for tenant-1
         builds = build_store.list_builds_by_tenant("tenant-1")
         assert len(builds) == 2
 
-        # List for tenant-2
         builds = build_store.list_builds_by_tenant("tenant-2")
         assert len(builds) == 1
 
@@ -281,10 +272,8 @@ class TestBuildStore:
             tenant_id="tenant-1",
         )
 
-        # Start one build
         build_store.start_build(build_id_1)
 
-        # Filter by state
         pending = build_store.list_builds_by_tenant("tenant-1", state="pending")
         assert len(pending) == 1
         assert pending[0].build_id == build_id_2
@@ -295,7 +284,6 @@ class TestBuildStore:
 
     def test_cleanup_old_builds(self, build_store):
         """Cleanup old completed/failed builds."""
-        # Create and complete a build
         old_build = str(uuid.uuid4())
         build_store.create_build(
             build_id=old_build,
@@ -306,10 +294,10 @@ class TestBuildStore:
         build_store.start_build(old_build)
         build_store.complete_build(old_build)
 
-        # Manually update completed_at to be old
+        # Backdate completed_at past the 7-day cutoff.
         conn = build_store._get_connection()
         try:
-            old_time = time.time() - (8 * 86400)  # 8 days ago
+            old_time = time.time() - (8 * 86400)
             conn.execute(
                 "UPDATE artifact_builds SET completed_at = ? WHERE build_id = ?",
                 (old_time, old_build),
@@ -318,7 +306,6 @@ class TestBuildStore:
         finally:
             conn.close()
 
-        # Create a recent build
         recent_build = str(uuid.uuid4())
         build_store.create_build(
             build_id=recent_build,
@@ -329,19 +316,15 @@ class TestBuildStore:
         build_store.start_build(recent_build)
         build_store.complete_build(recent_build)
 
-        # Cleanup (7 days default)
         deleted = build_store.cleanup_old_builds()
         assert deleted == 1
 
-        # Old build should be gone
         assert build_store.get_build(old_build) is None
 
-        # Recent build should remain
         assert build_store.get_build(recent_build) is not None
 
     def test_get_stats(self, build_store):
         """Get build statistics."""
-        # Create builds in various states
         b1 = str(uuid.uuid4())
         b2 = str(uuid.uuid4())
         b3 = str(uuid.uuid4())
@@ -409,7 +392,6 @@ class TestSingletons:
 
         assert store is not None
 
-        # Subsequent calls return same instance
         store2 = get_build_store()
         assert store2 is store
 
@@ -420,7 +402,6 @@ class TestSingletons:
 
         reset_build_store()
 
-        # After reset, returns None
         store = get_build_store()
         assert store is None
 

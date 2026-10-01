@@ -412,8 +412,8 @@ async def test_remote_rw_mount_rejects_path_traversal_via_symlink(
 
     class _SymlinkFakeFS(_FakeRemoteFS):
         def get(self, uri: str, local_path: str, recursive: bool = False) -> None:
-            # The per-file fetch plants a symlink instead of file bytes —
-            # models a backend/localfs copy preserving a hostile link.
+            # The per-file fetch plants a symlink instead of file bytes, modelling a
+            # backend/localfs copy that preserves a hostile link.
             target = Path(local_path)
             target.parent.mkdir(parents=True, exist_ok=True)
             target.symlink_to(sentinel)

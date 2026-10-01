@@ -79,9 +79,7 @@ def test_adding_schema_changes_hash():
     assert without != with_schema
 
 
-# ---------------------------------------------------------------------------
 # Validation helpers
-# ---------------------------------------------------------------------------
 
 
 _SCHEMA = {
@@ -108,9 +106,8 @@ class TestValidationErrors:
     def test_schema_violations_are_path_addressed(self):
         content = '{"sentiment": "ecstatic", "score": "high"}'
         errors = _validation_errors(content, _SCHEMA)
-        # We expect one error per violation, each beginning with a
-        # JSON Pointer path so downstream feedback can reference the
-        # exact location the model got wrong.
+        # One error per violation, each starting with a JSON Pointer path so the
+        # feedback can point at the exact location the model got wrong.
         joined = "\n".join(errors)
         assert "/sentiment" in joined
         assert "/score" in joined
@@ -128,9 +125,7 @@ class TestRetryPromptFormat:
         assert "Return a corrected JSON object" in prompt
 
 
-# ---------------------------------------------------------------------------
 # Retry loop integration (through execute_prompt_cell)
-# ---------------------------------------------------------------------------
 
 
 def _prompt_session(tmp_path, source: str, *, cell_id: str = "p1"):
@@ -272,9 +267,7 @@ async def test_no_schema_means_no_retries(tmp_path):
     assert len(calls) == 1
 
 
-# ---------------------------------------------------------------------------
-# Streaming (issue #110) — deltas via on_delta, retry frames, fallbacks
-# ---------------------------------------------------------------------------
+# Streaming: deltas via on_delta, retry frames, fallbacks
 
 
 def _fake_stream_returning(*responses: str, chunk_size: int = 4):
@@ -358,8 +351,8 @@ async def test_streaming_retry_emits_retry_frame_then_clean_attempt(tmp_path):
     assert retry_frames[0]["attempt"] == 2
     assert "/n" in retry_frames[0]["text"]
 
-    # Frame ordering: all attempt-1 deltas, then the retry frame, then
-    # attempt-2 deltas — the frontend clears its buffer on the retry.
+    # Frame ordering: attempt-1 deltas, the retry frame, then attempt-2 deltas;
+    # the frontend clears its buffer on the retry.
     retry_index = frames.index(retry_frames[0])
     assert all(f["attempt"] == 1 for f in frames[:retry_index])
     attempt2 = frames[retry_index + 1 :]

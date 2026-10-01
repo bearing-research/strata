@@ -31,7 +31,7 @@ class TestFastIoAvailability:
         if fast_io.is_rust_available():
             from strata import _strata_core
 
-            # Only two live entry points — see rust/src/lib.rs.
+            # Only two live entry points; see rust/src/lib.rs.
             assert hasattr(_strata_core, "read_file_bytes")
             assert hasattr(_strata_core, "concat_ipc_streams")
 
@@ -89,7 +89,6 @@ class TestConcatStreamBytes:
 
         result = fast_io.concat_stream_bytes([stream_bytes])
 
-        # Should produce valid Arrow IPC stream
         reader = ipc.open_stream(pa.BufferReader(result))
         batches = list(reader)
         assert len(batches) == 1
@@ -97,18 +96,16 @@ class TestConcatStreamBytes:
 
     def test_concat_multiple_segments(self):
         """Test concatenating multiple segments combines them."""
-        # Create multiple segments
         segments = []
         total_rows = 0
         for i in range(3):
-            num_rows = 10 + i * 5  # 10, 15, 20 rows
+            num_rows = 10 + i * 5
             batch = pa.RecordBatch.from_pydict({"id": list(range(num_rows))})
             segments.append(create_stream_bytes(batch))
             total_rows += num_rows
 
         result = fast_io.concat_stream_bytes(segments)
 
-        # Should produce valid Arrow IPC stream with all rows
         reader = ipc.open_stream(pa.BufferReader(result))
         batches = list(reader)
         assert len(batches) == 3
@@ -135,7 +132,6 @@ class TestConcatStreamBytes:
         batch = pa.RecordBatch.from_pydict({"id": [1, 2, 3]})
         stream_bytes = create_stream_bytes(batch)
 
-        # Include empty bytes in the list
         result = fast_io.concat_stream_bytes([stream_bytes, b"", stream_bytes])
 
         reader = ipc.open_stream(pa.BufferReader(result))
@@ -250,7 +246,6 @@ class TestConcatStreamBytes:
         reader = ipc.open_stream(pa.BufferReader(result))
         batches = list(reader)
 
-        # Verify data integrity
         all_ids = []
         all_values = []
         for batch in batches:
@@ -262,7 +257,6 @@ class TestConcatStreamBytes:
 
     def test_concat_with_multiple_batches_per_segment(self):
         """Test segments that contain multiple batches each."""
-        # Create a segment with multiple batches
         sink = pa.BufferOutputStream()
         schema = pa.schema([("id", pa.int64())])
         writer = ipc.new_stream(sink, schema)
@@ -279,7 +273,7 @@ class TestConcatStreamBytes:
         reader = ipc.open_stream(pa.BufferReader(result))
         batches = list(reader)
 
-        # Should have 3 batches total (2 from first segment + 1 from second)
+        # 2 from the first segment + 1 from the second
         assert len(batches) == 3
         all_ids = []
         for batch in batches:
@@ -318,10 +312,9 @@ class TestStreamConcatIpcSegments:
 
         chunks = list(fast_io.stream_concat_ipc_segments(iter([segment])))
 
-        # Should have at least 1 chunk (may coalesce small data)
+        # Small data may coalesce into one chunk.
         assert len(chunks) >= 1
 
-        # Combined result should be valid IPC
         combined = b"".join(chunks)
         reader = ipc.open_stream(pa.BufferReader(combined))
         batches = list(reader)
@@ -340,10 +333,8 @@ class TestStreamConcatIpcSegments:
 
         chunks = list(fast_io.stream_concat_ipc_segments(iter(segments)))
 
-        # Should yield at least 1 chunk (small data may be coalesced)
         assert len(chunks) >= 1
 
-        # Combined result should have all data
         combined = b"".join(chunks)
         reader = ipc.open_stream(pa.BufferReader(combined))
         batches = list(reader)
@@ -390,7 +381,6 @@ class TestStreamConcatIpcSegments:
 
     def test_stream_handles_multi_batch_segments(self):
         """Test segments with multiple batches are streamed correctly."""
-        # Create segment with multiple batches
         sink = pa.BufferOutputStream()
         schema = pa.schema([("id", pa.int64())])
         writer = ipc.new_stream(sink, schema)
@@ -428,24 +418,21 @@ class TestStreamConcatIpcSegments:
             nonlocal fetch_count
             for i in range(3):
                 fetch_count += 1
-                # Create larger batches that exceed the boundary threshold
+                # Large enough to exceed the boundary threshold.
                 batch = pa.RecordBatch.from_pydict({"id": list(range(10000))})
                 yield create_stream_bytes(batch)
 
-        # Create generator but don't consume it
         gen = fast_io.stream_concat_ipc_segments(lazy_segments())
 
-        # Nothing fetched yet
         assert fetch_count == 0
 
-        # Consume first chunk (schema)
+        # First chunk is the schema.
         first_chunk = next(gen)
-        assert first_chunk  # Should have data
-        assert fetch_count >= 1  # At least first segment fetched
+        assert first_chunk
+        assert fetch_count >= 1
 
-        # Consume remaining chunks
         list(gen)
-        assert fetch_count == 3  # All segments fetched
+        assert fetch_count == 3
 
     def test_stream_vs_concat_produce_same_result(self):
         """Test that streaming and buffered concat produce identical output."""
@@ -454,13 +441,10 @@ class TestStreamConcatIpcSegments:
             batch = pa.RecordBatch.from_pydict({"id": [i * 100 + j for j in range(10)]})
             segments.append(create_stream_bytes(batch))
 
-        # Get buffered result
         buffered_result = fast_io.concat_stream_bytes(segments.copy())
 
-        # Get streaming result
         streaming_result = b"".join(fast_io.stream_concat_ipc_segments(iter(segments)))
 
-        # Results should be identical
         assert buffered_result == streaming_result
 
     def test_stream_emits_single_schema_multiple_batches(self):
@@ -473,7 +457,6 @@ class TestStreamConcatIpcSegments:
 
         Client must be able to read the entire stream with ipc.open_stream().
         """
-        # Create segments with identical schema but different data
         schema = pa.schema([("id", pa.int64()), ("value", pa.float64())])
 
         def make_segment(ids, values):
@@ -490,20 +473,15 @@ class TestStreamConcatIpcSegments:
             make_segment([6], [6.0]),
         ]
 
-        # Stream-concatenate
         result = b"".join(fast_io.stream_concat_ipc_segments(iter(segments)))
 
-        # Verify client can read the entire stream
         reader = ipc.open_stream(pa.BufferReader(result))
 
-        # Schema should match
         assert reader.schema == schema
 
-        # Should read all 3 batches
         batches = list(reader)
         assert len(batches) == 3
 
-        # Data should be complete and in order
         all_ids = []
         all_values = []
         for batch in batches:
@@ -521,7 +499,6 @@ class TestStreamConcatIpcSegments:
         the streaming concatenation preserves dictionary encoding correctly.
         """
 
-        # Create segments with dictionary-encoded string column
         def make_dict_segment(categories: list[str], ids: list[int]) -> bytes:
             cat_array = pa.array(categories).dictionary_encode()
             batch = pa.RecordBatch.from_arrays(
@@ -536,19 +513,15 @@ class TestStreamConcatIpcSegments:
             make_dict_segment(["A", "A", "B", "B"], [9, 10, 11, 12]),
         ]
 
-        # Stream-concatenate
         chunks = list(fast_io.stream_concat_ipc_segments(iter(segments)))
         assert len(chunks) >= 1  # May coalesce small segments
 
-        # Combined result should be valid IPC
         combined = b"".join(chunks)
         reader = ipc.open_stream(pa.BufferReader(combined))
 
-        # Read all batches
         batches = list(reader)
         assert len(batches) == 3
 
-        # Verify data integrity
         all_ids = []
         all_categories = []
         for batch in batches:
@@ -571,7 +544,6 @@ class TestStreamConcatIpcSegments:
             "B",  # batch 3
         ]
 
-        # Verify streaming matches buffered result
         buffered = fast_io.concat_stream_bytes(segments)
         assert combined == buffered
 
@@ -581,30 +553,26 @@ class TestStreamConcatIpcSegments:
         With a high min_chunk_size, small batches should be coalesced
         into fewer, larger chunks.
         """
-        # Create many small segments (each ~100-200 bytes)
+        # Each ~100-200 bytes
         segments = []
         for i in range(20):
             batch = pa.RecordBatch.from_pydict({"id": [i]})
             segments.append(create_stream_bytes(batch))
 
-        # With default 256KB min, small segments get coalesced at segment boundary
+        # The default 256KB minimum coalesces small segments at the segment boundary.
         chunks_default = list(fast_io.stream_concat_ipc_segments(iter(segments)))
 
-        # With 0 min_chunk_size, each batch yields immediately
+        # min_chunk_size=0 yields each batch immediately.
         chunks_no_buffer = list(
             fast_io.stream_concat_ipc_segments(iter(segments), min_chunk_size=0)
         )
 
-        # No buffering should produce more chunks (one per batch + schema + eos)
-        # Default buffering yields at segment boundaries
         assert len(chunks_no_buffer) >= len(chunks_default)
 
-        # Both should produce identical combined output
         combined_default = b"".join(chunks_default)
         combined_no_buffer = b"".join(chunks_no_buffer)
         assert combined_default == combined_no_buffer
 
-        # Verify data integrity
         reader = ipc.open_stream(pa.BufferReader(combined_default))
         batches = list(reader)
         assert len(batches) == 20
@@ -617,18 +585,15 @@ class TestStreamConcatIpcSegments:
         When a single batch exceeds the threshold, it should be yielded
         immediately rather than buffering further.
         """
-        # Create a large batch that exceeds typical min_chunk_size
         large_data = list(range(100000))  # ~800KB as int64
         batch = pa.RecordBatch.from_pydict({"id": large_data})
         segment = create_stream_bytes(batch)
 
-        # Use a small min_chunk_size to see immediate yield behavior
         chunks = list(fast_io.stream_concat_ipc_segments(iter([segment]), min_chunk_size=1024))
 
-        # Should have at least schema + batch data + eos
+        # At least schema + batch data + eos
         assert len(chunks) >= 2
 
-        # Combined result should be valid
         combined = b"".join(chunks)
         reader = ipc.open_stream(pa.BufferReader(combined))
         batches = list(reader)
@@ -645,31 +610,25 @@ class TestStreamConcatIpcSegments:
         Note: With boundary threshold optimization, small segments may be
         coalesced and the error may be raised during the first next() call.
         """
-        # Create segments with different schemas
         segment1 = create_stream_bytes(
             pa.RecordBatch.from_pydict({"id": [1, 2], "value": [1.0, 2.0]})
         )
         segment2 = create_stream_bytes(
-            pa.RecordBatch.from_pydict({"id": [3, 4], "name": ["a", "b"]})  # Different schema
+            pa.RecordBatch.from_pydict({"id": [3, 4], "name": ["a", "b"]})
         )
 
         gen = fast_io.stream_concat_ipc_segments(iter([segment1, segment2]))
 
-        # Schema mismatch should raise error during consumption
         with pytest.raises(ValueError, match="Schema mismatch"):
             list(gen)
 
     def test_stream_schema_mismatch_column_order(self):
         """Test that column order differences are detected as schema mismatch."""
-        # Same columns but different order
         segment1 = create_stream_bytes(pa.RecordBatch.from_pydict({"a": [1], "b": [2]}))
-        segment2 = create_stream_bytes(
-            pa.RecordBatch.from_pydict({"b": [3], "a": [4]})  # Different order
-        )
+        segment2 = create_stream_bytes(pa.RecordBatch.from_pydict({"b": [3], "a": [4]}))
 
         gen = fast_io.stream_concat_ipc_segments(iter([segment1, segment2]))
 
-        # Schema mismatch should raise error during consumption
         with pytest.raises(ValueError, match="Schema mismatch"):
             list(gen)
 
@@ -679,11 +638,10 @@ class TestStreamEnforcementHooks:
 
     def test_max_output_bytes_aborts_on_exceed(self):
         """Test that exceeding max_output_bytes raises StreamLimitExceeded."""
-        # Create a segment that produces ~1KB of output
+        # ~1KB of output
         batch = pa.RecordBatch.from_pydict({"id": list(range(100))})
         segment = create_stream_bytes(batch)
 
-        # Set a very small limit that will be exceeded
         gen = fast_io.stream_concat_ipc_segments(
             iter([segment]),
             max_output_bytes=100,  # Too small for even the schema
@@ -697,15 +655,13 @@ class TestStreamEnforcementHooks:
         batch = pa.RecordBatch.from_pydict({"id": [1, 2, 3]})
         segment = create_stream_bytes(batch)
 
-        # Set a large limit that won't be exceeded
         chunks = list(
             fast_io.stream_concat_ipc_segments(
                 iter([segment]),
-                max_output_bytes=1_000_000,  # 1MB limit
+                max_output_bytes=1_000_000,
             )
         )
 
-        # Should complete successfully
         combined = b"".join(chunks)
         reader = ipc.open_stream(pa.BufferReader(combined))
         batches = list(reader)
@@ -714,33 +670,29 @@ class TestStreamEnforcementHooks:
 
     def test_max_output_bytes_partial_stream_before_abort(self):
         """Test that some data is yielded before limit is hit."""
-        # Create multiple segments
         segments = []
         for i in range(10):
             batch = pa.RecordBatch.from_pydict({"id": list(range(1000))})
             segments.append(create_stream_bytes(batch))
 
-        # Calculate approximate size of one segment
         single_segment_size = len(segments[0])
 
-        # Set limit to allow ~2 segments
+        # Room for about 2 segments.
         limit = single_segment_size * 2
 
         gen = fast_io.stream_concat_ipc_segments(
             iter(segments),
             max_output_bytes=limit,
-            min_chunk_size=0,  # Yield immediately
+            min_chunk_size=0,
         )
 
-        # Should get some chunks before hitting limit
         chunks = []
         with pytest.raises(fast_io.StreamLimitExceeded):
             for chunk in gen:
                 chunks.append(chunk)
 
-        # Should have received at least the schema
+        # At least the schema arrives, but not all the data.
         assert len(chunks) >= 1
-        # But not all data
         assert len(chunks) < 10
 
     def test_deadline_aborts_when_exceeded(self):
@@ -750,7 +702,6 @@ class TestStreamEnforcementHooks:
         batch = pa.RecordBatch.from_pydict({"id": [1, 2, 3]})
         segment = create_stream_bytes(batch)
 
-        # Set deadline in the past
         past_deadline = time.monotonic() - 1.0
 
         gen = fast_io.stream_concat_ipc_segments(
@@ -768,8 +719,7 @@ class TestStreamEnforcementHooks:
         batch = pa.RecordBatch.from_pydict({"id": [1, 2, 3]})
         segment = create_stream_bytes(batch)
 
-        # Set deadline far in the future
-        future_deadline = time.monotonic() + 60.0  # 60 seconds from now
+        future_deadline = time.monotonic() + 60.0
 
         chunks = list(
             fast_io.stream_concat_ipc_segments(
@@ -778,7 +728,6 @@ class TestStreamEnforcementHooks:
             )
         )
 
-        # Should complete successfully
         combined = b"".join(chunks)
         reader = ipc.open_stream(pa.BufferReader(combined))
         batches = list(reader)
@@ -795,7 +744,7 @@ class TestStreamEnforcementHooks:
         now = [0.0]
         monkeypatch.setattr(fast_io, "time", SimpleNamespace(monotonic=lambda: now[0]))
 
-        # Large enough to pass the chunk threshold at the segment boundary
+        # Large enough to pass the chunk threshold at the segment boundary.
         batch = pa.RecordBatch.from_pydict({"id": list(range(10000))})
 
         def segments():
@@ -810,7 +759,6 @@ class TestStreamEnforcementHooks:
             for chunk in gen:
                 chunks.append(chunk)
 
-        # The first segment went out before the deadline hit
         assert len(chunks) >= 1
 
     def test_both_limits_can_be_set(self):
@@ -828,7 +776,6 @@ class TestStreamEnforcementHooks:
             )
         )
 
-        # Should complete successfully
         combined = b"".join(chunks)
         reader = ipc.open_stream(pa.BufferReader(combined))
         batches = list(reader)
@@ -838,30 +785,26 @@ class TestStreamEnforcementHooks:
         """Test that size limit error is raised even if deadline also exceeded."""
         import time
 
-        # Create large segment
         batch = pa.RecordBatch.from_pydict({"id": list(range(10000))})
         segment = create_stream_bytes(batch)
 
-        # Both limits will be exceeded, but size is checked first per yield
         gen = fast_io.stream_concat_ipc_segments(
             iter([segment]),
-            max_output_bytes=100,  # Will be exceeded immediately
-            deadline=time.monotonic() - 1.0,  # Already expired
+            max_output_bytes=100,
+            deadline=time.monotonic() - 1.0,
         )
 
-        # Deadline is checked first (at segment start), so it raises first
+        # Deadline is checked first (at segment start), so it raises before the size limit.
         with pytest.raises(fast_io.StreamDeadlineExceeded):
             list(gen)
 
     def test_no_limits_by_default(self):
         """Test that without limits, streaming works for any size."""
-        # Create large segment
         batch = pa.RecordBatch.from_pydict({"id": list(range(100000))})
         segment = create_stream_bytes(batch)
 
         chunks = list(fast_io.stream_concat_ipc_segments(iter([segment])))
 
-        # Should complete successfully
         combined = b"".join(chunks)
         reader = ipc.open_stream(pa.BufferReader(combined))
         batches = list(reader)
@@ -885,9 +828,8 @@ class TestIncrementalIpcMerger:
 
         combined = b"".join(pieces)
 
-        # A single standard reader must see ALL rows — this is exactly what
-        # naive byte concatenation of complete streams gets wrong (the
-        # reader stops at the first EOS marker).
+        # One standard reader must see ALL rows: naive byte concatenation of
+        # complete streams gets this wrong (the reader stops at the first EOS).
         reader = ipc.open_stream(pa.BufferReader(combined))
         table = reader.read_all()
         assert table.column("id").to_pylist() == expected_ids

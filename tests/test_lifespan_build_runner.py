@@ -70,13 +70,13 @@ def test_a_lifespan_that_started_no_runner_does_not_stop_someone_elses(boot):
     boot(STRATA_DEPLOYMENT_MODE="service")
 
     assert foreign.stop_calls == 0
-    # Still cleared: leaving it registered is how the next lifespan inherits it.
+    # Still cleared: leaving it registered is how the next lifespan would inherit it.
     assert get_build_runner() is None
 
 
 def test_a_lifespan_stops_the_runner_it_started(boot):
-    # Personal mode always runs embedded transforms, so this one owns a runner
-    # and must shut it down.
+    # Personal mode always runs embedded transforms, so it owns a runner and must
+    # shut it down.
     boot(STRATA_DEPLOYMENT_MODE="personal")
 
     assert get_build_runner() is None

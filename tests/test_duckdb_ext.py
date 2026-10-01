@@ -102,7 +102,6 @@ class TestRegisterStrataScan:
 
         conn = duckdb.connect(database=":memory:")
         try:
-            # First registration with all columns
             register_strata_scan(
                 conn=conn,
                 name="events",
@@ -110,12 +109,10 @@ class TestRegisterStrataScan:
                 base_url=f"http://127.0.0.1:{config.port}",
             )
 
-            # Get column count
             result1 = conn.execute(
                 "SELECT COUNT(*) FROM information_schema.columns WHERE table_name = 'events'"
             ).fetchone()
 
-            # Second registration with fewer columns
             register_strata_scan(
                 conn=conn,
                 name="events",
@@ -130,7 +127,6 @@ class TestRegisterStrataScan:
             assert result1 is not None
             assert result2 is not None
 
-            # Second registration should have fewer columns
             assert result2[0] < result1[0]
         finally:
             conn.close()
@@ -189,7 +185,7 @@ class TestStrataScanner:
             assert "events" in scanner.registered_tables
 
             result = scanner.unregister("events")
-            assert result is scanner  # Returns self
+            assert result is scanner
             assert "events" not in scanner.registered_tables
         finally:
             scanner.close()
@@ -200,7 +196,6 @@ class TestStrataScanner:
 
         scanner = StrataScanner(base_url=f"http://127.0.0.1:{config.port}")
         try:
-            # Should not raise
             scanner.unregister("nonexistent")
         finally:
             scanner.close()
@@ -227,7 +222,6 @@ class TestStrataScanner:
         scanner = StrataScanner(base_url=f"http://127.0.0.1:{config.port}")
         try:
             scanner.register("events", table_uri)
-            # Should not raise
             scanner.register("events", table_uri, replace=True)
             assert "events" in scanner.registered_tables
         finally:
@@ -261,7 +255,7 @@ class TestStrataScanner:
             scanner.register("events", table_uri)
             result = scanner.query_df("SELECT id, value FROM events LIMIT 10")
 
-            # Check it's a DataFrame (without importing pandas)
+            # Check it is a DataFrame without importing pandas.
             assert hasattr(result, "shape")
             assert result.shape[0] <= 10
         finally:
@@ -279,7 +273,6 @@ class TestStrataScanner:
             all_rows = scanner.query("SELECT COUNT(*) as cnt FROM events")
             filtered_rows = scanner.query("SELECT COUNT(*) as cnt FROM events WHERE id < 50")
 
-            # Filtered should have fewer rows
             all_count = all_rows.to_pydict()["cnt"][0]
             filtered_count = filtered_rows.to_pydict()["cnt"][0]
             assert filtered_count < all_count
@@ -293,7 +286,6 @@ class TestStrataScanner:
 
         scanner = StrataScanner(base_url=f"http://127.0.0.1:{config.port}")
         try:
-            # Register same table twice with different names
             scanner.register("t1", table_uri, columns=["id", "value"])
             scanner.register("t2", table_uri, columns=["id", "name"])
 
@@ -347,7 +339,6 @@ class TestTableReferenceRetention:
         try:
             scanner.register("events", table_uri)
 
-            # Internal _tables dict should have the reference
             assert "events" in scanner._tables
             assert isinstance(scanner._tables["events"], pa.Table)
         finally:

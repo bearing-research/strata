@@ -30,7 +30,6 @@ def test_every_cell_is_boxed_with_its_glyph():
     art = render_dag(order, labels, statuses, edges)
     for cid in order:
         assert cid in art  # the label
-    # Status glyphs are rendered.
     assert "✓" in art and "▶" in art and "⊘" in art and "✗" in art
     # Box-drawing characters are present (boxes + edges were drawn).
     assert _BOX_CHARS & set(art)
@@ -42,7 +41,7 @@ def test_diamond_has_clean_corners_and_tees_no_crossing():
     """
     order, labels, statuses, edges = _diamond()
     art = render_dag(order, labels, statuses, edges)
-    assert any(ch in art for ch in "┌┐└┘")  # clean corners, not the old ┼
+    assert any(ch in art for ch in "┌┐└┘")  # clean corners, no crossing
     assert "├" in art or "┤" in art  # fork off / merge into a trunk → tee
     assert "┼" not in art  # a diamond has no true edge crossing
 

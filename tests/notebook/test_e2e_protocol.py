@@ -41,7 +41,6 @@ class TestMessageOrdering:
             with ws_connect(client, sid) as ws:
                 execute_cell_and_wait(ws, "c1")
 
-                # Find indices of running status and output
                 running_idx = None
                 output_idx = None
                 for i, m in enumerate(ws.messages):
@@ -99,13 +98,11 @@ class TestMessageOrdering:
             with ws_connect(client, sid) as ws:
                 execute_cell_and_wait(ws, "c3")
 
-                # Extract the order cells went to "running"
                 running_order = []
                 for m in ws.messages:
                     if m["type"] == "cell_status" and m["payload"].get("status") == "running":
                         running_order.append(m["payload"]["cell_id"])
 
-                # c1 should run before c2, c2 before c3
                 if "c1" in running_order and "c2" in running_order:
                     assert running_order.index("c1") < running_order.index("c2")
                 if "c2" in running_order and "c3" in running_order:

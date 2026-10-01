@@ -149,7 +149,6 @@ def test_provenance_hash_empty_inputs():
     assert hash1 == hash2
 
 
-# ---------------------------------------------------------------------------
 # derive_subkey
 
 
@@ -205,8 +204,8 @@ def test_safe_filename_stem_is_case_collision_proof():
     # A name with uppercase gets a short hash suffix.
     up = safe_filename_stem("Data")
     assert up.startswith("Data-") and up != "Data"
-    # The real bug: Data vs data must not collide even under case folding
-    # (macOS/APFS, Windows), so their blob files stay distinct.
+    # Data vs data must not collide even under case folding (macOS/APFS,
+    # Windows), so their blob files stay distinct.
     assert up != safe_filename_stem("data")
     assert up.lower() != safe_filename_stem("data").lower()
     # Two uppercase variants of one name also stay distinct.

@@ -50,7 +50,7 @@ class TestComponentHashStorage:
     def session_with_executed_cell(self, tmp_path):
         """Create a session, execute a cell, return (session, cell_id)."""
         nb_dir, cell_id = _create_notebook_with_cell(tmp_path, "x = 42")
-        # Need a two-cell pipeline so first cell's output is consumed
+        # Two cells, so the first cell's output is consumed (and stored).
         add_cell_to_notebook(nb_dir, "c2", after_cell_id="c1")
         write_cell(nb_dir, "c2", "y = x + 1")
 
@@ -68,7 +68,6 @@ class TestComponentHashStorage:
         result = await executor.execute_cell(cell_id, "x = 42")
         assert result.success
 
-        # Find the artifact
         cell = next(c for c in session.notebook_state.cells if c.id == cell_id)
         assert cell.artifact_uri is not None
 
@@ -108,22 +107,19 @@ class TestCausalityEnvChanged:
         mgr = SessionManager()
         session = mgr.open_notebook(nb_dir)
 
-        # Execute cell to create artifact with current env hash
         from strata.notebook.executor import CellExecutor
 
         executor = CellExecutor(session)
         result = await executor.execute_cell("c1", "x = 1")
         assert result.success
 
-        # Now add a dependency (changes lockfile)
+        # Adding a dependency changes the lockfile.
         add_result = add_dependency(nb_dir, "six")
         assert add_result.success
         assert add_result.lockfile_changed
 
-        # Re-sync session
         session.ensure_venv_synced()
 
-        # Compute causality — should detect env change
         causality_map = compute_causality_on_staleness(session)
 
         # c1 has a cached artifact with old env_hash, current env_hash is different
@@ -148,7 +144,7 @@ class TestCausalityEnvChanged:
         result = await executor.execute_cell("c1", "x = 1")
         assert result.success
 
-        # Change the source (but NOT env)
+        # Change the source but not the env.
         write_cell(nb_dir, "c1", "x = 999")
         cell = next(c for c in session.notebook_state.cells if c.id == "c1")
         cell.source = "x = 999"
@@ -249,11 +245,9 @@ class TestEnvironmentMetadata:
         nb_dir = create_notebook(tmp_path, "env_update")
         old_hash = load_runtime_state(nb_dir).environment.lockfile_hash
 
-        # Add a dependency
         result = add_dependency(nb_dir, "six")
         assert result.success
 
-        # Update metadata
         update_environment_metadata(nb_dir)
 
         new_hash = load_runtime_state(nb_dir).environment.lockfile_hash
@@ -261,5 +255,5 @@ class TestEnvironmentMetadata:
 
     def test_environment_missing_no_crash(self, tmp_path):
         """update_environment_metadata on non-notebook dir doesn't crash."""
-        # No notebook.toml — should just return silently
+        # No notebook.toml: returns silently.
         update_environment_metadata(tmp_path)

@@ -36,14 +36,11 @@ _MINIMAL_PNG_LITERAL = (
 )
 _MARKDOWN_LITERAL = '"# Title\\n\\nRendered over websocket."'
 
-# Sentinel timestamp for protocol envelopes. No test asserts on the value;
-# the date is arbitrary and uniform so we don't reintroduce drift.
+# Sentinel timestamp for protocol envelopes; no test asserts on it.
 _TS = "2026-01-01T00:00:00Z"
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
+# --- Helpers ---
 
 
 def open_session(notebook_dir):
@@ -133,9 +130,7 @@ def _terminal_frames(fake, cell_id):
     return output, terminal
 
 
-# ---------------------------------------------------------------------------
-# Fixtures
-# ---------------------------------------------------------------------------
+# --- Fixtures ---
 
 
 @pytest.fixture(autouse=True)
@@ -184,9 +179,7 @@ def notebook_session(temp_notebook):
     yield notebook_dir, open_session(notebook_dir)
 
 
-# ---------------------------------------------------------------------------
-# Sync / DAG serialization
-# ---------------------------------------------------------------------------
+# --- Sync / DAG serialization ---
 
 
 @pytest.mark.asyncio
@@ -330,9 +323,7 @@ async def test_notebook_sync_includes_remote_execution_metadata(
     assert root["remote_error_code"] is None
 
 
-# ---------------------------------------------------------------------------
-# cell_execute / display payloads
-# ---------------------------------------------------------------------------
+# --- cell_execute / display payloads ---
 
 
 @pytest.mark.asyncio
@@ -535,11 +526,9 @@ async def test_cell_execute_refreshes_downstream_staleness(temp_notebook):
 
     status_updates = [f["payload"] for f in fake.frames_of("cell_status")]
     assert any(p["cell_id"] == "root" and p["status"] == "ready" for p in status_updates)
-    # After root re-runs, its direct downstream `middle` holds a result made
-    # from root's previous artifact, with its own source unchanged: stale,
-    # upstream changed. It used to read a bare idle, a plain cache miss, while
-    # `leaf` one step further down already read stale for the same reason
-    # (#361). Neither may stay ready; now they also agree on why.
+    # After root re-runs, `middle` holds a result made from root's previous artifact
+    # with its own source unchanged: stale, upstream changed, the same reason `leaf`
+    # one step further down gives. Neither may stay ready.
     assert any(p["cell_id"] == "middle" and p["status"] == "stale" for p in status_updates)
     assert any(p["cell_id"] == "leaf" and p["status"] == "stale" for p in status_updates)
 
@@ -548,9 +537,8 @@ async def test_cell_execute_refreshes_downstream_staleness(temp_notebook):
 async def test_cell_execute_surfaces_module_export_error(temp_notebook):
     """Unsupported cross-cell code export should surface as a direct cell error."""
     notebook_dir, _ = temp_notebook
-    # ``x`` is bound nowhere in the notebook — a truly-unknown name, still a
-    # hard export blocker. (A same-cell/upstream runtime ``x`` would now be
-    # hydrated instead of erroring.)
+    # ``x`` is bound nowhere in the notebook, so it is a hard export blocker. (A
+    # same-cell/upstream runtime ``x`` would be hydrated instead.)
     write_cell(notebook_dir, "root", "def add(y):\n    return x + y\n")
     write_cell(notebook_dir, "middle", "result = add(2)")
     session = open_session(notebook_dir)
@@ -636,9 +624,8 @@ async def test_cell_execute_uses_warm_pool_when_available(notebook_session, monk
         source="",
         env_hash="",
         variant=None,
-        # Mirrors the real signature. A stub that pins an outdated one turns
-        # any added keyword into "the cell errored", which is what this
-        # assertion reads as — several layers away from the actual cause.
+        # Mirrors the real signature: a stub with an outdated one turns any added keyword
+        # into "the cell errored", far from the actual cause.
         build_env="",
         build_duration_ms=0.0,
         hardware=None,
@@ -755,9 +742,7 @@ y + 1
     assert terminal["payload"]["status"] == "ready"
 
 
-# ---------------------------------------------------------------------------
-# Environment-busy / blocked
-# ---------------------------------------------------------------------------
+# --- Environment-busy / blocked ---
 
 
 @pytest.mark.asyncio
@@ -864,9 +849,7 @@ def test_environment_job_submission_rejects_execution_already_accepted(monkeypat
     asyncio.run(_exercise())
 
 
-# ---------------------------------------------------------------------------
-# Remote-executor consumers
-# ---------------------------------------------------------------------------
+# --- Remote-executor consumers ---
 
 
 def _http_worker_config(executor_url, *, build_url=None, transport=None):
@@ -1203,9 +1186,8 @@ async def test_ws_cancelled_signed_http_executor_marks_build_failed(
     ]
     assert idle
 
-    # The cancelled signed build must be marked failed (not left pending/building).
-    # The finalize-failed marking happens on a background server thread; wait
-    # for it to settle via the build store rather than asserting on timing.
+    # The cancelled signed build must be marked failed, not left pending/building.
+    # That happens on a background server thread, so wait on the build store.
     await _wait_until(
         lambda: (
             notebook_build_server["build_store"].get_stats()["building"] == 0
@@ -1218,9 +1200,7 @@ async def test_ws_cancelled_signed_http_executor_marks_build_failed(
     assert stats["building"] == 0
 
 
-# ---------------------------------------------------------------------------
-# Per-socket scoping of cascade / impact responses
-# ---------------------------------------------------------------------------
+# --- Per-socket scoping of cascade / impact responses ---
 
 
 @pytest.mark.asyncio
@@ -1265,9 +1245,7 @@ async def test_impact_preview_is_sent_only_to_requesting_websocket(notebook_sess
     assert observer.frames_of("impact_preview") == []
 
 
-# ---------------------------------------------------------------------------
-# Inspect REPL
-# ---------------------------------------------------------------------------
+# --- Inspect REPL ---
 
 
 @pytest.mark.asyncio
@@ -1373,9 +1351,7 @@ async def test_inspect_sessions_closed_when_last_websocket_disconnects(
     assert session.id not in _notebook_inspect_managers
 
 
-# ---------------------------------------------------------------------------
-# Grace window (disconnect / reconnect)
-# ---------------------------------------------------------------------------
+# --- Grace window (disconnect / reconnect) ---
 
 
 @pytest.mark.asyncio
@@ -1412,7 +1388,7 @@ async def test_grace_window_preserves_inspect_state_on_reconnect(notebook_sessio
     assert session.id in _notebook_inspect_managers
     assert close_counter["count"] == 0
 
-    # Reconnect cancels the pending teardown — inspect state survives.
+    # Reconnect cancels the pending teardown; inspect state survives.
     _cancel_pending_grace_teardown(session.id)
     grace_task = _notebook_grace_tasks.pop(session.id, None)
     if grace_task is not None:
@@ -1442,8 +1418,8 @@ async def test_grace_window_expires_drops_state(notebook_session, monkeypatch):
     )
     assert session.id in _notebook_inspect_managers
 
-    # Simulate the last socket having gone away (no connections), then run
-    # the grace-teardown body directly with a zero wait — no polling.
+    # Simulate the last socket having gone away, then run the grace-teardown body
+    # directly with a zero wait.
     from strata.notebook.ws import _notebook_connections
 
     _notebook_connections.pop(session.id, None)
@@ -1487,7 +1463,7 @@ async def test_grace_window_preserves_active_execution_on_reconnect(notebook_ses
         assert _notebook_execution_state.get(session.id) is not None
         assert session.id in _notebook_grace_tasks
 
-        # Reconnect cancels the pending teardown — task stays alive.
+        # Reconnect cancels the pending teardown; the task stays alive.
         _cancel_pending_grace_teardown(session.id)
         grace_task = _notebook_grace_tasks.pop(session.id, None)
         if grace_task is not None:
@@ -1566,9 +1542,7 @@ async def test_last_websocket_disconnect_cancels_running_execution(notebook_sess
     assert _notebook_execution_state[session.id].execution_task is None
 
 
-# ---------------------------------------------------------------------------
-# Source update / cancel
-# ---------------------------------------------------------------------------
+# --- Source update / cancel ---
 
 
 @pytest.mark.asyncio
@@ -1678,9 +1652,7 @@ async def test_stale_cell_cancel_does_not_clobber_ready_state(notebook_session):
     assert cell.status.value == "ready"
 
 
-# ---------------------------------------------------------------------------
-# Malformed dispatch / variant add
-# ---------------------------------------------------------------------------
+# --- Malformed dispatch / variant add ---
 
 
 @pytest.mark.asyncio
@@ -1728,9 +1700,7 @@ async def test_variant_add_broadcasts_new_cell():
     assert old["variant_active"] is False
 
 
-# ---------------------------------------------------------------------------
-# Endpoint-level: notebook_websocket upgrade + owner gate (#52)
-# ---------------------------------------------------------------------------
+# --- notebook_websocket upgrade + owner gate ---
 
 
 @pytest.mark.asyncio
@@ -1918,11 +1888,6 @@ class TestWsOwnerAllowedHelper:
         assert _ws_owner_allowed("alice", "alice") is True
 
 
-# ---------------------------------------------------------------------------
-# _running_payload helper
-# ---------------------------------------------------------------------------
-
-
 class TestRunningPayloadHelper:
     """Tests for the ``_running_payload`` helper that decorates the
     ``cell_status: running`` broadcast with remote worker metadata.
@@ -2017,9 +1982,7 @@ class TestRunningPayloadHelper:
         assert payload["remote_worker"] == "df-cluster"
 
 
-# ---------------------------------------------------------------------------
-# Prompt-cell streaming broadcast wiring (issue #110)
-# ---------------------------------------------------------------------------
+# --- Prompt-cell streaming broadcast wiring ---
 
 
 @pytest.mark.asyncio
@@ -2092,9 +2055,8 @@ async def test_final_output_seq_is_newer_than_streamed_deltas(notebook_session, 
 
     monkeypatch.setattr(ws_module, "CellExecutor", _StreamingStubExecutor)
 
-    # Use the registry-backed state — that's what the WS handler passes in
-    # production, and it's the same counter ``next_notebook_sequence``
-    # draws delta seqs from.
+    # The registry-backed state is what the WS handler passes, and
+    # ``next_notebook_sequence`` draws delta seqs from the same counter.
     execution_state = _ensure_execution_state("nb-seq-test")
     try:
         await execute_cell_and_broadcast(
@@ -2137,7 +2099,7 @@ async def test_widget_update_persists_value_and_stales_downstream(tmp_path):
     session._analyze_and_build_dag()
     session.environment_sync_state = "ready"  # unblock the WS execute gate
 
-    # Run the consumer to READY — cascades the widget cell (alpha=0.5) first.
+    # Run the consumer to READY; this cascades the widget cell (alpha=0.5) first.
     await _run_cell_to_terminal(session, "consume")
     assert session.notebook_state.get_cell("consume").status == CellStatus.READY
 
@@ -2212,9 +2174,8 @@ async def test_live_widget_auto_cascades_cheap_downstream(tmp_path):
 
     await _run_cell_to_terminal(session, "consume")
     assert session.notebook_state.get_cell("consume").status == CellStatus.READY
-    # Pin the recorded duration below the auto-run cost gate so the assertion
-    # doesn't depend on the harness subprocess's real speed (which can exceed
-    # the threshold under a loaded full-suite run — the source of a flake).
+    # Pin the recorded duration below the auto-run cost gate so the result doesn't
+    # depend on the harness's real speed, which can exceed it under load.
     session.execution_history["consume"] = [ExecutionSample(duration_ms=1.0, cache_hit=False)]
 
     fake, execution_state = _make_fake_ws(session)
@@ -2227,7 +2188,7 @@ async def test_live_widget_auto_cascades_cheap_downstream(tmp_path):
     )
     await _drain_execution(execution_state)
 
-    # Live mode re-ran the downstream cell — it's READY again, not left STALE.
+    # Live mode re-ran the downstream cell: READY again, not left STALE.
     assert session.notebook_state.get_cell("consume").status == CellStatus.READY
 
 
@@ -2252,7 +2213,7 @@ async def test_live_cost_gate_leaves_expensive_downstream_stale(tmp_path):
     session.environment_sync_state = "ready"
 
     await _run_cell_to_terminal(session, "consume")
-    # Pretend the consumer's last run was very slow — over the auto-run gate.
+    # Pretend the consumer's last run was very slow, over the auto-run gate.
     session.execution_history["consume"] = [
         ExecutionSample(duration_ms=_LIVE_COST_THRESHOLD_MS + 1000, cache_hit=False)
     ]
@@ -2267,7 +2228,7 @@ async def test_live_cost_gate_leaves_expensive_downstream_stale(tmp_path):
     )
     await _drain_execution(execution_state)
 
-    # The expensive cell was NOT auto-run — it stays STALE for a manual run.
+    # The expensive cell was NOT auto-run; it stays STALE for a manual run.
     assert session.notebook_state.get_cell("consume").status == CellStatus.STALE
 
 
@@ -2294,8 +2255,8 @@ async def test_live_widget_reruns_all_downstream_leaves(tmp_path):
     session.notebook_state.get_cell(
         "controls"
     ).source = "# @live\nalpha = slider(0, 1, default=0.5)"
-    # Both leaves read the control and produce a display output — no edge
-    # between them (siblings), mirroring the example's table + plot cells.
+    # Both leaves read the control and produce a display output, with no edge between
+    # them, like the example's table + plot cells.
     session.notebook_state.get_cell("leaf_a").source = "a = alpha * 2\na"
     session.notebook_state.get_cell("leaf_b").source = "b = alpha * 3\nb"
     session._analyze_and_build_dag()
@@ -2318,7 +2279,7 @@ async def test_live_widget_reruns_all_downstream_leaves(tmp_path):
     )
     await _drain_execution(execution_state)
 
-    # BOTH downstream leaves re-ran — neither was skipped and left stale/idle.
+    # BOTH downstream leaves re-ran; neither was skipped and left stale/idle.
     assert session.notebook_state.get_cell("leaf_a").status == CellStatus.READY
     assert session.notebook_state.get_cell("leaf_b").status == CellStatus.READY
 
@@ -2348,8 +2309,8 @@ async def test_read_only_viewer_rejects_mutations_but_allows_widget_update(tmp_p
     codes = [f["payload"].get("code") for f in errors]
     # The mutation was rejected read-only …
     assert "read_only" in codes
-    # … but widget_update passed the gate (it errors only because c1 isn't a
-    # widget cell — not a read_only rejection).
+    # … but widget_update passed the gate (it errors only because c1 isn't a widget
+    # cell, not as a read_only rejection).
     assert any(
         e["payload"].get("code") != "read_only" and "widget" in e["payload"].get("error", "")
         for e in errors
@@ -2375,9 +2336,7 @@ async def test_editor_connection_allows_mutations(tmp_path):
     assert "read_only" not in codes
 
 
-# ---------------------------------------------------------------------------
-# execute_cell_exclusive — the REST/MCP drive's reservation
-# ---------------------------------------------------------------------------
+# --- execute_cell_exclusive: the REST/MCP drive's reservation ---
 
 
 class _GatedStubExecutor:
@@ -2424,7 +2383,7 @@ async def test_exclusive_run_rejects_concurrent_run(notebook_session, monkeypatc
     result = await first
     assert result is not None and result.success
 
-    # Reservation fully released — a follow-up run is admitted again.
+    # Reservation fully released: a follow-up run is admitted again.
     _GatedStubExecutor.started = asyncio.Event()
     _GatedStubExecutor.release = asyncio.Event()
     _GatedStubExecutor.release.set()
@@ -2484,9 +2443,7 @@ async def test_exclusive_run_is_cancellable(notebook_session, monkeypatch):
     assert state.active_task() is None  # state fully reset
 
 
-# ---------------------------------------------------------------------------
-# WS lifecycle hardening (code-review fixes)
-# ---------------------------------------------------------------------------
+# --- WS lifecycle hardening ---
 
 
 @pytest.mark.asyncio
@@ -2553,9 +2510,7 @@ async def test_broadcast_survives_mid_iteration_removal(notebook_session):
     assert received == ["first", "second"]  # nobody skipped
 
 
-# ---------------------------------------------------------------------------
-# WS authentication + notebook scopes (code-review round 2)
-# ---------------------------------------------------------------------------
+# --- WS authentication + notebook scopes ---
 
 
 @pytest.fixture

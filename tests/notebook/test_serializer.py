@@ -34,7 +34,7 @@ _MINIMAL_PNG_BYTES = (
 )
 
 
-# Module-level classes for pickle tests (local classes can't be pickled)
+# Module level because local classes can't be pickled.
 class _PickleTestCustomClass:
     def __init__(self, x):
         self.x = x
@@ -283,18 +283,14 @@ class TestArrowSerialization:
         with tempfile.TemporaryDirectory() as tmpdir:
             tmpdir = Path(tmpdir)
 
-            # Serialize
             meta = serialize_value(df_orig, tmpdir, "data")
             file_path = tmpdir / meta["file"]
 
-            # Deserialize
             df_loaded = deserialize_value(meta["content_type"], file_path)
 
-            # Convert to pandas for comparison
             if isinstance(df_loaded, pa.Table):
                 df_loaded = df_loaded.to_pandas()
 
-            # Check shape and values
             assert df_loaded.shape == df_orig.shape
             assert list(df_loaded.columns) == list(df_orig.columns)
             pd.testing.assert_frame_equal(df_loaded, df_orig)
@@ -312,7 +308,6 @@ class TestArrowSerialization:
             if isinstance(result, pa.Table):
                 result = result.to_pandas()
 
-            # Verify nulls are preserved
             assert result.iloc[0, 0] == 1
             assert pd.isna(result.iloc[1, 0])
             assert pd.isna(result.iloc[0, 1])
@@ -430,15 +425,12 @@ class TestJsonSerialization:
     def test_serialize_scalar(self):
         """Test serializing scalar values."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            # Integer
             result = serialize_value(42, Path(tmpdir), "int_val")
             assert result["content_type"] == "json/object"
 
-            # String
             result = serialize_value("hello", Path(tmpdir), "str_val")
             assert result["content_type"] == "json/object"
 
-            # Boolean
             result = serialize_value(True, Path(tmpdir), "bool_val")
             assert result["content_type"] == "json/object"
 
@@ -524,9 +516,8 @@ class TestPickleSerialization:
             result = serialize_value(obj, Path(tmpdir), "obj")
 
             assert result["content_type"] == "pickle/object"
-            # cloudpickle is the default codec (strict superset of
-            # stdlib pickle); stdlib "pickle" is available as an opt-in
-            # via STRATA_NOTEBOOK_OBJECT_CODEC.
+            # cloudpickle is the default codec; stdlib "pickle" is opt-in via
+            # STRATA_NOTEBOOK_OBJECT_CODEC.
             assert result["codec"] in {"cloudpickle", "pickle"}
             assert result["type"] == "_PickleTestCustomClass"
             assert result["bytes"] > 0
@@ -557,7 +548,7 @@ class TestPickleSerialization:
                 payload = pickle.load(f)
 
             assert payload["__strata_object_codec__"] == "strata.notebook.object_codec.v1"
-            # Default codec is now cloudpickle; "pickle" is opt-in.
+            # Default codec is cloudpickle; "pickle" is opt-in.
             assert payload["codec"] in {"cloudpickle", "pickle"}
             assert isinstance(payload["payload"], bytes)
 
@@ -687,7 +678,6 @@ class TestPickleSerialization:
         with tempfile.TemporaryDirectory() as tmpdir:
             result = serialize_value(func, Path(tmpdir), "func")
 
-            # Should return error metadata instead of crashing
             assert result.get("error") is not None or result["content_type"] == "pickle/object"
 
     def test_deserialize_invalid_cell_module_descriptor(self):
@@ -978,10 +968,8 @@ class TestLargeDataFrames:
 
             assert meta["content_type"] == "arrow/ipc"
             assert meta["rows"] == 1000
-            # Preview should only have first 20 rows
             assert len(meta["preview"]) == 20
 
-            # Verify round-trip
             file_path = tmpdir / meta["file"]
             df_loaded = deserialize_value(meta["content_type"], file_path)
             if isinstance(df_loaded, pa.Table):
@@ -1002,9 +990,8 @@ class TestRdsArtifactRefusal:
     """
 
     def test_content_type_registered(self):
-        # The ContentType enum and the file-extension table both need
-        # the RDS entry so executor._store_outputs's ``.rds`` ingestion
-        # path and the deserializer's dispatch table stay in sync.
+        # Both tables need the RDS entry so executor._store_outputs's ``.rds`` ingestion
+        # and the deserializer's dispatch stay in sync.
         assert ContentType.RDS_OBJECT == "application/x-r-rds"
         assert EXT_TO_CONTENT_TYPE[".rds"] == ContentType.RDS_OBJECT
 
@@ -1018,15 +1005,14 @@ class TestRdsArtifactRefusal:
         err = excinfo.value
         assert err.code == "R_ONLY_ARTIFACT"
         assert err.file_path == rds_path
-        # The default message (no variable name yet — that's filled in
-        # by the Python harness layer) points the user at the fix.
+        # The default message (the harness fills in the variable name) points the user
+        # at the fix.
         assert "saveRDS" in str(err)
         assert "data.frame" in str(err)
 
     def test_deserialize_rds_raises_via_raw_string_content_type(self, tmp_path):
-        # Callers from outside the notebook package pass the raw
-        # content-type string, not the enum. Both forms must dispatch
-        # to the same handler.
+        # Callers outside the notebook package pass the raw content-type string; both
+        # forms must dispatch to the same handler.
         rds_path = tmp_path / "obj.rds"
         rds_path.write_bytes(b"rds")
 
@@ -1100,9 +1086,8 @@ class TestPolarsSerialization:
         assert list(loaded.columns) == ["a", "b"]
 
 
-# Real torch / jax are too heavy for the CI matrix, so these exercise the
-# detection + codec plumbing through API-compatible stub modules. The actual
-# array conversion still runs through the shared numpy tensor codec.
+# Real torch / jax are too heavy for CI, so these use API-compatible stub modules.
+# Array conversion still runs through the shared numpy tensor codec.
 @pytest.fixture
 def fake_torch(monkeypatch):
     import sys
@@ -1126,10 +1111,8 @@ def fake_torch(monkeypatch):
             return self._arr
 
         def __dlpack__(self, *args, **kwargs):
-            # The real torch.Tensor exports DLPack, so the fake has to as
-            # well: without it the generic dlpack rule never matches these
-            # values and the tests below would pass with the rule ordering
-            # reversed, which is exactly what they exist to catch.
+            # Real torch.Tensor exports DLPack. Without it the generic dlpack rule never
+            # matches and the tests below would pass with the rule order reversed.
             return self._arr.__dlpack__(*args, **kwargs)
 
         def __dlpack_device__(self):
@@ -1437,8 +1420,8 @@ class TestArrowTypeRegistry:
     """The detection registry is the single source of truth for arrow routing."""
 
     def test_unknown_type_still_pickles(self):
-        # A set is neither arrow-representable, JSON-safe, nor a module/cell
-        # type — it falls through the registry to the pickle catch-all.
+        # Not arrow-representable, JSON-safe, or a module/cell type, so it falls through
+        # to the pickle catch-all.
         with tempfile.TemporaryDirectory() as tmpdir:
             result = serialize_value({1, 2, 3}, Path(tmpdir), "x")
         assert result["content_type"] == ContentType.PICKLE_OBJECT
@@ -1575,10 +1558,9 @@ class TestDisplayValueDeduplication:
         assert back.column_names == ["b"]
 
     def test_a_display_only_content_type_is_not_reused(self):
-        # A figure is pickle/object as a variable and image/png as a display,
-        # because the display name unlocks a detection path the variable name
-        # does not. Reusing on identity alone would store the pickle as the
-        # display and the UI would render nothing.
+        # A figure is pickle/object as a variable and image/png as a display (the display
+        # name unlocks a detection path). Reusing on identity alone would store the pickle
+        # as the display and the UI would render nothing.
         value = _SerializerPngDisplay()
 
         with tempfile.TemporaryDirectory() as tmp:
@@ -1638,9 +1620,8 @@ class TestGenericArrowProtocols:
         assert (back == arr).all()
 
     def test_duckdb_relation_serializes_as_arrow(self):
-        # The real-world case the capsule rule exists for, with no shim in the
-        # way: a duckdb relation is not picklable, so before this rule the cell
-        # that produced one failed outright.
+        # The real-world case for the capsule rule, with no shim: a duckdb relation is
+        # not picklable.
         duckdb = pytest.importorskip("duckdb")
 
         rel = duckdb.sql("SELECT 1 AS a UNION ALL SELECT 2 ORDER BY a")
@@ -1661,9 +1642,8 @@ class TestGenericArrowProtocols:
         values = {
             "df": pd.DataFrame({"a": [1, 2]}),
             "arr": np.array([1.5, 2.5]),
-            # A RecordBatch exports the capsule too, and the generic rule would
-            # hand it back as a pa.Table — a quieter identity loss than the
-            # DataFrame one, but the same bug.
+            # A RecordBatch exports the capsule too, and the generic rule would hand it back
+            # as a pa.Table: the same identity loss, just quieter.
             "batch": pa.record_batch({"a": [1, 2]}),
         }
         pl = pytest.importorskip("polars")
@@ -1684,11 +1664,9 @@ class TestGenericArrowProtocols:
         assert back["pseries"].name == "n"
 
     def test_one_shot_reader_is_left_on_the_pickle_path(self):
-        # A RecordBatchReader is consumed by reading. The harness serializes
-        # one object twice when a cell's value is also its display output, so
-        # routing this through Arrow makes the second artifact report zero
-        # rows with no error anywhere. Refusing it keeps the pre-existing
-        # visible failure instead of silently storing an empty table.
+        # A RecordBatchReader is consumed by reading, and the harness serializes a value
+        # twice when it is also the display output, so routing it through Arrow would
+        # silently store a zero-row second artifact. Refusing keeps the failure visible.
         table = pa.table({"a": [1, 2, 3]})
         reader = pa.RecordBatchReader.from_batches(table.schema, table.to_batches())
 
@@ -1719,11 +1697,9 @@ class TestGenericArrowProtocols:
         assert back is pd.DataFrame
 
     def test_hostile_getattr_is_never_invoked_by_detection(self):
-        # An instance-level hasattr runs the object's __getattr__. Proxies that
-        # raise something other than AttributeError when detached would escape
-        # detection entirely — past the Arrow fallback, out of serialize_value —
-        # and the caller turns that into an error entry, losing a value that
-        # used to pickle without complaint. Probing type(value) never calls it.
+        # An instance-level hasattr runs the object's __getattr__; a proxy raising
+        # something other than AttributeError would escape serialize_value and lose a
+        # value that pickles fine. Probing type(value) never calls it.
         value = _HostileProxy()
 
         assert serializer_module._matches_arrow_capsule(value) is False
@@ -1735,10 +1711,9 @@ class TestGenericArrowProtocols:
         assert meta["content_type"] == ContentType.PICKLE_OBJECT
 
     def test_generic_only_conversion_failure_is_not_warned_about(self):
-        # A ChunkedArray exports a non-struct stream, so pa.table() refuses it
-        # and pickle is the right answer. The loud "downstream cells expecting
-        # tabular shape will break" warning is for a *named* type that failed
-        # to encode; claiming it here would be false.
+        # A ChunkedArray exports a non-struct stream, so pa.table() refuses it and pickle
+        # is right. The "downstream cells expecting tabular shape will break" warning is
+        # for a named type that failed to encode.
         value = pa.chunked_array([[1, 2], [3]])
         assert serializer_module._matched_only_generic_rules(value) is True
 
@@ -1819,7 +1794,7 @@ class TestReadTablePage:
 
         page = read_table_page(blob, offset=0, limit=2, sort_by="a", sort_dir="desc")
 
-        # Global order is 5,4,3,2,1 — the first page must be the two largest.
+        # Global order is 5,4,3,2,1, so the first page holds the two largest.
         assert page is not None
         assert page["rows"] == [[5, "e"], [4, "d"]]
 
@@ -1842,7 +1817,7 @@ class TestReadTablePage:
         json.dumps(page["rows"])  # must not raise
 
     def test_scalar_shape_is_not_pageable(self):
-        # A numpy scalar serializes as arrow shape=scalar — not a table.
+        # A numpy scalar serializes as arrow shape=scalar, not a table.
         import numpy as np
 
         page = read_table_page(_arrow_blob(np.int64(7)))
@@ -1911,7 +1886,7 @@ class TestReadTablePageFiltering:
         assert page["rows"][0][0] == 3  # "north", revenue 99
 
     def test_uncoercible_filter_value_is_skipped(self):
-        # "abc" can't coerce to the int column — filter is a no-op, not a 500.
+        # "abc" can't coerce to the int column: the filter is a no-op, not a 500.
         page = read_table_page(self._blob(), filters=[{"col": "id", "op": "eq", "value": "abc"}])
 
         assert page["total"] == 5

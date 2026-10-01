@@ -98,8 +98,8 @@ class TestTheBundle:
         for member in sorted(unzipped.iterdir()):
             twin = by_cli / member.name
             if member.name in ("index.html", "manifest.json", "ro-crate-metadata.json"):
-                # These name the publication, and the CLI's copy is not one —
-                # it mints no token. Everything else has to match byte for byte.
+                # These name the publication, and the CLI's copy mints no token. Everything else
+                # has to match byte for byte.
                 continue
             assert member.read_bytes() == twin.read_bytes(), member.name
 

@@ -155,7 +155,6 @@ def test_notebook_level_worker_blocks_batching(tmp_path: Path):
     inherits it via _resolve_effective_worker and becomes non-batchable
     (even with no per-cell annotation)."""
     session = _make_session(tmp_path, [("c1", "a = 1\n")])
-    # Set notebook-level worker after session construction.
     session.notebook_state.worker = "gpu-fly"
     executor = CellExecutor(session)
     cell = session.notebook_state.cells[0]

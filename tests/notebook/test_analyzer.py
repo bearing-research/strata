@@ -247,8 +247,8 @@ class TestAnalyzerReferences:
         assert "x" in result.defines
         assert "x" in result.references
 
-        # Nested target — ``df.head()`` after the rebind reads the
-        # local df, but the original read still surfaces.
+        # Nested target: ``df.head()`` after the rebind reads the local df, but the
+        # original read still surfaces.
         result = analyze_cell("df = df.dropna()\ndf.head()\n")
         assert "df" in result.defines
         assert "df" in result.references
@@ -704,7 +704,7 @@ class TestAnalyzerGlobalWrites:
         # ``STATE`` is only written inside the function (no read), so
         # it shouldn't appear as a reference.
         assert "STATE" not in result.references
-        # ``compute`` is referenced but not bound — upstream dependency.
+        # ``compute`` is referenced but not bound, so it is an upstream dependency.
         assert "compute" in result.references
 
     def test_global_read_and_write_keeps_name_in_references(self):
@@ -733,8 +733,7 @@ class TestAnalyzerGlobalWrites:
         ``assigned``, and we filter on the assigned flag."""
         result = analyze_cell("def f():\n    global Y\n    return 1\n")
         assert "Y" not in result.defines
-        # Y should also not be in references — it's just a declaration,
-        # no actual access.
+        # Y is only declared, never accessed.
         assert "Y" not in result.references
 
     def test_nonlocal_does_not_register_as_module_define(self):
@@ -814,7 +813,7 @@ class TestBuiltinShadowReferences:
         assert result.builtin_references == []
 
     def test_intra_cell_shadow_is_not_a_reference(self):
-        # Pure-defined earlier in the cell — no upstream read.
+        # Defined earlier in the cell, so no upstream read.
         result = analyze_cell("input = 1\ny = input + 1")
         assert result.builtin_references == []
 

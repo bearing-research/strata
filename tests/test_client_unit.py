@@ -21,8 +21,7 @@ from strata_client.client import (
     _parse_artifact_uri,
 )
 
-# ---------------------------------------------------------------------------
-# Helpers
+# --- Helpers ---
 
 
 def _make_client(handler) -> StrataClient:
@@ -43,8 +42,7 @@ def _arrow_ipc_bytes(table: pa.Table) -> bytes:
     return sink.getvalue().to_pybytes()
 
 
-# ---------------------------------------------------------------------------
-# RetryConfig — pure function
+# --- RetryConfig ---
 
 
 class TestRetryConfig:
@@ -63,26 +61,24 @@ class TestRetryConfig:
 
     def test_exponential_growth(self):
         config = RetryConfig(base_delay=1.0, max_delay=1000.0, jitter=0.0)
-        # base * 2^attempt, no jitter for determinism
+        # base * 2^attempt; no jitter, for determinism
         assert config.calculate_delay(1) == 2.0
         assert config.calculate_delay(2) == 4.0
         assert config.calculate_delay(3) == 8.0
 
     def test_max_delay_caps_growth(self):
         config = RetryConfig(base_delay=1.0, max_delay=5.0, jitter=0.0)
-        # 2^10 = 1024, but cap is 5.0
+        # 2^10 = 1024, but the cap is 5.0
         assert config.calculate_delay(10) == 5.0
 
     def test_jitter_adds_within_bounds(self):
         config = RetryConfig(base_delay=1.0, max_delay=1000.0, jitter=0.5)
-        # base + max-jitter = 1.5; base + min-jitter = 1.0
         for _ in range(20):
             delay = config.calculate_delay(0)
             assert 1.0 <= delay <= 1.5
 
 
-# ---------------------------------------------------------------------------
-# Artifact — properties and URI parsing
+# --- Artifact: properties and URI parsing ---
 
 
 class TestArtifactProperties:
@@ -128,8 +124,7 @@ class TestParseArtifactUri:
             _parse_artifact_uri("strata://artifact/abc@v=x")
 
 
-# ---------------------------------------------------------------------------
-# Artifact — HTTP-backed accessors (info / lineage / dependents)
+# --- Artifact: HTTP-backed accessors (info / lineage / dependents) ---
 
 
 class TestArtifactHttpAccessors:
@@ -178,8 +173,7 @@ class TestArtifactHttpAccessors:
         assert url.params["max_depth"] == "3"
 
 
-# ---------------------------------------------------------------------------
-# Artifact — to_table / to_pandas / to_polars via cached stream
+# --- Artifact: to_table / to_pandas / to_polars via cached stream ---
 
 
 class TestArtifactToTable:
@@ -227,8 +221,7 @@ class TestArtifactToTable:
         assert polars_df.shape == (1, 1)
 
 
-# ---------------------------------------------------------------------------
-# StrataClient — top-level endpoints
+# --- StrataClient: top-level endpoints ---
 
 
 class TestSimpleEndpoints:
@@ -263,8 +256,7 @@ class TestSimpleEndpoints:
         assert result == {"cleared": True}
 
 
-# ---------------------------------------------------------------------------
-# _fetch_stream_with_retry — 429 backoff
+# --- _fetch_stream_with_retry: 429 backoff ---
 
 
 class TestFetchStreamRetry:
@@ -279,7 +271,6 @@ class TestFetchStreamRetry:
         assert client._fetch_stream_with_retry("/streams/abc") == b"payload"
 
     def test_retries_on_429_then_succeeds(self, monkeypatch):
-        # Avoid actually sleeping between retries.
         monkeypatch.setattr("time.sleep", lambda _: None)
         calls = {"n": 0}
 
@@ -306,7 +297,6 @@ class TestFetchStreamRetry:
             client._fetch_stream_with_retry("/streams/abc")
 
     def test_malformed_retry_after_falls_back_to_calculated_delay(self, monkeypatch):
-        # ``Retry-After: garbage`` should not crash; fall back to calculate_delay.
         monkeypatch.setattr("time.sleep", lambda _: None)
         calls = {"n": 0}
 
@@ -321,8 +311,7 @@ class TestFetchStreamRetry:
         assert client._fetch_stream_with_retry("/streams/abc") == b"ok"
 
 
-# ---------------------------------------------------------------------------
-# _fetch_artifact_data_with_wait — state machine
+# --- _fetch_artifact_data_with_wait: state machine ---
 
 
 class TestFetchWithWait:
@@ -348,14 +337,14 @@ class TestFetchWithWait:
                 calls["status"] += 1
                 state = "building" if calls["status"] < 3 else "ready"
                 return httpx.Response(200, json={"state": state})
-            # Anything else is the data fetch — return empty IPC stream.
+            # Anything else is the data fetch; return an empty IPC stream.
             return httpx.Response(
                 200,
                 json={"stream_url": "/v1/streams/x"},
             )
 
         client = _make_client(handler)
-        # Monkey-patch the data path to avoid pulling Arrow over the mock.
+        # Patch the data path to avoid pulling Arrow over the mock.
         monkeypatch.setattr(
             client,
             "_fetch_artifact_data",
@@ -383,8 +372,8 @@ class TestFetchWithWait:
         assert result.column("x").to_pylist() == [42]
 
     def test_timeout_during_building_raises(self, monkeypatch):
-        # ``time.time`` advances faster than ``time.sleep`` here so the
-        # timeout check trips on the second poll.
+        # ``time.time`` advances faster than ``time.sleep`` here, so the timeout
+        # trips on the second poll.
         clock = [0.0]
         monkeypatch.setattr("time.sleep", lambda _: clock.__setitem__(0, clock[0] + 100))
         monkeypatch.setattr("time.time", lambda: clock[0])
@@ -397,8 +386,7 @@ class TestFetchWithWait:
             client._fetch_artifact_data_with_wait("abc", 1, timeout=1.0)
 
 
-# ---------------------------------------------------------------------------
-# materialize — request shaping
+# --- materialize: request shaping ---
 
 
 class TestMaterializeRequestShape:
@@ -425,7 +413,7 @@ class TestMaterializeRequestShape:
             transform={"ref": "scan@v1", "params": {}},
         )
         body = captured[0]
-        # ``ref`` is the public spelling; server only accepts ``executor``.
+        # ``ref`` is the public spelling; the server only accepts ``executor``.
         assert "ref" not in body["transform"]
         assert body["transform"]["executor"] == "scan@v1"
 

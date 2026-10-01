@@ -71,12 +71,12 @@ class TestServiceModeScanStream:
             s1 = requests.get(f"{ctx.base_url}{miss['stream_url']}", headers=ARROW)
             assert s1.status_code == 200
 
-            # Hit: the response points at /data ...
+            # Hit: the response points at /data...
             hit = requests.post(f"{ctx.base_url}/v1/materialize", json=_scan(table_uri)).json()
             assert hit["hit"] is True
             assert "/data" in hit["stream_url"]
 
-            # ... and the read-back works (was 403 before A.1).
+            # ...and the read-back works.
             s2 = requests.get(f"{ctx.base_url}{hit['stream_url']}", headers=ARROW)
             assert s2.status_code == 200
             table = ipc.open_stream(s2.content).read_all()

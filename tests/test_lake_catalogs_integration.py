@@ -99,15 +99,14 @@ def rest_catalog(tmp_path):
     warehouse.chmod(0o777)
     port = _free_port()
     container = DockerContainer("apache/iceberg-rest-fixture:1.9.2")
-    # The same path inside and out: the catalog writes metadata files where the
-    # client, and then the scan, reads them.
+    # Same path inside and out: the catalog writes metadata files where the client,
+    # and then the scan, reads them.
     container.with_volume_mapping(str(warehouse), str(warehouse), "rw")
     container.with_env("CATALOG_WAREHOUSE", warehouse.as_uri())
-    # The catalog (root in the container) writes table metadata where this
-    # process then writes data files and manifests. Hadoop creates directories
-    # 0755 whatever the umask, so the table's directories exist, open, first.
-    # (Running the container as this uid instead fails: Hadoop cannot log in a
-    # user the image has no name for.)
+    # The catalog (root in the container) writes table metadata where this process
+    # then writes data files. Hadoop creates directories 0755 whatever the umask,
+    # so create them open first. (Running the container as this uid fails: Hadoop
+    # cannot log in a user the image has no name for.)
     for directory in ("taxi", "taxi/trips", "taxi/trips/data", "taxi/trips/metadata"):
         (warehouse / directory).mkdir()
         (warehouse / directory).chmod(0o777)
@@ -132,10 +131,9 @@ def test_a_rest_catalog_table_is_read_by_name(tmp_path, rest_catalog):
     _reads_by_name_and_pin(config, "rest", catalog, first)
 
 
-# DuckDB deletes merge-on-read: a positional delete file on a v2 table, a
-# deletion vector (Puffin) on v3. Its manifests leave snapshot ids and sequence
-# numbers to be inherited, which pyiceberg before 0.12 misread, dropping the
-# deletes without a word.
+# DuckDB deletes merge-on-read: a positional delete file on v2, a deletion vector
+# (Puffin) on v3. Its manifests leave snapshot ids and sequence numbers to be
+# inherited, which pyiceberg before 0.12 misread, silently dropping the deletes.
 @pytest.mark.parametrize(
     ("format_version", "delete_format"),
     [("2", "PARQUET"), ("3", "PUFFIN")],
@@ -189,8 +187,8 @@ def test_a_glue_catalog_table_is_read_by_name(tmp_path, monkeypatch):
         with mock_aws():
             catalog = load_catalog("glue", **properties)
             first = _two_snapshots(catalog)
-            # No S3 settings of Strata's own: the data files are read with the
-            # credentials the catalog gave the table.
+            # No Strata S3 settings: data files are read with the credentials the catalog
+            # gave the table.
             config = StrataConfig(cache_dir=tmp_path / "cache", catalogs={"glue": properties})
 
             _reads_by_name_and_pin(config, "glue", catalog, first)
@@ -204,8 +202,8 @@ def test_a_gcs_warehouse_scans(tmp_path):
 
     port = _free_port()
     container = DockerContainer("fsouza/fake-gcs-server:1.52.2")
-    # Resumable uploads are redirected to the external URL, so it has to be the
-    # address this process reaches the container on.
+    # Resumable uploads redirect to the external URL, so it must be the address this
+    # process reaches the container on.
     container.with_command(f"-scheme http -port 4443 -external-url http://127.0.0.1:{port}")
     container.with_bind_ports(4443, port)
     start_container_or_skip(

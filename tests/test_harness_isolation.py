@@ -61,8 +61,8 @@ def test_with_the_setting_it_does_not(tmp_path, capsys, monkeypatch):
     stdout = _run(_notebook(tmp_path), capsys)
 
     assert "TOKEN: <absent>" in stdout
-    # And the cell still got what it was given, and still ran at all — the
-    # half a too-aggressive filter would break.
+    # The cell still got its own env and still ran: the half an over-aggressive
+    # filter would break.
     assert "HF: hf_x" in stdout
 
 

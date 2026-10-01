@@ -205,7 +205,6 @@ def test_real_open_read_only_rejects_write_on_memory_db():
     spec = ConnectionSpec(name="db", driver="duckdb", path=":memory:")
     ro = a.open(spec, read_only=True)
     cur = ro.cursor()
-    # Reads work.
     cur.execute("SELECT 1+1")
     assert cur.fetchone() == (2,)
     # Writes are blocked by the per-cursor RO transaction.

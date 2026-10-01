@@ -96,8 +96,7 @@ def test_capabilities_match_design_doc():
     # data_version / schema_version are DB-wide, not per-table.
     assert a.capabilities.per_table_freshness is False
     assert a.capabilities.supports_snapshot is False
-    # Pragmas don't have transaction-frozen semantics — same
-    # connection can probe and query.
+    # Pragmas aren't transaction-frozen, so one connection can probe and query.
     assert a.capabilities.needs_separate_probe_conn is False
 
 
@@ -487,7 +486,7 @@ def test_probe_schema_unqualified_uses_default_pragma():
     conn = _FakeConn(cursor)
     a.probe_schema(conn, [QualifiedTable(None, None, "events")])
     sql, _ = cursor.executions[0]
-    # Bare pragma form — no "<schema>".pragma_table_info qualifier.
+    # Bare pragma form, with no "<schema>".pragma_table_info qualifier.
     assert "pragma_table_info" in sql
     assert '".pragma_table_info' not in sql
 
@@ -539,10 +538,8 @@ def test_sqlite_adapter_is_auto_registered():
 
 
 # --- real-DB integration --------------------------------------------------
-# These tests use ADBC against a real SQLite file. Skipped if the
-# package isn't installed, otherwise execute the full open → probe →
-# write → reprobe cycle to catch protocol-level mistakes the mock
-# tests miss.
+# ADBC against a real SQLite file (skipped without the package): the full open,
+# probe, write, reprobe cycle catches protocol mistakes the mocks miss.
 
 
 def _adbc_sqlite_available() -> bool:

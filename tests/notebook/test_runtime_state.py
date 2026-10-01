@@ -118,7 +118,7 @@ def test_migration_is_noop_when_runtime_state_already_populated(tmp_path: Path):
     migrated = migrate_from_legacy_notebook_toml(tmp_path, toml_data)
     assert migrated is False
     reloaded = load_runtime_state(tmp_path)
-    # Existing entry wins — migration must not overwrite fresh state.
+    # Existing entry wins; migration must not overwrite fresh state.
     assert reloaded.cells["c1"].display_outputs[0]["content_type"] == "pickle/object"
 
 
@@ -126,7 +126,7 @@ def test_migration_without_legacy_artifacts_returns_false(tmp_path: Path):
     toml_data = {"notebook_id": "nb", "cells": []}
     migrated = migrate_from_legacy_notebook_toml(tmp_path, toml_data)
     assert migrated is False
-    # And no runtime.json file was created since there was nothing to write.
+    # Nothing to write, so no file is created.
     assert not runtime_state_path(tmp_path).exists()
 
 
@@ -466,7 +466,7 @@ def test_local_and_team_savings_are_reported_separately(tmp_path: Path):
     write_cell(notebook_dir, "c2", "y = 2")
 
     session = NotebookSession(parse_notebook(notebook_dir), notebook_dir)
-    # c1: ran locally, then hit locally — priced against its own last run.
+    # c1: ran locally, then hit locally, so it is priced against its own last run.
     session.record_execution("c1", duration_ms=2000.0, cache_hit=False)
     session.record_execution("c1", duration_ms=5.0, cache_hit=True)
     # c2: never ran here; served from the team store.

@@ -266,9 +266,8 @@ def test_a_table_the_first_resolution_missed_reads_what_the_retry_found(tmp_path
     )
 
     assert lake.snapshots == {("taxi", "trips"): 7}
-    # And the cell's key names that snapshot, not the random stand-in
-    # fingerprint_tables invents for what it could not resolve — which no
-    # later run would ever reproduce.
+    # And the cell's key names that snapshot, not the random stand-in fingerprint_tables
+    # invents for a table it could not resolve, which no later run would reproduce.
     assert lake.fingerprints == [f"{_lake_name('lake:taxi.trips')}:table:lake:taxi.trips:7"]
 
 

@@ -40,8 +40,8 @@ class TestInplaceMutationRouting:
         assert dag.cell_upstream["mutate"] == ["load"]
         assert dag.cell_upstream["use"] == ["mutate"]
 
-        # Therefore the mutating cell must serialize df (recapture), and load's
-        # df is consumed by the mutating cell — not directly by the reader.
+        # So the mutating cell must serialize df (recapture), and load's df is
+        # consumed by the mutating cell, not directly by the reader.
         assert dag.consumed_variables["mutate"] == {"df"}
         assert dag.consumed_variables["load"] == {"df"}
 
@@ -81,16 +81,13 @@ class TestDagBuildingBasics:
         ]
         dag = NotebookDag.from_cells(cells)
 
-        # Check edges
         assert len(dag.edges) == 2
         assert dag.edges[0] == DagEdge("a", "b", "x")
         assert dag.edges[1] == DagEdge("b", "c", "y")
 
-        # Check upstream/downstream
         assert dag.cell_upstream == {"a": [], "b": ["a"], "c": ["b"]}
         assert dag.cell_downstream == {"a": ["b"], "b": ["c"], "c": []}
 
-        # Check roots and leaves
         assert dag.roots == {"a"}
         assert dag.leaves == {"c"}
 
@@ -104,7 +101,6 @@ class TestDagBuildingBasics:
         ]
         dag = NotebookDag.from_cells(cells)
 
-        # Check edges
         assert len(dag.edges) == 4
         edges_str = {(e.from_cell_id, e.to_cell_id, e.variable) for e in dag.edges}
         assert edges_str == {
@@ -114,7 +110,6 @@ class TestDagBuildingBasics:
             ("c", "d", "z"),
         }
 
-        # Check upstream/downstream
         assert dag.cell_upstream == {
             "a": [],
             "b": ["a"],
@@ -128,7 +123,6 @@ class TestDagBuildingBasics:
             "d": [],
         }
 
-        # Check roots and leaves
         assert dag.roots == {"a"}
         assert dag.leaves == {"d"}
 
@@ -249,9 +243,7 @@ class TestTopologicalSort:
         dag = NotebookDag.from_cells(cells)
 
         order = dag.topological_order
-        # a must come first
         assert order[0] == "a"
-        # d must come last
         assert order[-1] == "d"
         # b and c can be in any order as long as they're between a and d
         assert set(order[1:3]) == {"b", "c"}
@@ -266,7 +258,6 @@ class TestTopologicalSort:
         dag = NotebookDag.from_cells(cells)
 
         order = dag.topological_order
-        # c must come last
         assert order[-1] == "c"
         # a and b can be in any order
         assert set(order[:2]) == {"a", "b"}
@@ -424,7 +415,6 @@ class TestRealWorldDAGs:
         ]
         dag = NotebookDag.from_cells(cells)
 
-        # Linear chain
         assert dag.topological_order == ["load", "clean", "aggregate", "plot"]
         assert dag.roots == {"load"}
         assert dag.leaves == {"plot"}
@@ -485,7 +475,6 @@ class TestRealWorldDAGs:
         ]
         dag = NotebookDag.from_cells(cells)
 
-        # features is shared by both train and evaluate
         assert dag.cell_downstream["features"] == ["train", "evaluate"]
 
 

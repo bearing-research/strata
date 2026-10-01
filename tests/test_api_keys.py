@@ -21,10 +21,9 @@ class TestKeyFormat:
         assert parse_key(format_key("abc123", "s3cr3t")) == ("abc123", "s3cr3t")
 
     def test_secret_may_contain_underscores(self):
-        # The secret is base64url and that alphabet includes '_'. An unbounded
-        # split("_") reads such a key as four parts and rejects it -- which is
-        # an intermittent auth failure on roughly half of every batch issued,
-        # and looks like a flaky client rather than a server bug.
+        # The secret is base64url, which includes '_'. An unbounded split("_") reads such
+        # a key as four parts and rejects it: an intermittent failure on about half of all
+        # keys, which looks like a flaky client.
         assert parse_key("strata_keyid_ab_cd_ef") == ("keyid", "ab_cd_ef")
 
     @pytest.mark.parametrize(
@@ -58,9 +57,8 @@ class TestVerification:
         assert record.is_active
 
     def test_every_key_in_a_batch_verifies(self, store):
-        # The regression that matters for the underscore bug: about half of
-        # generated secrets contain one, so a single round-trip test passes
-        # roughly half the time by luck.
+        # About half of generated secrets contain '_', so a single round-trip test passes
+        # by luck half the time.
         minted = [store.create_key(principal_id=f"p{i}")[0] for i in range(50)]
         assert all(store.verify(k) is not None for k in minted)
 

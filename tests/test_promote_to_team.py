@@ -235,10 +235,8 @@ class TestPromote:
             chain["upstream"].id,
         ]
 
-        # Every node resolves to a row this store actually holds. The builder
-        # makes a node out of a recorded *edge*, so the list above is
-        # satisfied by a figure whose ancestor never arrived — which is the
-        # failure this test exists to catch, and it would not have.
+        # Every node resolves to a row this store holds. The builder makes a node out of
+        # a recorded *edge*, so the list above passes even when an ancestor never arrived.
         for node in artifacts:
             assert store.get_artifact(node.artifact_id, node.version) is not None, (
                 f"lineage names {node.artifact_id}@v={node.version}, "
@@ -581,9 +579,9 @@ class TestPromoteRoute:
         from strata.server import get_state
 
         monkeypatch.setattr(get_state().config, "notebook_remote_store_url", url)
-        # That setting belongs to the notebook's server, but in one process the
-        # team store reads the same config and its registry routes would forward
-        # every write back to themselves. The team store has no team store.
+        # That setting belongs to the notebook's server, but in one process the team
+        # store reads the same config and its registry routes would forward every write
+        # back to themselves.
         import strata.api.routers.artifacts as artifacts_router
         import strata.api.routers.names as names_router
 

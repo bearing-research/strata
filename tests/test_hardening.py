@@ -80,7 +80,6 @@ def temp_warehouse(tmp_path):
 
     table = catalog.create_table("test_db.events", schema)
 
-    # Create sample data
     num_rows = 1000
     data = pa.table(
         {
@@ -110,7 +109,6 @@ class TestRestartPersistence:
 
         config = StrataConfig(cache_dir=cache_dir)
 
-        # First planner instance - cold run
         planner1 = ReadPlanner(config)
         fetcher1 = CachedFetcher(config)
 
@@ -118,17 +116,15 @@ class TestRestartPersistence:
         batches1 = fetcher1.execute_plan(plan1)
         total_rows1 = sum(b.num_rows for b in batches1)
 
-        # Verify data was cached
         cache_entries = list((cache_dir / f"v{CACHE_VERSION}").rglob(f"*{CACHE_FILE_EXTENSION}"))
         assert len(cache_entries) > 0, "Cache should have entries after first run"
 
-        # Simulate restart: create new planner/fetcher instances
+        # Simulate a restart with fresh planner and fetcher instances.
         planner2 = ReadPlanner(config)
         fetcher2 = CachedFetcher(config)
 
         plan2 = planner2.plan(table_uri)
 
-        # Track cache hits
         cache_hits = 0
         for task in plan2.tasks:
             if fetcher2.cache.contains(task.cache_key):
@@ -137,7 +133,6 @@ class TestRestartPersistence:
         batches2 = fetcher2.execute_plan(plan2)
         total_rows2 = sum(b.num_rows for b in batches2)
 
-        # Verify results match and cache was used
         assert total_rows1 == total_rows2
         assert cache_hits == len(plan2.tasks), "All tasks should hit cache after restart"
 
@@ -148,33 +143,26 @@ class TestRestartPersistence:
         cache_dir = tmp_path / "cache"
         table_uri = temp_warehouse["table_uri"]
 
-        # Reset global state
         reset_caches()
 
         config = StrataConfig(cache_dir=cache_dir)
 
-        # First planner - populates metadata cache
         planner1 = ReadPlanner(config)
         plan1 = planner1.plan(table_uri)
 
-        # Check metadata store has entries
         store = get_metadata_store(cache_dir)
         stats1 = store.stats()
         assert stats1["parquet_entries"] > 0, "Should have parquet metadata cached"
 
-        # Simulate restart: reset in-memory caches but keep SQLite
+        # Simulate a restart: reset in-memory caches but keep SQLite.
         reset_caches()
 
-        # New planner should use persisted metadata
         planner2 = ReadPlanner(config)
 
-        # Record timing - should be faster due to cached metadata
         plan2 = planner2.plan(table_uri)
 
-        # Verify metadata was reused (check store hit counters)
         get_metadata_store(cache_dir)
 
-        # Should have hits from second planning
         assert len(plan2.tasks) == len(plan1.tasks)
 
 
@@ -190,34 +178,29 @@ class TestCorruptedCacheSelfHealing:
         planner = ReadPlanner(config)
         fetcher = CachedFetcher(config)
 
-        # First run - populate cache
         plan = planner.plan(table_uri)
         batches1 = fetcher.execute_plan(plan)
         total_rows1 = sum(b.num_rows for b in batches1)
 
-        # Find and corrupt a cache file
         cache_files = list((cache_dir / f"v{CACHE_VERSION}").rglob(f"*{CACHE_FILE_EXTENSION}"))
         assert len(cache_files) > 0
 
         corrupted_file = cache_files[0]
 
-        # Write garbage to corrupt the file
         corrupted_file.write_bytes(b"CORRUPTED DATA - NOT VALID ARROW IPC")
 
-        # Create fresh fetcher (simulates restart)
+        # A fresh fetcher simulates a restart.
         fetcher2 = CachedFetcher(config)
 
-        # Plan again and fetch - should handle corruption gracefully
         plan2 = planner.plan(table_uri)
         batches2 = fetcher2.execute_plan(plan2)
         total_rows2 = sum(b.num_rows for b in batches2)
 
-        # Data should still be correct (refetched)
+        # Refetched, so the data is still correct.
         assert total_rows2 == total_rows1
 
-        # Corrupted file should be deleted or replaced with valid data
+        # The corrupted file is deleted or replaced with valid data.
         if corrupted_file.exists():
-            # If it exists, it should be valid Arrow IPC now
             new_size = corrupted_file.stat().st_size
             assert new_size != len(b"CORRUPTED DATA - NOT VALID ARROW IPC"), (
                 "Corrupted file should be replaced with valid data"
@@ -234,20 +217,17 @@ class TestCorruptedCacheSelfHealing:
         planner = ReadPlanner(config)
         fetcher = CachedFetcher(config)
 
-        # First run - populate cache
         plan = planner.plan(table_uri)
         fetcher.execute_plan(plan)
 
-        # Corrupt a metadata sidecar file
         meta_files = list((cache_dir / f"v{CACHE_VERSION}").rglob(f"*{CACHE_META_EXTENSION}"))
         assert len(meta_files) > 0
 
         meta_files[0].write_text("{ invalid json }")
 
-        # Getting stats should handle corrupted metadata gracefully
         assert isinstance(fetcher.cache, DiskCache)
         stats = fetcher.cache.get_stats()
-        # Should still return stats (corrupted entries are skipped)
+        # Corrupted entries are skipped.
         assert stats.total_entries >= 0
 
 
@@ -266,7 +246,6 @@ class TestConcurrentRequestsNoThunderingHerd:
 
         def worker():
             try:
-                # Each worker creates its own planner and fetcher
                 planner = ReadPlanner(config)
                 fetcher = CachedFetcher(config)
                 plan = planner.plan(table_uri)
@@ -277,7 +256,6 @@ class TestConcurrentRequestsNoThunderingHerd:
 
                 errors.append((e, traceback.format_exc()))
 
-        # Run multiple concurrent fetchers
         num_workers = 5
         threads = [threading.Thread(target=worker) for _ in range(num_workers)]
 
@@ -286,11 +264,9 @@ class TestConcurrentRequestsNoThunderingHerd:
         for t in threads:
             t.join()
 
-        # All should succeed
         assert len(errors) == 0, f"Errors: {errors}"
         assert len(results) == num_workers
 
-        # All should return same row count
         assert all(r == results[0] for r in results)
 
     def test_server_concurrent_scans_use_semaphore(self, temp_warehouse, tmp_path):
@@ -300,7 +276,6 @@ class TestConcurrentRequestsNoThunderingHerd:
         cache_dir = tmp_path / "cache"
         table_uri = temp_warehouse["table_uri"]
 
-        # Find free port
         sock = socket.socket()
         sock.bind(("127.0.0.1", 0))
         port = sock.getsockname()[1]
@@ -310,7 +285,7 @@ class TestConcurrentRequestsNoThunderingHerd:
             host="127.0.0.1",
             port=port,
             cache_dir=cache_dir,
-            max_concurrent_scans=2,  # Low limit to test queuing
+            max_concurrent_scans=2,  # Low limit to exercise queuing
             deployment_mode="personal",
         )
 
@@ -334,13 +309,11 @@ class TestConcurrentRequestsNoThunderingHerd:
 
         client = StrataClient(base_url=f"http://127.0.0.1:{port}")
 
-        # Submit multiple scans concurrently
         results = []
         errors = []
 
         def scan_worker():
             try:
-                # Use the new materialize API
                 artifact = client.materialize(
                     inputs=[table_uri],
                     transform={"executor": "scan@v1", "params": {}},
@@ -360,7 +333,7 @@ class TestConcurrentRequestsNoThunderingHerd:
 
         client.close()
 
-        # All should succeed (queued if over limit)
+        # All succeed (queued when over the limit).
         assert len(errors) == 0, f"Errors: {errors}"
         assert len(results) == num_workers
 
@@ -379,7 +352,6 @@ class TestStaleMetadataInvalidation:
 
         config = StrataConfig(cache_dir=cache_dir)
 
-        # First scan - populates metadata
         planner1 = ReadPlanner(config)
         plan1 = planner1.plan(temp_warehouse["table_uri"])
 
@@ -388,7 +360,7 @@ class TestStaleMetadataInvalidation:
         initial_entries = stats1["parquet_entries"]
         assert initial_entries > 0
 
-        # Append more data (creates new files, may update existing)
+        # Creates new files and may update existing ones.
         new_data = pa.table(
             {
                 "id": pa.array(range(100), type=pa.int64()),
@@ -398,16 +370,13 @@ class TestStaleMetadataInvalidation:
         )
         table.append(new_data)
 
-        # Run cleanup - should detect stale entries
         store.cleanup_stale_parquet_meta()
 
-        # New planning should work correctly
         reset_caches()
         planner2 = ReadPlanner(config)
         plan2 = planner2.plan(temp_warehouse["table_uri"])
 
-        # Should have more tasks now (more data)
-        # Note: may have same number of row groups if data fits in existing
+        # May keep the same row-group count if the new data fits in existing files.
         assert len(plan2.tasks) >= len(plan1.tasks)
 
 
@@ -425,14 +394,12 @@ class TestLargeScanStreaming:
 
         plan = planner.plan(table_uri)
 
-        # Use streaming API - should yield batches one at a time
         batch_count = 0
         total_rows = 0
 
         for batch in fetcher.stream_plan(plan):
             batch_count += 1
             total_rows += batch.num_rows
-            # Each batch should be processable independently
             assert batch.num_rows > 0
 
         assert batch_count == len(plan.tasks)
@@ -449,16 +416,13 @@ class TestLargeScanStreaming:
 
         plan = planner.plan(table_uri)
 
-        # Use IPC streaming API
         segment_count = 0
         total_bytes = 0
 
         for segment in fetcher.stream_plan_as_ipc(plan):
             segment_count += 1
             total_bytes += len(segment)
-            # Each segment should be valid IPC bytes
             assert len(segment) > 0
-            # Verify it's valid Arrow IPC
             reader = ipc.open_stream(pa.BufferReader(segment))
             batches = list(reader)
             assert len(batches) == 1
@@ -475,17 +439,14 @@ class TestLargeScanStreaming:
         planner = ReadPlanner(config)
         fetcher = CachedFetcher(config)
 
-        # First, do a scan to see how big the response is
         plan = planner.plan(table_uri)
         batches = fetcher.execute_plan(plan)
         total_size = sum(b.nbytes for b in batches)
 
-        # The response will be larger than sum of nbytes due to IPC overhead
-        # Verify that we can detect when responses would be too large
         assert total_size > 0, "Should have data"
 
-        # The server enforces max_response_bytes during scan execution
-        # This test verifies the check exists by examining the config
+        # The server enforces max_response_bytes during the scan; this only checks
+        # the config carries the limit.
         assert config.max_response_bytes > 0, "Should have response size limit"
         assert config.max_response_bytes == 512 * 1024 * 1024  # Default 512MB
 
@@ -558,7 +519,6 @@ class TestStreamingIntegration:
         expected_rows = server_with_client["warehouse"]["num_rows"]
 
         with httpx.Client(timeout=30.0) as http_client:
-            # Create materialize request with stream mode
             response = http_client.post(
                 f"http://127.0.0.1:{config.port}/v1/materialize",
                 json=build_materialize_request(table_uri),
@@ -567,25 +527,20 @@ class TestStreamingIntegration:
             data = response.json()
             stream_url = data["stream_url"]
 
-            # Fetch stream data
             response = http_client.get(
                 f"http://127.0.0.1:{config.port}{stream_url}",
             )
             assert response.status_code == 200
             assert response.headers["content-type"] == "application/vnd.apache.arrow.stream"
 
-            # Collect streamed bytes
             streamed_bytes = response.content
 
-            # Must be valid Arrow IPC stream
             reader = ipc.open_stream(pa.BufferReader(streamed_bytes))
 
-            # Verify schema is present
             schema = reader.schema
             assert "id" in schema.names
             assert "value" in schema.names
 
-            # Read all batches
             batches = list(reader)
             assert len(batches) > 0, "Should have at least one batch"
 
@@ -633,7 +588,6 @@ class TestStreamingIntegration:
 
         config = server_with_client["config"]
 
-        # Create empty table
         warehouse_path = tmp_path / "empty_warehouse"
         warehouse_path.mkdir()
 
@@ -647,14 +601,13 @@ class TestStreamingIntegration:
         schema = Schema(NestedField(1, "id", LongType(), required=False))
         table = catalog.create_table("test_db.empty_table", schema)
 
-        # Append empty table (this creates a snapshot with no data files)
+        # This creates a snapshot with no data files.
         empty_data = pa.table({"id": pa.array([], type=pa.int64())})
         table.append(empty_data)
 
         table_uri = f"file://{warehouse_path}#test_db.empty_table"
 
         with httpx.Client(timeout=30.0) as http_client:
-            # Create materialize request
             response = http_client.post(
                 f"http://127.0.0.1:{config.port}/v1/materialize",
                 json=build_materialize_request(table_uri),
@@ -663,16 +616,14 @@ class TestStreamingIntegration:
             data = response.json()
             stream_url = data["stream_url"]
 
-            # Fetch stream data - should be valid empty IPC stream
             response = http_client.get(
                 f"http://127.0.0.1:{config.port}{stream_url}",
             )
             assert response.status_code == 200
 
-            # Verify it's a valid Arrow IPC stream (not 0 bytes)
             assert len(response.content) > 0, "Should return valid IPC stream, not 0 bytes"
 
-            # Parse as Arrow IPC - should have schema but no batches
+            # Schema but no batches.
             reader = ipc.open_stream(pa.BufferReader(response.content))
             assert "id" in reader.schema.names, "Schema should have 'id' column"
             batches = list(reader)
@@ -693,8 +644,6 @@ class TestStreamingIntegration:
             assert response.status_code == 200
             data = response.json()
 
-            # estimated_bytes should be present and positive (renamed to estimated_size_bytes)
-            # The response should contain size information
             assert "artifact_uri" in data
             assert "stream_url" in data
 
@@ -728,7 +677,6 @@ class TestStreamingIntegration:
 
         state.fetcher.fetch_as_stream_bytes = slow_fetch
 
-        # Create a materialize request
         with httpx.Client(timeout=30.0) as http_client:
             response = http_client.post(
                 f"http://127.0.0.1:{config.port}/v1/materialize",
@@ -739,24 +687,21 @@ class TestStreamingIntegration:
             stream_url = response.json()["stream_url"]
             artifact_id, version = artifact_uri.removeprefix("strata://artifact/").split("@v=")
 
-            # Start streaming but close connection after first chunk
-            # This simulates a client disconnect
+            # Close the connection after the first chunk to simulate a disconnect.
             try:
                 with http_client.stream(
                     "GET",
                     f"http://127.0.0.1:{config.port}{stream_url}",
                     timeout=5,
                 ) as stream:
-                    # Read just the first chunk then close
                     for chunk in stream.iter_bytes(chunk_size=1024):
                         if chunk:
-                            break  # Simulate disconnect by breaking early
+                            break
             except Exception:
                 pass  # Connection errors expected
 
-        # The build is decoupled from the client: a mid-stream disconnect must
-        # NOT poison the artifact. The background build finalizes it ready
-        # regardless of who is (or isn't) reading.
+        # The build is decoupled from the client: a mid-stream disconnect must NOT
+        # poison the artifact. The background build finalizes it ready regardless.
         with httpx.Client(timeout=30.0) as http_client:
             deadline = time.time() + 10
             final_state = None
@@ -773,8 +718,7 @@ class TestStreamingIntegration:
                 f"client disconnect must not fail the build; got state={final_state}"
             )
 
-        # Now verify we can still do scans (resources were released)
-        # If semaphore wasn't released, this would hang or timeout
+        # A leaked semaphore would make this hang or time out.
         with httpx.Client(timeout=30.0) as http_client:
             response = http_client.post(
                 f"http://127.0.0.1:{config.port}/v1/materialize",
@@ -783,14 +727,12 @@ class TestStreamingIntegration:
             assert response.status_code == 200
             stream_url2 = response.json()["stream_url"]
 
-            # Complete a full scan to verify functionality
             response = http_client.get(
                 f"http://127.0.0.1:{config.port}{stream_url2}",
             )
             assert response.status_code == 200
             assert len(response.content) > 0, "Should get data from second scan"
 
-            # Verify the streamed data is valid Arrow IPC
             reader = ipc.open_stream(pa.BufferReader(response.content))
             batches = list(reader)
             assert len(batches) > 0
@@ -818,12 +760,11 @@ class TestStreamingIntegration:
 
         cache_dir = tmp_path / "timeout_cache"
 
-        # Create config with very short timeout
         config = StrataConfig(
             host="127.0.0.1",
             port=port,
             cache_dir=cache_dir,
-            scan_timeout_seconds=0.001,  # 1ms - will definitely timeout
+            scan_timeout_seconds=0.001,  # 1ms: will definitely time out
             deployment_mode="personal",
         )
 
@@ -845,9 +786,9 @@ class TestStreamingIntegration:
         server_thread.start()
         time.sleep(1)
 
-        # Three row groups, not two: the first can come from a prefetch that is
-        # already done, so the check before the second can land inside 1ms. The
-        # check before the third always follows a slow fetch.
+        # Three row groups, not two: the first can come from a finished prefetch, so
+        # the check before the second can land inside 1ms. The check before the third
+        # always follows a slow fetch.
         append_rows(temp_warehouse["table"], 1000, 25)
         append_rows(temp_warehouse["table"], 1025, 25)
         table_uri = temp_warehouse["table_uri"]
@@ -861,7 +802,6 @@ class TestStreamingIntegration:
         state.fetcher.fetch_as_stream_bytes = slow_fetch
 
         with httpx.Client(timeout=30.0) as http_client:
-            # Create materialize request
             response = http_client.post(
                 f"http://127.0.0.1:{port}/v1/materialize",
                 json=build_materialize_request(table_uri),
@@ -871,27 +811,24 @@ class TestStreamingIntegration:
             stream_url = response.json()["stream_url"]
             artifact_id, version = artifact_uri.removeprefix("strata://artifact/").split("@v=")
 
-            # Fetch stream - should fail due to timeout
-            # The server aborts the connection, so we may get various errors
+            # The server aborts the connection, so several errors are possible.
             try:
                 response = http_client.get(
                     f"http://127.0.0.1:{port}{stream_url}",
                     timeout=10,
                 )
-                # If we get a response, it should be incomplete/invalid
-                # (server raised error during streaming)
+                # A response here is incomplete: the server raised during streaming.
                 if len(response.content) > 0:
-                    # Try to parse - may fail if truncated
+                    # May fail if truncated.
                     try:
                         reader = ipc.open_stream(pa.BufferReader(response.content))
                         list(reader)
-                        # If it parses, the scan was fast enough to complete
-                        # before timeout (possible with cached data)
+                        # Parsing means the scan beat the timeout (possible with cached data).
                     except Exception:
-                        # Expected - truncated stream
+                        # Truncated stream
                         pass
             except httpx.ReadError:
-                # Expected - server aborted connection
+                # Server aborted the connection
                 pass
 
             time.sleep(0.2)
@@ -949,15 +886,10 @@ class TestStreamAbortMetrics:
             "port": port,
         }
 
-    # NOTE: there is intentionally no client-disconnect *counter* test here.
-    # Under wait-then-serve the build is decoupled from the read, so a disconnect
-    # is only observable if it lands while the server is mid-send — which depends
-    # on the OS socket-send-buffer size and Starlette's cancel timing, and is not
-    # reproducible across platforms (it passes on local macOS but not on macOS CI
-    # runners). The `client_disconnects` metric is kept as best-effort
-    # observability (recorded when `serve_blob` is cancelled mid-send), but the
-    # meaningful, platform-independent contract — a disconnect leaves the artifact
-    # `ready` and leaks no resources — is covered by
+    # No client-disconnect *counter* test: a disconnect is only observable if it
+    # lands mid-send, which depends on socket buffer sizes and Starlette's cancel
+    # timing and is not reproducible across platforms. The contract (artifact
+    # stays `ready`, no leaked resources) is covered by
     # TestStreamingIntegration.test_client_disconnect_releases_resources and
     # test_semaphore_leak.test_concurrent_disconnects_no_leak.
 
@@ -1013,7 +945,6 @@ class TestStreamAbortMetrics:
         state.fetcher.fetch_as_stream_bytes = slow_fetch
 
         with httpx.Client(timeout=30.0) as http_client:
-            # Create materialize request
             response = http_client.post(
                 f"http://127.0.0.1:{port}/v1/materialize",
                 json=build_materialize_request(table_uri),
@@ -1021,7 +952,6 @@ class TestStreamAbortMetrics:
             assert response.status_code == 200
             stream_url = response.json()["stream_url"]
 
-            # Fetch - should timeout
             try:
                 http_client.get(
                     f"http://127.0.0.1:{port}{stream_url}",
@@ -1030,7 +960,7 @@ class TestStreamAbortMetrics:
             except Exception:
                 pass
 
-        # Give server time to record metrics
+        # Give the server time to record metrics.
         time.sleep(0.5)
 
         final_timeouts = state.metrics.stream_aborts_timeout
@@ -1096,7 +1026,6 @@ class TestStreamAbortMetrics:
         assert response.status_code == 200
         metrics = response.json()
 
-        # Verify abort counters are present
         assert "stream_aborts_timeout" in metrics
         assert "stream_aborts_size" in metrics
         assert "client_disconnects" in metrics
@@ -1111,7 +1040,6 @@ class TestStreamAbortMetrics:
         assert response.status_code == 200
         content = response.text
 
-        # Verify abort counters are present in Prometheus format
         assert "strata_stream_aborts_timeout_total" in content
         assert "strata_stream_aborts_size_total" in content
         assert "strata_client_disconnects_total" in content
@@ -1131,7 +1059,7 @@ class TestActiveScanCount:
         config = StrataConfig(cache_dir=tmp_path / "cache", interactive_slots=2, bulk_slots=2)
         state = ServerState(config)
 
-        # Fresh registry: no live limiters -> idle, not saturated.
+        # Fresh registry: no live limiters means idle, not saturated.
         _update_saturation_tracking(state)
         assert state._interactive_saturated_since is None
 
@@ -1139,13 +1067,12 @@ class TestActiveScanCount:
         interactive, _bulk = registry.get_or_create_limiters("team-a")
 
         async def drive():
-            # Exhaust the interactive tier on the real admission limiter.
             for _ in range(interactive.available):
                 await interactive.acquire()
             _update_saturation_tracking(state)
             assert state._interactive_saturated_since is not None
 
-            # Free one slot -> no longer saturated.
+            # Free one slot: no longer saturated.
             await interactive.release()
             _update_saturation_tracking(state)
             assert state._interactive_saturated_since is None
@@ -1175,33 +1102,26 @@ class TestActiveScanCount:
         registry = get_tenant_registry()
         interactive, bulk = registry.get_or_create_limiters("team-a")
 
-        # Initially no active scans
         assert _get_active_scan_count() == 0
 
         async def test_counting():
             assert _get_active_scan_count() == 0
 
-            # Acquire from interactive tier
             await interactive.acquire()
             assert _get_active_scan_count() == 1
 
-            # Acquire from bulk tier
             await bulk.acquire()
             assert _get_active_scan_count() == 2
 
-            # Acquire another from interactive
             await interactive.acquire()
             assert _get_active_scan_count() == 3
 
-            # Release from interactive
             await interactive.release()
             assert _get_active_scan_count() == 2
 
-            # Release from bulk
             await bulk.release()
             assert _get_active_scan_count() == 1
 
-            # Release remaining interactive
             await interactive.release()
             assert _get_active_scan_count() == 0
 
@@ -1249,11 +1169,9 @@ class TestActiveScanCount:
 
         table_uri = temp_warehouse["table_uri"]
 
-        # Check initial state
         assert _get_active_scan_count() == 0
 
         with httpx.Client(timeout=30.0) as http_client:
-            # Create and complete a materialize request
             response = http_client.post(
                 f"http://127.0.0.1:{port}/v1/materialize",
                 json=build_materialize_request(table_uri),
@@ -1261,14 +1179,12 @@ class TestActiveScanCount:
             assert response.status_code == 200
             stream_url = response.json()["stream_url"]
 
-            # Fetch all data
             response = http_client.get(f"http://127.0.0.1:{port}{stream_url}")
             assert response.status_code == 200
 
-        # Give server time to release resources
+        # Give the server time to release resources.
         time.sleep(0.2)
 
-        # Should be back to zero
         assert _get_active_scan_count() == 0
 
 
@@ -1334,8 +1250,7 @@ class TestConcurrentScans:
                 assert resp.status_code == 200
                 return len(resp.content)
 
-        # Warm the cache so all 5 concurrent requests follow the cache-hit
-        # path uniformly.
+        # Warm the cache so all 5 concurrent requests take the cache-hit path.
         do_scan()
 
         num_concurrent = 5
@@ -1371,21 +1286,16 @@ class TestNonBlockingLogging:
         collector = MetricsCollector(output=output, enabled=True)
 
         try:
-            # Verify queue exists
             assert hasattr(collector, "_log_queue")
             assert isinstance(collector._log_queue, queue_module.Queue)
 
-            # Verify background writer thread is running
             assert hasattr(collector, "_writer_thread")
             assert collector._writer_thread.is_alive()
 
-            # Log an event
             collector.log_event("test_event", key="value")
 
-            # Wait for background thread to process
             collector._log_queue.join()
 
-            # Verify output was written
             output.seek(0)
             content = output.read()
             assert "test_event" in content
@@ -1399,24 +1309,20 @@ class TestNonBlockingLogging:
 
         from strata.metrics import MetricsCollector
 
-        # Create collector with tiny queue that will fill up
         output = io.StringIO()
         collector = MetricsCollector(output=output, enabled=True, log_queue_size=2)
 
         try:
-            # Pause background writer by filling queue beyond capacity
-            # First, shut down the writer so queue fills up
+            # Stop the writer so the queue fills up.
             collector._shutdown.set()
             collector._writer_thread.join(timeout=1)
 
-            # Reset for new attempt - create a blocking scenario
             initial_dropped = collector.dropped_logs
 
-            # Flood the queue - should drop after queue is full
             for i in range(100):
                 collector.log_event(f"flood_event_{i}")
 
-            # Some logs should have been dropped (queue only holds 2)
+            # The queue only holds 2.
             assert collector.dropped_logs > initial_dropped, (
                 "Should have dropped logs when queue was full"
             )
@@ -1433,13 +1339,11 @@ class TestNonBlockingLogging:
         collector = MetricsCollector(output=output, enabled=True)
 
         try:
-            # Record some metrics
             collector.record_fetch(1000, 10, 5.0, from_cache=True)
             collector.record_fetch(2000, 20, 10.0, from_cache=False)
 
-            # The contract is that stats are aggregated from in-memory state;
-            # verify the aggregation is correct (the "non-blocking" design is
-            # structural — there's no I/O on this path to assert a time bound on).
+            # Stats aggregate in-memory state; there is no I/O on this path to put a
+            # time bound on, so check the aggregation is correct.
             stats = collector.get_aggregate_stats()
 
             assert stats["cache_hits"] == 1
@@ -1459,7 +1363,6 @@ class TestNonBlockingLogging:
         collector = MetricsCollector(output=output, enabled=True, log_queue_size=1)
 
         try:
-            # Force some drops
             collector._shutdown.set()
             collector._writer_thread.join(timeout=1)
 
@@ -1481,13 +1384,10 @@ class TestNonBlockingLogging:
         output = io.StringIO()
         collector = MetricsCollector(output=output, enabled=True)
 
-        # Thread should be alive
         assert collector._writer_thread.is_alive()
 
-        # Shutdown should complete quickly
         collector.shutdown()
 
-        # Thread should be stopped
         assert not collector._writer_thread.is_alive()
 
 
@@ -1506,16 +1406,13 @@ class TestCacheVersioning:
         planner = ReadPlanner(config)
         fetcher = CachedFetcher(config)
 
-        # Populate current version cache
         plan = planner.plan(table_uri)
         fetcher.execute_plan(plan)
 
-        # Create fake "old version" cache directory
         old_version_dir = cache_dir / "v0" / "ab" / "cd"
         old_version_dir.mkdir(parents=True)
         (old_version_dir / "fake_old_cache.arrowstream").write_bytes(b"old data")
 
-        # Current version should still work
         fetcher2 = CachedFetcher(config)
         plan2 = planner.plan(table_uri)
 
@@ -1525,7 +1422,6 @@ class TestCacheVersioning:
         # Nothing counts or evicts another version's entries, so they go.
         assert not (cache_dir / "v0").exists()
 
-        # Stats should only count current version
         assert isinstance(fetcher2.cache, DiskCache)
         stats = fetcher2.cache.get_stats()
         assert stats.total_entries == len(plan.tasks)

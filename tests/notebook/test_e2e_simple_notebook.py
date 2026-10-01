@@ -66,7 +66,6 @@ class TestSingleCellExecution:
                 result = execute_cell_and_wait(ws, "c1")
                 assert result["type"] == "cell_output"
 
-                # Check that a cell_console message was emitted
                 consoles = ws.messages_of_type("cell_console")
                 stdout_msgs = [m for m in consoles if m["payload"].get("stream") == "stdout"]
                 assert len(stdout_msgs) >= 1
@@ -109,12 +108,11 @@ class TestTwoCellDirect:
 
         with open_notebook_session(client, nb.path) as (sid, session):
             with ws_connect(client, sid) as ws:
-                # Execute c1 first
                 result1 = execute_cell_and_wait(ws, "c1")
                 assert result1["type"] == "cell_output"
                 assert "x" in result1["payload"]["outputs"]
 
-                # Now execute c2 — c1 is already "ready", so no cascade
+                # c1 is already ready, so no cascade.
                 result2 = execute_cell_and_wait(ws, "c2")
                 assert result2["type"] == "cell_output"
                 assert "y" in result2["payload"]["outputs"]

@@ -45,10 +45,8 @@ class TestProxyTokenVerification:
 
     def test_timing_safe_comparison(self):
         """Token comparison is constant-time to prevent timing attacks."""
-        # This is a behavioral test - we can't directly test timing,
-        # but we verify the function uses hmac.compare_digest
+        # Timing can't be tested directly; this only checks the comparison's result.
 
-        # Verify the implementation matches our expectation
         assert verify_proxy_token("a", "b") is False
         assert verify_proxy_token("a", "a") is True
 
@@ -307,7 +305,6 @@ class TestPrincipalContext:
         assert retrieved.id == "test-user"
         assert retrieved.tenant == "test-tenant"
 
-        # Clean up
         set_principal(None)
 
 
@@ -563,15 +560,15 @@ class TestArtifactReadAcl:
             set_principal(None)
 
     def test_no_auth_is_noop(self, monkeypatch):
-        # Without trusted-proxy auth there is no principal/ACL — read is allowed
+        # Without trusted-proxy auth there is no principal or ACL, so the read is allowed
         # (tenant scoping is enforced separately by _ensure_artifact_access).
         server_module = self._patch_state(monkeypatch, auth="none")
         art = self._artifact("file:///wh#secret.events")
         server_module._authorize_artifact_read(art)  # no raise
 
     def test_artifact_without_table_inputs_is_noop(self, monkeypatch):
-        # An artifact whose inputs are all artifacts (no tables) has no table ACL
-        # to check — tenant scoping is the gate.
+        # An artifact whose inputs are all artifacts has no table ACL to check; tenant
+        # scoping is the gate.
         from unittest.mock import MagicMock
 
         from strata.artifact_store import TransformSpec
@@ -764,8 +761,8 @@ class TestARuleIsAsNarrowAsItReads:
 
         from strata.config import AclRule
 
-        # The plural. It left ``tenant`` None, which matches every tenant
-        # rather than the one named, while the rule still read correctly.
+        # The plural would leave ``tenant`` None, which matches every tenant rather than
+        # the one named, while the rule still reads correctly.
         with pytest.raises(ValueError, match="tenants"):
             AclRule(principal="bob", tables=["*"], tenants="acme")
 

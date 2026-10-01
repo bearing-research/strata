@@ -47,14 +47,12 @@ class TestBuildMetricsCollector:
         """Test recording build success events."""
         collector = BuildMetricsCollector()
 
-        # First record start
         collector.record_started(
             build_id="build-1",
             tenant_id="acme",
             transform_ref="duckdb_sql@v1",
         )
 
-        # Then record success
         collector.record_succeeded(
             build_id="build-1",
             tenant_id="acme",
@@ -195,21 +193,18 @@ class TestBuildMetricsCollector:
 
         prom_metrics = collector.get_prometheus_metrics()
 
-        # Check required metrics are present
         assert "strata_builds_started_total 1" in prom_metrics
         assert "strata_builds_succeeded_total 1" in prom_metrics
         assert "strata_builds_in_flight 0" in prom_metrics
         assert "strata_builds_bytes_in_total 1000" in prom_metrics
         assert "strata_builds_bytes_out_total 500" in prom_metrics
 
-        # Check per-transform metrics
         assert 'strata_build_transform_started_total{transform="sql@v1"} 1' in prom_metrics
 
     def test_duration_percentiles(self):
         """Test duration percentile calculations."""
         collector = BuildMetricsCollector()
 
-        # Record 10 builds with increasing durations
         for i in range(10):
             duration = (i + 1) * 10.0  # 10, 20, 30, ..., 100
             collector.record_started(
@@ -300,7 +295,6 @@ class TestBuildStoreLogs:
 
     def test_complete_build_with_logs(self, build_store: BuildStore):
         """Test completing a build with logs."""
-        # Create a build
         build = build_store.create_build(
             build_id="build-123",
             artifact_id="artifact-1",
@@ -309,17 +303,14 @@ class TestBuildStoreLogs:
         )
         assert build.logs is None
 
-        # Start the build
         build_store.claim_build("build-123", "runner-1")
 
-        # Complete with logs
         build_store.complete_build(
             build_id="build-123",
             output_byte_count=1000,
             logs="[INFO] Transform completed successfully\n[DEBUG] Rows: 42",
         )
 
-        # Verify logs are stored
         build = build_store.get_build("build-123")
         assert build is not None
         assert build.state == "ready"
@@ -327,7 +318,6 @@ class TestBuildStoreLogs:
 
     def test_fail_build_with_logs(self, build_store: BuildStore):
         """Test failing a build with logs."""
-        # Create and claim a build
         build_store.create_build(
             build_id="build-456",
             artifact_id="artifact-2",
@@ -336,7 +326,6 @@ class TestBuildStoreLogs:
         )
         build_store.claim_build("build-456", "runner-1")
 
-        # Fail with logs
         build_store.fail_build(
             build_id="build-456",
             error_message="Syntax error",
@@ -344,7 +333,6 @@ class TestBuildStoreLogs:
             logs="[ERROR] Invalid SQL at line 5\n[ERROR] Unexpected token 'FROM'",
         )
 
-        # Verify logs are stored
         build = build_store.get_build("build-456")
         assert build is not None
         assert build.state == "failed"
@@ -376,7 +364,7 @@ class TestBuildStoreLogs:
         """Test that logs column is added via migration."""
         db_path = tmp_path / "migration_test.sqlite"
 
-        # Create an old-style database without logs column
+        # An old-style database without the logs column.
         conn = sqlite3.connect(str(db_path))
         conn.execute(
             """
@@ -407,10 +395,9 @@ class TestBuildStoreLogs:
         conn.commit()
         conn.close()
 
-        # Initialize BuildStore (should trigger migration)
+        # Opening it runs the migration.
         store = BuildStore(db_path)
 
-        # Verify we can create a build and store logs
         store.create_build(
             build_id="build-migrated",
             artifact_id="artifact-1",
@@ -437,7 +424,6 @@ class TestBuildMetricsIntegration:
         reset_build_metrics()
         collector = init_build_metrics()
 
-        # Simulate build lifecycle
         collector.record_started(
             build_id="build-full",
             tenant_id="integration",
@@ -445,7 +431,6 @@ class TestBuildMetricsIntegration:
             queue_wait_ms=25.0,
         )
 
-        # Simulate some work
         collector.record_succeeded(
             build_id="build-full",
             tenant_id="integration",
@@ -455,7 +440,6 @@ class TestBuildMetricsIntegration:
             bytes_out=5000,
         )
 
-        # Check all metrics are correct
         stats = collector.get_stats()
         assert stats["builds_started"] == 1
         assert stats["builds_succeeded"] == 1
@@ -463,7 +447,6 @@ class TestBuildMetricsIntegration:
         assert stats["total_bytes_in"] == 10000
         assert stats["total_bytes_out"] == 5000
 
-        # Check Prometheus format includes all data
         prom = collector.get_prometheus_metrics()
         assert "strata_builds_started_total 1" in prom
         assert "strata_builds_succeeded_total 1" in prom
@@ -475,7 +458,6 @@ class TestBuildMetricsIntegration:
         """Test metrics tracking for multiple concurrent builds."""
         collector = BuildMetricsCollector()
 
-        # Start 3 builds
         for i in range(3):
             collector.record_started(
                 build_id=f"concurrent-{i}",

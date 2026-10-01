@@ -104,13 +104,10 @@ async def test_dag_view_keeps_a_bracketed_cell_name(monkeypatch):
         assert "load[raw]" in _plain(app.screen.query_one("#dag-art", Static))
 
 
-# The two table tests below assert a renderable rather than the rendered text.
-# ``DataTable`` formats a cell only when its row scrolls into view, and the
-# headless pilot lays the table out two lines tall, so the rows never render and
-# there is nothing to read back. What the app controls is what it hands the
-# widget: a bare ``str`` cell is put through ``Text.from_markup``, anything
-# already renderable is not. Asserting the value carries its own text is
-# therefore the boundary this code is responsible for.
+# These assert a renderable, not rendered text: the headless pilot lays the
+# DataTable out two lines tall, so its rows never render. What the app controls is
+# what it hands the widget: a bare ``str`` goes through ``Text.from_markup``, a
+# renderable does not.
 
 
 @pytest.mark.asyncio

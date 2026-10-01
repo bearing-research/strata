@@ -39,8 +39,8 @@ def _build_notebook(
         "CliTest",
         initialize_environment=False,
     )
-    # Defensive: if a prior test or the creator left .venv behind, wipe it
-    # so tests that rely on its absence are deterministic.
+    # Wipe any .venv a prior test or the creator left behind, so tests that rely
+    # on its absence are deterministic.
     stale_venv = notebook_dir / ".venv"
     if stale_venv.exists():
         shutil.rmtree(stale_venv)
@@ -127,7 +127,6 @@ class TestExecutionFlow:
 
         assert exit_code == 0
         captured = capsys.readouterr()
-        # Both cell IDs (or their short forms) should appear in output
         assert "c1" in captured.out
         assert "c2" in captured.out
         assert "2 ran" in captured.out or "ran" in captured.out
@@ -305,7 +304,6 @@ class TestRCellsHeadless:
         assert exit_code == 0, payload
         c1 = next(c for c in payload["cells"] if c["id"] == "c1")
         assert c1["status"] == "ok", c1
-        # The old behaviour skipped R as an unsupported language.
         assert "unsupported language" not in (c1.get("reason") or "")
 
     @skip_if_no_r
@@ -365,7 +363,7 @@ class _FakeSyncSession:
     async def wait_for_environment_job(self) -> None:
         self._job.status = self._final_status
         self._job.error = self._error
-        self.environment_job = None  # cleared on completion — the #99 trigger
+        self.environment_job = None  # cleared on completion
 
 
 class TestSyncEnvironment:
@@ -381,9 +379,7 @@ class TestSyncEnvironment:
         assert "uv lock conflict" in (err or "")
 
 
-# ---------------------------------------------------------------------------
-# strata validate (issue #114 — agent feedback loop)
-# ---------------------------------------------------------------------------
+# strata validate
 
 
 def _validate(path, fmt="human"):
@@ -460,9 +456,7 @@ class TestValidate:
         assert _validate(tmp_path / "nope") == 2
 
 
-# ---------------------------------------------------------------------------
 # strata new
-# ---------------------------------------------------------------------------
 
 
 def _new(name, parent, fmt="human", no_env=True):
@@ -516,10 +510,8 @@ class TestNew:
         assert _new("../escape", tmp_path) == 2
 
 
-# ---------------------------------------------------------------------------
-# Round-trip contract (issue #114): a notebook hand-written from the docs
-# alone — no writer helpers, no server — parses, validates, and runs.
-# ---------------------------------------------------------------------------
+# Round-trip contract: a notebook hand-written from the docs alone (no writer
+# helpers, no server) parses, validates, and runs.
 
 
 class TestHandWrittenNotebookContract:

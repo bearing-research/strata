@@ -87,9 +87,8 @@ async def test_batch_executes_two_linear_cells_end_to_end(tmp_path: Path):
     statuses = {r.cell_id: r.status for r in result.cell_results}
     assert statuses == {"c1": "ok", "c2": "ok"}
 
-    # c1's `x` is consumed by c2, so it gets persisted.
-    # c2's `y` has no downstream cell, so it's not in consumed_vars
-    # (strata only persists variables that downstream cells reference).
+    # c1's `x` is consumed by c2, so it is persisted; c2's `y` has no downstream
+    # reader, so it is not in consumed_vars.
     c1 = session.notebook_state.get_cell("c1")
     assert "x" in c1.artifact_uris
 
@@ -138,8 +137,7 @@ async def test_batch_blocked_module_export_fails_persist(tmp_path: Path):
     single-cell semantics. Batch must surface this as status=persist_failed,
     NOT silently store as pickle/object.
     """
-    # Top-level lambda is blocked from module export (per module_export.py
-    # _target_names / blocking_lambda_names paths). With a downstream
+    # A top-level lambda is blocked from module export; with a downstream
     # consumer, single-cell mode returns success=False.
     session = _make_session_with_cells(
         tmp_path,
@@ -160,13 +158,13 @@ async def test_batch_blocked_module_export_fails_persist(tmp_path: Path):
     assert statuses["c1"] == "persist_failed", (
         f"c1 should be persist_failed (blocked module export), got {statuses}"
     )
-    # c2 must not have run — the batch ends on persist failure.
+    # c2 must not run: the batch ends on persist failure.
     assert statuses["c2"] == "not_run"
     assert result.end_reason == "persist_failed"
     assert result.failed_cell_id == "c1"
 
-    # And critically: c1's `add` must NOT have been stored as a pickle.
-    # cell.artifact_uris should be empty since persist was rejected.
+    # c1's `add` must not be stored as a pickle; artifact_uris stays empty
+    # because persist was rejected.
     c1 = session.notebook_state.get_cell("c1")
     assert "add" not in c1.artifact_uris, (
         f"add must not be persisted after module-export rejection; "
@@ -185,7 +183,7 @@ async def test_batch_cache_hit_skips_execution(tmp_path: Path):
         tmp_path,
         [
             ("c1", "x = 41\n"),
-            ("c2", "y = x + 1\n"),  # consumer of x — makes x a consumed_var
+            ("c2", "y = x + 1\n"),  # consumer of x, making x a consumed_var
         ],
     )
     specs = _populate_consumed_vars(
@@ -274,7 +272,7 @@ async def test_batch_cached_displays_round_trip(tmp_path: Path):
     assert c1_first.display_outputs, (
         f"first run: c1 should have display_outputs, got {c1_first.display_outputs!r}"
     )
-    # Post-persist metadata carries an artifact_uri (regression for #33 finding #3a).
+    # Post-persist metadata carries an artifact_uri.
     assert c1_first.display_outputs[0].get("artifact_uri"), (
         f"display metadata after persist should carry artifact_uri; "
         f"got {c1_first.display_outputs[0]}"
@@ -287,9 +285,8 @@ async def test_batch_cached_displays_round_trip(tmp_path: Path):
     assert c1_second.display_outputs, (
         f"cache-hit c1 should restore display_outputs; got {c1_second.display_outputs!r}"
     )
-    # Regression for #34 review finding #1: cached displays must keep
-    # the rich metadata (markdown_text / preview / image inline data),
-    # not just {content_type, file, artifact_uri}.
+    # Cached displays keep the rich metadata (markdown_text / preview / image
+    # inline data), not just {content_type, file, artifact_uri}.
     cached = c1_second.display_outputs[0]
     assert cached.get("markdown_text") == "first hello", (
         f"cached display lost markdown_text; got {cached!r}"
@@ -346,11 +343,9 @@ async def test_per_cell_watchdog_kills_hung_cell(tmp_path: Path):
     )
 
     executor = CellExecutor(session)
-    # The parent's own work no longer counts against a cell (see the test
-    # above), but c1's harness-side work still does, and a loaded full-suite
-    # run once took c1 past 2s. 10s leaves room for that and still sits far
-    # below c_hang's 60s sleep and the 600s batch_timeout_seconds, so a pass
-    # still means the per-cell kill.
+    # c1's harness-side work still counts against it and a loaded run can take
+    # it past 2s. 10s is still far below c_hang's 60s sleep and the 600s
+    # batch_timeout_seconds, so a pass still means the per-cell kill.
     result = await executor.execute_batch(specs, cell_timeout_seconds=10.0)
 
     assert not result.completed
@@ -364,7 +359,7 @@ async def test_per_cell_watchdog_kills_hung_cell(tmp_path: Path):
         "timed out"
         in (next(r for r in result.cell_results if r.cell_id == "c_hang").error or "").lower()
     )
-    # c3 was never reached — harness was killed before it started.
+    # c3 was never reached: the harness was killed before it started.
     assert statuses.get("c3", "not_run") == "not_run"
 
 

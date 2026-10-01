@@ -52,9 +52,7 @@ def _make_cell(source: str = "", language: CellLanguage = CellLanguage.R) -> Cel
     return CellState(id="r-cell-1", source=source, language=language, order=0)
 
 
-# ---------------------------------------------------------------------------
 # Registry wiring
-# ---------------------------------------------------------------------------
 
 
 class TestRegistry:
@@ -84,9 +82,7 @@ class TestRegistry:
         assert CellLanguage("r") is CellLanguage.R
 
 
-# ---------------------------------------------------------------------------
-# Wrapper behaviour — monkeypatched subprocess (no real R needed)
-# ---------------------------------------------------------------------------
+# Wrapper behaviour: monkeypatched subprocess (no real R needed)
 
 
 class TestRscriptUnavailable:
@@ -204,9 +200,7 @@ class TestCaching:
         assert calls == []
 
 
-# ---------------------------------------------------------------------------
-# Integration tests — real Rscript
-# ---------------------------------------------------------------------------
+# Integration tests: real Rscript
 
 
 @_skip_no_rscript
@@ -223,9 +217,8 @@ class TestIntegrationRealRscript:
         cell = _make_cell("y <- x + 1")
         result = _RAnalyzer().analyze(cell, session=None)
         assert "y" in result.defines
-        # ONLY ``x`` should be a reference — not ``+`` or anything else.
-        # The walker skips function-call ops so binary operators don't
-        # show up.
+        # Only ``x`` is a reference; the walker skips function-call ops so binary
+        # operators don't show up.
         assert result.references == ["x"]
 
     def test_multiple_assigns_locally_defined_not_a_reference(self):
@@ -269,7 +262,7 @@ class TestIntegrationRealRscript:
         assert "df" in result.defines
         assert "df" in result.references
         assert "complete.cases" not in result.references
-        # ``[`` is also a function call internally — must not leak.
+        # ``[`` is a function call internally and must not leak.
         assert "[" not in result.references
 
     def test_function_call_names_not_references(self):
@@ -286,8 +279,7 @@ class TestIntegrationRealRscript:
         assert "df" in result.defines
         assert "arrow" not in result.references
         assert "read_parquet" not in result.references
-        # No data references — the only inputs are the file path
-        # literal and the package.
+        # No data references: the only inputs are the file path literal and the package.
         assert result.references == []
 
     def test_namespace_access_not_a_reference(self):
@@ -337,8 +329,3 @@ class TestIntegrationRealRscript:
         cell = _make_cell("")
         result = _RAnalyzer().analyze(cell, session=None)
         assert result == AnalyzedCell()
-
-
-# ---------------------------------------------------------------------------
-# Executor side: R cells should fail loudly until #57 lands
-# ---------------------------------------------------------------------------

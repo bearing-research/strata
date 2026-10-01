@@ -58,7 +58,7 @@ async def test_consume_prefetched_first_none_when_cold_and_no_task():
     plan = _plan(prefetched=None)
     m.register_scan(plan)
 
-    # No warm chunk and no in-flight prefetch task → None (build does a direct fetch).
+    # No warm chunk and no in-flight prefetch, so None (the build fetches directly).
     assert await m.consume_prefetched_first(plan, "scan-1") is None
     assert m.prefetch_metrics()["used"] == 0
 

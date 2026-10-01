@@ -65,7 +65,7 @@ async def test_runtime_value_overrides_default(widget_session):
     executor = CellExecutor(widget_session)
     await executor.execute_cell("controls", _WIDGET_SRC)
 
-    # Simulate a P3 widget_update: the user dragged alpha to 0.25.
+    # Simulate a widget_update: the user dragged alpha to 0.25.
     state = load_runtime_state(widget_session.path)
     state.get_or_create_cell("controls").widget_values = {"alpha": 0.25}
     save_runtime_state(widget_session.path, state)

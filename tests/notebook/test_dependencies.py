@@ -60,9 +60,7 @@ from tests.notebook.e2e_fixtures import (
 
 pytestmark = pytest.mark.integration
 
-# ============================================================================
 # Core dependency operations
-# ============================================================================
 
 
 class TestListDependencies:
@@ -122,7 +120,7 @@ class TestAddDependency:
         nb_dir = create_notebook(tmp_path, "double_add")
         add_dependency(nb_dir, "six")
         result = add_dependency(nb_dir, "six")
-        # uv add is idempotent — should still succeed
+        # uv add is idempotent, so a repeat still succeeds.
         assert result.success
 
     def test_add_nonexistent_package(self, tmp_path: Path):
@@ -218,7 +216,6 @@ class TestRemoveDependency:
         assert result.action == "remove"
         assert result.lockfile_changed is True
 
-        # Verify it's gone
         deps = list_dependencies(nb_dir)
         names = [d.name for d in deps]
         assert "six" not in names
@@ -517,9 +514,7 @@ dependencies:
         assert preview.unchanged == []
 
 
-# ============================================================================
 # REST API tests
-# ============================================================================
 
 
 class TestDependencyRESTEndpoints:
@@ -566,7 +561,6 @@ class TestDependencyRESTEndpoints:
             assert "declared_package_count" in data["environment"]
             assert "stale_cell_count" in data
 
-            # Verify via list
             resp2 = client.get(f"/v1/notebooks/{sid}/dependencies")
             deps = resp2.json()["dependencies"]
             names = [d["name"] for d in deps]
@@ -605,9 +599,8 @@ class TestDependencyRESTEndpoints:
             assert "cells" in data
             statuses = {cell["id"]: cell["status"] for cell in data["cells"]}
             assert statuses["c1"] == "idle"
-            # c2 ran; the new dependency changed the env for the whole graph,
-            # so c2's cached result is invalid via its stale upstream c1 →
-            # STALE, not idle (#361).
+            # The new dependency changed the env for the whole graph, so c2's cached
+            # result is invalid via its stale upstream c1: STALE, not idle.
             assert statuses["c2"] == "stale"
 
     def test_remove_dependency_rest(self, setup):
@@ -616,13 +609,11 @@ class TestDependencyRESTEndpoints:
         nb = NotebookBuilder(tmp)
 
         with open_notebook_session(client, nb.path) as (sid, session):
-            # Add first
             client.post(
                 f"/v1/notebooks/{sid}/dependencies",
                 json={"package": "six"},
             )
 
-            # Remove
             resp = client.delete(f"/v1/notebooks/{sid}/dependencies/six")
             assert resp.status_code == 200
             data = resp.json()
@@ -631,7 +622,6 @@ class TestDependencyRESTEndpoints:
             assert data["operation_log"]["command"] == "uv remove six"
             assert "stale_cell_ids" in data
 
-            # Verify removed
             resp2 = client.get(f"/v1/notebooks/{sid}/dependencies")
             deps = resp2.json()["dependencies"]
             names = [d["name"] for d in deps]
@@ -800,9 +790,7 @@ dependencies:
         assert resp.status_code == 404
 
 
-# ============================================================================
 # WebSocket tests
-# ============================================================================
 
 
 class TestDependencyWebSocket:
@@ -837,12 +825,10 @@ class TestDependencyWebSocket:
 
         with open_notebook_session(client, nb.path) as (sid, session):
             with ws_connect(client, sid) as ws:
-                # Add first
                 ws.send("dependency_add", {"package": "six"})
                 ws.receive_until("dependency_changed")
                 ws.clear()
 
-                # Remove
                 ws.send("dependency_remove", {"package": "six"})
                 msg = ws.receive_until("dependency_changed")
 
@@ -923,9 +909,7 @@ class TestDependencyWebSocket:
                 assert status2["payload"]["status"] == "idle"
 
 
-# ============================================================================
 # R package listing
-# ============================================================================
 
 
 class TestListRPackages:
@@ -957,9 +941,8 @@ class TestListRPackages:
 
         def fake_run(args, **kwargs):
             assert args[0] == "/fake/Rscript"
-            # Confirm we scope to the project library via renv —
-            # a bare ``installed.packages()`` would enumerate every
-            # ``.libPaths()`` entry (P1 from #88 review).
+            # Scope to the project library via renv; a bare ``installed.packages()``
+            # would enumerate every ``.libPaths()`` entry.
             assert "renv::paths$library" in args[2]
             assert "lib.loc = lib" in args[2]
             return SimpleNamespace(returncode=0, stdout=sample_stdout, stderr="")
@@ -1084,9 +1067,7 @@ class TestListRPackages:
         assert captured["cwd"] == str(tmp_path)
 
 
-# ============================================================================
 # R package install + bootstrap (renv::init / renv::install)
-# ============================================================================
 
 
 class TestIsValidRPackageName:
@@ -1395,9 +1376,7 @@ class TestResolveUv:
         assert "~/.local/bin" in UV_NOT_FOUND_MESSAGE
 
 
-# ============================================================================
 # uv runs on the notebook's environment, not the server's
-# ============================================================================
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="the recording uv is a shell script")
@@ -1486,9 +1465,7 @@ class TestUvCommandsIgnoreTheServersEnvironment:
         self._assert_notebook_environment(recorded())
 
 
-# ============================================================================
 # Service mode installs wheels only
-# ============================================================================
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="the recording uv is a shell script")

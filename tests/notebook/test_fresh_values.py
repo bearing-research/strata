@@ -53,7 +53,7 @@ def _run(executor: CellExecutor, session: NotebookSession, cell_id: str):
     return asyncio.run(executor.execute_cell(cell_id, cell.source))
 
 
-# -- finding 1: a consumer's cache follows the value it read ---------------
+# --- a consumer's cache follows the value it read ---
 
 
 def test_a_consumer_recomputes_when_its_fresh_input_changed(tmp_path: Path):
@@ -189,7 +189,7 @@ def test_a_cell_that_never_ran_is_still_idle(tmp_path: Path):
     assert session.compute_staleness()["c"].status == CellStatus.IDLE
 
 
-# -- finding 2: one run executes each cell once ----------------------------
+# --- one run executes each cell once ---
 
 
 THREE_CELLS = [
@@ -360,8 +360,8 @@ def test_a_cascade_executes_a_fresh_producer_once(tmp_path: Path):
     session = _unbatched_notebook(tmp_path, counter)
     plan = CascadePlanner(session).plan("second")
     assert plan is not None
-    # p runs as its own step, then "second" materialises its upstream p: the
-    # second request is the one that used to execute it again.
+    # p runs as its own step, then "second" materialises its upstream p, which
+    # must not execute p again.
     assert [step.cell_id for step in plan.steps] == ["p", "second"]
 
     asyncio.run(_execute_cascade(None, session, plan, NotebookExecutionState(), session.id))
@@ -370,7 +370,7 @@ def test_a_cascade_executes_a_fresh_producer_once(tmp_path: Path):
     assert session.notebook_state.get_cell("second").display_output.preview == 1
 
 
-# -- round 4: one requested cell is one run --------------------------------
+# --- one requested cell is one run ---
 
 
 def _diamond(tmp_path: Path, counter: Path):
@@ -417,7 +417,7 @@ def test_an_independent_request_still_refreshes_the_fresh_ancestor(tmp_path: Pat
     assert second.display_output["preview"] == 2
 
 
-# -- round 4: a consumer is keyed on the variables it reads ----------------
+# --- a consumer is keyed on the variables it reads ---
 
 
 def test_a_consumer_of_a_stable_variable_hits_despite_a_changing_sibling(tmp_path: Path):

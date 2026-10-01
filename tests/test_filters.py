@@ -53,11 +53,9 @@ def temp_warehouse_multi_files(tmp_path):
 
     table = catalog.create_table("test_db.events", schema)
 
-    # Write multiple batches to create multiple files
-    # Each append creates a new data file
+    # Each append creates a new data file.
     base_ts = int(datetime(2024, 1, 1, tzinfo=UTC).timestamp() * 1_000_000)
 
-    # File 1: values 0-99, category "A"
     data1 = pa.table(
         {
             "id": pa.array(range(100), type=pa.int64()),
@@ -68,7 +66,6 @@ def temp_warehouse_multi_files(tmp_path):
     )
     table.append(data1)
 
-    # File 2: values 100-199, category "B"
     data2 = pa.table(
         {
             "id": pa.array(range(100, 200), type=pa.int64()),
@@ -79,7 +76,6 @@ def temp_warehouse_multi_files(tmp_path):
     )
     table.append(data2)
 
-    # File 3: values 200-299, category "C"
     data3 = pa.table(
         {
             "id": pa.array(range(200, 300), type=pa.int64()),
@@ -205,7 +201,6 @@ class TestFiltersToIcebergExpression:
             Filter(column="category", op=FilterOp.EQ, value="A"),
         ]
         expr = filters_to_iceberg_expression(filters)
-        # Should only have the flat column filter
         assert isinstance(expr, EqualTo)
 
 
@@ -218,7 +213,6 @@ class TestBuildColumnIndexMap:
 
         import pyarrow.parquet as pq
 
-        # Create a simple parquet file
         table = pa.table(
             {
                 "id": [1, 2, 3],
@@ -227,16 +221,14 @@ class TestBuildColumnIndexMap:
             }
         )
 
-        # Windows locks NamedTemporaryFile exclusively, blocking pyarrow
-        # from opening the path a second time. delete=False + manual
-        # unlink gets us the same cleanup with cross-platform behaviour.
+        # Windows locks NamedTemporaryFile exclusively, so pyarrow cannot reopen the
+        # path; delete=False plus manual unlink works on every platform.
         with tempfile.NamedTemporaryFile(suffix=".parquet", delete=False) as f:
             tmp_path = f.name
         try:
             pq.write_table(table, tmp_path)
             meta = pq.read_metadata(tmp_path)
 
-            # Build using parquet schema
             pq_schema = meta.schema
             col_map = _build_column_index_map(pq_schema)
 
@@ -316,12 +308,12 @@ class TestFilterMatching:
 
     def test_ne_all_same_value(self):
         f = Filter(column="value", op=FilterOp.NE, value=50)
-        # If min == max == filter_value, no rows can match
+        # min == max == filter_value, so no rows can match.
         assert f.matches_stats(50, 50) is False
 
     def test_ne_all_same_float_value(self):
         f = Filter(column="value", op=FilterOp.NE, value=50.0)
-        # Float stats leave NaN out, so the row group may still hold a NaN
+        # Float stats leave NaN out, so the row group may still hold a NaN.
         assert f.matches_stats(50.0, 50.0) is True
 
     def test_ne_different_values(self):
@@ -330,12 +322,10 @@ class TestFilterMatching:
 
     def test_lt_can_match(self):
         f = Filter(column="value", op=FilterOp.LT, value=50)
-        # min < filter_value means some rows might be less
         assert f.matches_stats(0, 100) is True
 
     def test_lt_cannot_match(self):
         f = Filter(column="value", op=FilterOp.LT, value=50)
-        # min >= filter_value means no rows can be less
         assert f.matches_stats(50, 100) is False
 
     def test_le_can_match(self):
@@ -352,12 +342,10 @@ class TestFilterMatching:
 
     def test_gt_can_match(self):
         f = Filter(column="value", op=FilterOp.GT, value=50)
-        # max > filter_value means some rows might be greater
         assert f.matches_stats(0, 100) is True
 
     def test_gt_cannot_match(self):
         f = Filter(column="value", op=FilterOp.GT, value=100)
-        # max <= filter_value means no rows can be greater
         assert f.matches_stats(0, 100) is False
 
     def test_ge_can_match(self):
@@ -392,7 +380,6 @@ class TestTwoTierPruning:
         filters = [Filter(column="value", op=FilterOp.LT, value=150)]
         plan = planner.plan(temp_warehouse_multi_files["table_uri"], filters=filters)
 
-        # Plan should have the filters attached
         assert plan.filters == filters
 
     def test_different_filters_produce_separate_cache_entries(
@@ -401,17 +388,14 @@ class TestTwoTierPruning:
         """Different filters should use different manifest cache entries."""
         planner = ReadPlanner(strata_config)
 
-        # First query with one filter
         filters1 = [Filter(column="value", op=FilterOp.LT, value=50)]
         planner.plan(temp_warehouse_multi_files["table_uri"], filters=filters1)
 
-        # Second query with different filter
         filters2 = [Filter(column="value", op=FilterOp.GT, value=250)]
         planner.plan(temp_warehouse_multi_files["table_uri"], filters=filters2)
 
-        # Check cache stats - should have entries for both
         stats = planner.manifest_cache.stats()
-        # Filtered cache should have 2 misses (each filter is different)
+        # Each filter is different, so each misses.
         assert stats["filtered"]["misses"] >= 2
 
     def test_same_filters_reuse_cache(self, temp_warehouse_multi_files, strata_config):
@@ -420,27 +404,21 @@ class TestTwoTierPruning:
 
         filters = [Filter(column="value", op=FilterOp.LT, value=150)]
 
-        # First query
         planner.plan(temp_warehouse_multi_files["table_uri"], filters=filters)
 
-        # Same query again
         planner.plan(temp_warehouse_multi_files["table_uri"], filters=filters)
 
-        # Check cache stats
         stats = planner.manifest_cache.stats()
-        # Should have 1 miss and 1 hit for filtered cache
         assert stats["filtered"]["hits"] >= 1
 
     def test_no_filters_uses_unfiltered_cache(self, temp_warehouse_multi_files, strata_config):
         """Queries without filters should use unfiltered manifest cache."""
         planner = ReadPlanner(strata_config)
 
-        # Query without filters
         planner.plan(temp_warehouse_multi_files["table_uri"])
         planner.plan(temp_warehouse_multi_files["table_uri"])
 
         stats = planner.manifest_cache.stats()
-        # Should have hits in unfiltered cache
         assert stats["unfiltered"]["hits"] >= 1
 
     def test_filter_on_string_column(self, temp_warehouse_multi_files, strata_config):
@@ -450,7 +428,6 @@ class TestTwoTierPruning:
         filters = [Filter(column="category", op=FilterOp.EQ, value="A")]
         plan = planner.plan(temp_warehouse_multi_files["table_uri"], filters=filters)
 
-        # Should successfully create a plan
         assert plan.snapshot_id > 0
         assert len(plan.tasks) >= 0  # May or may not prune depending on stats
 
@@ -464,7 +441,6 @@ class TestTwoTierPruning:
         ]
         plan = planner.plan(temp_warehouse_multi_files["table_uri"], filters=filters)
 
-        # Should successfully create a plan
         assert plan.snapshot_id > 0
 
 
@@ -477,14 +453,12 @@ class TestIcebergExpressionFallback:
         """If Iceberg expression fails, should fall back to unfiltered scan."""
         planner = ReadPlanner(strata_config)
 
-        # Create a filter that might fail in Iceberg (e.g., type mismatch)
-        # This won't actually fail, but tests the code path exists
+        # An unknown column exercises the fallback path when Iceberg cannot use a filter.
         filters = [Filter(column="nonexistent_column", op=FilterOp.EQ, value="test")]
 
-        # Should not raise, should fall back gracefully
         plan = planner.plan(temp_warehouse_multi_files["table_uri"], filters=filters)
 
-        # Should still get all data files (no pruning possible)
+        # No pruning is possible, so every data file stays.
         assert plan.snapshot_id > 0
 
 

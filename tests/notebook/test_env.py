@@ -62,7 +62,7 @@ def test_lockfile_hash_unchanged_for_uv_only_notebook(tmp_path):
     )
 
 
-# --- dev-group exclusion from the provenance hash (#302-followup) -----------
+# --- dev-group exclusion from the provenance hash ---
 
 
 def _uv_lock(
@@ -133,8 +133,8 @@ def _hash_with(tmp_path, lock_text: str) -> str:
 def test_dev_dependency_does_not_change_hash(tmp_path):
     """Adding a dev tool (and bumping it) must not change the provenance hash."""
     base = _hash_with(tmp_path, _uv_lock(runtime={"cloudpickle": "3.1.2"}, dev={"pytest": "9.1.1"}))
-    # Bump the dev tool's version + add a second dev tool — runtime closure is
-    # identical, so the hash must not move (the whole point of dev exclusion).
+    # Bump the dev tool's version and add a second dev tool: the runtime closure
+    # is identical, so the hash must not move.
     bumped = _hash_with(
         tmp_path,
         _uv_lock(
@@ -190,7 +190,7 @@ def test_dev_only_transitive_does_not_change_hash(tmp_path):
             transitive={"pytest": ("9.1.1", ["pluggy"]), "pluggy": ("1.6.0", [])},
         ),
     )
-    # pluggy (dev-only transitive) upgrades — must not move the hash.
+    # pluggy (dev-only transitive) upgrades; the hash must not move.
     bumped = _hash_with(
         tmp_path,
         _uv_lock(

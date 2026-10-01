@@ -39,7 +39,7 @@ def test_local_ops_get_cell_and_unknown(chain_nb):
     assert isinstance(cell, CellView)
     assert cell.id == "a"
     assert cell.source == "x = 1"
-    # Curated view drops internal bookkeeping — no provenance hashes leak through.
+    # Curated view drops internal bookkeeping: no provenance hashes leak through.
     assert "last_provenance_hash" not in cell.model_dump()
     with pytest.raises(NotebookOpsError):
         ops.get_cell("ghost")
@@ -330,7 +330,7 @@ def test_cell_show_var_sweep_vs_dangling_producer(capsys):
                 raise NotebookOpsError(f"no cell {cid!r}")
             return self._cells[cid]
 
-    # A sweep-group producer has no single cell — reported as a pointer, no get_cell.
+    # A sweep-group producer has no single cell: reported as a pointer, no get_cell.
     assert _cell_show_var(_FakeOps({"m": "sweep:grp"}, {}), "m", "json") == 0
     assert json.loads(capsys.readouterr().out) == {
         "variable": "m",
@@ -351,7 +351,7 @@ def test_cli_cell_show_requires_exactly_one_of_id_or_var(chain_nb, capsys):
 
 def test_cli_cell_add_run_includes_post_run_outputs(chain_nb, monkeypatch, capsys):
     # add --run must return the POST-run cell view so its rendered outputs (a
-    # trailing bare expression's value) ride along — not the pre-run view.
+    # trailing bare expression's value) ride along.
     from strata.notebook import cli as cli_mod
     from strata.notebook.ops import CellView, OutputView, RunResult
 
@@ -468,7 +468,7 @@ def test_cli_cell_annotate_bad_set_is_exit_2(chain_nb, capsys):
 
 
 def test_cli_cell_annotate_repeatable_key_is_exit_2(chain_nb, capsys):
-    # @env is repeatable — splicing one line would clobber others, so it's refused.
+    # @env is repeatable; splicing one line would clobber others, so it's refused.
     rc = main(["cell", "annotate", str(chain_nb), "a", "--set", "env=A=1", "--format", "json"])
     assert rc == 2
     assert "repeatable" in capsys.readouterr().err

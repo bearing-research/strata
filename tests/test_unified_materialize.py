@@ -47,7 +47,6 @@ def temp_warehouse(tmp_path):
 
     table = catalog.create_table("test_db.events", schema)
 
-    # Create sample data
     num_rows = 100
     base_ts = int(datetime(2024, 1, 1, tzinfo=UTC).timestamp() * 1_000_000)
     data = pa.table(
@@ -102,7 +101,6 @@ class TestUnifiedMaterialize:
         base_url = server_with_personal_mode["base_url"]
         table_uri = server_with_personal_mode["warehouse"]["table_uri"]
 
-        # Request materialize with scan@v1
         response = requests.post(
             f"{base_url}/v1/materialize",
             json={
@@ -118,14 +116,13 @@ class TestUnifiedMaterialize:
         assert response.status_code == 200
         data = response.json()
 
-        # Should be a cache miss (first request)
+        # First request, so a miss.
         assert data["hit"] is False
         assert data["state"] == "building"
         assert data["artifact_uri"].startswith("strata://artifact/")
         assert data["stream_id"] is not None
         assert data["stream_url"].startswith("/v1/streams/")
 
-        # Fetch the stream
         stream_response = requests.get(
             f"{base_url}{data['stream_url']}",
             headers={"Accept": "application/vnd.apache.arrow.stream"},
@@ -134,7 +131,6 @@ class TestUnifiedMaterialize:
         assert stream_response.status_code == 200
         assert stream_response.headers["content-type"] == "application/vnd.apache.arrow.stream"
 
-        # Parse the Arrow IPC stream
         reader = ipc.open_stream(stream_response.content)
         table = reader.read_all()
 
@@ -163,7 +159,6 @@ class TestUnifiedMaterialize:
         assert response.status_code == 200
         data = response.json()
 
-        # Fetch the stream
         stream_response = requests.get(
             f"{base_url}{data['stream_url']}",
             headers={"Accept": "application/vnd.apache.arrow.stream"},
@@ -171,7 +166,6 @@ class TestUnifiedMaterialize:
 
         assert stream_response.status_code == 200
 
-        # Parse and verify projection
         reader = ipc.open_stream(stream_response.content)
         table = reader.read_all()
 
@@ -202,7 +196,6 @@ class TestUnifiedMaterialize:
         assert response.status_code == 200
         data = response.json()
 
-        # Fetch the stream
         stream_response = requests.get(
             f"{base_url}{data['stream_url']}",
             headers={"Accept": "application/vnd.apache.arrow.stream"},
@@ -210,12 +203,11 @@ class TestUnifiedMaterialize:
 
         assert stream_response.status_code == 200
 
-        # Parse - filters may not reduce rows if row groups can't be pruned
-        # But the request should succeed
+        # Filters may not reduce rows when row groups can't be pruned; the request must
+        # still succeed.
         reader = ipc.open_stream(stream_response.content)
         table = reader.read_all()
 
-        # Should have rows (exact count depends on pruning)
         assert table.num_rows >= 0
 
     def test_identity_materialize_cache_hit(self, server_with_personal_mode):
@@ -223,7 +215,6 @@ class TestUnifiedMaterialize:
         base_url = server_with_personal_mode["base_url"]
         table_uri = server_with_personal_mode["warehouse"]["table_uri"]
 
-        # First request - cache miss
         response1 = requests.post(
             f"{base_url}/v1/materialize",
             json={
@@ -240,16 +231,15 @@ class TestUnifiedMaterialize:
         data1 = response1.json()
         assert data1["hit"] is False
 
-        # Consume the stream to finalize the artifact
+        # Consume the stream to finalize the artifact.
         stream_response = requests.get(
             f"{base_url}{data1['stream_url']}",
         )
         assert stream_response.status_code == 200
 
-        # Small delay for artifact finalization
+        # Let the artifact finalize.
         time.sleep(0.5)
 
-        # Second request - should be cache hit
         response2 = requests.post(
             f"{base_url}/v1/materialize",
             json={
@@ -288,12 +278,11 @@ class TestUnifiedMaterialize:
         assert response.status_code == 200
         data = response.json()
 
-        # Should be a cache miss with build_id
         assert data["hit"] is False
         assert data["state"] == "pending"
         assert data["artifact_uri"].startswith("strata://artifact/")
         assert data["build_id"] is not None
-        # In artifact mode, no stream_url should be provided
+        # Artifact mode provides no stream_url.
         assert data.get("stream_url") is None
 
     def test_identity_artifact_mode_build_status_and_name(self, server_with_personal_mode):
@@ -406,7 +395,7 @@ class TestUnifiedMaterialize:
         response = requests.post(
             f"{base_url}/v1/materialize",
             json={
-                "inputs": [table_uri, table_uri],  # Two inputs
+                "inputs": [table_uri, table_uri],
                 "transform": {
                     "executor": "scan@v1",
                     "params": {},
@@ -455,7 +444,7 @@ class TestUnifiedMaterialize:
                 "transform": {
                     "executor": "scan@v1",
                     "params": {
-                        "filters": "not_a_list",  # Invalid type
+                        "filters": "not_a_list",
                     },
                 },
             },
@@ -472,7 +461,6 @@ class TestUnifiedMaterializeEdgeCases:
         base_url = server_with_personal_mode["base_url"]
         table_uri = server_with_personal_mode["warehouse"]["table_uri"]
 
-        # Request without specifying mode
         response = requests.post(
             f"{base_url}/v1/materialize",
             json={
@@ -481,14 +469,13 @@ class TestUnifiedMaterializeEdgeCases:
                     "executor": "scan@v1",
                     "params": {},
                 },
-                # mode not specified - should default to "stream"
+                # mode defaults to "stream"
             },
         )
 
         assert response.status_code == 200
         data = response.json()
 
-        # Default mode should provide stream_url
         assert data.get("stream_url") is not None
 
 
@@ -556,8 +543,8 @@ class TestClientFetch:
             )
             table = client.fetch(artifact.uri)
 
-            # Filters are applied at row-group level, so we may get all rows
-            # depending on pruning. The test verifies the request succeeds.
+            # Filters prune at row-group level, so all rows may come back; the request must
+            # succeed.
             assert table.num_rows >= 0
         finally:
             client.close()
@@ -581,7 +568,6 @@ class TestClientFetch:
             assert artifact.version == 1
             assert artifact.uri.startswith("strata://artifact/")
 
-            # Get data from artifact
             table = client.fetch(artifact.uri)
             assert table.num_rows == 100
             assert set(table.column_names) == {"id"}
@@ -598,19 +584,17 @@ class TestClientFetch:
         client = StrataClient(base_url=base_url)
 
         try:
-            # First materialize - cache miss
             artifact1 = client.materialize(
                 inputs=[table_uri],
                 transform={"executor": "scan@v1", "params": {"columns": ["id", "name"]}},
             )
             assert artifact1.cache_hit is False
 
-            # Small delay for artifact finalization
+            # Let the artifact finalize.
             import time
 
             time.sleep(0.5)
 
-            # Second materialize - should be cache hit
             artifact2 = client.materialize(
                 inputs=[table_uri],
                 transform={"executor": "scan@v1", "params": {"columns": ["id", "name"]}},
@@ -652,7 +636,7 @@ class TestClientFetch:
             assert artifact2.artifact_id == artifact1.artifact_id
             assert artifact2.version == artifact1.version + 1
 
-            # Provenance cache now resolves the rebuild
+            # The provenance cache now resolves the rebuild.
             artifact3 = client.materialize(
                 inputs=[table_uri],
                 transform={"executor": "scan@v1", "params": {"columns": ["id"]}},

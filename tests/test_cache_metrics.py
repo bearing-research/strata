@@ -52,7 +52,7 @@ class TestEvictionStats:
         d = asdict(stats)
         assert d["total_evictions"] == 100
         assert d["total_files_evicted"] == 500
-        # Raw value — rounding for display is the consumer's concern.
+        # Raw value; rounding for display is the consumer's concern.
         assert d["eviction_rate_per_minute"] == 0.833
         assert d["pressure_level"] == "low"
 
@@ -113,13 +113,11 @@ class TestCacheEvictionTracker:
 
         tracker = CacheEvictionTracker()
 
-        # No evictions = low pressure
         assert tracker.get_stats().pressure_level == "low"
 
-        # Simulate high eviction rate (many events in last hour)
         # The rate is the worse of the last minute and the observed-span mean;
-        # 600 events recorded at once are all inside the last minute.
-        for _ in range(600):  # 600 in last hour = 10/minute
+        # 600 events recorded at once all land inside the last minute.
+        for _ in range(600):
             tracker.record_eviction(
                 files_evicted=1,
                 bytes_evicted=1024,
@@ -220,7 +218,6 @@ class TestCacheEvictionTracker:
 
         events = tracker.get_recent_events(limit=3)
         assert len(events) == 3
-        # Most recent first
         assert events[0]["reason"] == "reason_4"
         assert events[1]["reason"] == "reason_3"
         assert events[2]["reason"] == "reason_2"
@@ -240,7 +237,7 @@ class TestCacheEvictionTracker:
             )
 
         events = tracker.get_recent_events(limit=100)
-        assert len(events) == 5  # Max events is 5
+        assert len(events) == 5
 
     def test_reset(self):
         """Test resetting the tracker."""
@@ -274,13 +271,11 @@ class TestGlobalTracker:
         tracker1 = get_eviction_tracker()
         tracker2 = get_eviction_tracker()
 
-        # Should return same instance
         assert tracker1 is tracker2
 
         reset_eviction_tracker()
         tracker3 = get_eviction_tracker()
 
-        # After reset, should be new instance
         assert tracker3 is not tracker1
 
 
@@ -347,7 +342,6 @@ class TestCacheEvictionIntegration:
         config = StrataConfig(cache_dir=cache_dir)
         server_module._state = ServerState(config)
 
-        # Add some eviction events
         tracker = get_eviction_tracker()
         for i in range(3):
             tracker.record_eviction(
@@ -369,7 +363,6 @@ class TestCacheEvictionIntegration:
 
                 assert "recent_events" in data
                 assert len(data["recent_events"]) == 2
-                # Most recent first
                 assert data["recent_events"][0]["files_evicted"] == 3
                 assert data["recent_events"][1]["files_evicted"] == 2
         finally:

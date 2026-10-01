@@ -125,7 +125,6 @@ class TestDuckDBExecutor:
 
     def test_query_with_missing_table_raises(self):
         """Query referencing missing table raises DuckDB error."""
-        # DuckDB will fail when SQL references input0 but no inputs provided
         import duckdb
 
         with pytest.raises(duckdb.CatalogException):
@@ -224,7 +223,6 @@ class TestRunLocalWithBuildSpec:
             },
             "input_uris": ["uri://first", "uri://second"],
         }
-        # Dict order doesn't matter
         input_tables = {"uri://second": second, "uri://first": first}
 
         result = run_local(build_spec, input_tables)

@@ -49,7 +49,7 @@ def test_bash_python_is_an_escape_but_other_bash_is_not() -> None:
 
 
 def test_bash_package_install_is_an_escape() -> None:
-    # Managing deps via Bash bypasses add_dependency — the change never lands
+    # Managing deps via Bash bypasses add_dependency, so the change never lands
     # in the notebook's committed env.
     pip = ToolEvent("Bash", {"command": "pip install requests"})
     uv_add = ToolEvent("Bash", {"command": "uv add pandas"})
@@ -76,15 +76,15 @@ def test_run_snippet_mcp_tool_counts_as_work() -> None:
 
 
 def test_strata_cli_scratchpad_path_counts_as_notebook_work() -> None:
-    # The scratchpad flow drives the notebook via the `strata` CLI over Bash, not
-    # the MCP tools — those calls must score as work/reads, not fall through.
+    # The scratchpad flow drives the notebook via the `strata` CLI over Bash; those
+    # calls must score as work/reads, not fall through.
     add = ToolEvent("Bash", {"command": "strata cell add ./scratch -c 'print(1)' --run"})
     assert add.is_notebook_work and not add.is_escape
     assert ToolEvent("Bash", {"command": "uv run strata cell run ./scratch abc"}).is_notebook_work
-    # rm/mv/annotate mirror the MCP WORK_TOOLS (remove_cell/move_cell) — also work.
+    # rm/mv/annotate mirror the MCP WORK_TOOLS (remove_cell/move_cell), so they are work too.
     for cmd in ("strata cell rm ./s abc", "strata cell mv ./s abc 0", "strata cell annotate ./s a"):
         assert ToolEvent("Bash", {"command": cmd}).is_notebook_work, cmd
-    # `strata dep add` is the in-notebook way to add a package — work, not a
+    # `strata dep add` is the in-notebook way to add a package: work, not a
     # bash-install escape (its `pytest`/pkg arg must not trip the detectors).
     dep = ToolEvent("Bash", {"command": "strata dep add ./scratch pytest"})
     assert dep.is_notebook_work and not dep.is_escape
@@ -94,8 +94,8 @@ def test_strata_cli_scratchpad_path_counts_as_notebook_work() -> None:
 
 
 def test_strata_cell_with_python_in_payload_is_not_a_bash_python_escape() -> None:
-    # A cell whose source imports pytest/python must not read as a bash-python
-    # bypass — it's the agent putting code in a cell, the opposite of an escape.
+    # A cell whose source imports pytest/python is code going into a cell, not a
+    # bash-python bypass.
     ev = ToolEvent("Bash", {"command": "strata cell add ./scratch -c 'import pytest' --run"})
     assert ev.escape_reason is None
     assert ev.is_notebook_work
@@ -130,8 +130,8 @@ def test_scratchpad_tasks_are_un_primed() -> None:
 
     scratch = [t for t in TASKS if t.scratchpad]
     assert scratch, "expected scratchpad trigger-rate tasks"
-    # The whole point: the prompt must NOT tell the agent to use the notebook —
-    # otherwise it measures compliance, not spontaneous trigger.
+    # The prompt must not tell the agent to use the notebook, or it measures
+    # compliance instead of spontaneous trigger.
     for t in scratch:
         low = t.prompt.lower()
         assert "notebook" not in low and "cell" not in low and "scratch" not in low, t.id
@@ -305,14 +305,12 @@ def test_run_suite_replay_scores_committed_transcripts(tmp_path) -> None:
 
     assert len(results) == len(tasks)
     assert all(r.error is None for r in results)
-    # Every committed transcript is an ideal in-tool run: no escapes, rate 1.0.
     assert all(r.in_tool.escapes == 0 for r in results)
     assert all(r.in_tool.in_tool_rate == 1.0 for r in results)
 
     summary = runner.summarize(results)
     assert summary["errored"] == 0
     assert summary["mean_in_tool_rate"] == 1.0
-    # Table renders without raising.
     assert "in-tool" in runner.format_table(results)
 
 
@@ -342,8 +340,8 @@ def test_run_suite_replay_detects_an_escape(tmp_path) -> None:
 
 
 def test_cli_replay_all_skips_transcriptless_hard_tasks(capsys) -> None:
-    # Regression: `--driver replay` with the default `--select all` must skip the
-    # live-only hard tasks (no transcript) with a note, not error on them.
+    # `--driver replay` with the default `--select all` must skip the live-only
+    # hard tasks (no transcript) with a note, not error on them.
     rc = runner.main(["--driver", "replay", "--transcripts", str(TRANSCRIPTS), "--select", "all"])
     assert rc == 0
     captured = capsys.readouterr()

@@ -49,7 +49,6 @@ class TestCreateNotebookVenv:
     def test_uv_lock_created(self, tmp_path: Path):
         """uv sync produces uv.lock."""
         nb_dir = create_notebook(tmp_path, "test_lock")
-        # uv sync should have run and produced uv.lock
         assert (nb_dir / "uv.lock").exists()
 
     def test_venv_created(self, tmp_path: Path):
@@ -91,7 +90,7 @@ class TestUvSyncHelper:
     def test_returns_true_on_success(self, tmp_path: Path):
         """Successful sync returns True."""
         nb_dir = create_notebook(tmp_path, "sync_ok")
-        # Already synced during creation, but calling again is idempotent
+        # Already synced at creation; calling again is idempotent.
         assert _uv_sync(nb_dir) is True
 
     def test_sync_uses_requested_python_when_provided(self, tmp_path: Path):
@@ -146,7 +145,6 @@ class TestSessionVenvPython:
 
         assert session.venv_python is not None
         assert "python" in str(session.venv_python)
-        # Should point to the notebook's venv
         assert session.venv_python.exists()
         assert ".venv" in str(session.venv_python)
         assert session.environment_sync_state == "ready"
@@ -664,7 +662,6 @@ class TestLockfileHash:
         nb_dir = create_notebook(tmp_path, "hash_change")
         h1 = compute_lockfile_hash(nb_dir)
 
-        # Modify the lockfile
         lockfile = nb_dir / "uv.lock"
         lockfile.write_text(lockfile.read_text() + "\n# extra\n")
 

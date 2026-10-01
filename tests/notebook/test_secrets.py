@@ -88,11 +88,6 @@ def _install_fake_sdk_client(monkeypatch, client: _FakeClient) -> list[str]:
     return hosts_seen
 
 
-# ---------------------------------------------------------------------------
-# Registry
-# ---------------------------------------------------------------------------
-
-
 class TestRegistry:
     def setup_method(self) -> None:
         _reset_for_tests()
@@ -109,11 +104,6 @@ class TestRegistry:
         a = get_provider("infisical")
         b = get_provider("infisical")
         assert a is b
-
-
-# ---------------------------------------------------------------------------
-# Infisical provider
-# ---------------------------------------------------------------------------
 
 
 class TestInfisicalProvider:
@@ -278,9 +268,7 @@ class TestInfisicalHostInServiceMode:
         assert hosts == ["https://self-hosted.example.com"]
 
 
-# ---------------------------------------------------------------------------
-# Session merge
-# ---------------------------------------------------------------------------
+# --- Session merge ---
 
 
 def _state(
@@ -305,8 +293,7 @@ class TestApplySecretsToNotebookState:
         assert state.env_fetch_error is None
 
     def test_fetched_secrets_fill_empty_values(self, monkeypatch) -> None:
-        # Existing env has the key as a blanked sensitive placeholder —
-        # typical state after reload from disk.
+        # The key as a blanked sensitive placeholder, as after a reload from disk.
         state = _state(
             env={"OPENAI_API_KEY": "", "DEBUG": "true"},
             secret_manager_config={"provider": "infisical", "project_id": "p"},
@@ -414,9 +401,7 @@ def _install_fake_provider(
     monkeypatch.setattr(registry, "_cache", registry._cache)
 
 
-# ---------------------------------------------------------------------------
-# Route surface
-# ---------------------------------------------------------------------------
+# --- Route surface ---
 
 
 @pytest.fixture
@@ -473,11 +458,6 @@ class TestRefreshEndpoint:
         tc, _session_id, _ = client
         resp = tc.post("/v1/notebooks/does-not-exist/secret-manager/refresh")
         assert resp.status_code == 404
-
-
-# ---------------------------------------------------------------------------
-# Writer: update_notebook_secret_manager
-# ---------------------------------------------------------------------------
 
 
 class TestUpdateNotebookSecretManager:
@@ -546,16 +526,10 @@ class TestUpdateNotebookSecretManager:
         assert before == after
 
 
-# ---------------------------------------------------------------------------
-# Route: PUT /secret-manager/config
-# ---------------------------------------------------------------------------
-
-
 class TestUpdateSecretManagerConfigEndpoint:
     def test_saves_and_returns_config(self, client) -> None:
         tc, session_id, monkeypatch = client
-        # Replace the fake provider's fetch so the subsequent reload's
-        # apply_secrets_to_notebook_state doesn't hit real infisical.
+        # Stub the fetch so the reload's apply_secrets_to_notebook_state skips real Infisical.
         _install_fake_provider(monkeypatch, secrets={})
         resp = tc.put(
             f"/v1/notebooks/{session_id}/secret-manager/config",

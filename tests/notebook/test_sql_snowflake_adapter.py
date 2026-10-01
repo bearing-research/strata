@@ -469,7 +469,7 @@ def test_list_schema_empty_when_no_database():
     assert a.list_schema(_FakeConn(cur)) == []
 
 
-# --- Codex review fixes -----------------------------------------------------
+# --- URI identity, current schema, write role ---
 
 
 def test_connection_id_includes_uri_components():
@@ -540,7 +540,7 @@ def test_probe_freshness_uses_current_schema_for_unqualified_tables():
         ]
     )
     a = SnowflakeAdapter()
-    # Unqualified table — relies on CURRENT_SCHEMA()
+    # Unqualified table, which relies on CURRENT_SCHEMA().
     tables = [QualifiedTable(catalog=None, schema=None, name="orders")]
     a.probe_freshness(_FakeConn(cur), tables)
 
@@ -570,7 +570,7 @@ def test_probe_freshness_no_schema_does_not_pretend_to_match_public():
     token = a.probe_freshness(_FakeConn(cur), tables)
     assert token.value  # non-empty (sentinel)
     info_calls = [sql for sql, _ in cur.executions if "INFORMATION_SCHEMA" in sql]
-    # No INFORMATION_SCHEMA query was issued — sentinel only.
+    # No INFORMATION_SCHEMA query was issued: sentinel only.
     assert info_calls == []
 
 

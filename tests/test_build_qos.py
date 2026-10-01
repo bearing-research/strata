@@ -98,13 +98,10 @@ class TestTenantQuota:
         config = BuildQoSConfig(bytes_per_day_limit=1024 * 1024)  # 1MB
         qos = BuildQoS(config)
 
-        # First check should pass
         await qos.check_quota("tenant1", 512 * 1024)
 
-        # Record some usage
         await qos.record_bytes("tenant1", 900 * 1024)
 
-        # Now exceeding quota should raise
         with pytest.raises(TenantQuotaExceededError) as exc_info:
             await qos.check_quota("tenant1", 200 * 1024)
 
@@ -119,7 +116,6 @@ class TestTenantQuota:
         config = BuildQoSConfig(bytes_per_day_limit=1024 * 1024)  # 1MB
         qos = BuildQoS(config)
 
-        # Record usage for tenant1
         await qos.record_bytes("tenant1", 900 * 1024)
 
         # tenant2 should still be able to use quota
@@ -142,17 +138,13 @@ class TestSlotAcquisition:
         )
         qos = BuildQoS(config)
 
-        # Should acquire successfully
         slot = await qos.acquire("tenant1", BuildPriority.INTERACTIVE)
 
-        # Check metrics
         metrics = qos.get_metrics()
         assert metrics["interactive"]["active"] == 1
 
-        # Release
         await slot.release()
 
-        # Check slot was released
         metrics = qos.get_metrics()
         assert metrics["interactive"]["active"] == 0
 
@@ -203,7 +195,7 @@ class TestSlotAcquisition:
         )
         qos = BuildQoS(config)
 
-        # Acquire 2 slots (at limit)
+        # Two slots: at the limit.
         slot1 = await qos.acquire("tenant1", BuildPriority.INTERACTIVE)
         slot2 = await qos.acquire("tenant1", BuildPriority.INTERACTIVE)
 
@@ -218,7 +210,6 @@ class TestSlotAcquisition:
         # Different tenant should still succeed
         slot3 = await qos.acquire("tenant2", BuildPriority.INTERACTIVE)
 
-        # Clean up
         await slot1.release()
         await slot2.release()
         await slot3.release()
@@ -246,7 +237,6 @@ class TestSlotAcquisition:
             assert exc_info.value.slots == 2
             assert exc_info.value.status_code == 429
         finally:
-            # Clean up
             await slot1.release()
             await slot2.release()
 
@@ -261,7 +251,6 @@ class TestSlotAcquisition:
         )
         qos = BuildQoS(config)
 
-        # Acquire interactive slot
         slot1 = await qos.acquire("tenant1", BuildPriority.INTERACTIVE)
 
         # Should still be able to acquire bulk slot
@@ -342,7 +331,6 @@ class TestMetrics:
         slot = await qos.acquire("tenant1", BuildPriority.INTERACTIVE)
 
         try:
-            # Trigger rejection
             with pytest.raises(GlobalCapacityError):
                 await qos.acquire("tenant2", BuildPriority.INTERACTIVE)
 
@@ -357,10 +345,8 @@ class TestMetrics:
         config = BuildQoSConfig()
         qos = BuildQoS(config)
 
-        # Create some activity
         slot = await qos.acquire("tenant1", BuildPriority.INTERACTIVE)
 
-        # Get tenant metrics
         tenant_metrics = qos.get_tenant_metrics("tenant1")
         assert tenant_metrics is not None
         assert tenant_metrics["tenant_id"] == "tenant1"
@@ -439,13 +425,11 @@ class TestSingleton:
         reset_build_qos()
         assert get_build_qos() is None
 
-        # Set a QoS
         config = BuildQoSConfig()
         qos = BuildQoS(config)
         set_build_qos(qos)
         assert get_build_qos() is qos
 
-        # Reset
         reset_build_qos()
         assert get_build_qos() is None
 
@@ -470,7 +454,6 @@ class TestConcurrentAcquisition:
             try:
                 slot = await qos.acquire(tenant_id, BuildPriority.INTERACTIVE)
                 slots_acquired.append((tenant_id, n))
-                # Hold slot briefly
                 await asyncio.sleep(0.01)
                 await slot.release()
             except TenantAtCapacityError:
@@ -478,7 +461,6 @@ class TestConcurrentAcquisition:
             except GlobalCapacityError:
                 errors.append(("global_cap", tenant_id, n))
 
-        # Launch many concurrent requests across tenants
         tasks = []
         for tenant in ["t1", "t2", "t3"]:
             for i in range(5):
@@ -504,25 +486,20 @@ class TestConcurrentAcquisition:
         )
         qos = BuildQoS(config)
 
-        # Hold one slot
         slot1 = await qos.acquire("tenant1", BuildPriority.INTERACTIVE)
 
-        # Start a waiter
         async def wait_for_slot():
             slot = await qos.acquire("tenant2", BuildPriority.INTERACTIVE)
             await slot.release()
 
         waiter = asyncio.create_task(wait_for_slot())
 
-        # Let it wait a bit
         await asyncio.sleep(0.05)
 
         # Release first slot so waiter can proceed
         await slot1.release()
 
-        # Wait for waiter to complete
         await waiter
 
-        # Check queue wait was recorded
         metrics = qos.get_metrics()
         assert metrics["interactive"]["queue_wait_count"] >= 1

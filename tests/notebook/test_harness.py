@@ -37,20 +37,17 @@ def run_harness(harness_path: Path, manifest: dict) -> dict:
     with tempfile.TemporaryDirectory() as tmpdir:
         tmpdir = Path(tmpdir)
 
-        # Write manifest
         manifest_path = tmpdir / "manifest.json"
         manifest["output_dir"] = str(tmpdir)
         with open(manifest_path, "w") as f:
             json.dump(manifest, f)
 
-        # Run harness
         subprocess.run(
             [sys.executable, str(harness_path), str(manifest_path)],
             cwd=str(tmpdir),
             capture_output=True,
         )
 
-        # Read result
         result_path = tmpdir / "harness-result.json"
         with open(result_path) as f:
             return json.load(f)
@@ -410,9 +407,7 @@ result = greet("World")
         result = run_harness(harness_script, manifest)
 
         assert result["success"] is True
-        # Function is exported
         assert "greet" in result["variables"]
-        # But result is also there
         assert "result" in result["variables"]
         assert result["variables"]["result"]["preview"] == "Hello, World!"
 
@@ -447,10 +442,8 @@ x = 1
 
         result = run_harness(harness_script, manifest)
 
-        # Should succeed overall
         assert result["success"] is True
-        # But lock variable might have serialization error
-        # x should still be there
+        # The lock may fail to serialize, but x must still be there.
         assert "x" in result["variables"]
 
 
@@ -493,9 +486,8 @@ class TestHarnessLoopUntil:
         }
         result = run_harness(harness_script, manifest)
 
-        # Cell body still succeeded — the predicate failure is reported on
-        # the loop record rather than aborting execution, so the executor
-        # can decide how to surface it.
+        # A predicate failure is reported on the loop record instead of aborting
+        # execution, so the executor decides how to surface it.
         assert result["success"] is True
         assert result["loop"]["until_reached"] is False
         assert "NameError" in result["loop"]["error"]
@@ -568,8 +560,8 @@ class TestHarnessRdsInput:
         with tempfile.TemporaryDirectory() as tmpdir:
             tmpdir = Path(tmpdir)
 
-            # The bytes don't need to be a real RDS blob — the
-            # dispatcher rejects on content_type, not on file shape.
+            # The bytes need not be a real RDS blob: the dispatcher rejects on
+            # content_type, not file shape.
             rds_path = tmpdir / "fit.rds"
             rds_path.write_bytes(b"\x1f\x8b\x08\x00fakerds")
 
@@ -597,15 +589,12 @@ class TestHarnessRdsInput:
                 result = json.load(f)
 
         assert result["success"] is False
-        # The variable name + the saveRDS-suggested-fix wording both
-        # come from StrataRArtifactError.__init__; without the harness
-        # re-raise (or with the previous swallow-and-continue path),
-        # this assertion would fail.
+        # The variable name and the saveRDS fix wording both come from
+        # StrataRArtifactError; if the harness swallowed it, this would fail.
         assert "fit" in result["error"]
         assert "saveRDS" in result["error"]
         assert "data.frame" in result["error"]
-        # The cell body itself never ran, so the NameError leak we
-        # were guarding against can't happen.
+        # The cell body never ran, so no NameError can leak.
         assert "NameError" not in result["error"]
 
 

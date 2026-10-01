@@ -86,11 +86,10 @@ class TestScanToLazy:
             base_url=f"http://127.0.0.1:{config.port}",
         )
 
-        # Chain lazy operations
         result = lf.filter(pl.col("id") < 100).select(pl.col("value")).collect()
 
         assert isinstance(result, pl.DataFrame)
-        assert result.height < 500  # Filtered result
+        assert result.height < 500
 
 
 class TestStrataPolarsScanner:
@@ -209,10 +208,8 @@ class TestStrataPolarsScanner:
 
         scanner = StrataPolarsScanner(base_url=f"http://127.0.0.1:{config.port}")
         try:
-            # First scan
             result1 = scanner.scan(table_uri, columns=["id"])
 
-            # Second scan with different columns
             result2 = scanner.scan(table_uri, columns=["value", "name"])
 
             assert result1.columns == ["id"]
@@ -230,11 +227,9 @@ class TestStrataPolarsScanner:
         with StrataPolarsScanner(base_url=f"http://127.0.0.1:{config.port}") as scanner:
             df = scanner.scan(table_uri, columns=["id", "value"])
 
-            # Test filtering
             filtered = df.filter(pl.col("id") < 100)
             assert filtered.height < df.height
 
-            # Test aggregation
             agg = df.select(
                 pl.col("value").sum().alias("total"),
                 pl.col("value").mean().alias("avg"),
@@ -249,12 +244,10 @@ class TestStrataPolarsScanner:
         table_uri = server_with_client["warehouse"]["table_uri"]
 
         with StrataPolarsScanner(base_url=f"http://127.0.0.1:{config.port}") as scanner:
-            # Process batches incrementally (memory-efficient pattern)
+            # Incremental, memory-efficient batch processing.
             batch_counts = []
             for batch in scanner.scan_batches(table_uri, columns=["id", "value"]):
-                # Convert to Polars and process each batch
                 df = pl.from_arrow(batch)
                 batch_counts.append(df.height)
 
-            # Verify we processed all data
             assert sum(batch_counts) == 500

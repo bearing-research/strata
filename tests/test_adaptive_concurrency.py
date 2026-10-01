@@ -26,24 +26,20 @@ class TestResizableLimiter:
         assert limiter.in_use == 0
         assert limiter.available == 2
 
-        # Acquire first slot
         result = await limiter.acquire()
         assert result is True
         assert limiter.in_use == 1
         assert limiter.available == 1
 
-        # Acquire second slot
         result = await limiter.acquire()
         assert result is True
         assert limiter.in_use == 2
         assert limiter.available == 0
 
-        # Release one
         await limiter.release()
         assert limiter.in_use == 1
         assert limiter.available == 1
 
-        # Release second
         await limiter.release()
         assert limiter.in_use == 0
         assert limiter.available == 2
@@ -53,11 +49,9 @@ class TestResizableLimiter:
         """Acquire should respect timeout."""
         limiter = ResizableLimiter(1)
 
-        # Fill the limiter
         await limiter.acquire()
         assert limiter.available == 0
 
-        # Try to acquire with short timeout - should fail
         result = await limiter.acquire(timeout=0.05)
         assert result is False
         assert limiter.in_use == 1  # Still just one
@@ -67,17 +61,14 @@ class TestResizableLimiter:
         """Resize should allow increasing capacity."""
         limiter = ResizableLimiter(2)
 
-        # Fill the limiter
         await limiter.acquire()
         await limiter.acquire()
         assert limiter.available == 0
 
-        # Resize to allow more
         await limiter.resize(4)
         assert limiter.capacity == 4
         assert limiter.available == 2  # 4 - 2 in use
 
-        # Now we can acquire more
         result = await limiter.acquire()
         assert result is True
         assert limiter.in_use == 3
@@ -87,17 +78,14 @@ class TestResizableLimiter:
         """Resize should allow decreasing capacity."""
         limiter = ResizableLimiter(4)
 
-        # Use 2 slots
         await limiter.acquire()
         await limiter.acquire()
         assert limiter.in_use == 2
 
-        # Resize down to 3
         await limiter.resize(3)
         assert limiter.capacity == 3
         assert limiter.available == 1  # 3 - 2 in use
 
-        # Release one
         await limiter.release()
         assert limiter.in_use == 1
         assert limiter.available == 2  # 3 - 1 in use
@@ -107,21 +95,18 @@ class TestResizableLimiter:
         """Resize below in_use should work, just block new acquires."""
         limiter = ResizableLimiter(4)
 
-        # Use all 4 slots
         for _ in range(4):
             await limiter.acquire()
         assert limiter.in_use == 4
 
-        # Resize down to 2 (below current in_use)
+        # Resize below current in_use.
         await limiter.resize(2)
         assert limiter.capacity == 2
         assert limiter.available == 0  # max(0, 2 - 4) = 0
 
-        # Can't acquire more
         result = await limiter.acquire(timeout=0.01)
         assert result is False
 
-        # Release 3 - now we have capacity again
         for _ in range(3):
             await limiter.release()
         assert limiter.in_use == 1
@@ -139,11 +124,9 @@ class TestResizableLimiter:
             nonlocal acquired
             acquired = await limiter.acquire(timeout=1.0)
 
-        # Start a waiter
         task = asyncio.create_task(try_acquire())
         await asyncio.sleep(0.01)  # Let it start waiting
 
-        # Resize to allow the waiter through
         await limiter.resize(2)
         await asyncio.sleep(0.01)  # Let it acquire
 
@@ -234,14 +217,12 @@ class TestRollingLatencyWindow:
         """Window should drop old values when full."""
         window = RollingLatencyWindow(size=10)
 
-        # Fill with low latencies
         for _ in range(10):
             window.record(10.0)
 
         p95_low = window.get_p95()
         assert p95_low == 10.0
 
-        # Now add high latencies
         for _ in range(10):
             window.record(100.0)
 
@@ -340,7 +321,6 @@ class TestAdaptiveConcurrencyController:
         controller.record_latency("interactive", 50.0)
         controller.record_latency("bulk", 150.0)
 
-        # Check latencies are recorded in correct windows
         interactive_stats = controller._interactive.latency_window.get_stats()
         bulk_stats = controller._bulk.latency_window.get_stats()
 
@@ -349,7 +329,6 @@ class TestAdaptiveConcurrencyController:
 
     def test_get_metrics(self, controller):
         """Test metrics output."""
-        # Record some latencies
         for i in range(20):
             controller.record_latency("interactive", float(50 + i))
             controller.record_latency("bulk", float(100 + i))
@@ -399,7 +378,7 @@ class TestAdaptiveConcurrencyController:
         """Controller should decrease slots when p95 > target."""
         interactive, bulk = limiters
 
-        # Record high latencies (above 100ms target)
+        # Latencies above the 100ms target.
         for _ in range(20):
             controller.record_latency("interactive", 200.0)
 
@@ -409,8 +388,7 @@ class TestAdaptiveConcurrencyController:
         assert controller._interactive.consecutive_decrease_signals == 1
 
         await controller._evaluate_and_adjust(controller._interactive, interactive)
-        # Second signal should trigger adjustment (hysteresis=2)
-        # Slots should decrease from 10 to 9
+        # The second signal triggers the adjustment (hysteresis=2): 10 -> 9.
         assert controller._interactive.current_slots == 9
         assert controller._interactive.decrease_events == 1
 
@@ -427,11 +405,9 @@ class TestAdaptiveConcurrencyController:
         for _ in range(20):
             controller.record_queue_wait("interactive", 150.0)
 
-        # Trigger evaluations
         await controller._evaluate_and_adjust(controller._interactive, interactive)
         await controller._evaluate_and_adjust(controller._interactive, interactive)
 
-        # Slots should increase from 10 to 11
         assert controller._interactive.current_slots == 11
         assert controller._interactive.increase_events == 1
 
@@ -448,11 +424,10 @@ class TestAdaptiveConcurrencyController:
         for _ in range(20):
             controller.record_queue_wait("interactive", 10.0)
 
-        # Trigger evaluations multiple times
         for _ in range(5):
             await controller._evaluate_and_adjust(controller._interactive, interactive)
 
-        # Slots should NOT increase - no queue pressure means no demand
+        # No queue pressure means no demand, so no increase.
         assert controller._interactive.current_slots == 10
         assert controller._interactive.increase_events == 0
 
@@ -465,11 +440,9 @@ class TestAdaptiveConcurrencyController:
         controller._interactive.current_slots = 5
         await interactive.resize(5)
 
-        # Record high latencies
         for _ in range(20):
             controller.record_latency("interactive", 200.0)
 
-        # Try to decrease multiple times
         for _ in range(10):
             await controller._evaluate_and_adjust(controller._interactive, interactive)
 
@@ -490,7 +463,6 @@ class TestAdaptiveConcurrencyController:
             controller.record_latency("interactive", 50.0)
             controller.record_queue_wait("interactive", 150.0)
 
-        # Try to increase multiple times
         for _ in range(10):
             await controller._evaluate_and_adjust(controller._interactive, interactive)
 
@@ -502,7 +474,6 @@ class TestAdaptiveConcurrencyController:
         """Hysteresis should prevent rapid changes."""
         interactive, bulk = limiters
 
-        # Record high latency
         for _ in range(20):
             controller.record_latency("interactive", 200.0)
 
@@ -531,12 +502,10 @@ class TestAdaptiveConcurrencyController:
         for _ in range(20):
             controller.record_latency("bulk", 200.0)
 
-        # Trigger evaluations for both tiers
         await controller._evaluate_and_adjust(controller._interactive, interactive)
         await controller._evaluate_and_adjust(controller._bulk, bulk)
         await controller._evaluate_and_adjust(controller._bulk, bulk)
 
-        # Only bulk should have decreased
         assert controller._interactive.current_slots == 10  # No change
         assert controller._bulk.current_slots == 3  # Decreased from 4
 
@@ -594,7 +563,7 @@ class TestSampleAging:
         stats = window.get_stats()
         assert stats["window_size"] == 0
         assert stats["p95_ms"] is None
-        # The cumulative count is history, not a live signal — it stays.
+        # The cumulative count is history, not a live signal, so it stays.
         assert stats["count"] == 10
 
     def test_fresh_samples_survive_alongside_expired_ones(self):
@@ -723,13 +692,10 @@ class TestAdaptiveStartupValidation:
         assert config.interactive_slots <= config.adaptive_max_interactive
 
     def test_adaptive_with_multi_tenancy_is_rejected(self, tmp_path):
-        # The controller holds the default tenant's limiters. Under
-        # multi-tenancy that is a tier no request acquires, so it would run as
-        # a no-op again — the exact failure #549 is about.
-        #
-        # Spelled out in full as a valid service-mode config: multi-tenancy is
-        # already incoherent in personal mode, and matching that error instead
-        # would pass whether or not this rule exists.
+        # The controller holds the default tenant's limiters, a tier no multi-tenant
+        # request acquires, so it would run as a no-op.
+        # Spelled out as a valid service-mode config: personal mode already rejects
+        # multi-tenancy, and matching that error would pass whether or not this rule exists.
         with pytest.raises(ValidationError, match="adaptive_enabled cannot be combined"):
             StrataConfig(
                 deployment_mode="service",

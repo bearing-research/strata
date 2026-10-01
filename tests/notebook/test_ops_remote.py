@@ -158,9 +158,9 @@ def test_cli_no_target_is_exit_2(capsys):
 
 
 def test_cli_show_by_id_routes_to_remote(monkeypatch, capsys):
-    # Regression: `cell show --server … <id>` must reach get_cell(<id>). With
-    # cell_id now optional (for --var), argparse could misfile the lone positional
-    # into notebook_dir; cell_show_main recovers it for the remote form.
+    # `cell show --server … <id>` must reach get_cell(<id>): with cell_id optional
+    # (for --var), argparse can misfile the lone positional into notebook_dir, and
+    # cell_show_main recovers it for the remote form.
     seen = {}
 
     class _FakeRemote:

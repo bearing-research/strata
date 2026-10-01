@@ -97,7 +97,7 @@ class TestRegisterIsExtensible:
                 raise NotImplementedError
 
             def is_batchable(self, cell, executor):  # noqa: ANN001
-                return True  # Fake — markdown is normally non-batchable.
+                return True  # markdown is normally non-batchable
 
         original = get_language_executor(CellLanguage.MARKDOWN)
         try:
@@ -124,6 +124,6 @@ class TestIsBatchableShortcuts:
         end-to-end behaviour is covered in ``test_executor_batch.py``.
         R defers batching to a future phase per #57.
         """
-        # Sentinel cell + executor — should never be touched.
+        # Sentinel cell + executor; must never be touched.
         sentinel = object()
         assert get_language_executor(language).is_batchable(sentinel, sentinel) is False

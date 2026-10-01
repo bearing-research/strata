@@ -67,7 +67,6 @@ class TestCacheKeyGranularity:
             projection_fingerprint="def456",
         )
 
-        # With ROW_GROUP_PROJECTION, different projections = different keys
         hex1 = key1.to_hex(CacheGranularity.ROW_GROUP_PROJECTION)
         hex2 = key2.to_hex(CacheGranularity.ROW_GROUP_PROJECTION)
         assert hex1 != hex2
@@ -91,7 +90,6 @@ class TestCacheKeyGranularity:
             projection_fingerprint="def456",
         )
 
-        # With ROW_GROUP, different projections = same key
         hex1 = key1.to_hex(CacheGranularity.ROW_GROUP)
         hex2 = key2.to_hex(CacheGranularity.ROW_GROUP)
         assert hex1 == hex2
@@ -111,11 +109,11 @@ class TestCacheKeyGranularity:
             table_identity=table_identity,
             snapshot_id=123,
             file_path="/data/file.parquet",
-            row_group_id=1,  # Different row group
+            row_group_id=1,
             projection_fingerprint="abc123",
         )
 
-        # Different row groups = different keys (even with ROW_GROUP granularity)
+        # Row groups always split the key, even at ROW_GROUP granularity.
         hex1 = key1.to_hex(CacheGranularity.ROW_GROUP)
         hex2 = key2.to_hex(CacheGranularity.ROW_GROUP)
         assert hex1 != hex2
@@ -149,10 +147,8 @@ class TestDiskCacheGranularity:
             projection_fingerprint="proj2",
         )
 
-        # Put data for key1
         cache.put(key1, sample_batch)
 
-        # key1 should hit, key2 should miss
         assert cache.get(key1) is not None
         assert cache.get(key2) is None
 
@@ -180,15 +176,13 @@ class TestDiskCacheGranularity:
             snapshot_id=123,
             file_path="/data/file.parquet",
             row_group_id=0,
-            projection_fingerprint="proj2",  # Different projection
+            projection_fingerprint="proj2",
         )
 
-        # Put data for key1
         cache.put(key1, sample_batch)
 
-        # Both keys should hit (same row group, ignoring projection)
         assert cache.get(key1) is not None
-        assert cache.get(key2) is not None  # Shares cache with key1!
+        assert cache.get(key2) is not None
 
     def test_row_group_still_separates_different_row_groups(
         self, tmp_path, sample_batch, table_identity
@@ -213,14 +207,12 @@ class TestDiskCacheGranularity:
             table_identity=table_identity,
             snapshot_id=123,
             file_path="/data/file.parquet",
-            row_group_id=1,  # Different row group
+            row_group_id=1,
             projection_fingerprint="proj1",
         )
 
-        # Put data for key1
         cache.put(key1, sample_batch)
 
-        # key1 should hit, key2 should miss (different row groups)
         assert cache.get(key1) is not None
         assert cache.get(key2) is None
 

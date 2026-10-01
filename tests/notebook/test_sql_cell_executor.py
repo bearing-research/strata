@@ -9,8 +9,6 @@ from typing import Any
 
 import pytest
 
-# Skip the whole suite if optional ADBC packages are missing — the
-# tests need adbc-driver-sqlite to actually open a connection.
 adbc_sqlite = pytest.importorskip("adbc_driver_sqlite")
 
 
@@ -106,9 +104,8 @@ def _build_notebook_with_sql_cell(
     add_cell_to_notebook(nb_dir, cell_id, language="sql")
     write_cell(nb_dir, cell_id, cell_source)
 
-    # Inject [connections.db]. The current writer rewrites the whole
-    # toml on serialize, so the safest path is to read the existing
-    # toml as text, append the connection block, and write back.
+    # Append [connections.db] as text, since the writer rewrites the whole toml on
+    # serialize.
     toml_path = nb_dir / "notebook.toml"
     text = toml_path.read_text()
     text += f'\n[connections.db]\ndriver = "sqlite"\npath = "{db_path}"\n'
@@ -157,7 +154,6 @@ async def test_sql_cell_executes_and_returns_arrow_table(tmp_path):
     assert result["execution_method"] == "sql"
     assert result["artifact_uri"]
 
-    # Verify the stored artifact actually contains the rows.
     table = _load_artifact_as_arrow(session, result["artifact_uri"])
     assert table.num_rows == 3
     assert set(table.schema.names) == {"id", "name", "value"}
@@ -237,7 +233,6 @@ async def test_sql_cell_fingerprint_invalidates_on_schema_change(tmp_path):
     assert second["success"], second.get("error")
     assert second["cache_hit"] is False, "fingerprint should have invalidated after the ALTER TABLE"
 
-    # The new column should appear in the re-executed result's schema.
     table = _load_artifact_as_arrow(session, second["artifact_uri"])
     assert "extra" in table.schema.names
 
@@ -327,8 +322,7 @@ async def test_sql_cell_bind_param_from_upstream_python_cell(tmp_path):
     py_result = await executor.execute_cell("py", py_src)
     assert py_result.success, py_result.error
 
-    # Now run the SQL cell. It should resolve :min_value to 15 from
-    # the upstream artifact and return rows with value > 15.
+    # It resolves :min_value to 15 from the upstream artifact.
     from strata.notebook.sql.cell_executor import execute_sql_cell
 
     sql_src = (nb_dir / "cells" / "sql.py").read_text()
@@ -393,12 +387,10 @@ async def test_sql_cell_stays_ready_after_staleness_recompute(tmp_path):
     session.compute_staleness()
     session.mark_executed_ready("c1")
 
-    # A *second* staleness recompute (the path a notebook reopen
-    # also walks under load) must keep the cell READY. Without the
-    # language=='sql' branch in can_preserve_uncached_ready, this
-    # drops to IDLE because the generic per-variable artifact
-    # lookup misses (the SQL executor stored the artifact under
-    # SQL-specific provenance).
+    # A second staleness recompute (a reopen walks it too) must keep the cell READY.
+    # The generic per-variable artifact lookup misses, since the SQL executor stores
+    # under SQL-specific provenance, so can_preserve_uncached_ready needs its
+    # language=='sql' branch.
     session.compute_staleness()
     cell_after = next(c for c in session.notebook_state.cells if c.id == "c1")
     assert cell_after.status == CellStatus.READY, (
@@ -462,9 +454,8 @@ async def test_sql_cell_artifact_uri_visible_to_downstream_python(tmp_path):
     )
     assert "result" in sql_cell.artifact_uris
 
-    # And the downstream Python cell's input-hashes collection picks
-    # up the SQL artifact's provenance hash — exercising the wiring
-    # end-to-end.
+    # And the downstream Python cell's input hashes pick up the SQL artifact's
+    # provenance hash.
     input_hashes = session._collect_input_hashes("py")
     assert len(input_hashes) == 1, (
         f"downstream py cell should see 1 upstream input hash; got {input_hashes!r}"
@@ -545,7 +536,6 @@ async def test_sql_write_cell_creates_table_and_inserts_rows(tmp_path):
     result = await execute_sql_cell(session, "c1", src)
     assert result["success"], result.get("error")
 
-    # The DB has the rows.
     with sqlite3.connect(db_path) as conn:
         rows = conn.execute("SELECT id, label FROM events ORDER BY id").fetchall()
     assert rows == [(1, "alpha"), (2, "beta")]
@@ -622,7 +612,6 @@ async def test_sql_write_false_still_blocks_writes(tmp_path):
 
     result = await execute_sql_cell(session, "c1", _read_cell(nb_dir, "c1"))
     assert result["success"] is False
-    # Row count unchanged.
     with sqlite3.connect(tmp_path / "events.db") as conn:
         (count,) = conn.execute("SELECT COUNT(*) FROM events").fetchone()
         assert count == 3
@@ -688,7 +677,7 @@ async def test_sql_write_cell_makes_db_visible_to_read_cell(tmp_path):
     ]
 
 
-# --- Codex review fixes for write cells -----------------------------------
+# --- write cells: binds, invalidation, naming, commit, status ---
 
 
 @pytest.mark.asyncio
@@ -878,8 +867,7 @@ async def test_sql_write_cell_propagates_commit_failure(tmp_path, monkeypatch):
 
         # Replace just commit; keep the rest of the interface.
         conn.commit = explode  # type: ignore[method-assign]
-        # Keep ``original_commit`` reachable so it's not GC'd into a
-        # dangling reference; not strictly necessary but cleaner.
+        # Keep ``original_commit`` reachable so it isn't GC'd.
         conn._original_commit = original_commit  # type: ignore[attr-defined]
         return conn
 
@@ -921,16 +909,13 @@ async def test_sql_write_cell_emits_per_statement_status_table(tmp_path):
     assert table.num_rows == 3
     assert table.schema.names == ["stmt", "kind", "rows_affected"]
     rows = table.to_pylist()
-    # Order preserved.
     assert [r["stmt"] for r in rows] == [1, 2, 3]
-    # Kinds reflect the statement type.
     kinds = [r["kind"] for r in rows]
     assert kinds[0] == "DROP TABLE"
     assert kinds[1] == "CREATE TABLE"
     assert kinds[2] == "INSERT"
-    # DDL gets null rows_affected — we suppress the count for
-    # DDL even when SQLite's changes() would return a value from
-    # a prior DML.
+    # DDL gets null rows_affected even when SQLite's changes() would still return a
+    # prior DML's count.
     assert rows[0]["rows_affected"] is None
     assert rows[1]["rows_affected"] is None
     # INSERT: ADBC SQLite leaves cursor.rowcount at -1, but the

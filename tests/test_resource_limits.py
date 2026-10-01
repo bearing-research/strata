@@ -40,7 +40,6 @@ def temp_warehouse(tmp_path):
 
     table = catalog.create_table("test_db.events", schema)
 
-    # Create sample data
     data = pa.table(
         {
             "id": pa.array(range(100), type=pa.int64()),
@@ -105,10 +104,10 @@ class TestServerResourceLimits:
             host="127.0.0.1",
             port=port,
             cache_dir=tmp_path / "cache",
-            max_concurrent_scans=2,  # Low limit for testing
-            max_tasks_per_scan=10,  # Low limit for testing
-            scan_timeout_seconds=5.0,  # Short timeout for testing
-            max_response_bytes=1024 * 1024,  # 1 MB for testing
+            max_concurrent_scans=2,
+            max_tasks_per_scan=10,
+            scan_timeout_seconds=5.0,
+            max_response_bytes=1024 * 1024,
             deployment_mode="personal",
         )
 
@@ -146,11 +145,9 @@ class TestServerResourceLimits:
 
         metrics = client.metrics()
 
-        # Check that resource_limits section exists and has expected fields
         assert "resource_limits" in metrics
         limits = metrics["resource_limits"]
 
-        # These fields should always be present
         assert "max_concurrent_scans" in limits
         assert "max_tasks_per_scan" in limits
         assert "plan_timeout_seconds" in limits
@@ -158,7 +155,6 @@ class TestServerResourceLimits:
         assert "max_response_bytes" in limits
         assert "active_scans" in limits
 
-        # Values should be reasonable types
         assert isinstance(limits["max_concurrent_scans"], int)
         assert isinstance(limits["max_tasks_per_scan"], int)
         assert isinstance(limits["plan_timeout_seconds"], (int, float))
@@ -171,7 +167,6 @@ class TestServerResourceLimits:
         client = server_with_client["client"]
         table_uri = server_with_client["warehouse"]["table_uri"]
 
-        # Should complete without hitting limits
         artifact = client.materialize(
             inputs=[table_uri],
             transform={"executor": "scan@v1", "params": {}},

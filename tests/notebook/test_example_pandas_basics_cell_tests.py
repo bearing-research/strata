@@ -25,17 +25,17 @@ def _src(file_stem: str) -> str:
 def upstream_sales():
     """Build the `sales` frame as create-data → add-columns would."""
     ns0: dict = {}
-    exec(_src("create_data"), ns0)  # noqa: S102 — trusted example source
+    exec(_src("create_data"), ns0)  # noqa: S102 (trusted example source)
     sales_raw = ns0["sales"]
     ns1 = {"sales": sales_raw.copy()}
-    exec(_src("add_columns"), ns1)  # noqa: S102 — trusted example source
+    exec(_src("add_columns"), ns1)  # noqa: S102 (trusted example source)
     return sales_raw, ns1["sales"]
 
 
 def test_pandas_basics_cell_tests_pass(upstream_sales, tmp_path):
     sales_raw, sales_with_revenue = upstream_sales
 
-    # (cell-id, cell-file, inputs) — inputs mirror each cell's upstream edge.
+    # (cell-id, cell-file, inputs); inputs mirror each cell's upstream edge.
     plan = [
         ("create-data", "create_data", {}),
         ("add-columns", "add_columns", {"sales": sales_raw.copy()}),
