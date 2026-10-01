@@ -289,7 +289,7 @@ authors have an order, an affiliation, and an ORCID that distinguishes one
 researcher from another. Pass them when publishing over HTTP:
 
 ```json
-POST /v1/artifacts/fig/v/1/publish
+POST /v1/artifacts/nb_paper_cell_c2_var___display__0/v/1/publish
 {
   "title": "Figure 3",
   "authors": [

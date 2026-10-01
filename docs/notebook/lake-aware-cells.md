@@ -136,8 +136,11 @@ print("snapshot S2:", table.current_snapshot().snapshot_id)
 uv run python append_month2.py
 ```
 
-Back in the notebook, the `@table` cell now shows **stale** - its snapshot id
-moved from S1 to S2, so its provenance changed. A plain **Run** (no force)
+Back in the notebook, the `@table` cell is now **stale** - its snapshot id
+moved from S1 to S2, so its provenance changed. The badge does not update live:
+the notebook looks up the current snapshot only when it recomputes staleness,
+which happens when you reopen the notebook, edit a cell, or run one. Refreshing
+the browser tab alone keeps the old badge. A plain **Run** (no force)
 recomputes the scan against S2 and **cascades** the rebuild to every
 downstream cell. Nothing changed in your code; the data moved, and Strata
 treated that exactly like a code change.
@@ -183,6 +186,11 @@ inputs change; `@table` adds the lake snapshot to the mix.
   you need as a real assignment (`orders_snapshot_value = orders_snapshot`),
   exactly as in Step 2. This mirrors how mount variables behave.
 - **The name must be a valid Python identifier.**
+- **Schema-only changes do not restale the cell.** The fingerprint is the
+  snapshot id, and changing a table's schema (adding or renaming a column)
+  commits no new snapshot. The cell stays a cache hit, and a scan that passes
+  `orders_snapshot` keeps reading that snapshot's schema. The new schema shows
+  up once new data lands in a new snapshot.
 - **Unreachable catalog → conservatively stale.** If the catalog can't be
   reached when provenance is computed (which also happens on notebook open),
   the cell is treated as stale rather than crashing; if it's still unreachable

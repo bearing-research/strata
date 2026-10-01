@@ -60,6 +60,10 @@ of the cell source, the upstream inputs, and your test file staged under a
 `test_*.py` name (which is what gives you native collection **and** assertion
 rewriting).
 
+Before the run, any stale upstream cell is materialized, exactly as a normal
+run of the cell would (an unchanged upstream is a cache hit), so `cell.sales`
+is current.
+
 ![A Python cell with its results table above an open Tests panel: the test
 source, a green "2 passed" summary, and a tick beside each test name. The flask
 toggle on the cell's left rail carries a green 2/2
@@ -104,6 +108,22 @@ clients and automation can run them too:
 
 See the [WebSocket Protocol reference](../reference/websocket.md) for the frame
 shapes.
+
+## From the CLI, REST and MCP
+
+- **CLI:** `strata cell test <notebook_dir> <cell_id>` runs a cell's tests and
+  exits non-zero on a failure. `--file tests.py` (or `-` for stdin) sets the
+  test source first. Add `--server http://localhost:8765 --session <id>` to
+  drive a live session instead.
+- **REST:** `POST /v1/notebooks/{id}/cells/{cell_id}/tests` runs them and
+  returns the counts and per-test outcomes. `PUT` on the same path sets the
+  test source.
+- **MCP:** the `run_tests` tool, with the session id and cell id.
+
+While the notebook's environment is not ready (still being created, a failed
+sync, or an environment job running), the REST route answers `409` with code
+`ENVIRONMENT_BUSY` and the WebSocket replies with an `error` frame carrying the
+same code.
 
 ## A worked example
 

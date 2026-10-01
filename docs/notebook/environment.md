@@ -18,6 +18,8 @@ A cell sent to a [remote worker](workers.md) runs in this same locked environmen
 
 At notebook creation time, you can select a Python version from the versions configured on the server. The first one listed is the default.
 
+To change it later, click **Requested Python** in the Environment panel. Strata rewrites `requires-python`, rebuilds `.venv/` with `uv sync`, and restores the old version if the sync fails.
+
 !!! note
     The available versions come from the server's `STRATA_NOTEBOOK_PYTHON_VERSIONS`. Unset, they are the Python versions `uv` reports as installed on the server that Strata supports, with the server's own version included.
 
@@ -35,7 +37,7 @@ matplotlib
 
 The operation runs asynchronously, you can continue editing cells while it installs.
 
-On a server in service mode, packages install from wheels only: a package with no wheel for the notebook's Python fails to resolve, and the message says a wheel is required. R packages are not added from the notebook there: the server restores the notebook's committed `renv.lock` as the harness user when the notebook opens. See [Service mode](../deployment/service-mode.md).
+On a server in service mode, packages install from wheels only: a package with no wheel for the notebook's Python fails to resolve, and the message says a wheel is required. R packages are not added from the notebook there, nor on a personal-mode server with `STRATA_NOTEBOOK_HARNESS_USER` set: the server restores the notebook's committed `renv.lock` as the harness user when the notebook opens. See [Service mode](../deployment/service-mode.md).
 
 ### Import from requirements.txt
 
@@ -53,7 +55,7 @@ Strata previews the changes (additions, removals, unchanged) before applying.
 
 ### Import from environment.yaml
 
-Conda-style `environment.yaml` files are supported on a best-effort basis. Strata extracts `pip` dependencies and ignores conda-specific packages.
+Conda-style `environment.yaml` files are supported on a best-effort basis. Strata translates each conda spec to a pip requirement (`numpy=2.1` becomes `numpy==2.1`, a `conda-forge::` prefix is dropped) and adds the entries of the `pip:` list as they are. It ignores `channels`, the `python` pin and the `pip` entry itself, and the preview lists what it ignored.
 
 ### Export
 
@@ -61,7 +63,7 @@ Click **Export** to download the current dependencies as `requirements.txt`.
 
 ## Environment Operations
 
-All environment mutations run as **async jobs** with four actions:
+All environment mutations run as **async jobs** with seven actions:
 
 | Action | Description |
 |--------|-------------|
@@ -69,6 +71,9 @@ All environment mutations run as **async jobs** with four actions:
 | `remove` | Remove a package |
 | `sync` | Rebuild the environment from `pyproject.toml` |
 | `import` | Bulk import from requirements.txt or environment.yaml |
+| `change_python` | Switch the notebook's Python version |
+| `r_init` | Set up renv for R cells |
+| `r_add` | Install an R package with renv |
 
 The UI shows:
 
@@ -113,7 +118,9 @@ The `pyproject.toml` and `uv.lock` are the source of truth. The `.venv/` is recr
 On a server with many notebooks built from the same few lockfiles, a `.venv`
 per notebook installs the same packages again and again. With
 `STRATA_NOTEBOOK_ENV_BACKEND=shared`, notebooks share one environment per
-lockfile instead:
+lockfile instead. They live under `STRATA_NOTEBOOK_SHARED_ENV_DIR`, by default
+`envs` beside the notebook storage directory (`~/.strata/envs` unless
+`STRATA_NOTEBOOK_STORAGE_DIR` is set):
 
 ```
 ~/.strata/envs/
