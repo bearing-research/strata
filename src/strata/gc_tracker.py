@@ -40,10 +40,8 @@ class GCPause:
 class GCStats:
     """Aggregated GC statistics."""
 
-    # Recent pauses (last N events)
     recent_pauses: list[GCPause] = field(default_factory=list)
 
-    # Per-generation stats
     gen0_count: int = 0
     gen0_total_ms: float = 0.0
     gen0_max_ms: float = 0.0
@@ -56,7 +54,6 @@ class GCStats:
     gen2_total_ms: float = 0.0
     gen2_max_ms: float = 0.0
 
-    # Overall stats
     total_pauses: int = 0
     total_pause_ms: float = 0.0
     max_pause_ms: float = 0.0
@@ -87,7 +84,6 @@ class GCStats:
             },
         }
 
-        # Calculate percentiles from recent pauses if we have enough data
         if len(self.recent_pauses) >= 10:
             durations = sorted(p.duration_ms for p in self.recent_pauses)
             n = len(durations)
@@ -115,15 +111,12 @@ class GCTracker:
         self._current_generation: int = 0
         self._max_recent = max_recent
 
-        # Recent pauses (bounded deque for memory safety)
         self._recent: deque[GCPause] = deque(maxlen=max_recent)
 
-        # Per-generation counters
         self._gen_counts = [0, 0, 0]
         self._gen_total_ms = [0.0, 0.0, 0.0]
         self._gen_max_ms = [0.0, 0.0, 0.0]
 
-        # Overall counters
         self._total_pauses = 0
         self._total_pause_ms = 0.0
         self._max_pause_ms = 0.0
@@ -148,17 +141,12 @@ class GCTracker:
             generation = self._current_generation
             timestamp = time.time()
 
-            # Reset for next collection
             self._gc_start_time = 0.0
 
-            # Best-effort, NON-BLOCKING update. This callback fires *during* a GC
-            # — which can be triggered by an allocation made while a thread holds
-            # ``_lock`` (e.g. ``get_stats``/``reset`` building their result). With
-            # a non-reentrant lock a blocking acquire here would self-deadlock
-            # against that holder on the same thread (observed as an intermittent
-            # py3.12/macOS hang on the ``/metrics`` endpoint). Skip recording this
-            # pause when the lock is contended — dropping the occasional sample is
-            # acceptable for best-effort GC observability; a deadlock is not.
+            # Non-blocking: this callback fires during a GC, which an allocation
+            # can trigger while this same thread holds ``_lock`` (e.g. in
+            # ``get_stats``). A blocking acquire would self-deadlock; dropping a
+            # sample is fine.
             if not self._lock.acquire(blocking=False):
                 return
             try:
@@ -169,13 +157,11 @@ class GCTracker:
                 )
                 self._recent.append(pause)
 
-                # Update per-generation stats
                 if 0 <= generation <= 2:
                     self._gen_counts[generation] += 1
                     self._gen_total_ms[generation] += duration_ms
                     self._gen_max_ms[generation] = max(self._gen_max_ms[generation], duration_ms)
 
-                # Update overall stats
                 self._total_pauses += 1
                 self._total_pause_ms += duration_ms
                 self._max_pause_ms = max(self._max_pause_ms, duration_ms)
@@ -252,7 +238,6 @@ class GCTracker:
             ]
 
 
-# Global tracker instance
 _tracker: GCTracker | None = None
 
 

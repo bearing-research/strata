@@ -16,7 +16,6 @@ from strata.tenant import DEFAULT_TENANT_ID, TenantConfig, TenantQuotas
 if TYPE_CHECKING:
     from strata.adaptive_concurrency import ResizableLimiter
 
-# Max tenants to track runtime state for (LRU eviction beyond this)
 MAX_TRACKED_TENANTS = 1000
 
 
@@ -32,16 +31,15 @@ class TenantRegistry:
         quotas = registry.get_or_create_quotas("tenant-a")
     """
 
-    # Static tenant configurations (loaded from config file)
+    # Static configs, from the config file.
     _configs: dict[str, TenantConfig] = field(default_factory=dict)
 
-    # Runtime quota state (LRU evictable)
+    # Runtime quota state; LRU-evictable.
     _quotas: dict[str, TenantQuotas] = field(default_factory=dict)
 
-    # Lock for thread safety
     _lock: threading.Lock = field(default_factory=threading.Lock)
 
-    # Global defaults (from StrataConfig)
+    # Global defaults, from StrataConfig.
     default_interactive_slots: int = 32
     default_bulk_slots: int = 8
     default_per_client_interactive: int = 2
@@ -71,7 +69,6 @@ class TenantRegistry:
         with self._lock:
             if tenant_id in self._configs:
                 del self._configs[tenant_id]
-                # Also clean up runtime state
                 self._quotas.pop(tenant_id, None)
                 return True
             return False
@@ -91,22 +88,19 @@ class TenantRegistry:
         """
         with self._lock:
             if tenant_id in self._quotas:
-                # Move to end for LRU ordering (Python 3.7+ dict maintains insertion order)
+                # Re-insert to move to the LRU tail.
                 quotas = self._quotas.pop(tenant_id)
                 quotas.touch()
                 self._quotas[tenant_id] = quotas
                 return quotas
 
-            # Create new quotas
             quotas = TenantQuotas(tenant_id=tenant_id)
             self._quotas[tenant_id] = quotas
 
-            # LRU eviction if over limit, oldest first, of idle tenants only.
-            # Evicting a tenant whose limiters hold or await a slot would give
-            # its next request a fresh pair: it could run up to twice its
-            # quota, and the old pair's streams would drop out of
-            # aggregate_limiter_usage, which the shutdown drain waits on. The
-            # registry runs over the cap while that many tenants are busy.
+            # Evict oldest first, idle tenants only. Evicting a tenant whose limiters hold or await
+            # a slot would give its next request a fresh pair (up to twice its quota) and drop the
+            # old pair's streams from aggregate_limiter_usage, which the shutdown drain waits on.
+            # The registry runs over the cap while that many tenants are busy.
             for candidate in list(self._quotas):
                 if len(self._quotas) <= MAX_TRACKED_TENANTS:
                     break
@@ -133,7 +127,6 @@ class TenantRegistry:
 
         with self._lock:
             if quotas.interactive_limiter is None:
-                # Get tenant-specific config or use defaults
                 config = self.get_config(tenant_id)
                 if config:
                     interactive_slots = config.effective_interactive_slots(
@@ -147,7 +140,6 @@ class TenantRegistry:
                 quotas.interactive_limiter = ResizableLimiter(interactive_slots)
                 quotas.bulk_limiter = ResizableLimiter(bulk_slots)
 
-            # Cast and return (both should now be ResizableLimiter instances)
             interactive = quotas.interactive_limiter
             bulk = quotas.bulk_limiter
             if not isinstance(interactive, ResizableLimiter):
@@ -195,8 +187,8 @@ class TenantRegistry:
         """
         config = self._configs.get(tenant_id)
         if config is None:
-            # Unknown tenants allowed by default for flexibility
-            # The server config can require pre-registration if needed
+            # Unknown tenants are allowed by default; the server config can require
+            # pre-registration.
             return True
         return config.enabled
 
@@ -269,7 +261,6 @@ class TenantRegistry:
                 quotas.rows_returned = 0
 
 
-# Global registry instance
 _registry: TenantRegistry | None = None
 _registry_lock = threading.Lock()
 
@@ -307,7 +298,6 @@ def init_tenant_registry(
             default_per_client_interactive=default_per_client_interactive,
             default_per_client_bulk=default_per_client_bulk,
         )
-        # Register any provided tenant configs
         if tenant_configs:
             for config in tenant_configs:
                 _registry.register_tenant(config)

@@ -10,13 +10,12 @@ from dataclasses import dataclass, field
 from threading import Event, Lock, Thread
 from typing import Any, TextIO
 
-# Default queue size - logs are dropped if queue is full to prevent blocking
+# Logs are dropped when the queue is full rather than block.
 DEFAULT_LOG_QUEUE_SIZE = 1000
 
-# Max tables to track individually (LRU eviction after this)
 MAX_TRACKED_TABLES = 100
 
-# Latency histogram buckets in milliseconds
+# In milliseconds.
 LATENCY_BUCKETS = [10, 25, 50, 100, 250, 500, 1000, 2500, 5000]
 
 
@@ -52,11 +51,10 @@ class TableMetrics:
     rows_returned: int = 0
     row_groups_pruned: int = 0
 
-    # Latency tracking for percentiles (circular buffer of recent values)
+    # Bounded buffer of recent values for percentiles.
     _latencies: list[float] = field(default_factory=list, repr=False)
     _max_latency_samples: int = field(default=1000, repr=False)
 
-    # Last access time for LRU eviction
     last_access: float = field(default_factory=time.time, repr=False)
 
     def record_scan(self, metrics: "ScanMetrics") -> None:
@@ -77,7 +75,6 @@ class TableMetrics:
         self.row_groups_pruned += metrics.pruned_row_groups
         self.last_access = time.time()
 
-        # Track latency for percentile calculation
         if len(self._latencies) >= self._max_latency_samples:
             self._latencies.pop(0)
         self._latencies.append(metrics.total_time_ms)
@@ -231,7 +228,6 @@ class ScanMetrics:
             "pruned_row_groups": self.pruned_row_groups,
             "rows_returned": self.rows_returned,
         }
-        # Include request_id only when set (for correlation)
         if self.request_id:
             result["request_id"] = self.request_id
         return result
@@ -253,12 +249,10 @@ class MetricsCollector:
     # Lock only protects aggregate counters, NOT log writing
     _counter_lock: Lock = field(default_factory=Lock, repr=False)
 
-    # Background writer thread and queue (initialized in __post_init__)
     _log_queue: queue.Queue = field(init=False, repr=False)
     _writer_thread: Thread = field(init=False, repr=False)
     _shutdown: Event = field(default_factory=Event, repr=False)
 
-    # Aggregate counters
     total_cache_hits: int = 0
     total_cache_misses: int = 0
     total_bytes_from_cache: int = 0
@@ -269,19 +263,15 @@ class MetricsCollector:
     total_scans: int = 0
     total_row_groups_pruned: int = 0
 
-    # Stream abort counters
     stream_aborts_timeout: int = 0
     stream_aborts_size: int = 0
     client_disconnects: int = 0
 
-    # Cache eviction counters
     cache_evictions_count: int = 0
     cache_evicted_bytes: int = 0
 
-    # Logging metrics
     dropped_logs: int = 0
 
-    # Per-table metrics (table_id -> TableMetrics)
     _table_metrics: dict[str, TableMetrics] = field(default_factory=dict, repr=False)
 
     def __post_init__(self) -> None:
@@ -293,7 +283,6 @@ class MetricsCollector:
             daemon=True,
         )
         self._writer_thread.start()
-        # Register shutdown handler
         atexit.register(self.shutdown)
 
     def _writer_loop(self) -> None:
@@ -305,22 +294,21 @@ class MetricsCollector:
         """
         while not self._shutdown.is_set():
             try:
-                # Use timeout so we can check shutdown flag periodically
+                # Timeout so the loop can check the shutdown flag.
                 entry = self._log_queue.get(timeout=0.1)
                 try:
                     json.dump(entry, self.output)
                     self.output.write("\n")
                     self.output.flush()
                 except (OSError, TypeError, ValueError):
-                    # Broken pipe / closed stream / non-serializable entry —
-                    # drop it; the writer must survive one bad log.
+                    # Broken pipe, closed stream or non-serializable entry: drop it; the writer must
+                    # survive one bad log.
                     pass
                 finally:
                     self._log_queue.task_done()
             except queue.Empty:
                 continue
 
-        # Drain remaining items on shutdown
         while True:
             try:
                 entry = self._log_queue.get_nowait()
@@ -420,12 +408,10 @@ class MetricsCollector:
         metrics : ScanMetrics
             The completed scan's metrics.
         """
-        # Update aggregate counters and per-table metrics
         with self._counter_lock:
             self.total_scans += 1
             self.total_row_groups_pruned += metrics.pruned_row_groups
 
-            # Update per-table metrics
             if metrics.table_id:
                 self._record_table_metrics(metrics)
 
@@ -452,9 +438,7 @@ class MetricsCollector:
         table_id = metrics.table_id
 
         if table_id not in self._table_metrics:
-            # Check if we need to evict old entries (LRU)
             if len(self._table_metrics) >= MAX_TRACKED_TABLES:
-                # Find and remove the least recently accessed table
                 oldest_table = min(
                     self._table_metrics.keys(),
                     key=lambda t: self._table_metrics[t].last_access,
@@ -493,7 +477,6 @@ class MetricsCollector:
         with self._counter_lock:
             tables = list(self._table_metrics.values())
 
-        # Sort by scan count (hottest tables first)
         tables.sort(key=lambda t: t.scan_count, reverse=True)
         return [t.to_dict() for t in tables]
 
@@ -544,7 +527,7 @@ class MetricsCollector:
         try:
             self._log_queue.put_nowait(entry)
         except queue.Full:
-            # Drop the log rather than block - increment counter for observability
+            # Drop rather than block.
             with self._counter_lock:
                 self.dropped_logs += 1
 
@@ -574,14 +557,11 @@ class MetricsCollector:
                 "bytes_from_storage": self.total_bytes_from_storage,
                 "bytes_written_to_cache": self.total_bytes_written_to_cache,
                 "row_groups_pruned": self.total_row_groups_pruned,
-                # Stream abort metrics
                 "stream_aborts_timeout": self.stream_aborts_timeout,
                 "stream_aborts_size": self.stream_aborts_size,
                 "client_disconnects": self.client_disconnects,
-                # Cache eviction metrics
                 "cache_evictions_count": self.cache_evictions_count,
                 "cache_evicted_bytes": self.cache_evicted_bytes,
-                # Logging metrics
                 "dropped_logs": self.dropped_logs,
             }
 

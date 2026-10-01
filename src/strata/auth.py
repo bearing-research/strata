@@ -44,11 +44,8 @@ if TYPE_CHECKING:
     from strata.types import Principal, TableRef
 
 
-# ---------------------------------------------------------------------------
-# Principal Context
-# ---------------------------------------------------------------------------
+# Principal context
 
-# Request-scoped principal context (set by middleware)
 _principal_ctx: ContextVar[Principal | None] = ContextVar("principal", default=None)
 
 
@@ -104,11 +101,6 @@ def set_principal(principal: Principal | None) -> None:
     _principal_ctx.set(principal)
 
 
-# ---------------------------------------------------------------------------
-# Auth Errors
-# ---------------------------------------------------------------------------
-
-
 class AuthError(Exception):
     """Authentication or authorization error.
 
@@ -123,9 +115,7 @@ class AuthError(Exception):
         super().__init__(message)
 
 
-# ---------------------------------------------------------------------------
-# Proxy Verification
-# ---------------------------------------------------------------------------
+# Proxy verification and principal parsing
 
 
 def verify_proxy_token(request_token: str | None, expected_token: str | None) -> bool:
@@ -141,15 +131,13 @@ def verify_proxy_token(request_token: str | None, expected_token: str | None) ->
         True if token matches or no token is configured (auth disabled)
     """
     if expected_token is None:
-        # No token configured = skip verification (auth mode probably "none")
+        # No token configured: verification is off.
         return True
     if request_token is None:
         return False
 
-    # Constant-time comparison to prevent timing attacks. Compare the UTF-8
-    # bytes, not the strings: ASGI decodes header values as latin-1, so any
-    # non-ASCII byte in the header makes ``compare_digest`` raise TypeError
-    # on str inputs — a 500 where the answer is plainly "token doesn't match".
+    # Constant-time, on UTF-8 bytes: ASGI decodes headers as latin-1, and a
+    # non-ASCII str makes ``compare_digest`` raise TypeError (a 500, not a mismatch).
     return hmac.compare_digest(request_token.encode(), expected_token.encode())
 
 
@@ -209,20 +197,13 @@ def parse_api_key_principal(headers: dict[str, str], config: StrataConfig) -> Pr
 
     store = get_api_key_store()
     if store is None:
-        # Configured for key auth with no key store: fail closed. Falling
-        # through to anonymous would silently serve every request unauthenticated
-        # on a deployment whose operator asked for authentication.
+        # Key auth with no key store: fail closed rather than serve anonymously.
         raise AuthError("Unauthorized", 401)
 
     principal = store.verify(presented.strip())
     if principal is None:
         raise AuthError("Unauthorized", 401)
     return principal
-
-
-# ---------------------------------------------------------------------------
-# ACL Evaluator
-# ---------------------------------------------------------------------------
 
 
 class AclEvaluator:
@@ -270,20 +251,14 @@ class AclEvaluator:
         """
         from strata.config import AclRule  # noqa: F401 - for type checking
 
-        # Check principal match. ``principal`` is documented as a "Principal ID
-        # pattern", and tables are fnmatched two lines below — but this used
-        # exact string equality, so a rule like ``principal = "svc-*"`` never
-        # fired. For a deny rule that fails OPEN, silently, with no startup
-        # warning. fnmatch keeps "*" working exactly as before and makes the
-        # documented pattern form behave.
+        # ``principal`` is a pattern; exact equality would let a deny rule like
+        # ``svc-*`` silently fail open.
         if not fnmatch.fnmatch(principal.id, rule.principal):
             return False
 
-        # Check tenant match (if specified in rule)
         if rule.tenant is not None and rule.tenant != principal.tenant:
             return False
 
-        # Check table pattern match
         table_str = str(table_ref)
         for pattern in rule.tables:
             if fnmatch.fnmatch(table_str, pattern):
@@ -315,17 +290,15 @@ class AclEvaluator:
         Returns:
             True if access is allowed, False if denied
         """
-        # Check deny rules first (deny takes precedence)
+        # Deny first: an explicit deny beats any allow.
         for rule in self.config.deny_rules:
             if any(self._matches_rule(rule, principal, ref) for ref in (table_ref, *aliases)):
                 return False
 
-        # Check allow rules
         for rule in self.config.allow_rules:
             if self._matches_rule(rule, principal, table_ref):
                 return True
 
-        # Default action
         return self.config.default == "allow"
 
     def check_scope(self, principal: Principal, required_scope: str) -> bool:

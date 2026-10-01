@@ -27,7 +27,6 @@ import pyarrow.ipc as ipc
 
 type _BytesLike = bytes | bytearray | memoryview
 
-# Try to import Rust module for fast byte manipulation
 _RUST_AVAILABLE = False
 _rust_module = None
 
@@ -55,11 +54,9 @@ def get_concat_mode() -> str:
     return _FAST_CONCAT_MODE
 
 
-# Below this size, Python's read_bytes() beats the Rust mmap path: the mmap
-# syscall + FFI + PyBytes copy overhead isn't amortized until the read is large
-# enough. The measured crossover is ~4-6 MB (benchmarks/bench_rust_ext.py), so
-# only reads at or above this threshold go through Rust. Override with
-# STRATA_MMAP_MIN_BYTES (0 forces mmap always, matching the pre-threshold path).
+# Below this size, Python's read_bytes() beats the Rust mmap path: mmap syscall + FFI + PyBytes copy
+# overhead is not amortized. Measured crossover is ~4-6 MB (benchmarks/bench_rust_ext.py). Override
+# with STRATA_MMAP_MIN_BYTES (0 forces mmap always).
 MMAP_MIN_BYTES = int(os.environ.get("STRATA_MMAP_MIN_BYTES", 4 * 1024 * 1024))
 
 
@@ -86,7 +83,6 @@ def read_file_mmap(path: str) -> bytes:
             # plain read below, which reproduces the real error if there is one.
             pass
 
-    # Fallback: standard Python file read
     from pathlib import Path
 
     return Path(path).read_bytes()
@@ -98,8 +94,7 @@ def _concat_stream_bytes_pyarrow(segments: list[_BytesLike]) -> bytes:
     Parses each segment and re-serializes batches. Slower but handles
     all edge cases and schema variations.
     """
-    # Single-pass: stream batches directly to output buffer
-    # Avoids intermediate list that would add ~1× memory overhead
+    # Single pass straight to the output buffer; an intermediate list would add ~1x memory.
     sink = pa.BufferOutputStream()
     writer = None
 
@@ -109,7 +104,6 @@ def _concat_stream_bytes_pyarrow(segments: list[_BytesLike]) -> bytes:
         reader = ipc.open_stream(pa.BufferReader(segment))
         if writer is None:
             writer = ipc.new_stream(sink, reader.schema)
-        # Write each batch directly to output - no intermediate storage
         for batch in reader:
             writer.write_batch(batch)
 
@@ -134,10 +128,8 @@ def _concat_stream_bytes_rust(segments: list[_BytesLike]) -> bytes:
         return _concat_stream_bytes_pyarrow(segments)
 
     try:
-        # Rust concat_ipc_streams handles byte manipulation directly
         return bytes(_rust_module.concat_ipc_streams(segments))
     except Exception:
-        # Fall back to PyArrow on any error (malformed data, etc.)
         return _concat_stream_bytes_pyarrow(segments)
 
 
@@ -183,8 +175,7 @@ class _StreamingBuffer:
     underlying storage structure.
     """
 
-    # Compact the chunks list when it exceeds this many entries
-    # Prevents unbounded list growth from many small writes
+    # Bounds list growth from many small writes.
     _COMPACT_THRESHOLD = 64
 
     def __init__(self) -> None:
@@ -290,8 +281,8 @@ def validate_ipc_stream_reader(source) -> tuple[int, str]:
     reader = ipc.open_stream(source)
     schema_json = reader.schema.to_string()
     rows = sum(batch.num_rows for batch in reader)
-    # The reader stops at the first EOS; any remaining bytes mean concatenated
-    # streams (the #121 corruption that standard readers silently truncate).
+    # The reader stops at the first EOS; trailing bytes mean concatenated streams, which standard
+    # readers silently truncate.
     trailing = source.read()
     if trailing:
         raise ValueError(
@@ -345,9 +336,7 @@ class IncrementalIpcMerger:
         return self._buf.read_new()
 
 
-# Default minimum chunk size for streaming (256 KB)
-# Smaller chunks hurt throughput due to syscall overhead
-# Larger chunks increase memory but improve throughput
+# Smaller chunks pay syscall overhead; larger ones cost memory.
 DEFAULT_MIN_CHUNK_SIZE = 256 * 1024
 
 
@@ -458,63 +447,51 @@ def stream_concat_ipc_segments(
             if not segment:
                 continue
 
-            # Read batches from this segment's IPC stream
             reader = ipc.open_stream(pa.BufferReader(segment))
 
             if writer is None:
-                # Initialize output writer with schema from first segment
                 expected_schema = reader.schema
                 writer = ipc.new_stream(buf, expected_schema)
-                # Always yield schema immediately so client can start processing
+                # Yield the schema immediately so the client can start processing.
                 schema_bytes = buf.read_new()
                 if schema_bytes:
                     yield yield_chunk(schema_bytes)
             else:
-                # Validate schema matches first segment
-                # This catches bugs early with a clear error instead of
-                # confusing Arrow decode errors on the client
+                # Fail here with a clear error rather than with a confusing Arrow decode error on
+                # the client.
                 if not reader.schema.equals(expected_schema):
                     raise ValueError(
                         f"Schema mismatch across segments: "
                         f"expected {expected_schema}, got {reader.schema}"
                     )
 
-            # Stream each batch from input to output
             for batch in reader:
                 check_limits()
                 writer.write_batch(batch)
-                # Only yield if we've accumulated enough bytes
                 if buf.pending_bytes() >= min_chunk_size:
                     chunk = buf.read_new()
                     if chunk:
                         yield yield_chunk(chunk)
 
-            # At segment boundary: yield only if we have meaningful data
-            # Use threshold (min_chunk_size/4) to avoid tiny chunk overhead
-            # for narrow tables with many small batches.
-            # Note: remaining data will be flushed at end regardless of size.
+            # At a segment boundary, yield only past a quarter chunk to avoid tiny chunks for narrow
+            # tables with many small batches. The remainder is flushed at the end regardless.
             boundary_threshold = min_chunk_size // 4
             if buf.pending_bytes() >= boundary_threshold:
                 chunk = buf.read_new()
                 if chunk:
                     yield yield_chunk(chunk)
 
-            # Segment processed - its memory can be freed by GC
-
-        # Close writer and yield EOS marker + any remaining buffered data
-        # Only on normal completion - exceptions skip this and go to finally
+        # Only on normal completion; exceptions skip this and go to finally.
         if writer is not None:
             check_limits()
             writer.close()
             writer = None  # Mark as closed so finally doesn't double-close
-            # Always flush remaining data at end, regardless of size
             final_bytes = buf.read_new()
             if final_bytes:
                 yield yield_chunk(final_bytes)
 
     finally:
-        # Ensure writer is closed on any exception
-        # Don't yield in finally - let exception propagate cleanly
+        # Don't yield in finally; let the exception propagate cleanly.
         if writer is not None:
             try:
                 writer.close()

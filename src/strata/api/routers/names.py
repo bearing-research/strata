@@ -112,8 +112,8 @@ async def set_alias(
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e))
         if not queued:
-            # Alias already points at exactly this version — nothing to
-            # approve. Idempotent promote cells re-run without refiling.
+            # Alias already points at this version: nothing to approve, so idempotent promote cells
+            # re-run without refiling.
             return {
                 "status": "unchanged",
                 "name": name,
@@ -299,9 +299,9 @@ async def delete_tag(
     return {"status": "deleted", "artifact_id": artifact_id, "version": version, "key": key}
 
 
-# NOTE: this greedy {name:path} route must stay registered AFTER the more
-# specific "/v1/names/{name:path}/aliases/..." routes above, or ".../aliases/x"
-# URLs would be swallowed as part of the name. The "/aliases" suffix is reserved.
+# This greedy {name:path} route must stay registered AFTER the "/v1/names/{name:path}/aliases/..."
+# routes above, or ".../aliases/x" URLs are swallowed as part of the name. The "/aliases" suffix is
+# reserved.
 @router.get("/v1/names/{name:path}", response_model=NameResolveResponse)
 async def resolve_name(name: str, store: ReadStore, principal: CurrentPrincipal):
     """Resolve a name to its artifact.
@@ -316,7 +316,6 @@ async def resolve_name(name: str, store: ReadStore, principal: CurrentPrincipal)
     if target is not None:
         return await relay(target, "GET", f"/v1/names/{quoted(name, path=True)}")
 
-    # Get tenant from auth context for name isolation
     tenant_id = principal.tenant if principal else None
 
     name_info = store.get_name(name, tenant=tenant_id)
@@ -346,8 +345,6 @@ async def set_name(request: NameSetRequest, store: WriteStore, principal: Curren
     if target is not None:
         return await relay(target, "POST", "/v1/names", json_body=request.model_dump())
 
-    # Get tenant + actor from auth context for name isolation and audit
-    # attribution (who published this name).
     tenant_id = principal.tenant if principal else None
     actor = principal.id if principal else None
 
@@ -385,7 +382,6 @@ async def delete_name(name: str, store: PersonalModeStore, principal: CurrentPri
     if target is not None:
         return await relay(target, "DELETE", f"/v1/names/{quoted(name, path=True)}")
 
-    # Get tenant from auth context for name isolation
     tenant_id = principal.tenant if principal else None
 
     if not store.delete_name(name, tenant=tenant_id):
@@ -405,7 +401,6 @@ async def list_names(store: ReadStore, principal: CurrentPrincipal):
     if target is not None:
         return await relay(target, "GET", "/v1/names")
 
-    # Get tenant from auth context for name isolation
     tenant_id = principal.tenant if principal else None
 
     names = store.list_names(tenant=tenant_id)
@@ -443,15 +438,12 @@ async def get_name_status(name: str, store: ReadStore, principal: CurrentPrincip
 
     from strata.api.dependencies import resolve_input_version
 
-    # Get tenant from auth context for name isolation
     tenant_id = principal.tenant if principal else None
 
-    # Get name status from store (includes input_versions)
     status = store.get_name_status(name, tenant=tenant_id)
     if status is None:
         raise HTTPException(status_code=404, detail=f"Name '{name}' not found")
 
-    # Check for staleness by comparing stored vs current input versions
     changed_inputs: list[InputChangeInfo] = []
     for input_uri, old_version in status.input_versions.items():
         try:
@@ -465,7 +457,7 @@ async def get_name_status(name: str, store: ReadStore, principal: CurrentPrincip
                     )
                 )
         except HTTPException:
-            # Input no longer exists or is inaccessible - treat as changed
+            # Input gone or inaccessible: treat as changed.
             changed_inputs.append(
                 InputChangeInfo(
                     input_uri=input_uri,
@@ -474,7 +466,6 @@ async def get_name_status(name: str, store: ReadStore, principal: CurrentPrincip
                 )
             )
 
-    # Build staleness reason
     is_stale = len(changed_inputs) > 0
     stale_reason = None
     if is_stale:

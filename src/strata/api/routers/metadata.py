@@ -37,7 +37,6 @@ async def get_metadata_stats_v1():
         "manifest_cache": state.planner.manifest_cache.stats(),
     }
 
-    # Add SQLite store stats if available
     try:
         store = get_metadata_store()
         result["metadata_store"] = store.stats()

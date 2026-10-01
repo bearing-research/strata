@@ -91,15 +91,13 @@ class MaterializeService:
                 table Strata refuses to read is 422 with the planner's message,
                 as on the scan path.
         """
-        # Artifact URI: strata://artifact/{id}@v={version}
         if input_uri.startswith("strata://artifact/"):
             match = re.match(r"^strata://artifact/([^@]+)@v=(\d+)$", input_uri)
             if match:
-                # Look the artifact up rather than trusting the URI's shape:
-                # the version string alone reaches the runner, which reads the
-                # blob with no further check, so a bare regex parse let a
-                # caller name ANY artifact id — including another tenant's.
-                # The record is returned for the wrapper's tenant/ACL gate.
+                # Look the artifact up rather than trust the URI: the runner reads the blob by
+                # version with no further check, so a bare regex parse would let a caller name any
+                # artifact, including another tenant's. The record feeds the wrapper's tenant/ACL
+                # gate.
                 artifact_id, version = match.group(1), int(match.group(2))
                 artifact = store.get_artifact(artifact_id, version)
                 if artifact is None:
@@ -107,7 +105,6 @@ class MaterializeService:
                 return ResolvedInput(f"{artifact_id}@v={version}", artifact=artifact)
             raise InputResolutionError(400, f"Invalid artifact URI: {input_uri}")
 
-        # Name URI: strata://name/{name}
         if input_uri.startswith("strata://name/"):
             name = input_uri.replace("strata://name/", "")
             artifact = store.resolve_name(name, tenant=tenant)
@@ -115,7 +112,6 @@ class MaterializeService:
                 raise InputResolutionError(404, f"Name not found: {name}")
             return ResolvedInput(f"{artifact.id}@v={artifact.version}", artifact=artifact)
 
-        # Table URI: file:// or s3://
         if input_uri.startswith("file://") or input_uri.startswith("s3://"):
             try:
                 plan = planner.plan(
@@ -230,7 +226,7 @@ class MaterializeService:
                 resolved_input_versions=resolved_versions,
             )
 
-        # Cache miss — if a name is given, report whether its inputs have drifted.
+        # Cache miss: if a name is given, report whether its inputs have drifted.
         changed_inputs: list[InputChangeInfo] = []
         is_stale = False
         stale_reason: str | None = None

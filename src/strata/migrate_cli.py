@@ -22,9 +22,8 @@ def cmd_migrate(args: argparse.Namespace) -> int:
         print("No target. Pass --to-dsn or set STRATA_ARTIFACT_METADATA_DSN.")
         return 1
 
-    # Validate the DSN the same way the server does, so an unsupported scheme
-    # or a missing [postgres] extra produces the established message rather
-    # than an opaque driver traceback out of the pool.
+    # Validate the DSN as the server does, so an unsupported scheme or missing
+    # [postgres] extra gives the usual message, not a driver traceback.
     from strata.config import StrataConfig
 
     try:
@@ -49,12 +48,9 @@ def cmd_migrate(args: argparse.Namespace) -> int:
         print()
 
         if plan.blocking_tables:
-            # Only tables the source has rows for. api_keys exists only under
-            # auth_mode='api_key' and artifact_builds only when the build store
-            # is constructed, so a target booted the documented way lacks both
-            # -- gating on every missing table made the documented flow fail.
-            # The stores create their own schema at startup; deriving the DDL
-            # here would give it a second definition free to drift.
+            # Only tables the source has rows for: api_keys and artifact_builds
+            # are legitimately absent on a target booted the documented way.
+            # The stores create their own schema; DDL derived here would drift.
             print(f"Target is missing: {', '.join(plan.blocking_tables)}")
             print("Start Strata against the target database once, then migrate.")
             return 1
@@ -62,17 +58,12 @@ def cmd_migrate(args: argparse.Namespace) -> int:
         if args.dry_run:
             print(f"Dry run: {plan.total_rows} rows would be considered.")
             if not plan.target_is_empty:
-                # The real run refuses this; saying so now is the point of a
-                # dry run. Reported rather than failed: the operator may
-                # intend to resume.
+                # Reported, not failed: the operator may intend to resume.
                 print("Target already holds rows; the real run needs --allow-nonempty-target.")
             return 0
 
-        # Only now, and only for a real run. ArtifactStore's schema init
-        # upgrades a legacy store in place -- adds columns, rebuilds indexes
-        # and artifact_names, switches the file to WAL -- which normalizes the
-        # NULL tenants the Postgres schema declares NOT NULL. Doing it above
-        # made --dry-run rewrite the source it promised only to read.
+        # Only for a real run: ArtifactStore's schema init upgrades a legacy
+        # source in place (columns, indexes, WAL), which --dry-run must not do.
         from strata.artifact_store import ArtifactStore
 
         ArtifactStore(artifact_dir)
@@ -81,9 +72,8 @@ def cmd_migrate(args: argparse.Namespace) -> int:
         print(f"Copied {result.total_copied} rows, skipped {result.total_skipped} already present.")
 
         if result.rejected:
-            # Usually build rows whose artifact_versions row was deleted by
-            # garbage_collect or delete_artifact: dangling references SQLite
-            # tolerated and Postgres does not.
+            # Usually build rows whose artifact version was garbage-collected or
+            # deleted: dangling references SQLite tolerated and Postgres does not.
             print()
             print(f"{result.total_rejected} rows were refused by the target:")
             for table, key, reason in result.rejected[:10]:

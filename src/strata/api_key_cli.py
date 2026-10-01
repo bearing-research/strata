@@ -59,11 +59,8 @@ def cmd_create(args: argparse.Namespace) -> int:
         expires_in_seconds=expires_in,
     )
 
-    # The key alone on stdout, everything else on stderr, so
-    # ``KEY=$(strata apikey create ...)`` captures the credential and nothing
-    # else. Printing the summary to stdout too would fold it into the captured
-    # value, and the failure would be a confusing 401 rather than an obvious
-    # mistake.
+    # Only the key goes to stdout, so ``KEY=$(strata apikey create ...)``
+    # captures the credential and nothing else.
     print(presented)
 
     summary = [

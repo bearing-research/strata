@@ -217,8 +217,8 @@ async def warm_cache_v1(request: WarmRequest):
 
     state = get_state()
 
-    # Warming reads these tables into the shared cache — same deny-first gate
-    # as the scan path, before any planning or fetching.
+    # Warming reads these tables into the shared cache, so it takes the same deny-first gate as the
+    # scan path, before any planning or fetching.
     _authorize_warm_tables(request.tables)
 
     start_time = time.perf_counter()
@@ -228,7 +228,6 @@ async def warm_cache_v1(request: WarmRequest):
     bytes_written = 0
     errors: list[str] = []
 
-    # Limit concurrency for cache warming
     warming_semaphore = asyncio.Semaphore(request.concurrent)
 
     async def fetch_task(task: Task) -> tuple[str, int, str | None]:
@@ -241,7 +240,6 @@ async def warm_cache_v1(request: WarmRequest):
         """
         async with warming_semaphore:
             try:
-                # Run fetch in thread pool to avoid blocking
                 loop = asyncio.get_event_loop()
                 await loop.run_in_executor(None, state.fetcher.fetch_as_stream_bytes, task)
                 if task.cached:
@@ -257,7 +255,6 @@ async def warm_cache_v1(request: WarmRequest):
 
     for table_uri in request.tables:
         try:
-            # Plan the table
             plan = state.planner.plan(
                 table_uri=table_uri,
                 snapshot_id=None,  # Current snapshot
@@ -265,7 +262,6 @@ async def warm_cache_v1(request: WarmRequest):
                 filters=[],
             )
 
-            # Limit row groups if specified
             tasks = plan.tasks
             if request.max_row_groups is not None:
                 tasks = tasks[: request.max_row_groups]
@@ -274,7 +270,6 @@ async def warm_cache_v1(request: WarmRequest):
                 tables_warmed += 1
                 continue
 
-            # Fetch all tasks concurrently (bounded by semaphore)
             results = await asyncio.gather(
                 *[fetch_task(task) for task in tasks],
                 return_exceptions=True,
@@ -310,7 +305,6 @@ async def warm_cache_v1(request: WarmRequest):
 
     elapsed_ms = (time.perf_counter() - start_time) * 1000
 
-    # Log the warming operation
     state.metrics.log_event(
         "cache_warm",
         tables_warmed=tables_warmed,

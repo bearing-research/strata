@@ -43,7 +43,6 @@ class WarmingJob:
     request: WarmAsyncRequest
     status: WarmJobStatus = WarmJobStatus.PENDING
 
-    # Progress tracking
     tables_total: int = 0
     tables_completed: int = 0
     row_groups_total: int = 0
@@ -52,16 +51,13 @@ class WarmingJob:
     row_groups_skipped: int = 0
     bytes_written: int = 0
 
-    # Timing
     created_at: float = field(default_factory=time.time)
     started_at: float | None = None
     completed_at: float | None = None
 
-    # Current state
     current_table: str | None = None
     errors: list[str] = field(default_factory=list)
 
-    # Control
     cancelled: bool = False
     _task: asyncio.Task | None = field(default=None, repr=False)
 
@@ -130,14 +126,11 @@ class CacheWarmer:
         self._max_concurrent_jobs = max_concurrent_jobs
         self._job_retention_seconds = job_retention_seconds
 
-        # Job storage
         self._jobs: dict[str, WarmingJob] = {}
         self._lock = asyncio.Lock()
 
-        # Concurrency control
         self._job_semaphore = asyncio.Semaphore(max_concurrent_jobs)
 
-        # Cleanup task
         self._cleanup_task: asyncio.Task | None = None
 
     async def start(self) -> None:
@@ -146,7 +139,6 @@ class CacheWarmer:
 
     async def stop(self) -> None:
         """Stop and cancel all jobs."""
-        # Cancel cleanup task
         if self._cleanup_task:
             self._cleanup_task.cancel()
             try:
@@ -154,7 +146,6 @@ class CacheWarmer:
             except asyncio.CancelledError:
                 pass
 
-        # Cancel all running jobs
         async with self._lock:
             for job in self._jobs.values():
                 if job._task and not job._task.done():
@@ -185,7 +176,6 @@ class CacheWarmer:
         async with self._lock:
             self._jobs[job_id] = job
 
-        # Start the job task
         job._task = asyncio.create_task(self._run_job(job))
 
         logger.info(
@@ -236,7 +226,6 @@ class CacheWarmer:
             ):
                 result.append(job.to_progress())
 
-        # Sort by priority (descending) then created time
         result.sort(key=lambda p: (-self._jobs[p.job_id].request.priority, p.started_at or 0))
         return result
 
@@ -273,7 +262,6 @@ class CacheWarmer:
 
     async def _run_job(self, job: WarmingJob) -> None:
         """Execute a warming job."""
-        # Acquire semaphore (may wait if max jobs running)
         async with self._job_semaphore:
             if job.cancelled:
                 return
@@ -304,7 +292,6 @@ class CacheWarmer:
                 job.completed_at = time.time()
                 job.current_table = None
 
-                # Log completion
                 self._metrics.log_event(
                     "cache_warm_async",
                     job_id=job.job_id,
@@ -321,7 +308,6 @@ class CacheWarmer:
         """Execute the warming logic for a job."""
         request = job.request
 
-        # Concurrency control for fetches within job
         fetch_semaphore = asyncio.Semaphore(request.concurrent)
 
         async def fetch_task(task: Task) -> tuple[str, int, str | None]:
@@ -358,7 +344,6 @@ class CacheWarmer:
             job.current_table = table_uri
 
             try:
-                # Plan the table
                 plan = self._planner.plan(
                     table_uri=table_uri,
                     snapshot_id=request.snapshot_id,
@@ -366,7 +351,6 @@ class CacheWarmer:
                     filters=[],
                 )
 
-                # Limit row groups if specified
                 tasks = plan.tasks
                 if request.max_row_groups is not None:
                     tasks = tasks[: request.max_row_groups]
@@ -377,7 +361,6 @@ class CacheWarmer:
                     job.tables_completed += 1
                     continue
 
-                # Fetch all row groups concurrently
                 results = await asyncio.gather(
                     *[fetch_task(task) for task in tasks],
                     return_exceptions=True,
@@ -385,7 +368,6 @@ class CacheWarmer:
 
                 failures: list[str] = []
                 for result in results:
-                    # Handle exceptions that may be raised during gather
                     if isinstance(result, BaseException) and not isinstance(result, Exception):
                         continue
                     if isinstance(result, Exception):
@@ -404,8 +386,8 @@ class CacheWarmer:
                         failures.append(error or "unknown error")
 
                 if failures:
-                    # Summarised: a wide table can fail thousands of row groups
-                    # and the job record has to stay bounded.
+                    # Summarised: a wide table can fail thousands of row groups and the job record
+                    # has to stay bounded.
                     distinct = sorted(set(failures))[:3]
                     job.errors.append(
                         f"{table_uri}: {len(failures)} row group(s) failed to warm: "
@@ -448,7 +430,6 @@ class CacheWarmer:
                 logger.warning("Cleanup loop error", error=str(e))
 
 
-# Global instance (initialized with server state)
 _warmer: CacheWarmer | None = None
 
 

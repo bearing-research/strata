@@ -136,11 +136,10 @@ class PyIcebergCatalog:
         str
             A catalog connection URI.
         """
-        # Use configured URI if provided (supports PostgreSQL, MySQL, etc.)
+        # A configured URI may name PostgreSQL, MySQL, etc.
         if "uri" in self.config.catalog_properties:
             return self.config.catalog_properties["uri"]
 
-        # Fall back to SQLite based on warehouse path
         if warehouse_path and warehouse_path.startswith("s3://"):
             return f"sqlite:///{self.config.metadata_db}"
         elif warehouse_path:
@@ -278,7 +277,6 @@ class PyIcebergCatalog:
         """
         if "#" in table_uri:
             path_part, table_id = table_uri.rsplit("#", 1)
-            # Preserve s3:// prefix, strip file:// prefix
             if path_part.startswith("s3://"):
                 warehouse_path = path_part
             else:
@@ -310,17 +308,12 @@ class PyIcebergCatalog:
         try:
             return catalog.load_table(table_id)
         except Exception as exc:
-            # A catalog whose backing connection has gone bad stays cached, so
-            # every later read of that warehouse fails the same way until the
-            # process restarts. The observed case is a SqlCatalog on SQLite
-            # returning "disk I/O error" (SQLITE_IOERR): the connection is done,
-            # but the object lives on in ``_catalogs`` and retrying through it
-            # can never succeed — which is why a bounded retry loop at the call
-            # site did not help.
+            # A catalog whose connection has gone bad (e.g. SqlCatalog on SQLite returning
+            # SQLITE_IOERR) stays cached, and retrying through it can never succeed. Drop the
+            # poisoned entry and rebuild once.
             #
-            # Drop the poisoned entry and rebuild once. Narrow on purpose: only
-            # connection-level I/O failures are retried, so a genuinely missing
-            # table or a bad URI still raises immediately.
+            # Only connection-level I/O failures retry, so a missing table or bad URI still raises
+            # immediately.
             if not _is_connection_io_error(exc):
                 raise
             logger.warning(

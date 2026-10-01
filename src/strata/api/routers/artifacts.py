@@ -86,12 +86,10 @@ async def put_artifact(request: Request, store: WriteStore, principal: CurrentPr
 
     content_type = request.headers.get("content-type", "")
 
-    # Parse request based on content type
     if "multipart/form-data" in content_type:
         # Multipart: metadata JSON + Arrow IPC data
         form = await request.form()
 
-        # Get metadata
         metadata_file = form.get("metadata")
         if metadata_file is None:
             raise HTTPException(
@@ -113,7 +111,6 @@ async def put_artifact(request: Request, store: WriteStore, principal: CurrentPr
         transform_dict = metadata.get("transform", {})
         artifact_name = metadata.get("name")
 
-        # Get Arrow data
         data_file = form.get("data")
         if data_file is None:
             raise HTTPException(status_code=400, detail="Missing 'data' field in multipart request")
@@ -124,9 +121,8 @@ async def put_artifact(request: Request, store: WriteStore, principal: CurrentPr
             )
         arrow_bytes = await data_file.read()
 
-        # Parse Arrow to get schema and row count. The buffer must be exactly
-        # one IPC stream — trailing bytes (concatenated streams) would be
-        # silently dropped by every standard reader downstream (#123).
+        # The buffer must be exactly one IPC stream: trailing bytes (concatenated streams) would be
+        # silently dropped by every standard reader downstream.
         try:
             buf = pa.BufferReader(arrow_bytes)
             reader = ipc.open_stream(buf)
@@ -159,40 +155,33 @@ async def put_artifact(request: Request, store: WriteStore, principal: CurrentPr
         if data is None:
             raise HTTPException(status_code=400, detail="Missing 'data' field")
 
-        # Convert JSON data to Arrow
         try:
             if isinstance(data, dict) and all(isinstance(v, list) for v in data.values()):
-                # Columnar data - convert directly
                 table = pa.Table.from_pydict(data)
             else:
-                # Non-columnar - store as single JSON column
+                # Non-columnar: store as a single JSON column.
                 json_str = json_module.dumps(data)
                 table = pa.Table.from_pydict({"data": [json_str]})
         except Exception as e:
             raise HTTPException(status_code=400, detail=f"Failed to convert data to Arrow: {e}")
 
-        # Serialize to Arrow IPC
         sink = pa.BufferOutputStream()
         with ipc.new_stream(sink, table.schema) as writer:
             writer.write_table(table)
         arrow_bytes = sink.getvalue().to_pybytes()
 
-    # Validate transform
     executor = transform_dict.get("executor")
     if not executor:
         raise HTTPException(status_code=400, detail="Missing 'executor' in transform")
     params = transform_dict.get("params", {})
 
-    # Resolve tenant the same way materialize does (principal-based) —
-    # get_tenant_id() defaults to "_default", which stranded put-created
-    # artifacts in a tenant the name routes (None) could never address.
+    # Resolve the tenant from the principal, as materialize does: get_tenant_id() defaults to
+    # "_default", which the name routes (None) can never address.
     tenant_id = principal.tenant if principal else None
 
-    # Resolve input versions for provenance
     input_versions: dict[str, str] = {}
     for input_uri in inputs:
         try:
-            # Try to resolve artifact URIs
             if input_uri.startswith("strata://artifact/"):
                 match = re.match(r"^strata://artifact/([^@]+)@v=(\d+)$", input_uri)
                 if match:
@@ -207,17 +196,14 @@ async def put_artifact(request: Request, store: WriteStore, principal: CurrentPr
                 else:
                     input_versions[input_uri] = input_uri
             else:
-                # Table URI or unknown - use as-is
+                # Table or unknown URI: the URI stands in for its version.
                 input_versions[input_uri] = input_uri
         except Exception:
-            # Fallback: use URI as version
             input_versions[input_uri] = input_uri
 
-    # Compute provenance hash
     from strata.artifact_store import TransformSpec as ArtifactTransformSpec
     from strata.artifact_store import compute_provenance_hash
 
-    # Convert to internal TransformSpec
     artifact_transform = ArtifactTransformSpec(
         executor=executor,
         params=params,
@@ -227,13 +213,11 @@ async def put_artifact(request: Request, store: WriteStore, principal: CurrentPr
     input_hashes = [f"{uri}:{ver}" for uri, ver in sorted(input_versions.items())]
     provenance_hash = compute_provenance_hash(input_hashes, artifact_transform)
 
-    # Check for existing artifact with same provenance
     existing = store.find_by_provenance(provenance_hash, tenant=tenant_id)
     if existing is not None and existing.state == "ready":
         artifact_uri = f"strata://artifact/{existing.id}@v={existing.version}"
         name_uri = None
 
-        # Set name if requested
         if artifact_name:
             try:
                 store.set_name(artifact_name, existing.id, existing.version, tenant=tenant_id)
@@ -248,7 +232,6 @@ async def put_artifact(request: Request, store: WriteStore, principal: CurrentPr
             name_uri=name_uri,
         )
 
-    # Create artifact
     artifact_id = str(uuid.uuid4())
     version = store.create_artifact(
         artifact_id=artifact_id,
@@ -256,19 +239,13 @@ async def put_artifact(request: Request, store: WriteStore, principal: CurrentPr
         transform_spec=artifact_transform,
         input_versions=input_versions,
         tenant=tenant_id,
-        # A shared store hands you results you did not compute, so who did is
-        # part of the result. The column and the store parameter have both
-        # existed since the tenancy migration; this write site never passed it,
-        # which left every published artifact anonymous — including under
-        # `service_writes_enabled`, whose whole premise is attributed publish.
+        # A shared store hands out results you did not compute, so who did is part of the result.
         principal=principal.id if principal else None,
         minted=True,
     )
 
-    # Write blob
     store.write_blob(artifact_id, version, arrow_bytes)
 
-    # Finalize
     schema_json = table.schema.to_string()
     finalized_artifact = store.finalize_artifact(
         artifact_id=artifact_id,
@@ -284,7 +261,6 @@ async def put_artifact(request: Request, store: WriteStore, principal: CurrentPr
     artifact_uri = f"strata://artifact/{finalized_artifact.id}@v={finalized_artifact.version}"
     name_uri = None
 
-    # Set name if requested
     if artifact_name:
         try:
             store.set_name(
@@ -687,9 +663,9 @@ async def put_artifact_by_provenance(
 
     named_id = metadata.get("artifact_id")
     artifact_id = str(named_id or uuid.uuid4())
-    # The caller names the id, so it can name somebody else's — and a version
-    # appended there becomes that artifact's latest, which is what a notebook
-    # reads and what GC protects. The import route refuses the same case.
+    # The caller names the id, so it can name somebody else's; a version appended there becomes that
+    # artifact's latest, which a notebook reads and GC protects. The import route refuses the same
+    # case.
     existing = store.get_latest_version(artifact_id)
     if existing is not None and (existing.tenant or "") != (tenant_id or ""):
         raise HTTPException(
@@ -770,18 +746,13 @@ async def find_artifact_by_provenance(
     """
     from strata.server import _authorize_artifact_read, _ensure_artifact_access
 
-    # Two different Nones meet here. `CurrentTenant` yields None for "do not
-    # filter" (an `admin:*` caller, or auth switched off), while
-    # `find_by_provenance(tenant=None)` means the *tenantless* namespace
-    # specifically — never "any tenant", by design, so a tenantless build
-    # cannot dedup against another tenant's artifact. Passing one straight into
-    # the other made an admin miss on results they had just published.
+    # Two different Nones meet here. `CurrentTenant` yields None for "do not filter" (an `admin:*`
+    # caller, or auth off), while `find_by_provenance(tenant=None)` means the tenantless namespace,
+    # never "any tenant".
     #
-    # The lookup therefore scopes to the principal's own tenant, exactly as the
-    # publish path does. Admin does not widen it: "has anyone computed this?"
-    # is a question about one team's cache, and a match drawn from whichever
-    # tenant happened to write last is not an answer to it. Reading another
-    # tenant's artifact stays available by id, where admin does widen.
+    # So scope to the principal's own tenant, as the publish path does. Admin does not widen it:
+    # "has anyone computed this?" is a question about one team's cache. Reading another tenant's
+    # artifact by id is where admin widens.
     lookup_tenant = principal.tenant if principal else None
     artifact = store.find_by_provenance(provenance_hash, tenant=lookup_tenant)
     if artifact is None:
@@ -941,10 +912,7 @@ async def get_artifact_usage(scope: UsageScopeDep):
 async def list_artifacts(
     store: PersonalModeStore,
     tenant_filter: CurrentTenant,
-    # Bounded: these flow straight into "LIMIT ? OFFSET ?", and SQLite treats a
-    # NEGATIVE limit as unbounded — so ?limit=-1 materialized every
-    # artifact_versions row into one response. The sibling lineage/dependents
-    # params already carry ge/le.
+    # Bounded: these feed "LIMIT ? OFFSET ?", and SQLite treats a negative limit as unbounded.
     limit: int = Query(default=100, ge=1, le=1000),
     offset: int = Query(default=0, ge=0),
     state: str | None = None,
@@ -1231,7 +1199,6 @@ async def get_artifact_data(
     """
     from strata.server import _authorize_artifact_read, _ensure_artifact_access
 
-    # Verify artifact exists and is ready (tenant scoping)
     artifact = _ensure_artifact_access(
         store.get_artifact(artifact_id, version),
         tenant_filter,
@@ -1256,8 +1223,8 @@ async def get_artifact_data(
                     break
                 yield chunk
 
-    # Note: We don't include schema in headers since it may contain newlines
-    # Clients should read the schema from the Arrow IPC stream itself
+    # Schema stays out of the headers (it may contain newlines); clients read it from the IPC
+    # stream.
     return StreamingResponse(
         _iter_blob(),
         media_type="application/vnd.apache.arrow.stream",
@@ -1267,9 +1234,7 @@ async def get_artifact_data(
     )
 
 
-# ---------------------------------------------------------------------------
-# Lineage and Dependency Introspection Endpoints
-# ---------------------------------------------------------------------------
+# --- Lineage and dependency introspection ---
 
 
 @router.get(
@@ -1301,10 +1266,8 @@ async def get_artifact_lineage(
     Returns:
         ArtifactLineageResponse with nodes and edges representing the lineage graph
     """
-    # Answered by the team store when one is configured. The dashboard opens
-    # lineage from the Registry tab and the cell strip, both of which list what
-    # the team's registry holds — so asking the local store here would 404 on
-    # exactly the artifacts the reader just clicked.
+    # Answered by the team store when one is configured: the dashboard opens lineage from views that
+    # list the team's registry, so the local store would 404 on exactly what the reader clicked.
     target = remote_registry()
     if target is not None:
         return await relay(
@@ -1316,16 +1279,12 @@ async def get_artifact_lineage(
 
     from strata.server import _authorize_artifact_read, _ensure_artifact_access
 
-    # Get the root artifact
     artifact = _ensure_artifact_access(
         store.get_artifact(artifact_id, version),
         tenant_filter,
     )
-    # Same table-ACL re-check the sibling read endpoints run. Without it a
-    # principal denied a table could still read the lineage graph naming it —
-    # the response carries every upstream table URI, the snapshot pinned in
-    # input_version, and each transform ref, which is most of what the deny
-    # rule exists to withhold.
+    # Same table-ACL re-check as the sibling read endpoints: the graph carries every upstream table
+    # URI, pinned snapshot and transform ref, most of what a deny rule withholds.
     _authorize_artifact_read(artifact)
 
     if artifact.state not in ("ready", "superseded"):
@@ -1375,7 +1334,6 @@ async def get_artifact_dependents(
     """
     from strata.server import _authorize_artifact_read, _ensure_artifact_access
 
-    # Verify the artifact exists
     artifact = _ensure_artifact_access(
         store.get_artifact(artifact_id, version),
         tenant_filter,
@@ -1411,7 +1369,6 @@ async def upload_artifact_blob(
         version: Version number from materialize response
         request: Raw request body containing Arrow IPC bytes
     """
-    # Verify artifact exists and is in building state
     artifact = store.get_artifact(artifact_id, version)
     if artifact is None:
         raise HTTPException(status_code=404, detail="Artifact not found")
@@ -1450,25 +1407,18 @@ async def finalize_artifact(request: UploadFinalizeRequest, store: PersonalModeS
     Returns:
         UploadFinalizeResponse with artifact URI and optional name URI
     """
-    # Verify blob exists
     if not store.blob_exists(request.artifact_id, request.version):
         raise HTTPException(
             status_code=400,
             detail="Blob not uploaded. Call upload endpoint first.",
         )
 
-    # Get blob size without materializing the payload.
-    #
-    # ``blob_size`` returns None both when the object is absent and when the
-    # backend call simply failed, so ``or 0`` could stamp byte_size=0 onto an
-    # artifact this call is about to mark READY — a ready row claiming an
-    # empty blob. The sibling build-finalize route already refuses that; do
-    # the same here rather than record a figure we know is wrong.
+    # ``blob_size`` returns None both for an absent object and a failed backend call. Refuse rather
+    # than mark READY a row claiming an empty blob, as build-finalize does.
     byte_size = store.blob_size(request.artifact_id, request.version) or 0
     if byte_size == 0:
         raise HTTPException(status_code=500, detail="Failed to read uploaded blob")
 
-    # Finalize artifact
     try:
         finalized_artifact = store.finalize_artifact(
             artifact_id=request.artifact_id,
@@ -1486,13 +1436,12 @@ async def finalize_artifact(request: UploadFinalizeRequest, store: PersonalModeS
     artifact_uri = f"strata://artifact/{finalized_artifact.id}@v={finalized_artifact.version}"
     name_uri = None
 
-    # Set name if requested
     if request.name:
         try:
             store.set_name(request.name, finalized_artifact.id, finalized_artifact.version)
             name_uri = f"strata://name/{request.name}"
         except ValueError as e:
-            # Don't fail the whole request if name setting fails
+            # A name failure does not fail the whole request.
             logger.warning(f"Failed to set name {request.name}: {e}")
 
     return UploadFinalizeResponse(

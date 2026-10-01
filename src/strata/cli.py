@@ -341,9 +341,8 @@ def _build_parser() -> argparse.ArgumentParser:
     publish_parser.add_argument("ref", help="Name, id@v=N, or artifact id")
     _add_store_args(publish_parser)
     publish_parser.add_argument("--title", default=None, help="Human label for the page")
-    # Where to read and where to publish are different questions, so they are
-    # different arguments. Mutually exclusive because naming both a directory
-    # and "the source" is a contradiction rather than a preference.
+    # --into and --to both name the publish destination, so they exclude each
+    # other; where to read from is the separate store args.
     publish_target = publish_parser.add_mutually_exclusive_group()
     publish_target.add_argument(
         "--into",
@@ -644,7 +643,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
     artifact_parser.set_defaults(func=lambda args: (artifact_parser.print_help(), 0)[1])
 
-    # Agent inspect commands (CLI-hardening P0, NotebookOps local backend).
+    # Agent inspect commands.
     cell_parser = subparsers.add_parser(
         "cell",
         help="Per-cell operations: list, show, run, test, add, edit, rm, mv, annotate",
@@ -783,8 +782,7 @@ def _dispatch_apikey(command: str):
 
 
 def _dispatch_run(args: argparse.Namespace) -> int:
-    # Re-enter the run command's async runner without re-parsing — we
-    # already have a populated namespace from the top-level parser.
+    # The top-level parser already populated the namespace; don't re-parse.
     import asyncio
 
     from strata.notebook.cli import _run_async

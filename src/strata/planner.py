@@ -52,7 +52,7 @@ from strata.types import (
     filters_to_iceberg_expression,
 )
 
-# Type alias for compiled filters: list of (parquet_column_index, filter)
+# (parquet_column_index, filter)
 CompiledFilters = list[tuple[int, Filter]]
 
 
@@ -71,7 +71,7 @@ def _build_column_index_map(schema) -> dict[str, int]:
     col_map: dict[str, int] = {}
     for i in range(len(schema)):
         col = schema.column(i)
-        # Skip nested/repeated fields - path contains '.' for nested
+        # Nested/repeated fields have a dotted path; skip them
         if "." in col.path:
             continue
         col_map[col.name] = i
@@ -110,16 +110,14 @@ def _normalize_s3_path(path: str) -> str:
     if not path.startswith("s3://"):
         return path
 
-    # Split into bucket and path
     without_prefix = path[5:]
     if "/" not in without_prefix:
-        return path  # Just bucket name
+        return path  # bucket only
 
     bucket_end = without_prefix.index("/")
     bucket = without_prefix[:bucket_end]
     key = without_prefix[bucket_end + 1 :]
 
-    # Normalize the key path: split, filter empty/dot components, rejoin
     parts = key.split("/")
     normalized_parts = []
     for part in parts:
@@ -144,11 +142,8 @@ def _join_s3_path(base: str, relative: str) -> str:
     Returns:
         Joined and normalized S3 path
     """
-    # Strip trailing slash from base
     base = base.rstrip("/")
-    # Strip leading slash from relative
     relative = relative.lstrip("/")
-    # Join and normalize
     return _normalize_s3_path(f"{base}/{relative}")
 
 
@@ -293,8 +288,8 @@ def _project_schema(schema, columns: list[str] | None):
         return schema
     if list(schema.names) == columns:
         return schema
-    # ``field(name)`` raises for a name it does not know; ``get_field_index``
-    # would return -1 and silently pick the last field instead.
+    # ``field(name)`` raises on an unknown name; ``get_field_index`` would return -1 and
+    # silently pick the last field.
     return pa.schema([schema.field(name) for name in columns])
 
 
@@ -355,14 +350,11 @@ class ReadPlanner:
         catalog: CatalogProvider | None = None,
     ) -> None:
         self.config = config
-        # Injectable: a deployment with its own catalog access (or a test)
-        # supplies the provider; the default reads Strata's catalog settings.
+        # Injectable for deployments with their own catalog access (and tests).
         self.catalog = catalog if catalog is not None else PyIcebergCatalog(config)
         lake_files.configure(config)
-        # Enable persistence by passing cache_dir
         cache_dir = config.cache_dir
 
-        # Create S3 filesystem if any S3 config is provided
         s3_filesystem = None
         if (
             config.s3_region
@@ -377,9 +369,8 @@ class ReadPlanner:
         )
         self.manifest_cache = manifest_cache or get_manifest_cache(cache_dir=cache_dir)
         self._deleted_rows = DeletedRows()
-        # Each data file's column layout (None when it needs none), its
-        # columns by field id and its identity-partition values, per (table,
-        # schema): files never change, and a schema change is a new schema id.
+        # Per (table, schema id, file): column layout (None when it needs none), columns by
+        # field id, identity-partition values. Safe to cache: data files never change.
         self._file_columns: LRUCache[
             tuple[str, int, str],
             tuple[tuple[Column, ...] | None, dict[int, str], dict[int, Any]],
@@ -406,8 +397,7 @@ class ReadPlanner:
         start_time = time.perf_counter()
         filters = filters or []
 
-        # Parse table URI and build canonical TableIdentity
-        # table_uri is treated as input only; table_identity is the canonical ID
+        # table_uri is input only; table_identity is the canonical ID
         named, named_table_id = named_catalog(table_uri, self.config)
         if named is not None:
             table_id = named_table_id
@@ -419,26 +409,20 @@ class ReadPlanner:
             )
         table_identity = table_identity_for(table_uri, self.config)
 
-        # Load table and resolve snapshot
         table = self.catalog.load_table(table_uri)
         if named is not None:
-            # A catalog that vends credentials hands them to the table's FileIO;
-            # the fetcher reads the data files, so it needs them too.
+            # Vended credentials go to the table's FileIO; the fetcher needs them too.
             lake_files.register_vended_credentials(table.location(), dict(table.io.properties))
         resolved_snapshot_id = self.catalog.get_snapshot_id(table, snapshot_id)
 
-        # Get the snapshot's manifest
         snapshot = table.snapshot_by_id(resolved_snapshot_id)
         if snapshot is None:
             raise ValueError(f"Snapshot {resolved_snapshot_id} not found")
 
-        # Compute projection fingerprint
         proj_fingerprint = CacheKey.compute_projection_fingerprint(columns)
 
-        # Compute filter fingerprint for cache keying
         filter_fingerprint = compute_filter_fingerprint(filters)
 
-        # Collect all data files from the snapshot
         plan = ReadPlan(
             table_uri=table_uri,
             table_identity=table_identity,
@@ -447,8 +431,6 @@ class ReadPlanner:
             filters=filters,
         )
 
-        # Get data files from manifest cache or resolve fresh
-        # Two-level lookup: try filtered cache first, then compute with Iceberg pruning
         table_identity_str = str(table_identity)
         manifest_resolution = self.manifest_cache.get(
             manifest_catalog_name,
@@ -458,7 +440,6 @@ class ReadPlanner:
         )
 
         if manifest_resolution is None:
-            # Cache miss: resolve manifests with Iceberg file-level pruning
             with trace_span(
                 "resolve_manifests",
                 table_id=table_identity_str,
@@ -467,16 +448,14 @@ class ReadPlanner:
                 iceberg_expr = filters_to_iceberg_expression(filters)
 
                 try:
-                    # Iceberg's file-level pruning when there are filters.
-                    # Strata plans the files itself (iceberg_equality), since
-                    # pyiceberg refuses a table with equality deletes.
+                    # Strata plans files itself (iceberg_equality): pyiceberg refuses a
+                    # table with equality deletes.
                     data_files = plan_files(table, resolved_snapshot_id, iceberg_expr)
                 except Exception:
-                    # If Iceberg expression fails (type mismatch, unsupported column, etc.),
-                    # fall back to unfiltered scan - row-group pruning will still work
+                    # Expression unsupported (type mismatch, unknown column): scan unfiltered;
+                    # row-group pruning still applies.
                     data_files = plan_files(table, resolved_snapshot_id)
 
-                # Build manifest entries with resolved paths
                 entries = []
                 top_level = {
                     field.field_id: field.field_type
@@ -514,10 +493,8 @@ class ReadPlanner:
                 filter_fingerprint,
             )
 
-        # The schema to read as. A scan of the current table reads the current
-        # schema; one that names a snapshot reads that snapshot's, as pyiceberg
-        # does. A schema change makes no snapshot, so the cache key and the
-        # scan's provenance carry the schema as well as the snapshot.
+        # Read the current schema, or the named snapshot's (as pyiceberg does). A schema
+        # change makes no snapshot, so the cache key and provenance carry the schema too.
         if snapshot_id is None:
             snapshot_schema = table.schema()
         else:
@@ -535,7 +512,6 @@ class ReadPlanner:
         arrow_schema = None
         estimated_bytes = 0
 
-        # Batch load Parquet metadata for all files
         actual_paths = [entry.actual_path for entry in manifest_resolution.data_files]
         try:
             pq_meta_batch = self.parquet_cache.get_or_load_many(actual_paths)
@@ -550,10 +526,9 @@ class ReadPlanner:
             if pq_meta is None:
                 raise RuntimeError(f"Failed to load Parquet metadata for {actual_path}")
 
-            # Iceberg schema evolution rewrites no data files, so an older
-            # file may name, hold or type a column differently from the
-            # snapshot. Columns are matched by field id; ``layout`` says how to
-            # read this file as the snapshot's schema, None when it already is.
+            # Schema evolution rewrites no files, so an older file may name, hold or type a
+            # column differently. Columns match by field id; ``layout`` says how to read
+            # this file as the snapshot's schema (None when it already is).
             layout_key = (table_identity_str, snapshot_schema.schema_id, actual_path)
             cached_layout = self._file_columns.get(layout_key)
             if cached_layout is None:
@@ -585,15 +560,14 @@ class ReadPlanner:
                     else pa.schema([column.field for column in layout])
                 )
 
-            # Build column index map once per file and compile filters
-            # This avoids O(num_columns × num_filters × num_row_groups) scanning
+            # Once per file, not per row group and filter
             col_index_map = _build_column_index_map(pq_meta.parquet_schema)
-            # Equality delete keys are looked up by field id in the file itself:
-            # a key column may have been renamed or dropped since.
+            # Equality delete keys resolve by field id in the file: a key column may have
+            # been renamed or dropped since.
             key_index = {field_id: col_index_map.get(name) for field_id, name in stored.items()}
             if layout is not None:
-                # Statistics by the snapshot's names. A column the file lacks
-                # has none, and a dropped column's name must not lend it its own.
+                # Stats by the snapshot's names. A column the file lacks has none, and a
+                # dropped column's name must not lend it its own.
                 col_index_map = {
                     column.name: col_index_map[column.source]
                     for column in layout
@@ -601,9 +575,8 @@ class ReadPlanner:
                 }
             compiled_filters = _compile_filters(filters, col_index_map)
 
-            # Merge-on-read: rows this snapshot deleted from the file. The
-            # fetcher drops them, so the row group is cached without them,
-            # under a key that names the snapshot and so its deletes.
+            # Merge-on-read: the fetcher drops these rows, so the row group is cached without
+            # them under a key that names the snapshot (and so its deletes).
             deleted = (
                 self._deleted_rows.for_data_file(table.io, file_path, entry.delete_files)
                 if entry.delete_files
@@ -617,7 +590,6 @@ class ReadPlanner:
                 start = row_group_start
                 row_group_start += rg_meta.num_rows
 
-                # Check if we can prune this row group using compiled filters
                 if self._should_prune_row_group(rg_meta, compiled_filters):
                     pruned_row_groups += 1
                     continue
@@ -629,13 +601,11 @@ class ReadPlanner:
                 if deleted_rows is not None:
                     num_rows -= len(deleted_rows)
                     if num_rows == 0:
-                        # Every row deleted: nothing to read.
                         pruned_row_groups += 1
                         continue
 
-                # Equality deletes whose key range can meet this row group's.
-                # Applying them needs every one of their rows in memory, so a
-                # row group over the limit is refused rather than read.
+                # Equality deletes whose key range can meet this row group's. Applying them
+                # holds all their rows in memory, so a row group over the limit is refused.
                 equality = tuple(
                     delete
                     for delete in entry.equality_deletes
@@ -667,8 +637,7 @@ class ReadPlanner:
                     schema_id=plan.schema_id,
                 )
 
-                # Estimated size, projection-aware. Works with both our
-                # RowGroupMeta and PyArrow's RowGroupMetaData.
+                # Projection-aware; takes our RowGroupMeta or PyArrow's RowGroupMetaData.
                 rg_size = _estimate_row_group_bytes(rg_meta, columns, col_index_map)
 
                 task = Task(
@@ -699,16 +668,9 @@ class ReadPlanner:
         plan.estimated_bytes = estimated_bytes
         plan.planning_time_ms = elapsed_ms(start_time)
 
-        # Set schema: the first file's, as the snapshot reads it, when there
-        # was a file to read; the snapshot's schema for empty tables /
-        # fully-pruned scans.
-        #
-        # Then apply the projection. Neither source is projected on its own,
-        # and ``plan.schema`` IS the response schema when there are no tasks:
-        # a scan for ``columns=["id"]`` that matched rows streamed one column,
-        # while the same scan matching none streamed every column. Same query,
-        # different shape depending on the data — which breaks anything that
-        # concatenates partitioned scans or asserts on the schema.
+        # The first file's schema (as the snapshot reads it), else the snapshot's for empty or
+        # fully pruned scans. Always project: ``plan.schema`` is the response schema when
+        # there are no tasks, and the same query must have the same shape with or without rows.
         base_schema = arrow_schema if arrow_schema is not None else table_arrow_schema
         plan.schema = _project_schema(base_schema, columns)
 
@@ -724,25 +686,20 @@ class ReadPlanner:
         Returns:
             Resolved absolute path (local or S3)
         """
-        # Handle S3 paths - normalize and return
         if file_path.startswith("s3://"):
             return _normalize_s3_path(file_path)
 
-        # Handle file:// prefix
         if file_path.startswith("file://"):
             return file_path[7:]
 
-        # If it's already absolute, use it
         if file_path.startswith("/"):
             return file_path
 
-        # Try to resolve relative to warehouse
+        # Relative to the warehouse
         if "#" in table_uri:
             warehouse_path = table_uri.split("#")[0]
-            # S3 relative paths
             if warehouse_path.startswith("s3://"):
                 return _join_s3_path(warehouse_path, file_path)
-            # Local filesystem relative paths
             warehouse_path = warehouse_path.replace("file://", "")
             candidate = Path(warehouse_path) / file_path
             if candidate.exists():
@@ -807,14 +764,13 @@ class ReadPlanner:
                 min_val = stats.min
                 max_val = stats.max
 
-                # Convert to comparable types if needed
                 min_val, max_val = self._convert_stats(min_val, max_val)
 
                 if not f.matches_stats(min_val, max_val):
                     return True
 
             except Exception:
-                # If we can't get stats, don't prune (safe default)
+                # No stats: don't prune
                 continue
 
         return False
@@ -845,7 +801,6 @@ class ReadPlanner:
 
             Future: use Iceberg schema for type-aware conversions.
         """
-        # Convert PyArrow scalars to Python types if needed
         if hasattr(min_val, "as_py"):
             min_val = min_val.as_py()
         if hasattr(max_val, "as_py"):

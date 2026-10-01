@@ -110,11 +110,9 @@ def _citation_line(publication) -> str:
         template = _ID_LINKS.get(entry["scheme"], "{}")
         url = web_url_or_none(value) or web_url_or_none(template.format(value))
         label = value if entry["scheme"] == "url" else f"{entry['scheme'].upper()} {value}"
-        # Linked only when it is a link. The scheme of an identifier somebody
-        # typed is theirs, ``url`` takes whatever it is given, and escaping
-        # leaves ``javascript:`` intact -- on a page served to anyone holding
-        # the token, on this server's own origin. Printed either way, as the
-        # external inputs below are, so nothing is hidden by being unlinkable.
+        # Linked only when it is a link: escaping leaves ``javascript:`` intact, on this server's
+        # own origin, for anyone holding the token. Printed either way, as the external inputs below
+        # are, so nothing is hidden by being unlinkable.
         links.append(
             f"<a href='{escape(url, quote=True)}' rel='noopener'>{escape(label)}</a>"
             if url
@@ -263,11 +261,8 @@ def render_publication(
                 ("Content type", escape(content_type) if content_type else ""),
                 ("Produced", escape(_when(artifact.created_at))),
                 (
-                    # "Computed by", not "Author": the page header already
-                    # names whoever published it, and the two are different
-                    # facts. Sitting one under the other as "Published by F.
-                    # Li" and "Author: not recorded" read as a contradiction
-                    # rather than as the distinction it is.
+                    # "Computed by", not "Author": the header already names the publisher, a
+                    # different fact, and "Author: not recorded" under it reads as a contradiction.
                     "Computed by",
                     escape(artifact.principal)
                     if artifact.principal
@@ -306,10 +301,8 @@ def render_publication(
             "<div class='card'><p class='note'>No recorded inputs. This step "
             "read nothing from another step in the same store.</p></div>"
         )
-    # A cell that produces several consumed variables contributes one ancestor
-    # per variable, each carrying that cell's source. Printed straight, a cell
-    # defining five variables repeats its code five times, which reads as a
-    # rendering fault rather than as five artifacts from one step.
+    # A cell with several consumed variables contributes one ancestor per variable, each carrying
+    # the cell's source. Show each source once rather than repeat the code per variable.
     shown_sources: dict[str, str] = {}
     for node in ancestors:
         parts.append("<div class='card step'>")
@@ -351,11 +344,8 @@ def render_publication(
 
     parts.append("<h2>Checking it yourself</h2><div class='card'>")
     if bundle_filename is not None:
-        # A bundle has no server behind it, so the check is one the reader runs
-        # themselves. Naming the command matters more than it looks: an
-        # archived page that says "verified" and offers no way to test the
-        # claim is asking to be taken on faith, which is the opposite of why
-        # the bundle exists.
+        # A bundle has no server, so the reader runs the check. Name the command so "verified" is
+        # not taken on faith.
         parts.append(
             f"<p>The bytes are the file <code>{escape(bundle_filename)}</code> "
             "beside this page. Check it against the digest recorded when this "
@@ -449,9 +439,7 @@ def render_embed(*, publication, artifact, lineage, image_src: str | None, page_
     which pushed the title and the link to the provenance below the fold — an
     embed that is only an image, which is the one thing it must not be.
     """
-    # Every non-root node, matching what the full page lists as an ancestor.
-    # Counting only artifacts dropped table inputs, so a figure read straight
-    # from a table reported no steps at all while the page showed one.
+    # Every non-root node, matching the full page's ancestor list (table inputs included).
     root = next((node for node in lineage.nodes if node.artifact_id == artifact.id), None)
     steps = sum(1 for node in lineage.nodes if node is not root)
     title = publication.title or f"{artifact.id}@v={artifact.version}"
@@ -551,18 +539,12 @@ def _document(
         if oembed_url
         else ""
     )
-    # The same graph the crate carries, inline, for anything that reads
-    # structured data off a page.
+    # The crate's graph, inline, for anything that reads structured data off a page.
     #
-    # Every `<` becomes `\u003c`, not just `</`. HTML-escaping is wrong here —
-    # JSON-LD is script content, and entities would corrupt the JSON while
-    # leaving the injection — but escaping only the closing form is not enough
-    # either: `<!--<script>` puts the tokenizer in script-data-double-escaped
-    # state, where this block's own `</script>` no longer closes the element
-    # and the rest of the document is swallowed as script text. The page then
-    # renders blank, which is a self-inflicted defacement of the one page this
-    # feature exists to serve. `\u003c` is a JSON string escape, so the parsed
-    # value is unchanged.
+    # Every `<` becomes `<`, not just `</`. HTML entities would corrupt the JSON (this is script
+    # content), and escaping only `</` is not enough: `<!--<script>` enters
+    # script-data-double-escaped state, where this block's `</script>` no longer closes and the rest
+    # of the page is swallowed. `<` is a JSON string escape, so the parsed value is unchanged.
     structured = (
         f"<script type='application/ld+json'>{json_ld.replace('<', '\\u003c')}</script>"
         if json_ld

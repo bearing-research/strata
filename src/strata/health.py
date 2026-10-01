@@ -124,7 +124,6 @@ def check_disk_cache(cache_dir: Path, max_size_bytes: int) -> DependencyCheck:
     start = time.perf_counter()
 
     try:
-        # Check directory exists and is writable
         if not cache_dir.exists():
             return DependencyCheck(
                 name="disk_cache",
@@ -133,7 +132,6 @@ def check_disk_cache(cache_dir: Path, max_size_bytes: int) -> DependencyCheck:
                 message="Cache directory does not exist",
             )
 
-        # Check we can write a test file
         test_file = cache_dir / ".health_check"
         try:
             test_file.write_text("health_check")
@@ -146,9 +144,7 @@ def check_disk_cache(cache_dir: Path, max_size_bytes: int) -> DependencyCheck:
                 message=f"Cache directory not writable: {e}",
             )
 
-        # Check available disk space. shutil.disk_usage is cross-platform
-        # (Windows uses GetDiskFreeSpaceEx; POSIX uses statvfs). Prefer it
-        # over os.statvfs, which doesn't exist on Windows.
+        # shutil.disk_usage, not os.statvfs, which doesn't exist on Windows.
         usage = shutil.disk_usage(cache_dir)
         available_bytes = usage.free
         total_bytes = usage.total
@@ -162,7 +158,6 @@ def check_disk_cache(cache_dir: Path, max_size_bytes: int) -> DependencyCheck:
             "max_cache_bytes": max_size_bytes,
         }
 
-        # Degraded if disk is >90% full
         if usage_percent > 90:
             return DependencyCheck(
                 name="disk_cache",
@@ -232,7 +227,6 @@ def check_arrow_memory() -> DependencyCheck:
             "max_memory": max_memory,
         }
 
-        # Degraded if using >80% of max observed memory
         if max_memory > 0 and bytes_allocated > max_memory * 0.8:
             return DependencyCheck(
                 name="arrow_memory",
@@ -291,7 +285,6 @@ def check_thread_pools(planning_executor, fetch_executor) -> DependencyCheck:
             "overall_utilization": round(overall_utilization, 1),
         }
 
-        # Degraded if >90% utilized
         if overall_utilization > 90:
             return DependencyCheck(
                 name="thread_pools",
@@ -336,7 +329,6 @@ def check_rate_limiter() -> DependencyCheck:
 
         stats = limiter.get_stats()
 
-        # Check rejection rate
         total = stats.get("total_requests", 0)
         rejected = (
             stats.get("rejected_global", 0)
@@ -353,7 +345,6 @@ def check_rate_limiter() -> DependencyCheck:
             "rejection_rate": round(rejection_rate, 2),
         }
 
-        # Degraded if >10% rejection rate
         if rejection_rate > 10:
             return DependencyCheck(
                 name="rate_limiter",
@@ -391,9 +382,8 @@ def check_cache_evictions() -> DependencyCheck:
 
         details: JsonObject = {
             "total_evictions": stats.total_evictions,
-            # Both windows, because the rate is the worse of them: without the
-            # minute an operator sees a band that the hourly figure beside it
-            # does not account for, and cannot tell a burst from a trickle.
+            # Both windows, since the rate is the worse of them; without the
+            # minute a burst and a trickle look alike.
             "evictions_last_minute": stats.evictions_last_minute,
             "evictions_last_hour": stats.evictions_last_hour,
             "eviction_rate_per_minute": stats.eviction_rate_per_minute,
@@ -449,7 +439,6 @@ def run_health_checks(
         check_cache_evictions(),
     ]
 
-    # Determine overall status (worst of all checks)
     if any(c.status == HealthStatus.UNHEALTHY for c in checks):
         overall = HealthStatus.UNHEALTHY
     elif any(c.status == HealthStatus.DEGRADED for c in checks):

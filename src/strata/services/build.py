@@ -29,14 +29,12 @@ def _resolve_to_artifact_version(
     Handles ``strata://artifact/{id}@v={n}`` directly and ``strata://name/{name}``
     via the store; any other shape (or an unknown name) returns ``None``.
     """
-    # Artifact URI: strata://artifact/{id}@v={version}
     if input_uri.startswith("strata://artifact/"):
         match = re.match(r"^strata://artifact/([^@]+)@v=(\d+)$", input_uri)
         if match:
             return (match.group(1), int(match.group(2)))
         return None
 
-    # Name URI: strata://name/{name}
     if input_uri.startswith("strata://name/"):
         name = input_uri.replace("strata://name/", "")
         artifact = store.resolve_name(name, tenant=tenant)

@@ -11,10 +11,8 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, Field
 
-# Filter types live in the dependency-free ``strata.filters`` module so the
-# client can use them without importing this (pydantic-laden) module. Re-export
-# them here for backward compatibility — ``from strata.types import Filter`` etc.
-# keep working.
+# Filter types live in dependency-free ``strata.filters`` so the client avoids pydantic;
+# re-exported so ``from strata.types import Filter`` keeps working.
 from strata.filters import (  # noqa: F401
     Filter,
     FilterOp,
@@ -31,9 +29,7 @@ if TYPE_CHECKING:
     from strata.metadata_cache import EqualityDeleteEntry
 
 
-# ---------------------------------------------------------------------------
-# Authentication / Authorization Types
-# ---------------------------------------------------------------------------
+# --- Authentication / Authorization Types ---
 
 
 @dataclass(frozen=True)
@@ -108,10 +104,8 @@ class TableRef:
         Returns:
             TableRef with normalized catalog, namespace, and table
         """
-        # A configured catalog is named by the identity, and is what an ACL
-        # rule names too ("lake:taxi.*"); a warehouse URI is named by its
-        # store, so a rule for a local table does not also grant the table of
-        # the same name in someone's bucket.
+        # A configured catalog is named as ACL rules name it ("lake:taxi.*"); a warehouse
+        # URI by its store, so a rule for a local table cannot grant a same-named bucket table.
         catalog = "file"
         if named_catalog_name:
             catalog = named_catalog_name
@@ -132,8 +126,7 @@ class TableRef:
         return f"{self.catalog}:{self.namespace}.{self.table}"
 
 
-# Which store an ACL rule names a warehouse table by. A URI with no scheme is
-# a local path, which is what "file" has always meant here.
+# The store an ACL rule names a warehouse table by. A scheme-less URI is a local path ("file").
 _ACL_STORES = (
     ("s3://", "s3"),
     ("gs://", "gs"),
@@ -144,7 +137,6 @@ _ACL_STORES = (
     ("azure://", "az"),
 )
 
-# Every store name a warehouse table can be given, "file" included.
 ACL_STORE_NAMES = ("file", *dict.fromkeys(store for _, store in _ACL_STORES))
 
 
@@ -254,13 +246,9 @@ def filters_to_iceberg_expression(filters: list[Filter] | None):
         if "." in f.column:
             continue
 
-        # Wrap the column name as an ``UnboundTerm`` (``Reference``) and
-        # narrow the value into a typed pyiceberg ``Literal`` via a
-        # per-branch isinstance dispatch. Pyiceberg accepts raw scalars
-        # at runtime via internal coercion, but its constructors are
-        # typed to require these wrappers — and ``iceberg_literal`` itself
-        # is generic over a *constrained* type variable, so a single
-        # call with a ``FilterValue`` union won't typecheck either.
+        # pyiceberg's constructors are typed to require a ``Reference`` and a typed ``Literal``
+        # (raw scalars only coerce at runtime), and ``iceberg_literal`` is generic over a
+        # constrained TypeVar, so a ``FilterValue`` union must be narrowed per branch.
         term = Reference(f.column)
         value: IcebergLiteral = _wrap_filter_value(f.value)
         match f.op:
@@ -280,7 +268,6 @@ def filters_to_iceberg_expression(filters: list[Filter] | None):
     if not exprs:
         return None
 
-    # Combine with AND
     return reduce(And, exprs)
 
 
@@ -335,7 +322,7 @@ class CacheKey:
     - ROW_GROUP: ignores projection (caches all columns)
     """
 
-    tenant_id: str  # Tenant identifier for cache isolation
+    tenant_id: str
     table_identity: TableIdentity  # Canonical identity like 'strata.namespace.table'
     snapshot_id: int
     file_path: str
@@ -359,13 +346,11 @@ class CacheKey:
                 - ROW_GROUP: excludes projection, cache stores all columns
         """
         if granularity == CacheGranularity.ROW_GROUP:
-            # Ignore projection - cache all columns
             key_str = (
                 f"{self.tenant_id}|{self.table_identity}|{self.snapshot_id}|"
                 f"{self.file_path}|{self.row_group_id}"
             )
         else:
-            # Include projection in key
             key_str = (
                 f"{self.tenant_id}|{self.table_identity}|{self.snapshot_id}|"
                 f"{self.file_path}|{self.row_group_id}|{self.projection_fingerprint}"
@@ -447,26 +432,22 @@ class ReadPlan:
     # The Iceberg schema the scan read (a schema change makes no snapshot).
     schema_id: int | None = None
 
-    # Unique scan identifier (generated once at creation)
     scan_id: str = field(default_factory=lambda: uuid.uuid4().hex[:16])
 
-    # Metrics
     total_row_groups: int = 0
     pruned_row_groups: int = 0
     planning_time_ms: float = 0.0
 
-    # Estimated response size (sum of row group sizes from Parquet metadata)
-    # Used for pre-flight size checks before streaming begins
+    # Sum of row-group sizes from Parquet metadata, for the pre-flight size check
     estimated_bytes: int = 0
 
-    # Prefetched first row group bytes (optimization to reduce TTFB).
-    # Set by server after plan is stored; consumed by streaming endpoint.
-    # Using bytes | None avoids asyncio.Future which isn't picklable.
+    # First row group, prefetched to cut TTFB; consumed by the stream endpoint.
+    # bytes rather than an asyncio.Future so the plan stays picklable.
     prefetched_first: bytes | None = None
 
-    # Ownership tracking for authorization (set by server when auth_mode=trusted_proxy)
-    owner_principal: str | None = None  # Principal ID who created this scan
-    owner_tenant: str | None = None  # Tenant of the owner
+    # Set when auth_mode=trusted_proxy, for stream ownership checks
+    owner_principal: str | None = None
+    owner_tenant: str | None = None
 
 
 class ErrorResponse(BaseModel):
@@ -482,8 +463,8 @@ class ErrorResponse(BaseModel):
     - 504 Gateway Timeout: Planning or scan exceeded timeout
     """
 
-    detail: str  # Human-readable error message
-    error_code: str | None = None  # Optional machine-readable code
+    detail: str
+    error_code: str | None = None
 
 
 class WarmRequest(BaseModel):
@@ -498,22 +479,20 @@ class WarmRequest(BaseModel):
 
     tables: list[str]  # Table URIs to warm (e.g., "file:///warehouse#ns.table")
     columns: list[str] | None = None  # Columns to cache (None = all)
-    max_row_groups: int | None = Field(default=None, ge=1)  # Limit per table (None = all)
-    # ge=1: ``concurrent=0`` built an ``asyncio.Semaphore(0)`` that every fetch
-    # blocked on forever, hanging the request; the async twin wedged a warm-job
-    # slot permanently (its cleanup only reaps jobs that completed).
+    max_row_groups: int | None = Field(default=None, ge=1)  # Per table (None = all)
+    # ge=1: 0 would build ``asyncio.Semaphore(0)`` and every fetch would block forever.
     concurrent: int = Field(default=4, ge=1, le=64)  # Max concurrent fetches
 
 
 class WarmResponse(BaseModel):
     """Response from cache warming operation."""
 
-    tables_warmed: int  # Number of tables processed
-    row_groups_cached: int  # Total row groups written to cache
-    row_groups_skipped: int  # Already in cache (cache hits)
-    bytes_written: int  # Total bytes written to cache
-    elapsed_ms: float  # Total time taken
-    errors: list[str]  # Any errors encountered (table URI -> error message)
+    tables_warmed: int
+    row_groups_cached: int
+    row_groups_skipped: int  # Already in cache
+    bytes_written: int
+    elapsed_ms: float
+    errors: list[str]
 
 
 class WarmAsyncRequest(BaseModel):
@@ -523,8 +502,8 @@ class WarmAsyncRequest(BaseModel):
     for tracking progress.
     """
 
-    tables: list[str]  # Table URIs to warm
-    columns: list[str] | None = None  # Columns to cache (None = all)
+    tables: list[str]
+    columns: list[str] | None = None  # None = all
     snapshot_id: int | None = None  # Specific snapshot (None = current)
     max_row_groups: int | None = Field(default=None, ge=1)  # Limit per table
     concurrent: int = Field(default=4, ge=1, le=64)  # Max concurrent fetches
@@ -534,44 +513,42 @@ class WarmAsyncRequest(BaseModel):
 class WarmJobStatus(StrEnum):
     """Status of a background warming job."""
 
-    PENDING = "pending"  # Queued, not started
-    RUNNING = "running"  # Currently executing
-    COMPLETED = "completed"  # Finished successfully
-    FAILED = "failed"  # Finished with errors
-    CANCELLED = "cancelled"  # Cancelled by user
+    PENDING = "pending"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
 
 
 class WarmJobProgress(BaseModel):
     """Progress information for a warming job."""
 
-    job_id: str  # Unique job identifier
-    status: WarmJobStatus  # Current status
-    tables_total: int  # Total tables to warm
-    tables_completed: int  # Tables fully warmed
-    row_groups_total: int  # Total row groups across all tables
-    row_groups_completed: int  # Row groups fetched (cached + skipped)
-    row_groups_cached: int  # Row groups written to cache
-    row_groups_skipped: int  # Row groups already cached
-    bytes_written: int  # Bytes written so far
-    started_at: float | None  # Unix timestamp when job started
-    completed_at: float | None  # Unix timestamp when job completed
-    elapsed_ms: float  # Time elapsed so far
-    current_table: str | None  # Table currently being warmed
-    errors: list[str]  # Errors encountered
+    job_id: str
+    status: WarmJobStatus
+    tables_total: int
+    tables_completed: int
+    row_groups_total: int
+    row_groups_completed: int  # cached + skipped
+    row_groups_cached: int
+    row_groups_skipped: int
+    bytes_written: int
+    started_at: float | None  # Unix timestamp
+    completed_at: float | None  # Unix timestamp
+    elapsed_ms: float
+    current_table: str | None
+    errors: list[str]
 
 
 class WarmAsyncResponse(BaseModel):
     """Response when starting an async warming job."""
 
-    job_id: str  # Unique job ID for tracking
-    status: WarmJobStatus  # Initial status (pending or running)
-    tables_count: int  # Number of tables in the job
-    message: str  # Human-readable status message
+    job_id: str
+    status: WarmJobStatus  # pending or running
+    tables_count: int
+    message: str
 
 
-# ---------------------------------------------------------------------------
-# Unified Materialize API Types
-# ---------------------------------------------------------------------------
+# --- Unified Materialize API Types ---
 
 
 class TransformSpec(BaseModel):
@@ -586,7 +563,7 @@ class TransformSpec(BaseModel):
     """
 
     executor: str  # "scan@v1", "duckdb_sql@v1", etc.
-    params: dict[str, object] = {}  # Executor-specific parameters
+    params: dict[str, object] = {}
 
 
 class FilterSpec(BaseModel):
@@ -608,15 +585,12 @@ class FilterSpec(BaseModel):
     """
 
     column: str
-    # Typed as the enum so an invalid operator fails inside ``model_validate``
-    # (→ 400) instead of escaping as an uncaught ``ValueError`` from
-    # ``FilterOp(f.op)`` later in ``to_strata_filters``.
+    # The enum makes a bad operator fail in ``model_validate`` (400), not as an uncaught
+    # ``ValueError`` in ``to_strata_filters``.
     op: FilterOp
-    # The wire carries JSON-native scalars only: the client adapters encode richer
-    # types (datetime/Decimal/UUID/bytes) as tagged strings via
-    # ``serialize_filter_value``; ``to_strata_filters`` decodes them back. Typing
-    # the field as the scalar set (rather than the full ``FilterValue``) also stops
-    # pydantic from eagerly coercing a plain ISO string into a ``datetime``.
+    # JSON-native scalars only: clients tag richer types (datetime/Decimal/UUID/bytes) via
+    # ``serialize_filter_value`` and ``to_strata_filters`` decodes them. The narrow type
+    # also stops pydantic coercing a plain ISO string into a ``datetime``.
     value: str | bool | int | float
 
 
@@ -679,7 +653,7 @@ class MaterializeRequest(BaseModel):
 
     inputs: list[str]  # Input URIs: "file:///warehouse#db.events" or "strata://artifact/..."
     transform: TransformSpec
-    name: str | None = None  # Optional name to assign (e.g., "daily_revenue")
+    name: str | None = None  # e.g. "daily_revenue"
     mode: str = "stream"  # "stream" | "artifact"
     refresh: bool = False
     stream_timeout_seconds: float | None = None
@@ -740,7 +714,7 @@ class BuildSpec(BaseModel):
     version: int
     executor: str
     params: dict[str, object]
-    input_uris: list[str]  # Resolved URIs for inputs
+    input_uris: list[str]
 
 
 class UploadFinalizeRequest(BaseModel):
@@ -760,8 +734,8 @@ class UploadFinalizeRequest(BaseModel):
     artifact_id: str
     version: int
     arrow_schema: str  # Arrow schema serialized as JSON
-    row_count: int  # Number of rows in the result
-    name: str | None = None  # Optional name to assign
+    row_count: int
+    name: str | None = None
 
 
 class UploadFinalizeResponse(BaseModel):
@@ -796,8 +770,8 @@ class PutArtifactRequest(BaseModel):
 
     inputs: list[str]  # Input URIs: "strata://artifact/..." or "file:///..."
     transform: TransformSpec  # Opaque transform spec for provenance
-    data: dict[str, object]  # JSON data to persist
-    name: str | None = None  # Optional name pointer
+    data: dict[str, object]
+    name: str | None = None
 
 
 class PutArtifactResponse(BaseModel):
@@ -898,12 +872,9 @@ class ArtifactInfoResponse(BaseModel):
     transform_spec: str | None = None
 
 
-#: Marks a by-provenance 404 as a genuine "nobody has computed this", as
-#: opposed to the other 404s the same request can produce — a server that
-#: predates the route, or a gateway with no artifact store, both of which would
-#: otherwise read as a cache miss and recompute forever while looking healthy.
-#: ``strata_client`` keeps its own copy: it is a wire constant, and the two
-#: packages are deliberately independent.
+#: Marks a by-provenance 404 as a real miss. Other 404s (a server without the route, a
+#: gateway without a store) would otherwise read as a miss and recompute forever.
+#: ``strata_client`` keeps its own copy: the packages are deliberately independent.
 PROVENANCE_MISS_HEADER = "X-Strata-Provenance-Miss"
 
 
@@ -1122,9 +1093,7 @@ class ExplainMaterializeResponse(BaseModel):
     resolved_input_versions: dict[str, str] | None = None
 
 
-# ---------------------------------------------------------------------------
-# Lineage and Dependency Introspection
-# ---------------------------------------------------------------------------
+# --- Lineage and Dependency Introspection ---
 
 
 class LineageNode(BaseModel):
@@ -1272,31 +1241,11 @@ class ArtifactDependentsResponse(BaseModel):
     total_count: int
 
 
-# ---------------------------------------------------------------------------
-# Executor Protocol v1 - Stable interface for external executors
-# ---------------------------------------------------------------------------
-#
-# Protocol Version: v1
-# Header: X-Strata-Executor-Protocol: v1
-#
-# This defines the stable interface for implementing Strata executors.
-# Executors receive Arrow IPC inputs, run a transform, and return Arrow IPC output.
-#
-# Push Model (Strata streams to executor):
-#   POST {executor_url}/v1/execute
-#   Content-Type: multipart/form-data
-#   X-Strata-Executor-Protocol: v1
-#
-# Pull Model (Executor pulls from Strata):
-#   GET /v1/builds/{build_id}/manifest -> ExecutorManifest
-#   Executor downloads inputs, executes, uploads output, calls finalize
-#
-# ---------------------------------------------------------------------------
-
-# Protocol version constant
+# --- Executor Protocol v1: stable interface for external executors ---
+# Push: Strata POSTs multipart Arrow IPC inputs to {executor_url}/v1/execute.
+# Pull: the executor GETs /v1/builds/{build_id}/manifest, fetches inputs, uploads, finalizes.
 EXECUTOR_PROTOCOL_VERSION = "v1"
 
-# HTTP headers for protocol versioning
 EXECUTOR_PROTOCOL_HEADER = "X-Strata-Executor-Protocol"
 EXECUTOR_LOGS_HEADER = "X-Strata-Logs"
 

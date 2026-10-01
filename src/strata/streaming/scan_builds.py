@@ -45,21 +45,20 @@ class ScanBuildManager:
     """The active scan table plus opportunistic first-row-group prefetch."""
 
     def __init__(self, prefetch_concurrency: int = 4) -> None:
-        # Active scans (scan_id -> ReadPlan), registered when a client will stream.
+        # Registered when a client will stream
         self.scans: dict[str, ReadPlan] = {}
 
-        # Prefetch: limit concurrent prefetches so clients spamming POST /scan
-        # without consuming the streams can't exhaust resources (independent of
-        # streaming concurrency).
+        # Separate from streaming concurrency, so clients spamming POST /scan without
+        # consuming can't exhaust resources.
         self._prefetch_semaphore = asyncio.Semaphore(prefetch_concurrency)
         self._prefetch_futures: dict[str, asyncio.Task[None]] = {}
-        self._started = 0  # Total prefetches started
-        self._used = 0  # Prefetches consumed by streaming
-        self._wasted = 0  # Prefetches discarded (scan deleted/abandoned)
-        self._skipped = 0  # Prefetches skipped (server busy)
-        self._in_flight = 0  # Prefetches actively fetching
+        self._started = 0
+        self._used = 0  # Consumed by streaming
+        self._wasted = 0  # Discarded (scan deleted/abandoned)
+        self._skipped = 0  # Server busy
+        self._in_flight = 0
 
-    # --- scan table ---------------------------------------------------------
+    # --- scan table ---
 
     def register_scan(self, plan: ReadPlan) -> None:
         self.scans[plan.scan_id] = plan
@@ -73,7 +72,7 @@ class ScanBuildManager:
     def __contains__(self, scan_id: str) -> bool:
         return scan_id in self.scans
 
-    # --- prefetch -----------------------------------------------------------
+    # --- prefetch ---
 
     def discard_prefetch(self, scan_id: str, *, count_wasted: bool) -> None:
         """Cancel or discard any prefetched first chunk for a scan."""
@@ -153,8 +152,7 @@ class ScanBuildManager:
 
         prefetch_task = self._prefetch_futures.get(scan_id)
         if prefetch_task is not None:
-            # Wait briefly for an in-flight prefetch; a timeout just means it
-            # isn't ready yet, so fall through to consume-or-discard below.
+            # A timeout just means not ready yet; fall through to consume-or-discard.
             with contextlib.suppress(TimeoutError):
                 await asyncio.wait_for(asyncio.shield(prefetch_task), timeout=0.05)
             if plan.prefetched_first is not None:
@@ -175,7 +173,7 @@ class ScanBuildManager:
             "in_flight": self._in_flight,
         }
 
-    # --- cleanup callback ---------------------------------------------------
+    # --- cleanup callback ---
 
     def expire_scan(self, scan_id: str) -> None:
         """Scan-side cleanup for an expired stream (the registry's ``on_expire``).
@@ -185,7 +183,7 @@ class ScanBuildManager:
         self.discard_prefetch(scan_id, count_wasted=True)
         self.pop_scan(scan_id)
 
-    # --- background build ---------------------------------------------------
+    # --- background build ---
 
     def mark_stream_artifact_failed(self, state: ServerState, stream_state: StreamState) -> None:
         """Best-effort transition a stream-backed artifact to failed state."""
@@ -198,8 +196,7 @@ class ScanBuildManager:
         try:
             store.fail_artifact(stream_state.artifact_id, stream_state.artifact_version)
         except Exception as e:
-            # Best-effort cleanup on an already-failed build — record why marking
-            # it failed didn't take, but don't mask the original error by raising.
+            # Best-effort on an already-failed build; raising would mask the original error.
             logger.debug(
                 "mark_stream_artifact_failed_error",
                 artifact_id=stream_state.artifact_id,
@@ -225,7 +222,7 @@ class ScanBuildManager:
         try:
             store = get_artifact_store(state.config.artifact_dir)
             if store is None:
-                return  # No artifact store in service mode
+                return  # service mode has no artifact store
 
             if not plan.tasks:
                 if plan.schema is not None:
@@ -250,10 +247,8 @@ class ScanBuildManager:
             byte_size = 0
             start_time = time.perf_counter()
 
-            # Write each merged row-group chunk straight to the blob (write-through,
-            # bounded memory — no full-result buffer). The IncrementalIpcMerger emits
-            # one valid IPC stream across the row groups so standard readers see
-            # every row. The blob commits atomically when the writer context exits.
+            # Write-through for bounded memory. The merger emits one IPC stream across row
+            # groups so standard readers see every row; the blob commits on context exit.
             merger = IncrementalIpcMerger() if len(plan.tasks) > 1 else None
             with store.open_blob_writer(
                 stream_state.artifact_id, stream_state.artifact_version
@@ -262,17 +257,14 @@ class ScanBuildManager:
                     if state._draining:
                         raise RuntimeError("Server is shutting down")
 
-                    # Bound the build's wall-clock the same way the old streaming
-                    # generator did — a runaway scan marks the artifact failed
-                    # rather than holding resources indefinitely.
+                    # A runaway scan fails the artifact rather than holding resources.
                     if time.perf_counter() - start_time > state.config.scan_timeout_seconds:
                         state.metrics.record_stream_abort_timeout()
                         raise RuntimeError(
                             f"Scan timed out after {state.config.scan_timeout_seconds}s"
                         )
 
-                    # Consume the eagerly-prefetched first row group when stream
-                    # mode warmed one (no-op in artifact mode, which never prefetches).
+                    # Stream mode may have prefetched the first row group; artifact mode never does.
                     chunk: bytes | None = None
                     if index == 0:
                         chunk = await self.consume_prefetched_first(plan, scan_id)
@@ -288,8 +280,7 @@ class ScanBuildManager:
                     if out:
                         blob.write(out)
                         byte_size += len(out)
-                    # Counted from the rows sent: with equality deletes a task's
-                    # num_rows is only an upper bound.
+                    # With equality deletes a task's num_rows is only an upper bound.
                     row_count += validate_ipc_stream(chunk)
 
                 if merger is not None:
@@ -330,15 +321,8 @@ class ScanBuildManager:
             if stream_state.build_slot is not None:
                 await stream_state.build_slot.release()
             stream_state.completed_at = time.time()
-            # Pass the scan_id: schedule_cleanup() cancels any pending cleanup
-            # for this stream first, so omitting it here destroyed the
-            # scan-aware cleanup registered when the stream was created and
-            # replaced it with one that only pops _streams. ``expire_scan`` —
-            # the sole caller of pop_scan/discard_prefetch — runs from
-            # ``on_expire``, which fires only when scan_id is not None, so the
-            # ReadPlan (every Task, the pa.Schema, and any prefetched first row
-            # group) stayed resident for the life of the process. Nothing else
-            # ever removes it.
+            # Pass the scan_id: schedule_cleanup() replaces the pending cleanup, and only a
+            # scan-aware one runs ``expire_scan``; without it the ReadPlan leaks for good.
             state.streams.schedule_cleanup(stream_state.stream_id, stream_state.plan.scan_id)
 
     async def finalize_written_blob(
@@ -360,11 +344,10 @@ class ScanBuildManager:
 
         store = get_artifact_store(state.config.artifact_dir)
         if store is None:
-            return  # No artifact store in service mode
+            return  # service mode has no artifact store
 
         try:
-            # Integrity gate (#124): bounded re-read confirms the persisted blob is
-            # exactly one readable IPC stream whose row total matches the plan.
+            # Integrity gate: the blob must be one readable IPC stream with the plan's row total.
             if byte_size == 0:
                 readable_rows, schema_json = 0, ""
             else:
@@ -382,8 +365,7 @@ class ScanBuildManager:
                     f"{readable_rows} rows, build reported {row_count}"
                 )
 
-            # The blob is already persisted; finalize_and_set_name flips state to
-            # ready and records metadata + the requested name pointer atomically.
+            # Marks ready and sets metadata and the name pointer atomically.
             finalized_artifact = store.finalize_and_set_name(
                 artifact_id=stream_state.artifact_id,
                 version=stream_state.artifact_version,
@@ -413,8 +395,7 @@ class ScanBuildManager:
             try:
                 store.fail_artifact(stream_state.artifact_id, stream_state.artifact_version)
             except Exception as fail_err:
-                # Best-effort: the finalize already failed and was logged above;
-                # record that the fail-artifact cleanup also errored, don't raise.
+                # Best-effort: the finalize failure is already logged; don't raise.
                 logger.debug(
                     "stream_artifact_fail_cleanup_error",
                     artifact_id=stream_state.artifact_id,

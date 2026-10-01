@@ -87,15 +87,12 @@ class Filter:
                 return max_orderable >= filter_value
 
 
-# Wire encoding for the non-JSON-native FilterValue types. Values stay
-# JSON-native scalars (tagged strings) so a ``FilterValue`` field still
-# validates and the fingerprint has a deterministic, type-distinguishing
-# representation. Dependency-free.
+# Wire encoding for non-JSON-native FilterValue types. Tagged strings keep a
+# ``FilterValue`` field valid and the fingerprint deterministic and
+# type-distinguishing.
 #
-# Edge case, inherited from the prior ``__datetime__:`` convention: a genuine
-# string value that begins with one of these tags round-trips back to the
-# richer type. Acceptable — operator-bearing string literals are rare and this
-# keeps the wire JSON-native.
+# Edge case: a genuine string starting with one of these tags round-trips to
+# the richer type. Accepted, since such literals are rare.
 _FILTER_VALUE_DECODERS = {
     "__datetime__": datetime.fromisoformat,
     "__date__": date.fromisoformat,
@@ -112,7 +109,7 @@ def serialize_filter_value(value: FilterValue) -> str | bool | int | float:
     Primitives pass through; richer types (datetime/date/time/Decimal/UUID/bytes)
     become tagged strings that :func:`deserialize_filter_value` reconstructs.
     """
-    # bool is a subclass of int — keep it ahead of the int/float passthrough.
+    # bool is a subclass of int, so check it before the int/float passthrough.
     if isinstance(value, bool):
         return value
     if isinstance(value, (str, int, float)):
@@ -159,11 +156,9 @@ def compute_filter_fingerprint(filters: list[Filter] | None) -> str:
     if not filters:
         return "nofilter"
 
-    # Canonical JSON over explicit fields. Structured encoding so distinct
-    # (column, op, value) triples can't collide the way a delimiter-free
-    # concatenation could — e.g. (column='a>', op='=') vs (column='a', op='>=')
-    # both used to serialize to 'a>='. serialize_filter_value keeps the value
-    # JSON-native *and* type-distinguishing (str '1' != int 1).
+    # Canonical JSON over explicit fields, so distinct (column, op, value)
+    # triples can't collide: concatenation maps both (column='a>', op='=') and
+    # (column='a', op='>=') to 'a>='. The value encoding keeps str '1' != int 1.
     items = sorted(
         (
             {"column": f.column, "op": f.op.value, "value": serialize_filter_value(f.value)}

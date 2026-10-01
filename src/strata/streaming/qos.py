@@ -73,10 +73,8 @@ class Admission:
         # Slot-held duration is the adaptive controller's latency signal, and
         # release() is the one point every exit path funnels through.
         self.admitted_at = time.perf_counter()
-        # The exact semaphore object this admission acquired. Releasing THIS
-        # object (rather than re-deriving one from client_id at release time)
-        # is what makes release correct under both an LRU eviction and two
-        # admissions sharing a scan_id — see ``QoSAdmission._release``.
+        # Release this exact semaphore, not one re-derived from client_id, so release stays correct
+        # under LRU eviction and two admissions sharing a scan_id (see ``QoSAdmission._release``).
         self.client_semaphore = client_semaphore
         self._released = False
 
@@ -112,7 +110,6 @@ class QoSAdmission:
         self._interactive_rejected = 0
         self._bulk_rejected = 0
         self._client_rejected = 0
-        # Queue wait tracking (observability).
         self._interactive_queue_wait_total_ms = 0.0
         self._interactive_queue_wait_count = 0
         self._bulk_queue_wait_total_ms = 0.0
@@ -175,7 +172,7 @@ class QoSAdmission:
             return None
 
         if client_id in client_semaphores:
-            # Move to end for LRU (dict keeps insertion order).
+            # Move to the LRU tail.
             sem = client_semaphores.pop(client_id)
             client_semaphores[client_id] = sem
             return sem
@@ -204,7 +201,6 @@ class QoSAdmission:
         else:
             queue_timeout = self._config.bulk_queue_timeout
 
-        # Per-client fairness
         client_id = request.client.host if request.client else "unknown"
         client_semaphore = self._get_client_semaphore(client_id, tier)
         client_semaphore_acquired = False
@@ -217,16 +213,13 @@ class QoSAdmission:
                 self._client_rejected += 1
                 raise QoSRejected("per_client_limit", tier, 1)
 
-        # Queue with deadline. If this acquire is cancelled (client disconnect /
-        # shutdown while queued for a tenant slot), release the per-client
-        # semaphore grabbed above before propagating — CancelledError is a
-        # BaseException, and the `if not acquired:` path below only handles the
-        # timeout (False) case, so the semaphore would otherwise leak a slot.
+        # Queue with deadline. A cancelled acquire (disconnect or shutdown while queued) must
+        # release the per-client semaphore grabbed above: CancelledError is a BaseException, and the
+        # `if not acquired:` path below only handles the timeout.
         #
-        # The limiters are looked up here, with no await before the acquire:
-        # an idle tenant can be evicted from the registry while its request
-        # waits for the per-client slot, and a limiter fetched before that
-        # wait would then be one the registry no longer counts.
+        # Look the limiters up here, with no await before the acquire: an idle tenant can be evicted
+        # while its request waits for the per-client slot, leaving a limiter the registry no longer
+        # counts.
         interactive_limiter, bulk_limiter = get_tenant_registry().get_or_create_limiters(tenant_id)
         limiter = interactive_limiter if tier == "interactive" else bulk_limiter
         queue_start = time.perf_counter()
@@ -333,10 +326,8 @@ class QoSAdmission:
 
     def qos_metrics(self) -> dict[str, Any]:
         """QoS tier metrics: capacity/usage, rejections, queue waits, per-tenant."""
-        # Top-line capacity/usage reflects the per-tenant admission limiters that
-        # stream admission actually acquires (aggregated; a single-tenant
-        # deployment reduces to the _default tenant). Reading the never-acquired
-        # global limiters always reported 0 (#185).
+        # The per-tenant limiters stream admission actually acquires, aggregated (single-tenant
+        # reduces to the _default tenant).
         i_in_use, i_avail, b_in_use, b_avail = get_tenant_registry().aggregate_limiter_usage()
 
         interactive_avg_wait_ms = (
@@ -382,11 +373,9 @@ class QoSAdmission:
             "bulk_queue_wait_avg_ms": round(bulk_avg_wait_ms, 2),
             "bulk_queue_wait_total_ms": round(self._bulk_queue_wait_total_ms, 2),
             "bulk_queue_wait_count": self._bulk_queue_wait_count,
-            # Per-client fairness metrics
             "per_client_interactive": self._config.per_client_interactive,
             "per_client_bulk": self._config.per_client_bulk,
             "client_rejected": self._client_rejected,
             "tracked_clients": len(self._client_interactive_semaphores),
-            # Per-tenant QoS metrics
             "per_tenant": per_tenant_qos,
         }

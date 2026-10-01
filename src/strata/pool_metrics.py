@@ -94,7 +94,6 @@ class PoolMetricsTracker:
     _pools: dict[str, ThreadPoolExecutor] = field(default_factory=dict)
     _lock: threading.Lock = field(default_factory=threading.Lock)
 
-    # Track cumulative task counts
     _tasks_submitted: dict[str, int] = field(default_factory=dict)
     _tasks_completed: dict[str, int] = field(default_factory=dict)
 
@@ -165,27 +164,17 @@ class PoolMetricsTracker:
 
             max_workers = executor._max_workers
 
-            # Workers busy right now, from the tasks this tracker is carrying.
+            # Workers busy now, from the tasks this tracker carries. ``executor._threads`` never
+            # shrinks (idle threads park on the queue), so counting it would latch utilization at
+            # 100% after one burst.
             #
-            # This used to count live threads in ``executor._threads``, which
-            # is every thread the pool has ever created. Pool threads park on
-            # the work queue instead of exiting, so that number never falls:
-            # once a pool had seen ``max_workers`` concurrent submissions it
-            # reported 100% utilization for the rest of the process's life,
-            # and ``check_thread_pools`` (DEGRADED above 90%) latched the whole
-            # /health/dependencies report to degraded after a single burst.
-            #
-            # In-flight includes tasks still queued, so it is capped at
-            # ``max_workers`` to keep utilization a percentage; ``queue_depth``
-            # reports the backlog separately.
+            # In-flight includes queued tasks, so it is capped at ``max_workers`` to stay a
+            # percentage; ``queue_depth`` reports the backlog.
             in_flight = self._in_flight.get(name, 0)
             active_workers = min(in_flight, max_workers)
 
-            # Queue depth from the work queue
-            # This is the number of pending tasks waiting for a worker
             queue_depth = executor._work_queue.qsize()
 
-            # Calculate utilization
             utilization_pct = (active_workers / max_workers * 100) if max_workers > 0 else 0.0
 
             return ThreadPoolStats(
@@ -241,16 +230,13 @@ class ConnectionMetrics:
 
     _lock: threading.Lock = field(default_factory=threading.Lock)
 
-    # Request tracking
     _active_requests: int = 0
     _total_requests: int = 0
     _max_concurrent_requests: int = 0
 
-    # Timing for rate calculation
     _start_time: float = field(default_factory=time.time)
     _last_request_time: float = 0.0
 
-    # Connection keep-alive tracking
     _requests_with_keepalive: int = 0
     _requests_without_keepalive: int = 0
 
@@ -310,7 +296,6 @@ class ConnectionMetrics:
             self._requests_without_keepalive = 0
 
 
-# Global instances for server-wide tracking
 _pool_tracker: PoolMetricsTracker | None = None
 _connection_metrics: ConnectionMetrics | None = None
 

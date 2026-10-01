@@ -102,7 +102,7 @@ class DuckDBSQLTransform(Transform[DuckDBSQLParams]):
             inputs: List of input Arrow tables
             params: Validated parameters
         """
-        # No strict validation - DuckDB handles missing table references
+        # No strict validation: DuckDB reports missing table references itself.
         pass
 
     def execute(self, inputs: list[pa.Table], params: DuckDBSQLParams) -> pa.Table:
@@ -126,20 +126,16 @@ class DuckDBSQLTransform(Transform[DuckDBSQLParams]):
                 "DuckDB is required for duckdb_sql@v1. Install with: pip install duckdb"
             )
 
-        # Create in-memory connection
         conn = duckdb.connect(":memory:")
 
-        # Register input tables
         input_names = self.get_input_names(len(inputs))
         for name, table in zip(input_names, inputs):
             conn.register(name, table)
 
-        # Execute query and return as Arrow
         result = conn.execute(params.sql).to_arrow_table()
         return result
 
 
-# Convenience function for building DuckDB transform specs
 def build_duckdb_sql_transform(sql: str) -> dict[str, Any]:
     """Build a duckdb_sql@v1 transform specification.
 

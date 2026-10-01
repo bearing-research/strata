@@ -41,17 +41,14 @@ from strata.types import BuildStatusResponse
 
 router = APIRouter(tags=["builds"])
 
-# One console chunk. Generous for a line-oriented stream and small enough that
-# a runaway cell cannot move the server's memory through a display-only route.
+# Bounded so a runaway cell cannot move server memory through a display-only route.
 _MAX_LOG_CHUNK_BYTES = 256 * 1024
 
-# Lease owner recorded when a build is handed to an external (pull-model)
-# executor, so BuildRunner's poll loop does not also claim and run it.
+# Marks a build handed to a pull-model executor, so BuildRunner won't also run it.
 _EXTERNAL_LEASE_OWNER = "external:manifest"
 
-# How much longer than the signed URLs a manifest's lease runs. The lease is
-# what stops BuildRunner reclaiming a build out from under an executor, so it
-# has to still be held while any URL handed to that executor is usable.
+# The lease must outlive every signed URL handed to the executor, or BuildRunner
+# can reclaim the build while those URLs are still usable.
 _LEASE_MARGIN_SECONDS = 60.0
 
 
@@ -77,8 +74,8 @@ async def get_build_status(build_id: str):
 
     state = get_state()
 
-    # Identity materialize artifact-mode builds are tracked in the stream registry
-    # even when server-mode transforms are disabled.
+    # Identity artifact-mode builds live in the stream registry even when
+    # server-mode transforms are disabled.
     stream_state = state.streams.get(build_id)
     if isinstance(stream_state, StreamState):
         _authorize_build_access(
@@ -88,9 +85,8 @@ async def get_build_status(build_id: str):
 
         return _identity_build_status(stream_state)
 
-    # In-body gate (not the BuildTransportStore param dependency): the identity
-    # StreamState path above must answer even when transport is off, so the 404
-    # can't run as a blanket param.
+    # Checked in-body, not as a param dependency: the identity path above must
+    # answer even when transport is off.
     if not build_transport_available():
         raise HTTPException(
             status_code=404,
@@ -100,7 +96,6 @@ async def get_build_status(build_id: str):
             ),
         )
 
-    # Get build store
     build_store = runtime_build_store()
     if build_store is None:
         raise HTTPException(
@@ -108,12 +103,10 @@ async def get_build_status(build_id: str):
             detail="Build store not initialized",
         )
 
-    # Look up build
     build = build_store.get_build(build_id)
     if build is None:
         raise HTTPException(status_code=404, detail="Build not found")
 
-    # Check access control if auth is enabled
     _authorize_build_access(
         owner_principal=build.principal_id,
         owner_tenant=build.tenant_id,
@@ -170,25 +163,14 @@ async def get_build_manifest(build_id: str, request: Request, build_store: Build
 
     state = get_state()
 
-    # This route MINTS capabilities: it returns a signed upload URL plus a
-    # finalize URL, and nothing downstream binds the uploaded bytes to the
-    # executor's identity. Service mode has no loopback restriction and
-    # deployment_mode="service" with auth_mode="none" is a combination the
-    # coherence validator accepts, so without trusted-proxy auth any caller who
-    # reached the port and learned a build id could PUT arbitrary Arrow IPC and
-    # finalize it — and because the artifact is keyed by the build's provenance
-    # hash, every later identical materialize would serve the forged bytes as a
-    # dedup cache *hit*. ``_authorize_build_access`` below cannot cover this: it
-    # returns immediately when auth_mode != "trusted_proxy".
-    #
-    # Only minting is gated. Redeeming (upload / finalize) stays authorized by
-    # the signature itself — a worker holds a capability, not a principal, which
-    # is the whole point of the pull model (and is how the notebook's signed
-    # remote workers operate: the notebook assembles the manifest in-process and
-    # the worker only redeems the URLs).
-    #
-    # Personal mode is unaffected: single-operator trust boundary, loopback-bound
-    # unless the operator explicitly opts out.
+    # This route mints capabilities (signed upload + finalize URLs), and nothing binds
+    # the uploaded bytes to the executor's identity. Service mode with auth_mode="none"
+    # passes the coherence check, so without trusted-proxy auth anyone who learned a
+    # build id could upload forged bytes that later identical materializes serve as a
+    # dedup hit. ``_authorize_build_access`` returns early outside trusted_proxy.
+    # Only minting is gated: redeeming stays authorized by the signature alone, since a
+    # pull-model worker holds a capability, not a principal. Personal mode is exempt
+    # (single operator, loopback-bound by default).
     if not state.config.writes_enabled and state.config.auth_mode != "trusted_proxy":
         raise HTTPException(
             status_code=404,
@@ -202,41 +184,22 @@ async def get_build_manifest(build_id: str, request: Request, build_store: Build
     if build is None:
         raise HTTPException(status_code=404, detail="Build not found")
 
-    # Only allow manifest retrieval for pending/running builds
     if build.state not in _ACTIVE_BUILD_STATES:
         raise HTTPException(
             status_code=400,
             detail=f"Build is not in pending or building state (state={build.state})",
         )
 
-    # Access control
     _authorize_build_access(
         owner_principal=build.principal_id,
         owner_tenant=build.tenant_id,
     )
 
-    # Claim the build for the external executor before handing out its
-    # capabilities.
-    #
-    # Issuing a manifest used to leave the build in 'pending' and record
-    # nothing, so BuildRunner's poll loop happily picked the same build up and
-    # ran it via v1-push while the pull executor was uploading: two writers
-    # renaming/publishing onto the same (artifact_id, version) blob, and
-    # finalize_build then validating one blob's schema and row count while
-    # completing a different one. _is_runner_managed_build only skips builds
-    # whose *user-supplied* params carry _dispatch_mode == "external", which
-    # only the notebook remote path sets.
-    #
-    # claim_build is the existing atomic primitive (UPDATE ... WHERE state =
-    # 'pending'), so exactly one of manifest-issue and runner-claim can win,
-    # and the lease expiry reclaims the build if the executor never returns.
-    # The lease outlives the signed URLs it is handed alongside.
-    #
-    # The lease has to outlive the URLs minted below, or the orphan sweep can
-    # hand the build to BuildRunner while the executor still holds valid
-    # capabilities — two writers again, by a different route. The margin makes
-    # that ordering hold by construction rather than by the two durations
-    # happening to be equal.
+    # Claim before handing out capabilities, or BuildRunner's poll loop also picks the
+    # build up and two writers publish onto the same (artifact_id, version).
+    # claim_build is atomic (UPDATE ... WHERE state = 'pending'), so exactly one of
+    # manifest-issue and runner-claim wins; lease expiry reclaims an abandoned build.
+    # The margin keeps the lease alive past every URL minted below, by construction.
     lease_seconds = state.config.signed_url_expiry_seconds + _LEASE_MARGIN_SECONDS
     if build.state == "pending":
         claimed = build_store.claim_build(
@@ -245,46 +208,35 @@ async def get_build_manifest(build_id: str, request: Request, build_store: Build
             lease_duration_seconds=lease_seconds,
         )
         if not claimed:
-            # The runner claimed it in between — don't hand out a second
-            # writer's worth of capabilities.
+            # The runner claimed it in between; don't hand out a second writer's capabilities.
             raise HTTPException(
                 status_code=409,
                 detail="Build was claimed by the local runner; retry is not safe",
             )
     elif build.lease_owner == _EXTERNAL_LEASE_OWNER:
-        # A re-fetch of a manifest this route already issued. It mints a fresh
-        # set of signed URLs, so the lease has to be pushed out to cover them:
-        # otherwise the lease keeps its original deadline while the new URLs run
-        # a full window past it, leaving a long stretch where the sweep can
-        # reclaim the build and the executor can still finalize it.
+        # Re-fetch of a manifest issued here: it mints fresh URLs, so push the lease out
+        # to cover them, or the sweep could reclaim while the executor can still finalize.
         build_store.renew_lease(
             build_id,
             _EXTERNAL_LEASE_OWNER,
             lease_duration_seconds=lease_seconds,
         )
     elif build.lease_owner is not None:
-        # Someone else holds the lease — that is BuildRunner, which claims with
-        # its own runner id. Handing out capabilities now would put a second
-        # writer on the same (artifact_id, version) blob.
-        #
-        # A lease_owner of None is not the runner: it means the deprecated
-        # start_build() transition, used by the notebook's signed path (which
-        # assembles its manifest in-process) and by legacy rows. Those keep
-        # working, as does re-fetching a manifest this route already issued.
+        # BuildRunner holds the lease (it claims with its own runner id); capabilities now
+        # would put a second writer on the same blob. A lease_owner of None is not the
+        # runner: it is the deprecated start_build() path (the notebook's in-process
+        # manifest) and legacy rows, which keep working.
         raise HTTPException(
             status_code=409,
             detail="Build is already being executed by the local runner",
         )
 
-    # The server-mode store gate here never 403s — _build_transport_available()
-    # above already guaranteed it — so this is just the store handle.
+    # Never 403s: build_transport_available() above already passed.
     store = _get_artifact_store(allow_server_mode=True)
     base_url = str(request.base_url).rstrip("/")
 
-    # Re-read: the claim or renewal above moved the lease deadline, and the URLs
-    # have to be signed against the claim they are actually being issued under.
-    # Signing the pre-claim row would stamp them with a deadline that no longer
-    # exists, and every one of them would be rejected on arrival.
+    # Re-read: the claim or renewal above moved the lease deadline, and URLs signed
+    # against the pre-claim row would all be rejected on arrival.
     leased = build_store.get_build(build_id) or build
 
     try:
@@ -302,10 +254,8 @@ async def get_build_manifest(build_id: str, request: Request, build_store: Build
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-    # The manifest's upload URL writes under this claim's own attempt key, and
-    # a presigned one reaches the object store without passing through here
-    # again. Record the key before the URL leaves, with the latest moment it
-    # can still be written, so an upload that is never finalized is found.
+    # A presigned upload URL never passes through here again, so record its attempt
+    # key and write deadline before it leaves; an unfinalized upload is then findable.
     attempt = lease_attempt(lease_token(leased.lease_owner, leased.lease_expires_at))
     if attempt is not None:
         build_store.record_attempt(
@@ -343,7 +293,6 @@ async def download_artifact_signed(
     """
     from strata.server import _get_artifact_store, get_state
 
-    # Parse and verify signature
     try:
         version_int = int(version)
         expires_at_float = float(expires_at)
@@ -359,7 +308,6 @@ async def download_artifact_signed(
     ):
         raise HTTPException(status_code=403, detail="Invalid or expired signature")
 
-    # Get artifact blob
     store = _get_artifact_store(allow_server_mode=True)
     artifact = store.get_artifact(artifact_id, version_int)
 
@@ -436,7 +384,6 @@ async def upload_artifact_signed(
         get_state,
     )
 
-    # Parse and verify signature
     try:
         max_bytes_int = int(max_bytes)
         expires_at_float = float(expires_at)
@@ -452,9 +399,8 @@ async def upload_artifact_signed(
     ):
         raise HTTPException(status_code=403, detail="Invalid or expired signature")
 
-    # Check build exists and is in correct state. Resolved in-body (not via the
-    # RequiredBuildStore param) so the signature check above runs first — the
-    # signature is the authorization, it must precede the store-500.
+    # Resolved in-body, not via RequiredBuildStore, so the signature check (the
+    # authorization) runs before any store-500.
     build_store = runtime_build_store()
     if build_store is None:
         raise HTTPException(status_code=500, detail="Build store not initialized")
@@ -534,8 +480,7 @@ async def append_build_log(
 
     body = await request.body()
     if len(body) > _MAX_LOG_CHUNK_BYTES:
-        # Bounded so a runaway cell cannot push the server's memory around
-        # through a route that exists only to display text.
+        # Keep the tail; a runaway cell must not grow server memory through a display route.
         body = body[-_MAX_LOG_CHUNK_BYTES:]
 
     delivered = await console_relay.deliver(
@@ -584,8 +529,7 @@ async def finalize_build(
     if build is None:
         raise HTTPException(status_code=404, detail="Build not found")
 
-    # The claim this request's lease token was verified against; None unless
-    # a signed finalize URL carried one.
+    # The claim this request's lease token was verified against, if any.
     current = None
     if signature is not None or expires_at is not None:
         if signature is None or expires_at is None:
@@ -603,14 +547,10 @@ async def finalize_build(
         ):
             raise HTTPException(status_code=403, detail="Invalid or expired signature")
 
-        # Ownership before publication. Everything below this point writes:
-        # finalize_and_set_name commits the artifact and moves the name pointer,
-        # and the fence at the end can only refuse to record the build row
-        # afterwards — it cannot un-publish bytes. The signature proves the
-        # capability was minted by this server; the lease token proves it was
-        # minted for the claim that is current now, which is the part a stale
-        # executor cannot satisfy. Both are read from the row as it stands
-        # here, not from the copy taken at the top of the request.
+        # Ownership before publication: everything below writes, and the final fence can
+        # only refuse the build row, not un-publish bytes. The signature proves this
+        # server minted the capability; the lease token proves it was minted for the
+        # claim current now, which a stale executor cannot satisfy. Read the row fresh.
         if lease:
             current = build_store.get_build(build_id)
             expected = lease_token(
@@ -628,7 +568,6 @@ async def finalize_build(
             owner_tenant=build.tenant_id,
         )
 
-    # Check build state
     if build.state not in _ACTIVE_BUILD_STATES:
         raise HTTPException(
             status_code=400,
@@ -644,9 +583,8 @@ async def finalize_build(
 
     output_format = str(finalize_payload.get("output_format", "")).strip()
 
-    # Verify blob was uploaded. Under a lease, the executor uploaded to that
-    # claim's own attempt key, and that is the only upload finalize reads: an
-    # executor still holding an earlier manifest wrote somewhere else.
+    # Under a lease, finalize reads only that claim's attempt key; an executor holding
+    # an earlier manifest wrote somewhere else.
     attempt = lease_attempt(lease) if current is not None else None
     store = _get_artifact_store(allow_server_mode=True)
     if not store.blob_exists(build.artifact_id, build.version, attempt):
@@ -659,9 +597,7 @@ async def finalize_build(
     if byte_size == 0:
         raise HTTPException(status_code=500, detail="Failed to read uploaded blob")
 
-    # The Strata upload route enforces this as bytes arrive. A presigned upload
-    # never reaches it, and its policy is the object store's to enforce, so
-    # check here too rather than publish bytes on the policy's word alone.
+    # A presigned upload bypasses the upload route's size check, so enforce it here.
     max_output_bytes = get_state().config.max_transform_output_bytes
     if byte_size > max_output_bytes:
         build_store.fail_build(
@@ -734,10 +670,8 @@ async def finalize_build(
                 detail=f"Invalid Arrow IPC format: {e}",
             )
 
-    # Under a lease, publishing the attempt and completing the build are one
-    # transaction, fenced on the claim this request was issued under. Checking
-    # the token at the top of the request still left a window before the
-    # commit in which the lease could move.
+    # Under a lease, publishing and completing the build are one transaction fenced
+    # on this request's claim; the check at the top still left a window.
     fence = None
     if current is not None and current.lease_owner is not None:
         claim_owner, claim_deadline = current.lease_owner, current.lease_expires_at
@@ -753,7 +687,6 @@ async def finalize_build(
                 output_byte_count=byte_size,
             )
 
-    # Finalize the artifact atomically with name if provided
     try:
         finalized_artifact = store.finalize_and_set_name(
             artifact_id=build.artifact_id,
@@ -787,8 +720,7 @@ async def finalize_build(
         await record_build_output_bytes(build.tenant_id, byte_size)
         return _finalized(build, finalized_artifact, byte_size, row_count)
 
-    # Mark build as complete
-    # First start the build if it's still pending (pull model may finalize directly)
+    # The pull model may finalize a build that is still pending.
     if build.state == "pending":
         build_store.start_build(build_id)
     if finalized_artifact.id != build.artifact_id or finalized_artifact.version != build.version:
@@ -797,11 +729,9 @@ async def finalize_build(
             finalized_artifact.id,
             finalized_artifact.version,
         )
-    # Fenced on the owner we observed when this request started: completing
-    # decides who publishes, and an executor whose lease was reclaimed mid-flight
-    # must not record its result over the runner that took the build over. A
-    # ``lease_owner`` of None keeps the old unfenced behaviour, which is what the
-    # deprecated ``start_build`` path and legacy rows rely on.
+    # Fenced on the owner seen at request start, so an executor whose lease was
+    # reclaimed mid-flight cannot record over its successor. A ``lease_owner`` of None
+    # stays unfenced for the deprecated ``start_build`` path and legacy rows.
     if not build_store.complete_build(build_id, lease_owner=build.lease_owner):
         raise HTTPException(
             status_code=409,

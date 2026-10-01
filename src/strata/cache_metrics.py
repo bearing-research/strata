@@ -112,9 +112,8 @@ class CacheEvictionTracker:
         self._clock = clock
         self._lock = Lock()
         self._events: deque[EvictionEvent] = deque(maxlen=max_events)
-        # When rate measurement began. Without it the hourly rate divides by an
-        # hour the process may not have lived, so a young server reports a
-        # fraction of the traffic it is actually seeing.
+        # When rate measurement began, so a young server's hourly rate is not divided by an hour it
+        # has not lived.
         self._started_at = clock()
         self._total_evictions = 0
         self._total_files_evicted = 0
@@ -173,7 +172,6 @@ class CacheEvictionTracker:
         with self._lock:
             events = list(self._events)
 
-        # Count recent evictions
         evictions_minute = 0
         evictions_hour = 0
         bytes_minute = 0
@@ -190,26 +188,18 @@ class CacheEvictionTracker:
             if last_eviction is None or event.timestamp > last_eviction:
                 last_eviction = event.timestamp
 
-        # Per minute over the hour actually observed, not over a constant 60.
-        # A server up for one minute that evicted 50 times was reporting
-        # 50 / 60 = 0.83/min and reading LOW, while the documented band for
-        # that traffic is CRITICAL: it took 60 evictions in total to leave LOW
-        # at all, however fast they arrived. Floored at a minute so the first
-        # seconds of a process cannot extrapolate one sweep into a crisis;
-        # identical to the old value in steady state.
+        # Per minute over the hour actually observed, not a constant 60, so a young server that
+        # evicts fast reads at its real band. Floored at a minute so the first seconds cannot
+        # extrapolate one sweep into a crisis.
         observed_seconds = min(max(now - self._started_at, 0.0), 3600.0)
         observed_minutes = max(observed_seconds / 60.0, 1.0)
         hourly_rate = evictions_hour / observed_minutes if evictions_hour > 0 else 0.0
 
-        # The worse of the hour and the last minute. An hourly mean cannot tell
-        # a five-minute thrash from a steady trickle -- both average out the
-        # same -- so a burst has to be able to raise the band on its own. The
-        # hour keeps it raised afterwards rather than flapping green the moment
-        # the burst stops, which is the tradeoff: pressure is quick to fire and
-        # slow to clear.
+        # The worse of the hour and the last minute: an hourly mean cannot tell a five-minute thrash
+        # from a steady trickle. The hour keeps the band raised after a burst, so pressure is quick
+        # to fire and slow to clear.
         rate = max(hourly_rate, float(evictions_minute))
 
-        # Determine pressure level based on eviction rate
         if rate >= 10:
             pressure = EvictionPressure.CRITICAL
         elif rate >= 5:
@@ -260,7 +250,6 @@ class CacheEvictionTracker:
             self._total_bytes_evicted = 0
 
 
-# Global tracker instance
 _eviction_tracker: CacheEvictionTracker | None = None
 
 

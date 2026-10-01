@@ -46,9 +46,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-# ---------------------------------------------------------------------------
-# Data Types
-# ---------------------------------------------------------------------------
+# --- Data types ---
 
 
 class ArtifactImportConflict(ValueError):
@@ -390,9 +388,7 @@ class TransformSpec:
         )
 
 
-# ---------------------------------------------------------------------------
-# Provenance Hash
-# ---------------------------------------------------------------------------
+# --- Provenance hash ---
 
 
 def compute_provenance_hash(input_hashes: list[str], transform_spec: TransformSpec) -> str:
@@ -409,10 +405,8 @@ def compute_provenance_hash(input_hashes: list[str], transform_spec: TransformSp
     Returns:
         SHA-256 hex digest of the combined provenance
     """
-    # Sort input hashes for deterministic ordering
     sorted_inputs = sorted(input_hashes)
 
-    # Combine with transform spec
     hasher = hashlib.sha256()
     for h in sorted_inputs:
         hasher.update(h.encode("utf-8"))
@@ -422,27 +416,15 @@ def compute_provenance_hash(input_hashes: list[str], transform_spec: TransformSp
     return hasher.hexdigest()
 
 
-# ---------------------------------------------------------------------------
-# Artifact Store
-# ---------------------------------------------------------------------------
+# --- Artifact store ---
 
-# Schema evolution.
+# Schema evolution. The constants above always describe the *latest* shape; the migrations describe
+# the path to it from the baseline. A fresh database is created from the constants and stamped
+# latest, so it never runs a migration; an existing one is stamped at the baseline and walks
+# forward. ``test_a_migrated_database_matches_a_fresh_one`` keeps the two from drifting.
 #
-# The ad-hoc migrations further down are SQLite-only by construction: they
-# speak PRAGMA and sqlite_master, and they are guarded by
-# ``supports_legacy_migration`` because only SQLite had deployed databases when
-# they were written. Postgres, meanwhile, returns as soon as the schema exists
-# — so there was no way at all to add a column to a Postgres store that already
-# held data. That was fine while Postgres was new. It stops being fine the
-# moment one holds something worth keeping.
-#
-# So: an ordered list, a recorded version, and one rule — the schema constants
-# above always describe the *latest* shape, and the migrations describe the
-# path to it from the baseline. A fresh database is created from the constants
-# and stamped at the latest version, so it never runs a migration; an existing
-# one is stamped at the baseline and walks forward. The two must agree, which
-# is what ``test_a_migrated_database_matches_a_fresh_one`` checks, because
-# nothing else would notice them drifting.
+# The ad-hoc migrations further down are SQLite-only (PRAGMA, sqlite_master) and only bring legacy
+# SQLite databases up to the baseline.
 
 _SCHEMA_VERSION_SQL = """
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -639,7 +621,6 @@ _MIGRATIONS: list[_Migration] = [
 _LATEST_SCHEMA_VERSION = max((m.version for m in _MIGRATIONS), default=_BASELINE_SCHEMA_VERSION)
 
 
-# SQL schema for artifact metadata
 _SCHEMA_SQL = """
 -- Artifact versions: immutable once state="ready"
 CREATE TABLE IF NOT EXISTS artifact_versions (
@@ -697,9 +678,8 @@ CREATE TABLE IF NOT EXISTS artifact_names (
 CREATE INDEX IF NOT EXISTS idx_names_name ON artifact_names(name);
 """
 
-# Registry tables (aliases / tags / audit). Executed unconditionally at
-# init — CREATE IF NOT EXISTS makes it idempotent for both fresh and
-# existing databases (#129).
+# Registry tables (aliases / tags / audit). Run unconditionally at init; CREATE IF NOT EXISTS makes
+# it idempotent for fresh and existing databases.
 _REGISTRY_SCHEMA_SQL = """
 -- Aliases: mutable intent pointers (champion, candidate, ...) on a name.
 -- A name can hold many aliases; each points at one artifact version.
@@ -763,11 +743,9 @@ CREATE TABLE IF NOT EXISTS registry_pending (
 
 # Publications: opt-in, per-artifact-version public read grants.
 #
-# A token is bound to one (artifact_id, version) for good. Revoking sets
-# ``revoked_at`` and keeps the row, so a token can never be reused to point at
-# different content — the whole value of a URL printed in a paper is that what
-# it resolves to cannot change under the reader. A revoked citation has to fail
-# closed, not resolve to something else.
+# A token is bound to one (artifact_id, version) for good. Revoking sets ``revoked_at`` and keeps
+# the row, so a token can never be reused for different content: a URL printed in a paper must fail
+# closed, never resolve to something else.
 _PUBLICATION_SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS artifact_publications (
     token TEXT PRIMARY KEY,
@@ -815,7 +793,7 @@ CREATE TABLE IF NOT EXISTS import_staging (
 );
 """
 
-# Migration SQL to add tenant columns to existing tables
+# Legacy migration: tenant columns for existing tables.
 _MIGRATION_SQL = """
 -- Add tenant and principal columns to artifact_versions if they don't exist
 -- SQLite doesn't have ADD COLUMN IF NOT EXISTS, so we use a workaround
@@ -832,9 +810,8 @@ _MIGRATION_SQL = """
 _CANONICAL_PROMOTE_ATTEMPTS = 3
 
 
-# Sentinel for read_audit's tenant param: distinguishes "no tenant filter at
-# all" (the direct-store CLI / admin view of the whole store) from an
-# explicit tenant filter of None — which normalizes to the '' default tenant.
+# Sentinel for read_audit's tenant param: "no tenant filter at all" (the CLI / admin view of the
+# whole store), distinct from an explicit None, which normalizes to the '' default tenant.
 _AUDIT_ALL_TENANTS = object()
 
 
@@ -893,7 +870,6 @@ class ArtifactStore:
         self.artifact_dir = artifact_dir
         self.db_path = artifact_dir / "artifacts.sqlite"
 
-        # Initialize blob store (default to local filesystem)
         if blob_store is None:
             from strata.blob_store import LocalBlobStore
 
@@ -902,7 +878,7 @@ class ArtifactStore:
             self.blob_store: BlobStore = LocalBlobStore(self.blobs_dir)
         else:
             self.blob_store = blob_store
-            # For backwards compatibility, set blobs_dir if using local store
+            # Back-compat attribute, set for the local store only.
             from strata.blob_store import LocalBlobStore
 
             if isinstance(blob_store, LocalBlobStore):
@@ -910,16 +886,12 @@ class ArtifactStore:
             else:
                 self.blobs_dir = artifact_dir / "blobs"  # May not exist for remote stores
 
-        # Ensure artifact_dir exists (for metadata DB)
         self.artifact_dir.mkdir(parents=True, exist_ok=True)
 
-        # Every query in this class reaches the database through _get_connection,
-        # so the dialect is the one place a second backend has to be taught
-        # about. SQLite stays the default and behaves exactly as before; see
-        # strata/sql_backend.py for what actually differs between backends.
+        # Every query goes through _get_connection, so the dialect is the one place a second backend
+        # has to be taught about; see strata/sql_backend.py for what differs.
         self._dialect: SqlDialect = dialect if dialect is not None else SqliteDialect(self.db_path)
 
-        # Initialize schema
         self._init_schema()
 
     def _get_connection(self) -> StoreConnection:
@@ -950,17 +922,12 @@ class ArtifactStore:
         """Initialize database schema with migrations for tenant columns."""
         conn = self._get_connection()
         try:
-            # The migration below upgrades databases written by older Strata
-            # versions, and is expressed in SQLite's own introspection
-            # vocabulary (sqlite_master, PRAGMA, rowid). A backend added after
-            # those versions has no such history, so it goes straight to the
-            # current schema rather than paying to have this made portable.
+            # The migration below upgrades databases from older Strata versions in SQLite's own
+            # vocabulary (sqlite_master, PRAGMA, rowid). A newer backend has no such history and
+            # goes straight to the current schema.
             if not self._dialect.supports_legacy_migration:
-                # Fast path first: an ArtifactStore is constructed per session
-                # in several places, and the lock below is *global*, so taking
-                # it unconditionally would funnel every store construction in
-                # the cluster through one mutex. Once the schema exists there
-                # is nothing to serialize.
+                # Fast path: a store is constructed per session in several places and the lock below
+                # is global, so take it only while the schema is missing.
                 if self._dialect.schema_exists(conn):
                     # Existing database: it may still be behind. Under the same
                     # global lock the creation path takes, since two replicas
@@ -969,13 +936,10 @@ class ArtifactStore:
                     self._apply_schema_migrations(conn)
                     return
 
-                # CREATE TABLE IF NOT EXISTS is not concurrency-safe in
-                # Postgres: it checks and then creates without holding a lock,
-                # so simultaneous creators race in the system catalog and all
-                # but one fail with a duplicate key on pg_type_typname_nsp_index.
-                # Observed 7 of 8 nodes failing on a shared first boot, which is
-                # exactly the multi-node case this backend exists to enable.
-                # Both scripts share the one transaction so the lock covers them.
+                # CREATE TABLE IF NOT EXISTS is not concurrency-safe in Postgres: simultaneous
+                # creators race in the system catalog and all but one fail on
+                # pg_type_typname_nsp_index, which is exactly a multi-node first boot. Both scripts
+                # share one transaction so the lock covers them.
                 self._dialect.begin_write(conn, "__schema__")
                 conn.executescript(self._dialect.adapt_ddl(_SCHEMA_SQL))
                 conn.executescript(self._dialect.adapt_ddl(_REGISTRY_SCHEMA_SQL))
@@ -988,19 +952,16 @@ class ArtifactStore:
                 conn.commit()
                 return
 
-            # Check if this is a fresh database or needs migration
             cursor = conn.execute(
                 "SELECT name FROM sqlite_master WHERE type='table' AND name='artifact_versions'"
             )
             table_exists = cursor.fetchone() is not None
 
             if table_exists:
-                # Check if tenant column exists
                 cursor = conn.execute("PRAGMA table_info(artifact_versions)")
                 columns = {row["name"] for row in cursor.fetchall()}
 
                 if "tenant" not in columns:
-                    # Migrate: add tenant and principal columns
                     conn.execute("ALTER TABLE artifact_versions ADD COLUMN tenant TEXT")
                     conn.execute("ALTER TABLE artifact_versions ADD COLUMN principal TEXT")
                     conn.execute(
@@ -1009,13 +970,11 @@ class ArtifactStore:
                     )
                     conn.commit()
 
-                # Normalize tenant storage and (re)build the uniqueness index.
-                # Tenantless rows must use '' (not NULL) so the (tenant,
-                # provenance_hash) uniqueness actually holds — SQLite treats
-                # NULLs as distinct, which let duplicate tenantless ready rows
-                # slip through. Drop the index, normalize NULL -> '', collapse
-                # any pre-existing duplicate ready rows, then rebuild. Idempotent:
-                # once there are no NULL tenants and the index exists, it skips.
+                # Normalize tenant storage and (re)build the uniqueness index. Tenantless rows must
+                # be '' (not NULL): SQLite treats NULLs as distinct, so the (tenant,
+                # provenance_hash) uniqueness would not hold. Drop the index, normalize NULL -> '',
+                # collapse duplicate ready rows, rebuild. Idempotent: skips once no NULL tenants
+                # remain and the index exists.
                 has_null_tenant = (
                     conn.execute(
                         "SELECT 1 FROM artifact_versions WHERE tenant IS NULL LIMIT 1"
@@ -1032,10 +991,9 @@ class ArtifactStore:
                 if has_null_tenant or not index_exists:
                     conn.execute("DROP INDEX IF EXISTS idx_tenant_provenance_unique")
                     conn.execute("UPDATE artifact_versions SET tenant = '' WHERE tenant IS NULL")
-                    # Collapse pre-existing duplicate ready rows (the bug this
-                    # closes): keep the newest per (tenant, provenance_hash),
-                    # supersede the rest so the unique index can be built. The
-                    # superseded rows stay fetchable by explicit id+version.
+                    # Keep the newest ready row per (tenant, provenance_hash) and supersede the rest
+                    # so the unique index can be built. Superseded rows stay fetchable by explicit
+                    # id+version.
                     conn.execute(
                         """
                         UPDATE artifact_versions SET state = 'superseded'
@@ -1055,13 +1013,11 @@ class ArtifactStore:
                     )
                     conn.commit()
 
-                # Check if artifact_names needs migration
                 cursor = conn.execute("PRAGMA table_info(artifact_names)")
                 name_columns = {row["name"] for row in cursor.fetchall()}
 
                 if "tenant" not in name_columns:
-                    # Need to recreate artifact_names with new schema
-                    # SQLite doesn't support changing primary key
+                    # Recreate the table: SQLite cannot change a primary key.
                     conn.execute("ALTER TABLE artifact_names RENAME TO artifact_names_old")
                     conn.execute("""
                         CREATE TABLE artifact_names (
@@ -1075,8 +1031,7 @@ class ArtifactStore:
                                 REFERENCES artifact_versions(id, version)
                         )
                     """)
-                    # Migrate data with '' tenant (personal mode)
-                    # Use '' instead of NULL for SQLite unique constraint compatibility
+                    # '' tenant (personal mode), not NULL, so the unique constraint holds.
                     conn.execute("""
                         INSERT INTO artifact_names
                             (name, artifact_id, version, updated_at, tenant)
@@ -1089,7 +1044,6 @@ class ArtifactStore:
                     )
                     conn.commit()
             else:
-                # Fresh database: create schema
                 conn.executescript(_SCHEMA_SQL)
                 conn.executescript(_SCHEMA_VERSION_SQL)
                 # Born at the latest shape, so it must not replay migrations
@@ -1097,8 +1051,7 @@ class ArtifactStore:
                 self._stamp_schema_version(conn, _LATEST_SCHEMA_VERSION)
                 conn.commit()
 
-            # Registry tables (aliases/tags/audit) — idempotent, applies to
-            # fresh and existing databases alike (#129).
+            # Registry and publication tables: idempotent, for fresh and existing databases alike.
             conn.executescript(_REGISTRY_SCHEMA_SQL)
             conn.executescript(_PUBLICATION_SCHEMA_SQL)
             cursor = conn.execute("PRAGMA table_info(registry_audit)")
@@ -1107,9 +1060,8 @@ class ArtifactStore:
                 conn.execute("ALTER TABLE registry_audit ADD COLUMN from_artifact_id TEXT")
             conn.commit()
 
-            # After the SQLite-only steps above, which brought a legacy
-            # database up to the baseline. Everything from here is portable and
-            # runs on both backends.
+            # After the SQLite-only steps above brought a legacy database to the baseline.
+            # Everything from here is portable.
             self._apply_schema_migrations(conn)
         finally:
             conn.close()
@@ -1122,9 +1074,7 @@ class ArtifactStore:
         """
         return self.blobs_dir / f"{artifact_id}@v={version}.arrow"
 
-    # -----------------------------------------------------------------------
-    # Artifact CRUD
-    # -----------------------------------------------------------------------
+    # --- Artifact CRUD ---
 
     def create_artifact(
         self,
@@ -1158,12 +1108,9 @@ class ArtifactStore:
         """
         conn = self._get_connection()
         try:
-            # Serialize writers so the MAX(version)+1 read can't race a
-            # concurrent create for the same artifact id (two refresh rebuilds
-            # used to both read MAX=N and collide on the (id, version) primary
-            # key with an uncaught IntegrityError). The key names what is
-            # contended so a backend can lock narrowly; SQLite ignores it and
-            # locks the file.
+            # Serialize writers so the MAX(version)+1 read can't race a concurrent create for the
+            # same id into a primary-key collision. The key names what is contended so a backend can
+            # lock narrowly; SQLite ignores it and locks the file.
             self._dialect.begin_write(conn, artifact_id)
             row = conn.execute(
                 "SELECT COALESCE(MAX(version), 0) + 1 AS next_version, "
@@ -1174,10 +1121,8 @@ class ArtifactStore:
             # By name: a Postgres row unpacks to its column names, not values.
             version, was_minted = int(row["next_version"]), row["was_minted"]
 
-            # Serialize input_versions to JSON
             input_versions_json = json.dumps(input_versions) if input_versions else None
 
-            # Insert new version
             conn.execute(
                 """
                 INSERT INTO artifact_versions
@@ -1192,8 +1137,8 @@ class ArtifactStore:
                     time.time(),
                     transform_spec.to_json() if transform_spec else None,
                     input_versions_json,
-                    # Tenantless rows store '' (never NULL) so the uniqueness
-                    # index treats them as equal — matches names/aliases/tags.
+                    # Tenantless rows store '' (never NULL) so the uniqueness index treats them as
+                    # equal, as names/aliases/tags do.
                     tenant if tenant is not None else "",
                     principal,
                     1 if minted or was_minted else 0,
@@ -1280,9 +1225,8 @@ class ArtifactStore:
         current = row["version"] if row is not None and row["version"] is not None else None
 
         if current is None:
-            # A database that predates this table. It is at the baseline by
-            # definition — that is what the baseline means — so stamp it and
-            # let the migrations below carry it forward.
+            # A database that predates this table is at the baseline by definition: stamp it and let
+            # the migrations below carry it forward.
             current = _BASELINE_SCHEMA_VERSION
             self._stamp_schema_version(conn, current)
 
@@ -1622,7 +1566,6 @@ class ArtifactStore:
 
         conn = self._get_connection()
         try:
-            # Get the artifact being finalized to check tenant/provenance
             cursor = conn.execute(
                 """
                 SELECT id, version, state, provenance_hash, tenant
@@ -1636,7 +1579,7 @@ class ArtifactStore:
                 raise ValueError(f"Artifact {artifact_id}@v={version} not found")
 
             if row["state"] == "ready":
-                # Already finalized - return it (idempotent)
+                # Already finalized: idempotent.
                 _commit_through_fence(conn, artifact_id, version)
                 return self.get_artifact(artifact_id, version)
 
@@ -1649,12 +1592,9 @@ class ArtifactStore:
             provenance_hash = row["provenance_hash"]
             tenant = row["tenant"]
 
-            # Check if another artifact with same (tenant, provenance_hash) already exists
-            # This handles the race condition where two builds complete simultaneously
+            # Two builds with the same (tenant, provenance_hash) can complete at once.
             existing = self.find_by_provenance(provenance_hash, tenant=tenant)
             if existing is not None and existing.id != artifact_id:
-                # Another artifact with same provenance already exists
-                # Mark this one as failed (duplicate) and return the existing one
                 conn.execute(
                     """
                     UPDATE artifact_versions
@@ -1667,12 +1607,10 @@ class ArtifactStore:
                 return existing
 
             if existing is not None and existing.version != version:
-                # Same artifact id, older ready version with the same provenance:
-                # this is a refresh rebuild. Supersede the old version so the
-                # rebuild becomes canonical — the partial unique index allows
-                # only ONE ready row per (tenant, provenance_hash). The old
-                # version stays fetchable by explicit (id, version); only
-                # provenance/dedup lookups stop returning it.
+                # Same id, older ready version with the same provenance: a refresh rebuild.
+                # Supersede the old version so the rebuild becomes canonical, since the partial
+                # unique index allows only ONE ready row per (tenant, provenance_hash). The old
+                # version stays fetchable by explicit (id, version).
                 conn.execute(
                     """
                     UPDATE artifact_versions
@@ -1682,14 +1620,10 @@ class ArtifactStore:
                     (existing.id, existing.version),
                 )
 
-            # Recorded here rather than at write time because every write
-            # path arrives here — bytes in hand, a streamed writer, a file
-            # published from disk, an import — and this is the moment the
-            # artifact becomes readable, so it is the moment its bytes are
-            # final.
+            # Recorded here, not at write time: every write path (bytes, streamed writer, file,
+            # import) arrives here, and this is the moment the bytes become final.
             digest = content_sha256 or self.blob_digest(artifact_id, version, blob_attempt)
 
-            # Proceed with finalization
             try:
                 cursor = conn.execute(
                     """
@@ -1701,7 +1635,7 @@ class ArtifactStore:
                     (schema_json, row_count, byte_size, digest, blob_attempt, artifact_id, version),
                 )
                 if cursor.rowcount == 0:
-                    # Race condition: another process may have finalized
+                    # Another process may have finalized it.
                     conn.rollback()
                     if fence is not None:
                         raise BuildLeaseLost(
@@ -1711,12 +1645,11 @@ class ArtifactStore:
                 _commit_through_fence(conn, artifact_id, version)
                 return self.get_artifact(artifact_id, version)
             except self._dialect.integrity_error:
-                # Unique constraint violation - duplicate (tenant, provenance_hash)
-                # Another artifact was finalized first, return it
+                # Another artifact with this (tenant, provenance_hash) was finalized first; return
+                # it.
                 conn.rollback()
                 existing = self.find_by_provenance(provenance_hash, tenant=tenant)
                 if existing is not None:
-                    # Mark this one as failed
                     conn.execute(
                         """
                         UPDATE artifact_versions
@@ -1847,10 +1780,9 @@ class ArtifactStore:
         finally:
             conn.close()
 
-        # Streamed, not read_blob/write_blob: an artifact is as large as the
-        # value a cell produced, and pulling a multi-GB frame through process
-        # memory — a full download and re-upload on the object-store backends —
-        # to re-point a pointer would cost more than the run this avoids.
+        # Streamed, not read_blob/write_blob: an artifact can be a multi-GB frame, and pulling it
+        # through process memory (a full download and re-upload on object stores) to re-point a
+        # pointer would cost more than the run this avoids.
         from strata.blob_store import BLOB_STREAM_CHUNK_BYTES
 
         copied = 0
@@ -1858,9 +1790,8 @@ class ArtifactStore:
             reader_cm as reader,
             self.blob_store.open_blob_writer(artifact_id, new_version) as writer,
         ):
-            # Hashed as it goes by: the bytes are passing through anyway, and
-            # a copy is exactly the operation where reading them a second time
-            # to find their digest would be silly.
+            # Hashed in passing: the bytes go by anyway, and reading them again for the digest would
+            # be wasteful.
             hasher = hashlib.sha256()
             while chunk := reader.read(BLOB_STREAM_CHUNK_BYTES):
                 writer.write(chunk)
@@ -1879,11 +1810,9 @@ class ArtifactStore:
             content_sha256=hasher.hexdigest(),
         )
         if finalized is not None and finalized.id != artifact_id:
-            # Dedup sent us to another artifact holding the same provenance —
-            # two notebooks running the same cell source is enough. The caller
-            # asked to make *this* id current, and resolves by id, so the
-            # equivalent artifact under a different id is no answer. Same
-            # recovery store_cell_output uses on the write path.
+            # Dedup sent us to another artifact with the same provenance (two notebooks running the
+            # same cell is enough). The caller resolves by *this* id, so the equivalent under
+            # another id is no answer; same recovery store_cell_output uses on the write path.
             return self.force_finalize_canonical(
                 artifact_id=artifact_id,
                 version=new_version,
@@ -1930,21 +1859,14 @@ class ArtifactStore:
         Returns the canonical ``ArtifactVersion`` after promotion, or
         ``None`` if it can't be found post-update.
         """
-        # Retried, because a conflict here means the work is still to be done.
+        # Retried, because a conflict here means the work is still to be done. A keyed advisory lock
+        # only serializes writers sharing an artifact id, so a competing writer under another id can
+        # commit a ready row with our provenance between our supersede and our promote, and the
+        # uniqueness index rejects us.
         #
-        # Under SQLite a conflict was impossible: BEGIN IMMEDIATE locks the
-        # whole file, so no second writer was ever in flight. A keyed advisory
-        # lock is narrower -- it serializes writers sharing an artifact id, and
-        # rows sharing a provenance hash across *different* ids do not contend
-        # on it -- so a competing writer can commit its own ready row between
-        # our supersede and our promote, and the uniqueness index rejects us.
-        #
-        # Returning the winner would be wrong. The only caller reaches this
-        # method precisely *because* finalize landed under a foreign id
-        # (`notebook/artifact_integration.py`), so handing that same foreign id
-        # back leaves the canonical row 'failed' and the caller none the wiser.
-        # Retrying does what the method is for: the next pass sees the winner's
-        # now-committed row, supersedes it, and promotes ours.
+        # Returning the winner would be wrong: the only caller (`notebook/artifact_integration.py`)
+        # is here because finalize landed under a foreign id. The next pass supersedes the winner's
+        # now-committed row and promotes ours.
         for attempt in range(_CANONICAL_PROMOTE_ATTEMPTS):
             conn = self._get_connection()
             try:
@@ -2040,7 +1962,6 @@ class ArtifactStore:
 
         conn = self._get_connection()
         try:
-            # Get the artifact being finalized
             cursor = conn.execute(
                 """
                 SELECT id, version, state, provenance_hash, tenant
@@ -2054,7 +1975,7 @@ class ArtifactStore:
                 raise ValueError(f"Artifact {artifact_id}@v={version} not found")
 
             if row["state"] == "ready":
-                # Already finalized - set name and return (idempotent)
+                # Already finalized: set name and return (idempotent).
                 if name:
                     artifact_tenant = row["tenant"] if row["tenant"] else None
                     if not self._can_assign_name_for_tenant(artifact_tenant, tenant):
@@ -2082,11 +2003,10 @@ class ArtifactStore:
                     f"{normalized_artifact_tenant}, cannot assign name in tenant {tenant}"
                 )
 
-            # Check if another artifact with same (tenant, provenance_hash) already exists
             existing = self.find_by_provenance(provenance_hash, tenant=artifact_tenant)
             if existing is not None and existing.id != artifact_id:
-                # Another artifact with same provenance already exists
-                # Mark this one as failed and point name to existing
+                # Another artifact has this provenance: mark this one failed and point the name at
+                # the existing one.
                 conn.execute(
                     """
                     UPDATE artifact_versions
@@ -2101,10 +2021,9 @@ class ArtifactStore:
                 return existing
 
             if existing is not None and existing.version != version:
-                # Refresh rebuild: same artifact id, older ready version with
-                # the same provenance. Supersede the old version (still
-                # fetchable by explicit id+version; excluded from provenance
-                # lookups) so the rebuild becomes canonical (#123).
+                # Refresh rebuild: same id, older ready version with the same provenance. Supersede
+                # the old version (still fetchable by explicit id+version) so the rebuild becomes
+                # canonical.
                 conn.execute(
                     """
                     UPDATE artifact_versions
@@ -2114,7 +2033,6 @@ class ArtifactStore:
                     (existing.id, existing.version),
                 )
 
-            # Atomically finalize and set name
             try:
                 cursor = conn.execute(
                     """
@@ -2126,7 +2044,7 @@ class ArtifactStore:
                     (schema_json, row_count, byte_size, blob_attempt, artifact_id, version),
                 )
                 if cursor.rowcount == 0:
-                    # Race condition
+                    # Another process may have finalized it.
                     conn.rollback()
                     if fence is not None:
                         raise BuildLeaseLost(
@@ -2134,11 +2052,9 @@ class ArtifactStore:
                         )
                     artifact = self.get_artifact(artifact_id, version)
                     if artifact and artifact.state == "ready" and name:
-                        # Still set the name
                         self.set_name(name, artifact_id, version, tenant)
                     return artifact
 
-                # Set name in same transaction
                 if name:
                     self._set_name_in_connection(conn, name, artifact_id, version, tenant)
 
@@ -2146,11 +2062,10 @@ class ArtifactStore:
                 return self.get_artifact(artifact_id, version)
 
             except self._dialect.integrity_error:
-                # Unique constraint violation - duplicate provenance
+                # Duplicate provenance: another artifact was finalized first.
                 conn.rollback()
                 existing = self.find_by_provenance(provenance_hash, tenant=artifact_tenant)
                 if existing is not None:
-                    # Mark this one as failed, point name to existing
                     conn.execute(
                         """
                         UPDATE artifact_versions
@@ -2224,7 +2139,7 @@ class ArtifactStore:
         actor: str | None = None,
     ) -> None:
         """Set name within an existing connection (for use in transactions)."""
-        # Use '' instead of NULL for personal mode (SQLite NULL != NULL in unique constraints)
+        # '' not NULL for personal mode: SQLite NULL != NULL in unique constraints.
         effective_tenant = tenant if tenant is not None else ""
 
         # Audit: record what the name pointed at before this move.
@@ -2523,9 +2438,7 @@ class ArtifactStore:
             conn.rollback()
             logger.debug("Could not note a use of %s@v=%d: %s", artifact_id, version, exc)
 
-    # -----------------------------------------------------------------------
-    # Blob I/O
-    # -----------------------------------------------------------------------
+    # --- Blob I/O ---
 
     def _blob_id(
         self,
@@ -2655,9 +2568,7 @@ class ArtifactStore:
         """
         return self.blob_store.blob_exists(self._blob_id(artifact_id, version, attempt), version)
 
-    # -----------------------------------------------------------------------
-    # Name Pointers
-    # -----------------------------------------------------------------------
+    # --- Name pointers ---
 
     @staticmethod
     def _can_assign_name_for_tenant(
@@ -2704,7 +2615,6 @@ class ArtifactStore:
         """
         conn = self._get_connection()
         try:
-            # Verify target exists and is ready
             cursor = conn.execute(
                 """
                 SELECT state, tenant FROM artifact_versions
@@ -2726,7 +2636,7 @@ class ArtifactStore:
                     f"{artifact_tenant}, cannot assign name in tenant {tenant}"
                 )
 
-            # Upsert + audit in one transaction (shared with finalize paths)
+            # Upsert + audit in one transaction (shared with the finalize paths).
             self._set_name_in_connection(conn, name, artifact_id, version, tenant, actor=actor)
             conn.commit()
         finally:
@@ -2769,7 +2679,6 @@ class ArtifactStore:
         """
         conn = self._get_connection()
         try:
-            # Use '' instead of NULL for personal mode
             effective_tenant = tenant if tenant is not None else ""
             cursor = conn.execute(
                 """
@@ -2802,7 +2711,6 @@ class ArtifactStore:
         """
         conn = self._get_connection()
         try:
-            # Use '' instead of NULL for personal mode
             effective_tenant = tenant if tenant is not None else ""
             cursor = conn.execute(
                 """
@@ -2815,7 +2723,6 @@ class ArtifactStore:
             row = cursor.fetchone()
             if row is None:
                 return None
-            # Convert '' back to None for API consistency
             returned_tenant = row["tenant"] if row["tenant"] else None
             return ArtifactName(
                 name=row["name"],
@@ -2843,7 +2750,6 @@ class ArtifactStore:
         """
         conn = self._get_connection()
         try:
-            # Use '' instead of NULL for personal mode
             effective_tenant = tenant if tenant is not None else ""
             cursor = conn.execute(
                 "SELECT version FROM artifact_names WHERE name = ? AND tenant = ?",
@@ -2897,13 +2803,7 @@ class ArtifactStore:
         finally:
             conn.close()
 
-    # ------------------------------------------------------------------
-    # Registry: aliases, tags, audit (#129)
-    # ------------------------------------------------------------------
-
-    # ------------------------------------------------------------------
-    # Publications — opt-in public read grants
-    # ------------------------------------------------------------------
+    # --- Publications (opt-in public read grants), then registry: aliases, tags, audit ---
 
     @staticmethod
     def _publication_from_row(row) -> Publication:
@@ -3024,12 +2924,10 @@ class ArtifactStore:
                 return self._publication_from_row(existing)
 
             publication = Publication(
-                # The version's own digest, not a second computation of the
-                # same bytes: a publication that disagreed with the artifact it
-                # names would be the more alarming of the two answers. Read
-                # from the row already in hand rather than through
-                # ``content_digest``, which would open a second connection and
-                # write through it while this one holds the publication.
+                # The version's own digest, not a second computation: a publication disagreeing with
+                # its artifact would be the more alarming answer. Read from the row in hand rather
+                # than via ``content_digest``, which would open and write through a second
+                # connection while this one holds the publication.
                 content_sha256=row["content_sha256"] or self.blob_digest(artifact_id, version),
                 token=secrets.token_urlsafe(32),
                 artifact_id=artifact_id,
@@ -3250,7 +3148,7 @@ class ArtifactStore:
                 and previous["artifact_id"] == artifact_id
                 and previous["version"] == version
             ):
-                return False  # Already points here — idempotent no-op
+                return False  # Already points here: idempotent no-op
             self._audit_in_connection(
                 conn,
                 action="alias_set",
@@ -3684,7 +3582,7 @@ class ArtifactStore:
                     and current["artifact_id"] == artifact_id
                     and current["version"] == version
                 ):
-                    return False  # Already the live pointer — nothing to approve
+                    return False  # Already the live pointer: nothing to approve
             self._audit_in_connection(
                 conn,
                 action=f"alias_request_{action}",
@@ -3921,7 +3819,6 @@ class ArtifactStore:
         """
         conn = self._get_connection()
         try:
-            # Use '' instead of NULL for personal mode
             effective_tenant = tenant if tenant is not None else ""
             cursor = conn.execute(
                 """
@@ -3938,7 +3835,6 @@ class ArtifactStore:
                     artifact_id=row["artifact_id"],
                     version=row["version"],
                     updated_at=row["updated_at"],
-                    # Convert '' back to None for API consistency
                     tenant=row["tenant"] if row["tenant"] else None,
                 )
                 for row in cursor.fetchall()
@@ -3968,7 +3864,6 @@ class ArtifactStore:
         if artifact is None:
             return None
 
-        # Parse input_versions from JSON
         input_versions: dict[str, str] = {}
         if artifact.input_versions:
             input_versions = json.loads(artifact.input_versions)
@@ -3983,9 +3878,7 @@ class ArtifactStore:
             input_versions=input_versions,
         )
 
-    # -----------------------------------------------------------------------
-    # Lineage and Dependency Queries
-    # -----------------------------------------------------------------------
+    # --- Lineage and dependency queries ---
 
     def find_dependents(
         self,
@@ -4007,9 +3900,8 @@ class ArtifactStore:
         Returns:
             List of (ArtifactVersion, input_version_string) tuples for dependents
         """
-        # Build the search pattern - artifacts reference inputs as "artifact_id@v=N"
+        # Inputs are recorded as "artifact_id@v=N" or as the full URI.
         search_pattern = f'"{artifact_id}@v={version}"'
-        # Also search for the full URI format
         uri_pattern = f'"strata://artifact/{artifact_id}@v={version}"'
 
         conn = self._get_connection()
@@ -4060,7 +3952,6 @@ class ArtifactStore:
                     content_sha256=row["content_sha256"],
                 )
 
-                # Parse input_versions to find the exact version string used
                 input_version_used = f"{artifact_id}@v={version}"
                 if artifact.input_versions:
                     try:
@@ -4096,7 +3987,7 @@ class ArtifactStore:
         Returns:
             Name string if found, None otherwise
         """
-        # Use '' instead of NULL for personal mode (SQLite NULL != NULL in unique constraints)
+        # '' not NULL for personal mode: SQLite NULL != NULL in unique constraints.
         effective_tenant = tenant if tenant is not None else ""
         conn = self._get_connection()
         try:
@@ -4112,12 +4003,9 @@ class ArtifactStore:
         finally:
             conn.close()
 
-    # -----------------------------------------------------------------------
-    # Lifecycle Management
-    # -----------------------------------------------------------------------
+    # --- Lifecycle management ---
 
-    # Whitelisted sort columns — ORDER BY can't be parameterized, so restrict it
-    # to a known set to keep the query injection-safe.
+    # ORDER BY can't be parameterized, so only whitelisted columns keep it injection-safe.
     _SORT_COLUMNS = {"created_at": "created_at", "byte_size": "byte_size", "row_count": "row_count"}
 
     def list_artifacts(
@@ -4153,7 +4041,6 @@ class ArtifactStore:
         conn = self._get_connection()
         try:
             if name_prefix is not None:
-                # Join with names table to filter by name prefix
                 query = """
                     SELECT DISTINCT av.id, av.version, av.state, av.provenance_hash,
                            av.schema_json, av.row_count, av.byte_size, av.created_at,
@@ -4250,7 +4137,6 @@ class ArtifactStore:
         """
         conn = self._get_connection()
         try:
-            # Check existence + ownership
             cursor = conn.execute(
                 "SELECT tenant FROM artifact_versions WHERE id = ? AND version = ?",
                 (artifact_id, version),
@@ -4280,14 +4166,13 @@ class ArtifactStore:
             # Past this point the delete is committed to; the blob cleanup
             # below the finally runs only for rows that actually existed.
 
-            # Delete name pointers to this version
             conn.execute(
                 "DELETE FROM artifact_names WHERE artifact_id = ? AND version = ?",
                 (artifact_id, version),
             )
 
-            # Delete alias pointers (audited — an alias disappearing because
-            # its target was deleted must be reconstructible) and tags.
+            # Alias deletions are audited, so an alias vanishing with its target stays
+            # reconstructible.
             cursor = conn.execute(
                 "SELECT name, alias, tenant FROM artifact_aliases "
                 "WHERE artifact_id = ? AND version = ?",
@@ -4319,7 +4204,6 @@ class ArtifactStore:
             attempt = attempt_row["blob_attempt"] if attempt_row is not None else None
             blob_id = attempt_blob_id(artifact_id, attempt) if attempt else artifact_id
 
-            # Delete metadata
             conn.execute(
                 "DELETE FROM artifact_versions WHERE id = ? AND version = ?",
                 (artifact_id, version),
@@ -4611,13 +4495,10 @@ class ArtifactStore:
                   AND {used} <= ?
             """
             if not collect_latest:
-                # The current value of a caller-named id is spared, by two
-                # rules that are both needed. The version ``get_latest_version``
-                # resolves (its newest ready or superseded row) is spared,
-                # because a rebuild's building row, or a failed one, outranks
-                # it in MAX(version) while it is still the value readers get.
-                # MAX(version) is spared too, which the id-wide rule below
-                # would also ensure. A minted id has no current value.
+                # The current value of a caller-named id is spared by two rules. The version
+                # ``get_latest_version`` resolves (newest ready or superseded) is spared, since a
+                # rebuild's building or failed row can outrank it in MAX(version) while it is still
+                # what readers get. MAX(version) is spared too. A minted id has no current value.
                 query += """
                   AND (
                       av.minted = 1
@@ -4713,14 +4594,9 @@ class ArtifactStore:
             deleted_count = 0
             deleted_bytes = 0
 
-            # Metadata first, then blobs — the same ordering ``delete_artifact``
-            # uses. The reverse order left a window where a crash (or a raising
-            # blob backend) mid-loop had already removed blobs while the
-            # metadata DELETEs were still uncommitted and rolled back, leaving
-            # rows in state 'ready' whose blob no longer exists: every later
-            # read returns a ready artifact with no data, and verify_artifacts
-            # reports it as missing_blob. Losing a blob whose row is gone is
-            # merely wasted bytes; the reverse is a corrupt store.
+            # Metadata first, then blobs, as ``delete_artifact`` does. The reverse order can leave
+            # 'ready' rows whose blob is gone after a crash or a raising backend, a corrupt store;
+            # losing a blob whose row is gone only wastes bytes.
             collected: list[tuple[str, int]] = []
             for row in chosen.values():
                 artifact_id, version, byte_size = row["id"], row["version"], row["byte_size"] or 0
@@ -4732,11 +4608,9 @@ class ArtifactStore:
                         (artifact_id, version),
                     )
                 except self._dialect.integrity_error:
-                    # A name or alias was pointed at this version between the
-                    # SELECT above and here. Enforcement doing its job — the
-                    # pointer wins — but one unlucky race must not fail an
-                    # entire sweep, so skip this artifact and keep going. It is
-                    # not counted and its blob is not touched.
+                    # A name or alias was pointed at this version since the SELECT above; the
+                    # pointer wins. Skip it (uncounted, blob untouched) rather than fail the whole
+                    # sweep on one race.
                     logger.info(
                         "garbage_collect: skipping %s@v=%d, something referenced "
                         "it after it was selected.",
@@ -4755,15 +4629,11 @@ class ArtifactStore:
         finally:
             conn.close()
 
-        # Best-effort blob cleanup after the metadata is durably gone. A
-        # failure here only orphans bytes, so it must not abort the run.
+        # Best-effort blob cleanup after the metadata is durably gone; a failure only orphans bytes.
         #
-        # Outside the connection scope deliberately: a sweep deleting a few
-        # thousand blobs at 50-200ms each against a remote blob store would
-        # otherwise hold a pooled connection for minutes, and a handful of
-        # concurrent sweeps would exhaust the pool and fail unrelated requests
-        # with PoolTimeout. `collected` is already materialized, so nothing
-        # here needs the database.
+        # Outside the connection scope: thousands of remote deletes at 50-200ms each would hold a
+        # pooled connection for minutes, and concurrent sweeps would exhaust the pool. `collected`
+        # is already materialized.
         for blob_id, version in collected:
             try:
                 self.blob_store.delete_blob(blob_id, version)
@@ -4863,7 +4733,6 @@ class ArtifactStore:
                 cursor = conn.execute("SELECT COUNT(*) as count FROM artifact_names")
             names_count = cursor.fetchone()["count"]
 
-            # Count unreferenced artifacts
             unreferenced_query = """
                 SELECT COUNT(*) as count
                 FROM artifact_versions av
@@ -4900,9 +4769,7 @@ class ArtifactStore:
         finally:
             conn.close()
 
-    # -----------------------------------------------------------------------
-    # Maintenance (Legacy - kept for backwards compatibility)
-    # -----------------------------------------------------------------------
+    # --- Maintenance (legacy) ---
 
     def sweep_zombie_builds(self, max_age_seconds: float = 3600) -> int:
         """Mark stale ``building`` artifacts as failed.
@@ -5017,12 +4884,9 @@ class ArtifactStore:
                     }
                 )
 
-            # The checks above catch bytes that stopped being valid Arrow or
-            # stopped holding the rows they claim. A digest catches the edit
-            # that kept both true — a value changed in place, which is the
-            # alteration a reader would never otherwise notice. Rows with no
-            # digest are silent here: they predate the column, and verify is
-            # not the place to decide the store's history was wrong.
+            # The checks above catch bytes that stopped being valid Arrow or stopped holding their
+            # claimed rows. A digest catches an in-place value change that keeps both true. Rows
+            # with no digest predate the column and are skipped.
             recorded = row["content_sha256"]
             if recorded:
                 actual = hashlib.sha256(data).hexdigest()
@@ -5059,10 +4923,8 @@ class ArtifactStore:
             )
             rows = cursor.fetchall()
 
-            # Metadata first, then blobs. The previous order deleted each blob
-            # before its row was committed, so a failure mid-sweep left rows
-            # pointing at bytes that were already gone. Orphaned bytes are the
-            # better failure, and it is what garbage_collect already does.
+            # Metadata first, then blobs: a mid-sweep failure then orphans bytes rather than leaving
+            # rows pointing at deleted blobs, as garbage_collect does.
             for row in rows:
                 conn.execute(
                     "DELETE FROM artifact_versions WHERE id = ? AND version = ?",
@@ -5146,9 +5008,7 @@ class ArtifactStore:
             conn.close()
 
 
-# ---------------------------------------------------------------------------
-# Module-level singleton (initialized lazily)
-# ---------------------------------------------------------------------------
+# --- Module-level singleton (initialized lazily) ---
 
 _artifact_store: ArtifactStore | None = None
 

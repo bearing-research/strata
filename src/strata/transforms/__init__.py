@@ -6,7 +6,6 @@ This module provides:
 - Server-mode transform registry and build runner
 """
 
-# Core transform abstraction
 from strata.transforms.base import (
     Transform,
     _run_transform,
@@ -15,15 +14,11 @@ from strata.transforms.base import (
     register_transform,
     run_transform,  # Deprecated, use _run_transform internally
 )
-
-# Server-mode infrastructure
 from strata.transforms.build_store import (
     BuildState,
     BuildStore,
     get_build_store,
 )
-
-# Built-in transforms (auto-register on import)
 from strata.transforms.duckdb_sql import (
     DuckDBSQLParams,
     DuckDBSQLTransform,

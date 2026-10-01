@@ -25,9 +25,7 @@ from strata.notebook.python_versions import (
 )
 from strata.types import CacheGranularity
 
-# ---------------------------------------------------------------------------
-# ACL Configuration Types
-# ---------------------------------------------------------------------------
+# --- ACL configuration types ---
 
 
 logger = logging.getLogger(__name__)
@@ -47,11 +45,8 @@ class AclRule(BaseModel):
         tables: Tuple of table patterns (glob-style, e.g., "file:db.*")
     """
 
-    # ``extra="forbid"`` for the same reason the block around it forbids them:
-    # a key pydantic does not recognise is dropped, and a dropped key in an
-    # access rule is a rule that is wider than it reads. ``tenants = "acme"``
-    # -- the plural -- left ``tenant`` None, which matches every tenant rather
-    # than the one named. The rule still looked right in the file.
+    # ``extra="forbid"``: a dropped unknown key widens an access rule (``tenants = "acme"`` would
+    # leave ``tenant`` None, matching every tenant) while the file still looks right.
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     principal: str = "*"
@@ -237,13 +232,9 @@ class StrataConfig(BaseSettings):
     host: str = "127.0.0.1"
     port: Annotated[int, Field(ge=1, le=65535)] = 8765
 
-    # The origin readers reach this server on, when that differs from what the
-    # server sees. Behind a reverse proxy on another host, ``request.base_url``
-    # is the internal address — so a published page would advertise an oEmbed
-    # endpoint nobody can reach, and the endpoint would reject the public URL a
-    # wiki actually pastes. Only publication URLs consult this; unset, the
-    # request's own origin is used, which is right for a directly-reachable
-    # server.
+    # The origin readers reach this server on, when it differs from what the server sees (behind a
+    # reverse proxy ``request.base_url`` is the internal address, which published pages and oEmbed
+    # would advertise). Only publication URLs consult this; unset, the request's own origin is used.
     public_base_url: str | None = None
 
     # Cache settings
@@ -276,21 +267,16 @@ class StrataConfig(BaseSettings):
     # refused while planning, with a pointer to compaction; see
     # iceberg_equality.
     max_equality_delete_rows: Annotated[int, Field(ge=0)] = 10_000_000
-    # How long a completed/abandoned stream's state lingers before cleanup (a
-    # memory/resource knob; also lets tests use a short TTL via config instead of
-    # mutating server state).
+    # How long a finished or abandoned stream's state lingers before cleanup.
     stream_state_ttl_seconds: Annotated[float, Field(gt=0)] = 300.0
 
-    # How other nodes reach this one, e.g. "https://strata-3.internal:8765".
-    # Unset means single-node: nothing is written to or read from the stream
-    # ownership table, so the common case pays nothing.
+    # How other nodes reach this one, e.g. "https://strata-3.internal:8765". Unset means
+    # single-node: the stream ownership table is never touched.
     #
-    # Setting it is the operator asserting two things: that this deployment
-    # runs several nodes behind one address, and that this URL actually
-    # reaches this node. Streams cannot move between nodes -- a live
-    # asyncio.Task and an in-memory ReadPlan are not shareable -- so a node
-    # asked for someone else's stream redirects to the owner instead of
-    # returning a 404 that is indistinguishable from "expired".
+    # Setting it asserts that several nodes run behind one address and that this URL reaches this
+    # node. Streams cannot move between nodes (a live asyncio.Task and an in-memory ReadPlan are not
+    # shareable), so a node asked for another's stream redirects to the owner instead of a 404 that
+    # looks like "expired".
     node_advertised_url: str | None = None
 
     # QoS: Two-tier admission control
@@ -303,7 +289,6 @@ class StrataConfig(BaseSettings):
     per_client_interactive: Annotated[int, Field(ge=0)] = 2  # 0 disables per-client caps
     per_client_bulk: Annotated[int, Field(ge=0)] = 1
 
-    # Metadata database
     metadata_db: Path | None = None
 
     # S3 settings
@@ -313,7 +298,6 @@ class StrataConfig(BaseSettings):
     s3_endpoint_url: str | None = None
     s3_anonymous: bool = False
 
-    # Memory pool settings
     arrow_memory_pool: Literal["default", "system", "jemalloc", "mimalloc"] | None = None
 
     # Rate limiting settings
@@ -329,7 +313,6 @@ class StrataConfig(BaseSettings):
     s3_connect_timeout_seconds: Annotated[float, Field(gt=0)] = 10.0
     s3_request_timeout_seconds: Annotated[float, Field(gt=0)] = 30.0
 
-    # Fetch timeout settings
     fetch_timeout_seconds: Annotated[float, Field(gt=0)] = 60.0
 
     # Adaptive concurrency control
@@ -346,9 +329,7 @@ class StrataConfig(BaseSettings):
     multi_tenant_enabled: bool = False
     tenant_header: str = "X-Tenant-ID"
     require_tenant_header: bool = False
-    # Note: per-tenant admission defaults come from interactive_slots / bulk_slots
-    # (wired into the tenant registry at startup). The former default_tenant_*
-    # fields were never read and were removed (issue #185).
+    # Per-tenant admission defaults come from interactive_slots / bulk_slots.
 
     # Trusted proxy authentication settings
     auth_mode: Literal["none", "trusted_proxy", "api_key"] = "none"
@@ -358,80 +339,53 @@ class StrataConfig(BaseSettings):
     scopes_header: str = "X-Strata-Scopes"
     hide_forbidden_as_not_found: bool = True
 
-    # Opt-in: let authenticated clients WRITE in service mode (put / set_name /
-    # set_alias / tags), scoped to the caller's tenant and gated by the
-    # `artifacts:write` scope. Default off — service mode is read-only unless this
-    # is set. Requires trusted-proxy auth (writes must be attributable). For the
-    # shared-research-store deployment (team = tenant, principal = author).
+    # Opt-in: let authenticated clients WRITE in service mode (put / set_name / set_alias / tags),
+    # scoped to the caller's tenant and gated by the `artifacts:write` scope. Off, service mode is
+    # read-only. Requires trusted-proxy auth so writes are attributable.
     service_writes_enabled: bool = False
 
-    # Access control list configuration
     acl_config: AclConfig = Field(default_factory=AclConfig)
 
-    # Deployment mode settings.
-    #
-    # Default is ``personal`` — the common case. A first-time
-    # ``uv run strata-notebook`` boots into a single-user, loopback-only
-    # configuration that just works. Multi-user and multi-tenant
-    # deployments must opt in explicitly via ``deployment_mode="service"``
-    # plus the matching auth / artifact settings; that flow has its own
-    # coherence checks (see ``validate_mode_coherence``) so production
-    # operators get clear errors if anything's misconfigured.
+    # Default ``personal``: single-user, loopback-only, works out of the box. Multi-user and
+    # multi-tenant deployments opt in with ``"service"`` plus matching auth / artifact settings,
+    # checked by ``validate_mode_coherence``.
     deployment_mode: Literal["service", "personal"] = "personal"
     allow_remote_clients_in_personal: bool = False
-    # Extra browser origins allowed to make cross-origin calls to this server.
+    # Extra browser origins allowed to make cross-origin calls. Same-origin is always allowed; this
+    # exists for `npm run dev` (Vite on another port, via VITE_STRATA_URL), e.g.
+    # ["http://localhost:5173"].
     #
-    # Same-origin is always allowed, so the bundled frontend needs nothing here.
-    # This exists for `npm run dev`, where Vite serves the UI from another port
-    # and talks to this server via VITE_STRATA_URL — set it to that dev origin,
-    # e.g. ["http://localhost:5173"].
-    #
-    # It defaults to EMPTY on purpose. The server used to send
-    # Access-Control-Allow-Origin: * , which let any page the user happened to
-    # visit drive the loopback API: personal mode has no auth, so a page could
-    # enumerate notebooks, add a cell containing arbitrary Python and execute
-    # it. Binding to loopback is no defence, because the browser runs there too.
+    # Empty on purpose: a permissive origin lets any page the user visits drive the loopback API,
+    # which in personal mode has no auth and can execute arbitrary Python. Loopback binding is no
+    # defence; the browser runs there too.
     cors_allow_origins: list[str] = []
-    # Mount the MCP server at ``/mcp`` so an external coding agent (Claude Code,
-    # etc.) can drive the live notebook session over streamable HTTP. Opt-in and
-    # PERSONAL MODE ONLY — it exposes the same warm-session read/run/author
-    # surface the loopback REST API does, with no per-request auth, so service
-    # deployments must not turn it on (enforced in ``validate_mode_coherence``).
-    # Requires the ``[mcp]`` extra; without it the flag warns and no-ops.
+    # Mount the MCP server at ``/mcp`` so an external coding agent can drive the live session over
+    # streamable HTTP. PERSONAL MODE ONLY: it exposes the loopback API's read/run/author surface
+    # with no per-request auth (enforced in ``validate_mode_coherence``). Needs the ``[mcp]`` extra;
+    # without it the flag warns and no-ops.
     mcp_enabled: bool = False
-    # Optional request header that identifies the calling user when a personal
-    # mode deployment is fronted by an authenticating proxy (Cloudflare Access,
-    # Pomerium, etc.). When set, notebooks are stamped with the caller's
-    # identity on create and the discover/delete endpoints scope to it. When
-    # unset, the deployment behaves like a single-user instance — the default
-    # for a developer running on localhost.
+    # Request header naming the calling user when a personal-mode deployment sits behind an
+    # authenticating proxy (Cloudflare Access, Pomerium, etc.). Notebooks are stamped with the
+    # caller on create, and discover/delete scope to it. Unset means single-user.
     personal_mode_user_header: str | None = None
-    # Origins allowed to embed a notebook's app view in an ``<iframe>`` (e.g.
-    # a dashboard or wiki on another host). Sets ``Content-Security-Policy:
-    # frame-ancestors 'self' <origins>`` on every response. Empty (the default)
-    # means same-origin only — external embedding is opt-in, and unlike the old
-    # no-header behavior a stray page can no longer frame Strata. Accepts a JSON
-    # array or a comma-separated list; each entry is an origin
-    # (``https://analytics.example.com``) or ``*`` to allow any host.
+    # Origins allowed to embed a notebook's app view in an ``<iframe>``; sets
+    # ``Content-Security-Policy: frame-ancestors 'self' <origins>``. Empty (the default) means
+    # same-origin only. A JSON array or comma-separated list of origins
+    # (``https://analytics.example.com``) or ``*`` for any host.
     embed_frame_ancestors: Annotated[list[str], NoDecode] = Field(default_factory=list)
     artifact_dir: Path | None = None
-    # Builds stuck in 'building' longer than this are demoted to failed at
-    # startup (zombie sweep) — they can never serve data and would otherwise
-    # linger in the store forever.
+    # Builds stuck in 'building' longer than this are demoted to failed at startup: they can never
+    # serve data and would otherwise linger forever.
     artifact_zombie_build_timeout_seconds: Annotated[float, Field(gt=0)] = 3600.0
-    # Retention for the server's artifact store (ArtifactStore.garbage_collect):
-    # a sweep every artifact_gc_interval_seconds collects what nothing holds
-    # (no name, alias, pin or publication, and not the current value of an id
-    # somebody chose), least recently used first. It takes anything idle longer
-    # than artifact_gc_max_idle_days, and whatever it takes to bring a store
-    # over artifact_gc_max_bytes down to 80% of that, but never anything used
-    # in the last artifact_gc_min_idle_seconds. Losing one costs a recompute.
+    # Retention for the server's artifact store (ArtifactStore.garbage_collect). Every
+    # artifact_gc_interval_seconds, collect what nothing holds (no name, alias, pin or publication,
+    # and not the current value of a chosen id), least recently used first: anything idle past
+    # artifact_gc_max_idle_days, plus enough to bring a store over artifact_gc_max_bytes down to 80%
+    # of it, but never anything used in the last artifact_gc_min_idle_seconds.
     #
-    # Unset, personal mode sweeps hourly with a 20 GiB cap: a laptop's store
-    # otherwise grows by every distinct query, forever. Service mode sweeps
-    # only when an operator sets the interval, because a team store is a
-    # shared record and how long it keeps things is the operator's call. For
-    # the interval and the cap, 0 means off; so does an idle limit of 0.
+    # Unset, personal mode sweeps hourly with a 20 GiB cap (a laptop store otherwise grows forever);
+    # service mode sweeps only when the operator sets the interval, since a team store's retention
+    # is their call. 0 turns off the interval, the cap or the idle limit.
     artifact_gc_interval_seconds: Annotated[float, Field(ge=0)] | None = None
     artifact_gc_max_bytes: Annotated[int, Field(ge=0)] | None = None
     artifact_gc_max_idle_days: Annotated[float, Field(ge=0)] = 30.0
@@ -458,13 +412,9 @@ class StrataConfig(BaseSettings):
     notebook_shared_env_dir: Path | None = None
     notebook_shared_env_ttl_days: Annotated[float, Field(ge=0)] = 7.0
 
-    # Point the ambient `strata` client injected into notebook cells at a REMOTE
-    # shared store instead of this local notebook server. Lets a team of
-    # researchers publish/consume datasets against one central deployment (the
-    # shared research store). `notebook_remote_store_headers` carries the auth the
-    # remote store needs (e.g. the trusted-proxy identity/token, or a bearer
-    # token) — set via env so secrets stay out of committed config. Unset → the
-    # ambient client targets the local server as before.
+    # Point the ambient `strata` client in notebook cells at a REMOTE shared store instead of this
+    # server. `notebook_remote_store_headers` carries the auth it needs (proxy identity/token or a
+    # bearer token); set it via env so secrets stay out of committed config.
     notebook_remote_store_url: str | None = None
     notebook_remote_store_headers: dict[str, str] = Field(default_factory=dict)
     # Send the caller's principal to the remote store as X-Strata-Principal,
@@ -472,58 +422,38 @@ class StrataConfig(BaseSettings):
     # promotions and approvals are attributed to the member and not the server.
     # Off for a remote store that expects one fixed service identity.
     notebook_remote_store_forward_principal: bool = True
-    # Consult the remote store on a LOCAL cache miss, so a colleague's
-    # expensive cell becomes your instant result. Distinct from the knob above,
-    # which only redirects a cell's ambient client: that is explicit publish
-    # (someone names a dataset and pushes it), and nobody names their
-    # intermediate results — which is exactly where the recomputation is.
+    # Consult the remote store on a LOCAL cache miss, so a colleague's expensive cell becomes your
+    # instant result. Unlike the URL above (explicit publish), this covers unnamed intermediates,
+    # which is where the recomputation is.
     #
-    # Opt-in, and separate from the URL, because it is a real behaviour change
-    # and not only a performance one: it puts bytes another machine produced
-    # into your local store, and adds a network round-trip to the miss path of
-    # every cell. Wanting a shared store to publish to is not the same as
-    # wanting one to silently source results from.
+    # Opt-in and separate from the URL: it puts bytes another machine produced into your store and
+    # adds a round-trip to every cell's miss path.
     notebook_team_cache_enabled: bool = False
 
-    # What the cache offers *outward*. There was no setting between "every
-    # downstream-consumed variable of every successful cell" and "nothing",
-    # and that gap is the whole difference between a laptop and a shared
-    # server: on a personal server, offering everything means every
-    # intermediate a researcher ever computed lands in the team's store,
-    # whether or not they meant to share it.
+    # What the cache offers outward. On a personal server, offering everything puts every
+    # intermediate a researcher computed into the team's store.
     #
-    #   all       -- today's behaviour, and right for a server whose whole
-    #                purpose is a shared cache.
-    #   promoted  -- offer nothing automatically; `strata artifact promote`
-    #                is how a result reaches the team. Pulls are unchanged,
-    #                so the cache still saves you work it already holds.
-    #   off       -- no offers and no pulls, without unsetting the URL that
-    #                a cell's ambient client still needs.
+    # - all: every downstream-consumed variable of every successful cell; right for a server whose
+    #   purpose is a shared cache.
+    # - promoted: offer nothing automatically; `strata artifact promote` shares a result. Pulls are
+    #   unchanged.
+    # - off: no offers and no pulls, keeping the URL a cell's ambient client still needs.
     notebook_team_cache_publish: Literal["all", "promoted", "off"] = "all"
 
-    # Which of the server's environment variables a cell subprocess is given.
-    # Empty (the default) hands over the whole environment, which is right on a
-    # laptop and is the entire threat model on a shared server: a cell is
-    # arbitrary Python, so every member who can run one can read the remote-store
-    # headers, the proxy token, worker tokens and every data-source credential
-    # the server holds.
+    # Which server env vars a cell subprocess gets. Empty (the default) passes everything: right on
+    # a laptop, but on a shared server any cell can read the remote-store headers, proxy token,
+    # worker tokens and every data-source credential.
     #
-    # Entries are exact names, or a prefix written with a trailing ``*``. The
-    # essentials a subprocess cannot start without are always included, and
-    # STRATA_* is dropped unless named exactly. A cell's own configuration —
-    # ``[env]`` and mount credentials — travels in the manifest rather than the
-    # process environment, so the list stays short.
+    # Exact names, or a prefix with a trailing ``*``. Essentials a subprocess needs are always
+    # included; STRATA_* is dropped unless named exactly. A cell's own ``[env]`` and mount
+    # credentials travel in the manifest, not the environment.
     notebook_harness_env_allowlist: Annotated[list[str], NoDecode] = Field(default_factory=list)
 
-    # The OS user a cell subprocess runs as. The allowlist above filters what a
-    # cell is given; this changes who it is. Without it a cell runs as the
-    # server's own user and can read /proc/<server pid>/environ and the
-    # server's files whatever the allowlist says.
+    # The OS user a cell subprocess runs as. The allowlist above filters what a cell gets; this
+    # changes who it is, so it cannot read /proc/<server pid>/environ or the server's files.
     #
-    # Service mode refuses to start cell code on its own host unless this is
-    # set — the other way to run a cell there is a server-managed worker on
-    # another machine. Setting it needs the server to run as root, so it can
-    # switch users. POSIX only.
+    # Service mode refuses to run cell code on its own host unless this is set (the alternative is a
+    # managed worker on another machine). The server must run as root to switch users. POSIX only.
     notebook_harness_user: str | None = None
 
     # Named credentials, referenced from notebook.toml by name so no secret is
@@ -558,14 +488,10 @@ class StrataConfig(BaseSettings):
     ai_max_output_tokens: Annotated[int, Field(gt=0)] = 4096
     ai_timeout_seconds: Annotated[float, Field(gt=0)] = 60.0
 
-    # Artifact blob storage backend configuration
-    # Metadata backend for the artifact store. Unset means SQLite in
-    # artifact_dir, which is what personal mode wants and what every existing
-    # deployment already has. A DSN moves the store's system of record to a
-    # shared server, which is what lets more than one node share one store.
-    # Blobs are configured separately via artifact_blob_backend; a shared
-    # database paired with local blobs is only coherent on a single machine,
-    # so the two are validated together below.
+    # Metadata backend for the artifact store. Unset means SQLite in artifact_dir. A DSN moves the
+    # system of record to a shared server so several nodes can share one store. Blobs are configured
+    # separately (artifact_blob_backend); a shared database with local blobs only works on one
+    # machine, so the two are validated together below.
     artifact_metadata_dsn: str | None = None
 
     artifact_blob_backend: Literal["local", "s3", "gcs", "azure"] = "local"
@@ -578,18 +504,12 @@ class StrataConfig(BaseSettings):
 
     # GCS configuration
     #
-    # Named for what it does. PyArrow's GcsFileSystem has no project parameter
-    # at all, so the old STRATA_GCS_PROJECT_ID never set one — it fed whatever
-    # it was given to ``default_bucket_location``, a GCS location like ``US``
-    # or ``europe-west1``. The old name stays accepted so a deployment setting
-    # it keeps the behaviour it had; ``validate_gcs_settings`` says what it
-    # actually controls.
-    # Both entries carry the STRATA_ prefix deliberately. validation_alias
-    # *replaces* env_prefix rather than combining with it, so a bare
-    # "gcs_project_id" here would make the unprefixed GCS_PROJECT_ID live
-    # config — and in a GCP deployment that variable is ambient, which would
-    # feed a project id into the location field exactly as before. No other
-    # setting in this class is reachable without the prefix.
+    # PyArrow's GcsFileSystem has no project parameter: the legacy STRATA_GCS_PROJECT_ID always fed
+    # ``default_bucket_location`` (a location like ``US``), so it stays accepted with that
+    # behaviour; ``validate_gcs_settings`` says what it controls.
+    #
+    # Both aliases carry the STRATA_ prefix: validation_alias replaces env_prefix, so a bare
+    # "gcs_project_id" would make the ambient GCP variable GCS_PROJECT_ID live config.
     gcs_default_bucket_location: str | None = Field(
         default=None,
         validation_alias=AliasChoices(
@@ -641,10 +561,9 @@ class StrataConfig(BaseSettings):
     # from the cell's own timeout, which starts only once the job is running, so
     # a cold machine does not spend the cell's budget booting.
     worker_provisioning_timeout_seconds: Annotated[float, Field(gt=0)] = 600.0
-    # HMAC secret for signing pull-model build URLs (env STRATA_TRANSFORM_SIGNING_SECRET).
-    # If unset, a random per-process secret is used — fine for single-instance dev,
-    # but signed URLs then become invalid on restart and differ across replicas.
-    # Set a stable value for any multi-replica or restart-surviving deployment.
+    # HMAC secret for signing pull-model build URLs. Unset means a random per-process secret, so
+    # signed URLs break on restart and differ across replicas. Set a stable value for any
+    # multi-replica or restart-surviving deployment.
     transform_signing_secret: str | None = None
 
     # Build QoS configuration
@@ -815,17 +734,13 @@ class StrataConfig(BaseSettings):
     @model_validator(mode="after")
     def setup_paths_and_defaults(self) -> StrataConfig:
         """Set up paths and defaults after model creation."""
-        # Ensure cache_dir exists
         self.cache_dir.mkdir(parents=True, exist_ok=True)
 
-        # Set default metadata_db if not specified
         if self.metadata_db is None:
             self.metadata_db = Path.home() / ".strata" / "meta.sqlite"
-        # Ensure metadata_db parent directory exists
         if self.metadata_db is not None:
             self.metadata_db.parent.mkdir(parents=True, exist_ok=True)
 
-        # Set default artifact_dir for personal mode
         if self.artifact_dir is None and self.deployment_mode == "personal":
             self.artifact_dir = Path.home() / ".strata" / "artifacts"
 
@@ -837,11 +752,9 @@ class StrataConfig(BaseSettings):
             if self.artifact_gc_max_bytes is None:
                 self.artifact_gc_max_bytes = _PERSONAL_GC_MAX_BYTES
 
-        # Ensure artifact_dir exists in personal mode
         if self.deployment_mode == "personal" and self.artifact_dir is not None:
             self.artifact_dir.mkdir(parents=True, exist_ok=True)
 
-        # Ensure the default notebook storage directory exists.
         self.notebook_storage_dir.mkdir(parents=True, exist_ok=True)
 
         return self
@@ -978,10 +891,8 @@ class StrataConfig(BaseSettings):
         if self.deployment_mode == "service":
             conflicts: list[str] = []
 
-            # Multi-tenancy is an access-control boundary. Without auth the tenant
-            # header is unauthenticated and spoofable, and direct artifact reads
-            # aren't tenant-filtered — so multi-tenancy requires trusted-proxy auth
-            # to mean anything.
+            # Multi-tenancy is an access-control boundary: without auth the tenant header is
+            # spoofable and direct artifact reads aren't tenant-filtered.
             if self.multi_tenant_enabled and not self.principal_auth_enabled:
                 conflicts.append(
                     f"multi_tenant_enabled=True with auth_mode={self.auth_mode!r} "
@@ -990,11 +901,8 @@ class StrataConfig(BaseSettings):
                     "auth_mode='trusted_proxy' or 'api_key')"
                 )
 
-            # Trusted-proxy auth without a shared token is no auth at all:
-            # verify_proxy_token() returns True when no token is configured, so
-            # any client that can reach Strata can spoof the principal/scope
-            # headers. Require the token (it's free even for network-isolated
-            # deployments) rather than silently trusting every caller.
+            # Trusted-proxy auth without a shared token is no auth: verify_proxy_token() returns
+            # True when none is configured, so any client could spoof the principal/scope headers.
             if self.auth_mode == "trusted_proxy" and not self.proxy_token:
                 conflicts.append(
                     "auth_mode='trusted_proxy' without proxy_token (the token is "
@@ -1002,13 +910,9 @@ class StrataConfig(BaseSettings):
                     "headers can be spoofed; set proxy_token)"
                 )
 
-            # Authenticated write-back must be attributable: writes are stamped
-            # with the caller's principal/tenant, which only exist under auth.
-            # Still trusted-proxy only, deliberately: the write path stamps the
-            # caller's identity into stored artifacts, and that is a wider claim
-            # than a read gate. Named the mode it actually saw, because reporting
-            # 'none' to an api_key deployment sends the operator looking for a
-            # setting that is already correct.
+            # Writes are stamped with the caller's principal/tenant, which only exist under auth.
+            # Trusted-proxy only: stamping identity into stored artifacts is a wider claim than a
+            # read gate. The message names the mode actually seen.
             if self.service_writes_enabled and self.auth_mode != "trusted_proxy":
                 conflicts.append(
                     f"service_writes_enabled=True with auth_mode={self.auth_mode!r} "
@@ -1035,13 +939,10 @@ class StrataConfig(BaseSettings):
                     "in the artifact store's database; set artifact_dir)"
                 )
 
-            # A shared metadata store paired with local blobs is only coherent
-            # on one machine: node B resolves an artifact's metadata from the
-            # shared database, then looks for bytes that only exist on node A's
-            # disk. The read fails at fetch time, long after the request that
-            # created it looked successful. Moving the metadata off SQLite is
-            # done specifically to run more than one node, so this combination
-            # is always a misconfiguration in service mode.
+            # A shared metadata store with local blobs only works on one machine: node B resolves
+            # metadata from the shared database, then looks for bytes on node A's disk, failing long
+            # after the write looked successful. Moving metadata off SQLite only serves multiple
+            # nodes, so this is always a misconfiguration in service mode.
             if self.artifact_metadata_dsn and self.artifact_blob_backend == "local":
                 conflicts.append(
                     "artifact_metadata_dsn with artifact_blob_backend='local' "
@@ -1050,11 +951,8 @@ class StrataConfig(BaseSettings):
                     "its bytes; set artifact_blob_backend to s3, gcs, or azure)"
                 )
 
-            # The artifact store is created only when artifact_dir is set, even
-            # when its metadata and its blobs both live elsewhere and nothing
-            # durable is kept under it. Configuring a shared database or an
-            # object store without it booted cleanly, and then every artifact
-            # route answered 404 or 500.
+            # The artifact store is created only when artifact_dir is set, even when its metadata
+            # and blobs live elsewhere; without it every artifact route answers 404 or 500.
             artifact_store_configured = (
                 self.artifact_metadata_dsn is not None
                 or self.artifact_blob_backend != "local"
@@ -1070,9 +968,8 @@ class StrataConfig(BaseSettings):
                     "metadata and blobs are shared)"
                 )
 
-            # ACL rules are only evaluated when a principal was authenticated.
-            # Configured rules without auth would be silently ignored — an
-            # operator who wrote a deny rule would believe they were protected.
+            # ACL rules are only evaluated for an authenticated principal; without auth, configured
+            # rules would be silently ignored.
             acl_configured = (
                 self.acl_config.default != "allow"
                 or bool(self.acl_config.deny_rules)
@@ -1085,9 +982,8 @@ class StrataConfig(BaseSettings):
                     "auth_mode='trusted_proxy' or 'api_key')"
                 )
 
-            # Transform builds persist artifacts, which require an artifact store
-            # (its metadata DB lives under artifact_dir). Without it, every build
-            # would fail at runtime — reject at startup instead.
+            # Transform builds persist artifacts, which need an artifact store (its metadata DB
+            # lives under artifact_dir). Reject at startup rather than fail every build.
             if self.server_transforms_enabled and self.artifact_dir is None:
                 conflicts.append(
                     "transforms enabled without artifact_dir (builds persist "
@@ -1137,14 +1033,10 @@ class StrataConfig(BaseSettings):
                 "require_tenant_header=True (personal mode has no tenants to require a header for)"
             )
         if self.mcp_enabled and self.personal_mode_user_header:
-            # personal_mode_user_header is the proxy-fronted multi-user shim:
-            # `discover` and `delete` filter by owner, and every REST notebook
-            # route runs `_require_owner`. The MCP mount has no per-request
-            # identity to check against, and no owner filtering anywhere — its
-            # `list_notebooks` returns every open session with its path, and
-            # any tool call accepts any session id. Combining the two lets one
-            # user enumerate and execute code in another user's notebook,
-            # which the REST API on the same server would 404.
+            # personal_mode_user_header scopes REST notebook routes by owner, but the MCP mount has
+            # no per-request identity or owner filter: `list_notebooks` returns every open session
+            # and any tool call accepts any session id, so one user could run code in another's
+            # notebook.
             conflicts.append(
                 "mcp_enabled=True with personal_mode_user_header set (the MCP "
                 "endpoint has no per-request identity and does not filter by "
@@ -1171,7 +1063,6 @@ class StrataConfig(BaseSettings):
         if self.deployment_mode != "personal":
             return
 
-        # Check if host is loopback
         loopback_hosts = {"127.0.0.1", "localhost", "::1"}
         is_loopback = self.host in loopback_hosts
 
@@ -1356,11 +1247,9 @@ class StrataConfig(BaseSettings):
         file_config = _load_from_pyproject()
         env_config = _get_env_overrides()
 
-        # Documented precedence is pyproject < env, but file_config is passed to
-        # the model as init kwargs, which pydantic-settings ranks ABOVE its env
-        # source — so a key written in pyproject would otherwise shadow STRATA_*
-        # (e.g. STRATA_AUTH_MODE silently ignored). Drop any pyproject key that a
-        # STRATA_* env var overrides, letting the env source win.
+        # Documented precedence is pyproject < env, but file_config goes in as init kwargs, which
+        # pydantic-settings ranks ABOVE env. Drop any pyproject key a STRATA_* env var overrides so
+        # env wins.
         env_var_names = {name.upper() for name in os.environ}
 
         # A field with a validation_alias answers to more than one env name, so
@@ -1483,7 +1372,6 @@ class StrataConfig(BaseSettings):
         if self.s3_anonymous:
             kwargs["anonymous"] = True
 
-        # Apply timeout settings
         kwargs["connect_timeout"] = self.s3_connect_timeout_seconds
         kwargs["request_timeout"] = self.s3_request_timeout_seconds
 
@@ -1509,7 +1397,6 @@ class StrataConfig(BaseSettings):
         pool_name = self.arrow_memory_pool.lower()
 
         if pool_name == "default":
-            # Use PyArrow's default (no change needed)
             return pa.default_memory_pool().backend_name
 
         if pool_name == "system":
@@ -1576,12 +1463,10 @@ def _get_env_overrides() -> dict[str, Any]:
     # Catalog URI (for PostgreSQL or other SQL backends)
     # Example: postgresql://user:pass@localhost:5432/iceberg_catalog
     if catalog_uri := os.environ.get("STRATA_CATALOG_URI"):
-        # Merge into catalog_properties
         if "catalog_properties" not in overrides:
             overrides["catalog_properties"] = {}
         overrides["catalog_properties"]["uri"] = catalog_uri
 
-    # Server-mode transforms (complex nested config)
     if os.environ.get("STRATA_TRANSFORMS_ENABLED", "").lower() == "true":
         if "transforms_config" not in overrides:
             overrides["transforms_config"] = {}

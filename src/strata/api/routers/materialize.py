@@ -40,12 +40,10 @@ async def explain_materialize(
     """
     from strata.services.materialize import materialize_service
 
-    # Get tenant from auth context for artifact isolation.
     tenant_id = principal.tenant if principal else None
 
-    # Resolve current input versions (may 400/404 per input — captured as an
-    # error marker so the dry run still returns a full picture). The pure
-    # provenance / cache-hit / staleness logic lives in MaterializeService.
+    # A per-input 400/404 becomes an error marker so the dry run still returns
+    # a full picture.
     resolved_versions: dict[str, str] = {}
     for input_uri in request.inputs:
         try:

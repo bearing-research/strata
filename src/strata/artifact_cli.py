@@ -212,9 +212,7 @@ def _artifact_payload(store: ArtifactStore, artifact: ArtifactVersion) -> dict:
     }
 
 
-# ---------------------------------------------------------------------------
-# list
-# ---------------------------------------------------------------------------
+# --- list ---
 
 
 def cmd_list(args: argparse.Namespace) -> int:
@@ -247,9 +245,7 @@ def cmd_list(args: argparse.Namespace) -> int:
     return 0
 
 
-# ---------------------------------------------------------------------------
-# show
-# ---------------------------------------------------------------------------
+# --- show ---
 
 
 def cmd_show(args: argparse.Namespace) -> int:
@@ -287,9 +283,7 @@ def cmd_show(args: argparse.Namespace) -> int:
     return 0
 
 
-# ---------------------------------------------------------------------------
-# lineage
-# ---------------------------------------------------------------------------
+# --- lineage ---
 
 
 def _walk_lineage(
@@ -379,9 +373,7 @@ def cmd_lineage(args: argparse.Namespace) -> int:
     return 0
 
 
-# ---------------------------------------------------------------------------
-# publish / unpublish
-# ---------------------------------------------------------------------------
+# --- publish / promote / export / unpublish ---
 
 
 def _server_store() -> ArtifactStore | None:
@@ -410,10 +402,8 @@ def _publication_target(
     """
     to_url = getattr(args, "to_url", None)
     if to_url:
-        # A store on another machine. The chain travels over HTTP and the grant
-        # is minted there, because a link only resolves from the store that
-        # serves it — which for a hosted deployment is never the laptop that
-        # ran the cells.
+        # A store on another machine: the chain travels over HTTP and the grant is minted there,
+        # since a link only resolves from the store that serves it.
         return RemoteStore(str(to_url), _remote_headers(args)), str(to_url)
 
     into = getattr(args, "into", None)
@@ -425,9 +415,8 @@ def _publication_target(
 
     server_store = _server_store()
     if server_store is None:
-        # Nothing configured to serve from, so there is nowhere else to put it.
-        # Publishing in place and saying so beats minting a link that resolves
-        # nowhere.
+        # Nothing configured to serve from: publish in place and say so rather than mint a link that
+        # resolves nowhere.
         return source, f"{source.artifact_dir} (no server store is configured)"
     return server_store, f"{server_store.artifact_dir} (the store your server serves)"
 
@@ -491,9 +480,8 @@ def cmd_promote(args: argparse.Namespace) -> int:
         print(f"Cannot promote: {exc}")
         return 1
     except RuntimeError as exc:
-        # Whatever copied is already there, which is harmless and reusable: it
-        # is keyed by provenance, so it is a cache entry whether or not it ever
-        # got a name. Saying so beats implying nothing happened.
+        # What copied is harmless and reusable: it is keyed by provenance, so it is a cache entry
+        # whether or not it got a name.
         print(f"Promotion failed partway: {exc}")
         return 1
 
@@ -613,9 +601,8 @@ def cmd_publish(args: argparse.Namespace) -> int:
 
     requested_author = getattr(args, "author", None)
     if requested_author and publication.published_by != requested_author:
-        # Publishing is idempotent, so this returned an existing grant and the
-        # byline is whatever that one recorded. Saying nothing would print a
-        # success banner for an author that never reached the page.
+        # Publishing is idempotent, so this may have returned an existing grant with its own byline.
+        # Say so rather than print success for an author that never reached the page.
         print(
             f"Note: already published, and the page credits "
             f"{publication.published_by or 'nobody'} — republishing does not "
@@ -624,9 +611,8 @@ def cmd_publish(args: argparse.Namespace) -> int:
         )
 
     print(f"{artifact.id}@v={artifact.version} is public at /p/{publication.token}")
-    # Always, not only when a copy happened. A caller who is never told where
-    # the grant lives cannot tell a working link from one their own server will
-    # never resolve.
+    # Always, not only after a copy: a caller never told where the grant lives cannot tell a working
+    # link from one their own server will never resolve.
     print(f"Published into {destination}.")
     if copied:
         plural = "s" if copied != 1 else ""
@@ -687,9 +673,7 @@ def cmd_unpublish(args: argparse.Namespace) -> int:
     return 0
 
 
-# ---------------------------------------------------------------------------
-# archive
-# ---------------------------------------------------------------------------
+# --- archive ---
 
 
 def cmd_archive(args: argparse.Namespace) -> int:
@@ -738,10 +722,9 @@ def cmd_archive(args: argparse.Namespace) -> int:
         artifact = _resolve_for_cmd(store, args)
         if artifact is None:
             return 1
-        # Not inserted in the store: archiving grants nobody access to a
-        # running server, so it is not a publication and must not create one.
-        # The record shape is reused because the page and manifest are the same
-        # documents.
+        # Not inserted in the store: archiving grants nobody access to a running server, so it must
+        # not create a publication. The record shape is reused because the page and manifest are the
+        # same documents.
         publication = Publication(
             token="",
             artifact_id=artifact.id,
@@ -773,11 +756,9 @@ def cmd_archive(args: argparse.Namespace) -> int:
         print(f"Wrote {dest} (sha256 {hashlib.sha256(payload).hexdigest()})")
         return 0
 
-    # A bundle is a set of files that describe each other — index.html and
-    # README.md both name one payload and one digest. Writing into an occupied
-    # directory leaves the previous run's payload sitting beside the new one,
-    # with nothing naming it, and would happily clobber a README that was
-    # never ours. `--to .` made that a one-keystroke mistake.
+    # A bundle's files describe each other (index.html and README.md name one payload and one
+    # digest). Writing into an occupied directory leaves the old payload beside the new one,
+    # unnamed, and can clobber a README that was never ours.
     if dest.exists() and any(dest.iterdir()) and not getattr(args, "force", False):
         print(f"{dest}/ is not empty. Use --force to write into it anyway.")
         return 1
@@ -805,9 +786,7 @@ def cmd_archive(args: argparse.Namespace) -> int:
     return 0
 
 
-# ---------------------------------------------------------------------------
-# pull
-# ---------------------------------------------------------------------------
+# --- pull ---
 
 
 def cmd_pull(args: argparse.Namespace) -> int:
@@ -837,9 +816,7 @@ def cmd_pull(args: argparse.Namespace) -> int:
     return 0
 
 
-# ---------------------------------------------------------------------------
-# verify (moved from cli.py for cohesion)
-# ---------------------------------------------------------------------------
+# --- verify ---
 
 
 def cmd_verify(args: argparse.Namespace) -> int:
@@ -866,9 +843,7 @@ def cmd_verify(args: argparse.Namespace) -> int:
     return 1 if findings else 0
 
 
-# ---------------------------------------------------------------------------
-# gc
-# ---------------------------------------------------------------------------
+# --- gc ---
 
 _SIZE_UNITS = {"": 1, "K": 1024, "M": 1024**2, "G": 1024**3, "T": 1024**4}
 
@@ -930,9 +905,7 @@ def cmd_gc(args: argparse.Namespace) -> int:
     return 0
 
 
-# ---------------------------------------------------------------------------
-# audit
-# ---------------------------------------------------------------------------
+# --- audit / pending ---
 
 
 def cmd_audit(args: argparse.Namespace) -> int:

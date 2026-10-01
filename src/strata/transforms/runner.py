@@ -99,7 +99,7 @@ class RunnerConfig:
     default_max_output_bytes: int = 1024 * 1024 * 1024  # 1 GB
     lease_duration_seconds: float = 60.0
     heartbeat_interval_seconds: float = 15.0
-    runner_id: str | None = None  # Auto-generated if not provided
+    runner_id: str | None = None
 
 
 # How often the runner's loop sweeps settled build attempts.
@@ -154,7 +154,6 @@ class BuildRunner:
     scan_planner: ReadPlanner | None = None
     scan_fetcher: CachedFetcher | None = None
 
-    # Internal state
     _running: bool = field(default=False, init=False)
     _task: asyncio.Task | None = field(default=None, init=False)
     _heartbeat_task: asyncio.Task | None = field(default=None, init=False)
@@ -167,7 +166,6 @@ class BuildRunner:
 
     def __post_init__(self):
         self._global_sem = asyncio.Semaphore(self.config.max_concurrent_builds)
-        # Generate unique runner ID if not provided
         self._runner_id = self.config.runner_id or f"runner-{uuid.uuid4().hex[:8]}"
 
     async def start(self) -> None:
@@ -197,7 +195,6 @@ class BuildRunner:
 
         self._running = False
 
-        # Cancel the heartbeat loop
         if self._heartbeat_task:
             self._heartbeat_task.cancel()
             try:
@@ -206,7 +203,6 @@ class BuildRunner:
                 pass
             self._heartbeat_task = None
 
-        # Cancel the main loop
         if self._task:
             self._task.cancel()
             try:
@@ -215,16 +211,14 @@ class BuildRunner:
                 pass
             self._task = None
 
-        # Cancel all running build tasks
         for build_id, task in list(self._build_tasks.items()):
             task.cancel()
             try:
                 await task
             except asyncio.CancelledError:
                 pass
-            # Mark as failed due to shutdown, but only a build this runner
-            # still holds: one taken over by another runner is still running
-            # there, and shutting down here is no reason to fail it.
+            # Only a build this runner still holds: one taken over by another runner
+            # is still running there.
             self.build_store.fail_build(
                 build_id,
                 error_message="Build cancelled due to server shutdown",
@@ -242,32 +236,27 @@ class BuildRunner:
 
         while self._running:
             try:
-                # Fetch pending builds
                 pending = self.build_store.list_pending_builds(limit=50)
 
                 for build in pending:
                     if not _is_runner_managed_build(build):
                         continue
-                    # Skip if already running
                     if build.build_id in self._running_builds:
                         continue
 
-                    # Submit build for execution
                     self._submit_build(build)
 
-                # Remove the bytes of attempts that will never be published.
-                # Nothing waits on that space, so once a minute is enough.
+                # Nothing waits on the space attempts free, so once a minute is enough.
                 if time.monotonic() >= self._next_sweep_at:
                     self._next_sweep_at = time.monotonic() + _SWEEP_INTERVAL_SECONDS
                     await asyncio.to_thread(
                         sweep_settled_attempts, self.build_store, self.artifact_store
                     )
 
-                # Recover orphaned builds (expired leases from crashed runners)
+                # Orphans: expired leases from crashed runners.
                 expired = self.build_store.list_expired_leases(limit=10)
                 for build in expired:
                     if build.build_id not in self._running_builds:
-                        # Try to reclaim the build
                         if self.build_store.reclaim_expired_build(
                             build.build_id,
                             self._runner_id,
@@ -298,20 +287,17 @@ class BuildRunner:
 
         while self._running:
             try:
-                # Renew leases for all running builds
                 for build_id in list(self._running_builds):
                     if not self.build_store.renew_lease(
                         build_id,
                         self._runner_id,
                         self.config.lease_duration_seconds,
                     ):
-                        # Lease renewal failed - we may have lost the lease
+                        # Let the task finish; completion is fenced on the lease anyway.
                         logger.warning(
                             f"Failed to renew lease for build {build_id}",
                             extra={"runner_id": self._runner_id},
                         )
-                        # Don't cancel the task - let it finish if possible
-                        # The build will fail at completion if lease is lost
 
             except Exception as e:
                 logger.error(f"Error in heartbeat loop: {e}")
@@ -332,7 +318,6 @@ class BuildRunner:
         task = asyncio.create_task(self._execute_build_with_semaphores(build, already_claimed))
         self._build_tasks[build.build_id] = task
 
-        # Clean up when done
         def cleanup(t):
             self._running_builds.discard(build.build_id)
             self._build_tasks.pop(build.build_id, None)
@@ -350,13 +335,11 @@ class BuildRunner:
         """
         tenant_id = build.tenant_id or "__default__"
 
-        # Get or create per-tenant semaphore
         if tenant_id not in self._tenant_sems:
             self._tenant_sems[tenant_id] = asyncio.Semaphore(self.config.max_builds_per_tenant)
 
         tenant_sem = self._tenant_sems[tenant_id]
 
-        # Acquire both semaphores
         async with self._global_sem:
             async with tenant_sem:
                 await self._execute_build(build, already_claimed)
@@ -387,14 +370,13 @@ class BuildRunner:
         start_time = time_mod.time()
         build_started_recorded = False
 
-        # Wrap entire build execution in BuildContext for structured logging
         with BuildContext(
             build_id=build_id,
             tenant_id=build.tenant_id,
             transform_ref=build.executor_ref,
         ):
             try:
-                # Claim build with lease (skip if already building from retry/reclaim)
+                # Skip claiming when already building (retry / reclaim).
                 if build.state == "pending" and not already_claimed:
                     if not self.build_store.claim_build(
                         build_id,
@@ -404,13 +386,11 @@ class BuildRunner:
                         logger.warning(f"Build {build_id} already claimed or completed")
                         return
 
-                # Get fresh build state
                 fresh_build = self.build_store.get_build(build_id)
                 if fresh_build is None or fresh_build.state not in ("pending", "building"):
                     return
                 build = fresh_build
 
-                # Verify we still own the lease (in case of race)
                 if build.lease_owner and build.lease_owner != self._runner_id:
                     logger.warning(
                         f"Build {build_id} claimed by another runner",
@@ -418,10 +398,8 @@ class BuildRunner:
                     )
                     return
 
-                # Record build started metric
                 metrics = get_build_metrics()
                 if metrics is not None:
-                    # Calculate queue wait time (time from created_at to now)
                     queue_wait_ms = None
                     if build.created_at:
                         queue_wait_ms = (start_time - build.created_at) * 1000.0
@@ -433,24 +411,20 @@ class BuildRunner:
                     )
                     build_started_recorded = True
 
-                # Get transform definition
                 transform_defn = self.transform_registry.get(build.executor_ref)
                 if transform_defn is None:
                     raise ValueError(f"Transform not found in registry: {build.executor_ref}")
 
-                # Get artifact metadata to retrieve inputs and transform
                 artifact = self.artifact_store.get_artifact(build.artifact_id, build.version)
                 if artifact is None:
                     raise ValueError(f"Artifact not found: {build.artifact_id}@v={build.version}")
 
-                # Parse inputs and transform from artifact metadata
                 if artifact.transform_spec is None:
                     raise ValueError("Artifact has no transform spec")
 
                 transform_data = json.loads(artifact.transform_spec)
                 input_uris = transform_data.get("inputs", [])
 
-                # Prepare input files (materialize each input to temp file)
                 input_files: list[tuple[str, Path]] = []
                 for i, input_uri in enumerate(input_uris):
                     input_name = f"input{i}"
@@ -461,14 +435,10 @@ class BuildRunner:
                     )
                     input_files.append((input_name, input_path))
 
-                # Get executor URL and timeout
                 executor_url = transform_defn.executor_url
                 timeout = transform_defn.timeout_seconds or self.config.default_timeout_seconds
                 max_output = transform_defn.max_output_bytes or self.config.default_max_output_bytes
 
-                # Enforce the configured input ceiling. ``max_input_bytes`` was
-                # parsed from the registry and stored on the definition but read
-                # nowhere — an operator could set it and it did nothing.
                 max_input = transform_defn.max_input_bytes or 0
                 if max_input > 0:
                     total_input_bytes = sum(p.stat().st_size for _, p in input_files)
@@ -478,7 +448,6 @@ class BuildRunner:
                             f"max_input_bytes {max_input} for {build.executor_ref}"
                         )
 
-                # Prepare executor request metadata (protocol v1)
                 from strata.types import EXECUTOR_PROTOCOL_VERSION
 
                 metadata = {
@@ -499,7 +468,6 @@ class BuildRunner:
                     ],
                 }
 
-                # Execute transform via external executor
                 output_path, executor_logs = await self._call_executor(
                     executor_url=executor_url,
                     metadata=metadata,
@@ -509,27 +477,15 @@ class BuildRunner:
                     temp_files=temp_files,
                 )
 
-                # Read output schema and row count
                 output_bytes = output_path.stat().st_size
                 schema_json, row_count = self._read_arrow_metadata(output_path)
 
-                # Publish the output through the blob store rather than
-                # renaming into ``_blob_path``. That helper is documented
-                # local-only/deprecated: with a remote backend configured,
-                # ``blobs_dir`` is a local directory the backend never reads,
-                # so the rename either raised FileNotFoundError or dropped the
-                # output on local disk while ``finalize_artifact`` below still
-                # marked the artifact ready — a ready artifact whose blob does
-                # not exist in the configured store. Every other writer already
-                # goes through this API.
-                #
-                # Under this attempt's own id, not the version's: a runner whose
-                # lease was taken over keeps executing by design (see the
-                # heartbeat loop), so it gets this far too, and writing the
-                # shared key let it replace bytes already published as ready.
+                # Through the blob store, not a rename into ``_blob_path``: with a remote
+                # backend that local directory is never read. Under this attempt's own id,
+                # not the version's: a runner whose lease was taken over keeps executing,
+                # and writing the shared key could replace bytes already published as ready.
                 attempt = uuid.uuid4().hex
-                # Recorded first, so a crash between the write and the finalize
-                # below leaves bytes the sweep can still find.
+                # Recorded first, so a crash before finalize leaves bytes the sweep can find.
                 self.build_store.record_attempt(
                     build_id,
                     build.artifact_id,
@@ -541,12 +497,9 @@ class BuildRunner:
                     build.artifact_id, build.version, output_path, attempt=attempt
                 )
 
-                # Publishing the attempt and completing the build are one
-                # transaction, fenced on the lease: the commit point that
-                # decides which runner won, the mirror of ``claim_build``
-                # deciding which one started. Checking the lease only after
-                # finalize told a stale runner it lost once its result was
-                # already the ready artifact.
+                # Publishing the attempt and completing the build are one transaction,
+                # fenced on the lease: the commit point that decides which runner won,
+                # mirroring ``claim_build`` deciding which one started.
                 def _complete(conn: Any, artifact_id: str, version: int) -> bool:
                     return self.build_store.complete_within(
                         conn,
@@ -592,8 +545,7 @@ class BuildRunner:
                         build.artifact_id, build.version, attempt
                     )
 
-                # Set the requested name pointer now that the artifact is
-                # ready — the materialize endpoint can't (the build is async).
+                # Set here because the materialize endpoint can't: the build is async.
                 if build.name:
                     self.artifact_store.set_name(
                         build.name,
@@ -607,11 +559,9 @@ class BuildRunner:
                 if build_qos is not None:
                     await build_qos.record_bytes(build.tenant_id or "__default__", output_bytes)
 
-                # Record success metric
                 metrics = get_build_metrics()
                 if metrics is not None and build_started_recorded:
                     duration_ms = (time_mod.time() - start_time) * 1000.0
-                    # Calculate input bytes from input files
                     input_bytes = sum(f.stat().st_size if f.exists() else 0 for _, f in input_files)
                     metrics.record_succeeded(
                         build_id=build_id,
@@ -633,14 +583,13 @@ class BuildRunner:
                 )
 
             except asyncio.CancelledError:
-                # Don't mark as failed if cancelled - will be retried
+                # Not failed: a cancelled build is retried.
                 raise
 
             except Exception as e:
                 error_msg = str(e)
                 error_code = type(e).__name__
 
-                # Truncate long error messages
                 if len(error_msg) > 500:
                     error_msg = error_msg[:500] + "..."
 
@@ -649,7 +598,6 @@ class BuildRunner:
                     extra={"traceback": traceback.format_exc()},
                 )
 
-                # Record failure metric
                 metrics = get_build_metrics()
                 if metrics is not None and build_started_recorded:
                     duration_ms = (time_mod.time() - start_time) * 1000.0
@@ -661,10 +609,9 @@ class BuildRunner:
                         error_code=error_code,
                     )
 
-                # Only if this runner still holds the lease. One whose lease
-                # was taken over keeps executing, and failing here would fail
-                # the build its successor is running. The artifact row carries
-                # no lease of its own, so its failure is gated on this one.
+                # Only if this runner still holds the lease; a runner whose lease was taken
+                # over keeps executing, and failing here would fail its successor's build.
+                # The artifact row has no lease of its own, so its failure is gated on this.
                 failed = self.build_store.fail_build(
                     build_id=build_id,
                     error_message=error_msg,
@@ -681,7 +628,6 @@ class BuildRunner:
                     )
 
             finally:
-                # Clean up temp files
                 for temp_file in temp_files:
                     try:
                         if temp_file.exists():
@@ -705,9 +651,7 @@ class BuildRunner:
         Returns:
             Path to temp file containing Arrow IPC stream
         """
-        # Handle artifact URIs
         if input_uri.startswith("strata://artifact/"):
-            # Parse artifact URI: strata://artifact/{id}@v={version}
             import re
 
             match = re.match(r"strata://artifact/([^@]+)@v=(\d+)", input_uri)
@@ -717,12 +661,10 @@ class BuildRunner:
             artifact_id = match.group(1)
             version = int(match.group(2))
 
-            # Read artifact blob
             blob = self.artifact_store.read_blob(artifact_id, version)
             if blob is None:
                 raise ValueError(f"Artifact blob not found: {input_uri}")
 
-            # Write to temp file
             _fd, _tmp_path = tempfile.mkstemp(suffix=".arrow", dir=self.artifact_dir)
             os.close(_fd)  # Windows: handle must be closed before rename
             temp_file = Path(_tmp_path)
@@ -730,19 +672,16 @@ class BuildRunner:
             temp_files.append(temp_file)
             return temp_file
 
-        # Handle name URIs
         if input_uri.startswith("strata://name/"):
             name = input_uri.split("/", 3)[-1]
             artifact = self.artifact_store.resolve_name(name, tenant=tenant_id)
             if artifact is None:
                 raise ValueError(f"Name not found: {name}")
 
-            # Read artifact blob
             blob = self.artifact_store.read_blob(artifact.id, artifact.version)
             if blob is None:
                 raise ValueError(f"Artifact blob not found for name: {name}")
 
-            # Write to temp file
             _fd, _tmp_path = tempfile.mkstemp(suffix=".arrow", dir=self.artifact_dir)
             os.close(_fd)  # Windows: handle must be closed before rename
             temp_file = Path(_tmp_path)
@@ -750,10 +689,7 @@ class BuildRunner:
             temp_files.append(temp_file)
             return temp_file
 
-        # Handle Iceberg table URIs (file:// or s3://)
         if input_uri.startswith("file://") or input_uri.startswith("s3://"):
-            # For Iceberg scans, we need to run the internal scan pipeline
-            # and write the output to a temp file
             temp_file = await self._scan_to_file(input_uri, temp_files)
             return temp_file
 
@@ -769,15 +705,12 @@ class BuildRunner:
         This uses the internal scan pipeline to read the table and
         write the Arrow IPC stream to a file.
         """
-        # Import here to avoid circular imports
 
-        # Create a temp file for output
         _fd, _tmp_path = tempfile.mkstemp(suffix=".arrow", dir=self.artifact_dir)
         os.close(_fd)  # Windows: handle must be closed before rename
         temp_file = Path(_tmp_path)
         temp_files.append(temp_file)
 
-        # Run in thread pool to avoid blocking event loop
         loop = asyncio.get_event_loop()
         await loop.run_in_executor(
             None,
@@ -859,13 +792,11 @@ class BuildRunner:
             httpx.HTTPStatusError: If executor returns non-200 status
             asyncio.TimeoutError: If request times out
         """
-        # Check for embedded executor (special URL or empty)
         if executor_url == "embedded://local" or not executor_url:
             return await self._call_embedded_executor(
                 metadata, input_files, timeout, max_output_bytes, temp_files
             )
 
-        # External executor via HTTP
         return await self._call_http_executor(
             executor_url, metadata, input_files, timeout, max_output_bytes, temp_files
         )
@@ -899,18 +830,15 @@ class BuildRunner:
 
         from strata.transforms.base import _run_transform
 
-        # Parse inputs from files
         inputs = []
         for name, path in sorted(input_files, key=lambda x: x[0]):
             with ipc.open_stream(str(path)) as reader:
                 inputs.append(reader.read_all())
 
-        # Get transform info from metadata
         transform = metadata.get("transform", {})
         transform_ref = transform.get("ref", "")
         params = transform.get("params", {})
 
-        # Execute in thread pool to avoid blocking event loop
         loop = asyncio.get_event_loop()
         result = await asyncio.wait_for(
             loop.run_in_executor(
@@ -920,19 +848,16 @@ class BuildRunner:
             timeout=timeout,
         )
 
-        # Serialize result to Arrow IPC
         output_buffer = io.BytesIO()
         with ipc.new_stream(output_buffer, result.schema) as writer:
             writer.write_table(result)
         output_bytes = output_buffer.getvalue()
 
-        # Check output size
         if len(output_bytes) > max_output_bytes:
             raise ValueError(
                 f"Output exceeds maximum size: {len(output_bytes)} > {max_output_bytes}"
             )
 
-        # Write to temp file
         _fd, _tmp_path = tempfile.mkstemp(suffix=".arrow", dir=self.artifact_dir)
         os.close(_fd)  # Windows: handle must be closed before rename
         output_path = Path(_tmp_path)
@@ -973,38 +898,25 @@ class BuildRunner:
             httpx.HTTPStatusError: If executor returns non-200 status
             asyncio.TimeoutError: If request times out
         """
-        # Import protocol constants
         from strata.types import EXECUTOR_PROTOCOL_HEADER, EXECUTOR_PROTOCOL_VERSION
 
-        # Prepare multipart files.
-        #
-        # Inputs are handed to httpx as open file objects rather than
-        # ``path.read_bytes()``: the bytes form loaded every input fully into
-        # RAM and then httpx built the whole multipart body in memory on top of
-        # that, so N inputs cost roughly 2x their total size regardless of any
-        # configured limit.
+        # Inputs go to httpx as open file objects, not ``read_bytes()``, so N inputs
+        # don't cost ~2x their total size in RAM.
         files: dict[str, tuple[str, Any, str]] = {
             "metadata": ("metadata.json", json.dumps(metadata), "application/json"),
         }
 
-        # Create output temp file
         _fd, _tmp_path = tempfile.mkstemp(suffix=".arrow", dir=self.artifact_dir)
         os.close(_fd)  # Windows: handle must be closed before rename
         output_path = Path(_tmp_path)
         temp_files.append(output_path)
 
-        # Protocol version header for executor compatibility
         headers = {
             EXECUTOR_PROTOCOL_HEADER: EXECUTOR_PROTOCOL_VERSION,
         }
 
-        # Make request with timeout.
-        #
-        # ``client.stream`` rather than ``client.post``: post() reads the entire
-        # response body into memory before returning, so the size check below
-        # ran only *after* the whole payload had already been allocated — an
-        # executor returning 50 GB OOM'd the server despite a 1 GB limit. With
-        # streaming the check fires during transfer and aborts the download.
+        # ``client.stream``, not ``post``: post() buffers the whole body before the
+        # size check can run, so an oversized executor response could OOM the server.
         with contextlib.ExitStack() as input_handles:
             for name, path in input_files:
                 files[name] = (
@@ -1032,9 +944,7 @@ class BuildRunner:
                         await response.aread()
                     response.raise_for_status()
 
-                    # Capture executor logs from response header (if present).
-                    # Executors can include logs in EXECUTOR_LOGS_HEADER
-                    # (base64 encoded).
+                    # Executors may send base64-encoded logs in EXECUTOR_LOGS_HEADER.
                     from strata.types import EXECUTOR_LOGS_HEADER
 
                     executor_logs = None
@@ -1045,12 +955,9 @@ class BuildRunner:
                         try:
                             executor_logs = base64.b64decode(logs_header).decode("utf-8")
                         except Exception:
-                            # If we can't decode, store the raw header value
                             executor_logs = logs_header
 
-                    # Stream response to file with size limit. The check now
-                    # fires DURING transfer, so an oversized payload is aborted
-                    # rather than allocated in full and rejected afterwards.
+                    # Size limit enforced during transfer, aborting an oversized download.
                     bytes_written = 0
                     with open(output_path, "wb") as f:
                         async for chunk in response.aiter_bytes(chunk_size=65536):
@@ -1080,15 +987,10 @@ class BuildRunner:
             for batch in reader:
                 row_count += batch.num_rows
 
-        # Convert schema to JSON
         schema_json = schema.to_string()
 
         return schema_json, row_count
 
-
-# ---------------------------------------------------------------------------
-# Module-level singleton
-# ---------------------------------------------------------------------------
 
 _runner: BuildRunner | None = None
 

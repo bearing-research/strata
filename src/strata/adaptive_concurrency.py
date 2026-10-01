@@ -100,13 +100,11 @@ class ResizableLimiter:
         async with self._cv:
             try:
                 if timeout is None:
-                    # Wait indefinitely
                     while self._in_use >= self._capacity:
                         await self._cv.wait()
                     self._in_use += 1
                     return True
 
-                # Wait with timeout
                 loop = asyncio.get_running_loop()
                 end = loop.time() + timeout
                 while self._in_use >= self._capacity:
@@ -116,16 +114,15 @@ class ResizableLimiter:
                     try:
                         await asyncio.wait_for(self._cv.wait(), timeout=remaining)
                     except TimeoutError:
-                        # Check one more time in case we were notified
+                        # A notify may have landed just before the timeout.
                         if self._in_use >= self._capacity:
                             return False
                 self._in_use += 1
                 return True
             except BaseException:
-                # Before 3.13, asyncio.Condition drops a notify whose waiter
-                # is cancelled before it runs. Pass the wakeup on, as 3.13
-                # does, so a free slot isn't left idle while others wait. A
-                # spurious wakeup is harmless: waiters re-check the count.
+                # Before 3.13, asyncio.Condition drops a notify whose waiter is
+                # cancelled before it runs. Pass it on so a free slot isn't left
+                # idle; a spurious wakeup is harmless since waiters re-check.
                 self._cv.notify(1)
                 raise
 
@@ -159,7 +156,6 @@ class ResizableLimiter:
             old_capacity = self._capacity
             self._capacity = new_capacity
             if new_capacity > old_capacity:
-                # Wake all waiters to compete for new slots
                 self._cv.notify_all()
 
     def get_stats(self) -> dict[str, int]:
@@ -209,9 +205,9 @@ class AdaptiveConfig:
         ``min_slots`` while nothing is running.
     """
 
-    enabled: bool = False  # Disabled by default (opt-in)
+    enabled: bool = False
     adjustment_interval_seconds: float = 5.0
-    latency_target_p95_ms: float = 500.0  # 500ms target p95
+    latency_target_p95_ms: float = 500.0
     queue_wait_threshold_ms: float = 100.0  # 100ms queue wait = pressure
     min_slots_interactive: int = 4
     max_slots_interactive: int = 64
@@ -219,7 +215,7 @@ class AdaptiveConfig:
     max_slots_bulk: int = 32
     increase_step: int = 1
     decrease_step: int = 1
-    hysteresis_count: int = 3  # 3 consecutive signals needed
+    hysteresis_count: int = 3
     window_size: int = 100  # Keep last 100 samples for p95
     sample_max_age_seconds: float = 60.0  # Ignore samples older than this
 
@@ -252,8 +248,8 @@ class RollingLatencyWindow:
         self._max_age_seconds = max_age_seconds
         self._clock = clock
         self._lock = Lock()
-        # (monotonic timestamp, latency_ms) — monotonic so a clock step can
-        # never make a sample look infinitely old or infinitely fresh.
+        # (monotonic timestamp, latency_ms); monotonic so a clock step can't
+        # make a sample look infinitely old or fresh.
         self._samples: deque[tuple[float, float]] = deque(maxlen=size)
         self._count = 0  # Total samples seen (for metrics)
 
@@ -284,7 +280,6 @@ class RollingLatencyWindow:
         """
         sorted_samples = self._live_values()
         if len(sorted_samples) < 10:
-            # Need at least 10 samples for meaningful percentile
             return None
 
         n = len(sorted_samples)
@@ -353,17 +348,16 @@ class TierState:
     latency_window: RollingLatencyWindow = field(default_factory=RollingLatencyWindow)
     queue_wait_window: RollingLatencyWindow = field(default_factory=RollingLatencyWindow)
 
-    # Hysteresis counters (positive = increase signals, negative = decrease signals)
+    # Positive = increase signals, negative = decrease signals.
     consecutive_increase_signals: int = 0
     consecutive_decrease_signals: int = 0
 
-    # Last adjustment info for observability
     last_adjustment_time: float = 0.0
     last_adjustment_direction: str = ""  # "increase", "decrease", ""
     last_p95_ms: float | None = None
     last_queue_wait_p95_ms: float | None = None
 
-    # Cumulative stats (event counts, not slot counts)
+    # Event counts, not slot counts.
     increase_events: int = 0
     decrease_events: int = 0
 
@@ -394,7 +388,6 @@ class AdaptiveConcurrencyController:
         self._interactive_limiter = interactive_limiter
         self._bulk_limiter = bulk_limiter
 
-        # Per-tier state
         max_age = config.sample_max_age_seconds
         self._interactive = TierState(
             name="interactive",
@@ -413,7 +406,6 @@ class AdaptiveConcurrencyController:
             queue_wait_window=RollingLatencyWindow(config.window_size, max_age),
         )
 
-        # Background task handle
         self._task: asyncio.Task | None = None
         self._stop_event = asyncio.Event()
 
@@ -490,10 +482,6 @@ class AdaptiveConcurrencyController:
             try:
                 await asyncio.sleep(self.config.adjustment_interval_seconds)
 
-                # Get current queue wait from server state (passed via record methods)
-                # For now, we'll rely on latency signals only
-                # Queue wait could be added as a separate signal method
-
                 await self._evaluate_and_adjust(self._interactive, self._interactive_limiter)
                 await self._evaluate_and_adjust(self._bulk, self._bulk_limiter)
 
@@ -526,7 +514,6 @@ class AdaptiveConcurrencyController:
         tier.last_p95_ms = p95
         tier.last_queue_wait_p95_ms = queue_wait_p95
 
-        # Not enough latency data yet
         if p95 is None:
             return
 
@@ -534,7 +521,6 @@ class AdaptiveConcurrencyController:
         queue_threshold = self.config.queue_wait_threshold_ms
 
         if p95 > target:
-            # Latency too high - signal decrease
             tier.consecutive_decrease_signals += 1
             tier.consecutive_increase_signals = 0
 
@@ -543,11 +529,8 @@ class AdaptiveConcurrencyController:
                 tier.consecutive_decrease_signals = 0
 
         elif p95 < target * 0.8 and queue_wait_p95 is not None and queue_wait_p95 > queue_threshold:
-            # Latency well under target AND queue pressure exists - signal increase
-            # Both conditions must be true:
-            # 1. p95 < 80% of target (using 80% as headroom to avoid oscillation)
-            # 2. queue_wait_p95 > threshold (requests are waiting, demand exists)
-            # This prevents over-opening when latency is low but there's no demand.
+            # Open up only when there is headroom (p95 under 80% of target, to
+            # avoid oscillation) AND demand (queue wait over threshold).
             tier.consecutive_increase_signals += 1
             tier.consecutive_decrease_signals = 0
 
@@ -556,7 +539,6 @@ class AdaptiveConcurrencyController:
                 tier.consecutive_increase_signals = 0
 
         else:
-            # Latency in acceptable range OR no queue pressure - reset signals
             tier.consecutive_increase_signals = 0
             tier.consecutive_decrease_signals = 0
 
@@ -604,7 +586,6 @@ class AdaptiveConcurrencyController:
         if new_slots == tier.current_slots:
             return
 
-        # Resize the limiter - this is the correct way to adjust capacity
         await limiter.resize(new_slots)
 
         direction = "increase" if new_slots > tier.current_slots else "decrease"

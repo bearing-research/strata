@@ -35,7 +35,7 @@ from strata.timing import elapsed_ms
 logger = logging.getLogger("strata.slow_ops")
 
 
-# Default thresholds in milliseconds
+# In milliseconds.
 DEFAULT_THRESHOLDS = {
     "plan": 100.0,  # Planning (catalog + metadata fetch)
     "ttfb": 250.0,  # Time to first byte (first batch ready)
@@ -47,7 +47,6 @@ DEFAULT_THRESHOLDS = {
     "scan_close": 50.0,  # Scan close/cleanup time
 }
 
-# Histogram bucket boundaries in milliseconds
 HISTOGRAM_BUCKETS = [0, 10, 50, 100, 250, 500, 1000, 5000, float("inf")]
 BUCKET_LABELS = ["0-10ms", "10-50ms", "50-100ms", "100-250ms", "250-500ms", "500-1s", "1-5s", "5s+"]
 
@@ -61,7 +60,6 @@ class StageTimings:
     snapshot_id: int = 0
     request_id: str = ""
 
-    # Timing stages (in milliseconds)
     plan_ms: float = 0.0
     scan_open_ms: float = 0.0
     ttfb_ms: float = 0.0  # Time to first byte
@@ -70,20 +68,17 @@ class StageTimings:
     scan_close_ms: float = 0.0
     total_ms: float = 0.0
 
-    # Per-batch/fetch breakdown
     fetch_count: int = 0
     fetch_max_ms: float = 0.0
     encode_count: int = 0
     encode_max_ms: float = 0.0
 
-    # Data metrics
     bytes_streamed: int = 0
     rows_streamed: int = 0
     tasks_count: int = 0
     columns_count: int = 0
     filters_count: int = 0
 
-    # Context
     phase: str = ""  # warmup, steady, spike, cooldown
     tier: str = ""  # interactive, bulk
 
@@ -189,19 +184,14 @@ class LatencyHistogram:
         if total == 0:
             return {"p50_ms": 0, "p95_ms": 0, "p99_ms": 0}
 
-        # Bucket midpoints for estimation
         midpoints = [5, 30, 75, 175, 375, 750, 3000, 7500]
 
         cumsum = 0
         percentiles = {}
         for pct, name in [(0.50, "p50_ms"), (0.95, "p95_ms"), (0.99, "p99_ms")]:
-            # Nearest-rank: the target is the 1-based index of the sample at
-            # this percentile, so it must round UP and never reach 0. ``int()``
-            # truncated instead, and a target of 0 is satisfied by the very
-            # first (empty) bucket -- so a stage with a single sample reported
-            # the FASTEST bucket at every percentile. One 9-second scan came
-            # back as "p99 = 5ms", which is exactly backwards for the operator
-            # reading it.
+            # Nearest-rank: the target is the 1-based index of the sample at this percentile, so
+            # round up and never reach 0 (a 0 target matches the first, empty bucket and reports the
+            # fastest bucket).
             target = max(1, math.ceil(total * pct))
             for i, count in enumerate(counts):
                 cumsum += count
@@ -242,7 +232,6 @@ class SlowOpTracker:
     thresholds: dict[str, float] = field(default_factory=lambda: DEFAULT_THRESHOLDS.copy())
     histogram: LatencyHistogram = field(default_factory=LatencyHistogram)
 
-    # Current operation timings
     _timings: StageTimings = field(default_factory=StageTimings)
     _stage_times: dict[str, float] = field(default_factory=dict)
     _start_time: float = 0.0
@@ -262,7 +251,6 @@ class SlowOpTracker:
         self._stage_times[stage] = duration_ms
         self.histogram.record(stage, duration_ms)
 
-        # Update timings object
         if stage == "plan":
             self._timings.plan_ms = duration_ms
         elif stage == "scan_open":
@@ -303,7 +291,6 @@ class SlowOpTracker:
         self._timings.total_ms = elapsed_ms(self._start_time)
         self.histogram.record("total_request", self._timings.total_ms)
 
-        # Apply additional metrics
         for key, value in metrics.items():
             if hasattr(self._timings, key):
                 setattr(self._timings, key, value)
@@ -333,12 +320,10 @@ class SlowOpTracker:
             if actual > threshold:
                 slow.append((stage, actual, threshold))
 
-        # Check max fetch
         fetch_threshold = self.thresholds.get("fetch", float("inf"))
         if self._timings.fetch_max_ms > fetch_threshold:
             slow.append(("fetch", self._timings.fetch_max_ms, fetch_threshold))
 
-        # Check max encode
         encode_threshold = self.thresholds.get("batch_encode", float("inf"))
         if self._timings.encode_max_ms > encode_threshold:
             slow.append(("batch_encode", self._timings.encode_max_ms, encode_threshold))
@@ -356,7 +341,6 @@ class SlowOpTracker:
         slow_stages = self.check_slow_stages()
 
         if slow_stages:
-            # Build slow stages summary
             slow_summary = {
                 stage: f"{actual:.1f}ms (>{threshold:.0f}ms)"
                 for stage, actual, threshold in slow_stages
@@ -395,7 +379,6 @@ class _StageTimer:
         self.tracker.record_stage(self.stage, duration_ms)
 
 
-# Global histogram for server-wide latency tracking
 _global_histogram: LatencyHistogram | None = None
 _histogram_lock = Lock()
 

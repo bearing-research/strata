@@ -110,32 +110,27 @@ class TokenBucket:
 class RateLimitConfig:
     """Configuration for rate limiting."""
 
-    # Global rate limits (all clients combined)
+    # All clients combined.
     global_requests_per_second: float = 1000.0
     global_burst: float = 100.0  # Max burst above rate
 
-    # Per-client rate limits
     client_requests_per_second: float = 100.0
     client_burst: float = 20.0
 
-    # Per-endpoint rate limits (optional overrides)
+    # Per-endpoint overrides.
     scan_requests_per_second: float = 50.0
     scan_burst: float = 10.0
     warm_requests_per_second: float = 10.0
     warm_burst: float = 5.0
 
-    # Cleanup settings
     client_ttl_seconds: float = 300.0  # Remove idle clients after 5 minutes
-    # Hard ceiling on tracked clients. ``client_ttl_seconds`` alone cannot
-    # bound memory: the client id is derived from X-Forwarded-For, so a single
-    # caller can mint an unbounded number of distinct ids far faster than the
-    # TTL reclaims them. When the ceiling is hit the least-recently-seen
-    # buckets are dropped.
+    # Hard ceiling on tracked clients. The TTL alone can't bound memory: client
+    # ids come from X-Forwarded-For, so one caller can mint ids faster than the
+    # TTL reclaims them. At the ceiling, least-recently-seen buckets are dropped.
     max_tracked_clients: int = 10_000
     # How often the idle sweep runs, at most (seconds).
     cleanup_interval_seconds: float = 60.0
 
-    # Whether rate limiting is enabled
     enabled: bool = True
 
 
@@ -174,22 +169,18 @@ class RateLimiter:
         self._clock = clock or SystemClock()
         self._lock = Lock()
 
-        # Global bucket
         self._global_bucket = TokenBucket(
             capacity=self.config.global_burst,
             refill_rate=self.config.global_requests_per_second,
             _clock=self._clock,
         )
 
-        # Per-client buckets
         self._client_buckets: dict[str, TokenBucket] = {}
         self._client_last_seen: dict[str, float] = {}
         self._last_cleanup: float = self._clock.time()
 
-        # Per-endpoint buckets
         self._endpoint_buckets: dict[str, TokenBucket] = {}
 
-        # Stats
         self._stats = {
             "total_requests": 0,
             "allowed_requests": 0,
@@ -263,9 +254,9 @@ class RateLimiter:
 
     def _get_endpoint_bucket(self, endpoint: str) -> TokenBucket | None:
         """Get or create a bucket for an endpoint (if configured)."""
-        # Both /v1/scan (legacy) and /v1/materialize use the same rate limit
+        # /v1/scan and /v1/materialize share one limit.
         if endpoint in ("/v1/scan", "/v1/materialize"):
-            key = "/v1/materialize"  # Use single bucket for both endpoints
+            key = "/v1/materialize"
             if key not in self._endpoint_buckets:
                 self._endpoint_buckets[key] = TokenBucket(
                     capacity=self.config.scan_burst,
@@ -309,7 +300,6 @@ class RateLimiter:
         with self._lock:
             self._stats["total_requests"] += 1
 
-            # Check global limit first
             if not self._global_bucket.acquire():
                 self._stats["rejected_global"] += 1
                 return RateLimitResult(
@@ -319,7 +309,6 @@ class RateLimiter:
                     tokens_remaining=0,
                 )
 
-            # Check per-client limit
             client_bucket = self._get_client_bucket(client_id)
             if not client_bucket.acquire():
                 self._stats["rejected_client"] += 1
@@ -330,7 +319,6 @@ class RateLimiter:
                     tokens_remaining=0,
                 )
 
-            # Check per-endpoint limit (if applicable)
             if endpoint:
                 endpoint_bucket = self._get_endpoint_bucket(endpoint)
                 if endpoint_bucket and not endpoint_bucket.acquire():
@@ -388,7 +376,6 @@ class RateLimiter:
             }
 
 
-# Global rate limiter instance
 _rate_limiter: RateLimiter | None = None
 
 

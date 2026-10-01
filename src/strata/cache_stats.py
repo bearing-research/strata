@@ -140,13 +140,11 @@ class CacheStatsHistogram:
         self._bucket_bytes_cache = [0] * self._depth
         self._bucket_bytes_storage = [0] * self._depth
 
-        # Lifetime counters
         self._total_hits = 0
         self._total_misses = 0
         self._total_bytes_cache = 0
         self._total_bytes_storage = 0
 
-        # Per-table stats (table_id -> {hits, misses})
         self._table_stats: dict[str, dict[str, int]] = {}
 
     def _record(
@@ -268,7 +266,6 @@ class CacheStatsHistogram:
                     }
                 )
 
-        # Sort by total accesses descending
         table_list.sort(key=lambda stats: stats["total"], reverse=True)
         return table_list[:limit]
 
@@ -295,7 +292,6 @@ class CacheStatsHistogram:
             self._table_stats.clear()
 
 
-# Global histogram instance
 _cache_histogram: CacheStatsHistogram | None = None
 
 

@@ -39,8 +39,7 @@ def assert_uv_managed_runtime() -> None:
         # A venv, but not one uv made: python -m venv, virtualenv, pip.
         found = f"{cfg} has no `uv = ` line, so uv did not create this environment"
     else:
-        # conda and a bare interpreter have no pyvenv.cfg at all; pointing at
-        # the file only told those users to look for something they lack.
+        # conda and a bare interpreter have no pyvenv.cfg to point at.
         found = "not a virtual environment (conda or a system Python)"
     print(
         "error: Strata runs only inside a uv-managed Python environment;\n"

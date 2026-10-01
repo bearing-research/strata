@@ -118,39 +118,32 @@ class BuildMetricsCollector:
     """
 
     def __init__(self, max_events: int = 1000, max_transforms: int = 100, max_tenants: int = 100):
-        self._lock = threading.RLock()  # Use RLock for reentrant locking (nested calls)
+        self._lock = threading.RLock()  # Reentrant: locked methods call each other
 
-        # Global counters
         self._builds_started = 0
         self._builds_succeeded = 0
         self._builds_failed = 0
         self._builds_cancelled = 0
 
-        # Duration tracking
         self._total_duration_ms = 0.0
         self._durations: deque[float] = deque(maxlen=1000)
 
-        # Queue wait tracking
         self._total_queue_wait_ms = 0.0
         self._queue_wait_count = 0
         self._queue_waits: deque[float] = deque(maxlen=1000)
 
-        # Bytes tracking
         self._total_bytes_in = 0
         self._total_bytes_out = 0
 
-        # Per-transform stats (LRU bounded)
+        # Bounded; the oldest entry is evicted first.
         self._transform_stats: dict[str, TransformStats] = {}
         self._max_transforms = max_transforms
 
-        # Per-tenant stats (LRU bounded)
         self._tenant_stats: dict[str, TenantBuildStats] = {}
         self._max_tenants = max_tenants
 
-        # Recent events for debugging (ring buffer)
         self._recent_events: deque[BuildEvent] = deque(maxlen=max_events)
 
-        # Error code tracking
         self._error_codes: dict[str, int] = {}
 
     def record_started(
@@ -164,22 +157,18 @@ class BuildMetricsCollector:
         with self._lock:
             self._builds_started += 1
 
-            # Track queue wait
             if queue_wait_ms is not None:
                 self._total_queue_wait_ms += queue_wait_ms
                 self._queue_wait_count += 1
                 self._queue_waits.append(queue_wait_ms)
 
-            # Per-transform tracking
             if transform_ref not in self._transform_stats:
                 if len(self._transform_stats) >= self._max_transforms:
-                    # Evict oldest (first in dict)
                     oldest = next(iter(self._transform_stats))
                     del self._transform_stats[oldest]
                 self._transform_stats[transform_ref] = TransformStats(transform_ref=transform_ref)
             self._transform_stats[transform_ref].started += 1
 
-            # Per-tenant tracking
             tenant_key = tenant_id or "__default__"
             if tenant_key not in self._tenant_stats:
                 if len(self._tenant_stats) >= self._max_tenants:
@@ -188,7 +177,6 @@ class BuildMetricsCollector:
                 self._tenant_stats[tenant_key] = TenantBuildStats(tenant_id=tenant_key)
             self._tenant_stats[tenant_key].started += 1
 
-            # Record event
             event = BuildEvent(
                 build_id=build_id,
                 tenant_id=tenant_id,
@@ -216,13 +204,11 @@ class BuildMetricsCollector:
             self._total_bytes_in += bytes_in
             self._total_bytes_out += bytes_out
 
-            # Per-transform tracking
             if transform_ref in self._transform_stats:
                 self._transform_stats[transform_ref].record_success(
                     duration_ms, bytes_in, bytes_out
                 )
 
-            # Per-tenant tracking
             tenant_key = tenant_id or "__default__"
             if tenant_key in self._tenant_stats:
                 stats = self._tenant_stats[tenant_key]
@@ -231,7 +217,6 @@ class BuildMetricsCollector:
                 stats.total_bytes_out += bytes_out
                 stats.total_duration_ms += duration_ms
 
-            # Record event
             event = BuildEvent(
                 build_id=build_id,
                 tenant_id=tenant_id,
@@ -258,21 +243,17 @@ class BuildMetricsCollector:
             self._total_duration_ms += duration_ms
             self._durations.append(duration_ms)
 
-            # Track error codes
             if error_code:
                 self._error_codes[error_code] = self._error_codes.get(error_code, 0) + 1
 
-            # Per-transform tracking
             if transform_ref in self._transform_stats:
                 self._transform_stats[transform_ref].record_failure(duration_ms)
 
-            # Per-tenant tracking
             tenant_key = tenant_id or "__default__"
             if tenant_key in self._tenant_stats:
                 self._tenant_stats[tenant_key].failed += 1
                 self._tenant_stats[tenant_key].total_duration_ms += duration_ms
 
-            # Record event
             event = BuildEvent(
                 build_id=build_id,
                 tenant_id=tenant_id,
@@ -294,16 +275,13 @@ class BuildMetricsCollector:
         with self._lock:
             self._builds_cancelled += 1
 
-            # Per-transform tracking
             if transform_ref in self._transform_stats:
                 self._transform_stats[transform_ref].cancelled += 1
 
-            # Per-tenant tracking
             tenant_key = tenant_id or "__default__"
             if tenant_key in self._tenant_stats:
                 self._tenant_stats[tenant_key].cancelled += 1
 
-            # Record event
             event = BuildEvent(
                 build_id=build_id,
                 tenant_id=tenant_id,
@@ -481,7 +459,6 @@ class BuildMetricsCollector:
         lines = []
 
         with self._lock:
-            # Build lifecycle counters
             lines.append("# HELP strata_builds_started_total Total builds started")
             lines.append("# TYPE strata_builds_started_total counter")
             lines.append(f"strata_builds_started_total {self._builds_started}")
@@ -498,7 +475,6 @@ class BuildMetricsCollector:
             lines.append("# TYPE strata_builds_cancelled_total counter")
             lines.append(f"strata_builds_cancelled_total {self._builds_cancelled}")
 
-            # In-flight builds
             in_flight = (
                 self._builds_started
                 - self._builds_succeeded
@@ -509,7 +485,6 @@ class BuildMetricsCollector:
             lines.append("# TYPE strata_builds_in_flight gauge")
             lines.append(f"strata_builds_in_flight {in_flight}")
 
-            # Duration metrics
             lines.append("# HELP strata_builds_duration_total_ms Total build duration in ms")
             lines.append("# TYPE strata_builds_duration_total_ms counter")
             lines.append(f"strata_builds_duration_total_ms {round(self._total_duration_ms, 2)}")
@@ -528,7 +503,6 @@ class BuildMetricsCollector:
                 lines.append("# TYPE strata_builds_duration_p99_ms gauge")
                 lines.append(f"strata_builds_duration_p99_ms {duration_pcts['p99_ms']}")
 
-            # Queue wait metrics
             lines.append("# HELP strata_builds_queue_wait_total_ms Total queue wait time in ms")
             lines.append("# TYPE strata_builds_queue_wait_total_ms counter")
             lines.append(f"strata_builds_queue_wait_total_ms {round(self._total_queue_wait_ms, 2)}")
@@ -539,7 +513,6 @@ class BuildMetricsCollector:
                 lines.append("# TYPE strata_builds_queue_wait_p95_ms gauge")
                 lines.append(f"strata_builds_queue_wait_p95_ms {queue_pcts['p95_ms']}")
 
-            # Bytes metrics
             lines.append("# HELP strata_builds_bytes_in_total Total input bytes processed")
             lines.append("# TYPE strata_builds_bytes_in_total counter")
             lines.append(f"strata_builds_bytes_in_total {self._total_bytes_in}")
@@ -548,7 +521,6 @@ class BuildMetricsCollector:
             lines.append("# TYPE strata_builds_bytes_out_total counter")
             lines.append(f"strata_builds_bytes_out_total {self._total_bytes_out}")
 
-            # Per-transform metrics (top 20 by started count)
             transform_list = sorted(
                 self._transform_stats.values(),
                 key=lambda s: s.started,
@@ -587,7 +559,6 @@ class BuildMetricsCollector:
                         f'strata_build_transform_failed_total{{transform="{ref}"}} {stats.failed}'
                     )
 
-            # Per-tenant metrics (top 20 by started count)
             tenant_list = sorted(
                 self._tenant_stats.values(),
                 key=lambda s: s.started,
@@ -610,7 +581,6 @@ class BuildMetricsCollector:
                     val = stats.total_bytes_out
                     lines.append(f'strata_build_tenant_bytes_out_total{{tenant="{tenant}"}} {val}')
 
-            # Error code breakdown
             if self._error_codes:
                 lines.append("# HELP strata_builds_errors_total Build errors by code")
                 lines.append("# TYPE strata_builds_errors_total counter")
@@ -622,10 +592,6 @@ class BuildMetricsCollector:
 
         return "\n".join(lines)
 
-
-# ---------------------------------------------------------------------------
-# Module-level singleton
-# ---------------------------------------------------------------------------
 
 _build_metrics: BuildMetricsCollector | None = None
 

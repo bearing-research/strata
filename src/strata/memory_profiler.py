@@ -123,16 +123,13 @@ class DetailedMemoryReportDict(TypedDict):
 class MemorySnapshot:
     """Point-in-time memory snapshot."""
 
-    # Arrow memory pool
     arrow_bytes_allocated: int
     arrow_max_memory: int
     arrow_pool_backend: str
 
-    # Python memory (from sys.getsizeof approximations)
     python_gc_tracked: int  # Objects tracked by GC
     python_gc_objects_by_gen: list[int]  # Count per generation
 
-    # Process memory (if available)
     process_rss_bytes: int | None
     process_vms_bytes: int | None
 
@@ -174,18 +171,15 @@ def get_memory_snapshot() -> MemorySnapshot:
     Returns:
         MemorySnapshot with current memory statistics
     """
-    # Arrow memory pool stats
     pool = pa.default_memory_pool()
     arrow_bytes = pool.bytes_allocated()
     arrow_max = pool.max_memory()
     arrow_backend = pool.backend_name
 
-    # Python GC stats
     gc_stats = gc.get_stats()
     gc_tracked = sum(s["collections"] for s in gc_stats)
     gc_objects = [len(gc.get_objects(i)) for i in range(3)]
 
-    # Process memory (via psutil if available)
     rss_bytes = None
     vms_bytes = None
     try:
@@ -196,7 +190,7 @@ def get_memory_snapshot() -> MemorySnapshot:
         rss_bytes = mem_info.rss
         vms_bytes = mem_info.vms
     except ImportError:
-        # psutil not available - try /proc/self/statm on Linux
+        # No psutil: fall back to /proc/self/statm (Linux).
         try:
             with open("/proc/self/statm") as f:
                 parts = f.read().split()
@@ -232,12 +226,10 @@ def get_arrow_allocations() -> ArrowAllocationsDict:
         "available_pools": [],
     }
 
-    # Check which pools are available
     pools_to_check = [
         ("system", pa.system_memory_pool),
     ]
 
-    # Try optional pools
     try:
         pools_to_check.append(("jemalloc", pa.jemalloc_memory_pool))
     except AttributeError:
@@ -272,11 +264,10 @@ def get_python_memory_stats() -> PythonMemoryStatsDict:
     - GC thresholds and counts
     - Reference cycle information
     """
-    # Get GC info
     gc_stats = gc.get_stats()
     thresholds = gc.get_threshold()
 
-    # Count objects by type (can be expensive for large heaps)
+    # Can be expensive for large heaps.
     type_counts: dict[str, int] = {}
     try:
         for obj in gc.get_objects():
@@ -285,7 +276,6 @@ def get_python_memory_stats() -> PythonMemoryStatsDict:
     except Exception:
         pass
 
-    # Get top 20 types by count
     top_types = sorted(type_counts.items(), key=lambda x: x[1], reverse=True)[:20]
 
     result: PythonMemoryStatsDict = {
@@ -343,14 +333,13 @@ def _get_memory_recommendations(
         else _read_int_value(python_stats.get("total_objects"))
     )
 
-    # Check Arrow memory
     if snapshot.arrow_bytes_allocated > 1024 * 1024 * 1024:  # > 1GB
         recommendations.append(
             f"Arrow has {snapshot.arrow_bytes_allocated / (1024**3):.1f}GB allocated. "
             "Consider checking for retained batches or memory leaks."
         )
 
-    # Check if max memory is much higher than current (fragmentation)
+    # Max far above current suggests fragmentation.
     if snapshot.arrow_max_memory > 2 * snapshot.arrow_bytes_allocated > 0:
         recommendations.append(
             f"Arrow max memory ({snapshot.arrow_max_memory / (1024**3):.1f}GB) is much higher "
@@ -358,14 +347,12 @@ def _get_memory_recommendations(
             "This may indicate memory fragmentation."
         )
 
-    # Check GC objects
     if total_objects > 1_000_000:
         recommendations.append(
             f"Python GC is tracking {total_objects:,} objects. "
             "High object count can slow down GC. Consider object pooling."
         )
 
-    # Check process RSS
     if snapshot.process_rss_bytes and snapshot.process_rss_bytes > 4 * 1024**3:
         recommendations.append(
             f"Process RSS is {snapshot.process_rss_bytes / (1024**3):.1f}GB. "

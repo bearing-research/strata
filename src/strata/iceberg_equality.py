@@ -95,10 +95,9 @@ def plan_files(
     snapshot = table.snapshot_by_id(snapshot_id)
     if snapshot is None:
         raise ValueError(f"Snapshot {snapshot_id} not found")
-    # Only data files are pruned by the filter. pyiceberg prunes delete files
-    # by it too, which is right for a reader that then filters rows; Strata
-    # returns every row of a row group it reads, so an equality delete whose
-    # keys all miss the filter still has to apply to the rows it does return.
+    # Only data files are pruned by the filter. pyiceberg prunes delete files by it too, but Strata
+    # returns every row of a row group it reads, so a delete whose keys all miss the filter still
+    # applies to those rows.
     manifests = snapshot.manifests(table.io)
     data_planner = ManifestGroupPlanner(
         table_metadata=table.metadata, io=table.io, row_filter=row_filter or AlwaysTrue()
@@ -317,11 +316,9 @@ def _matching_rows(data_keys: pa.Table, delete_keys: pa.Table) -> pa.Array:
     """For each row of *data_keys*, whether some row of *delete_keys* equals it."""
     rows = pa.array(range(data_keys.num_rows), pa.int64())
     data, deletes = _null_safe(data_keys, delete_keys)
-    # The hash is built on the right side. The row group is the small side (a
-    # delete set can hold millions of keys), so it is built there and the
-    # deletes stream past it: at 10 million keys against a 100k-row row group,
-    # about 13 ms instead of 3.6 s, holding one row group's hash rather than
-    # a copy of every key per fetch thread.
+    # Build the hash on the row group (the small side; a delete set can hold millions of keys) and
+    # stream the deletes past it: about 13 ms instead of 3.6 s at 10M keys against 100k rows, and
+    # one row group's hash per fetch thread instead of a copy of every key.
     hits = deletes.join(
         data.append_column("row", rows), keys=deletes.column_names, join_type="right semi"
     ).column("row")

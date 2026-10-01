@@ -61,7 +61,6 @@ class LRUCache[K: Hashable, V]:
             except KeyError:
                 self._misses += 1
                 return default
-            # Reinsert at end (most recently used)
             self._cache[key] = value
             self._hits += 1
             return value
@@ -72,12 +71,10 @@ class LRUCache[K: Hashable, V]:
             return
         with self._lock:
             if key in self._cache:
-                # Update existing and move to end
                 self._cache[key] = value
                 self._cache.move_to_end(key)
                 self._updates += 1
             else:
-                # Evict one if at capacity (O(1) since we only insert one at a time)
                 if len(self._cache) >= self._max_size:
                     self._cache.popitem(last=False)
                     self._evictions += 1
@@ -95,21 +92,18 @@ class LRUCache[K: Hashable, V]:
         the same value simultaneously, but only one will be cached.
         This is acceptable for idempotent factories.
         """
-        # Fast path: check if already cached
         cached = self.get(key)
         if cached is not None:
             return cached
 
-        # Slow path: compute outside lock
+        # Compute outside the lock
         value = factory()
 
-        # Insert if still absent (another thread may have inserted)
         with self._lock:
             if key in self._cache:
-                # Another thread beat us, use their value
+                # Another thread won the race; use its value
                 self._cache.move_to_end(key)
                 return self._cache[key]
-            # Evict one if at capacity
             if len(self._cache) >= self._max_size:
                 self._cache.popitem(last=False)
                 self._evictions += 1
@@ -191,13 +185,12 @@ class RowGroupMeta:
     """
 
     num_rows: int
-    total_byte_size: int  # Size from Parquet metadata for pre-flight estimates
-    _columns: dict  # column_name -> ColumnChunkMeta
+    total_byte_size: int  # For pre-flight estimates
+    _columns: dict  # column index -> ColumnChunkMeta
 
     def column(self, idx: int) -> ColumnChunkMeta:
         """Get column metadata by index."""
-        # Map index to column name and return metadata
-        # If we don't have this column, return empty stats
+        # Unknown column: empty stats
         if idx in self._columns:
             return self._columns[idx]
         return ColumnChunkMeta(is_stats_set=False, statistics=None)
@@ -258,8 +251,8 @@ class ParquetMetadata:
 
     arrow_schema: pa.Schema
     num_row_groups: int
-    row_group_metadata: list  # List of RowGroupMeta or pq.RowGroupMetaData objects
-    parquet_schema: _SchemaColumns  # ParquetSchema or pq.ParquetSchema for column lookups
+    row_group_metadata: list  # RowGroupMeta or pq.RowGroupMetaData
+    parquet_schema: _SchemaColumns  # ParquetSchema or pq.ParquetSchema
 
 
 @dataclass(frozen=True)
@@ -276,10 +269,10 @@ class EqualityDeleteEntry:
 
     file_path: str  # As the manifest names it
     actual_path: str  # Resolved for reading, like a data file's
-    equality_ids: tuple[int, ...]  # The key: rows equal on these field ids are deleted
-    record_count: int  # Delete rows in the file, for the equality-delete limit
-    # Per key field: (field id, lower bound, upper bound, null count) from the
-    # manifest, bounds as iceberg_equality.encode_bound keeps them.
+    equality_ids: tuple[int, ...]  # Rows equal on these field ids are deleted
+    record_count: int  # For the equality-delete limit
+    # Per key field from the manifest: (field id, lower, upper, null count), bounds encoded
+    # by iceberg_equality.encode_bound.
     bounds: tuple[tuple[int, str | None, str | None, int | None], ...] = ()
 
     @classmethod
@@ -301,17 +294,15 @@ class ManifestEntry:
     Stores the resolved data file information from Iceberg manifest.
     """
 
-    file_path: str  # Original file path from manifest
-    actual_path: str  # Resolved path for reading
-    # The snapshot's positional deletes for this file. Which ones apply is
-    # pyiceberg's call (sequence numbers, partition, referenced file).
+    file_path: str  # As the manifest names it
+    actual_path: str  # Resolved for reading
+    # Positional deletes; which apply is pyiceberg's call (sequence numbers, partition,
+    # referenced file).
     delete_files: tuple[DeleteFileEntry, ...] = ()
-    # The snapshot's equality deletes for this file (sequence number and
-    # partition already matched; see iceberg_equality).
+    # Sequence number and partition already matched; see iceberg_equality.
     equality_deletes: tuple[EqualityDeleteEntry, ...] = ()
-    # The file's identity-partition values, what a source column the file
-    # omits reads as: (source field id, Iceberg type, the value in Iceberg's
-    # single-value encoding as hex).
+    # Identity-partition values, which a source column the file omits reads as:
+    # (source field id, Iceberg type, single-value encoding as hex).
     partition_values: tuple[tuple[int, str, str], ...] = ()
 
 
@@ -345,12 +336,8 @@ def _persisted_parquet_meta_from_loaded(metadata: ParquetMetadata) -> "Persisted
         serialize_arrow_schema,
     )
 
-    # Dotted PATHS, not leaf names. A struct field ``user.id`` has leaf name
-    # ``id``; keying by that collides with a top-level ``id`` — the nested
-    # column's stats overwrote the top-level column's, and on restore the
-    # planner's ``"." in col.path`` guard could no longer tell them apart, so
-    # pruning compared a filter against the WRONG column's min/max and dropped
-    # matching rows.
+    # Dotted paths, not leaf names: a struct field ``user.id`` would collide with a top-level
+    # ``id``, and pruning would compare against the wrong column's min/max and drop rows.
     column_names = [
         metadata.parquet_schema.column(i).path for i in range(len(metadata.parquet_schema))
     ]
@@ -360,9 +347,7 @@ def _persisted_parquet_meta_from_loaded(metadata: ParquetMetadata) -> "Persisted
         column_sizes: dict[str, int] = {}
         for idx, column_name in enumerate(column_names):
             column_meta = row_group.column(idx)
-            # Recorded for every column, including ones without statistics:
-            # the pre-flight size estimate needs the projected columns'
-            # sizes whether or not they happen to be prunable.
+            # Every column, stats or not: the pre-flight estimate needs projected sizes.
             column_sizes[column_name] = column_meta.total_uncompressed_size
             if not column_meta.is_stats_set or column_meta.statistics is None:
                 continue
@@ -456,23 +441,19 @@ class ParquetMetadataCache:
         This is the primary API - it transparently handles cache misses.
         Lookup order: in-memory cache -> SQLite store -> Parquet file
         """
-        # Check in-memory cache first
         cached = self._cache.get(file_path)
         if cached is not None:
             return cached
 
-        # Check persistent store if available
         if self._store is not None:
             persisted = self._load_from_store(file_path)
             if persisted is not None:
                 self._cache.put(file_path, persisted)
                 return persisted
 
-        # Load from file
         metadata = self._load_metadata(file_path)
         self._cache.put(file_path, metadata)
 
-        # Persist to store if available
         if self._store is not None:
             self._save_to_store(file_path, metadata)
 
@@ -497,7 +478,6 @@ class ParquetMetadataCache:
         result: dict[str, ParquetMetadata] = {}
         missing_from_memory: list[str] = []
 
-        # Check in-memory cache first
         for fp in file_paths:
             cached = self._cache.get(fp)
             if cached is not None:
@@ -508,7 +488,6 @@ class ParquetMetadataCache:
         if not missing_from_memory:
             return result
 
-        # Batch lookup from persistent store
         missing_from_store: list[str] = []
         if self._store is not None:
             persisted_batch = self._store.get_parquet_meta_many(missing_from_memory)
@@ -528,23 +507,20 @@ class ParquetMetadataCache:
         if not missing_from_store:
             return result
 
-        # Load remaining from files IN PARALLEL
-        # This is the key optimization: parallel I/O for Parquet footer reads
+        # Parallel footer reads are the main win here
         loaded: dict[str, ParquetMetadata] = {}
         errors: dict[str, Exception] = {}
 
-        # Use min of max_workers and number of files to avoid thread overhead
         num_workers = min(self._max_workers, len(missing_from_store))
 
         if num_workers == 1:
-            # Single file: no thread overhead
+            # Skip the pool for one file
             fp = missing_from_store[0]
             try:
                 loaded[fp] = self._load_metadata(fp)
             except Exception as e:
                 errors[fp] = e
         else:
-            # Multiple files: parallel loading
             with ThreadPoolExecutor(max_workers=num_workers) as executor:
                 future_to_path = {
                     executor.submit(self._load_metadata, fp): fp for fp in missing_from_store
@@ -556,17 +532,14 @@ class ParquetMetadataCache:
                     except Exception as e:
                         errors[fp] = e
 
-        # Update cache and result with loaded metadata
         for fp, metadata in loaded.items():
             self._cache.put(fp, metadata)
             result[fp] = metadata
 
-        # Re-raise first error if any files failed to load
         if errors:
             first_path, first_error = next(iter(errors.items()))
             raise RuntimeError(f"Failed to load Parquet metadata for {first_path}: {first_error}")
 
-        # Batch persist to store without rereading the Parquet files.
         if loaded and self._store is not None:
             to_persist: list[tuple[str, PersistedParquetMeta]] = []
 
@@ -595,7 +568,6 @@ class ParquetMetadataCache:
         try:
             arrow_schema = deserialize_arrow_schema(persisted.arrow_schema_bytes)
 
-            # Build row group metadata from persisted data
             row_group_meta = []
             for rg in persisted.row_groups:
                 columns = {}
@@ -650,14 +622,12 @@ class ParquetMetadataCache:
         if _persisted_meta_is_legacy_leaf_named(persisted):
             return None
 
-        # Convert persisted metadata to our compatible types
         try:
             arrow_schema = deserialize_arrow_schema(persisted.arrow_schema_bytes)
 
-            # Build row group metadata from persisted data
             row_group_meta = []
             for rg in persisted.row_groups:
-                # Convert column stats to our format, indexed by column position
+                # Keyed by column position
                 columns = {}
                 for idx, col_name in enumerate(persisted.column_names):
                     if col_name in rg.column_stats:
@@ -705,7 +675,7 @@ class ParquetMetadataCache:
             persisted = _persisted_parquet_meta_from_loaded(metadata)
             self._store.put_parquet_meta(file_path, persisted)
         except Exception:
-            pass  # Don't fail if persistence fails
+            pass  # Persistence is best-effort
 
     def _load_metadata(self, file_path: str) -> ParquetMetadata:
         """Load metadata from a Parquet file."""
@@ -713,7 +683,7 @@ class ParquetMetadataCache:
 
         pq_file = open_parquet(file_path, self._s3_filesystem)
 
-        # Extract row group metadata (we store references, not copies)
+        # References, not copies
         row_group_meta = []
         for i in range(pq_file.metadata.num_row_groups):
             row_group_meta.append(pq_file.metadata.row_group(i))
@@ -759,9 +729,9 @@ class ManifestCache:
     """
 
     def __init__(self, max_size: int = 100, store: "MetadataStore | None" = None) -> None:
-        # Unfiltered cache: (catalog, table, snapshot) -> all files
+        # (catalog, table, snapshot) -> all files
         self._cache: LRUCache[tuple[str, str, int], ManifestResolution] = LRUCache(max_size)
-        # Filtered cache: (catalog, table, snapshot, filter_fp) -> pruned files
+        # (catalog, table, snapshot, filter_fp) -> pruned files
         self._filtered_cache: LRUCache[tuple[str, str, int, str], ManifestResolution] = LRUCache(
             max_size * 2
         )
@@ -787,7 +757,6 @@ class ManifestCache:
         - Check unfiltered in-memory cache as a correctness-preserving fallback
         - Check SQLite store for the persisted unfiltered resolution
         """
-        # For filtered queries, check filtered cache first
         if filter_fingerprint != "nofilter":
             cached = self._filtered_cache.get(
                 (catalog_name, table_identity, snapshot_id, filter_fingerprint)
@@ -795,7 +764,7 @@ class ManifestCache:
             if cached is not None:
                 return cached
 
-        # Check unfiltered cache as the correctness-preserving fallback.
+        # Unfiltered files are a correct superset for any filter
         cached = self._cache.get((catalog_name, table_identity, snapshot_id))
         if cached is not None:
             return cached
@@ -845,21 +814,19 @@ class ManifestCache:
             filter_fingerprint: Filter fingerprint (default: "nofilter" for unfiltered)
         """
         if filter_fingerprint != "nofilter":
-            # Cache filtered result (in-memory only, not persisted)
+            # In memory only, not persisted
             self._filtered_cache.put(
                 (catalog_name, table_identity, snapshot_id, filter_fingerprint), resolution
             )
         else:
-            # Cache unfiltered result
             self._cache.put((catalog_name, table_identity, snapshot_id), resolution)
 
-            # Persist to store if available (unfiltered only)
             if self._store is not None:
                 try:
                     data_files = [asdict(entry) for entry in resolution.data_files]
                     self._store.put_manifest(catalog_name, table_identity, snapshot_id, data_files)
                 except Exception:
-                    pass  # Don't fail if persistence fails
+                    pass  # Persistence is best-effort
 
     def clear(self) -> None:
         """Clear all cached resolutions."""
@@ -876,13 +843,12 @@ class ManifestCache:
         }
 
 
-# Global singleton caches for use across the application.
-# These are created lazily and can be configured via set_*_cache().
+# Lazy process-wide singletons; override with set_*_cache().
 
 _parquet_cache: ParquetMetadataCache | None = None
 _manifest_cache: ManifestCache | None = None
 _metadata_store: "MetadataStore | None" = None
-_cache_lock = Lock()  # Protects all global cache singletons
+_cache_lock = Lock()  # Guards all the singletons
 
 
 def get_metadata_store(cache_dir: Path | None = None) -> "MetadataStore":
@@ -903,12 +869,9 @@ def get_metadata_store(cache_dir: Path | None = None) -> "MetadataStore":
 
     with _cache_lock:
         if cache_dir is None:
-            # No cache_dir means "the store already in use", not "the
-            # personal-mode default". /health/ready and the metadata routes
-            # call it this way, and resolving to the home directory there did
-            # not just read the wrong store — the path-mismatch branch below
-            # swapped the global singleton out from under a server configured
-            # with any other cache_dir, on every readiness probe.
+            # No cache_dir means "the store in use", not the personal-mode default:
+            # resolving the default here would swap the singleton out from under a server
+            # with another cache_dir on every /health/ready probe.
             if _metadata_store is not None:
                 return _metadata_store
             cache_dir = Path.home() / ".strata" / "cache"
@@ -943,7 +906,7 @@ def get_parquet_cache(
     """
     global _parquet_cache
 
-    # Get metadata store outside the lock to avoid nested locking
+    # Outside the lock to avoid nested locking
     store = None
     expected_db_path = None
     if cache_dir is not None:
@@ -952,7 +915,6 @@ def get_parquet_cache(
 
     with _cache_lock:
         if cache_dir is not None:
-            # Check if existing cache uses different store path
             if _parquet_cache is not None:
                 if (
                     _parquet_cache._store is None
@@ -965,7 +927,6 @@ def get_parquet_cache(
                         max_workers=max_workers,
                     )
                 elif s3_filesystem is not None and _parquet_cache._s3_filesystem is None:
-                    # Update existing cache with S3 filesystem
                     _parquet_cache._s3_filesystem = s3_filesystem
             else:
                 _parquet_cache = ParquetMetadataCache(
@@ -976,7 +937,6 @@ def get_parquet_cache(
                 max_size, store=None, s3_filesystem=s3_filesystem, max_workers=max_workers
             )
         elif s3_filesystem is not None and _parquet_cache._s3_filesystem is None:
-            # Update existing cache with S3 filesystem
             _parquet_cache._s3_filesystem = s3_filesystem
 
         return _parquet_cache
@@ -996,7 +956,7 @@ def get_manifest_cache(max_size: int = 100, cache_dir: Path | None = None) -> Ma
     """
     global _manifest_cache
 
-    # Get metadata store outside the lock to avoid nested locking
+    # Outside the lock to avoid nested locking
     store = None
     expected_db_path = None
     if cache_dir is not None:
@@ -1005,7 +965,6 @@ def get_manifest_cache(max_size: int = 100, cache_dir: Path | None = None) -> Ma
 
     with _cache_lock:
         if cache_dir is not None:
-            # Check if existing cache uses different store path
             if _manifest_cache is not None:
                 if (
                     _manifest_cache._store is None

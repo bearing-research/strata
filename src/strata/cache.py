@@ -22,20 +22,12 @@ from strata.metrics import MetricsCollector
 from strata.tracing import trace_span
 from strata.types import CacheGranularity, CacheKey, ReadPlan, Task
 
-# Cache file extension (Arrow IPC Stream format for zero-copy serving)
+# Arrow IPC stream format, served zero-copy.
 CACHE_FILE_EXTENSION = ".arrowstream"
-# Metadata sidecar file extension
 CACHE_META_EXTENSION = ".meta.json"
 
-# Cache version - bump this when cache format changes to invalidate old caches.
-# This is baked into the cache directory structure; a DiskCache deletes other
-# versions' directories when it starts, since nothing would ever evict them.
-# Version history:
-#   1: Initial version (Arrow IPC stream format, SHA-256 keyed)
-#   2: Multi-tenancy support (tenant_id in cache key, tenant-prefixed directories)
-#   3: created_at / stats timestamps are epoch floats (were ISO-8601 strings)
-#   4: keys name the Iceberg schema read; rows deleted merge-on-read are
-#      dropped (0.8.0 could cache a DuckDB-deleted table's rows)
+# Bump when the cache format changes. Baked into the directory layout; a DiskCache deletes other
+# versions' directories at startup, since nothing else would evict them.
 CACHE_VERSION = 4
 
 # A cache directory of some version, current or not: ``v`` and digits only.
@@ -196,7 +188,6 @@ class DiskCache:
         self.granularity = config.cache_granularity
         self.metrics = metrics or MetricsCollector()
 
-        # Ensure cache directory exists
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         self._remove_other_versions()
 
@@ -254,9 +245,8 @@ class DiskCache:
         import hashlib
 
         hex_digest = key.to_hex(self.granularity)
-        # Tenant prefix for isolation (hash first 8 chars for consistent directory naming)
+        # Hashed tenant prefix for isolation.
         tenant_prefix = hashlib.sha256(key.tenant_id.encode()).hexdigest()[:8]
-        # Version prefix + tenant prefix + two-level directory structure
         subdir = (
             self.cache_dir / f"v{CACHE_VERSION}" / tenant_prefix / hex_digest[:2] / hex_digest[2:4]
         )
@@ -300,7 +290,6 @@ class DiskCache:
             return None
 
         try:
-            # Read stream format and parse
             stream_bytes = path.read_bytes()
             reader = ipc.open_stream(pa.BufferReader(stream_bytes))
             batches = list(reader)
@@ -308,7 +297,7 @@ class DiskCache:
                 return None
             return batches[0]
         except Exception:
-            # Corrupted cache file, remove it
+            # Corrupted: remove it.
             self._delete_entry_files(path)
             return None
 
@@ -335,31 +324,20 @@ class DiskCache:
             return None
 
         try:
-            # Use mmap-based read for better performance on large files
-            # and OS page cache reuse on repeated access
+            # mmap for large files and OS page-cache reuse on repeated access.
             from strata import fast_io
 
             data = fast_io.read_file_mmap(str(path))
         except OSError:
-            # The file vanished or could not be read (read_file_mmap returns
-            # raw bytes, so this is an I/O error, not Arrow corruption). Drop
-            # the unreadable entry and treat it as a miss.
+            # Vanished or unreadable (an I/O error, not Arrow corruption, since this returns raw
+            # bytes): drop the entry and treat it as a miss.
             self._delete_entry_files(path)
             return None
 
-        # This path deliberately does not parse Arrow, so nothing here noticed
-        # a damaged entry: the bytes went straight to the network and — because
-        # cache keys are immutable snapshot IDs that are never invalidated —
-        # the same damaged entry was served again on every later request. The
-        # sibling ``get`` self-heals (it parses, and drops the entry on any
-        # failure); this one poisoned a key permanently.
-        #
-        # An Arrow IPC stream opens with the 0xFFFFFFFF continuation marker and
-        # closes with an end-of-stream marker, both fixed. The bytes are already
-        # in memory, so checking twelve of them costs nothing and catches the
-        # damage that matters: a zeroed or empty entry at the head, a truncated
-        # one at the tail. ``put`` also fsyncs, so a crash is far less likely to
-        # produce either shape to begin with.
+        # This path does not parse Arrow, and keys are never invalidated, so a damaged entry would
+        # be served on every later request (``get`` self-heals by parsing). The fixed head and tail
+        # markers are already in memory: checking them costs nothing and catches a zeroed, empty or
+        # truncated entry.
         if not (data.startswith(_IPC_STREAM_HEAD) and data.endswith(_IPC_STREAM_TAIL)):
             self._delete_entry_files(path)
             return None
@@ -404,31 +382,24 @@ class DiskCache:
         import uuid
 
         path = self._key_path(key)
-        # Use unique suffix to avoid race between concurrent writers
+        # Unique suffix so concurrent writers do not race on one temp file.
         unique_suffix = uuid.uuid4().hex[:8]
         tmp_path = path.with_suffix(f".{unique_suffix}.tmp")
         meta_path = self._meta_path(path)
         meta_tmp_path = meta_path.with_suffix(f".{unique_suffix}.tmp")
 
         try:
-            # Serialize to stream format (same as network transfer format)
             sink = pa.BufferOutputStream()
             writer = ipc.new_stream(sink, batch.schema)
             writer.write_batch(batch)
             writer.close()
             stream_bytes = sink.getvalue().to_pybytes()
 
-            # Write to temp file first, and fsync before the rename below.
-            # os.replace is atomic for *observers*, but atomicity is not
-            # durability: after a power loss the rename can survive while the
-            # data blocks it points at do not, leaving a correctly-named entry
-            # full of garbage. That is unrecoverable here, because cache keys
-            # are immutable snapshot IDs and nothing ever invalidates an entry.
-            # This costs one flush on the miss path only, which has already
-            # paid for a Parquet read from object storage.
+            # fsync before the rename: os.replace is atomic for observers, not durable. After a
+            # power loss the rename can survive while its data blocks do not, and with immutable
+            # keys nothing would ever invalidate that entry. Costs one flush, on the miss path only.
             _write_durably(tmp_path, stream_bytes)
 
-            # Write metadata sidecar
             metadata = CacheEntryMetadata(
                 table_id=key.table_id,
                 snapshot_id=key.snapshot_id,
@@ -441,17 +412,15 @@ class DiskCache:
             )
             _write_durably(meta_tmp_path, json.dumps(asdict(metadata)).encode())
 
-            # Atomic rename both files
-            # If another thread already wrote, that's fine - we just overwrite with same data
+            # Another thread may already have written this entry; overwriting it with the same data
+            # is fine.
             os.replace(tmp_path, path)
             os.replace(meta_tmp_path, meta_path)
 
             self.metrics.record_cache_write(len(stream_bytes))
 
-            # Evict old entries if over size limit
             self._evict_if_needed()
         except Exception:
-            # Failed to write, clean up temp files
             tmp_path.unlink(missing_ok=True)
             meta_tmp_path.unlink(missing_ok=True)
             raise
@@ -465,17 +434,9 @@ class DiskCache:
         import shutil
 
         for item in self.cache_dir.iterdir():
-            # Skip the metadata database - it's managed by MetadataStore.
-            #
-            # That means the -wal and -shm sidecars too. MetadataStore runs in
-            # WAL mode, where those two files are part of the database, not
-            # scratch beside it: the -wal holds committed transactions that
-            # have not been checkpointed into the main file yet, and the -shm
-            # is the shared index into it, mapped by every live connection
-            # (the store keeps one per thread). Matching only the exact name
-            # deleted both out from under an open database that this method
-            # says it preserves, which risks losing committed metadata and can
-            # leave a connection raising SQLITE_IOERR ("disk I/O error").
+            # Skip the metadata database (MetadataStore's) and its -wal / -shm sidecars. In WAL mode
+            # those hold committed, uncheckpointed transactions and the index every live connection
+            # maps; deleting them can lose metadata and raise SQLITE_IOERR.
             if item.name.startswith("metadata.sqlite"):
                 continue
             if item.is_dir():
@@ -534,17 +495,13 @@ class DiskCache:
                 total_size += data_path.stat().st_size
                 timestamps.append(meta.created_at)
 
-                # Count by table
                 by_table[meta.table_id] = by_table.get(meta.table_id, 0) + 1
 
-                # Count by snapshot
                 snap_key = f"{meta.table_id}:{meta.snapshot_id}"
                 by_snapshot[snap_key] = by_snapshot.get(snap_key, 0) + 1
             except Exception:
-                # Skip corrupted metadata files
                 continue
 
-        # Sort timestamps to find oldest/newest
         timestamps.sort()
         oldest = timestamps[0] if timestamps else None
         newest = timestamps[-1] if timestamps else None
@@ -595,7 +552,6 @@ class DiskCache:
 
         size_before = current_size
 
-        # Get all cache files sorted by modification time (oldest first)
         versioned_dir = self.cache_dir / f"v{CACHE_VERSION}"
         if not versioned_dir.exists():
             return
@@ -604,23 +560,20 @@ class DiskCache:
             files.append((path, path.stat().st_mtime, path.stat().st_size))
         files.sort(key=lambda x: x[1])
 
-        # Evict until under limit (target 80% to avoid evicting on every put)
+        # Target 80% to avoid evicting on every put.
         target_size = int(self.max_size_bytes * 0.8)
         evicted_count = 0
         evicted_bytes = 0
         while current_size > target_size and files:
             path, _, size = files.pop(0)
             path.unlink(missing_ok=True)
-            # Also remove metadata sidecar
             self._meta_path(path).unlink(missing_ok=True)
             current_size -= size
             evicted_count += 1
             evicted_bytes += size
 
-        # Record eviction metrics
         if evicted_count > 0:
             self.metrics.record_cache_eviction(evicted_count, evicted_bytes)
-            # Record detailed eviction event
             tracker = get_eviction_tracker()
             tracker.record_eviction(
                 files_evicted=evicted_count,
@@ -669,7 +622,6 @@ class CachedFetcher:
         self.config = config
         self.metrics = metrics or MetricsCollector()
 
-        # Create fetcher with S3 filesystem if configured
         if fetcher is None:
             s3_filesystem = None
             if config.s3_region or config.s3_access_key or config.s3_anonymous:
@@ -683,9 +635,8 @@ class CachedFetcher:
             self.fetcher = fetcher
 
         self.cache = cache or DiskCache(config, self.metrics)
-        # Row groups being read from storage right now, by cache key. Scans that
-        # miss on the same row group at once used to read it once each: sixteen
-        # concurrent cold scans of one table fetched its 37 row groups 127 times.
+        # Row groups being read from storage right now, by cache key, so concurrent scans that miss
+        # on one row group read it once.
         self._flights: dict[CacheKey, _Flight] = {}
         self._flights_lock = threading.Lock()
 
@@ -696,11 +647,9 @@ class CachedFetcher:
             return batch
         if batch.schema.names == columns:
             return batch
-        # Index by NAME, not by ``get_field_index``: that returns -1 for a name
-        # it does not know, and ``batch.column(-1)`` is the last column, so an
-        # unknown column silently came back holding another column's values.
-        # The planner now rejects those before a task is ever built; this keeps
-        # the helper itself loud rather than wrong, at identical cost.
+        # Index by NAME: ``get_field_index`` returns -1 for an unknown name, and
+        # ``batch.column(-1)`` is the last column, so an unknown column would silently hold another
+        # column's values.
         return pa.RecordBatch.from_arrays(
             [batch.column(name) for name in columns],
             names=columns,
@@ -777,7 +726,6 @@ class CachedFetcher:
         histogram = get_cache_histogram()
         cache_full_row_groups = self.config.cache_granularity == CacheGranularity.ROW_GROUP
 
-        # Fetch from storage with tracing
         with trace_span(
             "fetch_row_group",
             file_path=task.file_path,
@@ -791,13 +739,11 @@ class CachedFetcher:
             span.set_attribute("bytes_read", batch.nbytes)
             span.set_attribute("num_rows", batch.num_rows)
 
-        # Record miss in histogram
         histogram.record_miss(
             bytes_accessed=batch.nbytes,
             table_id=task.cache_key.table_id,
         )
 
-        # Store in cache
         self.cache.put(task.cache_key, batch)
         flight.batch = batch
 
@@ -855,7 +801,6 @@ class CachedFetcher:
         """
         for task in plan.tasks:
             batch = self.fetch(task)
-            # Serialize to IPC stream format
             sink = pa.BufferOutputStream()
             writer = ipc.new_stream(sink, batch.schema)
             writer.write_batch(batch)
@@ -882,7 +827,6 @@ class CachedFetcher:
         histogram = get_cache_histogram()
         cache_full_row_groups = self.config.cache_granularity == CacheGranularity.ROW_GROUP
 
-        # Check if DiskCache (not just Cache protocol) for optimized path
         if isinstance(self.cache, DiskCache) and not (
             cache_full_row_groups and task.columns is not None
         ):
@@ -896,28 +840,22 @@ class CachedFetcher:
                     elapsed_ms=0.0,
                     from_cache=True,
                 )
-                # Record hit in histogram
                 histogram.record_hit(
                     bytes_accessed=len(stream_bytes),
                     table_id=task.cache_key.table_id,
                 )
                 return stream_bytes
 
-        # Cache miss or non-DiskCache: fetch, cache, serialize
-        # Note: self.fetch() may record its own metrics with batch.nbytes,
-        # but we override task.bytes_read below to reflect actual IPC stream size.
         batch = self.fetch(task)
 
-        # Serialize to IPC stream format
         sink = pa.BufferOutputStream()
         writer = ipc.new_stream(sink, batch.schema)
         writer.write_batch(batch)
         writer.close()
         stream_bytes = sink.getvalue().to_pybytes()
 
-        # Set task metrics to reflect actual output (IPC stream bytes)
-        # This overrides bytes_read set by fetch() to use stream size for consistency
+        # Report the IPC stream size, overriding the bytes_read that fetch() set.
         task.bytes_read = len(stream_bytes)
-        # task.cached already set by fetch() (True if cache hit, False if miss)
+        # task.cached was already set by fetch().
 
         return stream_bytes

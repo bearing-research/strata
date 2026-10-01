@@ -143,7 +143,6 @@ class ArtifactService:
         visited: set[str] = set()
         queue: list[tuple[str, str, int, int]] = []  # (uri, artifact_id, version, depth)
 
-        # Add root node
         root_meta = _build_metadata(artifact.transform_spec)
         nodes[artifact_uri] = LineageNode(
             uri=artifact_uri,
@@ -161,7 +160,6 @@ class ArtifactService:
         )
         visited.add(artifact_uri)
 
-        # Parse input_versions and add to queue
         direct_inputs: list[str] = []
         for input_uri, input_version in _load_input_versions(artifact.input_versions).items():
             direct_inputs.append(input_uri)
@@ -182,7 +180,7 @@ class ArtifactService:
                 visited.add(input_uri)
                 nodes[input_uri] = _leaf_node(input_uri, input_version)
 
-        # BFS to traverse transitive dependencies
+        # BFS over transitive dependencies.
         max_depth_reached = 0
         while queue:
             uri, art_id, art_ver, depth = queue.pop(0)
@@ -196,11 +194,9 @@ class ArtifactService:
                 continue
             visited.add(node_uri)
 
-            # Get the artifact
             input_artifact = store.get_artifact(art_id, art_ver)
-            # A superseded version is still read by id and version, and a
-            # published chain keeps it, so it is a step of the chain like any
-            # other. Treating it as unknown cut the chain off at a rerun cell.
+            # Superseded versions are still readable by id and version and stay in published
+            # chains, so they count as steps rather than unknowns.
             if (
                 input_artifact is None
                 or input_artifact.state not in ("ready", "superseded")
@@ -210,7 +206,7 @@ class ArtifactService:
                     and input_artifact.tenant != tenant_filter
                 )
             ):
-                # Add as unknown node
+                # Bare node: missing, not ready, or another tenant's.
                 nodes[node_uri] = LineageNode(
                     uri=node_uri,
                     artifact_id=art_id,
@@ -235,7 +231,6 @@ class ArtifactService:
                 content_sha256=input_artifact.content_sha256,
             )
 
-            # Add this artifact's inputs to queue
             for inp_uri, inp_version in _load_input_versions(input_artifact.input_versions).items():
                 resolved_input = _input_version_to_artifact_ref(inp_uri, inp_version)
                 edge_from_uri = resolved_input[0] if resolved_input is not None else inp_uri

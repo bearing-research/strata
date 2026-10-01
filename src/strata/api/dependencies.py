@@ -24,12 +24,9 @@ from typing import Annotated, NamedTuple
 
 from fastapi import Depends, HTTPException
 
-# Imported at runtime (not under TYPE_CHECKING): the typed-dependency aliases
-# below embed these in ``Annotated[...]`` as concrete classes, not string
-# forward refs. A router module that uses an alias (e.g. ``store: ReadStore``)
-# has FastAPI run ``get_type_hints`` against *that module's* globals, where
-# these names are absent — a string forward ref would fail to resolve there
-# (it only worked while the handlers lived in ``server.py``, which imports them).
+# Imported at runtime, not under TYPE_CHECKING: the aliases below embed these in ``Annotated[...]``,
+# and FastAPI resolves hints against the router module's globals, where a string forward ref would
+# not resolve.
 from strata.artifact_store import ArtifactStore
 from strata.transforms.build_store import BuildStore
 from strata.types import Principal
@@ -213,16 +210,8 @@ def require_notebook_worker_admin() -> None:
     _require_notebook_worker_admin_access()
 
 
-# --- Build-store / signed-transport gate (#295) -----------------------------
-# The signed build-transport routes (status / manifest / download / upload /
-# finalize) need two things the handler used to hand-wire: a mode check
-# (``build_transport_available``) and the resolved runtime build store
-# (``runtime_build_store``). The plain helpers were ``server._build_transport_
-# available`` / ``server._get_runtime_build_store``, reached by the builds router
-# via lazy import; they live here now so a router imports them at module top
-# instead of from ``strata.server``. The ``Depends`` wrappers below bind the mode
-# gate and the store resolution together for the routes where that ordering is
-# behavior-preserving.
+# --- Build-store / signed-transport gate ---
+# The ``Depends`` wrappers below bind the mode gate and the store resolution together.
 
 
 def build_transport_available() -> bool:
@@ -299,15 +288,10 @@ def require_build_transport_store() -> BuildStore:
 BuildTransportStore = Annotated[BuildStore, Depends(require_build_transport_store)]
 
 
-# --- Table-input resolution + ACL (#295) ------------------------------------
-# ``_resolve_input_version`` resolved a table/artifact/name URI to a version AND
-# ACL-gated table inputs in one inline server helper — the finding-1 fix
-# (deny-first on *every* table input) lived there, shared by materialize,
-# explain, and name-status staleness. The pure resolution moved to
-# ``MaterializeService.resolve_input_version`` (unit-testable, raises a domain
-# error). What stays request-scoped — the table ACL and the HTTP mapping — lives
-# here, so the materialize/explain handlers and the names router call one
-# enforced unit instead of reaching into ``strata.server``.
+# --- Table-input resolution + ACL ---
+# Pure resolution lives in ``MaterializeService.resolve_input_version``. The request-scoped table
+# ACL and HTTP mapping live here, so materialize, explain and the names router share one enforced
+# unit.
 
 
 def authorize_table_access(table_uri: str, table_identity) -> None:
@@ -383,12 +367,10 @@ def resolve_input_version(input_uri: str, tenant: str | None = None) -> str:
     from strata.services.materialize import InputResolutionError, materialize_service
 
     store = _get_artifact_store(allow_server_mode=True)
-    # A table input is authorized before it is planned, on the identity its URI
-    # names, as the scan path does. Planning first answered a denied caller
-    # with the plan's failure: a 422 naming the table and its delete files, or
-    # a 400 that materialize treats as a legacy URI and builds past, the ACL
-    # never consulted. The check after resolution stays, for a catalog that
-    # resolves the table to another identity.
+    # Authorize a table input before planning, on the identity its URI names, as the scan path does.
+    # Planning first would answer a denied caller with the plan's failure (naming the table and its
+    # delete files) or a 400 that materialize builds past. The check after resolution stays, for a
+    # catalog that resolves the table to another identity.
     if input_uri.startswith(("file://", "s3://")):
         authorize_table_access(input_uri, _table_identity_from_uri(input_uri))
     try:
@@ -398,15 +380,12 @@ def resolve_input_version(input_uri: str, tenant: str | None = None) -> str:
     except InputResolutionError as e:
         raise HTTPException(status_code=e.status_code, detail=e.detail) from e
 
-    # Gate table inputs through the same ACL as the direct scan path — a
-    # transform input must not bypass it. Run after resolution (outside the
-    # error mapping) so a 401/403/404 isn't rewritten into a 400.
+    # Same ACL as the direct scan path, so a transform input cannot bypass it. Runs after resolution
+    # (outside the error mapping) so a 401/403/404 isn't rewritten into a 400.
     if resolved.table_identity is not None:
         authorize_table_access(input_uri, resolved.table_identity)
-    # Gate artifact inputs through the same tenant + provenance-ACL checks a
-    # direct GET /v1/artifacts/{id} runs. Without this, naming another
-    # tenant's artifact as a transform input read its blob with no check at
-    # any layer — and in pull mode handed back a signed URL for it.
+    # Same tenant + provenance-ACL checks as a direct GET /v1/artifacts/{id}. Otherwise a transform
+    # input could read another tenant's blob, or in pull mode get a signed URL for it.
     if resolved.artifact is not None:
         _ensure_artifact_access(resolved.artifact, tenant)
         _authorize_artifact_read(resolved.artifact)

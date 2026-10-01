@@ -43,7 +43,6 @@ type ExcInfo = (
     | None
 )
 
-# Context variable for request-scoped data
 _request_context: contextvars.ContextVar[JsonObject] = contextvars.ContextVar(
     "request_context", default={}
 )
@@ -188,7 +187,6 @@ class StructuredFormatter(logging.Formatter):
         self.include_timestamp = include_timestamp
 
     def format(self, record: logging.LogRecord) -> str:
-        # Base log entry
         log_entry: JsonObject = {
             "level": record.levelname.lower(),
             "logger": record.name,
@@ -198,27 +196,21 @@ class StructuredFormatter(logging.Formatter):
         if self.include_timestamp:
             log_entry["timestamp"] = time.time()
 
-        # Add request context
         ctx = get_request_context()
         if ctx:
             log_entry.update(ctx)
 
-        # Add trace context if available
         trace_ctx = get_trace_context()
         if trace_ctx:
             log_entry.update(trace_ctx)
 
-        # Add extra attributes passed via logger.info("msg", extra={...})
-        # or via our custom logging methods
         structured_data = getattr(record, "structured_data", None)
         if isinstance(structured_data, dict):
             log_entry.update(cast(JsonObject, structured_data))
 
-        # Add exception info if present
         if record.exc_info:
             log_entry["exception"] = self.formatException(record.exc_info)
 
-        # Add source location for errors/warnings
         if record.levelno >= logging.WARNING:
             log_entry["source"] = {
                 "file": record.pathname,
@@ -233,10 +225,8 @@ class TextFormatter(logging.Formatter):
     """Human-readable text formatter with context for development."""
 
     def format(self, record: logging.LogRecord) -> str:
-        # Build context string
         ctx_parts = []
 
-        # Request context
         ctx = get_request_context()
         request_id = ctx.get("request_id")
         if isinstance(request_id, str):
@@ -254,14 +244,12 @@ class TextFormatter(logging.Formatter):
         if isinstance(transform_ref, str):
             ctx_parts.append(f"transform={transform_ref}")
 
-        # Trace context
         trace_ctx = get_trace_context()
         if "trace_id" in trace_ctx:
             ctx_parts.append(f"trace={trace_ctx['trace_id'][:8]}")
 
         ctx_str = f"[{' '.join(ctx_parts)}] " if ctx_parts else ""
 
-        # Structured data
         data_str = ""
         structured_data = getattr(record, "structured_data", None)
         if isinstance(structured_data, dict) and structured_data:
@@ -291,7 +279,6 @@ class StructuredLogger(logging.Logger):
     ) -> None:
         """Internal method to log with structured data."""
         if self.isEnabledFor(level):
-            # Create record with extra structured data
             normalized_exc_info = _normalize_exc_info(exc_info)
             record = self.makeRecord(
                 self.name,
@@ -305,7 +292,6 @@ class StructuredLogger(logging.Logger):
                 extra=None,
                 sinfo=None,
             )
-            # Attach structured data to the record
             structured_data: JsonObject = {}
             if extra is not None:
                 structured_data.update(cast(JsonObject, dict(extra)))
@@ -441,10 +427,8 @@ class StructuredLogger(logging.Logger):
         )
 
 
-# Register our custom logger class
 logging.setLoggerClass(StructuredLogger)
 
-# Module-level state
 _configured = False
 _log_format = os.environ.get("STRATA_LOG_FORMAT", "json").lower()
 
@@ -469,7 +453,6 @@ def configure_logging(
     format = format or os.environ.get("STRATA_LOG_FORMAT", "json").lower()
     _log_format = format
 
-    # Create handler
     handler = logging.StreamHandler(sys.stderr)
 
     if format == "text":
@@ -477,13 +460,11 @@ def configure_logging(
     else:
         handler.setFormatter(StructuredFormatter())
 
-    # Configure root logger for strata
     root_logger = logging.getLogger("strata")
     root_logger.setLevel(getattr(logging, level, logging.INFO))
     root_logger.addHandler(handler)
     root_logger.propagate = False
 
-    # Also configure uvicorn loggers to use our format
     for logger_name in ["uvicorn", "uvicorn.error", "uvicorn.access"]:
         uvicorn_logger = logging.getLogger(logger_name)
         uvicorn_logger.handlers = [handler]
@@ -500,14 +481,12 @@ def get_logger(name: str) -> StructuredLogger:
     Returns:
         StructuredLogger instance
     """
-    # Ensure logging is configured
     if not _configured:
         configure_logging()
 
     return cast(StructuredLogger, logging.getLogger(name))
 
 
-# FastAPI middleware for request context
 async def request_context_middleware(request, call_next):
     """FastAPI middleware that sets up request context with correlation IDs.
 
@@ -520,18 +499,14 @@ async def request_context_middleware(request, call_next):
     When OpenTelemetry tracing is enabled, trace_id and span_id are automatically
     included in log entries via get_trace_context().
     """
-    # Import tenant context (lazy import to avoid circular dependencies)
+    # Lazy import to avoid a circular dependency.
     from strata.tenant import get_tenant_id
 
-    # Get or generate request ID
     request_id = request.headers.get("X-Request-ID") or generate_request_id()
 
-    # Get tenant_id from tenant context (set by tenant middleware)
-    # Note: tenant middleware runs AFTER this middleware in the stack,
-    # so we access the context at response time for accurate tenant_id
+    # Set by the tenant middleware: registered later, so it wraps this one and runs first.
     tenant_id = get_tenant_id()
 
-    # Set up request context
     token = set_request_context(
         request_id=request_id,
         method=request.method,
@@ -539,7 +514,6 @@ async def request_context_middleware(request, call_next):
         tenant_id=tenant_id,
     )
 
-    # Add request_id to response headers for client correlation
     try:
         response = await call_next(request)
         response.headers["X-Request-ID"] = request_id
