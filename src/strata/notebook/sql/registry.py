@@ -1,8 +1,4 @@
-"""Driver adapter registry.
-
-Adapters register themselves at import time; the executor looks them
-up by name (matched against ``ConnectionSpec.driver``).
-"""
+"""Driver adapter registry, keyed by name (matched against ``ConnectionSpec.driver``)."""
 
 from __future__ import annotations
 
@@ -16,21 +12,15 @@ _REGISTRY: dict[str, DriverAdapter] = {}
 
 
 def register_adapter(adapter: DriverAdapter) -> None:
-    """Register a ``DriverAdapter`` under its ``name``.
-
-    Called at module import time by each driver implementation.
-    Re-registration replaces the previous entry; tests that swap
-    adapters in and out can rely on this.
-    """
+    """Register a ``DriverAdapter`` under its ``name``; re-registration replaces it."""
     _REGISTRY[adapter.name] = adapter
 
 
 def get_adapter(name: str) -> DriverAdapter:
     """Look up the adapter registered for ``name``.
 
-    Raises ``KeyError`` with the known-driver list when ``name`` isn't
-    registered — matches how the executor wants to surface
-    "unknown driver" to users.
+    Raises ``KeyError`` listing the known drivers, which the executor shows as
+    "unknown driver".
     """
     if name not in _REGISTRY:
         known = ", ".join(sorted(_REGISTRY)) or "(none registered)"
@@ -46,22 +36,12 @@ def known_drivers() -> list[str]:
 
 
 def _reset_for_tests() -> None:
-    """Drop all registrations. Test-only helper.
-
-    Tests that use this should restore default adapters after they're
-    done (see ``_restore_defaults_for_tests``) — otherwise later tests
-    in the same session see an empty registry.
-    """
+    """Drop all registrations (test-only); restore with ``_restore_defaults_for_tests``."""
     _REGISTRY.clear()
 
 
 def _restore_defaults_for_tests() -> None:
-    """Re-register the built-in driver adapters.
-
-    Pairs with ``_reset_for_tests`` for fixtures that need to scrub
-    test-only registrations without leaking the empty state into
-    subsequent tests.
-    """
+    """Re-register the built-in adapters; pairs with ``_reset_for_tests``."""
     _REGISTRY.clear()
     from strata.notebook.sql.drivers import register_default_adapters
 

@@ -1,18 +1,9 @@
 """Built-in SQL driver adapters.
 
-Each adapter module exposes a ``register()`` callable that adds its
-``DriverAdapter`` to the global registry. ``register_default_adapters``
-imports each built-in module and calls ``register()``.
-
-**Driver-module convention**: a built-in driver module MUST keep its
-ADBC package import lazy (inside ``open()`` or behind a guard) so
-importing the module always succeeds, even when the optional ADBC
-package isn't installed. The adapter still registers; ``open()``
-raises a clear ``RuntimeError`` at execute time with the install hint.
-
-This convention means we don't need to swallow ``ImportError`` here —
-a real bug in a driver module surfaces immediately instead of being
-masked as "driver unavailable."
+Each module exposes ``register()``, which ``register_default_adapters`` calls.
+A driver module must import its ADBC package lazily (inside ``open()``), so the
+module always imports and registers, and ``open()`` raises a ``RuntimeError``
+with the install hint. ``ImportError`` is therefore never swallowed here.
 """
 
 from __future__ import annotations
@@ -32,15 +23,9 @@ _BUILTIN_DRIVERS: tuple[str, ...] = (
 def register_default_adapters() -> None:
     """Import each built-in driver module and call its ``register()``.
 
-    Calling ``register()`` explicitly (rather than relying on
-    module-level side effects) is necessary because Python caches
-    imported modules: a second import doesn't re-execute the module
-    body, so a registry that was reset via ``_reset_for_tests`` would
-    stay empty if we only relied on import-time registration.
-
-    Idempotent. ``ImportError`` from a built-in driver module
-    propagates — that means a real bug, not a missing optional
-    package.
+    Explicit, not import-time registration, because a cached module does not
+    re-run on import and a registry reset by ``_reset_for_tests`` would stay
+    empty. Idempotent. ``ImportError`` from a built-in module propagates as a bug.
     """
     for module_name in _BUILTIN_DRIVERS:
         mod = importlib.import_module(f"strata.notebook.sql.drivers.{module_name}")
@@ -54,8 +39,5 @@ def register_default_adapters() -> None:
 
 
 def builtin_driver_names() -> tuple[str, ...]:
-    """List of built-in driver module names ``register_default_adapters``
-    will import. Used by tests to verify every advertised driver
-    actually exists and registers.
-    """
+    """Names of the built-in driver modules ``register_default_adapters`` imports."""
     return _BUILTIN_DRIVERS

@@ -81,9 +81,9 @@ class PromptAnalysis:
 
 
 def analyze_prompt_cell(source: str) -> PromptAnalysis:
-    """Analyze a prompt cell's source to extract references and config.
+    """Extract references and config from a prompt cell's source.
 
-    The source format is::
+    Source format::
 
         # @name summary
         # @model claude-sonnet-4-20250514
@@ -91,9 +91,6 @@ def analyze_prompt_cell(source: str) -> PromptAnalysis:
         # @output json
         # @system You are a data analyst.
         Summarize {{ df }} by category and list {{ metrics }}.
-
-    Returns:
-        PromptAnalysis with defines, references, and prompt config.
     """
     result = PromptAnalysis()
 

@@ -1,16 +1,12 @@
 #!/usr/bin/env python3
 """Pool worker script that runs in the notebook subprocess.
 
-Single-shot: the worker imports common deps, sends a ``ready`` signal,
-reads exactly one manifest path from stdin, executes it, prints the
-JSON result, and exits. The parent (``WarmProcessPool``) kills the
-worker after every cell to preserve per-cell isolation (sys.path,
-os.environ, and module-state cannot leak between cells), so any
-reuse loop here would be unreachable.
+Single-shot: imports common deps, sends ``ready``, reads one manifest path from
+stdin, executes it, prints the JSON result and exits. ``WarmProcessPool`` kills
+it after every cell so no process state leaks between cells.
 
-This script runs in the notebook's venv and cannot ``import strata``.
-Serialization is delegated to ``serializer.py`` in the same directory,
-loaded via ``importlib.util``.
+Runs in the notebook's venv and cannot ``import strata``; ``serializer.py`` in
+the same directory is loaded via ``importlib.util``.
 """
 
 import importlib.util
@@ -28,11 +24,10 @@ import orjson
 
 
 def _dumps_result(result: dict) -> str:
-    """Encode a harness result for stdout.
+    """Encode a harness result as a str for stdout.
 
-    default=str catches anything orjson can't encode (previews are
-    display-only, so stringifying exotic values is safe). Returns str
-    rather than bytes so callers can use ``print(..., flush=True)``.
+    ``default=str`` stringifies anything orjson cannot encode; previews are
+    display-only, so that is safe.
     """
     return orjson.dumps(
         result,
@@ -167,13 +162,10 @@ def _inject_mounts(manifest: dict, namespace: dict[str, Any]) -> None:
 
 
 def _inject_tables(manifest: dict, namespace: dict[str, Any]) -> None:
-    """Inject ``@table`` lake inputs into the warm worker namespace.
+    """Inject ``@table`` inputs (``<name>`` and ``<name>_snapshot``) into the namespace.
 
-    Mirrors ``harness.inject_tables``: each declaration becomes ``<name>``
-    (the table URI) and ``<name>_snapshot`` (the resolved snapshot id). The
-    standalone harness path injects both mounts and tables; the warm pool
-    worker must too, or an ``@table`` cell run through the pool fails with
-    ``NameError`` for the injected variable.
+    Must match ``harness.inject_tables``, or a pool-run ``@table`` cell fails with
+    ``NameError``.
     """
     tables = manifest.get("tables", {})
     for table_name, spec in tables.items():
@@ -182,11 +174,9 @@ def _inject_tables(manifest: dict, namespace: dict[str, Any]) -> None:
 
 
 def _inject_client(manifest: dict, namespace: dict[str, Any]) -> Any:
-    """Inject an ambient ``strata`` client into the warm worker namespace.
+    """Inject an ambient ``strata`` client, as ``harness.inject_client`` does.
 
-    Mirrors ``harness.inject_client``. Returns the client so the caller
-    can close it — the warm worker process is reused across cells, so a
-    leaked ``httpx.Client`` would accumulate sockets. ``None`` if no
+    Returns the client so the caller can close it, or ``None`` if no
     ``strata_url`` is set.
     """
     url = manifest.get("strata_url")
@@ -218,15 +208,9 @@ def _inject_client(manifest: dict, namespace: dict[str, Any]) -> Any:
 def build_env_identity() -> str:
     """Which interpreter, on which machine, produced these bytes.
 
-    A duplicate of ``harness.build_env_identity``, and deliberately so: both
-    files run inside the notebook venv and cannot ``import strata``, and the
-    value has to describe *this* process rather than the server's. What must
-    not diverge is the format, since a warm-pool result and a cold-harness
-    result land in the same shared cache and are compared as strings.
-
-    Omitting it here was invisible in tests — they exercise the cold path —
-    and only showed up against a live team store, where every warm-pool
-    artifact published with no platform recorded at all.
+    Duplicates ``harness.build_env_identity`` because this file cannot
+    ``import strata``. The format must match: warm-pool and cold-harness results
+    land in the same shared cache and are compared as strings.
     """
     version = f"{sys.version_info.major}.{sys.version_info.minor}"
     return (

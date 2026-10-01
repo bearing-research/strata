@@ -1,17 +1,11 @@
 """Durable snapshots for warehouses with time travel (``# @cache snapshot``).
 
-Snowflake and BigQuery expose no per-table snapshot id, but both can query a
-table as it stood at a timestamp: ``AT (TIMESTAMP => ...)`` and ``FOR
-SYSTEM_TIME AS OF ...``. So a snapshot here is a timestamp. The first run of a
-snapshot cell reads the warehouse clock and runs its query pinned there; the
-timestamp is the freshness token, and it is recorded on the artifact. Later
-runs of the same query find it there and reuse it, so they hit the cache, and a
-run with the cache off replays the same state even after new rows land. Only a
-change to the cell (query, binds, connection, upstream inputs) or a rerun takes
-a new timestamp.
-
-A timestamp stays queryable only within the warehouse's retention window, so
-each pin records how long it is good for (``valid_until``).
+Snowflake and BigQuery have no per-table snapshot id, so a snapshot is a
+timestamp: the first run reads the warehouse clock and pins the query there, and
+the timestamp is recorded on the artifact as the freshness token. Later runs
+reuse it, so they hit the cache or replay the same state; only a change to the
+cell or a rerun takes a new one. Each pin records ``valid_until``, the end of
+the warehouse's retention window.
 """
 
 from __future__ import annotations
@@ -77,15 +71,11 @@ def plus(at: str, delta: timedelta) -> str:
 def pin_tables(sql: str, dialect: str, template: str, clause_key: str) -> str:
     """Attach the time-travel clause of *template* to every table *sql* reads.
 
-    *template* is a one-table query in *dialect* carrying the clause, and
-    *clause_key* is where sqlglot keeps it on a ``Table`` (``when`` for
-    Snowflake's ``AT``, ``version`` for BigQuery's ``FOR SYSTEM_TIME``).
-
-    The tables pinned are the ones the analyzer counts as the cell's inputs,
-    scope by scope, so a base table that shares a name with a CTE in another
-    scope is pinned rather than read live under a provenance that claims a
-    snapshot. A table the author already pinned keeps the moment they asked
-    for.
+    *template* is a one-table query in *dialect* carrying the clause; *clause_key*
+    is where sqlglot keeps it on a ``Table`` (``when`` for Snowflake, ``version``
+    for BigQuery). Tables are chosen scope by scope as the analyzer does, so a base
+    table sharing a name with a CTE elsewhere is still pinned. A table the author
+    already pinned keeps its moment.
     """
     from strata.notebook.sql.analyzer import base_table_nodes
 

@@ -1,7 +1,7 @@
 """WebSocket handler for real-time notebook execution updates.
 
-Manages WebSocket connections per notebook, dispatches client messages,
-and streams server updates (cell status, console output, execution results).
+Manages connections per notebook, dispatches client frames and streams server
+updates (cell status, console output, execution results).
 """
 
 from __future__ import annotations
@@ -79,20 +79,8 @@ _notebook_connections: dict[str, list[WebSocket]] = {}
 class NotebookExecutionState:
     """Per-notebook WebSocket execution bookkeeping.
 
-    Attributes
-    ----------
-    sequence : int
-        Monotonic outbound message counter for ordering WS broadcasts.
-    running_cell : str or None
-        Cell ID currently executing on the worker.
-    requested_cell : str or None
-        Cell ID the user has asked to run, queued before execution starts.
-    cascade_plan : CascadePlan or None
-        Active cascade plan when a multi-cell cascade is in flight.
-    execution_task : asyncio.Task[Any] or None
-        Background task running the cell; cleared once it completes.
-    control_lock : asyncio.Lock
-        Serializes execution-control transitions (start / stop / requeue).
+    ``requested_cell`` is reserved before execution starts and ``running_cell`` once
+    it runs; ``control_lock`` serializes start / stop / requeue transitions.
     """
 
     sequence: int = 0
@@ -158,13 +146,9 @@ def _make_message(
     *,
     ts: str | None = None,
 ) -> dict[str, Any]:
-    """Build a notebook WebSocket protocol message envelope.
+    """Build a ``{type, seq, ts, payload}`` protocol message envelope.
 
-    Centralizes the ``{type, seq, ts, payload}`` shape every send site
-    used to build inline. ``ts`` defaults to "now"; callers that need
-    multiple messages to share a single timestamp (e.g. the stdout /
-    stderr / output trio emitted from one execution result) pass an
-    explicit value.
+    ``ts`` defaults to now; pass one to make several messages share a timestamp.
     """
     return {
         "type": msg_type,
@@ -206,11 +190,9 @@ def _ensure_execution_state(notebook_id: str) -> NotebookExecutionState:
 def forget_notebook_execution_state(notebook_id: str) -> None:
     """Drop a closed session's bookkeeping, including its sequence counter.
 
-    The counter outlives a disconnect on purpose, so this is the one place it
-    is allowed to go: the session it counted for no longer exists, and the id
-    is never handed out again. The connections list is left alone -- a socket
-    that is still open has to reach its own cleanup, which is what closes the
-    inspect sessions behind it.
+    The counter outlives a disconnect on purpose; this is the one place it may go,
+    since the session id is never reused. Connections are left alone: an open socket
+    has to reach its own cleanup, which closes the inspect sessions behind it.
     """
     _notebook_execution_state.pop(notebook_id, None)
 
@@ -235,8 +217,8 @@ def notebook_has_active_execution(notebook_id: str) -> bool:
 async def cancel_notebook_execution(notebook_id: str) -> list[str]:
     """Cancel whatever a notebook is running; return the cells that were.
 
-    For a quiesce whose timeout ran out: the hold cannot start while a cell is
-    still writing, and a caller that asked for a bounded wait gets one.
+    For a quiesce whose timeout ran out: the hold cannot start while a cell is still
+    writing.
     """
     execution_state = _notebook_execution_state.get(notebook_id)
     if execution_state is None:
@@ -290,16 +272,10 @@ async def _set_cell_idle(
 
 
 async def _broadcast_downstream_stale(notebook_id: str, affected_cell_ids: list[str]) -> None:
-    """Broadcast STALE status for cells downstream of a just-errored cell.
+    """Broadcast STALE status for the cells ``mark_cell_error`` flipped from READY.
 
-    ``Session.mark_cell_error`` returns the list of downstream cells
-    whose status it flipped from READY → STALE; this helper pushes
-    a cell_status frame for each so the frontend stops showing them
-    green when an upstream cell is red.
-
-    A sequence each, for the reason the staleness batch beside this one takes
-    them: a client that dedupes on the number, as the protocol reference tells
-    it to, keeps the first of a shared batch and drops the rest.
+    Each frame takes its own sequence: a client deduping on ``seq``, as the protocol
+    reference says to, would drop all but the first of a shared one.
     """
     for cell_id in affected_cell_ids:
         await _broadcast_message(
@@ -319,14 +295,9 @@ async def _broadcast_staleness_updates(
 ) -> None:
     """Broadcast backend staleness state to all notebook clients.
 
-    Each cell's frame takes its own sequence. Reusing one number for the whole
-    batch made a client that follows the documented advice -- dedupe on ``seq``
-    -- drop every status but the first, including the one saying a cell had
-    finished.
-
-    Status only. What a cell failed *with* is announced by whoever saw it fail,
-    which is the only place that holds the whole of it: an install suggestion
-    and the worker that ran it are on the result, not on the cell.
+    Each cell's frame takes its own sequence, since a client deduping on ``seq``
+    would otherwise drop all but the first. Status only: the failure details belong
+    to whoever saw the cell fail, which holds the result.
     """
     for cell_id, staleness in staleness_map.items():
         causality = session.causality_map.get(cell_id)
@@ -354,12 +325,9 @@ async def _refresh_and_broadcast_changed_staleness(
 ) -> dict[str, CellStaleness]:
     """Recompute notebook staleness and broadcast only changed cells.
 
-    ``mark_error_cell_id`` is the failure counterpart of
-    ``preserve_ready_cell_id``: after the recompute, that cell is error and
-    whatever read its last good result stops claiming ready, as a failure has
-    always marked them. The recompute before it is the point: a failed attempt
-    can have re-run upstreams on its way to failing, and those carry new
-    artifacts that their readers' labels have to follow.
+    *mark_error_cell_id* is the failure counterpart of *preserve_ready_cell_id*:
+    after the recompute, that cell is error and its readers stop claiming ready.
+    Recomputing first matters because a failed attempt may have re-run upstreams.
     """
     # Deliberately on-loop: this runs between a cell's result and its frames,
     # and an await here would let other frames interleave out of order.
@@ -446,9 +414,8 @@ async def _schedule_execution(
 ) -> bool:
     """Schedule notebook execution so the WebSocket can keep receiving messages.
 
-    Draws a sequence only if it sends the busy refusal. Taking one up front
-    spent a number on every successful request without a frame behind it, and
-    the protocol reference tells a client to resync on the gap that leaves.
+    Draws a sequence only when it sends the busy refusal; an unused number would be
+    a gap that tells the client to resync.
     """
     busy_cell: str | None = None
     operation: Any | None = None
@@ -518,12 +485,7 @@ async def _release_execution_request(
 
 
 async def _tear_down_notebook_state(notebook_id: str) -> None:
-    """Cancel the active execution task and drop inspect/exec state.
-
-    Split out of ``_cleanup_notebook_websocket`` so the grace-period task
-    can call it after the reconnect window expires. Idempotent — safe to
-    call when state has already been drained.
-    """
+    """Cancel the active execution task and drop inspect/exec state. Idempotent."""
     execution_state = _notebook_execution_state.get(notebook_id)
     if execution_state is not None:
         task = execution_state.active_task()
@@ -548,10 +510,8 @@ async def _tear_down_notebook_state(notebook_id: str) -> None:
 async def _grace_cancel_then_tear_down(notebook_id: str, grace_seconds: float) -> None:
     """Wait the grace window, then drop notebook state if nobody reconnected.
 
-    Spawned as a background task by ``_cleanup_notebook_websocket`` when
-    the last WS for a notebook disconnects. A reconnect during the
-    window cancels this task before it fires; otherwise the running cell
-    is cancelled and execution / inspect state is dropped.
+    A reconnect during the window cancels this task; otherwise the running cell is
+    cancelled and execution and inspect state are dropped.
     """
     try:
         await asyncio.sleep(grace_seconds)
@@ -612,12 +572,7 @@ async def _cleanup_notebook_websocket(
 
 
 def _cancel_pending_grace_teardown(notebook_id: str) -> None:
-    """Abort any pending teardown task for ``notebook_id``.
-
-    Called from the WS upgrade handler when a new client reconnects to a
-    notebook that's mid-grace-period. Preserves the running execution
-    task + inspect sessions across the disconnect.
-    """
+    """Abort a pending teardown for *notebook_id* when a client reconnects in grace."""
     task = _notebook_grace_tasks.pop(notebook_id, None)
     if task is not None and not task.done():
         task.cancel()
@@ -627,13 +582,10 @@ def _cancel_pending_grace_teardown(notebook_id: str) -> None:
 
 
 def _ws_caller_identity(websocket: WebSocket) -> str | None:
-    """Resolve the calling user's identity from the WS upgrade headers.
+    """Return the caller identity from ``personal_mode_user_header``, or None.
 
-    Mirrors ``routes._caller_identity`` for the WS surface: reads the
-    configured ``personal_mode_user_header`` from the request headers and
-    returns the stripped value (or ``None`` when scoping is unconfigured
-    or the header is absent/blank). The single-user case (header unset)
-    returns ``None`` so the gate passes through unchanged.
+    The WS counterpart of ``routes._caller_identity``. None when per-user scoping is
+    unconfigured or the header is absent or blank, so the gate passes through.
     """
     try:
         from strata.server import get_state
@@ -647,15 +599,11 @@ def _ws_caller_identity(websocket: WebSocket) -> str | None:
 
 
 def _ws_owner_allowed(owner: str | None, caller: str | None) -> bool:
-    """Return whether ``caller`` may open a WS for an ``owner``-scoped notebook.
+    """Return whether *caller* may open a WS for an *owner*-scoped notebook.
 
-    The WS twin of ``routes._require_owner`` (which raises) — same rules,
-    expressed as a boolean so the handler closes with 1008 on ``False``:
-
-    - Unowned notebooks (``owner is None``) → allow (legacy / serviced).
-    - Per-user scoping configured but no caller identity → deny, so the
-      bypass can't be "just don't send the header."
-    - Owned notebook with a mismatched caller → deny.
+    The boolean twin of ``routes._require_owner``: unowned notebooks are allowed; a
+    missing caller identity under per-user scoping is denied (so omitting the header
+    is no bypass); a mismatched owner is denied.
     """
     from strata.notebook.routes import _user_scoping_enabled
 
@@ -677,13 +625,10 @@ _VIEWER_ALLOWED_FRAMES = frozenset(
 
 
 def _configured_auth_mode() -> str:
-    """The server's configured auth mode, or ``"none"`` when unconfigured.
+    """The server's configured auth mode, or ``"none"`` with no ``ServerState``.
 
-    A process with no ``ServerState`` has no auth configuration to enforce —
-    it isn't a running server (the app installs state in its lifespan, so a
-    live deployment always has it). Mirrors the existing convention in
-    ``routes._get_notebook_storage_root``, which treats the same condition as
-    "no configured boundary" rather than erroring.
+    A process without server state is not a running server and has nothing to
+    enforce, as ``routes._get_notebook_storage_root`` also assumes.
     """
     from strata.server import get_state
 
@@ -696,8 +641,7 @@ def _configured_auth_mode() -> str:
 def _frame_scope_error(msg_type: str) -> str | None:
     """Return an error message when the caller lacks the frame's scope.
 
-    ``None`` means allowed — including every no-auth deployment, where there is
-    no principal to check (mirrors ``require_scope``'s own gate).
+    ``None`` means allowed, including every no-auth deployment.
     """
     from strata.auth import get_principal
 
@@ -711,24 +655,13 @@ def _frame_scope_error(msg_type: str) -> str | None:
 
 
 async def _authenticate_websocket(websocket: WebSocket) -> bool:
-    """Authenticate a WS upgrade; False ⇒ already closed.
+    """Authenticate a WS upgrade; False means the socket is already closed.
 
-    ``auth_middleware`` and ``tenant_context_middleware`` are registered with
-    ``@app.middleware("http")``, and Starlette's ``BaseHTTPMiddleware`` passes
-    non-``http`` scopes straight through — so **no** HTTP middleware runs for a
-    WebSocket upgrade. This endpoint therefore has to establish the principal
-    itself, exactly as the HTTP path does; without it, in service mode anything
-    that can open a socket could send ``cell_execute`` and run arbitrary Python
-    with no credential at all.
-
-    Both credentialed modes are handled, and for the same reason the HTTP
-    middleware handles both: under ``api_key`` the key *is* the credential, so
-    there is no proxy and no proxy token to verify. Checking only for
-    ``trusted_proxy`` here left every ``api_key`` deployment's WebSocket wide
-    open while its HTTP surface was authenticated.
-
-    In personal / ``auth_mode="none"`` deployments there is no principal and the
-    socket stays open, matching the HTTP middleware's own early return.
+    No HTTP middleware runs for a WebSocket upgrade (``BaseHTTPMiddleware`` passes
+    non-http scopes through), so this establishes the principal itself; otherwise
+    anything that could open a socket could run code in service mode. Handles both
+    ``trusted_proxy`` and ``api_key``, like the HTTP middleware. With
+    ``auth_mode="none"`` there is no principal and the socket stays open.
     """
     from strata.auth import (
         AuthError,
@@ -769,43 +702,8 @@ async def _authenticate_websocket(websocket: WebSocket) -> bool:
 async def notebook_websocket(websocket: WebSocket, notebook_id: str):
     """WebSocket endpoint for real-time notebook updates.
 
-    Accepts messages (C→S):
-    - cell_execute              Run a cell (check if cascade needed)
-    - cell_execute_cascade      Execute cascade plan
-    - cell_execute_force        Run with stale inputs
-    - cell_execute_rerun        Force re-execute target cell (cache upstreams)
-    - notebook_run_all          Run all non-empty cells in notebook order
-    - notebook_rerun_all        Force re-execute every cell (cache off)
-    - cell_cancel               Cancel execution
-    - cell_source_update        Source code changed (debounced flush)
-    - cell_focus                The cell this client is on, or null
-    - notebook_sync             Request full state
-    - impact_preview_request    Compute upstream + downstream impact
-    - profiling_request         Compute per-cell duration summary
-    - inspect_open              Open an inspect REPL on a cell
-    - inspect_eval              Eval an expression in an open REPL
-    - inspect_close             Close the REPL
-    - dependency_add            Add a Python dep via writer
-    - dependency_remove         Remove a Python dep via writer
-    - variant_set_active        Switch active variant in a group
-    - variant_add               Add a new variant cell
-
-    Sends messages (S→C):
-    - cell_status               Status changed (idle/running/ready/error/stale)
-    - cell_output               Execution result
-    - cell_console              Incremental stdout/stderr
-    - cell_error                Execution failed
-    - cell_iteration_progress   Loop-cell iteration update
-    - cell_variant_progress     @per_variant fan-out per-variant update
-    - dag_update                DAG changed
-    - cascade_prompt            Cascade needed
-    - cascade_progress          Progress during cascade
-    - notebook_state            Full state (response to sync)
-    - impact_preview            Upstream + downstream impact
-    - inspect_result            Result of an inspect_eval
-    - profiling_summary         Per-cell duration summary
-    - presence                  Who is on the session, and on which cell
-    - error                     Generic error frame
+    Frame types are the ``MessageType`` enum in ``protocol.py``;
+    ``docs/reference/notebook-protocol.md`` is the client reference.
     """
     # No HTTP middleware runs for a WS upgrade. First, so an unauthenticated
     # caller can't learn whether a notebook_id exists.
@@ -920,11 +818,7 @@ async def _handle_cell_execute(
     execution_state: NotebookExecutionState,
     notebook_id: str,
 ) -> None:
-    """Handle cell_execute message.
-
-    Check if cascade needed. If yes, send cascade_prompt.
-    If no, execute cell directly.
-    """
+    """Handle cell_execute: send a cascade_prompt if upstreams need running, else run."""
     cell_id = payload.get("cell_id")
     if not cell_id:
         await websocket.send_text(
@@ -1049,12 +943,9 @@ async def _handle_notebook_run_all(
     notebook_id: str,
     payload: dict[str, Any],
 ) -> None:
-    """Handle notebook_run_all message.
+    """Handle notebook_run_all: run every non-empty cell in notebook order.
 
-    Execute all non-empty cells in notebook order. ``continue_on_error``
-    (default ``True``) controls whether the run continues past a failed
-    cell — historically the loop stopped on first failure; with batching
-    (issue #26) the per-cell granularity makes continuing useful.
+    ``continue_on_error`` (default True) keeps the run going past a failed cell.
     """
     continue_on_error = bool(payload.get("continue_on_error", True))
 
@@ -1120,12 +1011,7 @@ async def _handle_notebook_rerun_all(
     notebook_id: str,
     payload: dict[str, Any],
 ) -> None:
-    """Handle notebook_rerun_all message.
-
-    Like ``notebook_run_all`` but every cell bypasses its own cache so the
-    entire notebook is re-executed end-to-end. Accepts the same
-    ``continue_on_error`` (default ``True``) field as ``run_all``.
-    """
+    """Handle notebook_rerun_all: like run_all, but every cell bypasses its own cache."""
     continue_on_error = bool(payload.get("continue_on_error", True))
 
     runnable_cells = [
@@ -1190,10 +1076,7 @@ async def _handle_cell_execute_cascade(
     execution_state: NotebookExecutionState,
     notebook_id: str,
 ) -> None:
-    """Handle cell_execute_cascade message.
-
-    User confirmed cascade — execute all cells in the plan.
-    """
+    """Handle cell_execute_cascade: the user confirmed, so run every cell in the plan."""
     cell_id = payload.get("cell_id")
     plan_id = payload.get("plan_id")
 
@@ -1269,10 +1152,7 @@ async def _handle_cell_execute_force(
     execution_state: NotebookExecutionState,
     notebook_id: str,
 ) -> None:
-    """Handle cell_execute_force message.
-
-    Execute cell with stale inputs ("Run this only").
-    """
+    """Handle cell_execute_force: run the cell with stale inputs ("Run this only")."""
     cell_id = payload.get("cell_id")
     if not cell_id:
         await websocket.send_text(
@@ -1333,11 +1213,7 @@ async def _handle_cell_execute_rerun(
     execution_state: NotebookExecutionState,
     notebook_id: str,
 ) -> None:
-    """Handle cell_execute_rerun message.
-
-    Force re-execute the target cell, bypassing its cache but still
-    materializing upstreams through the normal cache path.
-    """
+    """Handle cell_execute_rerun: bypass the target's cache, materialize upstreams."""
     cell_id = payload.get("cell_id")
     if not cell_id:
         await websocket.send_text(
@@ -1438,10 +1314,8 @@ async def _handle_cell_run_tests(
 ) -> None:
     """Handle cell_run_tests: persist the test source, run it, broadcast results.
 
-    Reuses the cell-execution reservation so a test run (which materializes
-    upstreams) can't race a concurrent cell execution. Emits CELL_TEST_STATUS
-    (running → ready/error) around a CELL_TEST_RESULTS frame. v1 supports
-    Python cells only.
+    Takes the cell-execution reservation, since a test run materializes upstreams.
+    Emits CELL_TEST_STATUS around a CELL_TEST_RESULTS frame. Python cells only.
     """
     cell_id = payload.get("cell_id")
     test_source = payload.get("test_source", "")
@@ -1549,10 +1423,7 @@ async def _handle_cell_cancel(
     execution_state: NotebookExecutionState,
     notebook_id: str,
 ) -> None:
-    """Handle cell_cancel message.
-
-    Cancel a running cell without clobbering completed cell state.
-    """
+    """Handle cell_cancel without clobbering completed cell state."""
     cell_id = payload.get("cell_id")
     if not cell_id:
         return
@@ -1586,10 +1457,7 @@ async def _handle_cell_source_update(
     execution_state: NotebookExecutionState,
     notebook_id: str,
 ) -> None:
-    """Handle cell_source_update message.
-
-    Cell source changed — re-analyze and update DAG.
-    """
+    """Handle cell_source_update: re-analyze the cell and update the DAG."""
     cell_id = payload.get("cell_id")
     source = payload.get("source")
     # Agents send their own name, keeping their edits distinguishable on a
@@ -1761,9 +1629,8 @@ async def _handle_variant_set_active(
 ) -> None:
     """Switch the active variant for a group, then broadcast a dag_update.
 
-    Reuses the same broadcast shape as ``cell_source_update`` since the
-    effect on the DAG is the same: a different cell becomes the producer
-    for the group's defines, downstream cells go stale.
+    The DAG effect matches a source update: a different cell produces the group's
+    defines, and downstream cells go stale.
     """
     group = payload.get("group")
     variant_name = payload.get("name")
@@ -1865,9 +1732,7 @@ async def _handle_variant_add(
 ) -> None:
     """Add a sibling variant to a group, then broadcast a dag_update.
 
-    Same broadcast shape as ``variant_set_active`` since the effect on
-    the DAG is identical: a new cell appears, and (because the new
-    variant becomes active) the producer for the group's defines moves.
+    The new variant becomes active, so the producer of the group's defines moves.
     """
     group = payload.get("group")
     if not isinstance(group, str):
@@ -1931,10 +1796,7 @@ async def _handle_notebook_sync(
     session: NotebookSession,
     notebook_id: str,
 ) -> None:
-    """Handle notebook_sync message.
-
-    Return full notebook state (for reconnection).
-    """
+    """Handle notebook_sync: return the full notebook state (for reconnection)."""
     dag_edges = session.dag.serialize_edges() if session.dag else []
 
     state = session.serialize_notebook_state()
@@ -1960,13 +1822,7 @@ def _make_executor_with_progress(
     session: NotebookSession,
     notebook_id: str,
 ) -> CellExecutor:
-    """Build a CellExecutor whose loop iterations broadcast progress.
-
-    Each iteration of a ``@loop`` cell fires an ``on_iteration_complete``
-    callback; we forward it as a ``cell_iteration_progress`` WS message so
-    the frontend can keep its per-cell iteration badge in sync with the
-    live execution.
-    """
+    """Build a CellExecutor that broadcasts ``cell_iteration_progress`` per loop iteration."""
     executor = CellExecutor(session, session.warm_pool)
 
     async def _broadcast_iteration_progress(progress: dict[str, Any]) -> None:
@@ -2019,16 +1875,11 @@ async def execute_cell_exclusive(
     operation: Callable[[NotebookExecutionState], Coroutine[Any, Any, CellExecutionResult | None]]
     | None = None,
 ) -> CellExecutionResult | None:
-    """Reserve → execute → release for the non-WS drivers (REST, MCP).
+    """Reserve, execute and release for the non-WS drivers (REST, MCP).
 
-    The WS handlers serialize runs through ``_reserve_execution_request`` /
-    ``_schedule_execution`` under ``control_lock``. REST and MCP used to call
-    ``execute_cell_and_broadcast`` directly with no reservation, so an
-    agent-driven run and a browser Run click could execute concurrently on
-    one session — racing ``running_cell``, artifact writes, and leaving the
-    run uncancellable (no ``execution_task`` registered). This wrapper takes
-    the same reservation, registers the run as the execution task (so
-    ``cell_cancel`` and grace teardown can reach it), and raises
+    Takes the same reservation as the WS handlers and registers the run as the
+    execution task, so an agent run and a browser run cannot execute concurrently
+    and ``cell_cancel`` and grace teardown can reach it. Raises
     :class:`NotebookBusyError` when a run is already active.
     """
     execution_state = _ensure_execution_state(notebook_id)
@@ -2070,19 +1921,11 @@ async def execute_cell_and_broadcast(
 ) -> CellExecutionResult | None:
     """Execute a cell and broadcast the live frames to every spectator.
 
-    The single execute path shared by the WS drive (Vue) and the REST drive
-    (the agent CLI / MCP via ``RemoteNotebookOps``), so a cell run produces the
-    same ``cell_status`` → result → staleness frame sequence on a session's WS
-    spectators no matter which transport triggered it. Returns the execution
-    result (``success`` True or False), or ``None`` when the cell is missing or
-    the executor raised unexpectedly.
-
-    ``mode`` selects the executor entry point:
-
-    - ``normal`` — cache-on, materialize upstreams (default).
-    - ``force``  — cache-off, *do not* materialize upstreams ("Run this only").
-    - ``rerun``  — cache-off, but still materialize upstreams (force the
-      target cell only against the current valid upstream graph).
+    Shared by the WS and REST drives, so WS spectators see the same frame sequence
+    whichever transport triggered the run. Returns the execution result, or ``None``
+    when the cell is missing or the executor raised unexpectedly. *mode* is
+    ``normal`` (cache on), ``force`` (cache off, no upstream materialization) or
+    ``rerun`` (cache off, upstreams materialized).
     """
     seq = execution_state.next_sequence()
 
@@ -2184,9 +2027,8 @@ async def _execute_cascade(
 ) -> None:
     """Execute all cells in a cascade plan.
 
-    When ``target_force`` is true, the final step (the user-requested target
-    cell) runs ``execute_cell_rerun`` so its own cache is bypassed; upstream
-    steps still go through normal cached execution.
+    With *target_force*, the final (requested) cell runs ``execute_cell_rerun`` and
+    bypasses its own cache; upstream steps use normal cached execution.
     """
     del websocket
 
@@ -2352,16 +2194,11 @@ async def _execute_run_all(
 ) -> None:
     """Execute all requested notebook cells in notebook order.
 
-    ``force`` is rerun-all semantics: every cell bypasses its own cache.
-
-    The cells are partitioned into runs of consecutive batchable cells (per
-    ``executor.partition_batchable_runs``) — batches go through
-    ``CellExecutor.execute_batch``; non-batchable cells (workers, loops,
-    explicit timeouts, RW mounts) use the existing single-cell
-    ``execute_cell``. Once a cell fails, the rest of the run-all proceeds
-    with ``skip_upstream_materialization=True`` (or aborts entirely when
-    ``continue_on_error`` is False) so the failed cell isn't recursively
-    re-executed via ``_materialize_upstreams``.
+    *force* means rerun-all: every cell bypasses its own cache. Runs of consecutive
+    batchable cells go through ``CellExecutor.execute_batch``; the rest (workers,
+    loops, explicit timeouts, RW mounts) run one at a time. After a failure, cells
+    that read from the failed one are blocked, or the run stops when
+    *continue_on_error* is False.
     """
     del websocket
 
@@ -2478,11 +2315,10 @@ async def _run_partition_batch(
     force: bool,
     execution_state: NotebookExecutionState,
 ):
-    """Execute a partition run via ``execute_batch`` + stream per-cell broadcasts.
+    """Execute a partition run via ``execute_batch``, streaming per-cell broadcasts.
 
-    Returns the raw ``BatchExecutionResult`` so the caller can identify
-    the cells that ended up ``status=not_run`` and route them through
-    single-cell continuation.
+    Returns the raw ``BatchExecutionResult`` so the caller can send ``not_run``
+    cells through single-cell continuation.
     """
     cell_specs: list[dict[str, Any]] = []
     # A failed mount becomes a per-cell error (as in single-cell), not an
@@ -2647,9 +2483,8 @@ async def _run_partition_batch(
 def _upstream_that_failed(session: NotebookSession, cell_id: str, failed: set[str]) -> str | None:
     """The failed cell this one reads from, directly or through others.
 
-    Run All walks display order rather than topological order, so a consumer
-    can come before its producer and the answer has to look past the immediate
-    upstreams.
+    Run All walks display order, not topological order, so a consumer can precede
+    its producer.
     """
     dag = session.dag
     if dag is None or not failed:
@@ -2672,8 +2507,8 @@ async def _mark_blocked_by_failure(
 ) -> None:
     """Say a cell did not run because what it reads from failed.
 
-    Stale rather than error: nothing went wrong in this cell, and its last
-    result, if it has one, is still the last thing it computed.
+    Stale rather than error: nothing went wrong in this cell, and its last result is
+    still the last thing it computed.
     """
     cell = session.notebook_state.get_cell(cell_id)
     if cell is not None:
@@ -2701,13 +2536,11 @@ async def _run_partition_single_cell(
     force: bool,
     execution_state: NotebookExecutionState,
 ) -> bool:
-    """Existing per-cell broadcast flow. Returns True on success.
+    """Run one cell through the per-cell broadcast flow; True on success.
 
-    No cell reaches here with a failed producer behind it: the caller blocks
-    those rather than running them, so upstream materialization is always safe
-    and always correct. It used to be turned off for every cell after a
-    failure, which let a consumer of the failed cell read the artifacts from
-    before it and publish a fresh success built on them.
+    The caller blocks any cell with a failed producer behind it, so upstream
+    materialization here is always safe; a consumer cannot publish a success built
+    on artifacts from before the failure.
     """
     cell_id = cell.id
     execution_state.running_cell = cell_id
@@ -3055,8 +2888,7 @@ async def _handle_dependency_remove(
 async def broadcast_notebook_sync(notebook_id: str, session: Any) -> None:
     """Broadcast full notebook state to all WS clients.
 
-    Used by the REST CRUD routes and the MCP server to push state changes
-    made outside a WebSocket so attached frontends stay in sync.
+    For REST and MCP changes made outside a WebSocket.
     """
     dag_edges = session.dag.serialize_edges() if session.dag else []
 
@@ -3077,14 +2909,9 @@ async def broadcast_notebook_sync(notebook_id: str, session: Any) -> None:
 def _running_payload(session, cell_id: str, source: str) -> dict[str, Any]:
     """Build the payload for a ``cell_status: running`` broadcast.
 
-    If the cell will dispatch to a remote worker, include ``remote_worker``
-    and ``remote_transport`` so the UI can render a live "dispatching → X"
-    badge while the cell executes. Local cells get an unchanged payload.
-
-    Mirrors the precedence chain in
-    :meth:`CellExecutor._resolve_effective_worker`: annotation → cell
-    override → notebook default → implicit local. We consult the same
-    resolver to avoid drifting from the executor's decision.
+    A cell bound for a remote worker adds ``remote_worker`` and ``remote_transport``
+    for the UI's dispatching badge. Uses the executor's own resolver
+    (:meth:`CellExecutor._resolve_effective_worker`) so the two cannot disagree.
     """
     try:
         annotations = parse_annotations(source)
@@ -3118,17 +2945,9 @@ def _running_payload(session, cell_id: str, source: str) -> dict[str, Any]:
 def _execution_result_payload(cell_id: str, result: CellExecutionResult) -> dict[str, Any]:
     """Build the payload for ``cell_output`` (success) or ``cell_error`` (failure).
 
-    Single source of truth for the post-execution payload shape —
-    previously inlined at each execution site (``execute_cell_and_broadcast``,
-    ``_execute_cascade``, ``_execute_run_all``) with ~30 lines of
-    ``**({"key": value} if value else {})`` spreads.
-    Adding a field to ``CellExecutionResult`` used to require touching
-    every site; now it's one place.
-
-    Remote-* fields (worker / transport / build_id / build_state /
-    error_code) appear on both success and failure responses so the
-    frontend can render the same "ran on X via Y" badge regardless of
-    outcome.
+    The one place this shape is built. Remote fields (worker, transport, build_id,
+    build_state, error_code) appear on both, so the UI shows where a cell ran either
+    way.
     """
     payload: dict[str, Any] = {"cell_id": cell_id}
     if result.success:
@@ -3172,16 +2991,9 @@ def _execution_result_payload(cell_id: str, result: CellExecutionResult) -> dict
 async def _broadcast_upstream_results(notebook_id: str, executor: Any) -> None:
     """Announce every cell this run settled on the way to the one asked for.
 
-    A client needs the result and not just a status: the status changes a
-    badge, the result replaces the output the cell is showing and carries what
-    only that run knows, such as an offer to install a missing package. That
-    cuts both ways. A cell that broke needs its error, and a cell that was
-    broken and has now run clean needs the output that takes the error back,
-    or it stays red over a result that is no longer wrong.
-
-    Called from every path that drives an executor. Every cell kind turns a
-    broken upstream into a failed result rather than letting the error out, so
-    a run that found one always reaches here.
+    A client needs each result, not just a status: a broken cell needs its error,
+    and a cell that ran clean again needs the output that clears it. Every cell kind
+    turns a broken upstream into a failed result, so every driving path reaches here.
     """
     for upstream_id, upstream_result in getattr(executor, "upstream_results", {}).items():
         await _broadcast_execution_result(notebook_id, upstream_id, upstream_result)
@@ -3192,22 +3004,11 @@ async def _broadcast_execution_result(
     cell_id: str,
     result: CellExecutionResult,
 ) -> None:
-    """Broadcast the standard execution-finished message sequence.
+    """Broadcast stdout and stderr ``cell_console`` frames, then the result.
 
-    Emits, in order:
-
-    1. ``cell_console`` for stdout (if any)
-    2. ``cell_console`` for stderr (if any)
-    3. ``cell_output`` (success) or ``cell_error`` (failure)
-
-    Each takes its own sequence, drawn as it is sent. Sharing one across the
-    three described one event but broke the contract the protocol reference
-    states, and a client deduping on the number kept the console and dropped
-    the result.
-
-    The execution-driving handlers (``execute_cell_and_broadcast``,
-    ``_execute_cascade``, ``_execute_run_all``) used to inline this block. The cascade
-    path was already drifting — it skipped the stderr broadcast.
+    The result is ``cell_output`` on success or ``cell_error`` on failure. Each
+    frame draws its own sequence as it is sent; a shared one would make a client
+    deduping on ``seq`` keep the console and drop the result.
     """
     ts = datetime.now(tz=UTC).isoformat().replace("+00:00", "Z")
 
@@ -3290,8 +3091,7 @@ async def _broadcast_output_or_error(
 async def broadcast_presence(notebook_id: str, session: NotebookSession) -> None:
     """Send every connection on the session who is on it.
 
-    Sent per connection rather than broadcast, because each frame names the
-    receiver's own identity in ``you``.
+    Per connection, because each frame names the receiver's own identity in ``you``.
     """
     connections = _notebook_connections.get(notebook_id, [])
     if not connections:
@@ -3366,11 +3166,10 @@ async def _run_live_cascade(
 ) -> None:
     """Auto-run the cheap downstream cells after a @live widget change.
 
-    Walks the widget cell's transitive downstream in topological order and runs
-    each currently-stale cell in **force** mode (against the fresh upstream
-    artifacts, no upstream re-materialization). A cell whose last run exceeded
-    the cost threshold — or any cell downstream of a skipped/failed one — is
-    left STALE, so an expensive tail doesn't re-run on every drag.
+    Runs each stale transitive downstream cell in topological order in force mode
+    (no upstream re-materialization). A cell over the cost threshold, or downstream
+    of a skipped or failed one, stays STALE so an expensive tail does not re-run on
+    every drag.
     """
     dag = session.dag
     if dag is None:
@@ -3420,15 +3219,9 @@ async def apply_widget_values(
 ) -> CellExecutionResult | None:
     """Set a widget's controls and re-materialize it, chaining the live cascade.
 
-    The whole of what moving a slider does, so the WebSocket handler and the MCP
-    tool run the same code rather than two copies that drift: an agent's
-    ``set_widget_value`` used to skip the ``# @live`` cascade the browser got,
-    leaving the downstream stale while the docs said the two were the same act.
-
-    The caller must already hold the execution reservation. The values are
-    written here, inside it, so an update refused as busy leaves the stored
-    values exactly as they were: persisting before the busy check left a
-    rejected value on disk for the next materialization to pick up.
+    Shared by the WebSocket handler and the MCP tool so both get the ``# @live``
+    cascade. The caller must hold the execution reservation; values are written
+    inside it, so an update refused as busy leaves the stored values unchanged.
     """
     from strata.notebook.annotations import parse_annotations
     from strata.notebook.runtime_state import persist_cell_widget_values
@@ -3453,14 +3246,10 @@ async def _handle_widget_update(
     execution_state: NotebookExecutionState,
     notebook_id: str,
 ) -> None:
-    """Handle a widget_update: persist new control values, re-materialize the
-    widget cell's value artifacts (force), and broadcast downstream staleness.
+    """Handle widget_update: persist values, re-run the widget cell, flag downstream.
 
-    A widget value change is "an upstream producer's artifact changed" — the
-    same signal as an edited upstream source. Re-running the widget cell in
-    force mode re-stores its value artifacts at the new values; the shared
-    ``execute_cell_and_broadcast`` path then recomputes + broadcasts the
-    downstream staleness (Tier 0 — the user runs the stale cells).
+    A value change is an upstream artifact change: the widget cell re-runs in force
+    mode and downstream cells go stale for the user to run.
     """
     cell_id = payload.get("cell_id")
     values = payload.get("values")
@@ -3548,12 +3337,7 @@ _C2S_HANDLERS: dict[str, _C2SHandler] = {
 
 @cache
 def _handler_args(handler: _C2SHandler) -> tuple[str, ...]:
-    """Return the dispatch arg names this handler declares.
-
-    Cached on first lookup so the per-message dispatch overhead is one
-    dict access. Validated against ``_DISPATCH_FIELDS`` at registration
-    time below so a typo doesn't make it past module import.
-    """
+    """Return the dispatch arg names this handler declares (cached per handler)."""
     return tuple(inspect.signature(handler).parameters)
 
 

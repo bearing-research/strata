@@ -1,27 +1,13 @@
 """Infisical secret-manager integration via the official Python SDK.
 
-Authentication precedence (highest wins):
+Auth, highest first: Universal Auth (``INFISICAL_CLIENT_ID`` +
+``INFISICAL_CLIENT_SECRET``), then a service token (``INFISICAL_TOKEN``); with
+neither, the provider fails naming both. Project routing comes from the
+notebook's ``[secret_manager]`` block, overridable by env vars.
 
-1. **Universal Auth / Machine Identity** —
-   ``INFISICAL_CLIENT_ID`` + ``INFISICAL_CLIENT_SECRET`` in the process
-   environment. This is the path Infisical recommends; service tokens
-   are being deprecated upstream.
-
-2. **Service / access token** — ``INFISICAL_TOKEN`` in the process
-   environment. Kept for backward compatibility so users with an
-   existing service-token setup don't have to migrate immediately.
-
-If neither is set the provider returns a failure with a clear message
-pointing the user at both options.
-
-Project routing (``project_id``, ``environment``, ``path``) comes
-from the notebook's ``[secret_manager]`` block so the non-sensitive info
-can be committed. Override via env vars (``INFISICAL_PROJECT_ID``
-etc.) is supported for quick-start use.
-
-The host is where the server's credentials are sent. On a service-mode server
-it is the operator's alone (``INFISICAL_HOST``, else the public default): a
-notebook's ``base_url`` naming anywhere else is refused before any login.
+The host receives the server's credentials, so in service mode it is the
+operator's alone (``INFISICAL_HOST``, else the public default); a notebook
+``base_url`` naming anywhere else is refused before any login.
 """
 
 from __future__ import annotations

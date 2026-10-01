@@ -1,22 +1,8 @@
-"""``strata agent <path>`` — one-command on-ramp for driving a notebook with a coding agent.
+"""``strata agent <path>``: one command to let a coding agent drive a notebook.
 
-Everything needed to let a coding agent (Claude Code) drive a Strata notebook
-while a human watches it live already exists — the MCP server, the CLI ops, the
-TUI — but assembling them by hand is a fiddly, ordered dance that nobody does.
-This command collapses it into one step:
-
-1. create-or-open the notebook directory,
-2. start (or reuse) a notebook server with the MCP endpoint enabled,
-3. open a warm session — the piece the agent *cannot* do itself
-   (``list_notebooks`` only sees already-open sessions),
-4. drop a ``.mcp.json`` + a ``CLAUDE.md`` working agreement into the notebook so
-   Claude Code auto-connects and knows to drive cells instead of writing scratch
-   scripts,
-5. launch the read-only TUI attached to that session.
-
-The human then runs ``claude`` in the notebook directory in another pane; it
-discovers the MCP server, reads the working agreement, and drives cells that
-light up live in the TUI.
+Creates or opens the notebook, starts (or reuses) a server with MCP enabled,
+opens a warm session (``list_notebooks`` only sees open sessions), writes
+``.mcp.json`` plus a CLAUDE.md working agreement, and launches the read-only TUI.
 """
 
 from __future__ import annotations
@@ -72,16 +58,11 @@ def _server_alive(server_url: str) -> bool:
 
 
 def _mcp_mounted(server_url: str) -> bool:
-    """True if the MCP endpoint is actually mounted (i.e. MCP is enabled).
+    """True if the MCP endpoint is mounted (i.e. MCP is enabled).
 
-    Probe ``/mcp/`` — the real endpoint (trailing slash; ``/mcp`` without it
-    falls through to the SPA). A mounted MCP server app answers a bare GET with a
-    JSON 4xx (e.g. 406 Not Acceptable). When MCP is *not* mounted — the
-    ``[mcp]`` extra is missing, or the server is in service mode — the path hits
-    the SPA catch-all, which returns ``200 text/html``. Status alone can't tell
-    them apart (both non-404), so key off content type: the SPA is HTML, the MCP
-    endpoint is JSON. (Without a bundled frontend the miss is a plain ``404``,
-    also excluded.)
+    Probes ``/mcp/`` (``/mcp`` falls through to the SPA). A mounted MCP app
+    answers a bare GET with a JSON 4xx; an unmounted path hits the SPA catch-all
+    (``200 text/html``) or a plain 404, so this keys off content type, not status.
     """
     try:
         response = httpx.get(f"{server_url}/mcp/", timeout=5.0)
@@ -97,9 +78,8 @@ def _resolve_notebook_dir(
 ) -> Path:
     """Return an existing notebook dir, or scaffold one and return its path.
 
-    If ``<path>/notebook.toml`` exists we reuse it as-is. Otherwise the notebook
-    is created via :func:`create_notebook`, which slugifies the name — so we
-    return whatever directory it actually wrote, not the requested path.
+    :func:`create_notebook` slugifies the name, so the returned directory can
+    differ from the requested path.
     """
     path = Path(path_arg).expanduser().resolve()
     if (path / "notebook.toml").is_file():
@@ -118,14 +98,9 @@ def _resolve_notebook_dir(
 def _spawn_server(host: str, port: int, notebook_dir: Path) -> subprocess.Popen:
     """Start a notebook server with MCP enabled in personal mode.
 
-    ``STRATA_MCP_ENABLED`` and the mode must be set before the child imports
-    ``strata.server`` — the ``/mcp`` mount decision is made at import time — so
-    they go into the child's environment, not toggled after boot.
-
-    The storage root is scoped to *notebook_dir*'s parent so ``POST /open``
-    accepts the notebook: the open handler confines notebook paths to the
-    server's storage root, so a notebook living anywhere on disk would 400
-    against the default ``~/.strata/notebooks``.
+    MCP and the mode go in the child's environment because the ``/mcp`` mount is
+    decided at import time. The storage root is *notebook_dir*'s parent, since
+    ``POST /open`` rejects notebooks outside the server's storage root.
     """
     env = dict(os.environ)
     env["STRATA_MCP_ENABLED"] = "true"
@@ -155,9 +130,8 @@ class _OpenError(RuntimeError):
 def _open_session(server_url: str, notebook_dir: Path) -> str:
     """``POST /v1/notebooks/open`` for *notebook_dir*; return its ``session_id``.
 
-    Raises :class:`_OpenError` with the server's ``detail`` surfaced — most
-    usefully the "must be inside configured notebook storage" 400 that a reused
-    server raises when the notebook lives outside its storage root.
+    Raises :class:`_OpenError` carrying the server's ``detail``, e.g. the 400 a
+    reused server gives when the notebook is outside its storage root.
     """
     try:
         response = httpx.post(
@@ -181,11 +155,10 @@ def _open_session(server_url: str, notebook_dir: Path) -> str:
 
 
 def _establish_ssh_worker(server_url: str, session_id: str, ssh_target: str) -> None:
-    """Provision + tunnel + register an SSH worker via the running server.
+    """Provision, tunnel and register an SSH worker via the running server.
 
-    Best-effort: a failure is a warning, not a launch abort — the notebook is
-    still usable locally. Uses a long timeout since a first connect may install
-    ``strata-worker`` on the box.
+    Best-effort: a failure warns rather than aborts. The long timeout covers a
+    first connect that installs ``strata-worker`` on the box.
     """
     print(_dim(f"connecting ssh worker {ssh_target} (first connect may install strata-worker)…"))
     try:
@@ -286,11 +259,10 @@ while it installs. `list_workers` shows what's connected;
 
 
 def _write_agent_config(notebook_dir: Path, server_url: str, session_id: str) -> None:
-    """Write ``.mcp.json`` + the CLAUDE.md working agreement into *notebook_dir*.
+    """Write ``.mcp.json`` and the CLAUDE.md working agreement into *notebook_dir*.
 
-    ``.mcp.json`` is overwritten wholesale (it's ours). CLAUDE.md is edited
-    surgically: only the region between our managed markers is (re)written, so a
-    user's own instructions in the same file survive.
+    ``.mcp.json`` is overwritten. In CLAUDE.md only the region between our
+    managed markers is rewritten, so the user's own instructions survive.
     """
     # Trailing slash required: Starlette 307-redirects ``/mcp`` to ``/mcp/`` and MCP HTTP
     # clients (Claude Code) drop the POST body across the redirect, so the handshake fails.

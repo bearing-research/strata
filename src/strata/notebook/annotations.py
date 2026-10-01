@@ -1,40 +1,6 @@
-"""Parse cell-level annotations from leading comment blocks.
+"""Parse cell-level annotations (``# @key value``) from a cell's leading comment block.
 
-Annotations are metadata directives in the first contiguous comment block
-of a cell.  They control execution routing, mount overrides, timeouts,
-environment variables, and loop unrolling.
-
-Supported annotations::
-
-    # @name <display name>        — Human-readable cell name for DAG display
-    # @worker <name>              — Route to a named worker backend
-    # @timeout <seconds>          — Override execution timeout (per iteration for loops)
-    # @mount <name> <uri> [mode]  — Add/override a filesystem mount
-    # @table <name> <uri> [snapshot=<id>]
-                                  — Declare an Iceberg table input; the table's
-                                    snapshot id joins the cell's provenance so
-                                    new data makes the cell stale. <name> is
-                                    injected as the URI string and
-                                    <name>_snapshot as the resolved snapshot id.
-    # @fetch <name> <url> [sha256=<digest>] [refetch=never|stale|always]
-                                  — Declare a URL the cell reads; its bytes are
-                                    downloaded, injected as a Path, and their
-                                    digest joins the cell's provenance.
-    # @dataset <name> <registry-name>[@<alias>|@v=<n>]
-                                  — Declare a registry name the cell reads; it
-                                    resolves to one artifact version, bound to
-                                    <name>, which joins the cell's provenance.
-    # @env <KEY>=<value>          — Set an environment variable for this cell
-    # @variant <group> <name>     — Mark this cell as a variant in <group>; siblings
-                                    in the same group share a defines contract and
-                                    only the active variant participates in the DAG.
-    # @loop max_iter=<N> carry=<var> [start_from=<cell>@iter=<k>]
-                                  — Mark the cell as a loop; run the body up to N times,
-                                    threading `carry` between iterations.
-    # @loop_until <expression>    — Optional termination predicate evaluated in the
-                                    cell namespace after each iteration.
-
-Annotations do **not** affect the cell's ``defines``/``references`` analysis.
+Annotations do not affect the cell's ``defines``/``references`` analysis.
 """
 
 from __future__ import annotations
@@ -67,8 +33,7 @@ class VariantWirePayload(TypedDict):
 class AnnotationsWirePayload(TypedDict):
     """Wire shape for the curated annotation view sent to the frontend.
 
-    Subset of ``CellAnnotations`` keys consumed by the UI; ``mounts`` carries
-    ``MountSpec.model_dump()`` dicts (json-ready ``dict[str, Any]`` per entry).
+    ``mounts`` carries ``MountSpec.model_dump()`` dicts.
     """
 
     name: str | None
@@ -85,15 +50,10 @@ class AnnotationsWirePayload(TypedDict):
 class CachePolicy:
     """Resolved ``# @cache`` policy for a SQL cell.
 
-    ``kind`` is one of:
-      - ``fingerprint`` — driver-derived freshness token in hash (default)
-      - ``forever`` — static salt; never invalidates from DB-side state
-      - ``session`` — session-unique salt; invalidates across sessions
-      - ``ttl`` — time-bucketed salt; ``ttl_seconds`` is required
-      - ``snapshot`` — driver MUST return a real snapshot ID
-
-    The default (no ``# @cache`` annotation) is ``fingerprint``; the
-    caller substitutes that when ``CellAnnotations.cache`` is ``None``.
+    ``kind`` is one of: ``fingerprint`` (driver freshness token, the default),
+    ``forever`` (static salt), ``session`` (session-unique salt), ``ttl``
+    (time-bucketed salt; ``ttl_seconds`` required) or ``snapshot`` (driver must
+    return a real snapshot ID). ``CellAnnotations.cache is None`` means fingerprint.
     """
 
     kind: str
@@ -104,11 +64,8 @@ class CachePolicy:
 class SqlAnnotation:
     """Resolved ``# @sql connection=<name> [write=true]`` directive.
 
-    ``write=true`` opts the cell into writable execution: the
-    adapter opens the connection without the read-only enforcement
-    (``mode=ro``, ``PRAGMA query_only=ON``, etc) so DDL / DML can
-    run. The default is read-only, matching the design-doc
-    security boundary for read cells.
+    ``write=true`` opens the connection without read-only enforcement so DDL/DML
+    can run; the default is read-only.
     """
 
     connection: str | None = None
@@ -119,10 +76,8 @@ class SqlAnnotation:
 class VariantAnnotation:
     """Parsed ``# @variant <group> <name>`` directive.
 
-    Membership in a variant group is declared by source annotation only.
-    All cells sharing ``group`` form one group; ``name`` is the variant's
-    identifier within the group and must be unique across siblings. The
-    active variant per group is tracked separately in ``notebook.toml``.
+    ``name`` must be unique within ``group``. The active variant per group is
+    tracked separately in ``notebook.toml``.
     """
 
     group: str
@@ -133,16 +88,10 @@ class VariantAnnotation:
 class LoopAnnotation:
     """Parsed ``@loop`` / ``@loop_until`` directives for a loop cell.
 
-    Attributes:
-        max_iter: Safety bound on the iteration count.
-        carry: Name of the variable threaded between iterations. On iter 0 it is
-            read from upstream cells (or ``start_from``); on iter k>0 it is
-            rebound from iter k-1's output artifact before the body runs.
-        until_expr: Optional Python expression evaluated in the cell namespace
-            after each iteration. Truthy result terminates the loop early.
-        start_from_cell: Optional cell id whose existing iteration artifact
-            seeds iter 0's carry. ``None`` means seed from upstream as usual.
-        start_from_iter: Iteration index paired with ``start_from_cell``.
+    ``carry`` is read from upstream (or ``start_from``) on iter 0 and rebound from
+    iter k-1's artifact on iter k. A truthy ``until_expr``, evaluated in the cell
+    namespace after each iteration, ends the loop early. ``start_from_cell`` is
+    ``None`` to seed iter 0 from upstream as usual.
     """
 
     max_iter: int
@@ -158,17 +107,9 @@ _ANNOTATION_RE = re.compile(r"^#\s*@(\w+)\s*(.*?)\s*$")
 def iter_annotation_block(source: str) -> Iterator[tuple[int, str]]:
     """Yield ``(1-based lineno, raw_line)`` for the leading comment block.
 
-    The leading comment block is the first contiguous run of blank
-    lines and ``#``-prefixed lines at the top of a cell. Blank lines
-    inside the block are skipped (not yielded). The block ends at the
-    first non-blank non-comment line, which is the start of the cell
-    body.
-
-    Single source of truth for "what counts as the leading comment
-    block" — used by ``parse_annotations`` here, by validation
-    diagnostics in ``annotation_validation``, and by prompt/SQL
-    analysers. Drift between independent implementations of this scan
-    would silently desynchronise parsing from validation.
+    The block is the first contiguous run of blank and ``#`` lines; blank lines are
+    not yielded. This is the single definition of the block shared by parsing,
+    validation and the prompt/SQL analysers, so they cannot drift apart.
     """
     for lineno, line in enumerate(source.splitlines(), start=1):
         stripped = line.strip()
@@ -180,12 +121,7 @@ def iter_annotation_block(source: str) -> Iterator[tuple[int, str]]:
 
 
 def parse_annotation_directive(line: str) -> tuple[str, str] | None:
-    """Match one ``# @key value`` line and return ``(key.lower(), value)``.
-
-    Returns ``None`` when the line isn't a directive (a plain comment,
-    or a line outside the leading block). ``value`` is stripped of
-    surrounding whitespace; the caller decides how to interpret it.
-    """
+    """Match one ``# @key value`` line and return ``(key.lower(), value)``, or ``None``."""
     match = _ANNOTATION_RE.match(line.strip())
     if not match:
         return None
@@ -193,12 +129,7 @@ def parse_annotation_directive(line: str) -> tuple[str, str] | None:
 
 
 def strip_leading_annotations(source: str) -> str:
-    """Return source with the leading comment block removed.
-
-    The cell body is everything from the first non-blank non-comment
-    line onwards. Used by SQL and prompt cells, which embed an
-    annotation block at the top followed by a content body.
-    """
+    """Return source with the leading comment block removed."""
     lines = source.splitlines()
     for i, line in enumerate(lines):
         stripped = line.strip()
@@ -236,14 +167,9 @@ _REPEATABLE_DIRECTIVES = frozenset({"env", "mount", "table", "fetch", "dataset"}
 def set_annotation_directive(source: str, key: str, value: str) -> str:
     """Return *source* with a single ``# @key value`` directive set.
 
-    Replaces the first existing ``# @key`` directive in the leading comment
-    block (dropping any duplicate ``# @key`` lines) and leaves the cell body
-    untouched. When the key is absent, the directive is inserted after the last
-    existing annotation, or at the very top when the cell has none.
-
-    Intended for scalar directives (``name``, ``worker``, ``timeout``, ``model``,
-    …). The repeatable ones (``env``, ``mount``, ``table``) raise ``ValueError``
-    — collapsing them to one line would drop data; edit the source directly.
+    Replaces the first ``# @key`` in the leading block and drops duplicates; when
+    absent, inserts after the last annotation (or at the top). Raises ``ValueError``
+    for repeatable directives, since collapsing them to one line would drop data.
     """
     key = key.lower()
     if key in _REPEATABLE_DIRECTIVES:
@@ -334,10 +260,9 @@ class CellAnnotations:
     after: list[str] = field(default_factory=list)
 
     def to_wire_payload(self) -> AnnotationsWirePayload:
-        """Render the curated annotation view for cell serialization.
+        """Render the UI-visible subset of the annotations.
 
-        Only the UI-visible subset is included; SQL/cache/prompt-cell
-        directives and ``@after`` edges live in their own wire paths.
+        SQL/cache/prompt-cell directives and ``@after`` edges travel on their own wire paths.
         """
         loop_payload: LoopWirePayload | None = None
         if self.loop is not None:
@@ -367,15 +292,11 @@ class CellAnnotations:
 
 
 def unreadable_input_directives(source: str) -> list[tuple[int, str, str]]:
-    """``@fetch`` and ``@dataset`` lines the parser could not read.
+    """Return ``(lineno, directive, value)`` for unparseable ``@fetch``/``@dataset`` lines.
 
-    Returns ``(line number, directive, value)`` for each. Both directives are
-    dropped when malformed rather than guessed at, which is right -- half a URL
-    or half a dataset reference is not something to resolve on the author's
-    behalf -- but each one names a variable the cell expects to exist, so
-    dropping it silently means the cell fails on a ``NameError`` that says
-    nothing about the annotation that caused it. The validator turns these into
-    diagnostics; deciding what parses stays here, next to the parsing.
+    Both are dropped when malformed rather than guessed at, but each names a
+    variable the cell expects, so the cell would fail on an unexplained
+    ``NameError``. The validator turns these into diagnostics.
     """
     unreadable: list[tuple[int, str, str]] = []
     for lineno, line in iter_annotation_block(source):
@@ -391,14 +312,7 @@ def unreadable_input_directives(source: str) -> list[tuple[int, str, str]]:
 
 
 def parse_annotations(source: str) -> CellAnnotations:
-    """Extract annotations from the leading comment block of a cell.
-
-    Only the first contiguous block of ``#``-prefixed lines is scanned.
-    Once a non-comment, non-blank line is encountered, parsing stops.
-
-    Returns:
-        CellAnnotations with all parsed directives.
-    """
+    """Extract annotations from the leading comment block of a cell."""
     result = CellAnnotations()
 
     for _lineno, line in iter_annotation_block(source):
@@ -520,15 +434,9 @@ _VALID_CACHE_KINDS = frozenset({"fingerprint", "forever", "session", "snapshot",
 def _parse_sql_annotation(result: CellAnnotations, value: str) -> None:
     """Parse ``@sql connection=<name> [write=true]`` into ``result.sql``.
 
-    Multiple ``@sql`` lines accumulate into the same ``SqlAnnotation``;
-    later lines override earlier ones. Unknown keys are dropped silently
-    here — annotation_validation surfaces them as user-visible
-    diagnostics.
-
-    Booleans (``write=true|false``) are case-insensitive; anything
-    other than the truthy literals ``true``/``yes``/``1`` resolves to
-    False so a typo (``write=tru``) doesn't silently flip the cell
-    into writable mode.
+    Repeated lines accumulate, later keys winning. Unknown keys are dropped here
+    (annotation_validation reports them). Only ``true``/``yes``/``1`` enable write,
+    so a typo never makes a cell writable.
     """
     if result.sql is None:
         result.sql = SqlAnnotation()
@@ -545,14 +453,10 @@ def _parse_sql_annotation(result: CellAnnotations, value: str) -> None:
 
 
 def _parse_cache_annotation(result: CellAnnotations, value: str) -> None:
-    """Parse ``@cache <policy>`` into ``result.cache``.
+    """Parse ``@cache <policy>`` or ``@cache ttl=<seconds>`` into ``result.cache``.
 
-    Forms:
-      - ``@cache fingerprint`` / ``forever`` / ``session`` / ``snapshot``
-      - ``@cache ttl=<seconds>``
-
-    Malformed values yield ``None`` so annotation_validation can surface a
-    diagnostic instead of silently applying the wrong policy.
+    Malformed values yield ``None`` so annotation_validation can report them
+    instead of applying the wrong policy.
     """
     tokens = value.split()
     if not tokens:
@@ -575,11 +479,7 @@ _LOOP_START_FROM_RE = re.compile(r"^(?P<cell>[^@]+)@iter=(?P<iter>-?\d+)$")
 
 
 def _merge_loop_annotation(result: CellAnnotations, value: str) -> None:
-    """Merge ``@loop key=value key=value ...`` into ``result.loop``.
-
-    Multiple ``@loop`` lines accumulate into the same ``LoopAnnotation``;
-    later lines override earlier ones for any key they set.
-    """
+    """Merge ``@loop key=value ...`` into ``result.loop``; later lines override earlier keys."""
     if result.loop is None:
         result.loop = LoopAnnotation(max_iter=0, carry="")
 
@@ -614,12 +514,10 @@ def _merge_loop_annotation(result: CellAnnotations, value: str) -> None:
 
 
 def _parse_variant_annotation(value: str) -> VariantAnnotation | None:
-    """Parse ``# @variant <group> <name>``.
+    """Parse ``# @variant <group> <name>``, or return ``None`` when malformed.
 
-    Both ``group`` and ``name`` must be valid Python identifiers so they
-    survive notebook-toml round-trips and frontend rendering without
-    escaping. Malformed values yield ``None``; annotation_validation
-    surfaces a diagnostic so the user sees the issue.
+    Both parts must be Python identifiers so they round-trip through
+    ``notebook.toml`` and the frontend without escaping.
     """
     parts = value.split()
     if len(parts) != 2:
@@ -678,15 +576,7 @@ def _parse_dataset_annotation(value: str) -> DatasetSpec | None:
 
 
 def _parse_table_annotation(value: str) -> TableSpec | None:
-    """Parse a ``@table`` annotation value.
-
-    Format: ``<name> <uri> [snapshot=<id>]``
-
-    Examples::
-
-        @table trips file:///data/warehouse#nyc.trips
-        @table events s3://bucket/wh#db.events snapshot=1292033279574548405
-    """
+    """Parse ``<name> <uri> [snapshot=<id>]``."""
     parts = value.split()
     if len(parts) < 2:
         return None
@@ -709,16 +599,7 @@ def _parse_table_annotation(value: str) -> TableSpec | None:
 
 
 def _parse_mount_annotation(value: str) -> MountSpec | None:
-    """Parse a ``@mount`` annotation value.
-
-    Format: ``<name> <uri> [ro|rw]``
-
-    Examples::
-
-        @mount raw_data s3://bucket/prefix ro
-        @mount scratch file:///tmp/work rw
-        @mount data s3://bucket/data          # defaults to ro
-    """
+    """Parse ``<name> <uri> [ro|rw] [credential=<name>]``; mode defaults to ``ro``."""
     parts = value.split()
     if len(parts) < 2:
         return None

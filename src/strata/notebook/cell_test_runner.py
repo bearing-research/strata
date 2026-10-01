@@ -1,15 +1,9 @@
 """Run a cell's pytest tests in an isolated run dir.
 
-Executor-agnostic: given the cell source, the user's test source, the resolved
-upstream inputs, and the notebook venv's python, stage a temp run dir and shell
-to ``pytest`` using the generated ``cell_test_conftest`` plugin, then return the
-structured results the plugin writes to ``results.json``.
-
-This is deliberately *not* the keystroke path — only ``executor.run_cell_tests``
-calls it. The plugin (``cell_test_conftest.py``) is copied into the run dir as
-``conftest.py`` so pytest auto-loads it; staging the user's file under a
-``test_*.py`` name is what gets native collection AND assertion rewriting (see
-the conftest module docstring).
+Stages the cell source, the user's test file and the resolved inputs in a temp
+dir, then runs ``pytest`` in the notebook venv with the ``cell_test_conftest``
+plugin copied in as ``conftest.py``. Staging the tests under a ``test_*.py``
+name gets native collection and assertion rewriting. Not on the keystroke path.
 """
 
 from __future__ import annotations
@@ -32,9 +26,8 @@ _DEFAULT_TIMEOUT_SECONDS = 120.0
 class PytestUnavailableError(RuntimeError):
     """Raised when ``pytest`` is not importable in the notebook venv.
 
-    The executor turns this into a ``pytest_unavailable`` result so the UI can
-    surface an actionable "add pytest to this notebook's environment" message
-    rather than a raw ``ModuleNotFoundError``.
+    The executor maps this to a ``pytest_unavailable`` result so the UI can say
+    "add pytest to this notebook's environment".
     """
 
 
@@ -64,11 +57,9 @@ def run_cell_tests_in_dir(
 ) -> dict[str, Any]:
     """Stage *rundir* and run pytest; return the parsed ``results.json`` dict.
 
-    The result dict has totals (``passed``/``failed``/``errored``/``skipped``)
-    plus a ``tests`` list of ``{name, nodeid, outcome, message}``.
-
-    ``env`` and ``run_as`` are the cell harness's environment and OS user: a
-    test run imports the cell's source, so it is cell code like any other.
+    The dict has totals (``passed``/``failed``/``errored``/``skipped``) plus a
+    ``tests`` list of ``{name, nodeid, outcome, message}``. ``env`` and ``run_as``
+    are the cell harness's: a test run imports the cell's source, so it is cell code.
 
     Raises:
         PytestUnavailableError: ``pytest`` is not importable in *venv_python*.

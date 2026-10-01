@@ -1,10 +1,8 @@
-"""Inspect REPL — on-demand interactive exploration of cell artifacts.
+"""Inspect REPL: interactive exploration of a cell's inputs.
 
-Spawns a subprocess with a cell's input variables pre-loaded, accepts eval
-expressions, and returns results. The subprocess stays alive until explicitly
-closed, allowing multiple evaluations without re-loading. The subprocess body
-lives in the sibling :mod:`strata.notebook.inspect_harness`, which documents
-the JSON line protocol.
+Spawns a subprocess with the cell's input variables loaded and evaluates
+expressions in it until closed. The subprocess body and its JSON line protocol
+live in :mod:`strata.notebook.inspect_harness`.
 """
 
 from __future__ import annotations
@@ -28,20 +26,7 @@ _HARNESS_PATH = Path(__file__).parent / "inspect_harness.py"
 
 
 class InspectSession:
-    """An active inspect REPL session for a cell.
-
-    Spawns a subprocess with the cell's input artifacts pre-loaded, then accepts
-    eval commands and returns results.
-
-    Attributes
-    ----------
-    cell_id : str
-        Cell being inspected.
-    process : asyncio.subprocess.Process or None
-        The subprocess running the REPL.
-    ready : bool
-        Whether the subprocess has finished loading.
-    """
+    """An inspect REPL subprocess for one cell, with its inputs pre-loaded."""
 
     def __init__(self, cell_id: str):
         self.cell_id = cell_id
@@ -54,22 +39,9 @@ class InspectSession:
         session: NotebookSession,
         timeout_seconds: float = 15,
     ) -> str:
-        """Start the inspect subprocess.
+        """Resolve the cell's inputs into a temp dir and spawn the REPL subprocess.
 
-        Resolves the cell's upstream inputs, writes them to a temp dir, then
-        spawns a Python process with those inputs loaded.
-
-        Parameters
-        ----------
-        session : NotebookSession
-            Notebook session whose cell is being inspected.
-        timeout_seconds : float, optional
-            Startup timeout (default 15).
-
-        Returns
-        -------
-        str
-            ``"ready"`` on success, otherwise an error message.
+        Returns ``"ready"`` on success, otherwise an error message.
         """
         from strata.notebook.executor import CellExecutor, _no_interpreter_message
         from strata.notebook.harness_env import configured_allowlist, harness_env
@@ -143,20 +115,9 @@ class InspectSession:
             return f"Inspect startup failed: {e}"
 
     async def evaluate(self, expr: str, timeout_seconds: float = 10) -> dict[str, Any]:
-        """Evaluate an expression in the inspect subprocess.
+        """Evaluate an expression or statement in the inspect subprocess.
 
-        Parameters
-        ----------
-        expr : str
-            Python expression or statement to evaluate.
-        timeout_seconds : float, optional
-            Evaluation timeout (default 10).
-
-        Returns
-        -------
-        dict
-            Response with ``ok`` and either ``result``/``type``/``stdout`` or
-            ``error``.
+        Returns a dict with ``ok`` and either ``result``/``type``/``stdout`` or ``error``.
         """
         if not self.ready or self.process is None:
             return {"ok": False, "error": "Inspect session not ready"}
@@ -216,10 +177,7 @@ class InspectSession:
 
 
 class InspectManager:
-    """Manages inspect sessions across notebooks.
-
-    One inspect session can be open per cell at a time.
-    """
+    """Tracks inspect sessions; at most one per cell."""
 
     def __init__(self):
         self._sessions: dict[str, InspectSession] = {}
@@ -229,21 +187,9 @@ class InspectManager:
         cell_id: str,
         notebook_session: NotebookSession,
     ) -> tuple[InspectSession, str]:
-        """Open an inspect session for a cell.
+        """Open an inspect session for a cell, closing any existing one first.
 
-        If a session already exists for this cell, close it first.
-
-        Parameters
-        ----------
-        cell_id : str
-            Cell to inspect.
-        notebook_session : NotebookSession
-            Parent notebook session.
-
-        Returns
-        -------
-        tuple of (InspectSession, str)
-            The session and a status message.
+        Returns the session and a status message.
         """
         if cell_id in self._sessions:
             await self._sessions[cell_id].close()
@@ -258,18 +204,7 @@ class InspectManager:
         return inspect, status
 
     async def get_session(self, cell_id: str) -> InspectSession | None:
-        """Return an active inspect session for a cell, or ``None``.
-
-        Parameters
-        ----------
-        cell_id : str
-            Cell ID.
-
-        Returns
-        -------
-        InspectSession or None
-            The live session, or ``None`` if none exists or it has died.
-        """
+        """Return the cell's live inspect session, or ``None``; a dead one is closed and dropped."""
         session = self._sessions.get(cell_id)
         if session and not session.ready:
             await session.close()
@@ -278,13 +213,7 @@ class InspectManager:
         return session
 
     async def close_session(self, cell_id: str) -> None:
-        """Close an inspect session.
-
-        Parameters
-        ----------
-        cell_id : str
-            Cell ID.
-        """
+        """Close the cell's inspect session, if any."""
         session = self._sessions.pop(cell_id, None)
         if session:
             await session.close()

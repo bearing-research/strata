@@ -1,14 +1,9 @@
 """Model tokens used by this server, by tenant, principal and model.
 
-Every provider response already carried its token counts, and each route
-returned them for the one call; nothing added them up, so metering model use
-per organization or per member meant logging every response and summing it
-elsewhere. Recorded where each response is read, and exported as counters on
-``/metrics/prometheus``.
-
-The caller is whoever is in the request context (``strata.auth``): the
-principal an HTTP route or WebSocket was opened as, or no one in personal
-mode. Agent runs and prompt cells run in tasks that copy that context.
+Recorded where each provider response is read and exported as counters on
+``/metrics/prometheus``. The caller is whoever is in the request context
+(``strata.auth``), or no one in personal mode; agent runs and prompt cells
+run in tasks that copy that context.
 """
 
 from __future__ import annotations

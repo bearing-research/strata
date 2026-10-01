@@ -1,21 +1,9 @@
-"""A notebook's state at a moment, as one machine-readable bundle.
+"""A notebook's state at a moment, as one machine-readable bundle (``fmt=snapshot``).
 
-Two exports existed and neither was this. ``fmt=zip`` carries the committed
-files and a ``provenance.json`` with no outputs; the HTML and markdown exports
-carry rendered outputs and no machine-readable provenance. Assembling a
-reviewable snapshot meant three requests and two formats, and the result still
-could not seed a sandbox — nothing in it carries bytes.
-
-``fmt=snapshot`` is the ZIP's members plus what a reader and a machine each
-need: the outputs as files, the per-cell provenance and timings that live in
-``.strata/runtime.json``, an ``artifacts.json`` naming every ready cell's
-artifacts with their digests, and the bytes of however many of those the caller
-asked for.
-
-``include`` is the whole design. A snapshot for review wants the chain
-described and a figure or two attached; a project moving between servers wants
-every byte. Those are the same document with a different payload, so they are
-one format with a parameter rather than two formats that drift.
+The ZIP export's members plus outputs as files, per-cell provenance and timings,
+an ``artifacts.json`` of every ready cell's artifacts with digests, and the bytes
+of whichever of those the caller ``include``s (a figure for review, or every byte
+for a move between servers).
 """
 
 from __future__ import annotations
@@ -42,13 +30,9 @@ _OUTPUT_EXTENSIONS = {
 
 
 def write_committed_files(session: NotebookSession, archive: zipfile.ZipFile) -> None:
-    """The committed files and ``provenance.json`` — what every bundle carries.
+    """Write the committed files and ``provenance.json`` that every bundle carries.
 
-    Shared so the route and ``strata export`` cannot disagree about what a
-    bundle is. They did: the route wrote ``provenance.json`` and globbed
-    ``cells/*.py``, the CLI wrote no provenance and globbed everything, and a
-    test that called one of them a superset of the other passed only because
-    its fixture happened to be Python-only.
+    Shared by the route and ``strata export`` so they agree on what a bundle is.
     """
     from strata.notebook.env import compute_lockfile_hash
     from strata.notebook.provenance import compute_source_hash
@@ -91,9 +75,7 @@ def write_committed_files(session: NotebookSession, archive: zipfile.ZipFile) ->
 def build_artifact_index(session: NotebookSession) -> dict[str, Any]:
     """What every ready cell produced, named so another store can find it.
 
-    Digests are the point: two snapshots of the same notebook can be compared
-    output by output without either side reading a blob, which is what makes a
-    snapshot reviewable rather than merely openable.
+    Digests let two snapshots be compared output by output without reading blobs.
     """
     manager = session.get_artifact_manager()
     store = manager.artifact_store
@@ -128,9 +110,7 @@ def build_artifact_index(session: NotebookSession) -> dict[str, Any]:
 def list_fetches(session: NotebookSession) -> list[dict[str, Any]]:
     """Every ``@fetch`` in the notebook, so a preflight can flag the unpinned.
 
-    An unpinned fetch is the one input a snapshot cannot vouch for: its bytes
-    are whatever the URL serves when the cell next runs. ``sha256`` is the pin,
-    or else the digest last read, which is what an author would pin to.
+    ``sha256`` is the pin, or else the digest last read (what an author would pin to).
     """
     from strata.notebook.annotations import parse_annotations
     from strata.notebook.fetch import FetchCache
@@ -156,11 +136,7 @@ def list_fetches(session: NotebookSession) -> list[dict[str, Any]]:
 def _artifacts_to_carry(
     index: dict[str, Any], include: IncludeMode, selected: list[str] | None
 ) -> set[tuple[str, int]]:
-    """Which artifacts' bytes go in, given the caller's answer.
-
-    ``selected`` names cells rather than artifacts: a reviewer thinks "attach
-    the figure cell", not "attach nb_…_var___display__0@v=3".
-    """
+    """Which artifacts' bytes go in; ``selected`` names cells, not artifacts."""
     if include == "none":
         return set()
     wanted = set(index) if include == "all" else {c for c in (selected or []) if c in index}
@@ -170,10 +146,7 @@ def _artifacts_to_carry(
 def unknown_selection(session: NotebookSession, selected: list[str] | None) -> list[str]:
     """Cell ids in ``selected`` that this notebook does not have.
 
-    A mistyped id would otherwise produce a 200 and an empty ``carried``,
-    indistinguishable from a selection that legitimately had nothing to carry —
-    and the caller would find out when the snapshot turned out to be missing
-    the figure they meant to attach.
+    Lets the caller reject a typo instead of returning an empty ``carried``.
     """
     known = {cell.id for cell in session.notebook_state.cells}
     return [cell_id for cell_id in (selected or []) if cell_id not in known]
@@ -188,9 +161,7 @@ def write_snapshot(
 ) -> dict[str, Any]:
     """Write the snapshot's members into *archive*; return its manifest.
 
-    The committed files are the caller's to add — this is everything the ZIP
-    export does not already carry, so the two share the format rather than one
-    reimplementing the other.
+    The caller adds the committed files; this writes everything the ZIP export lacks.
     """
     from strata.notebook.runtime_state import load_runtime_state
     from strata.notebook.writer import load_cell_console_output
@@ -299,9 +270,8 @@ def _artifact_ref(uri: str | None) -> tuple[str, int] | None:
 def _display_bytes(store, output) -> bytes | str | None:
     """The output's own bytes, from the live value or from the store.
 
-    ``None`` for anything that is not a file in its own right — a table
-    preview or a scalar gets described instead, since there is no format in
-    which double-clicking it would mean anything.
+    ``None`` for outputs that are not files in their own right (table previews,
+    scalars); those are described instead.
     """
     if output.inline_data_url and "," in output.inline_data_url:
         from base64 import b64decode
@@ -337,13 +307,9 @@ def _write_display_output(
 ) -> str:
     """Write one display output as a file and return its name in the bundle.
 
-    An image or a markdown output is written as itself — a ``.png`` a reader
-    can open, not a JSON stub describing one. That takes the store, because
-    ``inline_data_url`` and ``markdown_text`` are transient: the writer strips
-    both before persisting to ``runtime.json`` and the parser rebuilds the
-    output without them, so any session read from disk — always the CLI, and
-    the server after a restart — holds only the ``artifact_uri`` and has to
-    fetch the bytes back.
+    Images and markdown are written as themselves. Their inline payloads are not
+    persisted, so a session read from disk (the CLI, or a restarted server) must
+    fetch the bytes from the store via ``artifact_uri``.
     """
     extension = _OUTPUT_EXTENSIONS.get(output.content_type, ".json")
     name = f"outputs/{cell_id}/{position}{extension}"

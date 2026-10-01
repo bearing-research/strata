@@ -1,12 +1,8 @@
 """Environment hashing for notebook dependencies.
 
-The cell-provenance env hash folds ``uv.lock`` (+ ``renv.lock``). A notebook with
-no dev-dependencies hashes the **raw ``uv.lock`` bytes** (the historical
-behavior — byte-identical, so existing caches are untouched). When a
-``[dependency-groups] dev`` group is present, the uv contribution becomes a
-fingerprint of just the **runtime dependency closure** instead, so adding or
-removing a dev tool (pytest / ruff / ty / mypy) — which doesn't change what a
-cell *computes* — never invalidates the cell's cache.
+The env hash folds ``uv.lock`` (and ``renv.lock``). With a ``[dependency-groups]
+dev`` group, the uv part is a fingerprint of the runtime closure only, so adding
+or removing a dev tool never invalidates a cell's cache; otherwise it is the raw bytes.
 """
 
 from __future__ import annotations
@@ -23,18 +19,12 @@ logger = logging.getLogger(__name__)
 
 
 def collect_referenced_env_keys(source: str) -> set[str]:
-    """Return the set of env var keys the cell source references statically.
+    """Return the env var keys the cell source references statically.
 
-    Detects the common access patterns:
-        os.environ["KEY"]               Subscript on ``os.environ``
-        os.environ.get("KEY", ...)      Method call on ``os.environ``
-        os.getenv("KEY", ...)           Top-level ``os.getenv``
-
-    Also recognises the same patterns when ``environ``, ``getenv``, or
-    ``os`` have been aliased (``from os import environ, getenv`` / ``import
-    os as o``). Dynamic lookups (``os.environ[key]`` with a variable) are
-    ignored — the returned set is a lower bound used for narrowing
-    provenance, not an exhaustive dependency analysis.
+    Detects ``os.environ["KEY"]``, ``os.environ.get("KEY")`` and
+    ``os.getenv("KEY")``, including aliased ``os``/``environ``/``getenv``.
+    Dynamic lookups are ignored: the result is a lower bound for narrowing
+    provenance, not a full dependency analysis.
     """
     try:
         tree = ast.parse(source)
@@ -106,35 +96,11 @@ def collect_referenced_env_keys(source: str) -> set[str]:
 
 
 def compute_lockfile_hash(notebook_dir: Path) -> str:
-    """Compute SHA-256 hash over the notebook's lockfiles.
+    """SHA-256 over the notebook's ``uv.lock`` and ``renv.lock``.
 
-    Folds together:
-
-    * ``uv.lock`` — Python dependency pins (the original behaviour).
-    * ``renv.lock`` — R dependency pins, when present. Contributes
-      under a ``\\0renv=`` tag so a renv.lock with bytes identical to
-      some hypothetical uv.lock can't collide.
-
-    Backward compatibility: when ``renv.lock`` is absent the result
-    is byte-identical to the pre-#59 hash (single ``sha256(uv.lock)``
-    call), so Python-only notebooks see no cache invalidation from
-    this change.
-
-    Why include renv.lock here rather than a new R-specific helper:
-    ``compute_execution_env_hash`` calls this once per provenance
-    pass and doesn't otherwise know the cell's language. Threading
-    language-awareness through would expand the call sites for no
-    benefit — the *only* additional input is renv.lock content,
-    which is cheap to read whether or not the notebook has R cells.
-
-    If renv.lock doesn't exist (e.g., notebook has no R deps) and
-    uv.lock doesn't either, return the sentinel empty-string hash.
-
-    Args:
-        notebook_dir: Path to notebook directory
-
-    Returns:
-        SHA-256 hex digest folded over present lockfiles.
+    ``renv.lock`` is folded under a ``\\0renv=`` tag so it cannot collide with
+    uv.lock bytes. Missing lockfiles contribute nothing, so with neither present
+    this is the digest of empty input.
     """
     hasher = hashlib.sha256()
     _fold_lockfile_into_hash(hasher, notebook_dir, "uv.lock", tag=None)
@@ -147,16 +113,10 @@ def compute_lockfile_hash(notebook_dir: Path) -> str:
 def _runtime_uv_closure_fingerprint(raw_uv_lock: bytes) -> bytes | None:
     """Fingerprint a ``uv.lock``'s runtime dependency closure, or ``None``.
 
-    Returns ``None`` when the lock declares **no** dev-dependencies (the caller
-    then folds the raw bytes — byte-identical to the historical hash, so notebooks
-    without dev tooling are completely unaffected) or cannot be parsed (safe
-    fallback to raw bytes).
-
-    Otherwise it walks the resolution graph from the root project's **runtime**
-    direct deps (its ``dependencies`` — *not* ``[package.dev-dependencies]``) and
-    folds each reachable package's ``name@version`` plus its artifact hashes. So
-    the digest tracks runtime content — including transitive runtime upgrades a
-    dev install might force — while being invariant to the dev tools themselves.
+    ``None`` when the lock has no dev-dependencies or cannot be parsed; the
+    caller then folds the raw bytes. Otherwise folds ``name@version`` and
+    artifact hashes of every package reachable from the root's runtime deps,
+    so transitive runtime upgrades count but dev tools do not.
     """
     try:
         data: Any = tomllib.loads(raw_uv_lock.decode("utf-8"))
@@ -239,16 +199,9 @@ def _fold_lockfile_into_hash(
 ) -> None:
     """Fold ``notebook_dir/filename`` content into *hasher* if it exists.
 
-    Quietly skips on missing file or read error — callers (the
-    aggregate ``compute_lockfile_hash``) treat a missing lockfile as
-    "no contribution", and the warning is informational only.
-
-    Uses ``open() + read()`` rather than ``Path.read_bytes()``
-    because CodeQL's ``py/path-injection`` taint model flags the
-    latter on a Path constructed from a function argument even when
-    the argument is internal trusted state (here:
-    ``session.path``). The ``open()`` form matches the pre-existing
-    helper signature CodeQL is already happy with.
+    A missing or unreadable file contributes nothing (read errors log a warning).
+    Uses ``open()`` rather than ``Path.read_bytes()`` because CodeQL's
+    ``py/path-injection`` model flags the latter here.
     """
     lockfile = notebook_dir / filename
     if not lockfile.exists():
@@ -279,17 +232,9 @@ def narrow_env_for_provenance(
 ) -> dict[str, str]:
     """Return the subset of ``resolved_env`` that participates in provenance.
 
-    Relevant keys are the union of:
-
-    * keys referenced in the cell source via ``os.environ[...]`` /
-      ``os.environ.get(...)`` / ``os.getenv(...)``, and
-    * keys in ``declared_keys`` — explicit cell-level declarations such
-      as ``# @env KEY=value`` annotations or persisted per-cell env
-      overrides in ``notebook.toml``.
-
-    Notebook-level ambient env vars that a cell neither references nor
-    declares do not influence its hash, so adding an API key at the
-    notebook level does not invalidate cells that do not use it.
+    That is keys the source references (``os.environ``/``os.getenv``) plus
+    ``declared_keys`` (``# @env`` annotations, per-cell env overrides). Ambient
+    notebook env vars a cell neither reads nor declares do not affect its hash.
     """
     referenced = collect_referenced_env_keys(source)
     relevant = referenced | (declared_keys or set())
@@ -301,13 +246,9 @@ def compute_execution_env_hash(
     runtime_env: Mapping[str, str] | None = None,
     runtime_identity: str | None = None,
 ) -> str:
-    """Compute the effective execution environment hash for a cell.
+    """The cell's execution env hash: the lockfile hash plus provenance-relevant env vars.
 
-    This combines the notebook lockfile hash with any persisted or annotated
-    runtime environment variables that should participate in provenance.
-
-    If ``runtime_env`` and ``runtime_identity`` are empty, this is identical
-    to ``compute_lockfile_hash``.
+    Equals ``compute_lockfile_hash`` when ``runtime_env`` and ``runtime_identity`` are empty.
     """
     lockfile_hash = compute_lockfile_hash(notebook_dir)
     if not runtime_env and not runtime_identity:

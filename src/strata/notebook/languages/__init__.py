@@ -1,15 +1,8 @@
 """Per-language adapters for the notebook subsystem.
 
-Notebook cells can be Python, prompt-LLM, SQL, R, or markdown. Each
-language used to be a hard-coded ``if/elif`` branch in ``executor.py``
-and ``session.py``. This package extracts those branches into
-Protocol-based adapters keyed by ``CellLanguage``, so adding a new
-language is a new module + one registry entry instead of edits scattered
-across the executor + session.
-
-Both sides are registry-driven: the **analyzer** side (defines/references
-extraction, #54) and the **executor** side (#54 follow-up) each expose
-``get_*`` / ``register_*`` hooks below.
+Python, prompt, SQL, R, markdown and widget cells are Protocol-based adapters
+keyed by ``CellLanguage``, on both the analyzer and executor side. A new
+language is a new module plus one registry entry.
 """
 
 from __future__ import annotations

@@ -1,26 +1,9 @@
-"""``RLanguageAnalyzer`` — defines/references for R cells.
+"""``RLanguageAnalyzer``: defines/references for R cells.
 
-Shells out to ``Rscript`` with the helper at ``analyze_cell.R`` to
-extract DAG inputs/outputs. The R script uses ``codetools::findGlobals``
-+ a manual top-level-assign scan; the parent process here is a thin
-wrapper that:
-
-- Spawns ``Rscript`` with a hard timeout (~5s) so a hung interpreter
-  can't wedge the session.
-- Pipes the cell source on stdin.
-- Parses the JSON object the helper writes to stdout.
-- Caches by source hash so unchanged cells don't pay the spawn cost
-  on every reload.
-
-The analyzer registers itself against the ``LanguageAnalyzer`` protocol
-from #54. Cells declared as ``language = "r"`` in ``notebook.toml`` go
-through this adapter just like Python / SQL / prompt cells go through
-their respective adapters.
-
-Note: R cells can be **declared** before #57 lands; this analyzer
-makes them participate in the DAG. Attempting to **execute** an R
-cell before #57 ships raises ``UnknownLanguageError`` from the
-executor registry.
+Pipes the cell source to ``Rscript`` running ``analyze_cell.R``
+(``codetools::findGlobals`` plus a top-level-assign scan) and parses its JSON.
+A hard timeout keeps a hung interpreter from wedging the session; results are
+cached by source hash.
 """
 
 from __future__ import annotations
@@ -56,13 +39,7 @@ _CACHE: dict[str, AnalyzedCell] = {}
 
 
 class RscriptUnavailableError(RuntimeError):
-    """Raised when ``Rscript`` is not on ``PATH``.
-
-    Distinct from ``FileNotFoundError`` so callers can surface a useful
-    "R isn't installed" message rather than a stack trace pointing at
-    ``subprocess.run``. Resolution flows through #55's renv bootstrap
-    (which expects R + Rscript already on the user's machine).
-    """
+    """Raised when ``Rscript`` is not on ``PATH``, so callers can say R is not installed."""
 
 
 def _source_hash(source: str) -> str:
@@ -73,17 +50,9 @@ def _source_hash(source: str) -> str:
 def _run_rscript(source: str) -> AnalyzedCell:
     """Invoke ``Rscript`` against the embedded helper and parse the JSON.
 
-    Three failure modes, each surfaced as a usable error rather than
-    swallowed:
-
-    - ``Rscript`` not on ``PATH`` → ``RscriptUnavailableError``. The
-      cell loses DAG analysis until R is installed, but the rest of
-      the notebook keeps working.
-    - Hard timeout → return empty ``AnalyzedCell``. The R interpreter
-      hung; logging captures it. The cell ends up isolated in the DAG
-      (no edges in or out) which is the safe fallback.
-    - Helper exited non-zero or stdout wasn't valid JSON → return
-      empty ``AnalyzedCell`` after logging. Same isolation behaviour.
+    Raises ``RscriptUnavailableError`` when ``Rscript`` is missing. A timeout, a
+    non-zero exit or invalid JSON is logged and returns an empty ``AnalyzedCell``,
+    isolating the cell in the DAG.
     """
     rscript = shutil.which("Rscript")
     if rscript is None:

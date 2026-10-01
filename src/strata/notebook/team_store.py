@@ -1,28 +1,15 @@
-"""Consult a shared store when the local cache misses.
+"""Consult a shared team store when the local cache misses.
 
-The team cache hit: a colleague ran this exact computation, so you get their
-result instead of spending the minutes again. It works because the notebook's
-provenance key — ``sha256(sorted_input_hashes + source_hash + env_hash)`` —
-contains no notebook id and no cell id. Two people running the same source over
-the same inputs in the same environment already arrive at the same hash. Only
-the lookup was missing.
+The notebook provenance key holds no notebook or cell id, so two people running
+the same source over the same inputs in the same environment get the same hash.
 
-**Pull-through, not redirection.** The notebook keeps its own local store and
-asks the team store only on a miss; what comes back is written into the local
-store under the local canonical id, so every later read is local and the
-existing cache-hit validation passes without an exception carved into it. The
-alternative — pointing the notebook's whole artifact store at the remote — would
-put a network call behind every inter-cell variable read and turn a store
-outage into a broken notebook.
+Pull-through, not redirection: the store is asked only on a local miss, and
+what comes back is written into the local store under the local canonical id,
+so later reads are local and a store outage never breaks a notebook.
 
-**Nothing here can fail a cell.** A team store that is unreachable, slow, or
-refusing is a store you recompute past. Every failure returns "no result" and
-logs; the difference between "nobody computed this" and "I could not ask" is
-kept in the *log level*, not in the return value, because a cell has to run
-either way. That distinction only exists at all because the route marks a
-genuine miss with :data:`PROVENANCE_MISS_HEADER` — without it an outage would
-be indistinguishable from an empty cache, and a team would conclude the shared
-cache does not work.
+Nothing here can fail a cell. Every failure returns "no result" and logs; a
+genuine miss (marked by :data:`PROVENANCE_MISS_HEADER`) and an outage differ
+only in log level.
 """
 
 from __future__ import annotations
@@ -69,10 +56,8 @@ class TeamArtifact:
 class TeamPull:
     """A completed pull: every consumed variable landed in the local store.
 
-    ``principal`` is who computed it, and is the reason this is a distinct type
-    rather than a bool. A result that materialises with no author is
-    indistinguishable from a bug; the executor surfaces the name so a hit reads
-    as "alice already ran this" rather than as an unexplained instant success.
+    ``principal`` is who computed it; the executor surfaces it so a hit reads as
+    "alice already ran this" rather than an unexplained instant success.
     """
 
     variables: tuple[str, ...]
@@ -100,15 +85,11 @@ class TeamStore:
         *,
         client: httpx.AsyncClient | None = None,
     ):
-        """
-        Args:
-            base_url: The shared store's root, e.g. ``https://store.example``.
-            headers: Auth the store needs — trusted-proxy identity, tenant, and
-                scopes. Sent per request rather than baked into an injected
-                client, so handing in a client for tests or a proxy cannot
-                silently drop authentication.
-            client: Injected transport. When supplied it is not closed here;
-                the caller owns what it created.
+        """Create a client for the shared store at ``base_url``.
+
+        ``headers`` (trusted-proxy identity, tenant, scopes) are sent per request, so
+        an injected ``client`` cannot silently drop authentication. An injected
+        ``client`` is owned by the caller and not closed here.
         """
         # Absolute URLs, not the client's ``base_url``, so an injected client cannot send
         # relative paths nowhere.
@@ -122,10 +103,9 @@ class TeamStore:
             await self._client.aclose()
 
     async def fetch(self, provenance_hash: str) -> TeamArtifact | None:
-        """The whole round trip: has anyone computed this, and if so, the bytes.
+        """Look up ``provenance_hash`` and download the bytes if anyone computed it.
 
-        Returns ``None`` for a miss and for every failure — see the module
-        docstring. The two are distinguished in the log, not in the result.
+        Returns ``None`` for a miss and for every failure; the log tells them apart.
         """
         match = await self._lookup(provenance_hash)
         if match is None:
@@ -170,10 +150,8 @@ class TeamStore:
     ) -> bool:
         """Offer a result to the team, keyed by provenance. Never raises.
 
-        Returns whether it landed, which is used for logging and nothing else:
-        a push that fails costs the *next* person a recomputation, and costs
-        this one nothing. It must not turn a cell that ran fine into a cell
-        that errored.
+        Returns whether it landed (for logging only): a failed push costs the next
+        person a recompute and must not fail a cell that ran fine.
         """
         metadata: dict[str, str] = {"content_type": content_type}
         if variable_name:
@@ -252,12 +230,10 @@ class TeamStore:
         return payload if isinstance(payload, dict) else None
 
     async def _download(self, artifact_id: str, version: int) -> bytes | None:
-        """The raw stored bytes — not an Arrow table.
+        """The raw stored bytes, not an Arrow table.
 
-        A cell variable can be any of the notebook's content types (arrow, JSON,
-        pickle), and only the serializer knows which. Decoding here would force
-        this module to learn all of them and re-encode before writing the blob
-        back, so it stays opaque bytes end to end.
+        Only the serializer knows a variable's content type (arrow, JSON, pickle), so
+        the bytes stay opaque end to end.
         """
         try:
             response = await self._client.get(
@@ -293,17 +269,10 @@ async def pull_cell_outputs(
 ) -> TeamPull | None:
     """Materialise a teammate's result for this cell in the local store.
 
-    All or nothing. The executor's cache-hit check requires *every* consumed
-    variable to have a local canonical artifact whose provenance matches, so a
-    partial pull is a miss that also wrote rows — this fetches all of them
-    before writing any, and gives up as soon as one is absent.
-
-    (A download that fails after the first write leaves the earlier variables
-    stored. That is benign: each is written under its own correct provenance,
-    so the next attempt re-fetches only what is still missing and the cache-hit
-    check keeps rejecting the incomplete set until it is complete.)
-
-    Returns the pull on success, ``None`` on any miss or failure.
+    All or nothing: the cache-hit check needs every consumed variable, so all are
+    fetched before any is written, and the pull stops at the first absent one. A
+    download failing after a write leaves correctly keyed rows behind; the hit
+    check keeps rejecting the incomplete set. Returns ``None`` on any miss or failure.
     """
     if not consumed_vars:
         # Nothing downstream means no artifact; console and display outputs live in runtime
@@ -417,21 +386,10 @@ async def publish_cell_outputs(
 ) -> int:
     """Offer this cell's freshly computed outputs to the team.
 
-    Reads back what was just written to the *local* store rather than the
-    harness's temp files: those artifacts are the ones the pull will have to
-    reproduce byte for byte, so publishing anything else would let the two
-    halves disagree without either being obviously wrong. It also means the
-    per-variable provenance key comes from the stored artifact rather than
-    being recomputed here, so the two sides cannot drift.
-
-    Unlike the pull this is not all-or-nothing. A pull that is short one
-    variable is a hit that will fail validation, so it must abort; a publish
-    that is short one variable just means the next person pulls nothing and
-    recomputes — the same outcome as not publishing at all, and no worse for
-    having published the others.
-
-    Returns how many variables landed. Never raises: the cell has already
-    succeeded, and a shared-cache problem must not retroactively fail it.
+    Reads back the *local* store's artifacts (not the harness temp files), so what
+    is published is exactly what a pull must reproduce, with the stored provenance
+    key. Not all-or-nothing: a partial publish just means the next person
+    recomputes. Returns how many variables landed. Never raises.
     """
     published = 0
     for var in sorted(consumed_vars):
@@ -463,12 +421,10 @@ async def publish_cell_outputs(
 
 
 def _spec_param(artifact, key: str) -> str:
-    """One value out of the stored transform spec's params.
+    """One value from the stored transform spec's params, or empty.
 
-    Carries ``content_type`` (how the blob was serialized) and ``build_env``
-    (which interpreter on which machine produced it). Empty rather than a
-    guess: the puller needs the first to decode at all, and a plausible default
-    that is wrong for a pickle is worse than an absent one.
+    Used for ``content_type`` and ``build_env``. Empty rather than a guess: a
+    wrong default content type would decode a pickle incorrectly.
     """
     if not artifact.transform_spec:
         return ""
@@ -485,7 +441,7 @@ def _spec_param(artifact, key: str) -> str:
 
 
 def _spec_int(artifact, key: str) -> int:
-    """The same, for a param that is a whole number of milliseconds."""
+    """Like :func:`_spec_param`, for an integer param (milliseconds)."""
     try:
         return int(_spec_param(artifact, key))
     except ValueError:

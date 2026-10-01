@@ -1,35 +1,21 @@
 """Recorded fetches: bytes a cell reads from a URL, as a tracked input (``@fetch``).
 
-A cell that reads a URL with pandas or urllib has the URL in its source hash and
-the bytes in nothing, so the same cell can compute different results from the
-same provenance. ``@fetch`` makes the bytes an input::
+``# @fetch zones https://example.org/taxi_zones.csv`` downloads the URL into a
+content-addressed cache (``.strata/fetch/<sha256>/``), binds ``zones`` to a
+``Path`` to the bytes, and folds ``"<name>:fetch:<url>:<sha256>"`` into
+provenance, so the cell goes stale when the bytes change. ``sha256=<digest>``
+pins it; bytes that no longer match fail the cell with both digests.
 
-    # @fetch zones https://example.org/taxi_zones.csv
-    import pandas as pd
-    df = pd.read_csv(zones)
+``refetch`` says when the URL is checked:
 
-The executor downloads the URL into the notebook's content-addressed cache
-(``.strata/fetch/<sha256>/``), injects ``zones`` as a local ``Path`` to the
-bytes, and folds ``"<name>:fetch:<url>:<sha256>"`` into the cell's provenance —
-so the cell goes stale when the bytes move, the way an ``@table`` does when a
-snapshot lands.
+* ``stale`` (default): a conditional GET (``ETag`` / ``Last-Modified``) at most
+  every ``STALE_CHECK_SECONDS`` during staleness, which is recomputed on every
+  edit, and always right before the cell runs;
+* ``never``: use the cached bytes; fetch only if there are none;
+* ``always``: download again on every check, ignoring validators.
 
-``sha256=<digest>`` pins it: the fingerprint is the pin, and bytes that no
-longer match fail the cell with both digests. ``refetch`` says when the URL is
-checked:
-
-* ``stale`` (default) — a conditional GET (``ETag`` / ``Last-Modified``), at
-  most every ``STALE_CHECK_SECONDS`` while staleness is recomputed and always
-  right before the cell runs;
-* ``never`` — use the bytes already cached; fetch only if there are none;
-* ``always`` — download again on every check, ignoring validators.
-
-The recheck interval exists because staleness is recomputed on every source
-edit; a request per ``@fetch`` per keystroke would be worse than the problem.
-Execution always checks, so what a run records is what the URL served then.
-
-URLs go through the same guard as a worker's manifest URLs: http(s) only, and
-no private or link-local address unless the host is named in
+URLs go through the same guard as a worker's manifest URLs: http(s) only, and no
+private or link-local address unless the host is in
 ``notebook_fetch_allowed_hosts``.
 """
 
@@ -62,19 +48,11 @@ _UNSAFE_NAME = re.compile(r"[^A-Za-z0-9._-]")
 
 
 def guard_settings(config: Any) -> tuple[tuple[str, ...], bool]:
-    """How strictly to check an ``@fetch`` URL, from the server's configuration.
+    """Return the host allowlist and whether private addresses are allowed.
 
-    Returns the host allowlist and whether a loopback or private address is
-    allowed. Personal mode allows them: that deployment is one person's own
-    machine, where ``http://localhost:8000/data.csv`` is their own dev server
-    and not a trust boundary being crossed, and refusing it does not protect
-    them from anything -- it only means the feature cannot be used on the
-    machine most people try it on first. A service deployment keeps the guard,
-    where the address a URL resolves to is exactly the question.
-
-    One helper because the executor and the staleness walk both build a
-    ``FetchCache`` and have to agree: a fetch the run accepts and the staleness
-    check refuses is a cell that never settles.
+    Personal mode allows them: ``http://localhost:8000/data.csv`` on one's own
+    machine crosses no trust boundary. The executor and the staleness walk both use
+    this so they agree; a fetch one accepts and the other refuses never settles.
     """
     allowed = tuple(getattr(config, "notebook_fetch_allowed_hosts", None) or ())
     personal = getattr(config, "deployment_mode", "service") == "personal"
@@ -84,8 +62,8 @@ def guard_settings(config: Any) -> tuple[tuple[str, ...], bool]:
 def _safe_filename(name: str) -> str:
     """The URL's own file name, reduced to something that can only name a file.
 
-    Kept at all so a cell that looks at the extension still can; reduced
-    because it comes from a URL, where ``..`` is a perfectly good last segment.
+    Kept so a cell can look at the extension; reduced because ``..`` is a valid last
+    URL segment.
     """
     cleaned = _UNSAFE_NAME.sub("_", name).lstrip(".")[:128]
     return cleaned or "data"
@@ -174,9 +152,9 @@ class FetchCache:
     def fingerprint(self, spec: FetchSpec, *, max_age: float | None = None) -> str:
         """The provenance component, for staleness. Never raises.
 
-        A pin is its own fingerprint, needing no network. Anything unresolvable
-        gets a unique one, the same stance as an unreachable ``@table``: the cell
-        shows stale and runs, and the run reports why.
+        A pin is its own fingerprint. Anything unresolvable gets a unique one, as an
+        unreachable ``@table`` does: the cell shows stale and runs, and the run reports
+        why.
         """
         if spec.sha256:
             return f"{spec.name}:fetch:{spec.url}:{spec.sha256}"
@@ -282,8 +260,7 @@ class FetchCache:
     def _contained(self, sha: str, filename: str) -> Path:
         """``<root>/<sha>/<filename>``, refused unless it stays under the root.
 
-        The name comes from a URL, and the index is a file on disk; neither is
-        trusted to keep the bytes where they belong.
+        Neither the URL-derived name nor the on-disk index is trusted.
         """
         if not _SHA256.fullmatch(sha):
             raise FetchError(f"not a sha256 digest: {sha!r}")

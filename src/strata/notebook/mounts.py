@@ -1,28 +1,10 @@
 """File mount resolution and fingerprinting for notebook cells.
 
-This module handles the full lifecycle of filesystem mounts:
-
-1. **Resolution** — Converting mount URIs to local paths before cell execution.
-   Local mounts (``file://``) are validated and used directly.  Remote mounts
-   (``s3://``, ``gs://``, ``az://``) are materialised to a local cache directory
-   via ``fsspec`` when available, or via PyArrow filesystems as a fallback.
-
-2. **Fingerprinting** — Computing content hashes for read-only mounts so they
-   participate in provenance-based caching.  A cell reading from
-   ``s3://bucket/data`` invalidates when the data changes.
-
-3. **Sync-back** — After cell execution, read-write mounts are synced back to
-   their remote URIs.
-
-Design decisions:
-
-- The **harness** only sees local ``pathlib.Path`` objects — all remote
-  resolution happens in the executor before the subprocess spawns.
-- Read-write mounts are tracked as side-effect declarations in artifact
-  metadata but don't participate in provenance hashing (you can't hash
-  the output before computing it).
-- ``fsspec`` is an optional dependency.  When unavailable, only ``file://``
-  mounts work and remote mounts raise a clear error.
+Local (``file://``) mounts are used directly; remote ones (``s3``, ``gs``,
+``az``) are mirrored to a local cache via ``fsspec`` before the subprocess
+spawns, so the harness only sees ``pathlib.Path``. Read-only mounts are
+fingerprinted into provenance; read-write mounts are synced back after
+execution and do not participate in provenance.
 """
 
 from __future__ import annotations
@@ -57,17 +39,7 @@ class ResolvedMount:
 
 
 def parse_mount_uri(uri: str) -> tuple[str, str]:
-    """Parse a mount URI into (scheme, path).
-
-    Examples::
-
-        "file:///home/user/data"   → ("file", "/home/user/data")
-        "s3://bucket/prefix"       → ("s3", "bucket/prefix")
-        "gs://bucket/prefix"       → ("gs", "bucket/prefix")
-        "az://container/prefix"    → ("az", "container/prefix")
-
-    Returns:
-        Tuple of (scheme, path).
+    """Parse a mount URI into ``(scheme, path)``: ``s3://bucket/p`` gives ``("s3", "bucket/p")``.
 
     Raises:
         ValueError: If the URI is malformed or uses an unsupported scheme.
@@ -117,14 +89,8 @@ for valid keys (s3fs, gcsfs, adlfs). Per-mount ``options`` from
 class MountResolver:
     """Resolves mount URIs to local paths for cell execution.
 
-    For local mounts, validates the path exists and returns it directly.
-    For remote mounts, uses fsspec (if available) to create a cached
-    local mirror, or raises an error if fsspec is not installed.
-
-    Args:
-        cache_dir: Base directory for caching remote mounts.
-        credentials: Per-scheme fsspec storage options — see
-            ``MountCredentials``.
+    Local mounts must exist; remote mounts are mirrored under ``cache_dir`` via
+    fsspec. ``credentials`` are per-scheme fsspec storage options.
     """
 
     def __init__(
@@ -165,13 +131,7 @@ class MountResolver:
         self,
         mounts: list[MountSpec],
     ) -> dict[str, ResolvedMount]:
-        """Resolve all mounts to local paths.
-
-        Args:
-            mounts: Mount specifications to resolve.
-
-        Returns:
-            Dict of {mount_name: ResolvedMount}.
+        """Resolve all mounts to local paths, keyed by mount name.
 
         Raises:
             ValueError: If a local mount path doesn't exist.
@@ -341,10 +301,7 @@ class MountResolver:
         self,
         resolved: dict[str, ResolvedMount],
     ) -> None:
-        """Sync read-write mounts back to their remote URIs.
-
-        Called after cell execution completes successfully.
-        """
+        """Sync read-write mounts back to their remote URIs after a successful run."""
         for name, rm in resolved.items():
             if rm.spec.mode != MountMode.READ_WRITE:
                 continue
@@ -378,19 +335,11 @@ class MountResolver:
 
 
 class MountFingerprinter:
-    """Compute content fingerprints for mount URIs.
-
-    Fingerprints are used in provenance hashing so that cache entries
-    invalidate when mount contents change.
-    """
+    """Content fingerprints for mount URIs, so cache entries invalidate when contents change."""
 
     @staticmethod
     def fingerprint_local_sync(path: Path) -> str:
-        """Fingerprint a local directory using file mtimes and sizes.
-
-        This is fast but not cryptographic — suitable for local dev.
-        For production, consider content hashing.
-        """
+        """Fingerprint a local directory from file mtimes and sizes (fast, not content-based)."""
         if not path.exists():
             return hashlib.sha256(b"missing").hexdigest()
 
@@ -427,10 +376,7 @@ class MountFingerprinter:
         remote_path: str,
         storage_options: dict[str, Any] | None = None,
     ) -> str:
-        """Fingerprint a remote path using object listing metadata.
-
-        Uses ETags/sizes/mtimes from the remote listing — no data download.
-        """
+        """Fingerprint a remote path from listing metadata (ETags, sizes, mtimes); no download."""
         try:
             protocol = _scheme_to_fsspec_protocol(scheme)
             fs = _mount_filesystem(protocol, storage_options or {})
@@ -485,18 +431,12 @@ class MountFingerprinter:
         mount: MountSpec,
         storage_options: dict[str, Any] | None = None,
     ) -> str | None:
-        """Compute fingerprint for any mount spec.
+        """Compute the fingerprint for any mount spec.
 
-        Returns ``None`` for read-write mounts — the caller must treat
-        the cell as non-cacheable (skip cache check entirely).
-
-        ``storage_options`` is the *merged* fsspec storage_options
-        (scheme credentials + ``mount.options``) — callers with access
-        to ``MountResolver.credentials`` should pass it so the remote
-        listing call hits the same endpoint as the actual data fetch.
-        When ``None``, falls back to ``mount.options`` for backward
-        compatibility with bare callers (e.g. session staleness check).
-        Pinned mounts return a hash of the pin value.
+        ``None`` for read-write mounts: the caller must skip the cache check.
+        Pinned mounts hash the pin value. ``storage_options`` should be the
+        merged options the data fetch uses, so the listing hits the same
+        endpoint; when ``None``, ``mount.options`` is used.
         """
         if mount.mode == MountMode.READ_WRITE:
             return None
@@ -537,13 +477,10 @@ def _scheme_to_fsspec_protocol(scheme: str) -> str:
 def _mount_filesystem(protocol: str, storage_options: dict[str, Any]) -> Any:
     """``fsspec.filesystem(protocol, **storage_options)``, but not gcsfs's gRPC probe.
 
-    Since 2026.6, gcsfs defaults to a filesystem that asks Google's Storage
-    Control API, over gRPC, what kind of bucket it is before the first
-    operation on one. An endpoint that is not Google's (the fake-gcs-server
-    emulator, a GCS-compatible service) cannot answer: the TLS handshake fails
-    and gcsfs retries for about two minutes per bucket before falling back.
-    Such an endpoint gets gcsfs's standard filesystem; Google's own endpoints,
-    ``*.googleapis.com`` included, keep the default.
+    Since 2026.6 gcsfs asks Google's Storage Control API (gRPC) about a bucket
+    before first use; a non-Google endpoint (fake-gcs-server, a GCS-compatible
+    service) cannot answer, and gcsfs retries for about two minutes per bucket.
+    Such endpoints get the standard filesystem; ``*.googleapis.com`` keeps the default.
     """
     import fsspec
 
@@ -562,13 +499,9 @@ def _mount_filesystem(protocol: str, storage_options: dict[str, Any]) -> Any:
 def _assert_within(candidate: Path, root: Path, mount_name: str, remote_name: str) -> None:
     """Raise if ``candidate`` would resolve outside ``root``.
 
-    ``root`` must already be resolved by the caller (so the comparison
-    handles symlinks consistently). The candidate is resolved with
-    ``strict=False`` because it may not exist yet (we check before
-    creation). A remote backend that returns a name containing ``..``
-    segments, an absolute path, or a symlink pointing outside the
-    mirror gets the mount rejected rather than silently widening what
-    the harness can read.
+    ``root`` must already be resolved; ``candidate`` is resolved non-strictly
+    since it may not exist yet. A remote name with ``..``, an absolute path, or
+    an escaping symlink rejects the mount rather than widening what the harness reads.
     """
     try:
         resolved = candidate.resolve(strict=False)
@@ -653,15 +586,10 @@ def resolve_cell_mounts(
     cell_mounts: list[MountSpec],
     annotation_mounts: list[MountSpec],
 ) -> list[MountSpec]:
-    """Merge notebook, cell-meta, and annotation mounts.
+    """Merge notebook, cell-meta and annotation mounts, deduplicated by name.
 
-    Priority order (highest wins):
-    1. Annotation mounts (``# @mount`` in cell source)
-    2. Cell-level mounts (``[[cells.mounts]]`` in notebook.toml)
-    3. Notebook-level mounts (``[[mounts]]`` in notebook.toml)
-
-    Returns:
-        Merged list of MountSpec, deduplicated by name.
+    Precedence (highest first): ``# @mount`` annotations, ``[[cells.mounts]]``,
+    then notebook-level ``[[mounts]]``.
     """
     merged: dict[str, MountSpec] = {}
 
@@ -678,18 +606,11 @@ def resolve_cell_mounts(
 def mount_fingerprint_sync(resolver: MountResolver, mount: MountSpec) -> str | None:
     """The provenance component for one mount, shared by execution and staleness.
 
-    Both have to produce the same string or a mounted cell's artifacts are keyed
-    under a hash the staleness check never reproduces. The credential's name is
-    part of it, since which credential a mount reads through can change what it
-    sees; the values are not, so rotating a secret changes nothing here.
-
-    The uri is part of it too: a cell reads the mount's path as well as its
-    contents, and two directories that happen to hold the same files — two
-    empty ones, say — are not the same input.
-
-    A credential that cannot be resolved gives a unique fingerprint, the same
-    stance as an unreachable store: the cell shows stale and runs, and the run
-    fails naming the credential.
+    Both must produce the same string, or artifacts are keyed under a hash
+    staleness never reproduces. It includes the uri (two directories with the
+    same files are different inputs) and the credential's name, never its values.
+    An unresolvable credential gives a unique fingerprint: the cell shows stale,
+    runs, and fails naming the credential.
     """
     try:
         storage_options = resolver.storage_options(mount)

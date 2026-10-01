@@ -1,9 +1,7 @@
 """Structured-output helpers: schema normalization and Anthropic tool-use.
 
-Schema enforcement on the OpenAI-compat path uses ``response_format``;
-on the Anthropic native path it uses a single forced tool call whose
-``input_schema`` is the user-requested schema. This module hides that
-fork from the rest of the LLM package.
+The OpenAI-compat path enforces schemas with ``response_format``; the Anthropic
+native path uses one forced tool call whose ``input_schema`` is the schema.
 """
 
 from __future__ import annotations
@@ -20,17 +18,12 @@ _ANTHROPIC_API_VERSION = "2023-06-01"
 def _normalize_openai_strict_schema(
     node: Any,
 ) -> tuple[Any, bool]:
-    """Return a schema shaped for OpenAI ``strict: true`` plus a flag
-    telling the caller whether strict mode is actually safe.
+    """Return the schema shaped for OpenAI ``strict: true`` and whether strict is safe.
 
-    OpenAI's strict mode rejects a schema unless every ``object`` node
-    declares ``additionalProperties: false`` and lists every property
-    in ``required``. We enforce the first rule ourselves — it's pure
-    tightening and never changes the meaning of a valid response. The
-    second rule can conflict with genuinely-optional fields, so if the
-    user has omitted any property from their own ``required`` list we
-    fall back to ``strict: false`` instead of silently promoting those
-    fields to required.
+    Strict mode needs ``additionalProperties: false`` on every object (always
+    added: it only tightens) and every property in ``required``. If the user left a
+    property out of ``required``, strict is reported unsafe rather than silently
+    making that field required.
     """
     strict_ok = True
 
@@ -63,19 +56,9 @@ def response_format_for(
 ) -> dict[str, Any] | None:
     """Pick the provider-appropriate ``response_format`` payload.
 
-    * OpenAI endpoints accept ``json_schema`` for schema enforcement.
-      We auto-normalize the schema (add ``additionalProperties: false``
-      at every object) and use ``strict: true`` when the user's
-      ``required`` lists fully cover ``properties``; otherwise we
-      relax to ``strict: false`` so optional fields still work.
-    * Everything else (Anthropic's OpenAI-compat, Mistral, Ollama,
-      local vLLM) reliably supports ``json_object`` for "valid JSON,
-      any shape" — schema enforcement happens client-side if at all.
-    * Plain ``output_type=="json"`` without a schema falls back to
-      ``json_object`` which still guarantees parseable JSON.
-
-    Returns ``None`` when no structured output is requested, so the
-    caller can leave ``response_format`` off the request body.
+    OpenAI endpoints get ``json_schema`` (strict when the schema allows it). Other
+    providers, and ``output_type == "json"`` without a schema, get ``json_object``.
+    Returns ``None`` when no structured output is requested.
     """
     if output_schema is not None:
         if "openai" in base_url.lower():
@@ -97,12 +80,7 @@ def response_format_for(
 def _split_system_and_messages(
     messages: list[dict[str, str]],
 ) -> tuple[str | None, list[dict[str, str]]]:
-    """Pull ``role: system`` turns out into a single system string.
-
-    Anthropic's native messages API takes ``system`` as a top-level
-    parameter; the OpenAI-compat path keeps it in the messages array.
-    When we route to native, we have to lift it.
-    """
+    """Lift ``role: system`` turns into one system string for Anthropic's native API."""
     system_chunks: list[str] = []
     remaining: list[dict[str, str]] = []
     for msg in messages:
@@ -124,15 +102,10 @@ def build_anthropic_tool_use_body(
     temperature: float | None,
     output_schema: dict[str, Any],
 ) -> dict[str, Any]:
-    """Build the native Anthropic ``/v1/messages`` request body for
-    schema-constrained output via tool-use.
+    """Build the native Anthropic ``/v1/messages`` body for schema-constrained output.
 
-    The trick: define a single tool whose ``input_schema`` is the
-    user-requested schema, then force the model to call it. The
-    response's ``tool_use.input`` is a structurally-valid object
-    conforming to the schema — Anthropic's decoder enforces this at
-    token time, the same grammar-masking idea OpenAI uses for
-    strict ``json_schema``.
+    Defines one tool whose ``input_schema`` is the requested schema and forces the
+    model to call it, so ``tool_use.input`` conforms to the schema.
     """
     system, filtered_messages = _split_system_and_messages(messages)
     body: dict[str, Any] = {
@@ -164,10 +137,8 @@ def parse_anthropic_tool_use_response(
 ) -> LlmCompletionResult:
     """Extract the forced tool call's arguments as JSON-encoded content.
 
-    Raises ``RuntimeError`` when the model returned prose or stopped
-    before emitting the tool call — both of which shouldn't happen
-    under ``tool_choice: {type: "tool", name: ...}`` but are worth
-    surfacing explicitly instead of crashing on a KeyError.
+    Raises ``RuntimeError`` when the model returned prose or stopped before the
+    tool call, instead of failing on a ``KeyError``.
     """
     for block in data.get("content") or []:
         if isinstance(block, dict) and block.get("type") == "tool_use":

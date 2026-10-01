@@ -1,15 +1,8 @@
-"""PostgreSQL driver adapter.
+"""PostgreSQL driver adapter, backed by ``adbc-driver-postgresql``.
 
-Backed by ``adbc-driver-postgresql``. The freshness probe combines
-``pg_stat_user_tables`` cumulative DML counters with
-``pg_class.relfilenode`` to catch both data changes and rewrite-style
-DDL. Read-only enforcement uses
-``SET default_transaction_read_only = on`` so every transaction the
-session opens rejects ``INSERT``/``UPDATE``/``DELETE`` at the engine.
-
-See ``docs/internal/design-sql-cells.md`` for the full design rationale
-and the gotcha list (stats-collector lag, frozen-inside-transaction
-semantics, replica counter divergence).
+Freshness combines ``pg_stat_user_tables`` DML counters with
+``pg_class.relfilenode`` to catch data changes and rewrite-style DDL. Read-only
+mode sets ``default_transaction_read_only = on`` so the engine rejects writes.
 """
 
 from __future__ import annotations
@@ -76,10 +69,8 @@ ORDER BY a.attnum
 def _resolve_var(value: str) -> str:
     """Resolve a single ``${VAR}`` indirection to its env-var value.
 
-    Literal strings pass through unchanged. The writer scrubs literals
-    before saving, so the only way a literal reaches this point is from
-    in-memory state that hasn't been persisted yet — kept usable for
-    test/dev scenarios where the user is iterating before save.
+    Literal strings pass through: the writer scrubs literals on save, so one can
+    only come from unsaved in-memory state.
     """
     if value.startswith("${") and value.endswith("}"):
         var = value[2:-1]
@@ -167,18 +158,11 @@ class PostgresAdapter:
     def open(self, spec: Any, *, read_only: bool) -> Any:
         """Open an ADBC PostgreSQL connection.
 
-        ``read_only=True`` flips the session into Postgres'
-        ``default_transaction_read_only`` mode so any subsequent
-        ``INSERT``/``UPDATE``/``DELETE`` is rejected by the engine
-        before reaching disk. This is the security boundary; SQL-text
-        keyword filtering is *not* relied on.
-
-        After read-only mode, applies any identity-shaping session
-        overrides — ``role`` (via ``SET ROLE``) and
-        ``options.search_path`` (via ``SET search_path``). These are
-        the same fields ``canonicalize_connection_id`` folds into the
-        cache key; applying them here keeps cache identity and live
-        session state consistent.
+        ``read_only=True`` sets ``default_transaction_read_only`` so the engine
+        rejects writes; that, not keyword filtering, is the security boundary.
+        Then applies ``role`` and ``options.search_path``, the same fields
+        ``canonicalize_connection_id`` hashes, so cache identity matches the
+        live session.
         """
         uri = self._build_uri(spec)
         conn = self._invoke_connect(uri)
@@ -226,15 +210,9 @@ class PostgresAdapter:
     def _build_uri(self, spec: Any) -> str:
         """Construct the ADBC connection URI from the spec.
 
-        Strategy:
-        - If ``spec.uri`` is set, use it as the base. Splice
-          ``auth.user``/``auth.password`` (resolved from env) into the
-          userinfo portion if either is present.
-        - Otherwise build from discrete ``host``/``port``/``database``
-          components and resolved auth.
-
-        ``${VAR}`` indirections in ``auth`` are resolved here, raising
-        ``RuntimeError`` when an env var is missing.
+        Uses ``spec.uri`` with resolved auth spliced into its userinfo, or else
+        builds from ``host``/``port``/``database``. Raises ``RuntimeError`` when
+        a ``${VAR}`` in ``auth`` names a missing env var.
         """
         auth_raw = getattr(spec, "auth", None) or {}
         auth_user = auth_raw.get("user")
@@ -268,17 +246,11 @@ class PostgresAdapter:
         probe_conn: Any,
         tables: list[QualifiedTable],
     ) -> FreshnessToken:
-        """Per-table freshness via DML counters + relfilenode + resolved schema.
+        """Per-table freshness via DML counters, relfilenode and resolved schema.
 
-        Uses ``to_regclass`` so unqualified table names resolve through
-        the connection's actual ``search_path``. The resolved ``nspname``
-        is folded into the digest, so an unqualified name pointing at
-        different schemas across connections produces different tokens.
-
-        Returns a token whose value digests every (qualified-input,
-        resolved-schema, dml_count, relfilenode) tuple in sorted order.
-        A name that ``to_regclass`` can't resolve flips the token to
-        ``is_session_only=True``.
+        ``to_regclass`` resolves unqualified names through the live
+        ``search_path``, and the resolved schema is part of the digest. An
+        unresolvable name makes the token ``is_session_only``.
         """
         if not tables:
             return FreshnessToken(value=b"")
@@ -311,13 +283,10 @@ class PostgresAdapter:
         probe_conn: Any,
         tables: list[QualifiedTable],
     ) -> SchemaFingerprint:
-        """Per-table schema fingerprint via ``pg_attribute`` + ``to_regclass``.
+        """Per-table schema fingerprint via ``pg_attribute`` and ``to_regclass``.
 
-        Catches metadata-only changes that the freshness probe would
-        miss: ``ADD COLUMN``, type changes, nullability flips. Uses
-        ``to_regclass`` for the same reason as ``probe_freshness`` —
-        unqualified names resolve through the connection's actual
-        ``search_path``, not a hardcoded ``public``.
+        Catches ``ADD COLUMN``, type changes and nullability flips that the
+        freshness probe misses.
         """
         if not tables:
             return SchemaFingerprint(value=b"")
@@ -342,16 +311,9 @@ class PostgresAdapter:
         return SchemaFingerprint(value=h.digest())
 
     def list_schema(self, conn: Any) -> list[TableSchema]:
-        """Enumerate user-visible tables and views via ``information_schema``.
+        """Enumerate user tables and views via ``information_schema`` in one round-trip.
 
-        Filters out system schemas (``pg_catalog``, ``information_schema``)
-        because those clutter the discovery surface and the user's
-        own queries almost never touch them. The query joins
-        ``tables`` to ``columns`` so we make one round-trip
-        regardless of how many tables the connection sees.
-
-        Read-only by construction: the connection arrives in
-        ``READ ONLY`` mode courtesy of ``open(read_only=True)``.
+        System schemas (``pg_catalog``, ``information_schema``) are excluded.
         """
         query = (
             "SELECT t.table_catalog, t.table_schema, t.table_name, "
@@ -395,12 +357,9 @@ class PostgresAdapter:
 
 
 def _to_regclass_arg(table: QualifiedTable) -> str:
-    """Build the string argument for ``to_regclass($1)``.
+    """Build the ``to_regclass($1)`` argument: ``"schema"."name"`` or ``"name"``.
 
-    Schema-qualified tables become ``"schema"."name"``; unqualified
-    tables become ``"name"``. Double-quoting preserves identifier case
-    (Postgres folds unquoted identifiers to lowercase). Embedded
-    double quotes are escaped per the SQL standard.
+    Quoting preserves identifier case; embedded double quotes are escaped.
     """
     parts = []
     if table.schema:
@@ -410,13 +369,10 @@ def _to_regclass_arg(table: QualifiedTable) -> str:
 
 
 def _format_search_path(value: Any) -> str:
-    """Format a ``search_path`` option into a ``SET search_path TO ...`` clause.
+    """Format a ``search_path`` option (comma string or list) as ``SET search_path TO ...``.
 
-    Accepts either a comma-separated string (``"analytics, public"``)
-    or a list (``["analytics", "public"]``). Each schema name is
-    validated against the unquoted-identifier pattern and double-
-    quoted in the output. ``SET search_path`` doesn't accept bind
-    parameters, so the validation is what prevents injection.
+    ``SET search_path`` takes no bind parameters, so validating each name against
+    the unquoted-identifier pattern is the injection defense.
     """
     if isinstance(value, str):
         names = [s.strip() for s in value.split(",") if s.strip()]
@@ -444,12 +400,7 @@ def _splice_userinfo(
 ) -> str:
     """Return ``uri`` with the user/password portion of the userinfo replaced.
 
-    Used when ``spec.auth`` carries credentials separately from the
-    base URI. The host/port/database/path stay intact; only the
-    authority's user[:password] portion changes. When ``user`` is
-    None, the URI's existing user is preserved — common when the
-    user is in the URI and only the password comes from
-    ``${VAR}`` indirection.
+    Host, port and path stay intact. ``user=None`` keeps the URI's existing user.
     """
     parsed = urlparse(uri)
     host = parsed.hostname or ""
@@ -473,10 +424,8 @@ _ADAPTER = PostgresAdapter()
 def register() -> None:
     """Register this adapter in the global SQL driver registry.
 
-    Exposed as a callable (not just a side effect of import) so
-    ``_restore_defaults_for_tests`` can re-register after a
-    ``_reset_for_tests`` without having to reload modules — Python's
-    import cache makes module-level registration only run once.
+    A callable so tests can re-register after ``_reset_for_tests`` without
+    reloading the module.
     """
     register_adapter(_ADAPTER)
 

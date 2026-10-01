@@ -1,22 +1,13 @@
 """Harness script that runs inside the inspect REPL subprocess.
 
-Receives a manifest JSON file (path as ``argv[1]``), pre-loads the cell's input
-variables into a namespace, then reads JSON command lines from stdin, evaluates
-them, and writes JSON results to stdout. The process stays alive until an
-explicit ``close`` command, so successive evaluations reuse the loaded inputs.
+Loads the cell's inputs from the manifest at ``argv[1]``, then evaluates JSON
+command lines from stdin until ``close``. Runs in the notebook's venv, so it
+loads the sibling ``serializer.py`` by path instead of importing ``strata``.
 
-It runs in the notebook's venv, so it cannot ``import strata`` — instead it
-loads ``serializer.py`` from the same directory via ``importlib.util`` (the
-package directory, which is this file's parent).
+Protocol (JSON lines)::
 
-Communication protocol
------------------------
-Parent -> Child: JSON lines on stdin  ``{"expr": "df.describe()"}``
-Child -> Parent: JSON lines on stdout ``{"ok": true, "result": "...", "type": "str"}``
-                                  or  ``{"ok": false, "error": "..."}``
-
-Special commands::
-
+    stdin:  {"expr": "df.describe()"}
+    stdout: {"ok": true, "result": "...", "type": "str"}  or  {"ok": false, "error": "..."}
     {"cmd": "ping"}  -> {"ok": true, "result": "pong"}
     {"cmd": "close"} -> process exits
 """
@@ -121,9 +112,8 @@ def _emit(response):
 def _evaluate(expr, namespace):
     """Evaluate an expression (or statement) and return a response dict.
 
-    Tries ``eval`` first; on ``SyntaxError`` falls back to ``exec`` so plain
-    statements work too. stdout produced during evaluation is captured and
-    returned under ``stdout`` (expressions) or as the result (statements).
+    Falls back from ``eval`` to ``exec`` on ``SyntaxError``. Captured stdout is
+    returned under ``stdout`` for expressions, or as the result for statements.
     """
     old_stdout, old_stderr = sys.stdout, sys.stderr
     capture_out = io.StringIO()

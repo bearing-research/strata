@@ -1,18 +1,8 @@
-"""Executor for widget cells (P2).
+"""Executor for widget cells: one value artifact per control, no subprocess.
 
-A widget cell produces one value artifact per declared control — with **no
-subprocess**. It is the simplest instance of the "produce an artifact without
-running user code" pattern that prompt cells established:
-
-- The current value of each control comes from ``runtime.json``
-  (``CellRuntime.widget_values``), falling back to the declared default.
-- Each value is stored as a ``json/object`` scalar under the canonical id
-  ``nb_{notebook}_cell_{cell}_var_{name}``, keyed by a per-value provenance
-  hash (declaration + value). Downstream cells resolve it like any upstream
-  output; returning a control to a prior value reproduces the hash, so
-  downstream re-computation is a cache hit.
-
-There is no LLM call, no network, no harness — this is pure store I/O.
+Each control's value comes from ``runtime.json`` (``CellRuntime.widget_values``)
+or its declared default, and is stored as a ``json/object`` scalar under
+``nb_{notebook}_cell_{cell}_var_{name}`` with a per-value provenance hash.
 """
 
 from __future__ import annotations
@@ -26,7 +16,7 @@ from strata.notebook.widget_analyzer import analyze_widget_cell, descriptor_prov
 
 
 def _current_values(session: Any, cell_id: str) -> dict[str, Any]:
-    """The cell's user-set control values from ``runtime.json`` (P3 writes them)."""
+    """The cell's user-set control values from ``runtime.json``."""
     from strata.notebook.runtime_state import load_runtime_state
 
     runtime = load_runtime_state(session.path)

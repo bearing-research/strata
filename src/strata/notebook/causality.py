@@ -1,15 +1,8 @@
-"""Causality inspector — explains WHY a cell is stale.
+"""Causality inspector: explains why a cell is stale.
 
-The staleness computation (session.compute_staleness) tells users *that* a cell
-is stale. The causality inspector tells them *why*, down to the specific change
-that triggered it.
-
-It works by comparing the current provenance components (source hash, input
-hashes, env hash) against those stored with the cached artifact. The diff
-between old and new components *is* the causality explanation.
-
-The same data also powers "Why did this run?" — same provenance diff, just
-rendered in past tense after execution instead of present tense before.
+Diffs the current provenance components (source, input and env hashes) against
+those stored with the cached artifact. The same diff, in past tense, answers
+"Why did this run?" after execution.
 """
 
 from __future__ import annotations
@@ -44,11 +37,7 @@ class CausalityReason(StrEnum):
 
 
 def skip_none(pairs: list[tuple[str, object]]) -> dict:
-    """``dict_factory`` for ``asdict`` that drops fields whose value is None.
-
-    Used by callers serializing CausalityChain / CausalityDetail to JSON,
-    so optional fields don't appear in the wire payload as ``null``.
-    """
+    """``asdict`` ``dict_factory`` that drops None fields, keeping them off the wire."""
     return {k: v for k, v in pairs if v is not None}
 
 
@@ -56,24 +45,9 @@ def skip_none(pairs: list[tuple[str, object]]) -> dict:
 class CausalityDetail:
     """A single reason contributing to staleness.
 
-    Attributes
-    ----------
-    type : CausalityType
-        Which provenance component changed.
-    cell_id : str or None
-        For source/input changes, which cell changed.
-    cell_name : str or None
-        Human-readable name of the changed cell.
-    from_version : str or None
-        Old artifact version string (for ``input_changed``).
-    to_version : str or None
-        New artifact version string (for ``input_changed``).
-    package : str or None
-        Package name (for ``env_changed``).
-    from_package_version : str or None
-        Old package version (for ``env_changed``).
-    to_package_version : str or None
-        New package version (for ``env_changed``).
+    ``cell_id``/``cell_name`` name the changed cell for source and input changes,
+    ``from_version``/``to_version`` are artifact versions for ``input_changed``, and
+    the ``package`` fields describe ``env_changed``.
     """
 
     type: CausalityType
@@ -88,15 +62,7 @@ class CausalityDetail:
 
 @dataclass
 class CausalityChain:
-    """Full causality explanation for a stale cell.
-
-    Attributes
-    ----------
-    reason : CausalityReason
-        Primary staleness reason.
-    details : list of CausalityDetail
-        Specific changes that caused staleness.
-    """
+    """Full causality explanation for a stale cell."""
 
     reason: CausalityReason
     details: list[CausalityDetail] = field(default_factory=list)
@@ -105,21 +71,10 @@ class CausalityChain:
 def compute_causality_on_staleness(
     session: NotebookSession,
 ) -> dict[str, CausalityChain]:
-    """Compute causality chains for all cells during staleness detection.
+    """Return ``{cell_id: CausalityChain}`` for the stale cells of *session*.
 
-    Called alongside ``compute_staleness()`` to provide causality
-    explanations for stale cells. It uses the same topological walk and
-    provenance comparison, but extracts component-level diffs.
-
-    Parameters
-    ----------
-    session : NotebookSession
-        Session whose cells will be inspected.
-
-    Returns
-    -------
-    dict of {str : CausalityChain}
-        Mapping from ``cell_id`` to the causality chain for stale cells.
+    Mirrors ``compute_staleness()``'s topological walk but reports which provenance
+    component changed.
     """
     if session.dag is None:
         return {}
@@ -260,22 +215,7 @@ def compute_causality_on_staleness(
 
 
 def _get_stored_hash(session: NotebookSession, cell_id: str, key: str) -> str | None:
-    """Read a component hash from a cell's stored artifact metadata.
-
-    Parameters
-    ----------
-    session : NotebookSession
-        Session that owns the cell's artifact store.
-    cell_id : str
-        Cell ID.
-    key : {"source_hash", "env_hash"}
-        Which component hash to read.
-
-    Returns
-    -------
-    str or None
-        Stored hash, or ``None`` if not available.
-    """
+    """Read *key* (``source_hash`` or ``env_hash``) from a cell's stored artifact, or None."""
     cell = session.notebook_state.get_cell(cell_id)
     if cell is None or not cell.artifact_uri:
         return None

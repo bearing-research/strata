@@ -1,21 +1,11 @@
 """Holding a notebook still for the seconds a copy takes.
 
-A notebook is a directory Strata writes as cells finish: sources, ``runtime.json``,
-console snapshots, artifacts. A copy taken while a cell completes can carry the
-new ``runtime.json`` and the old artifacts, which then disagree about what the
-notebook holds. Quiescing is the pause that makes a copy consistent.
-
-A hold covers a directory: one notebook, or a project directory and every
-notebook under it. It has two phases.
-
-* **draining** — new runs are refused, and running cells are allowed to finish
-  and write their results (or are cancelled at the caller's timeout).
-* **held** — nothing writes: runs and edits are refused, and so is any writer
-  that reaches the notebook's files some other way.
-
-It ends on release, or when ``max_hold_seconds`` passes, so a caller that dies
-mid-copy cannot freeze a notebook for good. State lives in this process: a hold
-is a promise about what this server writes, and nothing else writes a notebook.
+A copy taken while a cell completes can pair a new ``runtime.json`` with old
+artifacts. A hold covers one notebook directory or a project directory and
+every notebook under it, in two phases: **draining** (new runs refused, running
+cells may finish and write) and **held** (runs, edits and other writers
+refused). It ends on release or after ``max_hold_seconds``. State is
+in-process: a hold is a promise about what this server writes.
 """
 
 from __future__ import annotations
@@ -85,7 +75,7 @@ def execution_block(path: Path) -> str | None:
 def assert_writable(path: Path) -> None:
     """Refuse a write into a held notebook.
 
-    Only once the hold is ``held``: while draining, a running cell has to be
+    Only in the ``held`` phase: while draining, a running cell must still be
     able to write the result it was allowed to finish.
     """
     hold = _covering(path)
@@ -96,8 +86,8 @@ def assert_writable(path: Path) -> None:
 def refuses_while_held[**P, R](func: Callable[P, R]) -> Callable[P, R]:
     """Guard a writer whose first argument is the notebook directory.
 
-    At entry rather than at the file write, so a writer that touches two files
-    cannot land one and be refused on the other.
+    Checks at entry, so a writer that touches two files cannot land one and be
+    refused on the other.
     """
 
     @wraps(func)
@@ -111,12 +101,10 @@ def refuses_while_held[**P, R](func: Callable[P, R]) -> Callable[P, R]:
 
 
 def begin(root: Path, max_hold_seconds: float) -> Hold:
-    """Start draining *root*. Refuses one that overlaps an existing hold.
+    """Start draining *root*; refuse one that overlaps an existing hold.
 
-    *root* must already be resolved. The routes hand in either a session's
-    path or one ``_validate_notebook_path`` resolved and confined to the
-    storage root, and resolving again here would touch the filesystem with a
-    request-supplied path for no gain.
+    *root* must already be resolved (and confined, for request-supplied paths);
+    this does not touch the filesystem.
     """
     if _covering_resolved(root) is not None:
         raise NotebookQuiesced(f"{root} is already held")

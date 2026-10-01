@@ -1,15 +1,8 @@
-"""Process-local runtime tokens for dynamically-provisioned workers.
+"""Process-local runtime tokens for dynamically provisioned workers.
 
-An SSH-tunneled worker's bearer token is generated at provisioning time and held
-in the server process — it must never land in the committed ``notebook.toml``
-(which is why a plain ``config.token`` won't do, and there's no operator-exported
-env var to name in ``config.token_env``). This tiny registry is where the
-:class:`~strata.notebook.remote_worker_supervisor.RemoteWorkerSupervisor` stashes
-the token and where the executor's token resolution finds it, keyed by worker
-name and cleared on teardown.
-
-Deliberately dependency-free (stdlib only): the executor imports it, and the
-executor is core-deps-only.
+An SSH-tunneled worker's token is generated at provisioning time and must never
+reach ``notebook.toml``, so ``RemoteWorkerSupervisor`` stashes it here, keyed by
+worker name, for the executor to find. Stdlib only: the executor imports it.
 """
 
 from __future__ import annotations

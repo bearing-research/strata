@@ -10,13 +10,7 @@ from dataclasses import dataclass, field
 
 @dataclass
 class CellAnalysis:
-    """Result of analyzing a single cell.
-
-    Attributes:
-        defines: List of top-level variable names defined by this cell
-        references: List of free variable names referenced but not defined in this cell
-        error: Error message if analysis failed (None if successful)
-    """
+    """Result of analyzing a single cell; ``error`` is None on success."""
 
     defines: list[str] = field(default_factory=list)
     references: list[str] = field(default_factory=list)
@@ -34,12 +28,9 @@ class CellAnalysis:
 def imported_names(source: str) -> set[str]:
     """Top-level names bound by ``import`` statements in *source*.
 
-    These bindings are re-importable by name in any cell sharing the venv, so
-    a consuming cell that's missing one can simply re-import it — unlike a data
-    artifact, whose absence is a real materialisation gap. Used to pick the log
-    level when an upstream variable's artifact is unexpectedly absent. Matches
-    the binding rule in :meth:`VariableAnalyzer.visit_Import` (``asname`` or the
-    imported name); star imports contribute nothing.
+    A consumer missing one can re-import it, unlike a missing data artifact, so
+    this picks the log level for an absent upstream artifact. Binding rule
+    matches :meth:`VariableAnalyzer.visit_Import`; star imports contribute nothing.
     """
     try:
         tree = ast.parse(source)
@@ -58,10 +49,8 @@ def imported_names(source: str) -> set[str]:
 def _collect_name_targets(target: ast.expr, out: set[str]) -> None:
     """Recursively collect Name ids from an assignment target.
 
-    Handles plain ``x``, tuple/list unpacking (``a, b`` or ``[a, b]``),
-    and starred targets (``*rest``). Subscript / attribute targets are
-    ignored — they're mutations, not pure binds, and travel through a
-    separate code path.
+    Handles ``x``, tuple/list unpacking and ``*rest``. Subscript and attribute
+    targets are mutations and are ignored here.
     """
     if isinstance(target, ast.Name):
         out.add(target.id)
@@ -106,7 +95,7 @@ class VariableAnalyzer(ast.NodeVisitor):
         self._future_annotations: bool = False
 
     def visit_Module(self, node: ast.Module) -> None:
-        """Visit module — process top-level statements."""
+        """Visit module: process top-level statements."""
         self._future_annotations = any(
             isinstance(s, ast.ImportFrom)
             and s.module == "__future__"
@@ -149,19 +138,10 @@ class VariableAnalyzer(ast.NodeVisitor):
     def visit_AugAssign(self, node: ast.AugAssign) -> None:
         """Handle: x += ... or df["col"] += ...
 
-        Augmented assignment is ``x = x + value`` desugared: the LHS is
-        implicitly read before being written. Same class of bug as the
-        pure-rebind case in ``visit_Assign`` — without explicit tracking
-        the DAG misses the upstream edge to whoever produced ``x``
-        first, and the cell hits NameError at runtime.
-
-        For a Name target the implicit read isn't a visible AST node
-        (the target sits in Store context), so we add the name to
-        ``self.references`` and ``rebind_with_self_read`` directly —
-        but only if the cell hasn't already pure-defined that name
-        earlier in source order. Subscript / attribute targets
-        (``df["col"] += 1``) flow through ``_add_assign_target`` →
-        ``mutation_defines`` and stay in references via that path.
+        The LHS is implicitly read, so a Name target is added to references
+        (unless the cell already pure-defined it earlier); without that the DAG
+        misses the upstream edge and the cell hits NameError. Subscript and
+        attribute targets go through ``_add_assign_target``.
         """
         if isinstance(node.target, ast.Name):
             if node.target.id not in self._defined_so_far:
@@ -182,23 +162,12 @@ class VariableAnalyzer(ast.NodeVisitor):
             self.visit(node.value)
 
     def visit_Call(self, node: ast.Call) -> None:
-        """Detect in-place mutation expressed as ``X.method(..., inplace=True)``.
+        """Treat ``X.method(..., inplace=True)`` as a mutation of ``X``.
 
-        ``inplace=True`` is the unambiguous pandas idiom for "mutate the
-        receiver" (``df.drop`` / ``fillna`` / ``sort_values`` / ``rename`` …).
-        Unlike ``df["col"] = …`` it isn't an assignment target, so the analyzer
-        would otherwise treat ``df`` as read-only. In the shared-namespace
-        batch path that divergence is a correctness bug: a downstream cell
-        observes the mutated object while the stored artifact still holds the
-        pre-mutation value, so its provenance references stale inputs.
-
-        Flagging the receiver root as a mutation-define routes it through the
-        same machinery as subscript mutation — the cell becomes a (re)producer
-        of ``df`` in the DAG and serializes the post-mutation value, so
-        downstream reads resolve to it in both single-cell and batch execution.
-        Only a literal ``inplace=True`` triggers this (not ``inplace=False`` or
-        a variable), and only an attribute call on a name/attribute receiver
-        (mutating a call result has no cross-cell effect).
+        Otherwise ``df`` looks read-only, and in the shared-namespace batch path
+        a downstream cell sees the mutated object while the stored artifact holds
+        the old value. Only a literal ``inplace=True`` on an attribute call with a
+        name/attribute receiver counts.
         """
         if isinstance(node.func, ast.Attribute) and _has_inplace_true(node.keywords):
             self._add_reference_target(node.func.value)
@@ -206,13 +175,11 @@ class VariableAnalyzer(ast.NodeVisitor):
         self.generic_visit(node)
 
     def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
-        """Handle: def f(): ... — function name is defined, body is nested scope.
+        """Handle: def f(): the name is defined, the body is a nested scope.
 
-        Decorators, default arg values, return annotation, and arg
-        annotations all evaluate at module load (the latter only when
-        ``from __future__ import annotations`` is *not* set), so any
-        free variables in those positions are real module-scope
-        references. Body free vars are picked up by the symtable pass.
+        Decorators, defaults and annotations (unless PEP 563 is on) evaluate at
+        module load, so their free names are module references. Body free names
+        come from the symtable pass.
         """
         self.defines.add(node.name)
         self._visit_function_signature(node)
@@ -224,12 +191,10 @@ class VariableAnalyzer(ast.NodeVisitor):
         self._visit_function_signature(node)
 
     def visit_ClassDef(self, node: ast.ClassDef) -> None:
-        """Handle: class C: ... — class name is defined, body is nested scope.
+        """Handle: class C: the name is defined, the body is a nested scope.
 
-        Decorators, base classes, and class keyword arguments
-        (``metaclass=`` etc.) evaluate at module load and are walked
-        here. The class body itself is a nested scope; the symtable
-        pass picks up its free variables.
+        Decorators, bases and class keywords evaluate at module load and are
+        walked here; body free names come from the symtable pass.
         """
         self.defines.add(node.name)
         for decorator in node.decorator_list:
@@ -244,9 +209,7 @@ class VariableAnalyzer(ast.NodeVisitor):
         self,
         node: ast.FunctionDef | ast.AsyncFunctionDef,
     ) -> None:
-        """Visit decorators, default values, and (when not under PEP 563)
-        type annotations of a function definition.
-        """
+        """Visit decorators, defaults and (without PEP 563) annotations of a function."""
         for decorator in node.decorator_list:
             self.visit(decorator)
         for default in node.args.defaults:
@@ -330,12 +293,7 @@ class VariableAnalyzer(ast.NodeVisitor):
             self._add_delete_target(target)
 
     def _add_delete_target(self, target: ast.expr) -> None:
-        """Extract variable names from a del statement target.
-
-        del x → x is referenced
-        del x.attr → x is referenced
-        del x[key] → x is referenced
-        """
+        """Add the root name of a ``del`` target (``x``, ``x.attr``, ``x[k]``) to references."""
         if isinstance(target, ast.Name):
             self.references.add(target.id)
         elif isinstance(target, (ast.Tuple, ast.List)):
@@ -355,8 +313,7 @@ class VariableAnalyzer(ast.NodeVisitor):
                 self.references.add(node.id)
 
     def visit_ListComp(self, node: ast.ListComp) -> None:
-        """``[elt for x in iter if cond]`` — visit element/conditions with
-        loop targets locally scoped, visit iters in outer scope."""
+        """``[elt for x in iter if cond]``: loop targets are local; the first iter is outer."""
         self._visit_comprehension(node, [node.elt])
 
     def visit_SetComp(self, node: ast.SetComp) -> None:
@@ -364,7 +321,7 @@ class VariableAnalyzer(ast.NodeVisitor):
         self._visit_comprehension(node, [node.elt])
 
     def visit_DictComp(self, node: ast.DictComp) -> None:
-        """``{k: v for x in iter}`` — both key and value are scoped."""
+        """``{k: v for x in iter}``: both key and value are scoped."""
         self._visit_comprehension(node, [node.key, node.value])
 
     def visit_GeneratorExp(self, node: ast.GeneratorExp) -> None:
@@ -376,19 +333,12 @@ class VariableAnalyzer(ast.NodeVisitor):
         node: ast.ListComp | ast.SetComp | ast.DictComp | ast.GeneratorExp,
         elements: list[ast.expr],
     ) -> None:
-        """Walk comp parts with loop variables locally scoped.
+        """Walk comprehension parts with loop variables locally scoped.
 
-        The first generator's iterable runs in the OUTER scope, so it's
-        visited without any local additions. Subsequent generators'
-        iterables run inside the comprehension's scope (they can see
-        prior loop variables), so they're visited under the local
-        binding. Element(s) and ``if`` clauses always see all loop
-        variables.
-
-        Python 3.13 inlines comprehensions into the enclosing scope
-        (PEP 709), so ``symtable`` no longer creates a child scope for
-        them — the AST-level scope tracking here is what actually picks
-        up free variables in comp elements.
+        The first iterable runs in the outer scope; later iterables, elements
+        and ``if`` clauses see the loop variables. Python 3.13 inlines
+        comprehensions (PEP 709), so symtable has no child scope for them and
+        this AST tracking is what finds their free names.
         """
         if not node.generators:
             return
@@ -429,7 +379,7 @@ class VariableAnalyzer(ast.NodeVisitor):
         return names
 
     def visit_Lambda(self, node: ast.Lambda) -> None:
-        """Lambda expression — arguments are local scope."""
+        """Lambda expression: arguments are local scope."""
         # Defaults evaluate in the enclosing scope, before params shadow.
         for default in node.args.defaults:
             self.visit(default)
@@ -457,13 +407,10 @@ class VariableAnalyzer(ast.NodeVisitor):
         return params
 
     def _add_assign_target(self, target: ast.expr) -> None:
-        """Extract variable names from an assignment target.
+        """Add the names an assignment target defines.
 
-        Handles:
-        - Name: x
-        - Tuple/List: (x, y) or [x, y]
-        - Subscript: df["col"] → defines the root name df
-        - Attribute: obj.attr → defines the root name obj
+        Subscript (``df["col"]``) and attribute (``obj.attr``) targets define
+        their root name.
         """
         if isinstance(target, ast.Name):
             self.defines.add(target.id)
@@ -485,11 +432,7 @@ class VariableAnalyzer(ast.NodeVisitor):
             self._add_assign_target(target.value)
 
     def _add_reference_target(self, node: ast.expr) -> None:
-        """Extract root name from expression and add to references.
-
-        Used for attribute/subscript mutations (e.g. obj.attr = ..., df["col"] = ...)
-        which reference the root object but don't define it.
-        """
+        """Add the root name of an attribute/subscript mutation to references."""
         if isinstance(node, ast.Name):
             self.references.add(node.id)
         elif isinstance(node, (ast.Attribute, ast.Subscript)):
@@ -498,13 +441,9 @@ class VariableAnalyzer(ast.NodeVisitor):
     def _add_mutation_define(self, node: ast.expr) -> None:
         """Record the root name of a mutated target as a define.
 
-        ``df["col"] = ...`` or ``obj.attr = ...`` mutates an existing
-        object. For DAG purposes the mutating cell is the producer of
-        the *post-mutation* view that downstream cells observe, so we
-        also treat the root name as a define. The name also stays in
-        references via ``_add_reference_target`` — the mutation reads
-        the prior value. Tracking it in ``mutation_defines`` tells the
-        caller not to strip it from the final references set.
+        The mutating cell produces the post-mutation value downstream cells see.
+        The name also stays in references (the mutation reads the prior value);
+        ``mutation_defines`` tells the caller not to strip it from them.
         """
         if isinstance(node, ast.Name):
             self.defines.add(node.id)
@@ -514,19 +453,10 @@ class VariableAnalyzer(ast.NodeVisitor):
 
 
 def _collect_body_refs(source: str) -> set[str]:
-    """Find names referenced inside function/class bodies that resolve
-    via module globals at runtime.
+    """Names referenced inside function/class bodies that resolve via module globals.
 
-    The AST visitor walks module-scope expressions (including, after
-    the recent extension, decorators / defaults / bases / annotations)
-    but deliberately stops at the boundary of a function or class
-    *body*. Bodies are a nested scope and need real scope analysis to
-    tell a free variable apart from a parameter or a closure
-    reference. ``symtable`` does that analysis exactly the way the
-    Python compiler does, so we delegate.
-
-    Returns names that should be added to the cell's references — let
-    the caller filter for builtins / privates / defines.
+    The AST visitor stops at body boundaries; ``symtable`` does the real scope
+    analysis. The caller filters builtins, privates and defines.
     """
     try:
         root = symtable.symtable(source, "<cell>", "exec")
@@ -543,11 +473,8 @@ def _collect_body_refs(source: str) -> set[str]:
 def _walk_body(scope: symtable.SymbolTable, refs: set[str]) -> None:
     """Recursively collect names that fall through to module globals.
 
-    Within a function or class scope, a symbol falls through to module
-    globals iff it's referenced AND ``is_global()`` AND not locally
-    bound, not a parameter, not a closure variable. Closures
-    (``is_free()``) resolve via the enclosing scope chain, not module
-    globals — Python's compiler has already wired them up correctly.
+    A symbol does iff it is referenced, ``is_global()``, and not local, a
+    parameter or a closure variable (``is_free()`` resolves via enclosing scopes).
     """
     for sym in scope.get_symbols():
         if (
@@ -564,34 +491,14 @@ def _walk_body(scope: symtable.SymbolTable, refs: set[str]) -> None:
 
 
 def _collect_global_writes(source: str) -> tuple[set[str], set[str]]:
-    """Find names assigned at module scope from inside a function via
-    an explicit ``global`` declaration.
+    """Names a function binds at module scope through ``global X; X = ...``.
 
-    A pattern like::
+    The AST visitor only sees module-level defines, so it misses these.
 
-        def lazy_init():
-            global STATE
-            STATE = compute()
-        lazy_init()
-
-    binds ``STATE`` at module scope at runtime. The AST visitor only
-    walks module-level statements for ``defines``, so it would miss
-    this. Symtable flags such names as ``is_assigned() and
-    is_declared_global()`` at the function's scope, which is enough
-    to detect the binding without simulating runtime.
-
-    Returns ``(writes, writes_with_reads)``:
-
-    * ``writes`` — every name that's a global-declared assign target,
-      including those that are also read in the same function.
-    * ``writes_with_reads`` — subset that's *also* referenced. These
-      need to stay in the cell's references (mutation_defines path)
-      so the DAG records this cell as both a consumer and producer of
-      the name, parallel to ``df["col"] = df["col"] * 2``.
-
-    Bare ``global X`` declarations without a matching assign are
-    skipped (no binding occurs). ``nonlocal`` is skipped — those
-    write to the enclosing function's scope, not module scope.
+    Returns ``(writes, writes_with_reads)``; the second subset is also read in
+    the function and stays in references, so the DAG records the cell as both
+    consumer and producer. A bare ``global X`` without an assign, and
+    ``nonlocal``, bind nothing at module scope and are skipped.
     """
     try:
         root = symtable.symtable(source, "<cell>", "exec")
@@ -621,14 +528,7 @@ def _walk_global_writes(
 
 
 def analyze_cell(source: str) -> CellAnalysis:
-    """Analyze a cell's source code and extract defines/references.
-
-    Args:
-        source: Cell source code as a string
-
-    Returns:
-        CellAnalysis with defines, references, and optional error message
-    """
+    """Analyze a cell's source and extract its defines and references."""
     if not source or not source.strip():
         return CellAnalysis(defines=[], references=[])
 

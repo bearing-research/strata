@@ -1,29 +1,10 @@
-"""NotebookOps — the operation core an agent drives a notebook through.
+"""NotebookOps: the one operation set an agent drives a notebook through.
 
-A single operation set, exposed today by the ``strata`` CLI and (later) the MCP
-server, so an agent has a full-feature tool for a notebook without re-deriving
-the verbs in each surface. Two backends implement the protocol:
-
-- :class:`LocalNotebookOps` (here) — an in-process ``NotebookSession``, offline,
-  the same path ``strata run`` takes. No server required.
-- :class:`RemoteNotebookOps` (here) — an httpx client against a running
-  ``strata-notebook``, so the same commands drive a session a human can watch in
-  the TUI / web UI. Read verbs land first (P3b); run / author verbs follow.
-
-The verbs return small **curated view models** (``CellView`` / ``DagView`` /
-``NotebookStatus``) — agent-facing projections of the internal ``CellState`` /
-``NotebookDag`` domain models, fully typed (no ``Any``) and free of internal
-bookkeeping. They are *the* contract: both backends return them and the MCP
-server wraps them, so all three surfaces agree. A single wire-dict mapper
-(``_cell_view_from_wire``) builds them — the local backend feeds it
-``CellState.serialize()``, the remote backend feeds it the server's JSON, so the
-two paths cannot drift. (The raw server ``serialize()`` wire dict — ``CellState``
-+ ~7 computed overlays — is deliberately not modelled as a view; see
-``docs/internal/design-cli-hardening.md``.)
-
-This module is import-light: it pulls ``parse_notebook`` / ``NotebookSession``
-lazily and never imports the FastAPI server tree, so ``strata cell …`` stays a
-fast CLI.
+``LocalNotebookOps`` runs an in-process session offline; ``RemoteNotebookOps``
+drives a running server's session over HTTP. Both return the same curated view
+models, built by one wire-dict mapper (``_cell_view_from_wire``) so the CLI, the
+MCP server and the remote path cannot drift. Import-light: no FastAPI tree, so
+the CLI stays fast.
 """
 
 from __future__ import annotations
@@ -88,9 +69,8 @@ class CellTestView(BaseModel):
 class WidgetControlView(BaseModel):
     """One control of a widget cell, and what it is currently set to.
 
-    A widget cell's value is not in its source: the source declares the
-    controls, and the selection lives in runtime state. An agent reading only
-    source and outputs could not tell 0.9 from the declared default.
+    The selection lives in runtime state, not the source, so without this an agent
+    could not tell the current value from the declared default.
     """
 
     name: str
@@ -104,9 +84,7 @@ class WidgetControlView(BaseModel):
 class CellView(BaseModel):
     """An agent-facing view of one cell, projected from ``CellState``.
 
-    Carries what an agent needs to read a cell — source, status, dependency
-    links, outputs (with previews), console, and any test result — without the
-    internal bookkeeping fields (provenance hashes, remote-build state, …).
+    Omits internal bookkeeping such as provenance hashes and remote-build state.
     """
 
     id: str
@@ -228,11 +206,7 @@ class DependencyResult(BaseModel):
 
 
 class WorkerView(BaseModel):
-    """An agent-facing view of one registered worker.
-
-    Projected from a :class:`~strata.notebook.models.WorkerSpec` — the fields an
-    agent needs to see where a cell would run, without the raw config bag.
-    """
+    """An agent-facing view of one registered worker, projected from ``WorkerSpec``."""
 
     name: str
     backend: str  # "local" | "executor"
@@ -252,122 +226,60 @@ class WorkerListView(BaseModel):
 
 
 class NotebookOpsError(Exception):
-    """An operation failed (unknown cell, DAG cycle, …).
+    """An operation failed (unknown cell, DAG cycle, ...).
 
-    Distinct from an invocation error (bad path): the CLI maps this to a
-    structured ``{"error": …}`` on stdout + exit 1, not the exit-2 usage path.
+    The CLI maps this to a structured ``{"error": ...}`` on stdout and exit 1, not
+    the exit-2 usage path.
     """
 
 
 @runtime_checkable
 class NotebookOps(Protocol):
-    """The notebook operation set.
-
-    Read-only verbs first (P0); run / test / author / env verbs land in later
-    phases on this same protocol. Both the local and remote backends implement
-    it, and the MCP server wraps it, so all three surfaces share one contract.
-    """
+    """The notebook operation set, shared by the local and remote backends and the MCP server."""
 
     def list_cells(self) -> list[CellView]:
-        """Return every cell, in notebook order.
-
-        Returns
-        -------
-        list of CellView
-            One curated view per cell, in display order.
-        """
+        """Return every cell, in notebook order."""
         ...
 
     def get_cell(self, cell_id: str) -> CellView:
         """Return one cell's curated view.
 
-        Parameters
-        ----------
-        cell_id : str
-            Identifier of the cell to fetch.
-
-        Returns
-        -------
-        CellView
-            The cell's agent-facing view (source, status, outputs, …).
-
         Raises
         ------
         NotebookOpsError
-            If no cell with ``cell_id`` exists in the notebook.
+            If no cell with ``cell_id`` exists.
         """
         ...
 
     def save_output(self, cell_id: str, dest: Path, *, index: int = -1) -> SavedOutput:
-        """Write one of a cell's display outputs to a file and say where.
+        """Write one of a cell's display outputs to *dest* and say where.
 
-        A plot, a rendered image, any blob: the curated view can describe it
-        but not show it, and there is no other way to get the bytes out. The
-        caller chooses the destination, so nothing here decides where an
-        agent's files land.
-
-        Parameters
-        ----------
-        cell_id : str
-            Identifier of the cell that produced the output.
-        dest : Path
-            File to write. Its parent must exist. Overwritten if present.
-        index : int, default -1
-            Which display output, in the order the cell emitted them.
-            ``-1`` is the last, which is the one a cell ending in an
-            expression produced.
-
-        Returns
-        -------
-        SavedOutput
-            The path written, with the output's content type and size.
+        This is the only way to get an output's bytes (a plot, an image) out. The
+        caller chooses the destination; *dest*'s parent must exist and an existing
+        file is overwritten. ``index`` counts in emission order, ``-1`` being the last.
 
         Raises
         ------
         NotebookOpsError
-            If the cell does not exist, has no display output at ``index``,
-            or its stored bytes cannot be read back.
+            If the cell does not exist, has no display output at ``index``, or its
+            stored bytes cannot be read back.
         """
         ...
 
     def dag(self) -> DagView:
-        """Return the dependency graph.
-
-        Returns
-        -------
-        DagView
-            Variable-level ``edges``, a ``topological_order``, the ``leaves`` and
-            ``roots``, and the ``variable_producer`` map.
-        """
+        """Return the dependency graph."""
         ...
 
     def status(self) -> NotebookStatus:
-        """Return a compact per-cell status + staleness summary.
-
-        Returns
-        -------
-        NotebookStatus
-            ``notebook_id``, ``name``, and one :class:`CellStatusRow` per cell.
-        """
+        """Return a compact per-cell status and staleness summary."""
         ...
 
     async def run_cell(self, cell_id: str, *, mode: str = "normal") -> RunResult:
         """Execute one cell and return its outcome.
 
-        Parameters
-        ----------
-        cell_id : str
-            Identifier of the cell to run.
-        mode : {"normal", "rerun", "force"}, optional
-            ``normal`` uses the cache and materializes stale upstreams; ``rerun``
-            bypasses the target's cache but still materializes upstreams;
-            ``force`` runs against whatever upstream artifacts already exist.
-
-        Returns
-        -------
-        RunResult
-            Execution metadata (status, cache hit, duration, method) plus the
-            cell's captured stdout / stderr and any error.
+        ``mode``: ``normal`` uses the cache and materializes stale upstreams; ``rerun``
+        bypasses the target's cache but still materializes upstreams; ``force`` runs
+        against whatever upstream artifacts already exist.
 
         Raises
         ------
@@ -377,17 +289,7 @@ class NotebookOps(Protocol):
         ...
 
     async def run_tests(self, cell_id: str) -> TestRunResult:
-        """Run a cell's unit tests and return per-test outcomes.
-
-        Parameters
-        ----------
-        cell_id : str
-            Identifier of the (Python) cell whose ``cells/{id}.test.py`` to run.
-
-        Returns
-        -------
-        TestRunResult
-            Pass / fail / error / skip counts and per-test cases.
+        """Run a cell's unit tests (``cells/{id}.test.py``) and return per-test outcomes.
 
         Raises
         ------
@@ -397,19 +299,7 @@ class NotebookOps(Protocol):
         ...
 
     def set_cell_tests(self, cell_id: str, test_source: str) -> CellView:
-        """Set a Python cell's unit-test source (``cells/{id}.test.py``).
-
-        Parameters
-        ----------
-        cell_id : str
-            Identifier of the Python cell whose tests to set.
-        test_source : str
-            The pytest-style test source; empty clears the cell's tests.
-
-        Returns
-        -------
-        CellView
-            The updated cell.
+        """Set a Python cell's unit-test source; an empty string clears the tests.
 
         Raises
         ------
@@ -421,21 +311,7 @@ class NotebookOps(Protocol):
     def add_cell(
         self, source: str, *, after: str | None = None, language: str = "python"
     ) -> CellView:
-        """Add a new cell with backend-minted id.
-
-        Parameters
-        ----------
-        source : str
-            The new cell's source.
-        after : str or None, optional
-            Insert after this cell id (``None`` appends at the end).
-        language : str, optional
-            One of ``python``, ``markdown``, ``sql``, ``r``, ``prompt``.
-
-        Returns
-        -------
-        CellView
-            The newly created cell.
+        """Add a new cell with a backend-minted id, after ``after`` or at the end.
 
         Raises
         ------
@@ -484,13 +360,7 @@ class NotebookOps(Protocol):
 
 
 class LocalNotebookOps:
-    """:class:`NotebookOps` over an in-process session — offline, no server.
-
-    Parameters
-    ----------
-    notebook_dir : Path
-        Path to a notebook directory (must contain ``notebook.toml``).
-    """
+    """:class:`NotebookOps` over an in-process session; offline, no server."""
 
     def __init__(self, notebook_dir: Path, author: str | None = None) -> None:
         # Lazy imports keep ``--help`` and path errors cheap.
@@ -510,18 +380,9 @@ class LocalNotebookOps:
     def from_session(cls, session: NotebookSession, author: str | None = None) -> LocalNotebookOps:
         """Wrap an already-open ``NotebookSession`` instead of opening a new one.
 
-        The CLI constructs one offline session per invocation; the in-process
-        MCP server instead reuses the server's warm live session (its populated
-        artifact cache, current cell state) so tools see exactly what the UI
-        sees. ``notebook_dir`` is taken from the live session's path.
-
-        Parameters
-        ----------
-        session : NotebookSession
-            An open session, typically from the server's ``SessionManager``.
-        author : str | None
-            Who to credit for edits made through this handle. An MCP client
-            sends its own name; the browser sends none and gets ``local``.
+        The in-process MCP server uses this to share the server's live session (warm
+        artifact cache, current cell state) so tools see what the UI sees. ``author``
+        is credited for edits made through this handle.
         """
         from strata.notebook.authorship import resolve_author
 
@@ -535,19 +396,13 @@ class LocalNotebookOps:
         return ops
 
     def _ensure_staleness(self) -> None:
-        """Work out what each cell's status is, before reporting it.
+        """Compute staleness once per handle before any status is reported.
 
-        A session starts every cell IDLE -- status is not persisted -- and the
-        server's ``SessionManager`` settles that by computing staleness when it
-        opens the notebook. An offline handle builds its session directly and
-        so skipped it, and every cell read back ``idle``, no staleness reasons
-        and no outputs: the answer a cold session begins with rather than one
-        about this notebook. Anything reading a cell's status has to do the
-        work the server does.
-
-        Once per handle. One handle is one command, the computation reaches an
-        ``@fetch`` URL and an ``@table`` catalog, and nothing here mutates a
-        cell between two reads of it.
+        A session starts every cell IDLE (status is not persisted). The server's
+        ``SessionManager`` computes staleness on open; an offline handle must do the
+        same or every cell reads back ``idle`` with no outputs. Once is enough: one
+        handle is one command, and the computation can reach ``@fetch`` URLs and
+        ``@table`` catalogs.
         """
         if self._staleness_computed:
             return
@@ -618,8 +473,7 @@ class LocalNotebookOps:
     async def run_cell(self, cell_id: str, *, mode: str = "normal") -> RunResult:
         """Execute one cell (see :meth:`NotebookOps.run_cell`).
 
-        Assumes the environment is ready — call :meth:`sync_environment` first
-        (the CLI does, unless ``--no-sync``).
+        Assumes the environment is ready: call :meth:`sync_environment` first.
         """
         cell = self._session.notebook_state.get_cell(cell_id)
         if cell is None:
@@ -724,10 +578,9 @@ class LocalNotebookOps:
     def edit_cell(self, cell_id: str, source: str) -> CellView:
         """Replace a cell's source (see :meth:`NotebookOps.edit_cell`).
 
-        Held to the same soft lock as an edit over REST or the WebSocket: on a
-        live session (the MCP server's) someone else's change of this cell
-        moments ago refuses the edit, and this edit holds the cell in turn.
-        An offline session has no one else in it, so the check never refuses.
+        Subject to the same soft lock as REST and WebSocket edits: on a live session a
+        recent edit of this cell by someone else refuses this one. An offline session
+        never refuses.
         """
         from strata.notebook.presence import lock_window_seconds
         from strata.notebook.writer import write_cell
@@ -779,11 +632,7 @@ class LocalNotebookOps:
     # -- workers -------------------------------------------------------------
 
     def list_workers(self) -> WorkerListView:
-        """Return the notebook's registered workers + the default.
-
-        The built-in ``local`` worker is always listed first, followed by the
-        notebook-scoped ``[[workers]]`` definitions.
-        """
+        """Return the notebook's workers and the default; the built-in ``local`` is listed first."""
         from strata.notebook.workers import (
             get_builtin_local_worker,
             notebook_worker_definitions_editable,
@@ -811,14 +660,13 @@ class LocalNotebookOps:
     ) -> WorkerListView:
         """Register (or replace by name) a notebook-scoped worker.
 
-        An ``executor`` worker requires ``url`` (its ``/v1/execute`` endpoint).
-        Re-adding an existing name replaces that definition. With
+        An ``executor`` worker requires ``url`` (its ``/v1/execute`` endpoint). With
         ``set_default`` the notebook's default worker is pointed at it.
 
         Raises
         ------
         NotebookOpsError
-            If worker definitions aren't editable (service mode), the backend /
+            If worker definitions aren't editable (service mode), the backend or
             fields are invalid, or an ``executor`` worker is missing ``url``.
         """
         from pydantic import ValidationError
@@ -940,26 +788,12 @@ _EMPTY_DAG: dict[str, Any] = {
 
 
 class RemoteNotebookOps:
-    """:class:`NotebookOps` reads over a running ``strata-notebook`` server.
+    """:class:`NotebookOps` over a running ``strata-notebook`` server.
 
-    Drives a live session — the same one a human can watch in the TUI / web UI —
-    by its ``session_id``, reading the session-state endpoint and projecting the
-    server's JSON through the shared wire mapper, so a remote ``CellView`` is
-    byte-for-byte what the local backend would return for that notebook.
-
-    Read-only today (P3b); run / author verbs land in a later phase. The
-    session-state endpoint it reads is personal-mode only, which matches the
-    intended use — driving the session you're watching locally.
-
-    Parameters
-    ----------
-    base_url : str
-        Server root, e.g. ``http://localhost:8765``.
-    session_id : str
-        The open session to drive — the route ``{id}`` (a session id, *not* the
-        ``notebook.toml`` id).
-    client : httpx.Client or None, optional
-        An httpx client to reuse; one is created (and owned) when omitted.
+    Drives a live session by ``session_id`` (the route ``{id}``, not the
+    ``notebook.toml`` id), projecting the server's JSON through the shared wire
+    mapper so views match the local backend. The session-state endpoint it reads
+    is personal-mode only. A ``client`` passed in is not closed by :meth:`close`.
     """
 
     def __init__(
@@ -985,11 +819,7 @@ class RemoteNotebookOps:
         self._client: httpx.Client = client if client is not None else httpx.Client(timeout=30.0)
 
     def _credit(self) -> dict[str, str]:
-        """The author field, only when there is one.
-
-        Omitted rather than sent as null, so a caller that never set
-        ``--author`` sends the same body it always did.
-        """
+        """The author field, omitted rather than sent as null when unset."""
         return {"author": self._author} if self._author else {}
 
     def _send(
@@ -1003,9 +833,8 @@ class RemoteNotebookOps:
     ) -> httpx.Response:
         """Issue one request, turning a connection failure into an ops error.
 
-        ``timeout`` overrides the client default for a single call — used by the
-        SSH-worker verbs, whose first connect may install ``strata-worker`` on
-        the box and run well past the 30s default.
+        ``timeout`` overrides the client default for one call (SSH-worker verbs may
+        install ``strata-worker`` and run past the 30s default).
         """
         import httpx
 
@@ -1040,8 +869,8 @@ class RemoteNotebookOps:
     ) -> dict[str, Any]:
         """Issue a cell-scoped request and return the JSON body, mapping errors.
 
-        ``404`` becomes "no cell …" when *cell_id* is known (else the server's
-        detail), ``409`` an environment-busy error, any other ``4xx``/``5xx`` the
+        ``404`` becomes "no cell ..." when *cell_id* is given (else the server's
+        detail), ``409`` an environment-busy error, any other error status the
         server's detail message.
         """
         resp = self._send(method, path, json=json, params=params)
@@ -1067,12 +896,10 @@ class RemoteNotebookOps:
         raise NotebookOpsError(f"no cell with id {cell_id!r}")
 
     def save_output(self, cell_id: str, dest: Path, *, index: int = -1) -> SavedOutput:
-        """Fetch a display output's bytes and write them (see
-        :meth:`NotebookOps.save_output`).
+        """Fetch a display output's bytes and write them locally.
 
-        The file is written by the client, here, not by the server: a server
-        that wrote to a path a caller named would be writing wherever it was
-        asked to.
+        The client writes the file, not the server, so a caller cannot make the
+        server write to an arbitrary path.
         """
         resp = self._send(
             "GET",
@@ -1113,11 +940,7 @@ class RemoteNotebookOps:
     # -- execution -----------------------------------------------------------
 
     async def run_cell(self, cell_id: str, *, mode: str = "normal") -> RunResult:
-        """Execute one cell on the server (see :meth:`NotebookOps.run_cell`).
-
-        The server owns its venv, so there is no client-side environment sync —
-        unlike the local backend, which calls ``uv sync`` first.
-        """
+        """Execute one cell on the server; the server owns its venv, so there is no client sync."""
         import asyncio
 
         data = await asyncio.to_thread(
@@ -1158,8 +981,7 @@ class RemoteNotebookOps:
     ) -> CellView:
         """Add a new cell (see :meth:`NotebookOps.add_cell`).
 
-        Two calls: POST to mint the cell (server assigns the id), then PUT its
-        source — the add endpoint creates an empty cell.
+        The add endpoint creates an empty cell, so this POSTs then PUTs the source.
         """
         base = f"/v1/notebooks/{self._session_id}/cells"
         created = self._cell_op(
@@ -1252,12 +1074,10 @@ class RemoteNotebookOps:
         install: bool = True,
         timeout: float = 600.0,
     ) -> dict[str, Any]:
-        """Provision + tunnel + register a worker over SSH on the server.
+        """Provision, tunnel and register a worker over SSH on the server.
 
-        The tunnel is owned by the server (dispatch runs there), so this only
-        works against a running server. Returns the server's response — the
-        tunnel ``worker`` record plus the worker catalog. ``timeout`` is generous
-        since a first connect may install ``strata-worker`` on the box.
+        The server owns the tunnel, so this only works against a running server.
+        Returns the tunnel ``worker`` record plus the worker catalog.
         """
         body: dict[str, Any] = {
             "ssh_target": ssh_target,
@@ -1303,11 +1123,10 @@ class RemoteNotebookOps:
 
 
 def display_output_at(cell: CellState, index: int) -> tuple[CellOutput, int]:
-    """One of *cell*'s display outputs by position, with the index resolved.
+    """Return one of *cell*'s display outputs and its resolved index.
 
-    Negative indices count from the end, so the default ``-1`` is the value a
-    cell ending in a bare expression produced, which is the one an agent
-    almost always means.
+    Negative indices count from the end; ``-1`` is the value of a trailing bare
+    expression. Raises ``NotebookOpsError`` when there is no output at ``index``.
     """
     outputs = cell.display_outputs or (
         [cell.display_output] if cell.display_output is not None else []
@@ -1326,7 +1145,7 @@ def display_output_at(cell: CellState, index: int) -> tuple[CellOutput, int]:
 
 
 def _save_blob(session: NotebookSession, cell_id: str, dest: Path, index: int) -> SavedOutput:
-    """Shared by the local backend and the route: resolve, read, write."""
+    """Write a cell's display output to *dest*; shared by the local backend and the route."""
     cell = session.notebook_state.get_cell(cell_id)
     if cell is None:
         raise NotebookOpsError(f"no cell with id {cell_id!r}")
@@ -1372,11 +1191,7 @@ def _test_view_from_wire(data: dict[str, Any]) -> CellTestView:
 
 
 def _cell_view_from_wire(data: dict[str, Any]) -> CellView:
-    """Project a serialized-cell wire dict into a :class:`CellView`.
-
-    Reads only the agent-facing fields; the wire dict's internal bookkeeping
-    (provenance hashes, remote-build state, …) is simply not consulted.
-    """
+    """Project a serialized-cell wire dict into a :class:`CellView`."""
     annotations = data.get("annotations") or {}
     test = data.get("test_result")
     return CellView(
@@ -1434,8 +1249,8 @@ def _status_row_from_wire(data: dict[str, Any]) -> CellStatusRow:
 def _run_result_from_wire(data: dict[str, Any]) -> RunResult:
     """Project the server's execute-result wire dict into a :class:`RunResult`.
 
-    The server renames ``success`` → ``status`` (``"ready"`` / ``"error"``); the
-    agent-facing :class:`RunResult` uses ``"ok"`` / ``"error"``.
+    The server reports ``status`` as ``"ready"``/``"error"``; :class:`RunResult`
+    uses ``"ok"``/``"error"``.
     """
     return RunResult(
         cell_id=data["cell_id"],
@@ -1481,7 +1296,7 @@ def _error_detail(resp: Any) -> str:
 
 
 def _require_field(data: dict[str, Any], key: str) -> Any:
-    """Return ``data[key]`` or raise — a server response missing it is malformed."""
+    """Return ``data[key]``, or raise because a response missing it is malformed."""
     value = data.get(key)
     if value is None:
         raise NotebookOpsError(f"malformed server response: missing {key!r}")
@@ -1489,7 +1304,7 @@ def _require_field(data: dict[str, Any], key: str) -> Any:
 
 
 def _cell_view(cell: CellState) -> CellView:
-    """Local projection: serialize the cell to the wire dict, then map it."""
+    """Project a cell locally through the same wire mapper the remote path uses."""
     return _cell_view_from_wire(cell.serialize())
 
 

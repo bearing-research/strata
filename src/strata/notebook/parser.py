@@ -25,27 +25,13 @@ from strata.notebook.models import (
 def _parse_connections(
     toml_data: dict,
 ) -> tuple[list[ConnectionSpec], list[MalformedConnection]]:
-    """Split ``[connections.<name>]`` blocks into valid and malformed.
+    """Split ``[connections.<name>]`` blocks into valid specs and malformed records.
 
-    TOML shape: ``{"connections": {"<name>": {"driver": ..., ...}, ...}}``.
-    Two outputs:
-
-    1. Valid ``ConnectionSpec``s — fully parsed, ready for the adapter.
-    2. ``MalformedConnection`` records carrying the raw body and a
-       human-readable error. The annotation_validation layer reads
-       these to surface diagnostics; the writer round-trips them so a
-       transient typo doesn't get erased by an unrelated save.
-
-    Pydantic's ``extra="allow"`` on ``ConnectionSpec`` preserves
-    driver-specific keys (``uri``, ``host``, ``account``, ...) for the
-    adapter to interpret.
-
-    Path values are kept exactly as written on disk so a save
-    round-trips byte-for-byte. The cell executor resolves relative
-    SQLite paths against the notebook directory at adapter-open time
-    (see ``cell_executor._resolve_runtime_spec``), so the adapter
-    itself stays a pure in-process call site without any notebook
-    awareness.
+    ``MalformedConnection`` keeps the raw body and an error: annotation
+    validation surfaces it, and the writer round-trips it so a typo is not
+    erased by an unrelated save. ``extra="allow"`` keeps driver-specific keys.
+    Paths stay as written; relative ones are resolved at adapter-open time
+    (``cell_executor._resolve_runtime_spec``).
     """
     raw = toml_data.get("connections")
     if not isinstance(raw, dict):
@@ -86,16 +72,10 @@ def _parse_connections(
 
 
 def parse_notebook(directory: Path) -> NotebookState:
-    """Parse notebook directory, load notebook.toml and cell files.
-
-    Args:
-        directory: Path to notebook directory
-
-    Returns:
-        NotebookState with all cells loaded
+    """Parse a notebook directory: notebook.toml plus every cell file.
 
     Raises:
-        FileNotFoundError: If notebook.toml is missing
+        FileNotFoundError: If notebook.toml is missing.
     """
     directory = Path(directory)
     notebook_toml_path = directory / "notebook.toml"
@@ -283,10 +263,8 @@ def parse_notebook(directory: Path) -> NotebookState:
 def _parse_variant_groups(toml_data: dict) -> list[VariantGroupConfig]:
     """Parse ``[[variant_group]]`` entries into VariantGroupConfig.
 
-    Malformed entries (missing ``group`` / ``active``, or values that
-    don't match the identifier pattern) are dropped silently here;
-    annotation_validation surfaces a ``variant_active_unknown`` diagnostic
-    if the named active variant doesn't exist in the cells.
+    Malformed entries are dropped silently; annotation validation reports an
+    active variant that does not exist.
     """
     raw = toml_data.get("variant_group")
     if not isinstance(raw, list):
@@ -309,12 +287,9 @@ def _parse_variant_groups(toml_data: dict) -> list[VariantGroupConfig]:
 
 
 def _rewrite_notebook_toml(path: Path, toml_data: dict) -> None:
-    """Write a pre-parsed TOML dict back to disk (used by migration).
+    """Write a pre-parsed TOML dict back to disk for migration.
 
-    Unlike ``write_notebook_toml`` this preserves whatever shape the
-    caller has constructed, including fields not modelled by
-    ``NotebookToml``. Used when the migration helper has already
-    stripped legacy runtime sections from ``toml_data``.
+    Unlike ``write_notebook_toml``, keeps fields ``NotebookToml`` does not model.
     """
     from strata.notebook.writer import _dump_notebook_toml
 

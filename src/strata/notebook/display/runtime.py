@@ -1,13 +1,7 @@
-"""Runtime helpers for notebook display-side effects.
+"""Runtime helpers for notebook display side effects.
 
-This module is intentionally dependency-light so it can be imported both by
-the server package *and* by notebook subprocess helpers via direct file
-loading (``harness.py`` and ``pool_worker.py`` use
-``importlib.util.spec_from_file_location`` to load this file without setting
-up ``strata.notebook.display`` as a package). That load path imposes one
-invariant: **no relative imports in this module**. Absolute imports (stdlib,
-third-party) are fine; ``from .other import X`` would break the subprocess
-loaders silently.
+``harness.py`` and ``pool_worker.py`` load this file by path, not as a package,
+so it must have no relative imports (they would break those loaders silently).
 """
 
 from __future__ import annotations
@@ -36,11 +30,7 @@ DISPLAY_HELPER_NAMES = ("display", "Markdown")
 
 
 class DisplayCapture:
-    """Capture explicit display-side effects during cell execution.
-
-    Visible outputs are captured in order. A legacy last-item compatibility
-    shim is handled by higher layers.
-    """
+    """Capture explicit display side effects during cell execution, in order."""
 
     def __init__(self) -> None:
         self._values: list[Any] = []

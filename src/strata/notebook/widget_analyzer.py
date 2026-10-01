@@ -1,21 +1,10 @@
-"""Analyzer for widget-type notebook cells.
+"""Analyzer for widget cells.
 
-A widget cell is a declarative control panel — one ``name = control(...)``
-line per control:
-
-    alpha     = slider(0, 1, step=0.01, default=0.5)
-    optimizer = dropdown(["adam", "sgd"], default="adam")
-    epochs    = number(default=10, min=1, max=200)
-
-The cell is **never executed**. It is parsed with ``ast`` to extract, per
-control, the target variable name (a DAG ``defines``) and a
-``WidgetDescriptor`` (kind + params + resolved default). Widget cells have no
-upstream, so ``references`` is always empty.
-
-Only structural analysis lives here (what defines exist, what the descriptors
-are, and structural errors). Semantic validation — slider ranges, defaults in
-bounds — is surfaced as advisory diagnostics by
-``annotation_validation._validate_widget_cell_annotations``.
+A widget cell is one ``name = control(...)`` line per control, e.g.
+``alpha = slider(0, 1, step=0.01, default=0.5)``. It is never executed: ``ast``
+yields each control's target name (a ``defines``) and a ``WidgetDescriptor``.
+``references`` is always empty. Semantic checks (ranges, defaults in bounds) are
+advisory diagnostics in ``annotation_validation``.
 """
 
 from __future__ import annotations
@@ -60,10 +49,8 @@ class WidgetAnalysis:
 def _nice_slider_step(low: float, high: float) -> float | int:
     """Pick a readable slider increment for a ``[low, high]`` range.
 
-    Targets ~100 steps across the range, snapped to a 1/2/5 x 10^n value so the
-    tick size reads nicely (0.01, 0.02, 0.05, 0.1, …). Preserves int-ness when
-    both bounds are ints and the result is whole, so an all-integer slider steps
-    by whole numbers. ``slider(0, 1)`` lands on ``0.01`` — the historic default.
+    About 100 steps, snapped to a 1/2/5 x 10^n value; integer bounds with a whole
+    result step by ints. ``slider(0, 1)`` gives ``0.01``.
     """
     span = high - low
     raw = span / 100.0
@@ -89,8 +76,8 @@ def _nice_slider_step(low: float, high: float) -> float | int:
 def _default_slider_step(params: dict[str, Any]) -> None:
     """Fill in ``step`` for a slider when the source omits it (in place).
 
-    No-op unless ``min`` and ``max`` are both numeric and ``max > min`` — bad
-    ranges are left for advisory validation to flag, not silently patched.
+    No-op unless ``min`` and ``max`` are numeric and ``max > min``; bad ranges are
+    left for advisory validation to flag.
     """
     if "step" in params:
         return
@@ -195,11 +182,10 @@ def analyze_widget_cell(source: str) -> WidgetAnalysis:
 
 
 def _coerce_one(descriptor: WidgetDescriptor, value: Any) -> Any:
-    """Coerce/clamp one incoming value to a control's type + bounds.
+    """Coerce/clamp one incoming value to a control's type and bounds.
 
-    Returns ``None`` when the value can't be represented (non-numeric for a
-    slider, an option not in a dropdown) so the caller drops it and keeps the
-    prior value.
+    ``None`` means unrepresentable (non-numeric slider value, unknown dropdown
+    option); the caller drops it and keeps the prior value.
     """
     kind = descriptor.kind
     if kind in ("slider", "number"):
@@ -230,10 +216,10 @@ def _coerce_one(descriptor: WidgetDescriptor, value: Any) -> Any:
 def coerce_widget_values(
     descriptors: list[WidgetDescriptor], values: dict[str, Any]
 ) -> dict[str, Any]:
-    """Validate + coerce incoming control values against the cell's descriptors.
+    """Validate and coerce incoming control values against the cell's descriptors.
 
-    Unknown names and uncoercible values are dropped (the control keeps its
-    prior value); sliders/numbers are clamped to their range.
+    Unknown names and uncoercible values are dropped; sliders and numbers are
+    clamped to their range.
     """
     by_name = {d.name: d for d in descriptors}
     clean: dict[str, Any] = {}
@@ -248,11 +234,9 @@ def coerce_widget_values(
 
 
 def descriptor_provenance(descriptor: WidgetDescriptor, value: object) -> str:
-    """Content hash for one control at a given value.
+    """Content hash of one control's declaration (kind + params) and current value.
 
-    Combines the control's *declaration* (kind + params) with its *current
-    value*, so changing either re-provenances the artifact — and returning a
-    slider to a prior value reproduces the same hash (a cache hit downstream).
+    Returning a control to a prior value reproduces the prior hash.
     """
     import hashlib
     import json

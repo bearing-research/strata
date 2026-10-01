@@ -52,9 +52,8 @@ def run_spectator(
 ) -> None:
     """Launch the read-only Textual spectator against a running server.
 
-    Shared by this binary and the ``strata watch`` subcommand. With neither
-    *session* nor *notebook*, the app lists the caller's running sessions and
-    (auto-attaches the only one, else) shows an interactive picker.
+    Shared with ``strata watch``. With neither *session* nor *notebook*, attaches
+    the caller's only running session or shows a picker.
     """
     # Lazy import so ``--help`` doesn't pay the Textual import cost.
     from strata.notebook.tui.app import NotebookTUI

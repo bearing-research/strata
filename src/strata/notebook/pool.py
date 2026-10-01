@@ -1,7 +1,6 @@
-"""Warm process pool for fast cell execution.
+"""Warm process pool: pre-spawned Python processes with common imports loaded.
 
-The pool pre-spawns Python processes with common imports already loaded,
-reducing the startup overhead from ~1.5s to ~50ms per execution.
+Cuts per-execution startup from ~1.5s to ~50ms.
 """
 
 from __future__ import annotations
@@ -45,19 +44,12 @@ class WarmProcess:
 
 
 class WarmProcessPool:
-    """Pool of pre-spawned Python processes for fast cell execution.
+    """Pool of pre-spawned processes for fast cell execution.
 
-    Each worker is *single-shot*: it runs one manifest and is killed by
-    ``release_and_replace``. A background replacement is spawned so the
-    queue stays primed. The win is parallel warm-up — common imports
-    are loaded ahead of time so cells don't pay the ~1.5s import cost
-    when they execute — not interpreter reuse. Single-shot also
-    preserves Strata's per-cell isolation invariant (no sys.path,
-    os.environ, or module-state leakage between cells).
-
-    Attributes:
-        notebook_dir: Path to the notebook directory
-        pool_size: Number of warm processes to maintain
+    Each worker is single-shot: it runs one manifest and is killed by
+    ``release_and_replace``, which spawns a replacement in the background. The win
+    is imports loaded ahead of time, not interpreter reuse; single-shot keeps cells
+    isolated (no ``sys.path``, ``os.environ`` or module state leaks between them).
     """
 
     def __init__(
@@ -71,17 +63,11 @@ class WarmProcessPool:
         """Initialize the warm process pool.
 
         Args:
-            notebook_dir: Path to the notebook directory
-            pool_size: Number of warm processes to maintain
-            python_executable: Python interpreter used for warm workers
-                (ignored when ``worker_command`` is given)
-            worker_command: Full argv for the warm worker. Defaults to the
-                Python pool worker; the R pool passes
-                ``[Rscript, pool_worker.R, notebook_dir]`` here. The
-                stdin/stdout frame protocol is language-agnostic.
-            ready_timeout_seconds: How long to wait for the worker's
-                "ready" line. R workers pay renv activation at startup,
-                so their pools pass a larger value.
+            python_executable: Ignored when ``worker_command`` is given.
+            worker_command: Full worker argv; defaults to the Python pool worker. The
+                R pool passes ``[Rscript, pool_worker.R, notebook_dir]``.
+            ready_timeout_seconds: Wait for the worker's "ready" line. R workers pay
+                renv activation at startup, so their pools pass a larger value.
         """
         self.notebook_dir = Path(notebook_dir)
         self.pool_size = pool_size
@@ -96,10 +82,7 @@ class WarmProcessPool:
         self._background_tasks: set[asyncio.Task] = set()
 
     async def start(self) -> None:
-        """Spawn initial pool of warm processes.
-
-        Spawns pool_size processes in parallel.
-        """
+        """Spawn the initial ``pool_size`` warm processes in parallel."""
         async with self._lock:
             if self._started:
                 return
@@ -114,15 +97,7 @@ class WarmProcessPool:
         task.add_done_callback(self._background_tasks.discard)
 
     async def _spawn_warm_process(self) -> None:
-        """Spawn a process that imports common deps and waits for work.
-
-        Uses a pool_worker.py script that:
-        1. Imports common packages
-        2. Sends a 'ready' signal
-        3. Waits for a manifest path on stdin
-        4. Runs the harness logic
-        5. Exits (one-shot)
-        """
+        """Spawn a process that imports common deps and waits for one manifest on stdin."""
         try:
             harness_user = resolve_harness_user()
         except LocalExecutionRefused as exc:
@@ -186,11 +161,7 @@ class WarmProcessPool:
             self._warming -= 1
 
     async def acquire(self) -> WarmProcess | None:
-        """Get a warm process. If none available, return None (caller uses cold spawn).
-
-        Returns:
-            WarmProcess if available, None if pool is empty or not started
-        """
+        """Return a warm process, or None if the pool is empty or not started."""
         # A background spawn finishing just after drain() could otherwise be
         # handed out and then killed by the next invalidate cycle.
         if not self._started:
@@ -202,11 +173,7 @@ class WarmProcessPool:
             return None
 
     async def release_and_replace(self, process: WarmProcess) -> None:
-        """Kill used process and spawn a replacement in background.
-
-        Args:
-            process: The WarmProcess to kill
-        """
+        """Kill a used process and spawn a replacement in the background."""
         if process.process and process.process.returncode is None:
             await terminate_subprocess_tree(process.process)
 
@@ -214,11 +181,7 @@ class WarmProcessPool:
         self.track_background_task(task)
 
     async def drain(self) -> None:
-        """Kill all processes in the pool (on env change or shutdown).
-
-        Cancels pending background spawn tasks, then drains and kills
-        all queued processes.
-        """
+        """Cancel pending spawns and kill every queued process."""
         async with self._lock:
             self._started = False
 
@@ -238,10 +201,7 @@ class WarmProcessPool:
                 break
 
     async def invalidate(self) -> None:
-        """Environment changed — drain and respawn.
-
-        Called when uv.lock has changed, indicating dependencies changed.
-        """
+        """Drain and respawn after the environment changed (``uv.lock`` moved)."""
         logger.info("Invalidating warm process pool due to env change")
         await self.drain()
         await self.start()
@@ -263,10 +223,7 @@ class WarmProcessPool:
 
 
 class PooledCellExecutor:
-    """Wrapper that uses the warm process pool for execution.
-
-    This is a helper class for CellExecutor to use the pool when available.
-    """
+    """Runs cells on the warm pool for ``CellExecutor`` when one is available."""
 
     @staticmethod
     async def execute_with_pool(
@@ -277,19 +234,11 @@ class PooledCellExecutor:
     ) -> dict | None:
         """Execute a cell using a warm process from the pool.
 
-        Args:
-            pool: The WarmProcessPool instance
-            manifest_path: Path to the execution manifest
-            notebook_dir: Path to the notebook directory
-            timeout_seconds: Execution timeout
-
-        Returns:
-            Result dict if successful, None if pool not available (caller should use cold)
+        Returns None when no warm process is available; the caller then cold-spawns.
 
         Raises:
-            TimeoutError: the cell exceeded ``timeout_seconds`` in the warm
-                worker — a real cell timeout, not a pool-availability miss;
-                the caller's timeout handler surfaces it (no cold re-run).
+            TimeoutError: the cell exceeded ``timeout_seconds`` in the worker. This is
+                a real cell timeout, not a pool miss, so there is no cold re-run.
         """
         try:
             harness_user = resolve_harness_user()

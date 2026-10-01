@@ -1,37 +1,15 @@
 """DuckDB driver adapter (embedded, file-backed).
 
-Backed by the ``duckdb`` Python package's native DBAPI surface — not
-ADBC. DuckDB ships its own first-class DBAPI driver that's stricter
-about types than the ADBC bridge and exposes ``read_only=True`` at
-``connect`` time directly. Skipping the ADBC translation layer
-removes a moving part for a driver that already speaks Arrow
-natively.
+Uses duckdb's native DBAPI rather than ADBC: it is stricter about types, takes
+``read_only=True`` at ``connect``, and already speaks Arrow. Embedded mode only;
+MotherDuck and other remote modes would need token auth in identity hashing and
+different freshness semantics.
 
-Scope: embedded mode only (path-based ``ConnectionSpec``). MotherDuck
-and other remote modes are out of scope for this slice — they need
-token-based auth in identity hashing and different freshness
-semantics. They'll plug in as a separate adapter when needed.
-
-Read-only enforcement is layered, mirroring SQLite:
-
-1. **File-handle level** — file-backed connections open with
-   ``read_only=True``; the engine refuses ``INSERT``/``UPDATE``/
-   ``DELETE``/DDL.
-2. **Session level** — every read-only open also opens a
-   ``BEGIN TRANSACTION READ ONLY`` so an in-memory database (where
-   ``read_only=True`` doesn't apply because there's no file to lock)
-   still rejects writes at statement time.
-
-Freshness is DB-wide (mirrors SQLite). DuckDB doesn't expose a
-per-table change counter natively; we hash ``PRAGMA database_size``
-output which advances when blocks are written. Acceptable for the
-common "one DB per notebook" case; documented as a limitation.
-
-Schema fingerprint is per-table via the ``duckdb_columns()``
-function — catches metadata-only changes the freshness probe would
-miss.
-
-See ``docs/internal/design-sql-cells.md`` for the broader rationale.
+Read-only is enforced in two layers: ``read_only=True`` on file-backed
+connections, and ``BEGIN TRANSACTION READ ONLY`` on every read-only open, which
+also covers ``:memory:``. Freshness is DB-wide (``PRAGMA database_size``), since
+DuckDB has no per-table change counter; the schema fingerprint is per table
+(``duckdb_columns()``) and catches metadata-only changes.
 """
 
 from __future__ import annotations
@@ -93,12 +71,10 @@ class DuckDBAdapter:
         return hash_connection_identity(self.name, self._extract_identity(spec))
 
     def _extract_identity(self, spec: Any) -> dict[str, Any]:
-        """Identity for embedded DuckDB is just the absolute path.
+        """Identity for embedded DuckDB: the absolute path.
 
-        ``:memory:`` connections produce a stable id that's distinct
-        from any on-disk path. Two specs that resolve to the same
-        absolute path produce the same id; relative-path differences
-        canonicalize away.
+        ``:memory:`` gets a stable id distinct from any path; relative-path
+        differences canonicalize away.
         """
         identity: dict[str, Any] = {}
         path = getattr(spec, "path", None)
@@ -122,26 +98,10 @@ class DuckDBAdapter:
     def open(self, spec: Any, *, read_only: bool) -> Any:
         """Open a DuckDB connection in the requested mode.
 
-        Read-only enforcement is layered:
-
-        1. **File-handle level** — for file-backed connections, we
-           pass ``read_only=True`` to ``duckdb.connect``; the engine
-           refuses to open a writable handle and rejects any DML/DDL
-           before it touches storage. Cursors spawned from this
-           connection inherit the file flag, so the RO guarantee
-           propagates without extra work.
-        2. **Session level** — every read-only open also issues
-           ``BEGIN TRANSACTION READ ONLY`` on the parent and on
-           every cursor it spawns (see ``_ReadOnlyDuckDB``). This
-           catches in-memory databases (``:memory:``) where
-           ``read_only=True`` cannot apply because the database is
-           created on demand, plus any future quirk where the file
-           flag might not propagate.
-
-        Both layers together mean a SQL cell can't write to the
-        database regardless of how the connection was specified.
-        This is the security boundary, not SQL-text keyword
-        filtering.
+        Read-only is the security boundary (not SQL keyword filtering) and is layered:
+        file-backed connections pass ``read_only=True`` to ``duckdb.connect``, and every
+        read-only open issues ``BEGIN TRANSACTION READ ONLY`` on the parent and on each
+        cursor (see ``_ReadOnlyDuckDB``), which also covers ``:memory:``.
         """
         path = self._build_path(spec)
         catalog = getattr(spec, "catalog_properties", None)
@@ -178,12 +138,10 @@ class DuckDBAdapter:
     ) -> Any:
         """A read-only handle with the catalog attached and each mount a view.
 
-        The views have to be created before the read-only transaction starts,
-        and a read-only file cannot hold them, so the handle is an in-memory
-        database that the file is attached to and made the default of; the
-        views live in ``memory`` and resolve unqualified after the file's own
-        tables. The executor resolves ``catalog_properties`` and
-        ``mount_sources``; this method never looks a name up.
+        Views must exist before the read-only transaction starts and a read-only file
+        cannot hold them, so the handle is an in-memory database with the file attached
+        as default; views live in ``memory`` and resolve after the file's own tables.
+        The executor resolves ``catalog_properties`` and ``mount_sources``.
         """
         conn = self._invoke_connect(":memory:", read_only=False)
         setup: list[str] = []
@@ -238,21 +196,12 @@ class DuckDBAdapter:
         probe_conn: Any,
         tables: list[QualifiedTable],
     ) -> FreshnessToken:
-        """DB-wide freshness via ``PRAGMA database_size``.
+        """DB-wide freshness via ``PRAGMA database_size``; ``tables`` is ignored.
 
-        ``tables`` is intentionally ignored — DuckDB doesn't expose
-        per-table change counters (``estimated_size`` is too
-        approximate for small writes), so every cell against this
-        connection sees the same token. The pragma reports
-        ``used_blocks`` and ``free_blocks`` which advance when DuckDB
-        flushes block-aligned writes; a checkpoint or transaction
-        commit makes the change visible to subsequent probes.
-
-        Caveat: between block-aligned flushes, two distinct row
-        states can produce the same token. Acceptable for the
-        common "one DB per notebook" case; users running a notebook
-        against a shared DB during active mutations should pin
-        ``# @cache forever`` or ``# @cache off`` accordingly.
+        DuckDB has no per-table change counter. ``used_blocks``/``free_blocks`` advance
+        on block-aligned flushes, so between flushes two row states can share a token.
+        Notebooks against a shared DB under active writes should use ``# @cache
+        forever`` or ``# @cache off``.
         """
         h = hashlib.sha256()
         with probe_conn.cursor() as cursor:
@@ -288,15 +237,8 @@ class DuckDBAdapter:
     ) -> SchemaFingerprint:
         """Per-table schema fingerprint via ``duckdb_columns()``.
 
-        DuckDB's ``duckdb_columns()`` is a system-table view that
-        carries column name, data type, and nullability for every
-        column visible to the current session. Filtering by
-        ``database_name`` / ``schema_name`` / ``table_name``
-        scopes the read.
-
-        Per-table fingerprint catches metadata-only changes
-        (ADD COLUMN, type changes, nullability flips) that the
-        DB-wide freshness probe would miss.
+        Catches metadata-only changes (ADD COLUMN, type or nullability changes) that
+        the DB-wide freshness probe misses.
         """
         if not tables:
             return SchemaFingerprint(value=b"")
@@ -327,11 +269,8 @@ class DuckDBAdapter:
     ) -> list[tuple[str, str, bool]]:
         """Return ``[(name, data_type, nullable), ...]`` for a table.
 
-        DuckDB system functions accept bind parameters for filter
-        values, so injection-safe scoping is possible without
-        identifier splicing. We still validate the identifiers if
-        present to fail fast on garbage input rather than silently
-        returning zero rows.
+        Filters are bind parameters; identifiers are still validated so garbage input
+        fails fast instead of returning zero rows.
         """
         sql_parts = [
             "SELECT column_name, data_type, is_nullable FROM duckdb_columns() WHERE table_name = ?",
@@ -376,18 +315,10 @@ class DuckDBAdapter:
         return bool(value)
 
     def list_schema(self, conn: Any) -> list[TableSchema]:
-        """Enumerate user tables and views via ``duckdb_tables()`` /
-        ``duckdb_views()`` joined to ``duckdb_columns()``.
+        """Enumerate user tables and views with their columns.
 
-        The ``system`` and ``temp`` databases plus the
-        ``information_schema`` and ``pg_catalog`` schemas are
-        filtered out — those are DuckDB's internal surface area,
-        not anything a notebook author wrote.
-
-        Each ``TableSchema`` carries the table's catalog (DuckDB
-        ``database_name``), schema (``schema_name``), name, and a
-        tuple of ``ColumnInfo`` (column name + data type +
-        nullable).
+        Skips DuckDB's internal surface: the ``system`` and ``temp`` databases and the
+        ``information_schema`` and ``pg_catalog`` schemas.
         """
         out: list[TableSchema] = []
         with conn.cursor() as cursor:
@@ -425,19 +356,12 @@ class DuckDBAdapter:
 
 
 class _ReadOnlyDuckDB:
-    """Proxy wrapping a DuckDB connection in read-only mode.
+    """Proxy that keeps a DuckDB connection's cursors read-only.
 
-    DuckDB's ``conn.cursor()`` returns an independent child
-    connection that does NOT inherit the parent's active
-    transaction. So a ``BEGIN TRANSACTION READ ONLY`` on the parent
-    is silently ignored by cursor-side statements — the executor's
-    write attempts would succeed against an in-memory DB.
-
-    This proxy intercepts ``cursor()`` so each new cursor
-    immediately enters its own RO transaction. Everything else
-    (``execute``, ``fetchall``, ``to_arrow_table``, ``close``,
-    context-manager protocol) is forwarded transparently. Tests
-    and integration callers don't need to know the proxy is here.
+    ``conn.cursor()`` returns a child connection that does not inherit the parent's
+    transaction, so a read-only ``BEGIN`` on the parent would not stop cursor-side
+    writes to an in-memory DB. The proxy starts a read-only transaction on each new
+    cursor and forwards everything else.
     """
 
     def __init__(self, conn: Any, setup: list[str] | None = None) -> None:
@@ -480,17 +404,13 @@ def _ident(value: str) -> str:
 
 
 def _confine(conn: Any, locations: list[str]) -> None:
-    """Limit what SQL on *conn* can reach to *locations*, and lock it there.
+    """Limit what SQL on *conn* can reach to *locations*, and lock the configuration.
 
-    In service mode a SQL cell runs inside the server process, so without this
-    it could read any file the server can (on Linux, ``read_text`` of
-    ``/proc/self/environ`` returns the server's secrets), and a write cell
-    could ``COPY ... TO`` or ``ATTACH`` any path. This runs after the handle's
-    own setup (the notebook's database, extensions, the catalog, mount views),
-    which needed that access. A location ending in ``/`` is a directory and
-    admits everything under it; any other is one file. Locking the
-    configuration keeps a cell from turning access back on; ``SET
-    search_path``, which every cursor re-issues, still works under the lock.
+    In service mode a SQL cell runs in the server process and could otherwise read
+    any server file (e.g. ``/proc/self/environ``) or ``COPY ... TO`` / ``ATTACH``
+    any path. Runs after the handle's own setup, which needed that access. A
+    location ending in ``/`` admits everything under it; any other is one file.
+    ``SET search_path``, re-issued by every cursor, still works under the lock.
     """
     directories = [location for location in locations if location.endswith("/")]
     files = [location for location in locations if not location.endswith("/")]
@@ -509,8 +429,8 @@ def _mount_scheme(uri: str) -> str:
 def _s3_secret(name: str, fields: dict[str, Any], scope: str | None = None) -> str | None:
     """``CREATE SECRET`` for S3 from fsspec or pyiceberg names, or None without any.
 
-    A mount's storage options use s3fs's names (``key``, ``endpoint_url``) and a
-    catalog's properties pyiceberg's (``s3.access-key-id``, ``s3.endpoint``).
+    Mount storage options use s3fs names (``key``, ``endpoint_url``); catalog
+    properties use pyiceberg names (``s3.access-key-id``, ``s3.endpoint``).
     """
     client_kwargs = fields.get("client_kwargs") or {}
     values = {

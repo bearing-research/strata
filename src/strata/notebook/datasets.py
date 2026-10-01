@@ -1,28 +1,11 @@
 """Registry names as recorded cell inputs (``@dataset``).
 
-A cell that resolves a promoted name with the ambient ``strata`` client has the
-name in its source hash and the version in nothing: a new champion does not make it
-stale, and its artifacts do not say what they were computed from. ``@dataset``
-makes the version an input::
-
-    # @dataset model taxi/model@champion
-    predictions = model.predict(rows)
-
-The name resolves through the registry the notebook's ambient client uses (the
-server's own store, or ``notebook_remote_store_url`` when one is set) to one
-``id@v=N``. That version is copied into the notebook's store keeping its id and
-version, bound to ``model`` like an upstream variable, recorded among the
-artifact's inputs, and folded into provenance as
-``"<var>:dataset:<reference>:<id>@v=<n>"``.
-
-``name@alias`` follows the alias, so the cell goes stale when it moves; a bare
-name follows the name pointer the same way; ``name@v=N`` pins a version of the
-artifact the name points at, and a pin never goes stale.
-
-A value the notebook knows how to read (Arrow, JSON, pickle) is bound as that
-value. Anything else arrives as a ``Path`` to its bytes, as ``@fetch`` does.
-Artifacts written outside a notebook carry no content type; their bytes are
-the Arrow IPC every core transform produces.
+``# @dataset model taxi/model@champion`` resolves the name, through the registry
+the ambient client uses, to one ``id@v=N``; copies that version into the
+notebook's store; binds it to ``model`` like an upstream variable; and folds
+``"<var>:dataset:<reference>:<id>@v=<n>"`` into provenance. ``name@alias`` and a
+bare name go stale when their pointer moves; ``name@v=N`` never does. A value the
+harness can read is bound as that value; anything else arrives as a ``Path``.
 """
 
 from __future__ import annotations
@@ -69,8 +52,7 @@ class ResolvedDataset:
 
     @property
     def lineage_uri(self) -> str:
-        """The input URI an artifact records; the lineage walk follows
-        ``strata://name/`` inputs to the ``id@v=N`` they name."""
+        """The ``strata://name/`` input URI an artifact records for this dataset."""
         return f"strata://name/{self.spec.reference}"
 
 
@@ -89,8 +71,10 @@ def unresolved_fingerprint(spec: DatasetSpec) -> str:
 
 
 def content_type_of(record: ArtifactVersion) -> str:
-    """How a cell should receive *record*: its stored content type when the
-    harness can read it back, the bytes as a file otherwise."""
+    """Return *record*'s content type if the harness can read it, else ``file/path``.
+
+    A record with no content type (written outside a notebook) is Arrow IPC.
+    """
     content_type = "arrow/ipc"
     if record.transform_spec:
         try:
@@ -216,8 +200,7 @@ class RemoteRegistry:
 
 
 def registry_for(config: Any) -> Registry:
-    """The registry a notebook's ``@dataset`` reads: the remote store when one is
-    configured, as for the ambient client, else this server's own store."""
+    """The registry ``@dataset`` reads: the remote store if configured, else this server's."""
     remote = getattr(config, "notebook_remote_store_url", None)
     if remote:
         from strata.auth import remote_store_headers
@@ -234,8 +217,7 @@ def registry_for(config: Any) -> Registry:
 
 
 def copy_into(registry: Registry, resolved: ResolvedDataset, store: ArtifactStore) -> DatasetInput:
-    """Make *resolved* readable from the notebook's *store*, keeping its id and
-    version. A version already there is not downloaded again."""
+    """Copy *resolved* into the notebook's *store* under its id and version, if absent."""
     local = store.get_artifact(resolved.artifact_id, resolved.version)
     if local is not None and local.state in ("ready", "superseded"):
         return DatasetInput(

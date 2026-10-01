@@ -1,22 +1,14 @@
-"""MCP server — expose the live notebook session to an external coding agent.
+"""MCP server: expose the live notebook session to an external coding agent.
 
-Mounts at ``/mcp`` (streamable HTTP) inside the FastAPI app when
-``mcp_enabled`` is set (personal mode only). This is P4 of the CLI-hardening
-phase: the same :class:`~strata.notebook.ops.NotebookOps` contract the ``strata``
-CLI drives, wrapped as MCP tools so a coding agent (Claude Code, etc.) can
-operate a warm session — its populated artifact cache and current cell state —
-rather than an offline copy.
+Mounted at ``/mcp`` (streamable HTTP) when ``mcp_enabled`` is set. Wraps the
+:class:`~strata.notebook.ops.NotebookOps` contract the ``strata`` CLI drives,
+so an agent operates a warm session (its artifact cache and cell state) rather
+than an offline copy.
 
-Gated on the ``[mcp]`` extra: :func:`build_mcp_app` returns ``None`` when the
-``mcp`` package is not installed, so the server runs fine without it
-(core-deps-only rule). The tool *logic* lives in module-level ``_*`` functions
-that take a ``SessionManager`` so it is unit-testable without an MCP client or a
-live socket; :func:`build_mcp_app` registers thin wrappers whose docstrings are
-the agent-facing tool descriptions.
-
-Phase 1 = read tools (``list_notebooks`` / ``get_notebook`` / ``get_cell`` /
-``dag`` / ``status``). Run, authoring, and dependency tools land in later phases
-on the same surface.
+Needs the ``[mcp]`` extra: :func:`build_mcp_app` returns ``None`` without it.
+Tool logic lives in module-level ``_*`` functions that take a
+``SessionManager``, testable without an MCP client; :func:`build_mcp_app`
+registers thin wrappers whose docstrings are the agent-facing tool descriptions.
 """
 
 from __future__ import annotations
@@ -41,9 +33,8 @@ logger = logging.getLogger(__name__)
 def _resolve_ops(session_manager: SessionManager, session_id: str) -> LocalNotebookOps:
     """Wrap the server's warm session for *session_id* in ``LocalNotebookOps``.
 
-    Raises ``ValueError`` (surfaced to the agent as a tool error) when no such
-    session is open — MCP operates on sessions the UI/CLI already opened, not
-    arbitrary paths.
+    Raises ``ValueError`` (a tool error to the agent) when no such session is open:
+    MCP operates on sessions the UI or CLI already opened, not arbitrary paths.
     """
     return LocalNotebookOps.from_session(_live_session(session_manager, session_id))
 
@@ -94,9 +85,8 @@ def _save_cell_output(
 ) -> dict[str, Any]:
     """Write one display output into the notebook and return where it landed.
 
-    The destination is the notebook's own ``.strata/outputs/``, never a path
-    the caller names: a tool that wrote wherever it was asked would be a
-    filesystem write dressed as a notebook read.
+    Always the notebook's own ``.strata/outputs/``, never a caller-named path, so
+    the tool cannot become an arbitrary filesystem write.
     """
     from strata.notebook.ops import display_output_at
 
@@ -120,11 +110,10 @@ def _dag(session_manager: SessionManager, session_id: str) -> dict[str, Any]:
 
 
 def _get_variable(session_manager: SessionManager, session_id: str, name: str) -> dict[str, Any]:
-    """Return the cell that defines *name* — the "do I already have this?" lookup.
+    """Return the cell that defines *name*.
 
-    Composes the dag's variable→producer map with ``get_cell``. When *name* isn't
-    defined, returns ``defined: False`` plus the available variable names so the
-    miss doubles as discovery.
+    When *name* is not defined, returns ``defined: False`` plus the available
+    variable names, so a miss doubles as discovery.
     """
     ops = _resolve_ops(session_manager, session_id)
     producers = ops.dag().variable_producer
@@ -165,19 +154,11 @@ async def _set_variant(
     active: str | None = None,
     mode: str | None = None,
 ) -> dict[str, Any]:
-    """Switch a variant group's active variant and/or its mode.
+    """Switch a variant group's active variant and/or its mode, as the UI tab strip does.
 
-    The same two session calls the UI's tab strip makes, so a run afterwards
-    uses the selection and downstream staleness recomputes against it. Without
-    this an agent had to drive the REST route itself.
-
-    The group and the variant name are checked against the ones cells declare.
-    The writer appends an entry for whatever it is given, so a typo would
-    otherwise add a junk ``[[variant_group]]`` block to the *committed*
-    notebook.toml and report success, and an unknown variant name would leave
-    the DAG on the first variant in source order while the answer said
-    otherwise. The tab strip can only offer names that exist; an agent types
-    them.
+    The group and variant names are checked against the ones cells declare: the
+    writer would otherwise add a junk ``[[variant_group]]`` block to the committed
+    notebook.toml for a typo, or report a variant the DAG is not using.
     """
     if active is None and mode is None:
         raise ValueError("Provide `active` and/or `mode`.")
@@ -233,11 +214,9 @@ async def _run_cell(
 ) -> dict[str, Any]:
     """Execute a cell in the warm session, broadcasting live frames to spectators.
 
-    Unlike the read tools this does not go through ``LocalNotebookOps.run_cell``
-    (which runs the cell silently): it calls the same ``execute_cell_and_broadcast``
-    path the WS/REST drives use, so a browser or TUI attached to the session sees
-    the agent's run as ``cell_status`` → result → staleness frames in real time.
-    The result is mapped to the agent-facing ``RunResult`` view.
+    Goes through ``execute_cell_and_broadcast`` (not the silent
+    ``LocalNotebookOps.run_cell``) so an attached browser or TUI sees the run live.
+    Returns the agent-facing ``RunResult`` view.
     """
     from strata.notebook.ops import NotebookOpsError, _run_result_from_wire
     from strata.notebook.ws import NotebookBusyError, execute_cell_exclusive
@@ -278,14 +257,11 @@ async def _set_widget_value(
     cell_id: str,
     values: dict[str, Any],
 ) -> dict[str, Any]:
-    """Set a widget cell's controls and re-materialize it at the new values.
+    """Set a widget cell's controls and re-materialize it, as dragging the slider does.
 
-    The same thing dragging the slider does, through the same code: the values
-    are persisted, the widget re-runs in force mode to re-store its value
-    artifacts, everything downstream goes stale, and a ``# @live`` widget
-    chains the cost-gated cascade that re-runs the cheap ones. A widget's
-    selection is runtime state, not source, so an agent that only edits the
-    cell cannot change what the notebook computes.
+    Persists the values, re-runs the widget in force mode, marks downstream stale,
+    and for a ``# @live`` widget chains the cost-gated cascade. Widget selection is
+    runtime state, so editing the cell source alone cannot change it.
     """
     from strata.notebook.models import CellLanguage
     from strata.notebook.ops import NotebookOpsError, _run_result_from_wire
@@ -360,11 +336,10 @@ async def _run_tests(
 
 
 async def _broadcast_notebook(session_id: str, session: Any) -> None:
-    """Push a full notebook_state to the session's WS spectators after a mutation.
+    """Push a full ``notebook_state`` to the session's WS spectators after a mutation.
 
-    Authoring over MCP is a file mutation the offline ``LocalNotebookOps`` verbs
-    do not broadcast; sending the state sync (as the REST CRUD routes do) is what
-    makes an agent's edits appear live in an attached browser / TUI.
+    The offline ``LocalNotebookOps`` verbs do not broadcast; this makes an agent's
+    edits appear live in an attached browser or TUI.
     """
     from strata.notebook.ws import broadcast_notebook_sync
 
@@ -372,13 +347,10 @@ async def _broadcast_notebook(session_id: str, session: Any) -> None:
 
 
 async def _agent_note(session_id: str, source: str, text: str) -> None:
-    """Surface a one-line note in the Agent tab of an attached terminal viewer (#393).
+    """Surface a one-line ``agent_note`` frame in an attached terminal viewer's Agent tab.
 
-    An external agent driving via MCP keeps its reasoning in its own client, so
-    we narrate its tool actions (``source="mcp"``) and any explicit notes it
-    pushes via the ``note`` tool (``source="agent"``) as discrete ``agent_note``
-    frames, which the TUI folds into its Agent feed. A no-op when nothing is
-    attached (``_broadcast_message`` returns early).
+    ``source`` is ``"mcp"`` for narrated tool actions and ``"agent"`` for explicit
+    notes. A no-op when nothing is attached.
     """
     from strata.notebook.protocol import MessageType
     from strata.notebook.ws import _broadcast_message, _make_message, next_notebook_sequence
@@ -405,12 +377,9 @@ def _live_session(session_manager: SessionManager, session_id: str):
 async def _sync_and_broadcast(session_id: str, session: Any) -> None:
     """Reload the live session from disk after a file mutation, then broadcast.
 
-    The ``LocalNotebookOps`` authoring verbs write ``cells/*.py`` + ``notebook.toml``
-    and reload a *detached* copy — they never mutate the server's live session
-    (that is fine for the offline CLI). So we ``reload()`` the live session in
-    place (the same call the REST CRUD routes make: re-parse, rebuild the DAG,
-    restore execution history, recompute staleness) and broadcast the result, so
-    the server's warm state and any attached viewer reflect the edit.
+    ``LocalNotebookOps`` authoring verbs write files and reload a detached copy,
+    never the server's live session, so this ``reload()``s it in place (as the REST
+    CRUD routes do) before broadcasting.
     """
     session.reload()
     await _broadcast_notebook(session_id, session)
@@ -442,11 +411,9 @@ async def _run_snippet(
     language: str = "python",
     author: str | None = None,
 ) -> dict[str, Any]:
-    """Add a cell and immediately run it — the one-call scratchpad primitive.
+    """Add a cell and run it immediately (the one-call scratchpad primitive).
 
-    Composes :func:`_add_cell` + :func:`_run_cell`, so the run broadcasts the same
-    live frames a spectator sees. Returns the new cell view with the run result
-    nested under ``run``.
+    Returns the new cell view with the run result under ``run``.
     """
     view = await _add_cell(session_manager, session_id, source, after, language, author)
     run = await _run_cell(session_manager, session_id, view["id"], "normal")
@@ -498,8 +465,7 @@ async def _add_dependency(
 ) -> dict[str, Any]:
     """Add a Python dependency (``uv add``) to the warm session, then broadcast.
 
-    ``mutate_dependency`` updates the live session in place (re-sync + staleness
-    recompute — no detached reload), so only a broadcast is needed to surface it.
+    ``mutate_dependency`` updates the live session in place, so no reload is needed.
     """
     session = _live_session(session_manager, session_id)
     result = await LocalNotebookOps.from_session(session).add_dependency(package)
@@ -586,11 +552,10 @@ async def _connect_ssh_worker(
     set_default: bool = True,
     install: bool = True,
 ) -> dict[str, Any]:
-    """Provision + tunnel + register a remote worker over SSH, then broadcast.
+    """Provision, tunnel and register a remote worker over SSH, then broadcast.
 
-    Runs the server-owned supervisor (the tunnel must live in this process), so
-    the blocking SSH work is off-loaded to a thread. Returns the tunnel record
-    plus the updated worker list.
+    The tunnel must live in this process, so the server-owned supervisor runs in a
+    thread. Returns the tunnel record plus the updated worker list.
     """
     import asyncio
     from dataclasses import asdict
@@ -639,10 +604,8 @@ async def _disconnect_ssh_worker(
 def _cell_output(session_manager: SessionManager, session_id: str, cell_id: str, variable: str):
     """The artifact a cell stored for one of its variables.
 
-    Only variables a downstream cell reads become artifacts, so "there is no
-    such output" and "nothing downstream uses it" are the same situation from
-    here; the error says both, because the second is the one an agent can act
-    on.
+    Only variables a downstream cell reads become artifacts, so the error for a
+    missing one says that too: it is the case an agent can act on.
     """
     session = _live_session(session_manager, session_id)
     manager = session.get_artifact_manager()
@@ -745,9 +708,8 @@ def _publish_preflight(
 ) -> dict[str, Any]:
     """What publishing this output would put behind a link anyone can open.
 
-    The whole chain travels, which is the point of a publication and is the
-    part worth reading before minting one: every upstream step's code and
-    environment become readable by anyone with the URL.
+    The whole chain travels: every upstream step's code and environment become
+    readable by anyone with the URL.
     """
     store, artifact = _cell_output(session_manager, session_id, cell_id, variable)
     steps = _chain(store, artifact)
@@ -823,12 +785,10 @@ def _served_store():
 
 
 def _caller(context: Any) -> Principal | None:
-    """The authenticated principal behind one MCP request, or ``None`` when the
-    server does not authenticate callers.
+    """The authenticated principal behind one MCP request, or ``None`` without auth.
 
-    Parsed the same way the HTTP auth middleware parses it. The middleware has
-    already refused a request without valid credentials before it reached the
-    mount; this reads who it was for the call being served.
+    Parsed as the HTTP auth middleware does; the middleware has already refused a
+    request without valid credentials.
     """
     from strata.auth import AuthError, parse_api_key_principal, parse_principal, verify_proxy_token
 
@@ -862,8 +822,8 @@ def _caller(context: Any) -> Principal | None:
 def _mcp_import_failure(missing: str | None) -> str:
     """Why an installed mcp could not give the notebook its MCPServer.
 
-    Either the mcp is older than 2, where FastMCP became MCPServer, or it is an
-    mcp 2 whose own dependency (*missing*) is not installed.
+    Either mcp is older than 2 (before FastMCP became MCPServer), or it is mcp 2
+    missing its own dependency *missing*.
     """
     from importlib.metadata import PackageNotFoundError, version
 
@@ -889,9 +849,8 @@ def _mcp_import_failure(missing: str | None) -> str:
 def build_mcp_app(session_manager: SessionManager) -> Starlette | None:
     """Build the streamable-HTTP MCP ASGI app, or ``None`` if ``[mcp]`` is absent.
 
-    The returned Starlette app is meant to be mounted at ``/mcp``; its own
-    lifespan (which starts the MCP session manager) must be entered by the host
-    app's lifespan — see ``server.py``.
+    Mount it at ``/mcp``; the host app's lifespan must enter its lifespan (see
+    ``server.py``).
 
     Parameters
     ----------
@@ -911,14 +870,10 @@ def build_mcp_app(session_manager: SessionManager) -> Starlette | None:
     class AuthorizingMCPServer(MCPServer):
         """Every tool call runs as the caller that made it, within its scopes.
 
-        On a server with principal auth the caller is read from the tool
-        call's own HTTP request, not from the task serving the MCP session:
-        one session's requests can arrive under different credentials, and
-        its server task was started by whichever request opened it. The
-        principal is then current for the call, so authorship, team-store
-        attribution and anything else that asks ``get_principal`` see the
-        caller. Scopes come from the table the REST routes and WebSocket
-        frames use.
+        The caller is read from the tool call's own HTTP request, not the task serving
+        the MCP session: one session's requests can carry different credentials. The
+        principal is current for the call, so ``get_principal`` sees the caller. Scopes
+        come from the same table the REST routes and WebSocket frames use.
         """
 
         async def call_tool(

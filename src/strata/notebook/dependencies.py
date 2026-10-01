@@ -1,8 +1,6 @@
-"""Dependency management for notebooks.
+"""Dependency management for notebooks via ``uv add`` / ``uv remove``.
 
-Wraps ``uv add`` / ``uv remove`` to manage Python packages in a
-notebook's virtual environment.  After every mutation the lockfile
-is re-synced so that ``uv.lock`` and ``.venv/`` stay consistent.
+Every mutation re-syncs the lockfile so ``uv.lock`` and ``.venv/`` stay consistent.
 """
 
 from __future__ import annotations
@@ -57,16 +55,9 @@ def _get_notebook_lock(notebook_dir: Path) -> threading.Lock:
 def renv_process_lock(notebook_dir: Path) -> filelock.FileLock:
     """Cross-process lock guarding renv mutations for *notebook_dir*.
 
-    The ``threading.Lock`` above only serializes within one process.
-    ``renv::restore()`` / ``renv::install()`` can also run concurrently
-    from *different* processes — a server serving the notebook dir
-    while ``strata run`` syncs the same dir, or two concurrent CLI
-    runs — and renv has no locking of its own, risking a half-written
-    ``renv.lock`` or a partially-installed project library (issue #102).
-
-    The lock file lives under ``.strata/`` (gitignored runtime state)
-    so it never lands in committed notebooks. uv needs no equivalent:
-    it does its own cross-process locking on the venv and cache.
+    renv has no locking of its own, and a server and ``strata run`` can sync the same
+    dir at once. The lock file lives under ``.strata/`` so it is never committed. uv
+    needs no equivalent: it locks its venv and cache itself.
     """
     lock_dir = notebook_dir / ".strata"
     lock_dir.mkdir(parents=True, exist_ok=True)
@@ -80,18 +71,8 @@ def renv_process_lock(notebook_dir: Path) -> filelock.FileLock:
 class DependencyInfo:
     """One declared or resolved notebook dependency.
 
-    Attributes
-    ----------
-    name : str
-        PEP 503 canonical project name.
-    version : Version or None
-        Concrete pinned version parsed as PEP 440 (only set for entries
-        read from ``uv.lock``). Render with ``str(...)`` at serialization
-        boundaries.
-    specifier : SpecifierSet or None
-        Declared version constraint (only set for entries read from
-        ``pyproject.toml``). Stored as a parsed ``SpecifierSet`` so semantic
-        equality works; render with ``str(...)`` at serialization boundaries.
+    ``name`` is PEP 503 canonical. ``version`` is set only for ``uv.lock`` entries and
+    ``specifier`` only for ``pyproject.toml`` ones; render both with ``str(...)``.
     """
 
     name: str
@@ -217,12 +198,10 @@ UV_NOT_FOUND_MESSAGE = (
 
 
 def resolve_uv() -> str | None:
-    """Locate the ``uv`` executable: PATH first, then uv's installer dirs.
+    """Locate ``uv``: PATH first, then uv's installer dirs.
 
-    A non-login shell (``ssh host 'strata run …'``, cron) frequently has neither
-    ``~/.local/bin`` nor ``~/.cargo/bin`` on PATH, so a bare ``uv`` spawn dies
-    with ``[Errno 2] No such file or directory: 'uv'`` — once per cell. Probe the
-    standard install locations before giving up so headless runs just work.
+    Non-login shells (``ssh host 'strata run ...'``, cron) often lack
+    ``~/.local/bin`` and ``~/.cargo/bin`` on PATH.
     """
     found = shutil.which("uv")
     if found:
@@ -244,15 +223,10 @@ def uv_env(
 ) -> dict[str, str]:
     """The environment for a uv command on a notebook.
 
-    *base* (the server's own environment by default) without the variables
-    that point uv at another environment, then *extra* on top, so a caller can
-    still choose one on purpose (the shared-environment backend does).
-
-    In service mode uv installs wheels only. Building a source distribution
-    runs its build backend, code from wherever the package came from, as the
-    server's user with the server's environment, which is what the harness
-    user keeps cell code away from. A notebook does not build itself: it
-    declares no build backend.
+    *base* (default: the server's environment) minus the variables that point uv at
+    another environment, then *extra* on top. In service mode uv installs wheels
+    only: building an sdist runs its build backend as the server's user, which the
+    harness user exists to keep cell code away from.
     """
     env = {
         name: value
@@ -467,10 +441,7 @@ async def run_uv_command_streaming(
 
 
 def list_dependencies(notebook_dir: Path) -> list[DependencyInfo]:
-    """List current project dependencies from pyproject.toml.
-
-    Parses the ``[project] dependencies`` array.  Does **not** shell out.
-    """
+    """List declared dependencies from pyproject.toml without shelling out."""
     deps_list = _read_project_dependency_strings(notebook_dir)
     results: list[DependencyInfo] = []
     for dep_str in deps_list:
@@ -532,9 +503,7 @@ def list_resolved_dependencies(notebook_dir: Path) -> list[DependencyInfo]:
 class RPackageInfo:
     """One R package installed in the notebook's renv project library.
 
-    Lightweight parallel to ``DependencyInfo`` for the R side — the
-    env panel renders both lists side by side. ``version`` is the
-    string CRAN/renv stores (R doesn't use PEP 440); render as-is.
+    ``version`` is the string CRAN/renv stores (not PEP 440); render it as-is.
     """
 
     name: str
@@ -545,24 +514,14 @@ class RPackageInfo:
 class RPackageListing:
     """Result of listing R packages installed in the project library.
 
-    Two-state result so the UI can distinguish "the probe failed"
-    from "the library is empty" — both produce an empty ``packages``
-    list but only the former carries a non-``None`` ``error``.
+    ``packages`` is empty on failure as well as for an empty library; ``error`` is
+    set only on failure. ``status`` values:
 
-    ``status`` values:
-
-    * ``"ok"`` — listing succeeded. ``packages`` is the live content
-      of the renv project library (possibly empty when nothing's
-      installed yet).
-    * ``"rscript_missing"`` — Rscript not on PATH; install R to
-      enable R cells.
-    * ``"renv_not_active"`` — Rscript ran but the project's
-      ``.Rprofile`` didn't activate renv (pre-``renv::init()``
-      state, or broken activator). The project library directory
-      doesn't exist; treat as empty.
-    * ``"failed"`` — subprocess error (timeout, non-zero exit,
-      malformed output). ``error`` carries a short message for the
-      UI to surface.
+    * ``"ok"``: ``packages`` is the live library content (possibly empty).
+    * ``"rscript_missing"``: Rscript is not on PATH.
+    * ``"renv_not_active"``: ``.Rprofile`` did not activate renv (before
+      ``renv::init()``, or a broken activator); treat as empty.
+    * ``"failed"``: timeout, non-zero exit or malformed output; ``error`` says which.
     """
 
     packages: list[RPackageInfo]
@@ -577,9 +536,7 @@ def rscript_env(
 
     As the server: the server's own with *extra* on top, ``None`` when there is
     nothing to add. As the harness user: what a cell is given, because such an
-    Rscript runs code the notebook brought. It sources the notebook's
-    ``.Rprofile``, and a restore runs the configure scripts of the packages it
-    builds from source.
+    Rscript sources the notebook's ``.Rprofile`` and runs package configure scripts.
     """
     if harness_user is None:
         return {**os.environ, **extra} if extra else None
@@ -591,21 +548,10 @@ def rscript_env(
 def list_r_packages(notebook_dir: Path, *, timeout: int = 30) -> RPackageListing:
     """List R packages installed in the notebook's renv project library.
 
-    Spawns ``Rscript`` with ``cwd=notebook_dir`` so the project's
-    ``.Rprofile`` (renv activator) sources before the snippet runs.
-    The R snippet scopes ``installed.packages()`` to the renv project
-    library via ``renv::paths$library(project = getwd())`` —
-    *without* this scope, ``installed.packages()`` enumerates every
-    directory in ``.libPaths()`` (system + user + project) and the
-    UI ends up labeling base R packages as "installed in the project
-    library".
-
-    When renv isn't loadable in the spawned process (pre-init
-    notebooks, broken ``.Rprofile``), the snippet emits a sentinel
-    line ``RENV_NOT_ACTIVE`` and exits 0; that surfaces as
-    ``status = "renv_not_active"`` in the result so the UI can show
-    a targeted hint rather than the misleading "no packages
-    installed".
+    Runs ``Rscript`` in *notebook_dir* so the renv activator in ``.Rprofile`` loads,
+    and scopes ``installed.packages()`` to the project library; unscoped it lists
+    every ``.libPaths()`` entry, base R included. When renv is not loadable the
+    snippet prints ``RENV_NOT_ACTIVE`` and the status is ``"renv_not_active"``.
     """
     try:
         harness_user = resolve_harness_user()
@@ -704,9 +650,9 @@ _R_INSTALL_REFUSAL = (
 def _r_install_refusal() -> str | None:
     """Why ``renv_init`` / ``renv_add`` may not run here, ``None`` when they may.
 
-    They run as this process or not at all: an install cannot drop to the
-    harness user, since it writes files in the notebook directory that user
-    cannot write, and it may not run as a server that isolates cell code.
+    They run as this process or not at all: an install writes files in the notebook
+    directory the harness user cannot write, and it may not run as a server that
+    isolates cell code.
     """
     try:
         harness_user = resolve_harness_user()
@@ -731,12 +677,7 @@ def _run_rscript_command(
     timeout: int,
     display_name: str,
 ) -> _RscriptCommandResult:
-    """Run an Rscript ``-e`` snippet, capture bounded UI logs.
-
-    Mirror of ``_run_uv_command`` for the R side. Same timeout /
-    truncation / error-shape contract so the env-panel renders both
-    operations identically.
-    """
+    """Run an Rscript ``-e`` snippet and capture bounded UI logs, like ``_run_uv_command``."""
     rscript = shutil.which("Rscript")
     formatted_command = f"Rscript -e {shlex.quote(snippet)}"
 
@@ -815,14 +756,9 @@ async def run_rscript_command_streaming(
 ) -> _RscriptCommandResult:
     """Run an Rscript ``-e`` snippet asynchronously with streamed stdout/stderr.
 
-    Mirror of ``run_uv_command_streaming`` for the R side. ``subprocess.run``
-    only delivers stdout/stderr after the process exits — useless for a
-    5–10 min ``arrow`` source compile during ``renv::init``, where the
-    user looks at the env-panel and sees no progress. Switching to
-    ``asyncio.create_subprocess_exec`` + PIPE-streamed reads + an
-    ``on_update`` callback lets ``session.py`` broadcast
-    ``environment_job_progress`` frames as chunks arrive so the R
-    card's stdout tail populates live.
+    The R counterpart of ``run_uv_command_streaming``: an ``arrow`` source compile
+    during ``renv::init`` can take 5 to 10 minutes, and *on_update* lets the env
+    panel show its output live.
     """
     rscript = shutil.which("Rscript")
     formatted_command = f"Rscript -e {shlex.quote(snippet)}"
@@ -925,11 +861,10 @@ async def run_rscript_command_streaming(
 
 @dataclass
 class RJobResult:
-    """Result of an R-side env job (``renv::init`` / ``renv::install``).
+    """Result of an R env job (``renv::init`` / ``renv::install``).
 
-    Mirror of ``DependencyChangeResult`` for the R side — same
-    ``lockfile_changed`` semantics so the staleness propagation that
-    runs after a Python ``add`` runs after an ``r_add`` too.
+    ``lockfile_changed`` means the same as on ``DependencyChangeResult``, so staleness
+    propagates after an ``r_add`` as after a Python ``add``.
     """
 
     success: bool
@@ -941,19 +876,10 @@ class RJobResult:
 
 
 def _renv_lockfile_hash(notebook_dir: Path) -> str:
-    """SHA-256 of ``renv.lock``, or sentinel hash when absent.
+    """SHA-256 of ``renv.lock``, or of ``b""`` when absent.
 
-    Separate from ``_lockfile_hash`` (which hashes ``uv.lock``) —
-    the two files live side by side and the per-language jobs
-    track their respective hashes for lockfile-changed
-    bookkeeping.
-
-    Reuses ``_fold_lockfile_into_hash`` (no tag) so the renv.lock-only
-    read goes through the same ``open() + read()`` path that keeps
-    CodeQL's ``py/path-injection`` model happy with a Path built from
-    trusted-internal ``session.path`` — see that helper's docstring.
-    With no tag this yields ``sha256(renv.lock bytes)`` when present and
-    ``sha256(b"")`` when absent, matching the prior semantics.
+    Goes through ``_fold_lockfile_into_hash`` so the read takes the path CodeQL's
+    ``py/path-injection`` model accepts.
     """
     import hashlib
 
@@ -974,11 +900,11 @@ async def _run_renv_mutation(
 ) -> _RscriptCommandResult:
     """Run a snippet that installs into the notebook's R library.
 
-    With the shared backend the library is shared, so it is never installed
-    into: the notebook first moves onto a private library restored from the
-    package cache, and once the snippet has written ``renv.lock`` that library
-    is adopted under the new lock's key. A failed snippet links the notebook
-    back to the library for the lock it still has.
+    With the shared backend the library is shared, so it is never installed into:
+    the notebook first moves onto a private library restored from the package cache,
+    and once the snippet has written ``renv.lock`` that library is adopted under the
+    new lock's key. A failed snippet links the notebook back to the library for the
+    lock it still has.
     """
     from strata.notebook.env_backend import shared_root
 
@@ -1022,19 +948,10 @@ async def renv_init(
 ) -> RJobResult:
     """Bootstrap renv in *notebook_dir* with streamed Rscript output.
 
-    Async because the underlying ``arrow`` source compile takes several
-    minutes; ``on_update(stream, text, truncated)`` fires per chunk of
-    stdout/stderr so the env-panel's stdout tail populates live
-    instead of staying empty until exit. The 900s default matches
-    ``renv_add`` for the same compile-from-source reason on platforms
-    without pre-built binaries (Linux aarch64, fresh macOS).
-
-    Holds the per-notebook lock for the duration so a concurrent
-    ``renv_add`` can't race against init, plus the cross-process
-    ``renv_process_lock`` so a ``strata run`` in another process
-    can't restore mid-bootstrap. Lock acquires go through
-    ``asyncio.to_thread`` so the asyncio event loop stays responsive
-    if a lock is held.
+    ``on_update(stream, text, truncated)`` fires per output chunk; the 900s default
+    covers source compiles on platforms without binaries. Holds the per-notebook
+    lock and the cross-process ``renv_process_lock`` throughout, both acquired via
+    ``asyncio.to_thread`` so a held lock does not block the event loop.
     """
     refusal = _r_install_refusal()
     if refusal is not None:
@@ -1115,18 +1032,11 @@ async def renv_add(
     timeout: int = 600,
     on_update: Callable[[str, str, bool], Awaitable[None] | None] | None = None,
 ) -> RJobResult:
-    """Install + snapshot an R package via ``renv::install`` + ``renv::snapshot``.
+    """Install an R package and snapshot the lockfile, with streamed output.
 
-    Async + streaming for the same reason as ``renv_init``: a single
-    package can pull in a binary chain that compiles for minutes.
-    ``snapshot(type = "all")`` forces the lockfile to reflect the
-    actual library state rather than renv's default "only packages
-    referenced in source" mode.
-
-    Rejects package names that don't match the CRAN convention
-    before the snippet runs — the name is concatenated into the
-    Rscript body and we don't want shell metacharacters or quoting
-    games making it into the spawn.
+    ``snapshot(type = "all")`` makes the lockfile reflect the library rather than
+    only packages referenced in source. The name is concatenated into the Rscript
+    body, so names that are not valid CRAN names are rejected first.
     """
     if not is_valid_r_package_name(package):
         return RJobResult(
@@ -1453,22 +1363,11 @@ def add_dependency(
     dev: bool = False,
     timeout: int = 120,
 ) -> DependencyChangeResult:
-    """Add a Python package to the notebook.
+    """Add a Python package to the notebook with ``uv add`` (``--dev`` when *dev*).
 
-    Runs ``uv add <package>`` (or ``uv add --dev <package>`` when *dev*) which
-    updates pyproject.toml, resolves dependencies, writes uv.lock, and syncs
-    .venv. A dev-group add lands in ``[dependency-groups] dev`` — it is synced
-    into the venv but excluded from the cell-provenance env hash, so dev tooling
-    (pytest/ruff/ty) doesn't invalidate cell caches (see ``env.py``).
-
-    Args:
-        notebook_dir: Path to notebook directory
-        package: Package specifier (e.g. ``"requests"`` or ``"pandas>=2.0"``)
-        dev: Add to the ``dev`` dependency group rather than runtime deps.
-        timeout: Subprocess timeout in seconds
-
-    Returns:
-        DependencyChangeResult with success status
+    Updates pyproject.toml, writes uv.lock and syncs .venv. A dev-group package is
+    synced but excluded from the cell-provenance env hash, so dev tooling does not
+    invalidate cell caches.
     """
     lock = _get_notebook_lock(notebook_dir)
     with lock:
@@ -1513,11 +1412,9 @@ def ensure_dev_tool(
 ) -> DependencyChangeResult:
     """Provision a dev tool (pytest / ruff / ty / mypy) into the notebook.
 
-    The single entry point features use to install their tooling on demand —
-    adds *tool* to the ``dev`` dependency group via :func:`add_dependency`. Dev
-    tools are synced into the venv but kept out of the cell-provenance env hash,
-    so provisioning one never invalidates a cell. Future tool-backed features
-    (lint, type-check) call this instead of reimplementing ``uv add --dev``.
+    Adds *tool* to the ``dev`` group, which stays out of the cell-provenance env hash,
+    so provisioning never invalidates a cell. Tool-backed features call this rather
+    than running ``uv add --dev`` themselves.
     """
     return add_dependency(notebook_dir, tool, dev=True, timeout=timeout)
 
@@ -1528,19 +1425,7 @@ def remove_dependency(
     *,
     timeout: int = 120,
 ) -> DependencyChangeResult:
-    """Remove a Python package from the notebook.
-
-    Runs ``uv remove <package>`` which updates pyproject.toml,
-    re-resolves, writes uv.lock, and syncs .venv.
-
-    Args:
-        notebook_dir: Path to notebook directory
-        package: Package name to remove
-        timeout: Subprocess timeout in seconds
-
-    Returns:
-        DependencyChangeResult with success status
-    """
+    """Remove a Python package with ``uv remove``, re-resolving and syncing .venv."""
     lock = _get_notebook_lock(notebook_dir)
     with lock:
         return _remove_dependency_locked(notebook_dir, package, timeout=timeout)
@@ -1706,11 +1591,8 @@ def _dependency_info_from_requirement_strings(
 def _split_requirement(dep_str: str) -> tuple[str, SpecifierSet | None]:
     """Split a requirement into canonical name and parsed specifier.
 
-    Uses ``packaging.requirements.Requirement`` for PEP 508 parsing and
-    ``packaging.utils.canonicalize_name`` for PEP 503 name normalization.
-    Falls back to returning the raw string as the name (and ``None`` for
-    the specifier) when the entry can't be parsed, so malformed
-    ``pyproject.toml`` entries still surface in the UI rather than crashing.
+    An unparseable entry returns the raw string and ``None``, so a malformed
+    ``pyproject.toml`` entry still shows in the UI.
     """
     try:
         req = Requirement(dep_str)
@@ -1726,9 +1608,7 @@ def _diff_dependency_sets(
 ) -> tuple[list[DependencyInfo], list[DependencyInfo], list[DependencyInfo]]:
     """Diff dependency sets by canonical name and semantic specifier equality.
 
-    Names are already PEP 503 canonical at construction (``Pandas`` and
-    ``pandas`` collapse); specifiers are ``SpecifierSet`` instances, so
-    ``==`` is structural — ``>=1.0,<2.0`` matches ``<2.0,>=1.0``.
+    ``SpecifierSet`` equality is structural: ``>=1.0,<2.0`` equals ``<2.0,>=1.0``.
     """
     current_map = {dep.name: dep for dep in current}
     target_map = {dep.name: dep for dep in target}
@@ -1758,11 +1638,9 @@ def _diff_dependency_sets(
 
 
 def _validate_requirement_specifier(requirement: str) -> str:
-    """Validate a supported requirement line.
+    """Validate a plain PEP 508 requirement line.
 
-    Accepts plain PEP 508 requirements (name, optional extras, optional
-    version specifier); rejects environment markers and URL/direct
-    references, which are out of scope for this notebook surface.
+    Environment markers and URL/direct references are rejected as out of scope.
     """
     normalized = requirement.strip()
     if not normalized:

@@ -1,11 +1,7 @@
 """DriverAdapter protocol and supporting types for SQL cells.
 
-The protocol is intentionally Strata-shaped, not a generic SQL
-abstraction: each method exists because the executor or cache layer
-needs it. Per-driver implementations bind ADBC drivers to Strata's
-provenance and read-only-execution semantics.
-
-See ``docs/internal/design-sql-cells.md`` for the broader rationale.
+Strata-shaped, not a generic SQL abstraction: each method exists because the
+executor or cache layer needs it.
 """
 
 from __future__ import annotations
@@ -20,11 +16,9 @@ from typing import Any, Protocol
 class AdapterCapabilities:
     """Capability flags for a ``DriverAdapter``.
 
-    The cache policy resolver consults these to decide whether a
-    ``# @cache snapshot`` request can be honored, whether a
-    ``fingerprint`` policy yields a real per-table token or has to fall
-    back to session-scoped, and whether the executor needs to open a
-    second probe connection alongside the query connection.
+    The cache policy resolver reads these to decide whether ``# @cache snapshot``
+    can be honored, whether ``fingerprint`` yields a real per-table token or falls
+    back to session scope, and whether a separate probe connection is needed.
     """
 
     per_table_freshness: bool
@@ -46,10 +40,7 @@ class AdapterCapabilities:
 class QualifiedTable:
     """Fully qualified table reference.
 
-    ``catalog`` and ``schema`` may be None for backends that don't
-    expose those layers (SQLite has neither; an unqualified Postgres
-    table name resolves to the connection's ``search_path`` first
-    schema after qualify-time resolution).
+    ``catalog`` and ``schema`` are None for backends without those layers.
     """
 
     catalog: str | None
@@ -64,21 +55,13 @@ class QualifiedTable:
 
 @dataclass(frozen=True)
 class FreshnessToken:
-    """Opaque equality token reflecting database state for touched tables.
+    """Opaque equality token for the database state of touched tables.
 
-    Two tokens compare equal iff the touched tables produce the same
-    query result. The token's bytes are not interpreted by the cache
-    layer — only compared.
-
-    ``is_session_only`` is True when the adapter couldn't derive a real
-    fingerprint (e.g. DuckDB native, MySQL ``UPDATE_TIME=NULL`` after
-    server restart) and substituted a session-unique salt. The executor
-    surfaces this as a diagnostic so users know cache reuse is
-    session-scoped only.
-
-    ``is_snapshot`` is True when the token is a durable, reproducibly
-    queryable snapshot ID (Iceberg ``snapshot_id`` is the canonical
-    example). The ``# @cache snapshot`` policy requires this.
+    Equal tokens mean the touched tables give the same result; the cache layer
+    only compares the bytes. ``is_session_only`` means no real fingerprint was
+    available (e.g. DuckDB native) and a session-unique salt was used, so reuse
+    is session-scoped. ``is_snapshot`` means a durable, queryable snapshot ID
+    (e.g. Iceberg ``snapshot_id``), which ``# @cache snapshot`` requires.
     """
 
     value: bytes
@@ -90,11 +73,7 @@ class FreshnessToken:
 class ColumnInfo:
     """One column of a table, as the driver reports it.
 
-    ``type`` is whatever the catalog's column-type column returns —
-    SQL-text form (``INTEGER``, ``VARCHAR(64)``, ``timestamp with
-    time zone``). Strata doesn't normalize across drivers because
-    the user typed SQL for a specific dialect; surfacing the
-    driver's own type label is the most honest thing.
+    ``type`` is the driver's own SQL-text type label, not normalized across drivers.
     """
 
     name: str
@@ -104,12 +83,7 @@ class ColumnInfo:
 
 @dataclass(frozen=True)
 class TableSchema:
-    """A table's identity plus its columns.
-
-    Used by the schema-discovery surface (``DriverAdapter.list_schema``)
-    so the UI can show users the tables and columns available on a
-    connection without them having to hand-write probe queries.
-    """
+    """A table's identity plus its columns, for schema discovery."""
 
     catalog: str | None
     schema: str | None
@@ -123,12 +97,10 @@ class TableSchema:
 
 @dataclass(frozen=True)
 class SchemaFingerprint:
-    """Opaque equality token reflecting touched-table column structure.
+    """Opaque equality token for the column structure of touched tables.
 
-    Catches schema evolution that doesn't move the freshness token:
-    metadata-only ADD COLUMN, type changes, column rename. Folded into
-    the provenance hash so a cached Arrow Table whose schema would
-    differ from a re-run is correctly invalidated.
+    Catches schema changes the freshness token misses (metadata-only ADD COLUMN,
+    type changes, renames); folded into the provenance hash.
     """
 
     value: bytes
@@ -137,10 +109,8 @@ class SchemaFingerprint:
 class DriverAdapter(Protocol):
     """Per-driver glue between Strata's SQL pipeline and ADBC.
 
-    Implementations live in ``strata.notebook.sql.drivers.*`` and are
-    registered via ``register_adapter`` at import time. The executor
-    looks up the adapter for the cell's connection driver via
-    ``get_adapter(connection.driver)``.
+    Implementations in ``strata.notebook.sql.drivers.*`` call ``register_adapter``
+    at import time; the executor finds them with ``get_adapter(driver)``.
     """
 
     name: str
@@ -155,40 +125,23 @@ class DriverAdapter(Protocol):
         """Return a stable hash of the connection's identity-shaping config.
 
         Includes everything that changes object visibility (host, port,
-        default database, role, warehouse, search-path-like options)
-        and excludes secrets (auth credentials) and runtime-tunables
-        that don't change visibility (e.g. ``application_name``,
-        ``connect_timeout``).
+        database, role, warehouse, search path) and excludes secrets and
+        tunables like ``connect_timeout``, so equal ids see the same objects as
+        the same principal and caches never bleed between differing ones.
 
-        Two connections with the same ``connection_id`` are guaranteed
-        to see the same set of objects from the same effective
-        principal. Two connections that differ in identity-shaping
-        config produce different ``connection_id`` so cache entries
-        can't bleed between them.
-
-        ``read_only`` lets adapters that route reads vs writes through
-        different principals (Snowflake's ``write_role``, BigQuery's
-        ``write_credentials_path``) include only the fields that
-        actually shape *this* cell's identity. Without the param, a
-        change to the write principal would invalidate read-cell
-        caches even though read execution never touches it.
-        Defaults to ``True`` because read cells are more common; the
-        cell executor passes ``False`` for ``# @sql write=true``.
+        ``read_only`` selects the principal: adapters with a separate write
+        principal (Snowflake ``write_role``) include it only when ``False``, so
+        changing it does not invalidate read-cell caches.
         """
         ...
 
     def open(self, spec: Any, *, read_only: bool) -> Any:
-        """Open an ADBC connection in the requested mode.
+        """Open an ADBC connection; the handle is opaque to the executor.
 
-        ``read_only=True`` means the executor wants the connection in
-        an enforceable read-only mode (Postgres ``READ ONLY``
-        transaction, SQLite immutable connection). Adapters that can't
-        satisfy this raise ``RuntimeError`` — the executor turns the
-        error into a user-visible diagnostic instead of falling back to
-        keyword-based DML rejection.
-
-        Returns whatever connection handle the driver provides; the
-        executor treats it as opaque.
+        ``read_only=True`` requires an enforceable read-only mode (Postgres
+        ``READ ONLY`` transaction, SQLite immutable). An adapter that cannot
+        provide one raises ``RuntimeError`` rather than fall back to keyword-based
+        DML rejection.
         """
         ...
 
@@ -199,11 +152,8 @@ class DriverAdapter(Protocol):
     ) -> FreshnessToken:
         """Return a freshness token for the given tables.
 
-        Called once per cell execution as part of the cache key check.
-        Must be cheap (single metadata round-trip per touched
-        database). Returning a token with ``is_session_only=True``
-        signals the executor that the adapter couldn't derive a real
-        fingerprint for some or all of the requested tables.
+        Called once per cell execution for the cache key, so it must be cheap
+        (one metadata round-trip per database).
         """
         ...
 
@@ -212,28 +162,14 @@ class DriverAdapter(Protocol):
         probe_conn: Any,
         tables: list[QualifiedTable],
     ) -> SchemaFingerprint:
-        """Return a schema fingerprint for the given tables.
-
-        Catches metadata-only schema changes (ADD COLUMN, type changes)
-        that the freshness token would miss. Cheap; one metadata read
-        per touched table.
-        """
+        """Return a schema fingerprint for the given tables (one metadata read each)."""
         ...
 
     def list_schema(self, conn: Any) -> list[TableSchema]:
-        """Enumerate the tables (and columns) visible on this connection.
+        """Enumerate the tables and columns visible on this connection.
 
-        Used by the UI's schema-discovery sidebar so users can see
-        what's available before writing SQL. Should be idempotent
-        and side-effect free; the executor calls it on a read-only
-        connection. Each ``TableSchema`` carries the table's
-        catalog/schema/name plus a tuple of ``ColumnInfo`` (column
-        name + driver-reported type).
-
-        Adapters that can't enumerate (e.g. a driver behind a
-        catalog the user lacks rights to) raise — the route
-        surfaces the error verbatim so the user sees what went
-        wrong.
+        Side-effect free; called on a read-only connection. Raises when the
+        driver cannot enumerate, and the route surfaces the error verbatim.
         """
         ...
 
@@ -242,15 +178,9 @@ def hash_connection_identity(
     driver: str,
     identity: dict[str, Any],
 ) -> str:
-    """Default canonicalization helper for adapters.
+    """Hash ``{"driver": <driver>, **identity}`` as sorted JSON.
 
-    Hashes ``{"driver": <driver>, **identity}`` as sorted JSON. The
-    caller (the adapter) is responsible for choosing which keys belong
-    in ``identity`` — i.e. which fields are identity-shaping for that
-    driver — and for excluding secrets.
-
-    Adapters can call this directly from
-    ``canonicalize_connection_id``; nothing requires them to.
+    The adapter chooses the identity-shaping keys and must exclude secrets.
     """
     payload = {"driver": driver, **identity}
     encoded = json.dumps(

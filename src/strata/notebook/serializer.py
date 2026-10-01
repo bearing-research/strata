@@ -1,40 +1,13 @@
-"""Shared serialization/deserialization for notebook cell values.
+"""Shared serialization and deserialization for notebook cell values.
 
-Supports these content types:
-  arrow/ipc    — Anything Arrow-representable (PyArrow Tables/RecordBatch,
-                 pandas DataFrames/Series, numpy ndarrays of any dim,
-                 numpy scalars, typed Python primitives like datetime /
-                 Decimal / UUID / bytes / complex), plus any third-party
-                 type that exports itself through ``__arrow_c_stream__``
-                 or ``__dlpack__``. Shape is encoded in schema metadata:
-                 ``strata.arrow.shape`` = "table" | "tensor" | "scalar".
-  json/object  — dicts, lists, scalars (int/float/str/bool/None)
-  image/png    — Displayable PNG output (figures, images)
-  text/markdown — Displayable markdown output
-  module/import — Python module objects (re-imported by name on read)
-  module/cell  — Synthetic module export for top-level defs/classes
-  module/cell-instance — Instance of a synthetic notebook-exported class
-  pickle/object — everything else
-  application/x-r-rds — R-only RDS blob produced by harness.R; refuses to
-                 deserialize from Python (raises ``StrataRArtifactError``).
+Content types: ``arrow/ipc`` (anything Arrow-representable, plus types that
+export ``__arrow_c_stream__`` or ``__dlpack__``; shape in the schema metadata
+``strata.arrow.shape``), ``json/object``, ``image/png``, ``text/markdown``,
+``module/import``, ``module/cell``, ``module/cell-instance``, ``pickle/object``
+(everything else) and ``application/x-r-rds`` (R-only; Python refuses to read it).
 
-This module is loaded dynamically by harness.py, pool_worker.py, and
-inspect_repl.py via ``importlib.util``, since those scripts run inside
-the notebook's own venv and cannot ``import strata``.
-
-Loading pattern (used in each subprocess script):
-
-    import importlib.util as _ilu
-    from pathlib import Path as _Path
-
-    def _load_serializer():
-        _p = _Path(__file__).parent / "serializer.py"
-        _spec = _ilu.spec_from_file_location("_nb_serializer", _p)
-        _m = _ilu.module_from_spec(_spec)
-        _spec.loader.exec_module(_m)
-        return _m
-
-    _ser = _load_serializer()
+harness.py, pool_worker.py and inspect_harness.py load this file by path with
+``importlib.util``: they run in the notebook's venv and cannot ``import strata``.
 """
 
 from __future__ import annotations
@@ -58,15 +31,8 @@ logger = logging.getLogger(__name__)
 class ContentType(StrEnum):
     """Content type strings used by the notebook serializer.
 
-    StrEnum rather than bare strings so call sites get autocomplete,
-    typos become import-time errors, and the complete set is
-    inventoried here. StrEnum values remain plain ``str``, so existing
-    code comparing against ``"arrow/ipc"`` continues to interop
-    cleanly during migration.
-
-    Defined inside serializer.py (not a sibling module) because this
-    file is loaded via ``importlib.util`` inside the notebook venv,
-    which doesn't have ``strata`` importable.
+    A StrEnum, so members compare equal to the plain strings. Defined here because
+    this file is loaded where ``strata`` is not importable.
     """
 
     ARROW_IPC = "arrow/ipc"
@@ -88,14 +54,8 @@ class ContentType(StrEnum):
 class StrataRArtifactError(RuntimeError):
     """Raised when a Python cell tries to consume an R-only RDS artifact.
 
-    Attached attributes give callers the context to render a useful
-    error to the user without re-parsing the message string:
-
-    ``code``         — stable identifier ``R_ONLY_ARTIFACT``
-    ``file_path``    — on-disk path of the RDS blob (debugging only)
-    ``variable_name``— upstream variable, when known. Populated by the
-                       Python harness when it catches the error during
-                       input deserialization.
+    ``code`` is ``R_ONLY_ARTIFACT``; ``file_path`` is the RDS blob (debugging only);
+    ``variable_name`` is the upstream variable, set by the harness when known.
     """
 
     code = "R_ONLY_ARTIFACT"
@@ -144,17 +104,10 @@ def _record_x64_enabled() -> None:
 def x64_was_enabled_here() -> bool:
     """Whether reconstructing an input turned ``jax_enable_x64`` on.
 
-    The switch is process-wide and there is no per-array alternative in jax, so
-    a worker that is reused across cells -- the warm pool, and the batch behind
-    Run All -- keeps it on for every cell after the one that needed it. Those
-    cells then get float64 where they would otherwise get float32, and their
-    provenance hash does not record which it was, so what a cached result holds
-    depends on what ran before it in that process.
-
-    Setting ``JAX_ENABLE_X64`` in the notebook's env is the way to say this
-    deliberately: jax reads it at import, every execution path applies the env
-    before deserializing anything, and it is part of the cell's env hash. The
-    caller reports this so the author can move to that.
+    The switch is process-wide, so a reused worker (warm pool, Run All batch) keeps
+    it on for later cells, which then get float64 instead of float32 without their
+    provenance recording it. Setting ``JAX_ENABLE_X64`` in the notebook env is the
+    deliberate way (it is in the env hash); the caller reports this to suggest it.
     """
     return _x64_enabled_here
 
@@ -162,21 +115,14 @@ def x64_was_enabled_here() -> bool:
 class StrataPrecisionError(RuntimeError):
     """Raised when a stored array cannot be reconstructed at its own dtype.
 
-    A backstop, not the ordinary path. What a cell stores is what the next
-    cell must receive, so the reader enables ``jax_enable_x64`` and converts
-    again when a reconstruction comes back narrowed. This is raised only if
-    that fails too — the dtype is one this JAX cannot represent at all — and
-    it exists because silently handing back a 32-bit value in place of a
-    64-bit one is the outcome to rule out. That failure is quiet: the numbers
-    still look plausible, and it surfaces, if at all, somewhere far away, as a
-    ``lax.while_loop`` refusing a carry whose dtype no longer matches.
+    A backstop: the reader enables ``jax_enable_x64`` and converts again when a
+    reconstruction comes back narrowed, and raises only if the dtype is one this
+    JAX cannot represent. Silently handing back 32-bit values for 64-bit ones fails
+    far away, e.g. as a ``lax.while_loop`` carry dtype mismatch.
 
-    ``code``          — stable identifier ``PRECISION_NARROWED``
-    ``stored_dtype``  — dtype recorded with the artifact
-    ``reconstructed`` — dtype the reading process produced
-    ``variable_name`` — upstream variable, when known. Populated by the
-                        harness and the pool worker during input
-                        deserialization.
+    ``code`` is ``PRECISION_NARROWED``; ``stored_dtype`` and ``reconstructed`` are
+    the recorded and produced dtypes; ``variable_name`` is set during input
+    deserialization when known.
     """
 
     code = "PRECISION_NARROWED"
@@ -203,11 +149,8 @@ class StrataPrecisionError(RuntimeError):
 class SerializedPayload(TypedDict):
     """Metadata dict returned by ``serialize_value`` and every ``_serialize_*`` helper.
 
-    Four keys are always present (``content_type``, ``file``, ``bytes``,
-    ``preview``); the rest are content-type-specific extras. Keeping
-    them all in one ``TypedDict`` instead of per-handler subclasses
-    matches the actual on-wire shape and keeps typo protection at
-    every literal-dict construction site.
+    ``content_type``, ``file``, ``bytes`` and ``preview`` are always present; the
+    rest are content-type-specific extras.
     """
 
     content_type: ContentType
@@ -289,13 +232,9 @@ class _CloudPickleObjectCodec:
 def _resolve_object_codec(codec_name: str | None = None) -> ObjectCodec:
     """Return the configured object codec implementation.
 
-    Default is cloudpickle — it's a strict superset of stdlib pickle
-    (handles lambdas, closures, nested classes, dynamically-defined
-    functions) and ships with the ``notebook`` extra. Users can opt
-    out by setting the env var to ``pickle``. If cloudpickle can't be
-    imported (e.g. someone installed only core ``strata`` and still
-    spun up the notebook runtime), we transparently fall back to
-    stdlib pickle so cells don't fail to serialize.
+    Default is cloudpickle (handles lambdas, closures, dynamic classes); setting
+    the env var to ``pickle`` opts out. Falls back to stdlib pickle when cloudpickle
+    is unavailable.
     """
     selected = (codec_name or os.environ.get(OBJECT_CODEC_ENV_VAR, "cloudpickle")).strip().lower()
     if selected == "cloudpickle":
@@ -336,17 +275,10 @@ def _unwrap_codec_payload(obj: Any) -> tuple[str, bytes] | None:
 def _survives_json(value: Any) -> bool:
     """Whether JSON encoding would return *value* unchanged.
 
-    ``json.dumps`` does not fail on these — it coerces, which is why the encode
-    probe alone can't see them:
-
-    * non-string dict keys become strings, so ``{1: "a"}`` decodes as
-      ``{"1": "a"}`` and a downstream ``counts[1]`` raises KeyError;
-    * tuples become lists, so a cell expecting ``(1, 2)`` receives ``[1, 2]``.
-
-    Only called after ``json.dumps`` has succeeded, so *value* is finite and
-    acyclic and this walk terminates. NaN and Inf are deliberately not treated
-    as losses: the JSON writer round-trips both, and ``nan != nan`` would make
-    an equality-based probe reroute them for no reason.
+    ``json.dumps`` coerces rather than fails on non-string dict keys (``{1: "a"}``
+    decodes as ``{"1": "a"}``) and tuples (decoded as lists). Called only after
+    ``json.dumps`` succeeded, so the walk terminates. NaN and Inf are not losses:
+    the JSON writer round-trips both.
     """
     if isinstance(value, dict):
         return all(isinstance(key, str) for key in value) and all(
@@ -360,25 +292,16 @@ def _survives_json(value: Any) -> bool:
 
 
 def detect_content_type(value: Any, variable_name: str | None = None) -> ContentType:
-    """Return the content type for *value*.
+    """Return the content type for *value*; the first match wins.
 
-    Called from the notebook subprocess (harness / pool_worker), which
-    runs in a venv with pyarrow (core dep) and pandas/numpy (notebook
-    extra) installed. Imports stay lazy inside the function so that
-    loading this module doesn't pay ~400ms of pyarrow+pandas+numpy init
-    cost when detection never fires.
+    1. Arrow-representable: ``arrow/ipc``
+    2. Markdown / PNG display value: ``text/markdown`` or ``image/png``
+    3. JSON-serializable primitive: ``json/object``
+    4. Python module: ``module/import``
+    5. Cell-defined class instance: ``module/cell-instance``
+    6. Anything else: ``pickle/object``
 
-    Detection order (first match wins):
-      1. Anything Arrow-representable → arrow/ipc
-         (pyarrow Table/RecordBatch, pandas DataFrame/Series, numpy
-         ndarray of any dim, numpy scalars, typed Python primitives
-         like datetime/Decimal/UUID/bytes/complex, and any type
-         exporting __arrow_c_stream__ / __dlpack__)
-      2. Markdown / PNG display value → text/markdown or image/png
-      3. JSON-serializable primitive  → json/object
-      4. Python module                → module/import
-      5. Cell-defined class instance  → module/cell-instance
-      6. Anything else                → pickle/object (fallback)
+    Imports stay lazy so loading this module does not pay pyarrow/pandas/numpy init.
     """
     import types
 
@@ -412,23 +335,12 @@ def detect_content_type(value: Any, variable_name: str | None = None) -> Content
 
 
 def _is_arrow_representable(value: Any) -> bool:
-    """Return whether *value* should flow through the unified arrow/ipc codec.
+    """Return whether *value* should flow through the arrow/ipc codec.
 
-    Detection is driven by :data:`_ARROW_TYPE_RULES` — the same ordered
-    registry that :func:`_to_arrow_table` uses to encode. A value is
-    arrow-representable iff some rule's ``matches`` predicate accepts it, so a
-    new type becomes one rule entry rather than a branch here *and* a converter
-    there.
-
-    The covered set: tables (pyarrow / pandas / polars), n-d arrays and scalars
-    (numpy, plus torch / jax tensors via the numpy bridge), typed Python
-    primitives with a native or tagged Arrow representation (datetime family,
-    Decimal, bytes; UUID and complex via metadata tags), and — via the two
-    generic rules at the end of the registry — any third-party type that
-    exports ``__arrow_c_stream__`` or ``__dlpack__``. Those two keep an
-    unrecognised library's values readable as Arrow instead of dropping them
-    into an opaque pickle; they come back as a pa.Table / ndarray rather than
-    the original type, which only the named rules above them can rebuild.
+    True iff some :data:`_ARROW_TYPE_RULES` entry matches, the same registry
+    :func:`_to_arrow_table` encodes with. The two generic rules at the end
+    (``__arrow_c_stream__``, ``__dlpack__``) keep unrecognised libraries' values
+    readable as Arrow; they come back as a pa.Table / ndarray, not the original type.
     """
     return any(rule.matches(value) for rule in _ARROW_TYPE_RULES)
 
@@ -436,11 +348,8 @@ def _is_arrow_representable(value: Any) -> bool:
 def _matched_only_generic_rules(value: Any) -> bool:
     """Whether *value* reached the Arrow path on a protocol probe alone.
 
-    True when no rule recognised the type and only ``__arrow_c_stream__`` /
-    ``__dlpack__`` claimed it. Used to tell a genuine encoding failure (a
-    pandas DataFrame that could not become Arrow — downstream really does
-    break) from the ordinary case of a protocol exporter we cannot convert,
-    which simply keeps the pickle it would have had anyway.
+    Tells a genuine encoding failure (a DataFrame that could not become Arrow) from
+    a protocol exporter we cannot convert, which keeps its pickle.
     """
     return not any(rule.matches(value) for rule in _NAMED_ARROW_TYPE_RULES)
 
@@ -462,19 +371,10 @@ _DeserializeFn = Callable[[Path], Any]
 class _Handler(NamedTuple):
     """Bidirectional codec for one content type.
 
-    ``serialize`` is ``None`` for content types that arrive on disk by
-    other means (``module/cell`` is written by the module-export
-    machinery, not by ``serialize_value``). ``deserialize`` is ``None``
-    for display-only types (``image/png``) that the notebook UI
-    consumes directly without round-tripping through Python.
-
-    NamedTuple rather than ``@dataclass(frozen=True)`` because this
-    module is loaded via ``importlib.util.spec_from_file_location`` in
-    harness / pool_worker / inspect_repl subprocesses — that loader
-    doesn't register the module in ``sys.modules`` before class
-    creation runs, and ``dataclass`` crashes when it tries to look up
-    annotations via ``sys.modules[cls.__module__]``. NamedTuple has
-    no such introspection.
+    ``serialize`` is ``None`` for types written by other means (``module/cell``);
+    ``deserialize`` is ``None`` for display-only types (``image/png``). A NamedTuple
+    because ``dataclass`` fails under the ``spec_from_file_location`` loader, which
+    does not register the module in ``sys.modules`` before class creation.
     """
 
     serialize: _SerializeFn | None
@@ -484,11 +384,8 @@ class _Handler(NamedTuple):
 def _safe_filename_stem(variable_name: str) -> str:
     """Case-collision-proof filename stem (write side).
 
-    Kept byte-for-byte identical to ``provenance.safe_filename_stem`` (guarded by
-    a test) — this module is loaded standalone in the harness venv and cannot
-    ``import strata``, so it carries its own copy. See that function for the why:
-    ``Widget``/``widget`` (class + instance) must not share a blob file on a
-    case-insensitive filesystem.
+    A copy of ``provenance.safe_filename_stem`` (a test keeps them identical),
+    because this module cannot ``import strata``.
     """
     if variable_name != variable_name.lower():
         return f"{variable_name}-{hashlib.sha256(variable_name.encode()).hexdigest()[:8]}"
@@ -496,14 +393,10 @@ def _safe_filename_stem(variable_name: str) -> str:
 
 
 def serialize_value(value: Any, output_dir: Path | str, variable_name: str) -> SerializedPayload:
-    """Serialize *value* to *output_dir* and return a metadata dict.
+    """Serialize *value* to *output_dir* and return its metadata.
 
-    The metadata dict always contains:
-      content_type  — one of the supported content types above
-      file          — filename written (relative to output_dir)
-      bytes         — file size in bytes
-      preview       — a JSON-safe preview of the value
-    Arrow results additionally include ``rows`` and ``columns``.
+    The metadata always has ``content_type``, ``file`` (relative to *output_dir*),
+    ``bytes`` and a JSON-safe ``preview``; Arrow results add ``rows`` and ``columns``.
     """
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -522,23 +415,13 @@ def serialize_display_value(
     index: int,
     written: Iterable[tuple[Any, SerializedPayload]] = (),
 ) -> SerializedPayload:
-    """Serialize one display value, reusing a variable's payload when they are
-    the same object.
+    """Serialize one display value, reusing a variable's payload for the same object.
 
-    A cell whose last expression is one of its own variables hands the same
-    object to both serialization loops. Writing it twice is wasted work for a
-    large frame, and wrong outright for anything whose bytes are not a pure
-    function of the object: converting a lazy query handle re-runs the query,
-    so a non-deterministic source stores different data under the variable and
-    under the display, and a one-shot stream is already drained by the time the
-    display is written.
-
-    *written* carries the ``(value, payload)`` pairs this cell has already
-    serialized. Reuse needs the content type to agree as well as the identity,
-    because a display name unlocks the markdown and PNG paths that a variable
-    name does not (see :func:`_is_display_variable_name`): a matplotlib figure
-    that is also a consumed variable is legitimately ``pickle/object`` as a
-    variable and ``image/png`` as a display, and must be written twice.
+    Writing it twice is wrong for anything whose bytes are not a pure function of
+    the object: a lazy query re-runs, and a one-shot stream is already drained.
+    *written* holds the ``(value, payload)`` pairs serialized so far. Reuse also
+    needs the content type to agree: a figure can be ``pickle/object`` as a variable
+    and ``image/png`` as a display, and is then written twice.
     """
     variable_name = f"__display__{index}"
     content_type = detect_content_type(value, variable_name)
@@ -557,14 +440,10 @@ def serialize_display_value(
 def _serialize_arrow_with_fallback(
     value: Any, output_dir: Path, variable_name: str
 ) -> SerializedPayload:
-    """Try the unified Arrow path; fall back to JSON-tagged-arrow or pickle on failure.
+    """Try the unified Arrow path; fall back to JSON-tagged Arrow or pickle on failure.
 
-    Pandas-specific Arrow failures (Series shape mismatch, mixed dtypes
-    pa.Table.from_pandas can't coerce) use the JSON table fallback so
-    downstream code still sees a table-shaped artifact. Non-pandas
-    failures (complex ndarray, structured dtype, unencodable scalar)
-    pickle — the JSON fallback assumes a pandas shape and silently
-    drops non-pandas values.
+    Pandas Arrow failures use the JSON table fallback so downstream still sees a
+    table. Other failures pickle, because the JSON fallback assumes a pandas shape.
     """
     try:
         return _serialize_arrow(value, output_dir, variable_name)
@@ -610,10 +489,7 @@ _META_PD_NAME = b"strata.arrow.pandas.name"  # Series name
 def _encode_series_name(name: Any) -> bytes:
     """JSON-encode a Series name, preserving ``None`` vs ``""`` vs ``0``.
 
-    The old ``str(name or "")`` collapsed every falsy name (``0``, ``""``,
-    ``False``) to ``""`` — which decoded back to ``None`` — and stringified
-    ints (``name=5`` round-tripped as ``"5"``). JSON keeps the exact
-    scalar; non-JSON-safe names degrade to their string form.
+    Non-JSON-safe names degrade to their string form.
     """
     if name is None or isinstance(name, (str, int, float, bool)):
         return json.dumps(name).encode("utf-8")
@@ -621,8 +497,7 @@ def _encode_series_name(name: Any) -> bytes:
 
 
 def _decode_series_name(raw: bytes) -> Any:
-    """Decode a stored Series name; legacy blobs hold the plain string form
-    (where ``""`` meant ``None``)."""
+    """Decode a stored Series name; legacy blobs hold a plain string (``""`` = None)."""
     text = raw.decode("utf-8")
     try:
         return json.loads(text)
@@ -666,11 +541,8 @@ _REAL_VIEW_OF_COMPLEX = {"complex64": "float32", "complex128": "float64"}
 def _serialize_arrow(value: Any, output_dir: Path, variable_name: str) -> SerializedPayload:
     """Unified writer for the arrow/ipc codec.
 
-    Dispatches to one of three shape encoders (table / tensor / scalar)
-    and stamps schema metadata so the reader can reconstruct the exact
-    Python type. All three shapes use the same on-disk format — an
-    Arrow IPC stream of a single Table — so readers only need one
-    entry point.
+    Every shape (table / tensor / scalar) is written as an Arrow IPC stream of one
+    Table, with schema metadata the reader uses to rebuild the exact Python type.
     """
     import pyarrow as pa
 
@@ -723,16 +595,9 @@ def _serialize_arrow(value: Any, output_dir: Path, variable_name: str) -> Serial
 class _ArrowRule(NamedTuple):
     """One entry in the arrow/ipc type registry.
 
-    ``matches`` is a cheap, side-effect-free predicate (typically an
-    ``isinstance`` check) used both to decide the content type
-    (:func:`_is_arrow_representable`) and to pick a converter
-    (:func:`_to_arrow_table`). ``to_table`` does the real conversion and may
-    assume ``matches`` already returned ``True``. Adding a new arrow-routable
-    type is one rule appended to :data:`_ARROW_TYPE_RULES`.
-
-    NamedTuple (not ``@dataclass``) for the same reason as :class:`_Handler` —
-    this module is loaded via ``importlib.util`` in the harness subprocesses,
-    where ``dataclass`` annotation introspection fails.
+    ``matches`` is a cheap, side-effect-free predicate used both for detection and
+    to pick the converter; ``to_table`` may assume it returned True. A NamedTuple for
+    the same reason as :class:`_Handler`.
     """
 
     matches: Callable[[Any], bool]
@@ -740,11 +605,9 @@ class _ArrowRule(NamedTuple):
 
 
 def _to_arrow_table(value: Any) -> Any:
-    """Dispatch *value* to an Arrow Table with shape metadata stamped.
+    """Convert *value* to an Arrow Table with shape metadata, via the first matching rule.
 
-    Walks :data:`_ARROW_TYPE_RULES` in order; the first rule whose ``matches``
-    accepts the value converts it. ``matches`` already gated detection, so a
-    miss here means registry drift.
+    Detection used the same rules, so a miss here means registry drift.
     """
     for rule in _ARROW_TYPE_RULES:
         if rule.matches(value):
@@ -878,10 +741,8 @@ def _matches_typed_scalar(value: Any) -> bool:
 def _table_from_typed_scalar(value: Any) -> Any:
     """Wrap a typed Python primitive in a 1-row scalar Table.
 
-    UUID and complex need a custom Arrow representation (binary(16) and a struct
-    of floats) plus a scalar-type tag so the reader can reconstruct the original
-    Python type. datetime / Decimal / bytes round-trip through pyarrow natively,
-    so they just need the scalar shape tag and no type discriminator.
+    UUID and complex need a custom representation (binary(16), a struct of floats)
+    plus a scalar-type tag; datetime / Decimal / bytes round-trip natively.
     """
     from uuid import UUID
 
@@ -909,32 +770,12 @@ def _table_from_typed_scalar(value: Any) -> Any:
 def _matches_arrow_capsule(value: Any) -> bool:
     """Anything that exports itself through the Arrow PyCapsule interface.
 
-    The generic table hatch. A library implementing ``__arrow_c_stream__``
-    (duckdb, cudf, ibis, datafusion, delta-rs, chdb, ...) has declared itself
-    tabular and will hand us the data, so supporting it costs no rule of its
-    own. What it cannot do is name the type on the way back, which is why this
-    sits *below* the pandas / polars rules: those types implement the capsule
-    too, and reaching them here first would silently downgrade every DataFrame
-    in the codebase to a pa.Table.
-
-    The probe is against ``type(value)``, not the value, for two reasons. A
-    class carries its instances' protocol methods, so ``Frame = pd.DataFrame``
-    would otherwise be detected as tabular and then fail to convert. And an
-    instance-level ``hasattr`` calls the object's ``__getattr__``, which for a
-    detached-session proxy or a lazy remote handle can raise something other
-    than ``AttributeError`` — that escapes detection entirely, past the Arrow
-    fallback, and costs the cell a value it used to pickle without complaint.
-
-    Iterators are excluded as well: an exporter that is itself an iterator
-    (``pa.RecordBatchReader``, and the readers other libraries hand back) is a
-    one-shot stream, and reading it consumes it, leaving the caller's object
-    spent. This only catches exporters that *are* iterators — the protocol
-    carries no re-readability signal, so a wrapper presenting
-    ``__arrow_c_stream__`` over a one-shot reader without being iterable is
-    indistinguishable from a re-readable handle and gets stored. That is
-    survivable now that :func:`serialize_display_value` writes each object
-    once per cell: the value is read exactly once, so it lands in its artifact
-    intact rather than producing a second, empty one.
+    The generic table hatch (duckdb, cudf, ibis, ...). It sits below the pandas /
+    polars rules, which also implement the capsule but can name their type on the
+    way back. The probe is on ``type(value)``: a class object carries its instances'
+    protocol methods, and an instance ``hasattr`` can run a ``__getattr__`` that
+    raises something other than ``AttributeError``. Exporters that are iterators are
+    excluded because reading a one-shot stream consumes it.
     """
     cls = type(value)
     if hasattr(cls, "__next__"):
@@ -955,19 +796,11 @@ def _table_from_arrow_capsule(value: Any) -> Any:
 def _matches_dlpack(value: Any) -> bool:
     """Anything that exports a raw n-d buffer through DLPack.
 
-    The generic array hatch, covering cupy / tensorflow / mlx without a rule
-    each. Deliberately ``__dlpack__`` and not ``__array__``: dlpack is an
-    opt-in declaration of *being* a buffer, whereas ``__array__`` is a
-    coercion hook that richer types (xarray, astropy Quantity, PIL images)
-    also implement to offer a lossy array view of themselves. Routing on the
-    latter would quietly discard coordinates, units and image-ness that the
-    pickle fallback preserves today — and, since arrow detection runs ahead
-    of the display checks, would capture PNG display values as tensors.
-
-    Probed against ``type(value)`` for the reasons given in
-    :func:`_matches_arrow_capsule`: ``T = torch.Tensor`` is a class object
-    carrying its instances' protocol methods rather than a buffer, and an
-    instance-level probe would run a hostile ``__getattr__``.
+    The generic array hatch (cupy, tensorflow, mlx). ``__dlpack__`` rather than
+    ``__array__``: richer types (xarray, astropy Quantity, PIL images) implement
+    ``__array__`` as a lossy view, and routing on it would drop what pickle keeps
+    and capture PNG display values as tensors. Probed on ``type(value)`` as in
+    :func:`_matches_arrow_capsule`.
     """
     return hasattr(type(value), "__dlpack__")
 
@@ -1013,10 +846,10 @@ def _python_scalar_to_table(value: Any) -> Any:
 
 
 def _ndarray_to_table(arr: Any, source: bytes | None = None) -> Any:
-    """Encode an ndarray as a 1-column Table + tensor shape metadata.
+    """Encode an ndarray as a 1-column Table plus tensor shape metadata.
 
-    *source*, when given, records the originating library (torch / jax) so the
-    reader can rebuild that type instead of a bare ndarray.
+    *source* records the originating library (torch / jax) so the reader can
+    rebuild that type.
     """
     import numpy as np
     import pyarrow as pa
@@ -1090,20 +923,10 @@ def _is_pandas_value(value: Any) -> bool:
 def to_serialization_safe(value: Any) -> Any:
     """Return a JSON- and TOML-compatible form of *value*.
 
-    This is the **single sanitization boundary** for all downstream
-    writers (manifest.json, notebook.toml, REST/WS response payloads).
-    Callers can trust that the output contains only ``bool``, ``int``,
-    ``float``, ``str``, ``list``, or ``dict[str, ...]`` — no ``None``,
-    ``datetime``, ``Decimal``, ``bytes``, numpy scalars, or other types
-    that trip up ``json.dump`` or ``tomli_w.dump``.
-
-    Rules:
-      - ``None`` → ``""`` (TOML rejects ``None``; empty string is safe
-        for both JSON and TOML, preserves preview shape)
-      - ``bool``, ``int``, ``float``, ``str`` → pass through
-      - ``list`` / ``tuple`` → recursed list
-      - ``dict`` → recursed dict with stringified keys
-      - Everything else → ``str(value)``
+    The single sanitization boundary for manifest.json, notebook.toml and REST/WS
+    payloads: the output holds only ``bool``, ``int``, ``float``, ``str``, ``list``
+    and ``dict[str, ...]``. ``None`` becomes ``""`` (TOML has no null), sequences
+    and dicts recurse (keys stringified), and anything else becomes ``str(value)``.
     """
     if value is None:
         return ""
@@ -1266,12 +1089,7 @@ _PNG_HANDLERS = (_png_via_repr_png, _png_via_matplotlib, _png_via_pil)
 
 
 def _png_size_from_bytes(png_bytes: bytes) -> tuple[int | None, int | None]:
-    """Probe PIL for size when the source handler couldn't supply one.
-
-    Returns ``(None, None)`` if PIL isn't installed or fails to read
-    the bytes; the caller stamps the dimensions as ``None`` in that
-    case so downstream renderers fall back to intrinsic sizing.
-    """
+    """Probe PIL for a PNG's size; ``(None, None)`` if PIL is missing or fails."""
     try:
         from PIL import Image as _PILImage
     except ImportError:
@@ -1288,10 +1106,9 @@ def _serialize_dataframe_json(
 ) -> SerializedPayload:
     """JSON fallback for DataFrames when Arrow serialization fails.
 
-    The fallback still uses ``arrow/ipc`` metadata and a ``.arrow`` artifact
-    name so downstream dependency loading treats the value as table-shaped.
-    The file contents are JSON, tagged with a serializer-local marker that
-    ``_deserialize_arrow`` understands even when ``pyarrow`` is unavailable.
+    Keeps ``arrow/ipc`` metadata and a ``.arrow`` name so downstream loading treats
+    the value as a table; the JSON content carries a marker ``_deserialize_arrow``
+    reads even without ``pyarrow``.
     """
     payload: dict[str, Any] = {
         _TAG_ARROW_JSON_FALLBACK: True,
@@ -1446,10 +1263,8 @@ def deserialize_value(
 ) -> Any:
     """Deserialize a value from *file_path*.
 
-    *output_dir* is accepted for API compatibility but not required —
-    *file_path* is always treated as an absolute (or relative-to-cwd) path.
-    Accepts either a ContentType enum value or the raw string form; since
-    ContentType is a StrEnum, ``_HANDLERS`` lookups work for both.
+    *output_dir* is ignored; *file_path* is used as given. *content_type* may be a
+    ``ContentType`` or its string.
     """
     handler = _HANDLERS.get(content_type)
     if handler is None or handler.deserialize is None:
@@ -1458,11 +1273,10 @@ def deserialize_value(
 
 
 def _load_arrow_table(blob: bytes) -> Any | None:
-    """Open a table-shaped Arrow IPC *blob* into a chunk-consolidated Table.
+    """Open a table-shaped Arrow IPC *blob* as a chunk-consolidated Table.
 
-    Returns ``None`` for non-table shapes (tensor/scalar), JSON-fallback
-    blobs, or anything that isn't a readable Arrow IPC stream — the data
-    viewer only operates on tables.
+    Returns ``None`` for tensor/scalar shapes, JSON-fallback blobs and anything
+    unreadable as Arrow IPC.
     """
     import pyarrow as pa
 
@@ -1481,9 +1295,8 @@ def _load_arrow_table(blob: bytes) -> Any | None:
 def _coerce_filter_scalar(value: Any, arrow_type: Any) -> Any | None:
     """Coerce a JSON filter *value* to a pyarrow scalar of *arrow_type*.
 
-    Returns ``None`` when the value can't be represented in the column's
-    type (e.g. non-numeric text against an int column) so the caller can
-    skip the filter instead of erroring.
+    Returns ``None`` when the column's type cannot represent it, so the caller skips
+    the filter.
     """
     import pyarrow as pa
 
@@ -1516,11 +1329,10 @@ def _coerce_filter_scalar(value: Any, arrow_type: Any) -> Any | None:
 
 
 def _apply_filters(table: Any, filters: list[dict[str, Any]] | None) -> Any:
-    """AND together per-column filter predicates and filter the table.
+    """AND per-column filter predicates (``{col, op, value, value2}``) over the table.
 
-    Each filter is ``{col, op, value, value2}``. Unknown columns/ops and
-    uncoercible values are skipped (treated as no-ops) rather than raising,
-    so a half-typed filter never 500s the viewer.
+    Unknown columns or ops and uncoercible values are skipped, so a half-typed
+    filter never fails the viewer.
     """
     import pyarrow as pa
     import pyarrow.compute as _pc
@@ -1581,8 +1393,7 @@ def _apply_filters(table: Any, filters: list[dict[str, Any]] | None) -> Any:
 def _apply_search(table: Any, search: str | None) -> Any:
     """Keep rows where *search* appears (case-insensitive) in any column.
 
-    Every column is cast to string for the match; columns that can't be
-    cast (nested types) simply don't contribute matches.
+    Columns that cannot be cast to string (nested types) match nothing.
     """
     import pyarrow as pa
     import pyarrow.compute as _pc
@@ -1633,17 +1444,11 @@ def read_table_page(
     search: str | None = None,
     filters: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any] | None:
-    """Decode an Arrow IPC *blob* into a JSON-safe page of table rows.
+    """Decode an Arrow IPC *blob* into a JSON-safe page of table rows for the viewer.
 
-    Powers the interactive data viewer: the frontend requests a window of
-    the full cached DataFrame instead of being limited to the 20-row inline
-    preview. Filters + search + sort apply to the whole table before
-    slicing, so ``total`` reflects the filtered row count and the page
-    reflects a global order.
-
-    Returns ``None`` when *blob* is not a table-shaped Arrow IPC stream
-    (tensor/scalar shapes, or a JSON-fallback blob) — the caller keeps the
-    inline preview rather than paging.
+    Filters, search and sort apply to the whole table before slicing, so ``total``
+    is the filtered count and the order is global. Returns ``None`` for a blob that
+    is not a table-shaped Arrow IPC stream.
     """
     table = _load_arrow_table(blob)
     if table is None:
@@ -1664,9 +1469,8 @@ def read_table_page(
 def read_table_summary(blob: bytes) -> dict[str, Any] | None:
     """Per-column summary of a table-shaped Arrow *blob* for the viewer header.
 
-    Each column reports its dtype, null count, and distinct count; numeric
-    and temporal columns additionally report min/max. ``None`` for
-    non-table blobs.
+    Each column has dtype, null count and distinct count, plus min/max for numeric
+    and temporal columns. ``None`` for non-table blobs.
     """
     import pyarrow as pa
     import pyarrow.compute as _pc
@@ -1714,9 +1518,8 @@ def write_table_export(
 ) -> bytes | None:
     """Serialize a table-shaped Arrow *blob* to CSV or Parquet bytes.
 
-    The same filters/search/sort as the viewer are applied, so a download
-    matches what's on screen. ``None`` for non-table blobs or an
-    unsupported *fmt*.
+    Applies the viewer's filters, search and sort, so a download matches the
+    screen. ``None`` for non-table blobs or an unsupported *fmt*.
     """
     table = _load_arrow_table(blob)
     if table is None:
@@ -1738,13 +1541,7 @@ def write_table_export(
 
 
 def _deserialize_arrow(file_path: Path) -> Any:
-    """Read an Arrow IPC stream.
-
-    Branches on the ``strata.arrow.shape`` schema-metadata tag to
-    reconstruct the original Python type: table (DataFrame/Series/
-    pa.Table), tensor (numpy ndarray with original shape+dtype), or
-    scalar (typed primitive).
-    """
+    """Read an Arrow IPC stream, rebuilding the type named by ``strata.arrow.shape``."""
     fallback_payload = _read_arrow_json_fallback(file_path)
     if fallback_payload is not None:
         return _deserialize_arrow_json_fallback(fallback_payload)
@@ -1775,11 +1572,8 @@ def _deserialize_arrow(file_path: Path) -> Any:
 def _table_to_pandas_or_arrow(table: Any) -> Any:
     """Decode a shape=table Arrow Table back to pandas or pyarrow.
 
-    When the source metadata says the value originated as pandas but
-    to_pandas() fails, we still return the pa.Table — but log it. Silent
-    type changes break downstream cells that called ``.iloc`` on what
-    they expected to be a DataFrame, and the AttributeError they see
-    gives no clue why the type morphed across the round-trip.
+    If the value came from pandas but ``to_pandas()`` fails, returns the pa.Table
+    and logs it, since a silent type change confuses downstream cells.
     """
     meta = table.schema.metadata or {}
     source = meta.get(_META_SOURCE, b"")
@@ -1830,8 +1624,7 @@ def _table_to_pandas_or_arrow(table: Any) -> Any:
 def _table_to_polars(table: Any, source: bytes) -> Any | None:
     """Rebuild a polars DataFrame / Series, or ``None`` if polars is absent.
 
-    The Series name round-trips through the single Arrow field name, so no
-    extra metadata is needed (see :func:`_table_from_polars`).
+    The Series name round-trips through the Arrow field name.
     """
     try:
         import polars as pl
@@ -1848,10 +1641,8 @@ def _table_to_polars(table: Any, source: bytes) -> Any | None:
 def _tensor_from_table(table: Any) -> Any:
     """Decode a shape=tensor Arrow Table back to its original array type.
 
-    Returns a numpy ndarray, or — when the ``_META_SOURCE`` tag says the value
-    came from torch / jax and that library is importable on the read side — the
-    reconstructed ``torch.Tensor`` / ``jax.Array``. Falls back to the ndarray
-    when the origin library isn't installed.
+    Returns a torch / jax array when ``_META_SOURCE`` names one and that library is
+    importable, else a numpy ndarray.
     """
     import numpy as np
 
@@ -2031,8 +1822,7 @@ def _deserialize_cell_module(file_path: Path, injected: dict[str, Any] | None = 
 
 
 def deserialize_cell_module_with_injection(file_path: Path, injected: dict[str, Any]) -> Any:
-    """Deserialize a ``module/cell`` export, hydrating *injected* upstream values
-    into the synthetic module's namespace before exec."""
+    """Deserialize a ``module/cell`` export with *injected* upstream values in its namespace."""
     return _deserialize_cell_module(file_path, injected=injected)
 
 

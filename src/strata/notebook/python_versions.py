@@ -22,11 +22,9 @@ def current_python_minor() -> str:
 def normalize_python_minor(version: str) -> str:
     """Validate and canonicalize a Python ``major.minor`` string.
 
-    Rejects anything that isn't exactly two release components — no
-    patch (``3.12.0``), no pre/post/dev (``3.12rc1``), no leading ``v``.
-    This is the form ``uv --python`` accepts as a request to install
-    a minor line, so we keep callers from accidentally passing patch
-    versions that would either pin or fail downstream.
+    Rejects patch (``3.12.0``), pre/post/dev (``3.12rc1``) and a leading ``v``:
+    ``major.minor`` is what ``uv --python`` accepts as a minor-line request, and a
+    patch version would pin or fail downstream.
     """
     stripped = version.strip()
     try:
@@ -42,30 +40,15 @@ def normalize_python_minor(version: str) -> str:
 
 
 def format_requires_python(version: str) -> str:
-    """Return a ``requires-python`` spec that pins one minor line.
-
-    Notebooks run on exactly one Python minor — there's no useful
-    "range" interpretation, so we emit ``==3.12.*`` (wildcard match
-    of any 3.12.x patch) rather than ``>=3.12,<3.13``. Both forms
-    match the same set of versions, but ``==`` expresses the intent
-    directly. ``infer_requested_python_minor`` understands either
-    form for backward compatibility with notebooks created earlier.
-    """
+    """Return a ``requires-python`` spec (``==X.Y.*``) that pins one minor line."""
     return f"=={normalize_python_minor(version)}.*"
 
 
 def infer_requested_python_minor(requires_python: str | None) -> str | None:
-    """Extract a Python ``major.minor`` from a notebook ``requires-python``.
+    """Extract ``major.minor`` from a notebook ``requires-python``.
 
-    The only supported form is the canonical ``==X.Y.*`` written by
-    ``format_requires_python``. Notebooks are pinned to exactly one
-    minor — there's no useful "range" interpretation — so accepting
-    anything else (``>=X.Y``, ``>=X.Y,<X.(Y+1)``, ``~=X.Y``) would
-    invite the user to scribble a spec the rest of the toolchain
-    can't honor.
-
-    Returns ``None`` when the spec is empty, malformed, or not a
-    single ``==X.Y.*`` clause.
+    Only the canonical ``==X.Y.*`` is accepted, since notebooks pin exactly one
+    minor. Returns ``None`` for an empty or malformed spec, or any other form.
     """
     if not requires_python:
         return None
@@ -108,12 +91,9 @@ def read_requested_python_minor(notebook_dir: Path) -> str | None:
 
 
 def discover_installed_python_minors() -> list[str]:
-    """Return ``major.minor`` versions uv reports as installed locally,
-    filtered through Strata's own ``requires-python``.
+    """Return installed ``major.minor`` versions uv reports, within Strata's ``requires-python``.
 
-    Used as the default for ``StrataConfig.notebook_python_versions``.
-    Falls back to ``[current_python_minor()]`` on any failure (uv
-    missing, timeout, malformed output, metadata missing).
+    Falls back to ``[current_python_minor()]`` on any failure.
     """
     current = current_python_minor()
     fallback = [current]

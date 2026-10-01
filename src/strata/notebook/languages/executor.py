@@ -1,29 +1,9 @@
-"""``LanguageExecutor`` protocol + registry + built-in adapters.
+"""``LanguageExecutor`` protocol, registry and built-in adapters.
 
-The companion to ``analyzer.py``. The notebook's per-cell *execution*
-dispatch used to branch via ``if cell.language == CellLanguage.X`` in
-three places:
-
-- ``executor.py:_materialize_cell`` (PROMPT / SQL / MARKDOWN short-circuit
-  + PYTHON fall-through).
-- ``executor.py:is_cell_batchable`` (PYTHON-only batching gate).
-- ``session.py`` staleness gates (MARKDOWN skips provenance; PROMPT and
-  SQL use an alternate per-variable cache scheme so the generic miss
-  check needs to preserve READY status).
-
-This module collapses all three behaviours onto per-language adapters:
-
-- ``execute(...)`` — runs the cell. Each language's adapter delegates to
-  its existing ``CellExecutor`` method, which is what stops this PR
-  from rewriting ~400 lines of subprocess plumbing.
-- ``is_batchable(cell, executor)`` — only PYTHON returns True (after the
-  worker/loop/timeout/rw_mount checks); others return False.
-- ``skips_execution_provenance`` / ``has_alternate_cache_scheme`` —
-  flags consumed by the staleness gates in ``session.py``.
-
-Adding R (or Lean) becomes a new adapter module + one
-``register_language_executor`` call. No edits scattered across the
-executor or session.
+Each adapter runs its language's cells (``execute``), answers whether they can
+join run-all batching (``is_batchable``, Python only), and sets the flags the
+staleness gates in ``session.py`` read (``skips_execution_provenance``,
+``has_alternate_cache_scheme``).
 """
 
 from __future__ import annotations
@@ -39,14 +19,10 @@ if TYPE_CHECKING:
 
 
 class LanguageExecutor(Protocol):
-    """Run a cell of a particular language + answer its behaviour flags.
+    """Run a cell of a particular language and answer its behaviour flags.
 
-    Each adapter is registered once at import time; ``execute_cell`` and
-    related dispatch sites look up the adapter for the cell's language
-    and call ``execute(...)``. Languages that bypass the subprocess
-    pipeline (prompt = LLM call, sql = ADBC query, markdown = no-op)
-    return their result directly; Python delegates to the existing
-    subprocess pipeline.
+    Adapters register at import time. Prompt, SQL and markdown return their
+    result directly; Python delegates to the subprocess pipeline.
     """
 
     # Behaviour flags consumed by session.py's staleness gates.
@@ -86,46 +62,32 @@ class LanguageExecutor(Protocol):
     def reopen_identity(self, cell: CellState, session: Any) -> str | None:
         """What this cell's cache identity rests on beyond the generic triplet.
 
-        ``compute_staleness`` folds source, env, inputs, mounts and tables. A
-        language with its own cache scheme folds more -- the connection a SQL
-        cell reads and the policy it caches under, the model a prompt cell
-        asked -- and none of that is in the generic hash, so preserving READY
-        on that hash alone asserts a freshness nothing established.
-
-        ``None`` means the identity cannot be settled without going out to the
-        world: a ``@cache fingerprint`` cell has to probe its database, and an
-        open is not the place to do it. The gate treats ``None`` as "run it".
-        ``""`` means the generic triplet already covers this cell.
+        A language with its own cache scheme (a SQL cell's connection and cache
+        policy, a prompt cell's model) folds more than ``compute_staleness``
+        does, so READY on the generic hash alone would be unearned. ``None``
+        means it cannot be settled without probing the outside world (the gate
+        then runs the cell); ``""`` means the triplet already covers it.
         """
         ...
 
 
 class UnknownLanguageError(LookupError):
-    """Raised when a cell's language has no registered executor.
-
-    Distinct from ``KeyError`` so callers can ``except`` it specifically.
-    Mirrors the analyzer registry's error shape.
-    """
+    """Raised when a cell's language has no registered executor (distinct from ``KeyError``)."""
 
 
 _REGISTRY: dict[CellLanguage, LanguageExecutor] = {}
 
 
 def register_language_executor(language: CellLanguage, executor_adapter: LanguageExecutor) -> None:
-    """Bind ``executor_adapter`` to ``language`` in the global registry.
-
-    Later registrations silently overwrite earlier ones; matches the
-    analyzer registry + the SQL ``DriverAdapter`` registry.
-    """
+    """Bind ``executor_adapter`` to ``language``; a later registration overwrites."""
     _REGISTRY[language] = executor_adapter
 
 
 def get_language_executor(language: CellLanguage) -> LanguageExecutor:
     """Look up the executor adapter for ``language``.
 
-    Raises ``UnknownLanguageError`` rather than falling back to PYTHON
-    so a missing registration surfaces immediately instead of silently
-    routing R or Lean cells through the Python subprocess pipeline.
+    Raises ``UnknownLanguageError`` rather than falling back to Python, which
+    would silently route other languages through the Python pipeline.
     """
     try:
         return _REGISTRY[language]
@@ -137,15 +99,9 @@ def get_language_executor(language: CellLanguage) -> LanguageExecutor:
 
 
 class _PythonExecutor:
-    """Adapter that delegates to the existing subprocess pipeline.
+    """Adapter that delegates to ``CellExecutor._execute_python_cell``.
 
-    The pipeline (provenance compute → upstream materialize → cache
-    check → harness dispatch → persist) lives on
-    ``CellExecutor._execute_python_cell`` — kept on ``CellExecutor``
-    rather than moved here because it accesses ~30 private helper
-    methods on the same object. Moving the body in this PR would mean
-    promoting all of those to module-level or this adapter would need
-    a private attribute on CellExecutor for each.
+    The pipeline stays on ``CellExecutor`` because it uses many of its private helpers.
     """
 
     skips_execution_provenance = False
@@ -233,8 +189,8 @@ class _PromptExecutor:
     def reopen_identity(self, cell: CellState, session: Any) -> str | None:
         """The model the answer came from, and the shape it was asked for.
 
-        All of it is settled by the cell's annotations and the notebook's
-        ``[ai]`` block, so reopening can check it without calling anybody.
+        Settled by the annotations and the notebook's ``[ai]`` block, so reopen
+        can check it without calling a provider.
         """
         from strata.notebook.prompt_executor import prompt_reopen_identity
 
@@ -271,11 +227,9 @@ class _SqlExecutor:
         )
 
     def reopen_identity(self, cell: CellState, session: Any) -> str | None:
-        """The connection read and the policy cached under, when they settle it.
+        """The connection read and the cache policy, when they settle the identity.
 
-        ``None`` for a policy that wants a freshness probe: the cell's own
-        declaration is that its cache is only good if the source still says so,
-        and an open cannot ask.
+        ``None`` for a policy that needs a freshness probe, which an open cannot make.
         """
         from strata.notebook.sql.cell_executor import sql_reopen_identity
 
@@ -286,12 +240,10 @@ class _SqlExecutor:
 
 
 class _MarkdownExecutor:
-    """No-op adapter.
+    """No-op adapter: markdown is not executed.
 
-    Markdown cells are pure prose — no execution, no subprocess, no
-    provenance chain. The frontend renders the source in-place via the
-    cell's preview view, so emitting a display output would duplicate
-    the same content in the output panel.
+    No display output is emitted, since the frontend already renders the source
+    in place and an output would duplicate it.
     """
 
     skips_execution_provenance = True

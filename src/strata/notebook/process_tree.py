@@ -1,25 +1,9 @@
 """Process-tree-aware subprocess termination.
 
-The default :py:meth:`asyncio.subprocess.Process.kill` sends SIGKILL to
-the direct child only. When that child has spawned its own descendants
-(PyTorch DataLoader workers via ``multiprocessing``, GPU streams,
-fork-server workers, …), those descendants get reparented to PID 1 and
-keep running. We've seen this leak ~150 MB of orphaned DataLoader
-workers on cancelled training cells.
-
-This module wraps the two operations correctly:
-
-- :py:func:`subprocess_kwargs_for_new_group` returns the kwargs that
-  put the child in its own process group on the current platform.
-  Callers thread these into ``asyncio.create_subprocess_exec``.
-- :py:func:`terminate_subprocess_tree` sends SIGTERM to the whole
-  group, waits a brief grace period, then SIGKILL the group if any
-  descendant survived. Standard SIGTERM-then-SIGKILL escalation that
-  Docker, k8s, and systemd use.
-
-The harness's own ``finally`` block runs during the grace period if
-the user code is at an await point; if it's blocked in C-level code
-(numpy / torch loops), SIGKILL after the grace period still wins.
+``Process.kill`` signals only the direct child, so its descendants (DataLoader
+workers, fork-server workers) are reparented to PID 1 and keep running. Spawn
+with :py:func:`subprocess_kwargs_for_new_group` and stop with
+:py:func:`terminate_subprocess_tree` to signal the whole group instead.
 """
 
 from __future__ import annotations
@@ -42,13 +26,8 @@ SUBPROCESS_LINE_LIMIT = 256 * 1024 * 1024
 def subprocess_kwargs_for_new_group() -> dict[str, Any]:
     """Spawn kwargs that put the child into its own process group.
 
-    POSIX: ``start_new_session=True`` makes the child a session leader
-    (and therefore a process-group leader). Equivalent to calling
-    ``os.setsid`` in a preexec hook.
-
-    Windows: ``CREATE_NEW_PROCESS_GROUP`` does the equivalent for
-    Win32 console processes, so ``CTRL_BREAK_EVENT`` can target the
-    whole group rather than just the direct child.
+    POSIX uses ``start_new_session=True``; Windows uses
+    ``CREATE_NEW_PROCESS_GROUP`` so ``CTRL_BREAK_EVENT`` reaches the whole group.
     """
     if sys.platform == "win32":
         import subprocess as _subprocess
@@ -62,16 +41,11 @@ async def terminate_subprocess_tree(
     *,
     grace_seconds: float = 2.0,
 ) -> None:
-    """SIGTERM → grace period → SIGKILL the subprocess and its descendants.
+    """SIGTERM, grace period, then SIGKILL the subprocess and its descendants.
 
-    Requires ``proc`` to have been spawned with the kwargs from
-    :py:func:`subprocess_kwargs_for_new_group`. Without that, signals
-    only reach the direct child and descendants leak (which is exactly
-    the bug this module exists to fix).
-
-    Returns once the process is reaped. Tolerates races: if the process
-    exits between any of our calls, ``ProcessLookupError`` is caught
-    and treated as success.
+    ``proc`` must have been spawned with :py:func:`subprocess_kwargs_for_new_group`,
+    or only the direct child is signalled. Returns once the process is reaped;
+    a process that exits mid-way (``ProcessLookupError``) counts as success.
     """
     if proc.returncode is not None:
         return  # already exited cleanly
@@ -135,11 +109,9 @@ async def terminate_subprocess_tree(
 
 
 def kill_subprocess_tree_nowait(proc: asyncio.subprocess.Process) -> None:
-    """Synchronous best-effort SIGKILL of the process group.
+    """Synchronous best-effort SIGKILL of the process group, for paths that can't await.
 
-    Used by shutdown_nowait paths that can't ``await``. No grace
-    period, no reap: the caller is on the way down anyway. Tolerates
-    races (process already gone) silently.
+    No grace period and no reap; a process that is already gone is ignored.
     """
     if proc.returncode is not None:
         return
