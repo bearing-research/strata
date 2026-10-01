@@ -2595,17 +2595,38 @@ async def update_notebook_env_endpoint(
     req: EnvConfigRequest,
 ) -> dict:
     """Replace the notebook-level default env vars."""
+    from strata.notebook.secret_manager.session_integration import MANUAL_SOURCE
 
     try:
-        update_notebook_env(session.path, req.env)
+        # The panel sends every row back. An unchanged provider-fetched value is not
+        # an edit: keep it out of the committed notebook.toml and keep its source.
+        state = session.notebook_state
+        previous_sources = dict(state.env_sources)
+        fetched = {
+            key
+            for key, value in req.env.items()
+            if previous_sources.get(key, MANUAL_SOURCE) != MANUAL_SOURCE
+            and state.env.get(key) == value
+        }
+        # A fetched key already declared on disk stays declared, blank, so the file still
+        # records which variables the notebook expects.
+        with open(session.path / "notebook.toml", "rb") as f:
+            declared = tomllib.load(f).get("env", {})
+        to_write = {key: value for key, value in req.env.items() if key not in fetched}
+        to_write.update({key: "" for key in fetched if key in declared})
+        update_notebook_env(session.path, to_write)
         session.reload()
         # The disk writer blanks sensitive values to keep them out of git; restore
-        # them in memory for the LLM config and Runtime panel.
-        session.notebook_state.env.update(req.env)
-        # Runtime panel edits are manual overrides (for the UI badge). Rebuild each
-        # cell's env too: the executor reads cell.env, which still has blanked values.
-        for key in req.env:
-            session.notebook_state.env_sources[key] = "manual"
+        # them in memory for the LLM config and Runtime panel. Edits are manual
+        # overrides (for the UI badge).
+        state = session.notebook_state
+        for key, value in req.env.items():
+            if key in fetched and key in state.env:
+                continue  # the reload refetched it, possibly rotated
+            state.env[key] = value
+            state.env_sources[key] = previous_sources[key] if key in fetched else MANUAL_SOURCE
+        # Rebuild each cell's env too: the executor reads cell.env, which still has
+        # blanked values.
         for cell in session.notebook_state.cells:
             resolved = dict(session.notebook_state.env)
             resolved.update(cell.env_overrides or {})

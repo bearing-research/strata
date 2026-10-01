@@ -74,15 +74,19 @@ All four fields are non-sensitive routing info and safe to commit. Save triggers
 ## How values flow
 
 ```
-notebook.toml [env]  ──►  memory  ◄──  Runtime panel edits (session-only)
-                            ▲
-                            │ (merged at session open + on refresh)
-                   Infisical (project_id, env, path)
+Runtime panel edits  ──►  notebook.toml [env]   (sensitive names blanked)
+        │                        │
+        ▼                        │ (read at session open)
+      memory  ◄──────────────────┘
+        ▲
+        │ (merged at session open + on refresh; never written to disk)
+Infisical (project_id, env, path)
 ```
 
 - On **session open**, Strata pulls all secrets at the configured path and merges them into `notebook.env` where the key isn't already present (or where the existing value is a blanked sensitive placeholder from disk).
 - On **Refresh** (button in the Runtime panel), Strata re-fetches without reopening. New/rotated values take effect for the next cell run.
-- Values typed **manually in the Runtime panel** override anything from the manager for the current session. Useful for one-off overrides; remove the value to fall back to the manager's version.
+- Values typed **manually in the Runtime panel** override the manager's. Saving writes a manual value to the committed `notebook.toml` `[env]` unless its name looks sensitive (see [Security notes](#security-notes)), so a manual `DATABASE_URL` still wins after a reopen; a sensitive-looking one lasts for the current session. Remove the row to fall back to the manager's version.
+- Saving the panel leaves a fetched row alone when you didn't change its value: its value is not written to `notebook.toml` (a key the file already declares stays declared, blank), it keeps its source badge, and the next Refresh replaces it.
 
 Each env row in the Runtime panel shows a green source badge (`INFISICAL`) next to its name when the value came from the manager. Rows without a badge are manual overrides or local-only vars.
 
@@ -104,8 +108,8 @@ Fix the cause (rotate the credential, check `project_id` / `environment` / `path
 
 ## Security notes
 
-- Secret **values** never ship to the frontend in cleartext from the env endpoints, values are only visible in the notebook venv's `os.environ`. The UI shows the key names + source, not the values.
-- Secret values are **not written to disk**. `[env]` blocks on disk blank sensitive keys (`KEY`, `SECRET`, `TOKEN`, `PASSWORD`, `CREDENTIAL` name patterns) before persisting; secrets fetched at open time are in-memory only.
+- Fetched **values reach the Runtime panel**: the env endpoints return them so the panel can show and edit them. A row whose name looks sensitive (contains `KEY`, `SECRET`, `TOKEN`, `PASSWORD` or `CREDENTIAL`) is masked as a password field; any other row, such as `DATABASE_URL`, is shown in plain text.
+- Fetched values are **not written to disk**: they live in memory and are re-fetched on each open. Manual edits are saved: `[env]` in `notebook.toml` keeps the names of sensitive-looking keys but blanks their values, and stores other values as typed. Don't type a secret into a row whose name doesn't look sensitive.
 - If a cell **prints** an env var, its value is captured in the cell's console output and persisted in `.strata/console/` alongside stdout/stderr. Don't `print(os.environ)` in production notebooks.
 - Authenticating credentials (`INFISICAL_CLIENT_ID` / `INFISICAL_CLIENT_SECRET` or `INFISICAL_TOKEN`) live in the process environment, set by whoever launches the server. Distribute them the same way you'd distribute any deploy secret (systemd unit, k8s secret, `.envrc` with direnv-allow, etc.) **not** in a committed file.
 - On a server in service mode the Infisical host is the operator's: a notebook `base_url` other than `INFISICAL_HOST` (or the public default) is refused before any login, since the login would send the server's credentials there. `project_id`, `environment` and `path` still come from the notebook, so every author can read whatever the server's machine identity can; scope it accordingly. See [Service Mode: A notebook's secret manager](../deployment/service-mode.md#a-notebooks-secret-manager).

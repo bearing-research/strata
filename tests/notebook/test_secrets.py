@@ -454,6 +454,102 @@ class TestRefreshEndpoint:
         assert resp.status_code == 404
 
 
+class TestUpdateEnvEndpointWithFetchedSecrets:
+    """The Runtime panel's Save sends every row back, fetched ones included."""
+
+    @staticmethod
+    def _fetch(tc, session_id, monkeypatch, value: str) -> dict:
+        _install_fake_provider(monkeypatch, secrets={"DATABASE_URL": value})
+        resp = tc.post(f"/v1/notebooks/{session_id}/secret-manager/refresh")
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["env"]["DATABASE_URL"] == value
+        assert body["env_sources"]["DATABASE_URL"] == "infisical"
+        return body
+
+    @staticmethod
+    def _toml_env(session_id) -> dict:
+        import tomllib
+
+        from strata.notebook.routes import get_session_manager
+
+        session = get_session_manager().get_session(session_id)
+        assert session is not None
+        with open(session.path / "notebook.toml", "rb") as f:
+            return tomllib.load(f).get("env", {})
+
+    def test_unchanged_fetched_value_is_not_persisted(self, client) -> None:
+        tc, session_id, monkeypatch = client
+        self._fetch(tc, session_id, monkeypatch, "postgres://v1")
+
+        resp = tc.put(
+            f"/v1/notebooks/{session_id}/env",
+            json={"env": {"DATABASE_URL": "postgres://v1", "NEW_VAR": "hello"}},
+        )
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["env"]["DATABASE_URL"] == "postgres://v1"
+        assert body["env"]["NEW_VAR"] == "hello"
+        assert body["env_sources"]["DATABASE_URL"] == "infisical"
+        assert body["env_sources"]["NEW_VAR"] == MANUAL_SOURCE
+        assert body["cells"][0]["env"]["DATABASE_URL"] == "postgres://v1"
+        assert self._toml_env(session_id) == {"NEW_VAR": "hello"}
+
+        # Still provider-owned, so a rotation is picked up.
+        self._fetch(tc, session_id, monkeypatch, "postgres://v2")
+
+    def test_a_declared_fetched_key_stays_declared(self, client, monkeypatch) -> None:
+        tc, session_id, _ = client
+        resp = tc.put(
+            f"/v1/notebooks/{session_id}/env",
+            json={"env": {"API_KEY": "", "LOG_LEVEL": "info"}},
+        )
+        assert resp.status_code == 200, resp.text
+        _install_fake_provider(monkeypatch, secrets={"API_KEY": "sk-1", "DATABASE_URL": "pg://1"})
+        body = tc.post(f"/v1/notebooks/{session_id}/secret-manager/refresh").json()
+        assert body["env_sources"]["API_KEY"] == "infisical"
+
+        resp = tc.put(f"/v1/notebooks/{session_id}/env", json={"env": body["env"]})
+        assert resp.status_code == 200, resp.text
+        assert self._toml_env(session_id) == {"API_KEY": "", "LOG_LEVEL": "info"}
+        assert resp.json()["env"]["API_KEY"] == "sk-1"
+
+    def test_edited_fetched_value_becomes_manual(self, client) -> None:
+        tc, session_id, monkeypatch = client
+        self._fetch(tc, session_id, monkeypatch, "postgres://v1")
+
+        resp = tc.put(
+            f"/v1/notebooks/{session_id}/env",
+            json={"env": {"DATABASE_URL": "postgres://mine"}},
+        )
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["env"]["DATABASE_URL"] == "postgres://mine"
+        assert body["env_sources"]["DATABASE_URL"] == MANUAL_SOURCE
+        assert self._toml_env(session_id) == {"DATABASE_URL": "postgres://mine"}
+
+        # A manual override wins over the next fetch.
+        _install_fake_provider(monkeypatch, secrets={"DATABASE_URL": "postgres://v2"})
+        resp = tc.post(f"/v1/notebooks/{session_id}/secret-manager/refresh")
+        assert resp.json()["env"]["DATABASE_URL"] == "postgres://mine"
+
+    def test_fetched_value_survives_failed_refetch_on_save(self, client) -> None:
+        tc, session_id, monkeypatch = client
+        self._fetch(tc, session_id, monkeypatch, "postgres://v1")
+
+        # The save reloads the session, which refetches; that fetch fails here.
+        _install_fake_provider(monkeypatch, error="Infisical down")
+        resp = tc.put(
+            f"/v1/notebooks/{session_id}/env",
+            json={"env": {"DATABASE_URL": "postgres://v1"}},
+        )
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["env"]["DATABASE_URL"] == "postgres://v1"
+        assert body["env_sources"]["DATABASE_URL"] == "infisical"
+        assert self._toml_env(session_id) == {}
+
+
 class TestUpdateNotebookSecretManager:
     def test_writes_cleaned_config_to_toml(self, tmp_path) -> None:
         import tomllib
