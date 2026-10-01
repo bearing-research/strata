@@ -37,12 +37,16 @@ The viewer is a client - you always have a **server**, a **session**, and the
 ### 1. Start the server
 
 ```bash
-strata-notebook                # serves http://127.0.0.1:8765 (web UI + REST + WS)
+strata-notebook --notebook-dir .   # serves http://127.0.0.1:8765 (web UI + REST + WS)
 ```
+
+The server opens only notebooks inside its storage root, which defaults to
+`~/.strata/notebooks`. `--notebook-dir .` makes the current directory the
+root, so the notebook created in step 2 can be opened.
 
 ### 2. Have a notebook
 
-Scaffold one from the terminal:
+Scaffold one from the terminal, in the same directory:
 
 ```bash
 strata new my-notebook         # creates ./my-notebook

@@ -39,10 +39,19 @@ Every open session on the server is visible to any caller holding
 `notebook:read`: a server serves one organization, and the check is scopes, not
 ownership.
 
-```bash
-uv sync --extra mcp          # or: uv tool install "strata-notebook[mcp]"
-STRATA_MCP_ENABLED=true uv run python -m strata
-```
+=== "From PyPI"
+
+    ```bash
+    uv tool install "strata-notebook[mcp,tui]"
+    STRATA_MCP_ENABLED=true strata-notebook
+    ```
+
+=== "From source"
+
+    ```bash
+    uv sync --extra mcp
+    STRATA_MCP_ENABLED=true uv run python -m strata
+    ```
 
 Then register it with your agent. For Claude Code:
 
@@ -50,8 +59,10 @@ Then register it with your agent. For Claude Code:
 claude mcp add --transport http strata http://localhost:8765/mcp
 ```
 
-If the flag is set but the `[mcp]` extra is not installed, the server logs a
-warning and starts normally without the endpoint.
+The `[mcp]` extra needs `mcp` 2.2 or newer. If the flag is set but the extra is
+not installed, the server logs a warning and starts normally without the
+endpoint. With `mcp` 1 installed (another tool may pin it), `/mcp` stays off
+the same way and the server logs that the installed `mcp` is too old.
 
 !!! tip "One-command setup"
     [`strata agent <notebook-dir>`](agent.md) does the enable-open-register-watch

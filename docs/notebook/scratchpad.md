@@ -139,6 +139,10 @@ You don't have to, and usually won't. When you want to, the simplest way is:
 strata agent ./scratch        # starts a server scoped to it, then attaches the viewer
 ```
 
+It also writes `.mcp.json` and a `CLAUDE.md` working agreement into
+`./scratch`, so an agent started there connects to the session. In an existing
+`CLAUDE.md` it rewrites only its own marked block.
+
 !!! warning "`strata watch ./scratch` on its own usually won't work"
 
     A server only opens notebooks inside its configured storage root, which
@@ -148,8 +152,10 @@ strata agent ./scratch        # starts a server scoped to it, then attaches the 
     `connecting…` rather than saying so.
 
     `strata agent` avoids this because it starts a server scoped to the
-    notebook's parent directory. If you would rather use a server you already
-    run, start it with its root over your project:
+    notebook's parent directory. It does so only when nothing answers on
+    `:8765` (or its `--server`): a server already running there is reused, and
+    then the storage-root rule above applies to it. If you would rather use a
+    server you already run, start it with its root over your project:
 
     ```bash
     STRATA_NOTEBOOK_STORAGE_DIR=. strata-notebook &

@@ -104,6 +104,28 @@ when writing it by hand:
 - **`language`** - one of `python`, `r`, `sql`, `prompt`, `markdown`,
   `widget`.
 
+## pyproject.toml - required for `strata run`
+
+`strata run` builds the notebook's environment with `uv sync`, which needs a
+`pyproject.toml`; without one the run stops with exit code `2`. `strata validate`
+does not read it. Declare the packages the cell harness uses to hand values
+between cells, plus your own:
+
+```toml
+[project]
+name = "my-analysis"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = [
+    "pyarrow>=18.0.0",
+    "orjson>=3.10.0",
+    "cloudpickle>=3.0.0",
+]
+```
+
+`strata new` writes the same list, with `requires-python` pinned to one
+Python minor.
+
 ## How variables flow between cells
 
 Each cell's top-level assignments are its **defines**; the free variables
@@ -231,8 +253,8 @@ stored.
 
 ## Worked example
 
-This exact notebook is pinned by Strata's test suite
-(`TestHandWrittenNotebookContract`) - if it ever stops working, CI fails:
+Its `notebook.toml` and cells are pinned by Strata's test suite
+(`TestHandWrittenNotebookContract`) - if they ever stop working, CI fails:
 
 `notebook.toml`:
 
@@ -253,6 +275,14 @@ cells = [
 numbers = [1, 2, 3, 4]
 ```
 
+`cells/doc.md`:
+
+```markdown
+# Analysis
+
+plain prose cell
+```
+
 `cells/stats.py`:
 
 ```python
@@ -260,9 +290,31 @@ total = sum(numbers)
 mean = total / len(numbers)
 ```
 
+`pyproject.toml`:
+
+```toml
+[project]
+name = "handwritten"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = [
+    "pyarrow>=18.0.0",
+    "orjson>=3.10.0",
+    "cloudpickle>=3.0.0",
+]
+```
+
 ```bash
 $ strata validate ./handwritten && strata run ./handwritten
-✓ valid: 3 cell(s)
 ...
-3 ran in 1.2s
+✓ valid: 3 cell(s)
+syncing environment…
+...
+  load numbers = [1, 2, 3, 4]           ✓ 1.4s
+  doc [markdown] plain prose cell      ✓ cached
+  stats total = sum(numbers)             ✓ 1.1s
+
+2 ran, 1 cached in 2.6s
 ```
+
+A markdown cell never runs, so the summary counts it as cached.
