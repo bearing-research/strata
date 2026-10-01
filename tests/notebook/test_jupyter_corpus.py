@@ -1,42 +1,10 @@
-"""Smoke + extended corpus runner for Jupyter notebook import.
+"""Smoke and extended corpus runner for Jupyter notebook import.
 
-PRs 5–7 of the Jupyter interop work.
-
-**Smoke** fixtures live under ``tests/notebook/jupyter_corpus/smoke/``
-— hand-crafted ``.ipynb`` files exercising different facets of the
-converter (pandas/numpy/matplotlib/sklearn idioms, ``%pip install``
-capture, ``;``-suppression, variable rebinding, …). Committed
-verbatim so any behavior change in the converter shows up as a diff.
-
-**Extended** corpus lives in
-``tests/notebook/jupyter_corpus/extended.yaml`` — URLs pinned to
-specific commit SHAs of public stable-source repos. Fetched at test
-time (cached under ``~/.cache/strata-jupyter-corpus/``). Run on a
-nightly schedule via the ``jupyter-corpus`` GitHub Actions workflow,
-or on-demand by anyone with ``STRATA_CORPUS_RUN=1`` set locally.
-
-Scoring rubric (per the design doc):
-
-    parse:    can we read the .ipynb at all?
-    convert:  did jupyter_import produce a valid Strata notebook dir?
-    dag:      does the DAG build with no cycles / unbound references?
-    run:      does `strata run` complete with no exceptions?
-    artifact: do leaf cells produce non-empty artifacts?
-
-PR 5 covers parse + convert + dag — network-free, ~80ms total, every PR.
-
-PR 6 adds run + artifact behind the ``STRATA_CORPUS_RUN=1`` env knob.
-That path executes the notebook end-to-end: uv sync the notebook
-venv, run all cells through Strata's harness, score per-cell results
-out of the ``strata run --format json`` payload. Slow and networked
-(every smoke notebook installs its primary library), so it stays
-opt-in. Intended use: nightly schedule, manual pre-release runs,
-and any time a converter change touches code that produces source
-the harness actually has to execute.
-
-External / URL-fetched corpus (the "extended" tier in the design)
-is intentionally not part of this file — that's release-ops
-infrastructure and lands separately.
+Smoke fixtures in ``jupyter_corpus/smoke/`` are committed ``.ipynb`` files scored on
+parse, convert and dag, network-free, on every run. ``STRATA_CORPUS_RUN=1`` adds run and
+artifact scoring (a real venv sync and cell execution) and the extended corpus: URLs
+pinned to commits in ``jupyter_corpus/extended.yaml``, cached under
+``~/.cache/strata-jupyter-corpus/``.
 """
 
 from __future__ import annotations
@@ -67,11 +35,10 @@ _FETCH_TIMEOUT_S = 30
 
 @dataclass
 class CorpusScore:
-    """Result of scoring one notebook through the rubric.
+    """Result of scoring one notebook.
 
-    Each step is gated by the previous: ``convert`` is only checked
-    when ``parse`` passed, etc. The first failing step is recorded in
-    ``failed_at`` so test output points the reader at the right place.
+    Each step is checked only when the previous one passed; ``failed_at`` names the first
+    failure.
     """
 
     notebook: str
@@ -95,12 +62,12 @@ _STRATA_RUN_TIMEOUT_S = 300
 
 
 def _full_mode_enabled() -> bool:
-    """``STRATA_CORPUS_RUN=1`` (or ``true``) opts into run + artifact scoring."""
+    """``STRATA_CORPUS_RUN`` set to 1, true or yes opts into run and artifact scoring."""
     return os.environ.get("STRATA_CORPUS_RUN", "0").lower() in ("1", "true", "yes")
 
 
 def _score(ipynb_path: Path, out_dir: Path, *, full: bool = False) -> CorpusScore:
-    """Score one notebook through parse → convert → dag (+ run + artifact when ``full``)."""
+    """Score one notebook through parse, convert and dag (plus run and artifact when ``full``)."""
     score = CorpusScore(notebook=ipynb_path.name)
 
     # parse
@@ -277,11 +244,9 @@ def _score(ipynb_path: Path, out_dir: Path, *, full: bool = False) -> CorpusScor
 @pytest.mark.skipif(not _SMOKE_NOTEBOOKS, reason="smoke corpus directory is empty")
 @pytest.mark.parametrize("notebook_path", _SMOKE_NOTEBOOKS, ids=lambda p: p.name)
 def test_corpus_smoke(notebook_path: Path, tmp_path: Path) -> None:
-    """Each smoke notebook must clear parse → convert → dag.
+    """Each smoke notebook must clear parse, convert and dag.
 
-    Regression = test failure. The fixtures themselves are committed
-    and don't change, so any failure here points at converter or DAG-
-    analysis breakage.
+    The fixtures never change, so a failure is converter or DAG-analysis breakage.
     """
     score = _score(notebook_path, out_dir=tmp_path / notebook_path.stem)
     assert score.parse and score.convert and score.dag, (
@@ -290,9 +255,7 @@ def test_corpus_smoke(notebook_path: Path, tmp_path: Path) -> None:
 
 
 def test_corpus_smoke_directory_is_populated() -> None:
-    """Standalone guard: the smoke corpus directory must contain at
-    least 5 fixtures (per the design doc). Catches accidental deletion
-    or refactors that move fixtures out of the discovery path."""
+    """At least 5 fixtures; catches fixtures deleted or moved out of the discovery path."""
     assert len(_SMOKE_NOTEBOOKS) >= 5, (
         f"Smoke corpus has only {len(_SMOKE_NOTEBOOKS)} notebooks under {_SMOKE_DIR}; "
         "the design doc requires at least 5"
@@ -300,10 +263,9 @@ def test_corpus_smoke_directory_is_populated() -> None:
 
 
 def test_corpus_exercises_converter_translations(tmp_path: Path) -> None:
-    """At least one smoke notebook must exercise each branch of the
-    converter we care about: magic translation and dep capture.
-    Otherwise the corpus stops being a useful regression net for
-    those code paths."""
+    """Some smoke notebook must exercise magic translation and dependency capture, or the
+    corpus stops guarding those paths.
+    """
     saw_translated = False
     saw_deps = False
     for nb_path in _SMOKE_NOTEBOOKS:
@@ -330,12 +292,7 @@ class _ExtendedEntry:
 
 
 def _load_extended_manifest() -> list[_ExtendedEntry]:
-    """Read ``extended.yaml`` and return its entries.
-
-    Returns an empty list when the file is missing or empty — the
-    test is parametrized over the result, so an empty list just
-    means the parametrized test produces zero items (no failure).
-    """
+    """Read ``extended.yaml``; empty when the file is missing, which parametrizes zero tests."""
     if not _EXTENDED_MANIFEST.is_file():
         return []
     import yaml  # PyYAML; transitive dep already present via pytest plugins
@@ -361,13 +318,10 @@ def _load_extended_manifest() -> list[_ExtendedEntry]:
 
 
 def _fetch_notebook(url: str) -> Path:
-    """Download a notebook to the local cache; return its path.
+    """Download a notebook to the local cache and return its path.
 
-    Cache key is the URL's SHA-256 digest. The URL is pinned to a
-    specific commit SHA in the manifest, so once fetched the cache
-    entry is immutable — re-running tests doesn't re-download. Raises
-    on network failure; callers map that to a skip (network is
-    flaky, not the converter's problem).
+    URLs are commit-pinned, so an entry keyed on the URL digest never goes stale. Raises on
+    network failure; callers turn that into a skip.
     """
     _EXTENDED_CACHE.mkdir(parents=True, exist_ok=True)
     digest = hashlib.sha256(url.encode("utf-8")).hexdigest()[:16]
@@ -391,16 +345,10 @@ _EXTENDED_ENTRIES = _load_extended_manifest()
 )
 @pytest.mark.parametrize("entry", _EXTENDED_ENTRIES, ids=lambda e: e.name)
 def test_corpus_extended(entry: _ExtendedEntry, tmp_path: Path) -> None:
-    """Score one extended-corpus entry end-to-end.
+    """Score one extended-corpus entry end to end.
 
-    The manifest pins each URL to a commit SHA, so this test is
-    reproducible across runs once the local cache is warm. Network
-    failures during fetch are reported as skips (transient, not a
-    converter problem); everything else is a real signal.
-
-    Intended to be run under the ``jupyter-corpus`` GitHub Actions
-    workflow nightly + on dispatch. Failures here are report-only —
-    the workflow doesn't gate other CI.
+    Fetch failures are skips; anything else is a real signal. Report-only: the
+    ``jupyter-corpus`` workflow does not gate other CI.
     """
     try:
         ipynb_path = _fetch_notebook(entry.url)
@@ -431,16 +379,9 @@ def test_corpus_extended(entry: _ExtendedEntry, tmp_path: Path) -> None:
 )
 @pytest.mark.parametrize("notebook_path", _SMOKE_NOTEBOOKS, ids=lambda p: p.name)
 def test_corpus_smoke_full_run(notebook_path: Path, tmp_path: Path) -> None:
-    """Full rubric: parse → convert → dag → run → artifact.
+    """Full rubric through ``strata run`` after a real venv sync, opt-in for speed.
 
-    Each smoke fixture is end-to-end executed through ``strata run``
-    after its venv is synced. Slow (one ``uv sync`` per fixture, then
-    real cell execution), so this is opt-in: set ``STRATA_CORPUS_RUN=1``
-    locally, or wire it into a nightly schedule in CI.
-
-    Regression here means the converter produced source the harness
-    can't actually run — a class of bug the fast-mode tier wouldn't
-    catch.
+    Catches converter output the harness cannot run, which the fast tier misses.
     """
     score = _score(notebook_path, out_dir=tmp_path / notebook_path.stem, full=True)
     assert (

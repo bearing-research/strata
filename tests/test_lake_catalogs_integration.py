@@ -1,9 +1,7 @@
-"""Scanning tables from a REST catalog, a Glue catalog and a GCS warehouse. Item 24.
+"""Scanning tables from a REST catalog, a Glue catalog and a GCS warehouse.
 
-Real services where they can run locally: Iceberg's REST catalog fixture and
-fake-gcs-server in containers, and Glue through moto with its tables' data in a
-MinIO container. Each test reads a table by catalog name the way a notebook's
-``@table`` and a scan do, and reads a pinned snapshot.
+Uses containers for the REST catalog and fake-gcs-server, and moto Glue over MinIO data. Each test
+reads a table by catalog name, as ``@table`` and a scan do, and reads a pinned snapshot.
 """
 
 from __future__ import annotations
@@ -258,8 +256,7 @@ MAVEN_JARS = (
 
 @pytest.fixture(scope="module")
 def java_equality_writer(tmp_path_factory) -> tuple[Path, str]:
-    """tests/java/EqualityDeletes.java compiled: Iceberg's own Java writer, the
-    one Flink's upsert sink uses. Returns its directory and classpath."""
+    """Compiled tests/java/EqualityDeletes.java (Iceberg's Java writer): directory, classpath."""
     root = tmp_path_factory.mktemp("java")
     client = docker.from_env()
     try:

@@ -1,24 +1,10 @@
 """Azure Blob mount integration tests against an Azurite testcontainer.
 
-Phase 2 of issue #19. Mirrors ``test_e2e_mounts_s3.py`` against Azurite,
-Microsoft's emulator for the Blob/Queue/Table services. ``adlfs`` is the
-fsspec backend (mapped from URI scheme ``az`` → fsspec protocol ``abfs``
-by ``mounts._scheme_to_fsspec_protocol``).
-
-Three scopes:
-
-- **Scope A — Annotation-only.** ``# @mount data az://container/key ro``
-  with no ``[[mounts]]`` block. Credentials reach fsspec via the
-  ``CellExecutor.mount_credentials`` kwarg from Phase 0.
-- **Scope B — Read-write.** A cell mounts ``rw`` and writes; a separate
-  cell mounts ``ro`` and reads back, asserting sync-back actually pushed
-  bytes to the Blob service.
-- **Scope C — Storage options via TOML.** ``[[mounts]] options = {...}``
-  carries the same ``connection_string`` per-mount; ``CellExecutor``
-  constructed *without* ``mount_credentials``.
-
-Requires Docker. Skipped at collection time when the Docker daemon is
-unreachable (CI always has it).
+Mirrors ``test_e2e_mounts_s3.py`` with ``adlfs`` as the fsspec backend (scheme ``az`` maps
+to protocol ``abfs``). Covers an annotation-only mount fed by
+``CellExecutor.mount_credentials``, an ``rw`` mount read back by a separate ``ro`` cell, and
+``[[mounts]] options`` carrying the connection string with no ``mount_credentials``.
+Skipped when the Docker daemon is unreachable.
 """
 
 from __future__ import annotations
@@ -67,13 +53,8 @@ pytestmark = [pytest.mark.integration, pytest.mark.slow]
 def azurite_container():
     """Module-scoped Azurite container exposing the Blob endpoint.
 
-    ``:latest`` is intentional — the installed ``azure-storage-blob``
-    SDK ships a recent API version (``2025-11-05+``) that older Azurite
-    builds reject with ``InvalidHeaderValue``. Microsoft's error
-    response for that mismatch literally says "upgrade Azurite to
-    latest version and retry," so we track latest. The tradeoff
-    (occasional CI breakage if Microsoft ships a regression) is
-    smaller than the SDK/emulator drift problem with a fixed pin.
+    ``:latest`` on purpose: older Azurite rejects the installed SDK's API version with
+    ``InvalidHeaderValue``, and a fixed pin drifts worse than latest breaks.
     """
     container = start_container_or_skip(
         AzuriteContainer("mcr.microsoft.com/azure-storage/azurite:latest"), label="Azurite"
@@ -85,11 +66,9 @@ def azurite_container():
 
 
 def _adlfs_options(azurite_container: AzuriteContainer) -> dict[str, object]:
-    """fsspec/adlfs storage_options for the Azurite emulator.
+    """fsspec/adlfs storage_options for Azurite.
 
-    ``connection_string`` carries the BlobEndpoint and account credentials;
-    ``account_name`` is set explicitly so adlfs resolves ``abfs://<container>/...``
-    URIs without needing the full FQDN form.
+    ``account_name`` lets adlfs resolve ``abfs://<container>/...`` without the FQDN form.
     """
     return {
         "connection_string": azurite_container.get_connection_string(),
@@ -105,11 +84,7 @@ def az_credentials(azurite_container) -> MountCredentials:
 
 @pytest.fixture
 def fresh_container(azurite_container, request) -> str:
-    """Make-and-return a unique Blob container per test.
-
-    Azure container names: lowercase, 3–63 chars, hyphens/digits — same
-    constraints satisfied by the S3 test's bucket-name munging.
-    """
+    """A unique Blob container per test."""
     raw = request.node.name.lower().replace("_", "-").replace(".", "-")
     name = f"mt-{raw}"[:63].rstrip("-")
     client = BlobServiceClient.from_connection_string(azurite_container.get_connection_string())
@@ -149,7 +124,7 @@ async def test_annotation_only_mount_reads_via_credentials_kwarg(
     az_credentials: MountCredentials,
     fresh_container: str,
 ) -> None:
-    """Phase 0's mount_credentials kwarg drives an annotation-only mount end-to-end."""
+    """The ``mount_credentials`` kwarg drives an annotation-only mount end to end."""
     _put(azurite_container, fresh_container, "data/hello.txt", b"hello from azurite")
 
     source = textwrap.dedent(

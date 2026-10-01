@@ -1,5 +1,4 @@
-"""The ``strata-notebook --notebook-dir`` flag — controls where new notebooks
-are created (default ~/.strata/notebooks, a common surprise)."""
+"""The ``strata-notebook --notebook-dir`` flag: where new notebooks are created."""
 
 from __future__ import annotations
 
@@ -16,8 +15,7 @@ _ENV = "STRATA_NOTEBOOK_STORAGE_DIR"
 
 @pytest.fixture(autouse=True)
 def _isolate_storage_env():
-    """Save/clear the storage env around each test (the flag mutates os.environ
-    so the app's lifespan config-load picks it up)."""
+    """Save and clear the storage env; the flag sets os.environ for the lifespan config."""
     saved = os.environ.pop(_ENV, None)
     yield
     os.environ.pop(_ENV, None)

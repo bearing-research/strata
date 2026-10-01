@@ -1,8 +1,7 @@
 """Tests for the SSH-worker service layer (establish + register / teardown).
 
-A fake supervisor stands in for the tunnel + provisioning (covered elsewhere), so
-these focus on the service's job: registering the tunnel as a `[[workers]]` entry
-via the shared ops and reversing it, against a real local notebook session.
+A fake supervisor replaces tunnel and provisioning, so these cover registering the tunnel as a
+`[[workers]]` entry and reversing it, against a real local notebook session.
 """
 
 from __future__ import annotations

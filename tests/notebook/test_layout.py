@@ -1,9 +1,7 @@
 """What a notebook directory puts in git, and what it keeps out.
 
-The split was documented and nowhere else: no function returned the committed
-set, and nothing wrote a ``.gitignore``. So a new notebook directory had none,
-and ``git add -A`` swept in the virtualenv, the SQLite artifact store, and
-every blob it held.
+Without a ``.gitignore``, ``git add -A`` sweeps in the virtualenv, the SQLite
+artifact store, and every blob in it.
 """
 
 from __future__ import annotations
@@ -84,7 +82,7 @@ class TestCommittedPaths:
 
 
 class TestAgainstRealGit:
-    """The item's own 'done when', run against git rather than reasoned about."""
+    """The layout checked against real git rather than reasoned about."""
 
     def test_git_add_all_stages_exactly_the_committed_set(self, notebook):
         def git(*args):

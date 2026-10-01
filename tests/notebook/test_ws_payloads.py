@@ -1,4 +1,4 @@
-"""Tests for the typed WS frame payload models (#44)."""
+"""Tests for the typed WS frame payload models."""
 
 from __future__ import annotations
 
@@ -273,8 +273,9 @@ def test_environment_job_model_matches_snapshot_fields():
 
 
 def test_dag_update_payload_round_trips_realistic_shape():
-    """A realistic dag_update — edges, topology, a module cell + a plain cell,
-    and a variant group — validates and round-trips without dropping fields."""
+    """A realistic dag_update (edges, topology, module and plain cells, a variant group) round-trips
+    without dropping fields.
+    """
     from strata.notebook.ws_payloads import dag_update_payload
 
     raw = {
@@ -346,9 +347,8 @@ def test_dag_update_payload_rejects_unmodeled_cell_field():
 class TestErrorPayload:
     """The ``error`` frame, whose ``code`` is a live contract.
 
-    ``stores/notebook.ts`` branches on ``ENVIRONMENT_BUSY`` to raise its
-    environment-busy banner, so ``code`` is not decoration and its absence on
-    a plain error is equally part of the shape.
+    ``stores/notebook.ts`` branches on ``ENVIRONMENT_BUSY``, so ``code`` and its absence on a plain
+    error are both part of the shape.
     """
 
     def test_a_plain_error_keeps_its_two_key_shape(self):

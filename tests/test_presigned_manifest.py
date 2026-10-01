@@ -1,4 +1,4 @@
-"""Build manifests with object-store URLs where the blob store can sign them. Item 12."""
+"""Build manifests use object-store URLs where the blob store can sign them."""
 
 from __future__ import annotations
 

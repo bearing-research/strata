@@ -1,9 +1,8 @@
-"""DuckDB SQL cells against a real Iceberg REST catalog and an S3 mount. Item 26.
+"""DuckDB SQL cells against a real Iceberg REST catalog and an S3 mount.
 
-Iceberg's REST catalog fixture and MinIO in containers. A DuckDB cell reads
-``lake.taxi.trips`` at its current snapshot, a new snapshot makes the cell stale
-and the next run reads it, and the query reads the snapshot its provenance
-names even when the table moves in between.
+The REST catalog and MinIO run in containers. A new snapshot of ``lake.taxi.trips`` makes
+the cell stale, and a run reads the snapshot its provenance names even if the table moves
+in between.
 """
 
 from __future__ import annotations

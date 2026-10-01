@@ -1,11 +1,6 @@
-"""Tests for build reliability features.
+"""Build reliability: lease claiming, heartbeat renewal, orphan recovery, idempotent finalize.
 
-These tests verify:
-1. Lease-based claiming prevents duplicate execution
-2. Heartbeat renewal keeps leases alive
-3. Orphan recovery reclaims expired leases
-4. Idempotent finalize prevents duplicate artifacts
-5. Atomic finalize-and-name ensures consistency
+Also checks finalize-and-name is atomic.
 """
 
 import asyncio
@@ -33,7 +28,6 @@ from tests.conftest import seed_build_targets
 
 @pytest.fixture
 def artifact_dir(tmp_path):
-    """Create a temporary artifact directory."""
     artifact_path = tmp_path / "artifacts"
     artifact_path.mkdir(parents=True)
     return artifact_path
@@ -41,7 +35,6 @@ def artifact_dir(tmp_path):
 
 @pytest.fixture
 def artifact_store(artifact_dir):
-    """Create a temporary artifact store."""
     reset_artifact_store()
     store = get_artifact_store(artifact_dir)
     yield store
@@ -50,7 +43,6 @@ def artifact_store(artifact_dir):
 
 @pytest.fixture
 def build_store(artifact_dir):
-    """Create a temporary build store."""
     reset_build_store()
     from strata.transforms.build_store import get_build_store
 
@@ -65,12 +57,8 @@ def build_store(artifact_dir):
 def clock_build_store(artifact_dir):
     """A build store whose clock the test advances by hand.
 
-    Lease expiry compares two stored timestamps, so a test that sleeps past a
-    lease is really asserting the runner's timer resolution plus the cost of a
-    SQLite round-trip. On Windows (~15ms ``time.time`` granularity) that flaked
-    both directions: the pre-sleep "nothing has expired yet" check failed
-    because more than the lease duration had already elapsed, and widening the
-    lease only moved which of the two assertions broke (#627).
+    Sleeping past a lease measures timer resolution plus a SQLite round-trip, which flakes on
+    Windows' ~15ms ``time.time`` granularity.
     """
     from strata.transforms.build_store import BuildStore
 
@@ -88,7 +76,6 @@ def clock_build_store(artifact_dir):
 
 @pytest.fixture
 def transform_registry():
-    """Create a test transform registry."""
     reset_transform_registry()
     registry = TransformRegistry(
         enabled=True,
@@ -107,10 +94,8 @@ def transform_registry():
 
 
 class TestLeaseBasedClaiming:
-    """Tests for lease-based build claiming."""
-
     def test_claim_build_sets_lease_owner(self, build_store, artifact_store):
-        """claim_build should set lease_owner and lease_expires_at."""
+        """claim_build sets lease_owner and lease_expires_at."""
         artifact_id = str(uuid.uuid4())
         version = artifact_store.create_artifact(
             artifact_id=artifact_id,
@@ -141,7 +126,6 @@ class TestLeaseBasedClaiming:
         assert build.lease_expires_at > time.time()
 
     def test_claim_build_fails_if_already_claimed(self, build_store, artifact_store):
-        """claim_build should fail if build is already claimed."""
         artifact_id = str(uuid.uuid4())
         version = artifact_store.create_artifact(
             artifact_id=artifact_id,
@@ -170,7 +154,6 @@ class TestLeaseBasedClaiming:
         assert build.lease_owner == "runner-1"
 
     def test_renew_lease_extends_expiry(self, clock_build_store, artifact_store):
-        """renew_lease should extend the lease expiry time."""
         artifact_id = str(uuid.uuid4())
         version = artifact_store.create_artifact(
             artifact_id=artifact_id,
@@ -196,7 +179,7 @@ class TestLeaseBasedClaiming:
         assert build.lease_expires_at > initial_expiry
 
     def test_renew_lease_fails_for_wrong_owner(self, build_store, artifact_store):
-        """renew_lease should fail if caller is not the lease owner."""
+        """renew_lease fails when the caller is not the lease owner."""
         artifact_id = str(uuid.uuid4())
         version = artifact_store.create_artifact(
             artifact_id=artifact_id,
@@ -216,10 +199,7 @@ class TestLeaseBasedClaiming:
 
 
 class TestOrphanRecovery:
-    """Tests for orphan build recovery."""
-
     def test_list_expired_leases_finds_orphans(self, clock_build_store, artifact_store):
-        """list_expired_leases should find builds with expired leases."""
         artifact_id = str(uuid.uuid4())
         version = artifact_store.create_artifact(
             artifact_id=artifact_id,
@@ -247,7 +227,6 @@ class TestOrphanRecovery:
         assert expired[0].build_id == build_id
 
     def test_reclaim_expired_build(self, clock_build_store, artifact_store):
-        """reclaim_expired_build should take over orphaned builds."""
         artifact_id = str(uuid.uuid4())
         version = artifact_store.create_artifact(
             artifact_id=artifact_id,
@@ -273,7 +252,6 @@ class TestOrphanRecovery:
         assert build.lease_expires_at == pytest.approx(1000.0 + 61.0 + 60.0)
 
     def test_reclaim_fails_for_non_expired_lease(self, build_store, artifact_store):
-        """reclaim_expired_build should fail if lease is still valid."""
         artifact_id = str(uuid.uuid4())
         version = artifact_store.create_artifact(
             artifact_id=artifact_id,
@@ -297,10 +275,7 @@ class TestOrphanRecovery:
 
 
 class TestIdempotentFinalize:
-    """Tests for idempotent artifact finalization."""
-
     def test_finalize_same_artifact_twice_is_idempotent(self, artifact_store):
-        """Calling finalize_artifact twice should be idempotent."""
         artifact_id = str(uuid.uuid4())
         provenance_hash = f"hash-{uuid.uuid4()}"
 
@@ -332,7 +307,7 @@ class TestIdempotentFinalize:
         assert result2.version == result1.version
 
     def test_duplicate_provenance_returns_existing(self, artifact_store):
-        """If same (tenant, provenance_hash) exists, return existing artifact."""
+        """An existing (tenant, provenance_hash) returns the existing artifact."""
         provenance_hash = f"hash-{uuid.uuid4()}"
         tenant = "team-a"
 
@@ -375,10 +350,7 @@ class TestIdempotentFinalize:
 
 
 class TestAtomicFinalizeAndName:
-    """Tests for atomic finalize-and-set-name."""
-
     def test_finalize_and_set_name_atomic(self, artifact_store):
-        """finalize_and_set_name should set name atomically with finalize."""
         artifact_id = str(uuid.uuid4())
         provenance_hash = f"hash-{uuid.uuid4()}"
         tenant = "team-a"
@@ -409,7 +381,7 @@ class TestAtomicFinalizeAndName:
         assert resolved.version == version
 
     def test_finalize_and_set_name_points_to_existing_on_duplicate(self, artifact_store):
-        """If duplicate provenance, name should point to existing artifact."""
+        """On duplicate provenance the name points to the existing artifact."""
         provenance_hash = f"hash-{uuid.uuid4()}"
         tenant = "team-a"
         name = "my-report"
@@ -454,11 +426,10 @@ class TestAtomicFinalizeAndName:
 
 
 class TestBuildRunnerLeaseIntegration:
-    """Integration tests for build runner with leases."""
+    """The build runner with leases."""
 
     @pytest.fixture
     def runner_config(self):
-        """Create a test runner config."""
         return RunnerConfig(
             poll_interval_ms=50,
             max_concurrent_builds=5,
@@ -474,7 +445,6 @@ class TestBuildRunnerLeaseIntegration:
     def build_runner(
         self, runner_config, artifact_store, build_store, transform_registry, artifact_dir
     ):
-        """Create a test build runner."""
         runner = BuildRunner(
             config=runner_config,
             artifact_store=artifact_store,
@@ -485,11 +455,9 @@ class TestBuildRunnerLeaseIntegration:
         return runner
 
     def test_runner_has_unique_id(self, build_runner):
-        """Build runner should have a unique ID."""
         assert build_runner._runner_id == "test-runner-1"
 
     def test_runner_config_has_lease_settings(self, runner_config):
-        """Runner config should have lease settings."""
         assert runner_config.lease_duration_seconds == 2.0
         assert runner_config.heartbeat_interval_seconds == 0.5
         assert runner_config.runner_id == "test-runner-1"
@@ -497,7 +465,6 @@ class TestBuildRunnerLeaseIntegration:
     def test_runner_generates_id_if_not_provided(
         self, artifact_store, build_store, transform_registry, artifact_dir
     ):
-        """Runner should generate unique ID if not provided."""
         config = RunnerConfig()
         runner = BuildRunner(
             config=config,
@@ -511,7 +478,7 @@ class TestBuildRunnerLeaseIntegration:
 
     @pytest.mark.asyncio
     async def test_heartbeat_renews_leases(self, build_runner, artifact_store, build_store):
-        """Heartbeat loop should renew leases for running builds."""
+        """The heartbeat loop renews leases for running builds."""
         artifact_id = str(uuid.uuid4())
         version = artifact_store.create_artifact(
             artifact_id=artifact_id,

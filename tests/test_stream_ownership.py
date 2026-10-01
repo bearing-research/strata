@@ -1,8 +1,7 @@
 """Stream ownership: which node serves a stream, and the redirect it enables.
 
-A stream cannot move between nodes -- its ``ReadPlan`` and its ``asyncio.Task``
-are in-process -- so the point of these is not to share stream state but to
-stop a routing problem looking identical to an expired stream.
+A stream's ``ReadPlan`` and task are in-process and cannot move, so the goal is to keep a routing
+problem from looking like an expired stream.
 """
 
 from __future__ import annotations

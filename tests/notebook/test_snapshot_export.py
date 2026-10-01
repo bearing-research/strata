@@ -1,9 +1,7 @@
 """A notebook's state at a moment, as one bundle.
 
-``fmt=zip`` carried the committed files and no outputs; the HTML and markdown
-exports carried rendered outputs and no machine-readable provenance. Assembling
-a reviewable snapshot took three requests and two formats, and the result still
-could not seed a sandbox, because nothing in it carried bytes. Item 42.
+The snapshot carries committed files, outputs and provenance together, so it
+can be reviewed and can seed a sandbox.
 """
 
 from __future__ import annotations
@@ -67,16 +65,13 @@ class TestTheIndex:
         assert entry["provenance_hash"] == "a1" * 32
 
     def test_every_entry_carries_a_digest(self, session):
-        """What makes a snapshot reviewable rather than merely openable: two
-        snapshots of the same notebook can be compared output by output with
-        neither side reading a blob."""
+        """Digests let two snapshots be compared output by output without reading blobs."""
         manifest = _manifest(_bundle(session))
 
         assert manifest["artifacts"]["rows"][0]["content_sha256"]
 
     def test_a_cell_that_produced_nothing_is_absent(self, session):
-        """Only variables a downstream cell reads become artifacts, so a cell
-        with no entry is the normal case rather than a gap."""
+        """Only variables a downstream cell reads become artifacts, so no entry is normal."""
         assert "total" not in _manifest(_bundle(session))["artifacts"]
 
 
@@ -96,10 +91,10 @@ class TestIncludeModes:
         assert not [n for n in bundle.namelist() if n.startswith("artifacts/")]
 
     def test_selected_carries_the_named_cells_and_describes_the_rest(self, session):
-        """A review snapshot: the figure attached, everything else by
-        reference. The index still names what was left out, which is how an
-        importer knows to mark those cells stale rather than inferring it from
-        what it failed to find."""
+        """A review snapshot: named cells carried, the rest described by reference.
+
+        The index names what was left out so an importer marks those cells stale.
+        """
         bundle = _bundle(session, include="selected", selected_cells=["total"])
         manifest = _manifest(bundle)
 
@@ -107,8 +102,7 @@ class TestIncludeModes:
         assert manifest["artifacts"]["rows"], "the omitted cell is still described"
 
     def test_selected_names_cells_not_artifacts(self, session):
-        """A reviewer thinks "attach the figure cell", not "attach
-        nb_…_var___display__0@v=3"."""
+        """Selection is by cell id, not by artifact name."""
         bundle = _bundle(session, include="selected", selected_cells=["rows"])
 
         assert len(_manifest(bundle)["carried"]) == 1
@@ -130,9 +124,7 @@ class TestPerCellState:
         assert "outputs/rows/console.json" not in bundle.namelist()
 
     def test_provenance_and_timings_come_from_runtime_json(self, session):
-        """They live in ``.strata/``, which is gitignored and in neither
-        existing export — so a snapshot assembled from those two could not say
-        what a cell's last run cost or hashed to."""
+        """Provenance and timings live in gitignored ``.strata/``; only snapshots carry them."""
         from strata.notebook.runtime_state import (
             persist_cell_execution_sample,
             persist_cell_provenance,
@@ -155,8 +147,7 @@ class TestPerCellState:
 
 class TestTheRoute:
     def test_snapshot_is_a_superset_of_the_zip(self, session, monkeypatch):
-        """One format with a parameter, not two formats that drift: everything
-        ``fmt=zip`` produces is still there."""
+        """Everything ``fmt=zip`` produces is still in the snapshot."""
         import asyncio
 
         from strata.notebook.routes import export_notebook
@@ -191,9 +182,7 @@ class TestTheRoute:
 
 class TestTheCLI:
     def test_it_writes_the_same_bundle_the_route_serves(self, session, tmp_path, capsys):
-        """Opened offline rather than through a session manager — working on a
-        directory with no server running is the CLI's whole point — but the
-        members come from one implementation."""
+        """The CLI writes offline, with no server, but from the same implementation as the route."""
         import argparse
 
         from strata.notebook.cli import export_main
@@ -222,8 +211,7 @@ class TestTheCLI:
         assert len(manifest["carried"]) == 1
 
     def test_a_snapshot_without_an_out_path_is_refused(self, session, capsys):
-        """It is a zip, not text, so there is nothing sensible to put on
-        stdout — and a caller who omitted --out expected a file."""
+        """A zip has nothing sensible to put on stdout, so a missing --out is refused."""
         import argparse
 
         from strata.notebook.cli import export_main
@@ -247,10 +235,10 @@ class TestTheCLI:
 
 class TestEveryCellFileTravels:
     def test_a_markdown_cell_s_file_is_in_the_bundle(self, session, tmp_path, capsys):
-        """notebook.toml names `note.md`; a bundle that globbed only `*.py`
-        described a cell it did not contain, which no sandbox can be seeded
-        from. Found by review — the original fixture was Python-only, so the
-        superset test passed while the two bundles genuinely differed."""
+        """A markdown cell's file must be in the bundle, not only `*.py`.
+
+        A Python-only fixture let the superset test pass while the bundles differed.
+        """
         import argparse
         import zipfile as _zipfile
 
@@ -275,9 +263,7 @@ class TestEveryCellFileTravels:
             assert "cells/note.md" in bundle.namelist()
 
     def test_the_route_and_the_cli_agree_on_the_members(self, session, tmp_path):
-        """One implementation, asserted rather than claimed. These diverged:
-        the route wrote provenance.json and globbed `*.py`, the CLI wrote no
-        provenance and globbed everything."""
+        """The route and the CLI produce the same members."""
         import argparse
         import asyncio
         import zipfile as _zipfile
@@ -315,11 +301,10 @@ class TestEveryCellFileTravels:
 
 class TestDisplayOutputs:
     def _with_image(self, session):
-        """A PNG display output as a parsed session actually holds one.
+        """A PNG display output as a session parsed from disk holds one.
 
-        ``inline_data_url`` is stripped before persistence and the parser
-        rebuilds without it, so a session read from disk has only the
-        ``artifact_uri`` — which is every CLI export and every server restart.
+        ``inline_data_url`` is stripped before persistence, so only ``artifact_uri`` is
+        left, as after every server restart and in every CLI export.
         """
         from strata.notebook.models import CellOutput
 
@@ -344,16 +329,14 @@ class TestDisplayOutputs:
         return session
 
     def test_an_image_is_written_as_a_png(self, session):
-        """Not a JSON stub describing one. The documented layout says
-        `outputs/<cell id>/0.png`, and it has to actually be the bytes."""
+        """The image lands as `outputs/<cell id>/0.png` holding the bytes, not a JSON stub."""
         bundle = _bundle(self._with_image(session))
 
         assert "outputs/note/0.png" in bundle.namelist()
         assert bundle.read("outputs/note/0.png").startswith(b"\x89PNG")
 
     def test_a_table_preview_is_still_described(self, session):
-        """There is no format in which double-clicking a row preview means
-        anything, so those stay JSON."""
+        """Table previews have no useful file format, so they stay JSON."""
         from strata.notebook.models import CellOutput
 
         cell = session.notebook_state.get_cell("total")
@@ -366,9 +349,7 @@ class TestDisplayOutputs:
 
 class TestASelectionThatNamesNothing:
     def test_a_mistyped_cell_id_is_refused(self, session):
-        """It used to answer 200 with an empty `carried`, indistinguishable
-        from a selection that legitimately had nothing — and the caller found
-        out when the snapshot turned out to be missing the figure."""
+        """A mistyped cell id is refused rather than answering 200 with an empty `carried`."""
         import asyncio
 
         from fastapi import HTTPException
@@ -384,15 +365,14 @@ class TestASelectionThatNamesNothing:
         assert "figur" in caught.value.detail
 
     def test_a_real_cell_that_produced_nothing_is_still_fine(self, session):
-        """Not every cell has artifacts, and naming one that does not is a
-        legitimate request rather than a typo."""
+        """Naming a real cell with no artifacts is legitimate, not a typo."""
         bundle = _bundle(session, include="selected", selected_cells=["total"])
 
         assert _manifest(bundle)["carried"] == []
 
 
 class TestFetches:
-    """Item 44: a preflight flags unpinned fetches from the snapshot alone."""
+    """A preflight flags unpinned fetches from the snapshot alone."""
 
     def test_every_fetch_is_listed_with_whether_it_is_pinned(self, tmp_path):
         nb = create_notebook(tmp_path, "Fetches", initialize_environment=False)
@@ -437,9 +417,8 @@ class TestFetches:
 
 
 class TestWritingTheBundleOut:
-    """``--out`` names a path, and a path that already holds something is more
-    likely a mistake than an instruction — the same stance
-    ``strata artifact archive`` takes."""
+    """An --out path that already holds something is refused, as ``strata artifact archive``
+    does."""
 
     @staticmethod
     def _export(notebook_dir, out, *extra):

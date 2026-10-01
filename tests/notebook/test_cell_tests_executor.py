@@ -1,11 +1,7 @@
-"""Integration tests for cell unit tests: executor + WebSocket handler.
+"""Integration tests for cell unit tests: executor and WebSocket handler.
 
-These spawn a real pytest subprocess (via ``executor.run_cell_tests``) using the
-test interpreter as the notebook venv, so they exercise the full slice:
-materialize upstreams → inject inputs → run pytest → persist + broadcast.
-
-WS handlers are driven directly with a fake WebSocket — never ``TestClient``'s
-``websocket_connect`` (the py3.12/macOS portal hang, see project memory).
+A real pytest subprocess runs with the test interpreter as the notebook venv. WS handlers
+get a fake WebSocket, never ``TestClient.websocket_connect`` (it hangs on py3.12/macOS).
 """
 
 from __future__ import annotations
@@ -39,7 +35,7 @@ def _reset_ws_globals():
 
 
 def _session_with(cells: list[tuple[str, str, str | None]]) -> NotebookSession:
-    """Build a session whose notebook venv is the test interpreter.
+    """A session whose notebook venv is the test interpreter.
 
     ``cells`` is a list of ``(cell_id, source, after_cell_id)``.
     """
@@ -262,9 +258,9 @@ async def test_handle_cell_run_tests_failure_reports_error_status():
 
 @pytest.mark.asyncio
 async def test_handle_cell_run_tests_refuses_while_the_environment_is_not_ready():
-    """Tests run the cell's code, so they wait for the environment as a run
-    does. The REST route refused; the WebSocket handler ran them with whatever
-    ``python`` was on PATH."""
+    """Tests run the cell's code, so they wait for the environment as a run does rather than
+    use whatever ``python`` is on PATH.
+    """
     from strata.notebook.ws import _handle_cell_run_tests
 
     session = _session_with([("cell1", "def add(a, b):\n    return a + b\n", None)])

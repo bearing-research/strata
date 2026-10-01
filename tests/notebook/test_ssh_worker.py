@@ -1,9 +1,7 @@
-"""Tests for the SSH worker provisioning core (P1 of the SSH remote-worker path).
+"""Tests for SSH worker provisioning.
 
-A scripted fake :class:`SshRunner` stands in for a real host, so these assert the
-exact command contracts and the provisioning decisions (install-if-missing,
-idempotent adoption) with no network. No real SSH runs here; a localhost-sshd
-integration test is a separate, opt-in phase.
+A scripted fake :class:`SshRunner` stands in for the host, so these pin the exact command contracts
+and provisioning decisions (install if missing, idempotent adoption) without network.
 """
 
 from __future__ import annotations
@@ -207,8 +205,7 @@ def test_launch_rejects_token_with_newline():
 
 
 def test_timeout_error_never_contains_stdin_data(monkeypatch):
-    """A launch timeout's message reaches HTTP 400 bodies and logs — the
-    token (fed via stdin) must never appear in it."""
+    """The message reaches HTTP 400 bodies and logs, so the stdin-fed token must not appear."""
     import subprocess
 
     def fake_run(argv, **kwargs):
@@ -235,11 +232,11 @@ def test_launch_adopts_a_live_worker_on_same_port():
 
 
 def test_launch_replaces_an_adopted_worker_when_a_token_must_apply():
-    """A live worker enforces the token it was *started* with, and that token
-    can't be read back off the box. Adopting it while publishing a freshly
-    generated token locally makes every dispatch 401 — and ``/health`` is
-    unauthenticated, so the establish still reports the worker healthy. When a
-    token is in play the old process is replaced instead of adopted."""
+    """A running worker enforces the token it started with, which cannot be read back.
+
+    Adopting it with a fresh local token makes every dispatch 401 while unauthenticated ``/health``
+    still reports healthy, so the old process is replaced.
+    """
     runner = ScriptedSshRunner(
         [
             ("kill -0 111", _ok("up")),

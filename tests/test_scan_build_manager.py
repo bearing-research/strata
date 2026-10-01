@@ -1,8 +1,6 @@
-"""Unit tests for ScanBuildManager's scan table + prefetch (#302, phase 2a).
+"""Unit tests for ScanBuildManager's scan table and prefetch, driven with fake plans.
 
-The build-side (``build_identity_artifact``) still lives in ``server.py`` and is
-covered by the streaming e2e suites; these drive the scan-table + prefetch logic
-directly with fake plans — no TestClient, no ServerState.
+``build_identity_artifact`` still lives in ``server.py`` and is covered by the streaming e2e suites.
 """
 
 from __future__ import annotations

@@ -1,4 +1,4 @@
-"""Tests for the ``strata artifact`` inspection CLI (list/show/lineage/pull)."""
+"""Tests for the ``strata artifact`` inspection CLI."""
 
 from __future__ import annotations
 
@@ -180,8 +180,7 @@ class TestPull:
 
 class TestTheStoreItOpens:
     def test_it_finds_the_store_through_strata_artifact_dir(self, chain_store, monkeypatch, capsys):
-        """Without --artifact-dir it looked only at ~/.strata/artifacts, so a
-        server's STRATA_ARTIFACT_DIR pointed every command somewhere else."""
+        """A server's STRATA_ARTIFACT_DIR is honoured without --artifact-dir."""
         monkeypatch.setenv("STRATA_ARTIFACT_DIR", chain_store["dir"])
 
         assert cmd_show(_args(ref="demo/model", artifact_dir=None)) == 0
@@ -192,9 +191,9 @@ class TestWhichStoreACommandReads:
     def test_artifact_dir_names_one_local_store_whatever_the_environment_says(
         self, chain_store, monkeypatch
     ):
-        """With a server's settings in the shell, --artifact-dir on a notebook's
-        store was paired with the team's bucket, so its rows were read against
-        another store's bytes."""
+        """With server settings in the shell, --artifact-dir must not pair a local store's rows with
+        the team bucket's bytes.
+        """
         from strata.artifact_cli import _open_store
         from strata.blob_store import LocalBlobStore
 
@@ -218,7 +217,7 @@ class TestWhichStoreACommandReads:
     def test_without_artifact_dir_it_reads_tool_strata_in_pyproject(
         self, chain_store, tmp_path, monkeypatch
     ):
-        """The server reads [tool.strata]; the CLI read only the environment."""
+        """The CLI reads [tool.strata] like the server, not only the environment."""
         from strata.artifact_cli import _open_store
 
         project = tmp_path / "project"
@@ -235,8 +234,9 @@ class TestWhichStoreACommandReads:
         assert str(store.db_path).startswith(chain_store["dir"])
 
     def test_a_missing_store_is_reported_and_not_created(self, tmp_path, monkeypatch, capsys):
-        """Loading the config creates a personal-mode artifact_dir, so a typo in
-        STRATA_ARTIFACT_DIR used to leave an empty store at the typo."""
+        """Loading config creates a personal-mode artifact_dir, so a typo must not leave an empty
+        store.
+        """
         from strata.artifact_cli import _open_store
 
         typo = tmp_path / "artifcats"
@@ -306,7 +306,7 @@ class TestTenantAgnosticResolution:
 
 
 class TestAliasRefsAndAudit:
-    """CLI alias refs (name@alias) and the audit command (#129)."""
+    """CLI alias refs (name@alias) and the audit command."""
 
     def test_show_resolves_alias_ref(self, chain_store, capsys):
         store = chain_store["store"]
@@ -352,13 +352,9 @@ class TestPublish:
     """``strata artifact publish`` and the disclosure it prints first."""
 
     def test_publish_lists_every_step_the_link_will_expose(self, chain_store, capsys):
-        """Publishing exposes the whole ancestry, not just the artifact.
+        """Publishing exposes the whole ancestry, so the disclosure must name every step.
 
-        That is the transparency being asked for, but it is also the thing a
-        researcher can be surprised by — upstream cell source can name private
-        dataset paths. So the chain is printed back before the link is used,
-        and this pins that it names every step rather than only the one being
-        published.
+        Upstream cell source can name private dataset paths.
         """
         from strata.artifact_cli import cmd_publish
 
@@ -379,13 +375,10 @@ class TestPublish:
             assert step in out, f"{step} is exposed by the link but was not disclosed"
 
     def test_a_shared_upstream_is_disclosed_once(self, chain_store, capsys):
-        """A diamond listed the same step twice, under two different names.
+        """A diamond's shared step is listed once.
 
-        ``_walk_lineage`` renders a tree, so a step two cells depend on appears
-        expanded once and as a bare ``strata://artifact/...`` leaf where the
-        recursion stops. This is the text someone reads to decide whether to
-        send a link, so it has to be the actual set of steps — not a longer
-        list naming some of them twice.
+        ``_walk_lineage`` renders a tree, so a shared step appears expanded and again as a bare
+        leaf; the disclosure must be the actual set of steps.
         """
         from strata.artifact_cli import cmd_publish
 
@@ -447,10 +440,8 @@ class TestPublish:
 
 class TestPublishAuthor:
     def test_republishing_says_the_author_did_not_take(self, chain_store, capsys):
-        """Publishing is idempotent, so a later --author is quietly dropped.
-
-        Printing the usual success banner would report an author that never
-        reached the page, with no indication anything was ignored.
+        """Publishing is idempotent, so a later --author is dropped and must not be reported as
+        applied.
         """
         from strata.artifact_cli import cmd_publish
 
@@ -471,7 +462,7 @@ class TestPublishAuthor:
 
 
 class TestArchive:
-    """``strata artifact archive`` — the copy that needs no server."""
+    """``strata artifact archive``: the copy that needs no server."""
 
     @staticmethod
     def _archive(chain_store, tmp_path, **overrides):
@@ -500,11 +491,8 @@ class TestArchive:
         assert (dest / "README.md").exists()
 
     def test_the_recorded_digest_is_the_one_a_reader_computes(self, chain_store, tmp_path):
-        """The README tells the reader to run sha256sum and compare.
-
-        If the recorded digest were taken from anything but the bytes actually
-        written into the bundle, that instruction would fail for every reader
-        who followed it — the one check the bundle offers, broken.
+        """The README tells readers to sha256sum and compare, so the recorded digest must come from
+        the bytes written.
         """
         import hashlib
         import json as jsonlib
@@ -519,12 +507,7 @@ class TestArchive:
         assert manifest["content_sha256"] in (dest / "README.md").read_text()
 
     def test_archiving_grants_nobody_access_to_the_server(self, chain_store, tmp_path):
-        """Archiving is not publishing, and must not quietly become it.
-
-        A bundle is a file someone chooses to hand over. Minting a live public
-        link as a side effect would put the artifact on the network without
-        anyone asking for that.
-        """
+        """Archiving is not publishing: it must not mint a live public link."""
         self._archive(chain_store, tmp_path)
 
         assert chain_store["store"].list_publications() == []
@@ -540,12 +523,7 @@ class TestArchive:
         assert any("scan-1" in u for u in uris)
 
     def test_it_does_not_date_itself_as_a_publication(self, chain_store, tmp_path):
-        """Archiving mints no link and serves nothing, so it publishes nothing.
-
-        A bundle reporting a ``published_at`` dates an event that never
-        happened — to a reader, and to a machine consuming a deposit that has
-        no way to know better.
-        """
+        """Archiving publishes nothing, so the bundle must not report a ``published_at``."""
         import json as jsonlib
 
         dest = self._archive(chain_store, tmp_path)
@@ -556,17 +534,13 @@ class TestArchive:
         assert "Archived" in (dest / "index.html").read_text()
 
     def test_a_payload_is_referenced_not_embedded(self, chain_store, tmp_path):
-        """The file sits beside the page, so base64 would only double the size.
-
-        Unbounded, it also turns a large figure into an index.html no browser
-        will open, which is the single thing a bundle has to guarantee.
-        """
+        """The file sits beside the page; base64 would double it and can break index.html."""
         dest = self._archive(chain_store, tmp_path)
 
         assert "data:image/png;base64," not in (dest / "index.html").read_text()
 
     def test_it_refuses_a_non_empty_destination(self, chain_store, tmp_path):
-        """`--to .` was a one-keystroke way to clobber someone's README."""
+        """`--to .` must not clobber someone's README."""
         from strata.artifact_cli import cmd_archive
 
         dest = tmp_path / "occupied"
@@ -588,11 +562,7 @@ class TestArchive:
         assert (dest / "README.md").read_text() == "someone else's work"
 
     def test_an_unfinished_artifact_is_not_archivable(self, chain_store, tmp_path):
-        """A half-written blob digests like any other.
-
-        Without the guard the bundle presents truncated bytes as a
-        deposit-ready record, with a sha256sum line vouching for the fragment.
-        """
+        """A half-written blob digests like any other, so it must not become a deposit record."""
         from strata.artifact_cli import cmd_archive
 
         store = chain_store["store"]
@@ -615,8 +585,9 @@ class TestArchive:
         assert not (tmp_path / "bundle").exists()
 
     def test_the_author_is_credited_when_given(self, chain_store, tmp_path):
-        """A local run has no authenticated identity, so this is the only way
-        a lone researcher's name reaches the page."""
+        """A local run has no authenticated identity, so this is the only way a name reaches the
+        page.
+        """
         dest = self._archive(chain_store, tmp_path)
 
         assert "F. Li" in (dest / "index.html").read_text()

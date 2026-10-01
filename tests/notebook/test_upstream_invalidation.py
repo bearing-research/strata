@@ -1,12 +1,7 @@
-"""Test that editing an upstream cell invalidates downstream cache.
+"""Editing an upstream cell invalidates the downstream cache.
 
-Reproduces the scenario:
-1. Cell 1: x = 1
-2. Cell 2: y = x + 1
-3. Cell 3: print(y)
-4. Run all three cells
-5. Edit cell 1 to: x = 2
-6. Run cell 2 → should NOT be a cache hit (upstream changed)
+Scenario: run ``x = 1``, ``y = x + 1``, ``print(y)``; edit cell 1 to ``x = 2``; running cell 2 must
+not be a cache hit.
 """
 
 from __future__ import annotations
@@ -44,7 +39,7 @@ from tests.notebook.e2e_fixtures import (
 
 @pytest.fixture
 def pipeline_notebook(tmp_path):
-    """Create a 3-cell pipeline: x=1 → y=x+1 → print(y)."""
+    """A 3-cell pipeline: x=1, y=x+1, print(y)."""
     notebook_dir = create_notebook(tmp_path, "pipeline")
 
     add_cell_to_notebook(notebook_dir, "c1", None)
@@ -63,11 +58,9 @@ def pipeline_notebook(tmp_path):
 
 
 class TestUpstreamInvalidation:
-    """Editing an upstream cell must invalidate downstream caches."""
-
     @pytest.mark.asyncio
     async def test_mount_change_invalidates_cached_upstream(self, tmp_path):
-        """Mounted inputs must participate in staleness, not just execution-time provenance."""
+        """Mounted inputs must count for staleness, not just execution-time provenance."""
         notebook_dir = tmp_path / "mount_pipeline"
         notebook_dir.mkdir()
         cells_dir = notebook_dir / "cells"
@@ -135,7 +128,7 @@ class TestUpstreamInvalidation:
 
     @pytest.mark.asyncio
     async def test_multi_output_upstream_stays_ready_when_unchanged(self, tmp_path):
-        """Staleness should use all upstream artifact_uris, not just artifact_uri."""
+        """Staleness checks every upstream artifact_uri, not just artifact_uri."""
         notebook_dir = create_notebook(tmp_path, "multi_output")
 
         add_cell_to_notebook(notebook_dir, "c1", None)
@@ -166,7 +159,6 @@ class TestUpstreamInvalidation:
 
     @pytest.mark.asyncio
     async def test_edit_upstream_invalidates_downstream(self, pipeline_notebook):
-        """After editing c1 from x=1 to x=2, c2 must not cache hit."""
         session = pipeline_notebook
 
         assert session.dag is not None
@@ -212,7 +204,6 @@ class TestUpstreamInvalidation:
 
     @pytest.mark.asyncio
     async def test_edit_exported_function_invalidates_downstream(self, tmp_path):
-        """Editing an exported function should invalidate downstream consumers."""
         notebook_dir = create_notebook(tmp_path, "function_invalidation")
 
         add_cell_to_notebook(notebook_dir, "c1", None)
@@ -271,7 +262,7 @@ class TestUpstreamInvalidation:
 
     @pytest.mark.asyncio
     async def test_uncached_leaf_reports_upstream_change_after_upstream_rerun(self, tmp_path):
-        """An executed uncached leaf should stay ready until upstream provenance changes."""
+        """An executed uncached leaf stays ready until upstream provenance changes."""
         notebook_dir = create_notebook(tmp_path, "leaf_upstream_change")
 
         add_cell_to_notebook(notebook_dir, "c1", None)
@@ -306,7 +297,7 @@ class TestUpstreamInvalidation:
 
     @pytest.mark.asyncio
     async def test_missing_one_multi_output_artifact_marks_downstream_stale(self, tmp_path):
-        """Staleness must validate every consumed output, not just the first one."""
+        """Staleness checks every consumed output, not just the first."""
         notebook_dir = create_notebook(tmp_path, "missing_output")
 
         add_cell_to_notebook(notebook_dir, "c1", None)
@@ -343,7 +334,6 @@ class TestUpstreamInvalidation:
 
     @pytest.mark.asyncio
     async def test_edit_upstream_produces_correct_value(self, pipeline_notebook):
-        """After editing c1, c2's output should reflect the new value."""
         session = pipeline_notebook
 
         executor = CellExecutor(session)
@@ -370,7 +360,7 @@ class TestUpstreamInvalidation:
 
 
 class TestUpstreamInvalidationE2E:
-    """Same tests but through REST+WS path, matching the UI flow."""
+    """The same scenarios through REST and WS, as the UI drives them."""
 
     @pytest.fixture
     def setup(self):
@@ -380,11 +370,8 @@ class TestUpstreamInvalidationE2E:
             yield client, Path(tmpdir)
 
     def test_edit_c1_via_rest_then_run_c2_via_ws(self, setup):
-        """Reproduce: edit cell 1 via REST PUT, run cell 2 via WS.
-
-        This is exactly what the UI does:
-        - CodeMirror onChange → PUT /cells/{id} (REST)
-        - Shift+Enter → cell_execute (WS)
+        """The UI flow: editor change is ``PUT /cells/{id}`` (REST), Shift+Enter is ``cell_execute``
+        (WS).
         """
         client, tmp = setup
         nb = (
@@ -431,7 +418,6 @@ class TestUpstreamInvalidationE2E:
                 )
 
     def test_edit_c1_via_rest_then_run_c2_produces_correct_value(self, setup):
-        """After editing c1 from x=1 to x=100 via REST, c2 should produce y=101."""
         client, tmp = setup
         nb = NotebookBuilder(tmp).add_cell("c1", "x = 1").add_cell("c2", "y = x + 1", after="c1")
 

@@ -1,9 +1,7 @@
 """Selecting the artifact store's metadata backend from configuration.
 
-The Postgres backend was reachable only from direct instantiation until this
-landed, so these cover the wiring: the DSN field, the dialect factory, the
-startup validation, and the coherence rule that keeps a shared database from
-being paired with node-local blobs.
+Covers the DSN field, the dialect factory, startup validation, and the rule keeping a shared
+database from pairing with node-local blobs.
 """
 
 from __future__ import annotations

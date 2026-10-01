@@ -8,10 +8,9 @@ import pytest
 
 
 class TestGCTracker:
-    """Tests for GC pause duration tracking."""
+    """GC pause duration tracking."""
 
     def test_tracker_install_and_uninstall(self):
-        """Test that tracker can be installed and uninstalled."""
         from strata.gc_tracker import GCTracker
 
         tracker = GCTracker()
@@ -26,7 +25,7 @@ class TestGCTracker:
         assert tracker._gc_callback not in gc.callbacks
 
     def test_tracker_install_idempotent(self):
-        """Test that calling install multiple times is safe."""
+        """Installing more than once is safe."""
         from strata.gc_tracker import GCTracker
 
         tracker = GCTracker()
@@ -36,7 +35,6 @@ class TestGCTracker:
         tracker.uninstall()
 
     def test_tracker_records_gc_pauses(self):
-        """Test that tracker records GC pause durations."""
         from strata.gc_tracker import GCTracker
 
         tracker = GCTracker()
@@ -57,13 +55,11 @@ class TestGCTracker:
             tracker.uninstall()
 
     def test_gc_callback_is_nonblocking_when_lock_held(self):
-        """Regression: the GC callback must not block on the tracker lock.
+        """The GC callback must not block on the tracker lock.
 
-        The callback fires *during* a GC, which an allocation under ``_lock``
-        (e.g. ``get_stats`` building its result) can trigger on the same thread.
-        With a non-reentrant lock, a blocking acquire would self-deadlock — the
-        intermittent py3.12/macOS ``/metrics`` hang. So with the lock already
-        held, the callback must return promptly (skipping the sample), not hang.
+        A GC can fire during an allocation under the non-reentrant ``_lock`` on the same thread, so
+        a blocking acquire would self-deadlock (the py3.12/macOS ``/metrics`` hang). It skips the
+        sample.
         """
         from strata.gc_tracker import GCTracker
 
@@ -91,7 +87,6 @@ class TestGCTracker:
             tracker._lock.release()
 
     def test_tracker_get_recent_pauses(self):
-        """Test getting recent pause list."""
         from strata.gc_tracker import GCTracker
 
         tracker = GCTracker(max_recent=10)
@@ -112,7 +107,6 @@ class TestGCTracker:
             tracker.uninstall()
 
     def test_tracker_reset(self):
-        """Test resetting tracker statistics."""
         from strata.gc_tracker import GCTracker
 
         tracker = GCTracker()
@@ -131,7 +125,6 @@ class TestGCTracker:
             tracker.uninstall()
 
     def test_gc_stats_to_dict(self):
-        """Test GCStats serialization."""
         from strata.gc_tracker import GCPause, GCStats
 
         stats = GCStats(
@@ -159,7 +152,7 @@ class TestGCTracker:
         assert "p50_ms" in d["recent"]
 
     def test_global_functions(self):
-        """Test module-level convenience functions."""
+        """Module-level convenience functions."""
         from strata.gc_tracker import (
             get_gc_stats,
             get_recent_gc_pauses,
@@ -185,10 +178,9 @@ class TestGCTracker:
 
 
 class TestSlowOps:
-    """Tests for slow operation logging and latency histograms."""
+    """Slow operation logging and latency histograms."""
 
     def test_latency_histogram_record(self):
-        """Test recording latencies to histogram."""
         from strata.slow_ops import LatencyHistogram
 
         hist = LatencyHistogram()
@@ -209,7 +201,7 @@ class TestSlowOps:
         assert stats["buckets"]["100-250ms"] == 1
 
     def test_latency_histogram_empty_stage(self):
-        """Test getting stats for a stage with no data."""
+        """Stats for a stage with no data."""
         from strata.slow_ops import LatencyHistogram
 
         hist = LatencyHistogram()
@@ -218,7 +210,7 @@ class TestSlowOps:
         assert stats["sum_ms"] == 0.0
 
     def test_latency_histogram_all_buckets(self):
-        """Test that all histogram buckets are populated correctly."""
+        """Every histogram bucket is populated correctly."""
         from strata.slow_ops import LatencyHistogram
 
         hist = LatencyHistogram()
@@ -242,7 +234,6 @@ class TestSlowOps:
             assert stats["buckets"][expected_bucket] >= 1, f"Bucket {expected_bucket} not populated"
 
     def test_slow_op_tracker_basic(self):
-        """Test SlowOpTracker basic timing."""
         from strata.slow_ops import SlowOpTracker
 
         tracker = SlowOpTracker()
@@ -261,7 +252,6 @@ class TestSlowOps:
         assert timings.rows_streamed == 100
 
     def test_slow_op_tracker_multiple_stages(self):
-        """Test SlowOpTracker with multiple stages."""
         from strata.slow_ops import SlowOpTracker
 
         tracker = SlowOpTracker()
@@ -284,7 +274,7 @@ class TestSlowOps:
         assert timings.total_ms >= 15
 
     def test_global_latency_functions(self):
-        """Test module-level latency functions."""
+        """Module-level latency functions."""
         from strata.slow_ops import (
             get_latency_stats,
             record_latency,
@@ -308,7 +298,7 @@ class TestSlowOps:
         assert len(stats) == 0
 
     def test_get_latency_percentiles(self):
-        """Test percentile estimation from histogram."""
+        """Percentile estimation from the histogram."""
         from strata.slow_ops import (
             get_latency_percentiles,
             record_latency,
@@ -330,10 +320,9 @@ class TestSlowOps:
 
 
 class TestPoolMetrics:
-    """Tests for thread pool metrics tracking."""
+    """Thread pool metrics tracking."""
 
     def test_pool_tracker_register(self):
-        """Test registering a thread pool."""
         from strata.pool_metrics import PoolMetricsTracker
 
         tracker = PoolMetricsTracker()
@@ -351,10 +340,8 @@ class TestPoolMetrics:
     def test_pool_tracker_utilization(self):
         """Utilization reflects work the tracker is carrying.
 
-        Callers wrap the handoff to the pool in ``tracker.track(...)``; a bare
-        ``executor.submit`` is invisible to the tracker by design. Utilization
-        used to be read off ``executor._threads`` instead, which counts every
-        thread the pool ever created and so never fell back down.
+        Callers wrap the handoff in ``tracker.track(...)``; a bare ``executor.submit`` is invisible
+        by design.
         """
         from strata.pool_metrics import PoolMetricsTracker
 
@@ -371,7 +358,7 @@ class TestPoolMetrics:
         executor.shutdown(wait=True)
 
     def test_pool_tracker_queue_depth(self):
-        """Test tracking queue depth when pool is saturated."""
+        """Queue depth while the pool is saturated."""
         from strata.pool_metrics import PoolMetricsTracker
 
         tracker = PoolMetricsTracker()
@@ -393,7 +380,6 @@ class TestPoolMetrics:
         executor.shutdown(wait=True)
 
     def test_pool_tracker_get_all_stats(self):
-        """Test getting stats for all registered pools."""
         from strata.pool_metrics import PoolMetricsTracker
 
         tracker = PoolMetricsTracker()
@@ -413,7 +399,7 @@ class TestPoolMetrics:
         executor2.shutdown(wait=False)
 
     def test_pool_tracker_get_summary(self):
-        """Test getting summary for metrics endpoint."""
+        """The summary for the metrics endpoint."""
         from strata.pool_metrics import PoolMetricsTracker
 
         tracker = PoolMetricsTracker()
@@ -429,7 +415,6 @@ class TestPoolMetrics:
         executor.shutdown(wait=False)
 
     def test_pool_stats_to_dict(self):
-        """Test ThreadPoolStats serialization."""
         from strata.pool_metrics import ThreadPoolStats
 
         stats = ThreadPoolStats(
@@ -450,7 +435,7 @@ class TestPoolMetrics:
         assert d["utilization_pct"] == 50.0
 
     def test_connection_metrics_tracking(self):
-        """Test HTTP connection metrics."""
+        """HTTP connection metrics."""
         from strata.pool_metrics import ConnectionMetrics
 
         metrics = ConnectionMetrics()
@@ -473,7 +458,6 @@ class TestPoolMetrics:
         assert stats["total_requests"] == 3  # Total does not decrease.
 
     def test_connection_metrics_reset(self):
-        """Test resetting connection metrics."""
         from strata.pool_metrics import ConnectionMetrics
 
         metrics = ConnectionMetrics()
@@ -487,7 +471,7 @@ class TestPoolMetrics:
         assert stats["total_requests"] == 0
 
     def test_global_pool_functions(self):
-        """Test module-level convenience functions."""
+        """Module-level convenience functions."""
         from strata.pool_metrics import (
             get_connection_metrics,
             get_pool_tracker,
@@ -507,10 +491,7 @@ class TestPoolMetrics:
 
 
 class TestMemoryProfiler:
-    """Tests for memory profiling utilities."""
-
     def test_memory_snapshot(self):
-        """Test getting memory snapshot."""
         from strata.memory_profiler import get_memory_snapshot
 
         snapshot = get_memory_snapshot()
@@ -522,7 +503,6 @@ class TestMemoryProfiler:
         assert len(snapshot.python_gc_objects_by_gen) == 3
 
     def test_memory_snapshot_to_dict(self):
-        """Test MemorySnapshot serialization."""
         from strata.memory_profiler import get_memory_snapshot
 
         snapshot = get_memory_snapshot()
@@ -540,7 +520,6 @@ class TestMemoryProfiler:
         assert "gc_objects_by_gen" in d["python"]
 
     def test_get_arrow_allocations(self):
-        """Test getting Arrow allocation details."""
         from strata.memory_profiler import get_arrow_allocations
 
         allocs = get_arrow_allocations()
@@ -551,7 +530,6 @@ class TestMemoryProfiler:
         assert "available_pools" in allocs
 
     def test_get_python_memory_stats(self):
-        """Test getting Python memory statistics."""
         from strata.memory_profiler import get_python_memory_stats
 
         stats = get_python_memory_stats()
@@ -566,7 +544,6 @@ class TestMemoryProfiler:
         assert len(stats["top_object_types"]) <= 20
 
     def test_get_detailed_memory_report(self):
-        """Test getting detailed memory report."""
         from strata.memory_profiler import get_detailed_memory_report
 
         report = get_detailed_memory_report()
@@ -580,7 +557,7 @@ class TestMemoryProfiler:
         assert len(report["recommendations"]) >= 1
 
     def test_memory_recommendations_healthy(self):
-        """Test that healthy memory state gets appropriate recommendation."""
+        """A healthy memory state gets the matching recommendation."""
         from strata.memory_profiler import MemorySnapshot, _get_memory_recommendations
 
         snapshot = MemorySnapshot(
@@ -599,7 +576,6 @@ class TestMemoryProfiler:
         assert "healthy" in recs[0].lower()
 
     def test_memory_recommendations_high_arrow(self):
-        """Test recommendation for high Arrow memory."""
         from strata.memory_profiler import MemorySnapshot, _get_memory_recommendations
 
         snapshot = MemorySnapshot(
@@ -619,11 +595,11 @@ class TestMemoryProfiler:
 
 
 class TestDebugEndpoints:
-    """Integration tests for debug endpoints in server."""
+    """The server's debug endpoints."""
 
     @pytest.fixture
     def client(self, tmp_path):
-        """Create test client with initialized server state."""
+        """A test client with initialized server state."""
 
         from httpx import ASGITransport, AsyncClient
 
@@ -649,7 +625,7 @@ class TestDebugEndpoints:
 
     @pytest.mark.asyncio
     async def test_debug_pools_endpoint(self, tmp_path):
-        """Test /v1/debug/pools endpoint."""
+        """/v1/debug/pools."""
         from httpx import ASGITransport, AsyncClient
 
         import strata.server as server_module
@@ -679,7 +655,7 @@ class TestDebugEndpoints:
 
     @pytest.mark.asyncio
     async def test_debug_connections_endpoint(self, tmp_path):
-        """Test /v1/debug/connections endpoint."""
+        """/v1/debug/connections."""
         from httpx import ASGITransport, AsyncClient
 
         import strata.server as server_module
@@ -708,7 +684,7 @@ class TestDebugEndpoints:
 
     @pytest.mark.asyncio
     async def test_debug_memory_endpoint(self, tmp_path):
-        """Test /v1/debug/memory endpoint."""
+        """/v1/debug/memory."""
         from httpx import ASGITransport, AsyncClient
 
         import strata.server as server_module
@@ -745,7 +721,7 @@ class TestDebugEndpoints:
 
     @pytest.mark.asyncio
     async def test_debug_latency_endpoint(self, tmp_path):
-        """Test /v1/debug/latency endpoint."""
+        """/v1/debug/latency."""
         from httpx import ASGITransport, AsyncClient
 
         import strata.server as server_module
@@ -780,7 +756,7 @@ class TestDebugEndpoints:
 
     @pytest.mark.asyncio
     async def test_debug_gc_pauses_endpoint(self, tmp_path):
-        """Test /v1/debug/gc/pauses endpoint."""
+        """/v1/debug/gc/pauses."""
         from httpx import ASGITransport, AsyncClient
 
         import strata.server as server_module
@@ -813,7 +789,7 @@ class TestDebugEndpoints:
 
     @pytest.mark.asyncio
     async def test_metrics_includes_pools_and_connections(self, tmp_path):
-        """Test that /metrics includes thread pool and connection data."""
+        """/metrics includes thread pool and connection data."""
         from httpx import ASGITransport, AsyncClient
 
         import strata.server as server_module
@@ -844,14 +820,9 @@ class TestDebugEndpoints:
 
 
 class TestPercentilesUseNearestRank:
-    """The percentile target is a 1-based sample index, so it must round UP
-    and never reach 0.
+    """The percentile target is a 1-based sample index: round up, never 0.
 
-    ``int(total * pct)`` truncated instead, and a target of 0 is satisfied by
-    the very first bucket before any count is added — so a stage with a single
-    sample reported the FASTEST bucket at every percentile. One 9-second scan
-    came back as ``p99 = 5ms``: exactly backwards for the operator reading it
-    to decide whether a stage is slow.
+    A target of 0 is met by the first bucket, so a single 9-second sample reported ``p99 = 5ms``.
     """
 
     def test_a_lone_slow_sample_is_not_reported_as_the_fastest_bucket(self):
@@ -898,14 +869,8 @@ class TestPercentilesUseNearestRank:
 class TestPoolUtilizationFallsBackToZero:
     """Utilization must describe now, not the busiest moment so far.
 
-    ``active_workers`` was ``len([t for t in executor._threads if
-    t.is_alive()])`` -- every thread the pool had ever created. Pool threads
-    park on the work queue rather than exiting, so the count only ever rose.
-    Once a pool had seen ``max_workers`` concurrent submissions it reported
-    100% utilization for the rest of the process's life, and because
-    ``check_thread_pools`` returns DEGRADED above 90% and the overall
-    dependency status is the worst of all checks, one traffic burst latched
-    /health/dependencies to degraded until the server restarted.
+    Counting ``executor._threads`` only ever rises, since pool threads park instead of exiting. One
+    burst then latches /health/dependencies to degraded (above 90%) until restart.
     """
 
     def test_utilization_returns_to_zero_when_work_finishes(self):
@@ -983,10 +948,7 @@ class TestPoolUtilizationFallsBackToZero:
         executor.shutdown(wait=True)
 
     def test_task_counters_are_no_longer_dead(self):
-        """``record_task_submitted``/``_completed`` had no callers anywhere.
-
-        Both counters shipped in the /v1/debug/pools payload as a constant 0.
-        """
+        """``track()`` feeds the task counters, so /v1/debug/pools is not a constant 0."""
         from strata.pool_metrics import PoolMetricsTracker
 
         tracker = PoolMetricsTracker()

@@ -1,15 +1,9 @@
-"""Who a cell runs as, and whether a service-mode host starts it at all. Item 49.
+"""Who a cell runs as, and whether a service-mode host starts it at all.
 
-The environment allowlist filters what a cell is given; a cell running as the
-server's own user could still read ``/proc/<server pid>/environ``. So a
-service-mode server refuses to start cell code on its own host unless cells run
-as a separate OS user — or on another machine, which is a worker and never
-reaches these spawns.
-
-Dropping to a *different* user needs root, which the suite does not have; the
-root-only end-to-end check lives in ``tests/test_harness_isolation.py``. Here the
-harness user is the current user, which exercises every spawn path without
-privileges, and the refusal is checked on every site that starts cell code.
+A cell running as the server's user could read ``/proc/<server pid>/environ``, so a
+service-mode server refuses to run cell code on its own host unless cells run as a
+separate OS user. Switching users needs root, so here the harness user is the current
+user; the root-only check lives in ``tests/test_harness_isolation.py``.
 """
 
 from __future__ import annotations
@@ -67,9 +61,9 @@ class TestResolution:
         assert resolve_harness_user() is None
 
     def test_outside_a_server_nothing_is_refused(self, monkeypatch):
-        """A CLI run has no server credentials for a cell to read — and the
-        loaded config's default mode is service, so falling back to it would
-        refuse every `strata run`."""
+        """A CLI run has no server credentials for a cell to read, and falling back to the loaded
+        config's default (service) mode would refuse every `strata run`.
+        """
         monkeypatch.setattr("strata.server._state", None)
 
         assert resolve_harness_user() is None

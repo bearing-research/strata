@@ -17,8 +17,7 @@ def test_parses_sql_connection():
 
 
 def test_sql_without_connection_keyword_yields_none_connection():
-    """`@sql` without `connection=` is malformed; the parser leaves
-    `result.sql.connection` as None so validation can flag it."""
+    """``@sql`` without ``connection=`` parses to a None connection so validation can flag it."""
     src = "# @sql warehouse\nSELECT 1"
     a = parse_annotations(src)
     assert a.sql is not None
@@ -51,8 +50,7 @@ def test_parses_cache_policies():
 
 
 def test_invalid_cache_policy_drops_to_none():
-    """Unknown policies and malformed ttl values land as None in the
-    parsed annotations; validation surfaces a diagnostic."""
+    """Unknown policies and malformed ttl parse to None; validation reports them."""
     cases = [
         "# @cache\nSELECT 1",
         "# @cache bogus\nSELECT 1",
@@ -140,10 +138,7 @@ def test_validation_clean_for_valid_cache_policies():
 
 
 def test_validation_flags_malformed_connection():
-    """A SQL cell that references a malformed [connections.<name>]
-    block gets a `connection_malformed` error — sharper than the
-    generic `sql_connection_unknown` because the user actually did
-    declare the connection, just wrong."""
+    """A declared but malformed connection gets ``connection_malformed``, not ``unknown``."""
     from strata.notebook.models import MalformedConnection
 
     cell = _sql_cell("# @sql connection=warehouse\nSELECT 1")
@@ -168,9 +163,7 @@ def test_validation_flags_malformed_connection():
 
 
 def test_validation_flags_unknown_driver():
-    """The connection is declared and parses, but its `driver` value
-    isn't in the SQL adapter registry. The runtime would fail later;
-    we surface it at validation time."""
+    """A driver missing from the adapter registry is flagged at validation, not at run time."""
     from strata.notebook.sql import AdapterCapabilities, FreshnessToken, SchemaFingerprint
     from strata.notebook.sql.registry import (
         _reset_for_tests,
@@ -215,10 +208,7 @@ def test_validation_flags_unknown_driver():
 
 
 def test_validation_skips_driver_check_when_registry_empty():
-    """If no adapters are registered (e.g. optional ADBC packages not
-    installed), don't flag every connection as 'driver unknown' — that
-    would be noise. The runtime will produce the right error when the
-    cell actually executes."""
+    """With no adapters registered (ADBC extras absent), driver checks would be pure noise."""
     from strata.notebook.sql.registry import _reset_for_tests, _restore_defaults_for_tests
 
     _reset_for_tests()
@@ -232,9 +222,10 @@ def test_validation_skips_driver_check_when_registry_empty():
 
 
 def test_validation_flags_literal_auth_values():
-    """`auth.password = "hunter2"` is a literal secret. The writer
-    blanks it on save; without a diagnostic, the user wouldn't know
-    why their connection breaks after the next unrelated rewrite."""
+    """``auth.password = "hunter2"`` is flagged: the writer blanks literal secrets on save.
+
+    Without a diagnostic the connection would break after an unrelated rewrite.
+    """
     cell = _sql_cell("# @sql connection=db\nSELECT 1")
     state = _state_with(
         [
@@ -276,11 +267,11 @@ def test_validation_clean_when_all_auth_uses_indirection():
 
 
 def test_validation_surfaces_sql_parse_error_diagnostic():
-    """Codex review fix: when a SQL cell has a syntax error and the
-    connection's driver is registered, the analyzer's parse error
-    survives the session boundary as a ``sql_parse_error``
-    diagnostic. Without this, parse failures were invisible to the
-    UI — only ``defines`` / ``references`` made it onto the cell."""
+    """A SQL syntax error reaches the cell as a ``sql_parse_error`` diagnostic.
+
+    Otherwise only ``defines`` / ``references`` cross the session boundary and the
+    parse failure is invisible in the UI.
+    """
     cell = _sql_cell("# @sql connection=db\nSELECT * FROM")  # truncated
     state = _state_with([ConnectionSpec(name="db", driver="postgresql")])
     diags = validate_cell_annotations(cell, state)
@@ -300,10 +291,7 @@ def test_validation_no_sql_parse_error_for_valid_sql():
 
 
 def test_validation_skips_sql_parse_check_when_connection_unknown():
-    """Without a resolved connection (and therefore no dialect), we
-    can't parse SQL deterministically — so no ``sql_parse_error``
-    even though the SQL is malformed. The user already gets
-    ``sql_connection_unknown`` for the underlying problem."""
+    """No resolved connection means no dialect, so no ``sql_parse_error`` is reported."""
     cell = _sql_cell("# @sql connection=missing\nSELECT * FROM")
     state = _state_with([])
     diags = validate_cell_annotations(cell, state)

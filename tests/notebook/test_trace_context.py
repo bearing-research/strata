@@ -1,9 +1,7 @@
-"""One trace per remote cell run, across the server and the worker. Item 52.
+"""One trace per remote cell run, across the server and the worker.
 
-The manifest carried no trace context, so a worker's spans started a trace of
-their own and the two halves were matched by build id by hand. Spans are
-collected in memory here; the worker runs in this process, so both sides
-export to the same place.
+Spans are collected in memory; the worker runs in this process, so both sides export to the same
+place.
 """
 
 from __future__ import annotations
@@ -92,9 +90,9 @@ class _Store(http.server.BaseHTTPRequestHandler):
 
 
 def test_a_dispatchers_header_context_is_the_nearer_parent_than_the_manifests(spans, monkeypatch):
-    """A pool between the server and the worker forwards its own span in the
-    headers while the manifest still holds the server's. The worker's span
-    belongs under the pool's."""
+    """A pool forwards its own span in headers while the manifest holds the server's; the worker
+    belongs under the pool's.
+    """
     from strata.notebook.remote_executor import (
         NOTEBOOK_EXECUTOR_MANIFEST_VERSION,
         NOTEBOOK_EXECUTOR_TRANSFORM_REF,
@@ -136,8 +134,7 @@ def test_a_dispatchers_header_context_is_the_nearer_parent_than_the_manifests(sp
 
 
 def test_with_tracing_off_nothing_is_added_and_no_span_is_made(monkeypatch):
-    """The helpers run on every dispatch, so switched off they contribute no
-    header and no span, whatever the caller sent."""
+    """The helpers run on every dispatch, so when off they add no header and no span."""
     monkeypatch.setenv("STRATA_TRACING_ENABLED", "false")
 
     assert tracing.current_trace_context() == {}
@@ -148,9 +145,9 @@ def test_with_tracing_off_nothing_is_added_and_no_span_is_made(monkeypatch):
 
 
 async def test_through_a_pool_the_order_is_dispatch_then_pool_then_worker(spans, monkeypatch):
-    """The chain a pooled remote cell takes: the dispatch's context reaches
-    the pool as headers and in the manifest, the pool opens its span, and the
-    worker runs under the pool's."""
+    """Dispatch context reaches the pool as headers and in the manifest; the worker runs under the
+    pool's span.
+    """
     import json
 
     import httpx

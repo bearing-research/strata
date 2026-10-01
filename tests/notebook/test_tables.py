@@ -1,4 +1,4 @@
-"""Tests for lake table inputs (``@table`` annotation) — tables.py."""
+"""Tests for lake table inputs (``@table`` annotation)."""
 
 from __future__ import annotations
 

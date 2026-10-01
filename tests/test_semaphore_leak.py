@@ -1,17 +1,7 @@
-"""Regression tests for semaphore/resource leak under client disconnects and timeouts.
+"""Resources are released when clients disconnect mid-stream, time out or are cancelled.
 
-This test suite ensures the server properly releases resources when:
-- Clients disconnect mid-stream
-- Clients timeout waiting for response
-- Requests are cancelled
-
-The bug this prevents:
-- Semaphore slots were leaked when clients disconnected before the generator
-  completed, causing the server to eventually return 503 for all requests.
-- Fixed by moving resource tracking inside the generator with proper cleanup
-  in GeneratorExit and CancelledError handlers.
-
-These tests should be run as part of CI to prevent regression.
+A leaked slot per disconnect eventually makes the server answer 503 to everything. Cleanup lives in
+the generator's GeneratorExit and CancelledError handlers.
 """
 
 import asyncio
@@ -29,7 +19,6 @@ from tests.conftest import find_free_port, run_server
 
 
 def build_materialize_request(table_uri: str, columns: list[str] | None = None) -> dict:
-    """Build a materialize request for the given table and columns."""
     params = {}
     if columns is not None:
         params["columns"] = columns
@@ -42,7 +31,7 @@ def build_materialize_request(table_uri: str, columns: list[str] | None = None) 
 
 @pytest.fixture
 def large_warehouse(tmp_path):
-    """Create a warehouse with enough data to cause slow responses."""
+    """A warehouse with enough data to make responses slow."""
     import sys
 
     if sys.platform == "win32":
@@ -88,18 +77,10 @@ def large_warehouse(tmp_path):
 
 
 class TestSemaphoreLeakRegression:
-    """Regression tests for semaphore leak under disconnects/timeouts.
-
-    These tests verify the fix for the bug where client disconnects
-    caused semaphore slots to leak, eventually exhausting capacity.
-    """
+    """Semaphore slots must not leak under disconnects or timeouts."""
 
     def test_semaphore_released_on_client_timeout(self, large_warehouse, tmp_path):
-        """Test that semaphore is released when client times out.
-
-        This is the core regression test. Before the fix, client timeouts
-        would leak semaphore slots, eventually causing all requests to 503.
-        """
+        """The core case: a leaked slot per timeout eventually makes every request 503."""
         port = find_free_port()
         config = StrataConfig(
             host="127.0.0.1",
@@ -175,7 +156,7 @@ class TestSemaphoreLeakRegression:
                 )
 
     def test_semaphore_released_on_client_disconnect(self, large_warehouse, tmp_path):
-        """Test that semaphore is released when client disconnects mid-stream."""
+        """The semaphore is released when the client disconnects mid-stream."""
         port = find_free_port()
         config = StrataConfig(
             host="127.0.0.1",
@@ -229,11 +210,7 @@ class TestSemaphoreLeakRegression:
                 )
 
     def test_no_503_after_many_timeouts(self, large_warehouse, tmp_path):
-        """Test that server doesn't return 503 after many client timeouts.
-
-        This is the key acceptance test: even after many timeouts,
-        the server should still accept new requests.
-        """
+        """After many client timeouts the server still accepts new requests."""
         port = find_free_port()
         max_scans = 3  # Very low limit
         config = StrataConfig(
@@ -292,7 +269,7 @@ class TestSemaphoreLeakRegression:
 
     @pytest.mark.asyncio
     async def test_concurrent_disconnects_no_leak(self, large_warehouse, tmp_path):
-        """Test that concurrent client disconnects don't leak semaphores."""
+        """Concurrent client disconnects do not leak semaphores."""
         port = find_free_port()
         max_scans = 10
         config = StrataConfig(
@@ -355,10 +332,8 @@ class TestSemaphoreLeakRegression:
 
 
 class TestSemaphoreInvariants:
-    """Tests for semaphore invariants that should always hold."""
-
     def test_active_scans_never_negative(self, large_warehouse, tmp_path):
-        """Test that active_scans counter never goes negative."""
+        """active_scans never goes negative."""
         port = find_free_port()
         config = StrataConfig(
             host="127.0.0.1",
@@ -406,7 +381,7 @@ class TestSemaphoreInvariants:
                         pass
 
     def test_active_scans_bounded_by_max(self, large_warehouse, tmp_path):
-        """Test that active_scans never exceeds max_concurrent_scans."""
+        """active_scans never exceeds max_concurrent_scans."""
         port = find_free_port()
         max_scans = 3
         config = StrataConfig(

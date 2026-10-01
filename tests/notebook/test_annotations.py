@@ -6,15 +6,11 @@ from strata.notebook.annotations import parse_annotations
 
 
 class TestNameAnnotation:
-    """Tests for the @name annotation."""
-
     def test_name_with_spaces(self):
-        """@name accepts human-readable names with spaces."""
         result = parse_annotations("# @name Load arXiv Papers\nx = 1")
         assert result.name == "Load arXiv Papers"
 
     def test_name_identifier(self):
-        """@name accepts Python identifiers (backward compat for prompt cells)."""
         result = parse_annotations("# @name research_themes\n")
         assert result.name == "research_themes"
 
@@ -24,17 +20,14 @@ class TestNameAnnotation:
         assert result.name == "Aggregate by Topic (DataFusion)"
 
     def test_name_empty_is_none(self):
-        """Empty @name is ignored."""
         result = parse_annotations("# @name\nx = 1")
         assert result.name is None
 
     def test_name_no_annotation(self):
-        """No @name annotation → None."""
         result = parse_annotations("x = 1")
         assert result.name is None
 
     def test_name_with_worker(self):
-        """@name coexists with @worker."""
         result = parse_annotations("# @name Train Model\n# @worker gpu-fly\nx = 1")
         assert result.name == "Train Model"
         assert result.worker == "gpu-fly"
@@ -46,7 +39,7 @@ class TestNameAnnotation:
 
 
 class TestNameInPromptAnalyzer:
-    """Verify that prompt_analyzer still requires identifiers for @name."""
+    """prompt_analyzer still requires identifiers for @name."""
 
     def test_prompt_analyzer_requires_identifier(self):
         from strata.notebook.prompt_analyzer import analyze_prompt_cell
@@ -63,7 +56,7 @@ class TestNameInPromptAnalyzer:
 
 
 class TestNameInRoutes:
-    """Verify that @name flows through to the API response."""
+    """@name flows through to the API response."""
 
     def test_cell_annotations_include_name(self, tmp_path):
         from strata.notebook.parser import parse_notebook
@@ -99,8 +92,6 @@ class TestNameInRoutes:
 
 
 class TestLoopAnnotation:
-    """Tests for ``@loop`` / ``@loop_until`` parsing."""
-
     def test_loop_requires_max_iter_and_carry(self):
         """A well-formed ``@loop`` populates max_iter and carry."""
         result = parse_annotations("# @loop max_iter=10 carry=state\nstate = refine(state)")
@@ -174,9 +165,9 @@ class TestLoopAnnotation:
         assert result.loop.carry == ""
 
     def test_loop_annotation_surfaces_in_cell_serialization(self, tmp_path):
-        """``session.serialize_cell`` must include the loop annotation so
-        the frontend can populate the iteration picker without a second
-        round-trip to parse the cell source itself."""
+        """``session.serialize_cell`` includes the loop annotation, so the frontend fills the
+        iteration picker without parsing the source itself.
+        """
         from strata.notebook.parser import parse_notebook
         from strata.notebook.session import NotebookSession
         from strata.notebook.writer import add_cell_to_notebook, create_notebook, write_cell
@@ -226,8 +217,6 @@ class TestLoopAnnotation:
 
 
 class TestVariantAnnotation:
-    """Tests for the @variant grouping annotation."""
-
     def test_variant_parses_group_and_name(self):
         result = parse_annotations("# @variant model_choice gpt4\nx = 1")
         assert result.variant is not None
@@ -396,8 +385,6 @@ class TestSpliceDirectives:
 
 
 class TestNocacheAnnotation:
-    """Tests for the @nocache annotation."""
-
     def test_nocache_sets_flag(self):
         result = parse_annotations("# @nocache\nprint('x')\n")
         assert result.nocache is True

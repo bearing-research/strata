@@ -1,10 +1,7 @@
 """Authorization under ``auth_mode="api_key"``.
 
-Authentication and authorization are separate questions, and api_key mode
-answered only the first: every gate asked ``auth_mode == "trusted_proxy"``, so
-a valid key with no scopes reached admin endpoints and no tenant filter was
-applied. These pin that a key is authorized the same way a proxy-asserted
-principal is.
+A key is authorized the same way a proxy-asserted principal is: scopes gate admin endpoints and the
+tenant filter applies.
 """
 
 from __future__ import annotations
@@ -106,7 +103,7 @@ class TestTenantIsolation:
 
 
 class TestPrincipalAuthEnabled:
-    """The predicate the gates now share."""
+    """The predicate the gates share."""
 
     @pytest.mark.parametrize(
         ("mode", "expected"),
@@ -122,8 +119,7 @@ class TestPrincipalAuthEnabled:
 class TestWebSocketAuthentication:
     """The WS upgrade authenticates itself; no HTTP middleware runs for it.
 
-    Driven through fake objects rather than ``TestClient.websocket_connect``,
-    which deadlocks on Python 3.12 macOS CI in modules that share an app.
+    Uses fake objects because ``TestClient.websocket_connect`` deadlocks on Python 3.12 macOS CI.
     """
 
     class _FakeWebSocket:

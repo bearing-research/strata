@@ -1,8 +1,6 @@
 """Unit tests for the ASCII DAG renderer.
 
-Pure-function tests: assert structural properties (every cell boxed, glyphs +
-selection shown, edges drawn, graceful fallback/edge cases) rather than exact
-art, which would be brittle to layout tweaks.
+Asserts structural properties rather than exact art, which would break on layout tweaks.
 """
 
 from __future__ import annotations
@@ -36,9 +34,7 @@ def test_every_cell_is_boxed_with_its_glyph():
 
 
 def test_diamond_has_clean_corners_and_tees_no_crossing():
-    """A diamond (a→{b,c}→d) renders with clean elbows + branch/merge tees and
-    no spurious ``┼`` — the direction-accumulation prettifier in action.
-    """
+    """A diamond renders clean elbows and branch/merge tees with no spurious ``┼``."""
     order, labels, statuses, edges = _diamond()
     art = render_dag(order, labels, statuses, edges)
     assert any(ch in art for ch in "┌┐└┘")  # clean corners, no crossing
@@ -67,7 +63,7 @@ def test_cycle_does_not_crash():
 
 
 def test_falls_back_when_grandalf_unavailable(monkeypatch):
-    """If grandalf layout raises, the fallback longest-path layout still renders."""
+    """If grandalf layout raises, the longest-path fallback still renders."""
 
     def _boom(*args, **kwargs):
         raise RuntimeError("no grandalf")
@@ -81,7 +77,6 @@ def test_falls_back_when_grandalf_unavailable(monkeypatch):
 
 
 def test_layers_are_top_down_in_dependency_order():
-    """A linear chain a→b→c puts a above b above c (more rows)."""
     order = ["a", "b", "c"]
     art = render_dag(
         order, {c: c for c in order}, {c: "ready" for c in order}, [("a", "b"), ("b", "c")]

@@ -1,16 +1,7 @@
 """Tests for ``strata.notebook.jupyter_import``.
 
-PR 1 coverage: parse + convert markdown / code cells, ``;``-suppression
-handling, source-order preservation.
-
-PR 2 coverage: line-magic and cell-magic translation per the table,
-``!shell`` handling, dependency capture from sibling
-``requirements.txt`` / ``pyproject.toml`` and from ``pip install``
-lines extracted from cells.
-
-PR 3 coverage: import report written to ``<notebook_dir>/
-import_report.md`` and returned on the :class:`ImportResult` so REST
-can serve it without re-reading from disk.
+Covers cell conversion and ``;``-suppression, magic and ``!shell`` translation,
+dependency capture, and the import report.
 """
 
 from __future__ import annotations
@@ -105,10 +96,10 @@ def test_import_converts_markdown_and_code_cells_in_source_order(tmp_path: Path)
 
 
 def test_import_preserves_trailing_semicolon_display_suppression(tmp_path: Path) -> None:
-    """Jupyter convention: ``df;`` evaluates ``df`` but suppresses the
-    auto-displayed value. Strata's harness auto-displays any final
-    bare expression, so the converter has to rewrite the cell so the
-    last statement isn't an ``ast.Expr``."""
+    """``df;`` suppresses Jupyter's auto-display, but Strata's harness displays any final bare
+    expression, so the converter must make the last statement something other than an
+    ``ast.Expr``.
+    """
     ipynb = _make_ipynb(
         tmp_path,
         [_code_cell("import pandas as pd\ndf = pd.DataFrame()\ndf;")],
@@ -126,8 +117,7 @@ def test_import_preserves_trailing_semicolon_display_suppression(tmp_path: Path)
 
 
 def test_import_detects_suppression_followed_by_inline_comment(tmp_path: Path) -> None:
-    """Real notebooks routinely write ``df;  # don't print`` — the ``;``
-    is still suppression, the comment is just commentary."""
+    """``df;  # don't print`` is still suppression; the comment is commentary."""
     ipynb = _make_ipynb(
         tmp_path,
         [_code_cell("import pandas as pd\ndf = pd.DataFrame()\ndf;  # quiet\n")],
@@ -152,11 +142,9 @@ def test_import_passes_through_non_suppressed_last_expression(tmp_path: Path) ->
 
 
 def test_import_strips_envelope_whitespace_around_source(tmp_path: Path) -> None:
-    """Regression: some hand-edited .ipynb files store cell source as
-    ``" Image(filename='...')"`` (leading space). That leading space
-    confuses Python's module-level parser; the converter has to strip
-    envelope whitespace before writing the cell so the analyzer can
-    parse it. Caught by pml3-ch02 in the extended corpus."""
+    """Hand-edited .ipynb files can store source with a leading space, which the module-level
+    parser rejects, so the converter strips envelope whitespace.
+    """
     ipynb = _make_ipynb(
         tmp_path,
         [_code_cell(" Image(filename='./img.png', width=600) ")],
@@ -211,10 +199,7 @@ def test_import_returns_error_for_missing_file(tmp_path: Path) -> None:
 
 
 def test_import_rejects_non_dict_top_level_json(tmp_path: Path) -> None:
-    """Regression: a top-level JSON list / scalar / null used to fall
-    through to ``nb.get("cells")`` and crash with AttributeError. The
-    converter should raise ValueError instead so callers can map to a
-    clean 400."""
+    """A top-level JSON list, scalar or null raises ValueError (a clean 400), not AttributeError."""
     for bad in ("[]", '"a string"', "null", "42"):
         bad_path = tmp_path / f"bad-{hash(bad)}.ipynb"
         bad_path.write_text(bad, encoding="utf-8")
@@ -223,11 +208,9 @@ def test_import_rejects_non_dict_top_level_json(tmp_path: Path) -> None:
 
 
 def test_import_rejects_non_dict_cell_entries(tmp_path: Path) -> None:
-    """Regression: ``{"cells":[1]}`` used to crash mid-loop with
-    AttributeError on ``cell.get("cell_type")``. Validate the cell
-    list shape before we materialize a directory, so the failure
-    surfaces as a clean ValueError and no orphan notebook dir is
-    left on disk."""
+    """A non-dict cell entry raises ValueError before any directory exists, so no orphan
+    notebook dir is left on disk.
+    """
     bad = tmp_path / "bad_cells.ipynb"
     bad.write_text(
         '{"cells":[1, {"cell_type":"code","source":"x=1"}], "metadata":{}, '
@@ -255,8 +238,7 @@ def test_import_rejects_non_list_cells_field(tmp_path: Path) -> None:
 
 
 def test_import_stamps_owner_when_provided(tmp_path: Path) -> None:
-    """The CLI doesn't pass owner; the REST endpoint does. Verify the
-    plumbing all the way down to notebook.toml."""
+    """The REST endpoint passes owner (the CLI does not); it must reach notebook.toml."""
     import tomllib
 
     ipynb = _make_ipynb(tmp_path, [_code_cell("x = 1\n")])
@@ -329,8 +311,7 @@ def test_strata_import_cli_rejects_missing_file(tmp_path: Path) -> None:
 
 
 def test_drops_matplotlib_inline_magic(tmp_path: Path) -> None:
-    """%matplotlib inline is decorative in Strata — figures are
-    captured via the display protocol regardless."""
+    """%matplotlib inline is decorative in Strata; figures are captured by the display protocol."""
     ipynb = _make_ipynb(
         tmp_path,
         [_code_cell("%matplotlib inline\nimport matplotlib.pyplot as plt\n")],
@@ -444,10 +425,9 @@ def test_drops_javascript_and_html_cell_magics(tmp_path: Path) -> None:
 
 
 def test_inspection_magics_dropped(tmp_path: Path) -> None:
-    """``%who``, ``%whos``, ``%lsmagic``, ``%history``, ``%alias``,
-    ``%magic`` all live for interactive REPL exploration. None have
-    Strata equivalents; all should drop cleanly with marker comments
-    so the rest of the cell still parses."""
+    """``%who``, ``%whos``, ``%lsmagic``, ``%history``, ``%alias`` and ``%magic`` have no Strata
+    equivalent and drop with marker comments, so the rest of the cell still parses.
+    """
     ipynb = _make_ipynb(
         tmp_path,
         [
@@ -511,8 +491,9 @@ def test_more_cell_magics_routed_correctly(tmp_path: Path) -> None:
 
 
 def test_unsupported_line_magic_dropped_with_comment(tmp_path: Path) -> None:
-    """``%pastebin`` is not in the translation table — should drop
-    with a marker comment so the rest of the cell still parses."""
+    """``%pastebin`` is not in the translation table, so it drops with a marker comment and the
+    cell still parses.
+    """
     ipynb = _make_ipynb(tmp_path, [_code_cell("%pastebin foo\nx = 1\n")])
     result = import_notebook(ipynb)
     assert "%pastebin" in " ".join(result.dropped_magics)
@@ -554,9 +535,7 @@ def test_pip_install_shell_form_captures_packages(tmp_path: Path) -> None:
 
 
 def test_pip_install_does_not_capture_subcommand_word(tmp_path: Path) -> None:
-    """Regression: ``%pip install httpx`` must capture ``httpx``, NOT
-    the literal subcommand word ``install``. Caught by end-to-end run
-    on a fixture with a single ``%pip install`` line."""
+    """``%pip install httpx`` captures ``httpx``, not the subcommand word ``install``."""
     ipynb = _make_ipynb(tmp_path, [_code_cell("%pip install httpx\n")])
     result = import_notebook(ipynb)
     assert result.captured_deps == ["httpx"]
@@ -658,10 +637,9 @@ def test_deduplicates_deps_across_sources(tmp_path: Path) -> None:
 
 
 def test_shell_assignment_form_does_not_produce_invalid_python(tmp_path: Path) -> None:
-    """Jupyter also supports ``files = !ls`` — assignment form of !cmd.
-    Letting it pass through produces invalid Python and breaks the
-    imported cell. We drop the command with a stub binding so the
-    cell still parses and downstream references resolve."""
+    """``files = !ls`` passed through would be invalid Python, so the command drops with a stub
+    binding; the cell parses and downstream references resolve.
+    """
     ipynb = _make_ipynb(
         tmp_path,
         [
@@ -685,8 +663,9 @@ def test_shell_assignment_form_does_not_produce_invalid_python(tmp_path: Path) -
 def test_shell_assignment_with_pip_install_captures_deps_and_stubs_target(
     tmp_path: Path,
 ) -> None:
-    """``out = !pip install requests`` — rare but legal. Capture the
-    package; stub the lhs with []."""
+    """``out = !pip install requests`` is rare but legal: capture the package, stub the lhs
+    with [].
+    """
     ipynb = _make_ipynb(
         tmp_path,
         [_code_cell("out = !pip install requests\nprint(out)\n")],
@@ -718,10 +697,9 @@ def test_run_magic_generates_self_contained_path_import(tmp_path: Path) -> None:
 
 
 def test_pyproject_serialization_handles_specs_with_quotes(tmp_path: Path) -> None:
-    """A common Kaggle dep is something like
-    ``importlib-metadata; python_version < "3.10"``. Manual string
-    interpolation breaks the TOML — round-trip through tomllib /
-    tomli_w handles the escaping."""
+    """Specs with quotes (``importlib-metadata; python_version < "3.10"``) break manual string
+    interpolation; a tomllib / tomli_w round trip escapes them.
+    """
     (tmp_path / "requirements.txt").write_text(
         'importlib-metadata; python_version < "3.10"\nrequests\n',
         encoding="utf-8",
@@ -739,10 +717,9 @@ def test_pyproject_serialization_handles_specs_with_quotes(tmp_path: Path) -> No
 
 
 def test_pyproject_skips_pip_only_specs(tmp_path: Path) -> None:
-    """``-e .`` and bare ``git+https://...`` aren't PEP 508 specifiers;
-    pyproject.toml ``dependencies`` won't accept them. Filter at the
-    boundary so we don't write invalid TOML or surface confusing
-    uv-sync errors later."""
+    """``-e .`` and bare ``git+https://...`` are not PEP 508 specifiers, so they are filtered
+    rather than written as invalid TOML that fails uv sync later.
+    """
     (tmp_path / "requirements.txt").write_text(
         "-e .\ngit+https://github.com/psf/requests\nrequests==2.31.0\n",
         encoding="utf-8",
@@ -774,11 +751,9 @@ def test_pyproject_skips_pip_only_specs(tmp_path: Path) -> None:
 
 
 def test_captures_deps_from_bare_import_statements(tmp_path: Path) -> None:
-    """The dep-capture design's source 3: walk imports and auto-add
-    third-party packages to pyproject.toml. Without this, Kaggle-style
-    notebooks that just ``import pandas`` (no %pip install line, no
-    sibling requirements.txt) would land with an empty pyproject and
-    crash at run time."""
+    """Third-party imports are added to pyproject.toml, so a notebook that only does ``import
+    pandas`` does not land with an empty pyproject and crash at run time.
+    """
     ipynb = _make_ipynb(
         tmp_path,
         [
@@ -794,10 +769,9 @@ def test_captures_deps_from_bare_import_statements(tmp_path: Path) -> None:
 
 
 def test_import_name_to_pip_name_override(tmp_path: Path) -> None:
-    """Common Python idioms where the top-level import name differs
-    from the PyPI package name (``cv2`` → opencv-python, ``sklearn``
-    → scikit-learn, ``PIL`` → Pillow, etc.). The mapping is a hand-
-    maintained dict; anything not in it falls through unchanged."""
+    """Import names that differ from the PyPI name (``cv2``, ``sklearn``, ``PIL``) map through a
+    hand-maintained dict; anything else passes through unchanged.
+    """
     ipynb = _make_ipynb(
         tmp_path,
         [
@@ -818,9 +792,7 @@ def test_import_name_to_pip_name_override(tmp_path: Path) -> None:
 
 
 def test_import_name_pip_overrides_extended(tmp_path: Path) -> None:
-    """Regression test pinning the full override table. New entries
-    added to ``_IMPORT_TO_PIP`` should grow this test rather than
-    living unpinned."""
+    """Pins the whole ``_IMPORT_TO_PIP`` table; a new entry grows this test."""
     ipynb = _make_ipynb(
         tmp_path,
         [
@@ -856,9 +828,7 @@ def test_import_name_pip_overrides_extended(tmp_path: Path) -> None:
 
 
 def test_stdlib_imports_not_captured(tmp_path: Path) -> None:
-    """``import os``, ``import json``, ``import re`` etc. resolve to
-    the standard library — never a PyPI dep. Filtering via
-    sys.stdlib_module_names covers everything."""
+    """Standard-library imports are never PyPI deps; ``sys.stdlib_module_names`` covers them."""
     ipynb = _make_ipynb(
         tmp_path,
         [_code_cell("import os\nimport json\nimport re\nfrom pathlib import Path\n")],
@@ -872,9 +842,9 @@ def test_stdlib_imports_not_captured(tmp_path: Path) -> None:
 
 
 def test_local_module_imports_not_captured(tmp_path: Path) -> None:
-    """``import my_helpers`` next to a ``my_helpers.py`` file should
-    NOT be captured as a fake PyPI dep — that would make ``uv sync``
-    fail later with a confusing 'package not found' error."""
+    """``import my_helpers`` next to ``my_helpers.py`` is not a PyPI dep; capturing it would
+    make ``uv sync`` fail with 'package not found'.
+    """
     (tmp_path / "my_helpers.py").write_text("def helper(): pass\n", encoding="utf-8")
     (tmp_path / "my_package").mkdir()
     (tmp_path / "my_package" / "__init__.py").write_text("", encoding="utf-8")
@@ -893,9 +863,9 @@ def test_local_module_imports_not_captured(tmp_path: Path) -> None:
 
 
 def test_explicit_version_pin_shadows_inferred_bare_name(tmp_path: Path) -> None:
-    """If the user pinned ``pandas==2.0.1`` in requirements.txt and a
-    cell does ``import pandas``, only the pinned version should land
-    in pyproject.toml. Source 1+2 (explicit) shadow source 3 (inferred)."""
+    """A pin like ``pandas==2.0.1`` in requirements.txt shadows the bare name inferred from
+    ``import pandas``.
+    """
     (tmp_path / "requirements.txt").write_text("pandas==2.0.1\n", encoding="utf-8")
     ipynb = _make_ipynb(
         tmp_path,
@@ -910,10 +880,7 @@ def test_explicit_version_pin_shadows_inferred_bare_name(tmp_path: Path) -> None
 
 
 def test_pep503_normalization_dedupes_underscore_dash_variants(tmp_path: Path) -> None:
-    """PEP 503 says ``scikit_learn`` and ``scikit-learn`` are the same
-    package. Our dedup has to normalize so an underscore-form in
-    requirements.txt doesn't get duplicated by a dash-form anywhere
-    else (or vice versa)."""
+    """PEP 503 treats ``scikit_learn`` and ``scikit-learn`` as one package, so dedup normalizes."""
     (tmp_path / "requirements.txt").write_text("scikit-learn\n", encoding="utf-8")
     ipynb = _make_ipynb(
         tmp_path,
@@ -927,8 +894,7 @@ def test_pep503_normalization_dedupes_underscore_dash_variants(tmp_path: Path) -
 
 
 def test_relative_imports_not_captured(tmp_path: Path) -> None:
-    """``from . import foo`` is a relative import — never a PyPI dep,
-    even though the AST has an ImportFrom node."""
+    """``from . import foo`` is a relative import, never a PyPI dep."""
     ipynb = _make_ipynb(
         tmp_path,
         [_code_cell("from . import helpers\nfrom ..pkg import thing\nimport numpy\n")],
@@ -1026,8 +992,7 @@ def test_report_lists_warnings(tmp_path: Path) -> None:
 
 
 def test_report_omits_empty_sections_for_clean_notebook(tmp_path: Path) -> None:
-    """A notebook with no magics / no shell / no deps / no warnings
-    produces a short report — only the counts section."""
+    """A clean notebook's report has only the counts section."""
     ipynb = _make_ipynb(
         tmp_path,
         [_md_cell("# Hello\n"), _code_cell("x = 1\n")],
@@ -1043,8 +1008,7 @@ def test_report_omits_empty_sections_for_clean_notebook(tmp_path: Path) -> None:
 
 
 def test_format_import_report_is_callable_directly(tmp_path: Path) -> None:
-    """The formatter is exposed so the REST endpoint (PR 4) can call it
-    without re-running the conversion."""
+    """The formatter is exposed so the REST endpoint can call it without re-running conversion."""
     ipynb = _make_ipynb(tmp_path, [_code_cell("x = 1\n")])
     result = import_notebook(ipynb)
     rendered = format_import_report(result, ipynb)

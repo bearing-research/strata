@@ -12,7 +12,7 @@ from strata.types import CacheGranularity, CacheKey, TableIdentity, Task
 
 @pytest.fixture
 def sample_batch():
-    """Create a sample record batch."""
+    """A sample record batch."""
     return pa.RecordBatch.from_pydict(
         {
             "id": [1, 2, 3],
@@ -24,20 +24,16 @@ def sample_batch():
 
 @pytest.fixture
 def table_identity():
-    """Create a sample table identity."""
+    """A sample table identity."""
     return TableIdentity.from_table_id("test_db.events")
 
 
 class TestCacheGranularityConfig:
-    """Tests for cache granularity configuration."""
-
     def test_default_granularity_is_row_group_projection(self, tmp_path):
-        """Test that default granularity is ROW_GROUP_PROJECTION."""
         config = StrataConfig(cache_dir=tmp_path / "cache")
         assert config.cache_granularity == CacheGranularity.ROW_GROUP_PROJECTION
 
     def test_can_configure_row_group_granularity(self, tmp_path):
-        """Test that ROW_GROUP granularity can be configured."""
         config = StrataConfig(
             cache_dir=tmp_path / "cache",
             cache_granularity=CacheGranularity.ROW_GROUP,
@@ -46,10 +42,7 @@ class TestCacheGranularityConfig:
 
 
 class TestCacheKeyGranularity:
-    """Tests for CacheKey with different granularity options."""
-
     def test_row_group_projection_includes_projection(self, table_identity):
-        """Test that ROW_GROUP_PROJECTION includes projection in key."""
         key1 = CacheKey(
             tenant_id="_default",
             table_identity=table_identity,
@@ -72,7 +65,6 @@ class TestCacheKeyGranularity:
         assert hex1 != hex2
 
     def test_row_group_ignores_projection(self, table_identity):
-        """Test that ROW_GROUP ignores projection in key."""
         key1 = CacheKey(
             tenant_id="_default",
             table_identity=table_identity,
@@ -95,7 +87,6 @@ class TestCacheKeyGranularity:
         assert hex1 == hex2
 
     def test_row_group_still_differentiates_row_groups(self, table_identity):
-        """Test that ROW_GROUP still differentiates different row groups."""
         key1 = CacheKey(
             tenant_id="_default",
             table_identity=table_identity,
@@ -120,10 +111,7 @@ class TestCacheKeyGranularity:
 
 
 class TestDiskCacheGranularity:
-    """Tests for DiskCache with different granularity options."""
-
     def test_row_group_projection_caches_separately(self, tmp_path, sample_batch, table_identity):
-        """Test that ROW_GROUP_PROJECTION caches different projections separately."""
         config = StrataConfig(
             cache_dir=tmp_path / "cache",
             cache_granularity=CacheGranularity.ROW_GROUP_PROJECTION,
@@ -155,7 +143,6 @@ class TestDiskCacheGranularity:
     def test_row_group_shares_cache_across_projections(
         self, tmp_path, sample_batch, table_identity
     ):
-        """Test that ROW_GROUP shares cache across different projections."""
         config = StrataConfig(
             cache_dir=tmp_path / "cache",
             cache_granularity=CacheGranularity.ROW_GROUP,
@@ -187,7 +174,6 @@ class TestDiskCacheGranularity:
     def test_row_group_still_separates_different_row_groups(
         self, tmp_path, sample_batch, table_identity
     ):
-        """Test that ROW_GROUP still separates different row groups."""
         config = StrataConfig(
             cache_dir=tmp_path / "cache",
             cache_granularity=CacheGranularity.ROW_GROUP,
@@ -219,7 +205,7 @@ class TestDiskCacheGranularity:
     def test_row_group_cached_fetcher_refetches_full_row_group_for_broader_projection(
         self, tmp_path
     ):
-        """ROW_GROUP mode should cache full row groups, not pin the first projection."""
+        """ROW_GROUP mode caches full row groups instead of pinning the first projection."""
         parquet_path = tmp_path / "data.parquet"
         pq.write_table(
             pa.table(

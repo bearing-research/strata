@@ -1,10 +1,7 @@
-"""Tests for the per-language analyzer registry.
+"""Tests for the per-language analyzer registry surface.
 
-Most behavior is exercised end-to-end by the DAG + cell analysis suites
-(``test_analyzer.py``, ``test_prompt_analyzer.py``, ``test_sql_*.py``,
-``test_dag.py``). These tests target the registry surface itself —
-adding a language, looking one up, the failure shape for an unregistered
-language.
+Covers registration, lookup and the error for an unregistered language; per-language
+analysis is covered end to end by the DAG and analyzer suites.
 """
 
 from __future__ import annotations
@@ -74,9 +71,7 @@ class TestRegisterIsExtensible:
     def test_register_overrides_existing(self):
         """Re-registering a language replaces the prior adapter.
 
-        Matches the SQL ``DriverAdapter`` registry's behaviour. Tests
-        rely on this to swap in fakes; production code shouldn't, but
-        the contract is the contract.
+        Same as the SQL ``DriverAdapter`` registry; tests rely on it to swap in fakes.
         """
 
         captured: list[str] = []

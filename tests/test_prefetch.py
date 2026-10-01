@@ -1,10 +1,6 @@
-"""Tests for prefetch optimization and safeguards.
+"""Prefetch: overlaps planning with the first row-group fetch to cut TTFB.
 
-These tests verify that the prefetch mechanism:
-1. Reduces TTFB by overlapping planning and first row group fetch
-2. Is bounded by a semaphore to prevent resource exhaustion
-3. Properly cancels on scan deletion
-4. Tracks metrics for observability (started, used, wasted)
+Checks the semaphore bound, cancellation on scan deletion, and the started/used/wasted metrics.
 """
 
 import time
@@ -21,7 +17,6 @@ from tests.conftest import find_free_port, run_server
 
 
 def build_materialize_request(table_uri: str, columns: list[str] | None = None) -> dict:
-    """Build a materialize request for the given table and columns."""
     params = {}
     if columns is not None:
         params["columns"] = columns
@@ -34,7 +29,7 @@ def build_materialize_request(table_uri: str, columns: list[str] | None = None) 
 
 @pytest.fixture
 def prefetch_warehouse(tmp_path):
-    """Create a warehouse with data for prefetch testing."""
+    """A warehouse with data for prefetch tests."""
     import sys
 
     if sys.platform == "win32":
@@ -79,10 +74,8 @@ def prefetch_warehouse(tmp_path):
 
 
 class TestPrefetchBasics:
-    """Basic prefetch functionality tests."""
-
     def test_prefetch_metrics_in_response(self, prefetch_warehouse, tmp_path):
-        """Test that prefetch metrics are exposed in /metrics endpoint."""
+        """Prefetch metrics are exposed on /metrics."""
         port = find_free_port()
         config = StrataConfig(
             host="127.0.0.1",
@@ -110,7 +103,7 @@ class TestPrefetchBasics:
                 assert prefetch["in_flight"] == 0
 
     def test_prefetch_used_on_normal_scan(self, prefetch_warehouse, tmp_path):
-        """Test that prefetch is used when stream is consumed normally."""
+        """Prefetch is used when the stream is consumed normally."""
         port = find_free_port()
         config = StrataConfig(
             host="127.0.0.1",
@@ -146,7 +139,7 @@ class TestPrefetchBasics:
                 assert prefetch["in_flight"] == 0
 
     def test_prefetch_wasted_on_scan_delete(self, prefetch_warehouse, tmp_path):
-        """Test that prefetch is marked as wasted when artifact is created but not streamed."""
+        """Prefetch counts as wasted when the artifact is created but not streamed."""
         import strata.server as server_module
 
         port = find_free_port()
@@ -183,10 +176,8 @@ class TestPrefetchBasics:
 
 
 class TestPrefetchSemaphore:
-    """Tests for prefetch semaphore limiting."""
-
     def test_prefetch_limited_by_semaphore(self, prefetch_warehouse, tmp_path):
-        """Test that concurrent prefetches are limited by semaphore."""
+        """Concurrent prefetches are limited by the semaphore."""
         port = find_free_port()
         config = StrataConfig(
             host="127.0.0.1",
@@ -226,10 +217,8 @@ class TestPrefetchSemaphore:
 
 
 class TestPrefetchCancellation:
-    """Tests for prefetch cancellation on scan deletion."""
-
     def test_prefetch_cancelled_on_immediate_delete(self, prefetch_warehouse, tmp_path):
-        """Test that prefetch is cancelled if artifact is created but not streamed immediately."""
+        """Prefetch is cancelled when the artifact is created but not streamed right away."""
         port = find_free_port()
         config = StrataConfig(
             host="127.0.0.1",
@@ -259,10 +248,8 @@ class TestPrefetchCancellation:
 
 
 class TestPrefetchPrometheusMetrics:
-    """Tests for prefetch Prometheus metrics."""
-
     def test_prefetch_prometheus_metrics(self, prefetch_warehouse, tmp_path):
-        """Test that prefetch metrics are exposed in Prometheus format."""
+        """Prefetch metrics are exposed in Prometheus format."""
         port = find_free_port()
         config = StrataConfig(
             host="127.0.0.1",
@@ -284,10 +271,8 @@ class TestPrefetchPrometheusMetrics:
 
 
 class TestPrefetchNoLeak:
-    """Tests to ensure prefetch doesn't leak resources."""
-
     def test_no_memory_leak_on_abandoned_scans(self, prefetch_warehouse, tmp_path):
-        """Test that abandoned streams don't leak prefetch resources."""
+        """Abandoned streams do not leak prefetch resources."""
         port = find_free_port()
         config = StrataConfig(
             host="127.0.0.1",

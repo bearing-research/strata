@@ -12,7 +12,6 @@ from strata.notebook.remote_bundle import (
 
 
 def test_remote_bundle_round_trip_success(tmp_path):
-    """A successful harness result should survive pack/unpack losslessly."""
     output_dir = tmp_path / "output"
     output_dir.mkdir()
     (output_dir / "x.json").write_text('{"value": 1}', encoding="utf-8")
@@ -43,7 +42,7 @@ def test_remote_bundle_round_trip_success(tmp_path):
 
 
 def test_remote_bundle_round_trip_failure(tmp_path):
-    """Failure manifests should preserve stderr, traceback, and schema version."""
+    """Failure manifests preserve stderr, traceback and schema version."""
     output_dir = tmp_path / "output"
     output_dir.mkdir()
     result = {
@@ -79,9 +78,7 @@ def test_remote_bundle_round_trip_failure(tmp_path):
 
 
 def test_read_member_rejects_oversized_member(tmp_path, monkeypatch):
-    """A malicious / misconfigured bundle could declare an enormous member
-    size; _read_member must refuse rather than OOM the unpacker.
-    """
+    """A bundle declaring an enormous member size is refused rather than OOM the unpacker."""
     import io
     import tarfile
 
@@ -105,10 +102,9 @@ def test_read_member_rejects_oversized_member(tmp_path, monkeypatch):
 
 
 def test_the_workers_build_environment_survives_the_bundle(tmp_path):
-    """A remote cell is exactly the case where the producing machine is not
-    ours, so the bundle has to carry the worker's identity across rather than
-    letting the receiving side substitute its own. Dropping it here would make
-    every remotely-computed artifact silently claim no platform at all.
+    """The bundle carries the worker's identity; the receiver must not substitute its own.
+
+    Otherwise every remotely computed artifact claims no platform.
     """
     output_dir = tmp_path / "output"
     output_dir.mkdir()
@@ -134,8 +130,7 @@ def test_the_workers_build_environment_survives_the_bundle(tmp_path):
 
 
 def test_a_bundle_from_a_worker_that_reports_no_platform_is_still_valid(tmp_path):
-    """Older workers predate this field. They must keep working, reporting an
-    empty platform rather than failing to unpack."""
+    """Workers without the field report an empty platform rather than fail to unpack."""
     output_dir = tmp_path / "output"
     output_dir.mkdir()
     (output_dir / "x.json").write_text('{"value": 1}', encoding="utf-8")
@@ -156,9 +151,7 @@ def test_a_bundle_from_a_worker_that_reports_no_platform_is_still_valid(tmp_path
 
 
 def test_every_display_survives_the_round_trip(tmp_path):
-    """A cell that draws three figures on a remote worker came back showing
-    one: only the last display travelled, because it is also the variable
-    ``_``. Each display, file-backed or inline, now arrives in order."""
+    """Every display arrives in order, file-backed or inline, not only the last one (``_``)."""
     output_dir = tmp_path / "output"
     output_dir.mkdir()
     for i in range(3):
@@ -190,8 +183,7 @@ def test_every_display_survives_the_round_trip(tmp_path):
 
 
 def test_a_bundle_from_an_older_worker_has_no_displays(tmp_path):
-    """An older worker sends no display list; the executor then falls back to
-    ``_``, as it always did."""
+    """With no display list from the worker, the executor falls back to ``_``."""
     output_dir = tmp_path / "output"
     output_dir.mkdir()
     result = {"success": True, "variables": {}, "stdout": "", "stderr": ""}

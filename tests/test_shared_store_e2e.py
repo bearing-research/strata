@@ -1,12 +1,7 @@
-"""End-to-end: the shared research store (W4).
+"""End-to-end shared research store, over a real service-mode server.
 
-Mirrors the deployment scenario exactly, over a real HTTP server in genuine
-service mode with authenticated write-back + multi-tenancy:
-
-  - Researcher A (team-a, `artifacts:write`) PUBLISHES a dataset under a name.
-  - Teammate B (team-a) RESOLVES the name and READS the data.
-  - Other-team C (team-b) is DENIED — tenant isolation.
-  - A team-a member WITHOUT the write scope cannot publish.
+Researcher A (team-a, `artifacts:write`) publishes a dataset under a name; teammate B resolves and
+reads it; C on team-b is denied; a team-a member without the write scope cannot publish.
 """
 
 import json
@@ -128,10 +123,10 @@ def _request_champion(base: str, art_id: str, version: int, headers: dict) -> ht
 
 
 def test_protected_alias_approval_requires_scope_and_distinct_approver(tmp_path):
-    """The registry governance path for the shared store: a protected alias
-    (``champion``) queues for approval, and deciding it requires the
-    ``admin:registry`` scope *and* a distinct approver — the requester can't
-    self-approve. This is the multi-tenant security claim, untested until now."""
+    """A protected alias (``champion``) queues for approval.
+
+    Deciding it requires ``admin:registry`` and an approver other than the requester.
+    """
     cache_dir = tmp_path / "cache"
     cache_dir.mkdir()
     artifact_dir = tmp_path / "artifacts"
@@ -204,9 +199,7 @@ def test_protected_alias_approval_requires_scope_and_distinct_approver(tmp_path)
 
 
 def test_protected_alias_admin_star_is_break_glass_self_approve(tmp_path):
-    """``admin:*`` is the break-glass scope: it satisfies admin:registry *and*
-    waives separation of duty, so a superadmin can self-approve their own
-    protected-alias request (the one-operator escape hatch)."""
+    """``admin:*`` is break-glass: it satisfies admin:registry and allows self-approval."""
     cache_dir = tmp_path / "cache"
     cache_dir.mkdir()
     artifact_dir = tmp_path / "artifacts"
@@ -244,8 +237,7 @@ def test_protected_alias_admin_star_is_break_glass_self_approve(tmp_path):
 
 
 def test_reject_requires_registry_scope(tmp_path):
-    """Rejecting a pending change is also a governance action — a tenant member
-    without ``admin:registry`` can't quietly drop a colleague's promotion."""
+    """Rejecting is governance too: a member without ``admin:registry`` cannot drop a promotion."""
     cache_dir = tmp_path / "cache"
     cache_dir.mkdir()
     artifact_dir = tmp_path / "artifacts"

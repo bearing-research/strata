@@ -1,8 +1,6 @@
-"""Tests for the ``strata agent`` on-ramp launcher (offline pieces).
+"""Tests for the offline pieces of the ``strata agent`` launcher.
 
-Covers create-or-open resolution, the agent-config file writers, and URL
-parsing. The server-spawn / TUI-attach paths need a live process and are
-exercised by hand, not here.
+Server spawn and TUI attach need a live process and are not covered here.
 """
 
 from __future__ import annotations

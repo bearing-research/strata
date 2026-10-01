@@ -1,9 +1,7 @@
 """E2E tests: ``@table`` lake inputs through live notebook execution.
 
-The headline behavior under test: a cell declaring an Iceberg table input
-goes stale when new data lands in the table (the snapshot id is part of
-the cell's provenance), and re-runs against the new snapshot — while an
-unchanged table cache-hits.
+The snapshot id is part of the cell's provenance, so new data in the table makes the cell
+stale and it re-runs against the new snapshot, while an unchanged table cache-hits.
 """
 
 from __future__ import annotations
@@ -153,15 +151,10 @@ class TestTableStaleness:
                 assert again["payload"]["cache_hit"] is True
 
     def test_table_cell_stays_ready_after_downstream_runs(self, setup):
-        """An executed ``@table`` cell must stay READY across a staleness
-        recompute, including after a downstream cell runs.
+        """An executed ``@table`` cell stays READY across a staleness recompute.
 
-        ``compute_staleness`` omitted the ``@table`` snapshot fingerprint
-        from the provenance hash that execution *did* fold in, so the
-        cell's stored artifacts were keyed under a hash the staleness
-        lookup never reproduced. The cell (and everything downstream)
-        resolved to IDLE — in run-all this surfaced as every completed
-        cell flipping back to grey, leaving only the last cell green.
+        Fails if ``compute_staleness`` leaves the snapshot fingerprint out of the provenance hash
+        that execution folds in: the cell and everything downstream would resolve to IDLE.
         """
         from strata.notebook.models import CellStatus
 

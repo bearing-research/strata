@@ -1,13 +1,8 @@
-"""MCP on a server that authenticates its callers. Item 4.
+"""MCP on a server that authenticates its callers.
 
-The endpoint was personal-mode only because a tool call had no caller: any
-client that reached it could list every session and run code in any of them.
-Each call now runs as the principal its HTTP request names, and is checked
-against the same notebook scopes as the REST routes and WebSocket frames.
-
-Driven with the real MCP client over streamable HTTP against a real server, so
-the identity is read the way it is in production: from each tool call's own
-request, served by the session's task.
+Each tool call runs as the principal its HTTP request names, checked against the
+same notebook scopes as REST and WebSocket. Driven with the real MCP client over
+streamable HTTP so identity is read from each call's own request.
 """
 
 from __future__ import annotations
@@ -113,8 +108,7 @@ async def test_a_viewer_reads_but_cannot_run_a_cell(served):
 
 
 async def test_a_writer_authors_as_themselves(served):
-    """The tool runs as the caller, so authorship records the principal rather
-    than what the client declared."""
+    """Authorship records the calling principal, not what the client declared."""
     url, session = served
     writer = _headers("wes", "notebook:read notebook:write")
 
@@ -156,8 +150,7 @@ async def test_a_call_without_valid_credentials_is_refused(served):
 
 
 def test_every_tool_is_classified():
-    """A new tool defaults to notebook:execute, which is safe but may be wrong;
-    this makes whoever adds one decide."""
+    """A new tool must be classified explicitly rather than default to notebook:execute."""
     import asyncio
 
     from strata.notebook.mcp_server import build_mcp_app

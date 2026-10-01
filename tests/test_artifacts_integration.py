@@ -1,11 +1,5 @@
-"""Integration tests for personal mode artifacts.
-
-These tests verify end-to-end artifact workflows:
-1. Materialize with cache miss (build locally)
-2. Materialize with cache hit (return cached)
-3. Name pointer CRUD via client
-4. Artifact data streaming
-5. Service mode blocks artifact endpoints
+"""Integration tests for personal-mode artifacts: materialize miss and hit, names, data streaming,
+and service-mode blocking.
 """
 
 import time
@@ -25,10 +19,7 @@ def materialize_and_upload(
     inputs: list[str] | None = None,
     name: str | None = None,
 ) -> tuple[str, pa.Table]:
-    """Helper to materialize using the unified API.
-
-    Returns (artifact_uri, result_table).
-    """
+    """Materialize using the unified API; returns (artifact_uri, result_table)."""
     inputs = inputs or []
 
     artifact = client.materialize(
@@ -122,10 +113,8 @@ def service_mode_server(tmp_path):
 
 
 class TestArtifactEndpoints:
-    """Tests for artifact HTTP endpoints."""
-
     def test_materialize_cache_miss_queues_embedded_build(self, personal_mode_server):
-        """Cache miss queues an embedded build that completes server-side."""
+        """A cache miss queues an embedded build that completes server-side."""
         base_url = personal_mode_server["base_url"]
         response = httpx.post(
             f"{base_url}/v1/artifacts/materialize",
@@ -159,7 +148,6 @@ class TestArtifactEndpoints:
         assert "duckdb_sql" in str(detail["message"])
 
     def test_put_persists_local_result(self, personal_mode_server):
-        """PUT /v1/artifacts persists a locally-computed result."""
         base_url = personal_mode_server["base_url"]
         table = pa.table({"x": [1, 2, 3]})
         data = put_artifact(base_url, table)
@@ -179,7 +167,6 @@ class TestArtifactEndpoints:
         assert second["artifact_uri"] == first["artifact_uri"]
 
     def test_artifact_data_streaming(self, personal_mode_server):
-        """Fetch artifact data returns Arrow IPC stream."""
         base_url = personal_mode_server["base_url"]
 
         import re
@@ -198,7 +185,6 @@ class TestArtifactEndpoints:
         assert set(result.column_names) == {"x", "y"}
 
     def test_name_crud(self, personal_mode_server):
-        """Name pointer CRUD operations."""
         base_url = personal_mode_server["base_url"]
 
         # Create artifact via the embedded runner.
@@ -236,13 +222,9 @@ class TestArtifactEndpoints:
         assert resp.status_code == 404
 
     def test_put_then_name_after_the_fact(self, personal_mode_server):
-        """A put-created artifact is nameable after the fact in personal mode.
+        """A put-created artifact is nameable in a later call in personal mode.
 
-        Friction #7 regression: PUT used to stamp tenant "_default" while the
-        names routes resolved no-header requests to tenant None, so naming a
-        put-created artifact in a separate call failed with
-        "belongs to tenant _default, cannot assign name in tenant None".
-        No tenant header anywhere here (personal mode) — it must just work.
+        PUT and the names routes must agree on the tenant for no-header requests.
         """
         with StrataClient(base_url=personal_mode_server["base_url"]) as client:
             art = client.put(
@@ -261,10 +243,7 @@ class TestArtifactEndpoints:
 
 
 class TestServiceModeBlocking:
-    """Tests that service mode blocks artifact endpoints."""
-
     def test_materialize_blocked_in_service_mode(self, service_mode_server):
-        """Materialize returns 403 in service mode."""
         response = httpx.post(
             f"{service_mode_server['base_url']}/v1/artifacts/materialize",
             json={"inputs": [], "transform": {"executor": "test", "params": {}}},
@@ -273,9 +252,9 @@ class TestServiceModeBlocking:
         assert "writes_disabled" in response.json()["detail"]["error"]
 
     def test_name_writes_blocked_reads_reachable_in_service_mode(self, service_mode_server):
-        """Name *writes* stay blocked in service mode; name *reads* (listing and
-        resolution) are reachable. This gateway has no artifact_dir, so the reads
-        return 404 (no store) rather than a mode-gated 403."""
+        """Name writes stay blocked in service mode; reads are reachable and 404 here because this
+        gateway has no artifact_dir.
+        """
         base_url = service_mode_server["base_url"]
 
         # Writing a name stays blocked (403).
@@ -293,25 +272,12 @@ class TestServiceModeBlocking:
 
 
 class TestArtifactContract:
-    """Contract tests that verify the complete artifact workflow.
-
-    These are the critical tests that ensure the full loop works correctly:
-    1. materialize() returns cache miss on first call
-    2. Local executor (DuckDB) runs the transform
-    3. materialize() returns cache hit on second call
-    4. Data is accessible via artifact URI and name URI
-    5. Persistence survives server restart
+    """Contract tests for the full artifact loop: miss, local DuckDB execution, hit, access by
+    artifact and name URI, and persistence across restart.
     """
 
     def test_transform_pipeline_with_dependencies(self, personal_mode_server):
-        """Full pipeline: source -> transform -> aggregate, with real input dependencies.
-
-        This is the realistic workflow that exercises the entire artifact system:
-        - Stage 1: Create source data artifact
-        - Stage 2: Filter source data (depends on stage 1)
-        - Stage 3: Aggregate filtered data (depends on stage 2)
-        - Verify all stages cache correctly and data flows through
-        """
+        """Source, filter, aggregate pipeline with real input dependencies; every stage caches."""
         with StrataClient(base_url=personal_mode_server["base_url"]) as client:
             # Stage 1: Create source data
             source = client.materialize(
@@ -386,7 +352,6 @@ class TestArtifactContract:
                 assert artifact.to_table().to_pydict() == expected
 
     def test_persistence_across_restart(self, tmp_path):
-        """Artifacts persist across server restarts."""
         cache_dir = tmp_path / "cache"
         artifact_dir = tmp_path / "artifacts"
         cache_dir.mkdir()
@@ -424,11 +389,10 @@ class TestArtifactContract:
                 assert resolved.uri == saved_uri
 
     def test_provenance_deduplication(self, personal_mode_server):
-        """Same inputs (same order) + transform deduplicate via provenance hash.
+        """Same inputs in the same order plus the same transform dedup.
 
-        Input order is significant: ``duckdb_sql`` binds inputs positionally
-        (``input0``/``input1``), so ``[b, a]`` is a different computation
-        from ``[a, b]`` and must NOT dedup to the same artifact.
+        ``duckdb_sql`` binds inputs positionally (``input0``/``input1``), so ``[b, a]`` must not
+        dedup with ``[a, b]``.
         """
         with StrataClient(base_url=personal_mode_server["base_url"]) as client:
             input_a = client.materialize(
@@ -498,7 +462,7 @@ class TestArtifactContract:
 
 
 class TestArtifactLifecycle:
-    """Tests for artifact lifecycle management: list, delete, GC, usage."""
+    """Artifact lifecycle: list, delete, GC, usage."""
 
     def test_list_artifacts(self, personal_mode_server):
         """List artifacts with pagination and filtering."""
@@ -525,7 +489,6 @@ class TestArtifactLifecycle:
                 assert a["artifact_uri"].startswith("strata://artifact/")
 
     def test_delete_artifact(self, personal_mode_server):
-        """Delete an artifact version."""
         with StrataClient(base_url=personal_mode_server["base_url"]) as client:
             artifact = client.materialize(
                 inputs=[],
@@ -547,7 +510,7 @@ class TestArtifactLifecycle:
             assert exc_info.value.response.status_code == 404
 
     def test_garbage_collect_unreferenced(self, personal_mode_server):
-        """GC removes unreferenced artifacts older than cutoff."""
+        """GC removes unreferenced artifacts older than the cutoff."""
         with StrataClient(base_url=personal_mode_server["base_url"]) as client:
             # No name, so unreferenced.
             unreferenced = client.materialize(
@@ -584,7 +547,6 @@ class TestArtifactLifecycle:
             assert fetched.to_table().to_pydict() == {"status": ["gc-safe"]}
 
     def test_usage_metrics(self, personal_mode_server):
-        """Usage metrics track artifacts correctly."""
         with StrataClient(base_url=personal_mode_server["base_url"]) as client:
             usage1 = client.get_artifact_usage()
             initial_versions = usage1["total_versions"]
@@ -602,7 +564,6 @@ class TestArtifactLifecycle:
             assert usage2["name_count"] >= 2
 
     def test_delete_nonexistent_artifact(self, personal_mode_server):
-        """Deleting nonexistent artifact returns 404."""
         with StrataClient(base_url=personal_mode_server["base_url"]) as client:
             with pytest.raises(httpx.HTTPStatusError) as exc_info:
                 client.delete_artifact("nonexistent-id", 999)
@@ -632,16 +593,12 @@ class TestArtifactLifecycle:
 
 
 class TestStalenessDetection:
-    """Tests for artifact staleness detection endpoints.
-
-    Staleness detection allows users to:
-    - Check if a named artifact's inputs have changed
-    - Understand why a rebuild is needed
-    - Get dry-run materialize explanations
+    """Staleness endpoints: whether a named artifact's inputs changed, why a rebuild is needed, and
+    dry-run materialize explanations.
     """
 
     def test_get_name_status_not_stale(self, personal_mode_server):
-        """Name status shows not stale when inputs unchanged."""
+        """Name status is not stale when inputs are unchanged."""
         with StrataClient(base_url=personal_mode_server["base_url"]) as client:
             # Create artifact with no inputs (will never be stale)
             client.materialize(
@@ -662,14 +619,12 @@ class TestStalenessDetection:
             assert status["state"] == "ready"
 
     def test_get_name_status_not_found(self, personal_mode_server):
-        """Name status returns 404 for unknown name."""
         with StrataClient(base_url=personal_mode_server["base_url"]) as client:
             with pytest.raises(httpx.HTTPStatusError) as exc_info:
                 client.get_name_status("nonexistent-name")
             assert exc_info.value.response.status_code == 404
 
     def test_is_artifact_stale_convenience(self, personal_mode_server):
-        """is_artifact_stale convenience method returns boolean."""
         with StrataClient(base_url=personal_mode_server["base_url"]) as client:
             client.materialize(
                 inputs=[],
@@ -683,7 +638,7 @@ class TestStalenessDetection:
             assert client.is_artifact_stale("staleness-check") is False
 
     def test_explain_materialize_hit(self, personal_mode_server):
-        """Explain materialize shows would_hit for cached computation."""
+        """Explain shows would_hit for a cached computation."""
         with StrataClient(base_url=personal_mode_server["base_url"]) as client:
             client.materialize(
                 inputs=[],
@@ -709,7 +664,7 @@ class TestStalenessDetection:
             assert result["is_stale"] is False
 
     def test_explain_materialize_miss_no_name(self, personal_mode_server):
-        """Explain materialize shows would_build for new computation."""
+        """Explain shows would_build for a new computation."""
         with StrataClient(base_url=personal_mode_server["base_url"]) as client:
             result = client.explain_materialize(
                 inputs=[],
@@ -725,15 +680,10 @@ class TestStalenessDetection:
             assert result["is_stale"] is False
 
     def test_explain_materialize_shows_stale_reason(self, personal_mode_server):
-        """Explain materialize shows why rebuild is needed when stale.
+        """A changed transform over the same inputs makes explain report a rebuild.
 
-        This test creates an artifact that depends on another artifact,
-        then modifies the transform (while keeping same inputs) to trigger
-        a cache miss. The explain should show that a rebuild is needed.
-
-        Note: Staleness is detected by comparing the named artifact's stored
-        input versions against the SAME input URIs' current versions. If the
-        input URIs themselves differ, it's a different computation, not staleness.
+        Staleness compares a name's stored input versions with the same input URIs' current
+        versions; different URIs are a different computation.
         """
         with StrataClient(base_url=personal_mode_server["base_url"]) as client:
             source = client.materialize(
@@ -772,15 +722,7 @@ class TestStalenessDetection:
             assert result["is_stale"] is False
 
     def test_name_status_with_artifact_dependency(self, personal_mode_server):
-        """Name status correctly reports dependencies for artifact.
-
-        This test verifies that when an artifact depends on another artifact,
-        the name status shows the input versions correctly.
-
-        Note: Staleness detection compares stored vs current versions of the
-        SAME input URIs. If the input URI itself changes (e.g., pointing to
-        a new artifact version), that's a different computation entirely.
-        """
+        """Name status reports the input versions of an artifact-on-artifact dependency."""
         with StrataClient(base_url=personal_mode_server["base_url"]) as client:
             base = client.materialize(
                 inputs=[],
@@ -808,7 +750,6 @@ class TestStalenessDetection:
             assert "@v=" in status["input_versions"][base.uri]
 
     def test_name_status_reports_input_versions(self, personal_mode_server):
-        """Name status reports stored input versions correctly."""
         with StrataClient(base_url=personal_mode_server["base_url"]) as client:
             input1 = client.materialize(
                 inputs=[],
@@ -841,7 +782,6 @@ class TestStalenessDetection:
             assert status["is_stale"] is False
 
     def test_explain_resolved_input_versions(self, personal_mode_server):
-        """Explain returns resolved input versions."""
         with StrataClient(base_url=personal_mode_server["base_url"]) as client:
             input_artifact = client.materialize(
                 inputs=[],
@@ -871,7 +811,7 @@ class TestStalenessDetection:
 
 @pytest.fixture
 def iceberg_warehouse(tmp_path):
-    """Create a temporary warehouse with a sample Iceberg table."""
+    """A temporary warehouse with a sample Iceberg table."""
     import sys
 
     if sys.platform == "win32":
@@ -937,10 +877,9 @@ def artifact_server_with_warehouse(tmp_path, iceberg_warehouse):
 
 
 class TestUnifiedMaterializeAPI:
-    """Tests for the unified client.materialize() API with real tables."""
+    """The unified client.materialize() API with real tables."""
 
     def test_materialize_from_iceberg_table(self, artifact_server_with_warehouse):
-        """Materialize an artifact from a real Iceberg table."""
         table_uri = artifact_server_with_warehouse["table_uri"]
         base_url = artifact_server_with_warehouse["base_url"]
 
@@ -975,7 +914,6 @@ class TestUnifiedMaterializeAPI:
             assert totals["B"] == 60.0  # 20 + 40
 
     def test_materialize_cache_hit(self, artifact_server_with_warehouse):
-        """Second materialize with same inputs should hit cache."""
         table_uri = artifact_server_with_warehouse["table_uri"]
         base_url = artifact_server_with_warehouse["base_url"]
 
@@ -1003,7 +941,7 @@ class TestUnifiedMaterializeAPI:
             assert artifact2.version == artifact1.version
 
     def test_materialize_chain_artifacts(self, artifact_server_with_warehouse):
-        """Chain artifacts: use output of one as input to another."""
+        """The output of one materialize is the input to another."""
         table_uri = artifact_server_with_warehouse["table_uri"]
         base_url = artifact_server_with_warehouse["base_url"]
 
@@ -1036,15 +974,7 @@ class TestUnifiedMaterializeAPI:
             assert agg_df["avg_value"].iloc[0] == 40.0  # (30 + 40 + 50) / 3
 
     def test_materialize_multi_input_chain(self, personal_mode_server):
-        """Chain artifacts with multiple inputs (fan-in pattern).
-
-        This tests the common pattern where multiple data sources are
-        processed independently and then joined together:
-        - Create two independent data sources
-        - Process each independently
-        - Join the processed results together
-        - Verify caching works correctly for the entire DAG
-        """
+        """Fan-in: two sources processed separately, then joined; caching holds across the DAG."""
         with StrataClient(base_url=personal_mode_server["base_url"]) as client:
             # Create two independent source artifacts
             orders = client.materialize(
@@ -1189,7 +1119,6 @@ class TestUnifiedMaterializeAPI:
             assert artifact2.to_pandas()["max_val"].iloc[0] == 50.0
 
     def test_artifact_info_and_lineage(self, artifact_server_with_warehouse):
-        """Test artifact.info() and artifact.lineage() methods."""
         table_uri = artifact_server_with_warehouse["table_uri"]
         base_url = artifact_server_with_warehouse["base_url"]
 
@@ -1210,7 +1139,6 @@ class TestUnifiedMaterializeAPI:
             assert info["row_count"] == 5
 
     def test_get_artifact_by_name(self, artifact_server_with_warehouse):
-        """Test retrieving artifact by name."""
         table_uri = artifact_server_with_warehouse["table_uri"]
         base_url = artifact_server_with_warehouse["base_url"]
 
@@ -1232,7 +1160,6 @@ class TestUnifiedMaterializeAPI:
             assert retrieved.to_pandas()["min_val"].iloc[0] == 10.0
 
     def test_explain_materialize_with_real_table(self, artifact_server_with_warehouse):
-        """Test explain_materialize() with real table."""
         table_uri = artifact_server_with_warehouse["table_uri"]
         base_url = artifact_server_with_warehouse["base_url"]
 
@@ -1273,11 +1200,9 @@ class TestUnifiedMaterializeAPI:
 
 @pytest.fixture
 def multi_file_warehouse(tmp_path):
-    """Warehouse whose table spans multiple Parquet files (multi-task scans).
+    """Warehouse whose table spans three Parquet files, so a scan plan has three tasks.
 
-    Three separate appends produce three data files, so a scan plan has
-    three tasks — the shape that exposed #121 (per-task IPC streams naively
-    concatenated; standard readers stopped at the first EOS marker).
+    Naively concatenated per-task IPC streams stop standard readers at the first EOS marker.
     """
     import sys
 
@@ -1342,10 +1267,9 @@ def multi_file_server(tmp_path, multi_file_warehouse):
 
 
 class TestMultiTaskScanIntegrity:
-    """A scan spanning multiple files/row groups must never truncate (#121)."""
+    """A scan spanning multiple files or row groups must never truncate."""
 
     def test_stream_mode_returns_all_rows(self, multi_file_server):
-        """Stream-mode materialize delivers every task's rows on the wire."""
         with StrataClient(base_url=multi_file_server["base_url"]) as client:
             artifact = client.materialize(
                 inputs=[multi_file_server["table_uri"]],
@@ -1357,7 +1281,6 @@ class TestMultiTaskScanIntegrity:
             assert ids == list(range(multi_file_server["total_rows"]))
 
     def test_persisted_artifact_returns_all_rows(self, multi_file_server):
-        """The persisted blob reads back complete via the data endpoint."""
         with StrataClient(base_url=multi_file_server["base_url"]) as client:
             artifact = client.materialize(
                 inputs=[multi_file_server["table_uri"]],
@@ -1370,7 +1293,7 @@ class TestMultiTaskScanIntegrity:
             assert refetched.num_rows == multi_file_server["total_rows"]
 
     def test_artifact_blob_is_exactly_one_ipc_stream(self, multi_file_server):
-        """Raw data endpoint bytes parse as ONE stream matching row_count."""
+        """Raw data endpoint bytes parse as one stream matching row_count."""
         import io
 
         base_url = multi_file_server["base_url"]
@@ -1414,7 +1337,7 @@ class TestMultiTaskScanIntegrity:
 
 
 class TestRefreshSupersede:
-    """refresh=True rebuilds the same artifact identity (#123)."""
+    """refresh=True rebuilds the same artifact identity."""
 
     def test_refresh_bumps_version_of_same_artifact(self, multi_file_server):
         with StrataClient(base_url=multi_file_server["base_url"]) as client:
@@ -1478,7 +1401,7 @@ class TestRefreshSupersede:
 
 
 class TestNamespacedNames:
-    """Names containing '/' must be readable, not write-only (friction #6)."""
+    """Names containing '/' must be readable, not write-only."""
 
     def test_slash_name_round_trip(self, multi_file_server):
         base_url = multi_file_server["base_url"]
@@ -1519,7 +1442,7 @@ class TestNamespacedNames:
 
 
 class TestRegistry:
-    """Aliases, tags, and audit over HTTP + SDK (#129)."""
+    """Aliases, tags and audit over HTTP and the SDK."""
 
     def _make_model(self, client, table_uri, refresh=False):
         artifact = client.materialize(
@@ -1548,7 +1471,7 @@ class TestRegistry:
                 client.resolve_alias("team/model", "champion")
 
     def test_promotion_with_history(self, multi_file_server):
-        """The friction-#9 flow: promote, promote again, recover the past."""
+        """Promote, promote again, and recover the past."""
         with StrataClient(base_url=multi_file_server["base_url"]) as client:
             v1 = self._make_model(client, multi_file_server["table_uri"])
             client.set_alias("team/model", "champion", v1.artifact_id, v1.version)
@@ -1605,12 +1528,9 @@ class TestRegistry:
 
 
 def queue_champion(base_url, artifact):
-    """Queue a protected champion move, asserting it actually queued.
+    """Queue a protected champion move, asserting it queued.
 
-    Every caller below then approves or rejects it. Leaving this PUT unchecked
-    made a failure here surface two steps later as an unexplained 404 from
-    approve/reject ("no pending change"), which is how one CI flake reported
-    itself with nothing in the log pointing at the cause.
+    Unchecked, a failure here surfaces later as an unexplained 404 from approve/reject.
     """
     resp = httpx.put(
         f"{base_url}/v1/names/team/model/aliases/champion",
@@ -1641,7 +1561,7 @@ def gated_server(tmp_path, multi_file_warehouse):
 
 
 class TestApprovalGates:
-    """Protected aliases queue for approval instead of applying (#129)."""
+    """Protected aliases queue for approval instead of applying."""
 
     def _make_model(self, client, table_uri):
         artifact = client.materialize(
@@ -1712,7 +1632,7 @@ class TestApprovalGates:
 
 
 class TestAliasIdempotenceOverHttp:
-    """Re-running an idempotent promote does not refile approvals (D4)."""
+    """Re-running an idempotent promote does not refile approvals."""
 
     def test_rerequest_of_live_champion_is_unchanged(self, gated_server):
         base_url = gated_server["base_url"]
@@ -1759,10 +1679,7 @@ class TestAliasIdempotenceOverHttp:
 
 
 class TestRegistryAuthzPersonalMode:
-    """The registry surface is personal-mode-gated today; auth hardening
-    must not regress the single-user path (Vuln 1/2 fixes are forward-
-    looking for service-mode exposure).
-    """
+    """Registry auth hardening must not regress the single-user personal-mode path."""
 
     def _make(self, client, table_uri):
         artifact = client.materialize(
@@ -1785,8 +1702,7 @@ class TestRegistryAuthzPersonalMode:
         assert "name_set" in actions
 
     def test_approval_open_without_auth(self, gated_server):
-        """Personal mode (auth_mode=none) has a single operator — no scope
-        gate, self-approval allowed."""
+        """Personal mode (auth_mode=none) has one operator: no scope gate, self-approval allowed."""
         base_url = gated_server["base_url"]
         with StrataClient(base_url=base_url) as client:
             artifact = self._make(client, gated_server["table_uri"])
@@ -1797,8 +1713,9 @@ class TestRegistryAuthzPersonalMode:
 
 
 class TestRegistrySummary:
-    """GET /v1/registry/summary assembles the names-table data (each name with
-    its aliases + the version's tags) — the dashboard's registry-state source."""
+    """GET /v1/registry/summary: each name with its aliases and the version's tags, for the
+    dashboard.
+    """
 
     def test_summary_lists_names_with_aliases_and_tags(self, multi_file_server):
         base_url = multi_file_server["base_url"]

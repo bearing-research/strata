@@ -1,13 +1,8 @@
 """Tests for WebSocket notebook execution.
 
-These tests drive the notebook WS handlers (and the ``notebook_websocket``
-endpoint) directly in the event loop against a ``FakeNotebookWebSocket``,
-rather than through ``TestClient.websocket_connect``. The TestClient runs
-the ASGI app on an anyio blocking portal; on macOS + Python 3.12 the portal
-teardown's ``thread.join()`` deadlocks on lingering session tasks created
-during a WS upgrade when a module-scope ``app`` fixture meets
-session-creating fixtures (#206). Calling the handlers in-loop sidesteps the
-portal entirely and gives #52 direct owner-gate coverage. See #205 / #52.
+Handlers (and the ``notebook_websocket`` endpoint) run in-loop against a ``FakeNotebookWebSocket``,
+not ``TestClient.websocket_connect``: on macOS + Python 3.12 the TestClient portal teardown
+deadlocks on session tasks created during a WS upgrade.
 """
 
 import asyncio
@@ -63,12 +58,10 @@ def _envelope(msg_type, payload=None, *, seq=1):
 
 
 def _make_fake_ws(session, *, inbound=None, headers=None):
-    """Create a fake WS already registered for ``session`` broadcasts.
+    """Create a fake WS registered for ``session`` broadcasts; returns ``(fake, execution_state)``.
 
-    Handlers fan results out through ``_broadcast_message`` (which reads
-    ``_notebook_connections``) in addition to direct ``send_text`` replies,
-    so the fake must be registered as a connection to capture every frame.
-    Returns ``(fake, execution_state)``.
+    Handlers reply both directly and through ``_broadcast_message``, so the fake must be a
+    registered connection to capture every frame.
     """
     from strata.notebook.ws import _ensure_execution_state, _notebook_connections
 
@@ -78,16 +71,10 @@ def _make_fake_ws(session, *, inbound=None, headers=None):
 
 
 async def _wait_until(predicate, *, timeout=10.0, interval=0.005):
-    """Poll until ``predicate()`` becomes true, then return.
+    """Poll until ``predicate()`` is true; fail only if it never is within ``timeout``.
 
-    A bounded wait, not a timing assertion: it succeeds the moment the
-    condition holds and fails only if it never does within the generous
-    ``timeout``. Unlike a tight ``asyncio.sleep(0)`` spin, it sleeps a small
-    *real* interval between checks, so conditions that depend on a background
-    thread — e.g. the build server finalizing a cancelled build on its own
-    uvicorn thread — actually get CPU to make progress under load (coverage,
-    parallel servers). ``timeout`` is a generous ceiling that only trips on a
-    genuine hang, never on how fast the condition is reached.
+    Sleeps a real interval between checks so background threads (e.g. the build server finalizing a
+    cancelled build) get CPU under load. Not a timing assertion.
     """
     deadline = time.monotonic() + timeout
     while not predicate():
@@ -154,7 +141,7 @@ def _reset_ws_globals():
 
 @pytest.fixture
 def temp_notebook():
-    """Create a temporary notebook with three linear cells (x → y → z)."""
+    """A temporary notebook with three linear cells (x, y, z)."""
     with tempfile.TemporaryDirectory() as tmpdir:
         tmpdir = Path(tmpdir)
         notebook_dir = create_notebook(tmpdir, "test_notebook")
@@ -169,12 +156,7 @@ def temp_notebook():
 
 @pytest.fixture
 def notebook_session(temp_notebook):
-    """Open a session over ``temp_notebook`` and yield (notebook_dir, session).
-
-    The common-case fixture for WS tests. Use ``temp_notebook`` + ``open_session``
-    explicitly when the test must mutate cells (e.g. overwrite ``root``) before
-    the session resolves.
-    """
+    """Open a session over ``temp_notebook`` and yield (notebook_dir, session)."""
     notebook_dir, _ = temp_notebook
     yield notebook_dir, open_session(notebook_dir)
 
@@ -184,7 +166,6 @@ def notebook_session(temp_notebook):
 
 @pytest.mark.asyncio
 async def test_notebook_sync(notebook_session):
-    """notebook_sync returns a full notebook state snapshot."""
     from strata.notebook.ws import _handle_notebook_sync
 
     _, session = notebook_session
@@ -199,14 +180,8 @@ async def test_notebook_sync(notebook_session):
 
 
 def test_serialize_dag_edges_uses_frontend_field_names(notebook_session):
-    """Edges sent to the frontend must use ``from_cell_id`` / ``to_cell_id``.
-
-    Regression for a field-name drift in ``broadcast_notebook_sync`` (used by
-    the agent's ``edit_cell`` / ``run_cell`` flows) where edges were emitted
-    as ``{"from": ..., "to": ...}``. The frontend's ``applyBackendDag`` keys
-    off ``from_cell_id`` / ``to_cell_id``, so every edge silently failed the
-    cell lookup and the DAG view rendered as disconnected nodes after every
-    agent edit until the user hard-refreshed.
+    """The frontend's ``applyBackendDag`` keys off ``from_cell_id`` / ``to_cell_id``; ``from`` /
+    ``to`` left the DAG view disconnected after every agent edit.
     """
     _, session = notebook_session
     edges = session.dag.serialize_edges() if session.dag else []
@@ -218,13 +193,7 @@ def test_serialize_dag_edges_uses_frontend_field_names(notebook_session):
 
 
 def test_broadcast_notebook_sync_emits_correct_edge_field_names(notebook_session):
-    """End-to-end: ``broadcast_notebook_sync`` must put correctly-keyed edges on the wire.
-
-    Same regression as above but exercises the full agent-broadcast path: a
-    fake WS captures the message and we inspect the payload directly. If
-    this test ever flips back to ``from`` / ``to``, the agent edit flow has
-    drifted again and the DAG view will silently break.
-    """
+    """The same contract through the full agent-broadcast path, read off the wire."""
     from strata.notebook.ws import _notebook_connections, broadcast_notebook_sync
 
     _, session = notebook_session
@@ -244,7 +213,7 @@ def test_broadcast_notebook_sync_emits_correct_edge_field_names(notebook_session
 
 @pytest.mark.asyncio
 async def test_notebook_sync_includes_causality_and_staleness(temp_notebook):
-    """notebook_sync should return enriched cell state, not just bare DAG fields."""
+    """notebook_sync returns enriched cell state, not just bare DAG fields."""
     from strata.notebook.executor import CellExecutor
     from strata.notebook.ws import _handle_notebook_sync
 
@@ -275,7 +244,7 @@ async def test_notebook_sync_includes_remote_execution_metadata(
     notebook_executor_server,
     notebook_build_server,
 ):
-    """Notebook sync should retain remote execution metadata from the live session."""
+    """Notebook sync keeps remote execution metadata from the live session."""
     from strata.notebook.executor import CellExecutor
     from strata.notebook.models import WorkerBackendType, WorkerSpec
     from strata.notebook.ws import _handle_notebook_sync
@@ -328,7 +297,6 @@ async def test_notebook_sync_includes_remote_execution_metadata(
 
 @pytest.mark.asyncio
 async def test_cell_execute_no_cascade(notebook_session):
-    """cell_execute on a root cell does not trigger cascade."""
     from strata.notebook.ws import _handle_cell_execute
 
     _, session = notebook_session
@@ -362,10 +330,9 @@ async def _drain_execution(execution_state):
 
 
 async def _run_cell_to_terminal(session, cell_id, *, msg_type="cell_execute", payload=None):
-    """Drive ``cell_id`` through a handler and await its execution task.
+    """Drive ``cell_id`` through a handler, auto-accepting any cascade, and await its execution.
 
     Returns the registered fake WS so the caller can inspect emitted frames.
-    Handles the cascade prompt → auto-accept loop for non-root cells.
     """
     from strata.notebook.ws import (
         _handle_cell_execute,
@@ -402,7 +369,7 @@ async def _run_cell_to_terminal(session, cell_id, *, msg_type="cell_execute", pa
 
 @pytest.mark.asyncio
 async def test_cell_execute_emits_explicit_display_payload(temp_notebook):
-    """Image-like last-expression results should be sent in the dedicated display payload."""
+    """Image-like last-expression results go in the dedicated display payload."""
     notebook_dir, _ = temp_notebook
     write_cell(
         notebook_dir,
@@ -428,7 +395,7 @@ Display()
 
 @pytest.mark.asyncio
 async def test_cell_execute_emits_explicit_markdown_display_payload(temp_notebook):
-    """Markdown last-expression results should be sent in the dedicated display payload."""
+    """Markdown last-expression results go in the dedicated display payload."""
     notebook_dir, _ = temp_notebook
     write_cell(
         notebook_dir,
@@ -454,7 +421,6 @@ Display()
 
 @pytest.mark.asyncio
 async def test_cell_execute_emits_display_side_effect_payload(temp_notebook):
-    """display(...) side effects should be surfaced through the websocket display payload."""
     notebook_dir, _ = temp_notebook
     write_cell(
         notebook_dir,
@@ -476,7 +442,7 @@ display(Markdown("# Side effect\\n\\nVia websocket."))
 
 @pytest.mark.asyncio
 async def test_cell_execute_emits_multiple_display_payloads_in_order(temp_notebook):
-    """Ordered visible outputs should be sent together, with the last one preserved as display."""
+    """Ordered visible outputs are sent together, with the last one also as display."""
     notebook_dir, _ = temp_notebook
     write_cell(
         notebook_dir,
@@ -505,7 +471,7 @@ display(Markdown("# First"))
 
 @pytest.mark.asyncio
 async def test_cell_execute_refreshes_downstream_staleness(temp_notebook):
-    """Successful execution should immediately invalidate downstream cell state."""
+    """Successful execution invalidates downstream cell state immediately."""
     from strata.notebook.executor import CellExecutor
 
     notebook_dir, _ = temp_notebook
@@ -535,7 +501,7 @@ async def test_cell_execute_refreshes_downstream_staleness(temp_notebook):
 
 @pytest.mark.asyncio
 async def test_cell_execute_surfaces_module_export_error(temp_notebook):
-    """Unsupported cross-cell code export should surface as a direct cell error."""
+    """Unsupported cross-cell code export surfaces as a direct cell error."""
     notebook_dir, _ = temp_notebook
     # ``x`` is bound nowhere in the notebook, so it is a hard export blocker. (A
     # same-cell/upstream runtime ``x`` would be hydrated instead.)
@@ -562,7 +528,6 @@ async def test_cell_execute_surfaces_module_export_error(temp_notebook):
 
 @pytest.mark.asyncio
 async def test_cell_execute_surfaces_module_export_lambda_error(temp_notebook):
-    """The WS path should surface top-level lambda export errors clearly."""
     notebook_dir, _ = temp_notebook
     write_cell(notebook_dir, "root", "add = lambda y: y + 1\n")
     write_cell(notebook_dir, "middle", "result = add(2)")
@@ -581,7 +546,6 @@ async def test_cell_execute_surfaces_module_export_lambda_error(temp_notebook):
 
 @pytest.mark.asyncio
 async def test_cell_execute_uses_warm_pool_when_available(notebook_session, monkeypatch):
-    """The WebSocket path is wired to use the session warm pool."""
     from strata.notebook.executor import CellExecutor
     from strata.notebook.pool import PooledCellExecutor, WarmProcessPool
 
@@ -648,7 +612,6 @@ async def test_cell_execute_uses_warm_pool_when_available(notebook_session, monk
 
 @pytest.mark.asyncio
 async def test_notebook_run_all_emits_multiple_display_payloads_in_order(temp_notebook):
-    """Run-all should preserve ordered display payloads on the websocket path."""
     notebook_dir, _ = temp_notebook
     write_cell(
         notebook_dir,
@@ -677,15 +640,11 @@ display(Markdown("# First"))
 
 @pytest.mark.asyncio
 async def test_run_all_on_a_host_that_refuses_says_so_on_every_cell(notebook_session, monkeypatch):
-    """Run-all batches consecutive cells into one harness. On a service-mode host
-    with no harness user that spawn is refused, and a refused batch would leave
-    the rest of the notebook idle with nothing said, so each cell goes through
-    single-cell instead.
+    """On a service-mode host with no harness user, the batched spawn is refused, so each cell runs
+    single-cell and says why.
 
-    The first cell reports the refusal. The cells that read from it are not
-    attempted at all now: running them would have meant computing from the
-    artifacts of an earlier run and publishing that as a fresh result. They say
-    they did not run, and why.
+    The first cell reports the refusal. Its readers are not attempted, since running them would
+    publish results computed from an earlier run's artifacts.
     """
     from strata.notebook.harness_user import REFUSAL
 
@@ -714,7 +673,6 @@ async def test_run_all_on_a_host_that_refuses_says_so_on_every_cell(notebook_ses
 
 @pytest.mark.asyncio
 async def test_cell_execute_cascade_emits_multiple_display_payloads_in_order(temp_notebook):
-    """Cascade execution should preserve ordered display payloads for the target cell."""
     notebook_dir, _ = temp_notebook
     write_cell(
         notebook_dir,
@@ -747,7 +705,7 @@ y + 1
 
 @pytest.mark.asyncio
 async def test_cell_execute_blocked_when_environment_runtime_is_unavailable(notebook_session):
-    """Execution should be blocked when no notebook runtime is available after bootstrap failure."""
+    """Execution is blocked when bootstrap left no notebook runtime."""
     from strata.notebook.ws import _handle_cell_execute
 
     _, session = notebook_session
@@ -772,7 +730,7 @@ async def test_cell_execute_blocked_when_environment_runtime_is_unavailable(note
 
 @pytest.mark.asyncio
 async def test_cell_execute_blocked_while_environment_job_running(notebook_session):
-    """Cell execution should be rejected while an environment job is active."""
+    """Cell execution is rejected while an environment job is active."""
     from strata.notebook.session import EnvironmentJobSnapshot
     from strata.notebook.ws import _handle_cell_execute
 
@@ -798,7 +756,7 @@ async def test_cell_execute_blocked_while_environment_job_running(notebook_sessi
 
 
 def test_environment_job_submission_rejects_execution_already_accepted(monkeypatch, temp_notebook):
-    """Execution acceptance should block env jobs before the task starts."""
+    """An accepted execution blocks env jobs even before its task starts."""
     from strata.notebook import ws as notebook_ws
 
     notebook_dir, _ = temp_notebook
@@ -879,7 +837,6 @@ def _attach_worker(session, name, runtime_id, config):
 
 @pytest.mark.asyncio
 async def test_ws_execute_supports_http_executor_worker(notebook_session, notebook_executor_server):
-    """The live WebSocket execution path should support HTTP notebook workers."""
     _, session = notebook_session
     _attach_worker(
         session,
@@ -908,7 +865,6 @@ async def test_ws_execute_supports_signed_http_executor_worker(
     notebook_executor_server,
     notebook_build_server,
 ):
-    """The live WebSocket path should support signed remote notebook workers."""
     _, session = notebook_session
     config = _http_worker_config(
         notebook_executor_server["execute_url"],
@@ -956,7 +912,7 @@ async def test_ws_execute_supports_signed_http_executor_worker_with_class_instan
     notebook_executor_server,
     notebook_build_server,
 ):
-    """The live WS path should preserve exported class instances over signed transport."""
+    """Exported class instances survive signed transport on the live WS path."""
     from strata.notebook.ws import _handle_notebook_sync
 
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -1027,7 +983,7 @@ class Person:
 
 @pytest.mark.asyncio
 async def test_ws_execute_reports_unavailable_http_executor_worker(notebook_session):
-    """The live WS path should surface unreachable HTTP executor workers."""
+    """Unreachable HTTP executor workers surface as errors on the live WS path."""
     _, session = notebook_session
     _attach_worker(
         session,
@@ -1053,7 +1009,7 @@ async def test_ws_execute_reports_signed_finalize_failure(
     notebook_build_server,
     monkeypatch,
 ):
-    """The live WS path should surface signed transport finalize failures."""
+    """Signed transport finalize failures surface as errors on the live WS path."""
     from strata.transforms.signed_urls import URLSigner
 
     _real_generate = URLSigner.generate_build_manifest
@@ -1112,7 +1068,7 @@ async def test_ws_cancelled_signed_http_executor_marks_build_failed(
     notebook_build_server,
     monkeypatch,
 ):
-    """Cancelling signed remote execution over WS should fail the build cleanly."""
+    """Cancelling signed remote execution over WS fails the build cleanly."""
     from strata.notebook.ws import _handle_cell_cancel, _handle_cell_execute
 
     _, session = notebook_session
@@ -1205,7 +1161,7 @@ async def test_ws_cancelled_signed_http_executor_marks_build_failed(
 
 @pytest.mark.asyncio
 async def test_cascade_prompt_is_sent_only_to_requesting_websocket(notebook_session):
-    """A cascade prompt should be a direct reply, not a broadcast to other clients."""
+    """A cascade prompt is a direct reply, not a broadcast to other clients."""
     from strata.notebook.ws import _handle_cell_execute, _notebook_connections
 
     _, session = notebook_session
@@ -1227,7 +1183,7 @@ async def test_cascade_prompt_is_sent_only_to_requesting_websocket(notebook_sess
 
 @pytest.mark.asyncio
 async def test_impact_preview_is_sent_only_to_requesting_websocket(notebook_session):
-    """Impact preview responses should stay scoped to the requesting client."""
+    """Impact preview responses stay scoped to the requesting client."""
     from strata.notebook.ws import _handle_impact_preview_request, _notebook_connections
 
     _, session = notebook_session
@@ -1250,7 +1206,6 @@ async def test_impact_preview_is_sent_only_to_requesting_websocket(notebook_sess
 
 @pytest.mark.asyncio
 async def test_inspect_repl_round_trip(notebook_session):
-    """The inspect REPL round-trips over the websocket."""
     from strata.notebook.ws import (
         _handle_inspect_close,
         _handle_inspect_eval,
@@ -1316,11 +1271,8 @@ def _patch_inspect_manager(monkeypatch, *, close_counter):
 async def test_inspect_sessions_closed_when_last_websocket_disconnects(
     notebook_session, monkeypatch
 ):
-    """Tearing down the last socket should close notebook inspect sessions.
-
-    The zero-grace teardown path (``_tear_down_notebook_state``) is what
-    ``_cleanup_notebook_websocket`` invokes inline when the grace window is
-    disabled or no loop is running; exercise it directly.
+    """Exercises the zero-grace teardown ``_cleanup_notebook_websocket`` runs inline when the grace
+    window is off or no loop is running.
     """
     from strata.notebook.ws import (
         _handle_inspect_open,
@@ -1356,12 +1308,8 @@ async def test_inspect_sessions_closed_when_last_websocket_disconnects(
 
 @pytest.mark.asyncio
 async def test_grace_window_preserves_inspect_state_on_reconnect(notebook_session, monkeypatch):
-    """Disconnect-then-reconnect within the grace window keeps inspect state.
-
-    Without the grace window, the inspect manager would be dropped the moment
-    the WS disconnects. The TUI's tmux / SSH audience would lose any open
-    inspect REPL on a network blip — bad UX for exactly the users the window
-    exists for.
+    """A reconnect within the grace window keeps inspect state, so a network blip does not drop an
+    open inspect REPL.
     """
     from strata.notebook.ws import (
         _cancel_pending_grace_teardown,
@@ -1400,7 +1348,6 @@ async def test_grace_window_preserves_inspect_state_on_reconnect(notebook_sessio
 
 @pytest.mark.asyncio
 async def test_grace_window_expires_drops_state(notebook_session, monkeypatch):
-    """When the grace window elapses with no reconnect, state is dropped."""
     from strata.notebook.ws import (
         _grace_cancel_then_tear_down,
         _handle_inspect_open,
@@ -1431,12 +1378,9 @@ async def test_grace_window_expires_drops_state(notebook_session, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_grace_window_preserves_active_execution_on_reconnect(notebook_session, monkeypatch):
-    """A running execution task survives a disconnect-reconnect cycle within the window.
+    """A running execution survives a disconnect-reconnect within the window (tmux detach mid-cell).
 
-    Load-bearing #42 contract: tmux detach during a long cell, reconnect
-    within the window, find the cell still running. This targets
-    ``NotebookExecutionState.execution_task`` — the actual mechanism behind
-    cancel-on-disconnect — rather than the inspect cleanup hook.
+    Targets ``NotebookExecutionState.execution_task``, the mechanism behind cancel-on-disconnect.
     """
     from strata.notebook.ws import (
         _cancel_pending_grace_teardown,
@@ -1477,7 +1421,6 @@ async def test_grace_window_preserves_active_execution_on_reconnect(notebook_ses
 
 @pytest.mark.asyncio
 async def test_grace_window_expiry_cancels_active_execution(notebook_session):
-    """Past the grace window with no reconnect, the running execution task is cancelled."""
     from strata.notebook.ws import (
         _ensure_execution_state,
         _grace_cancel_then_tear_down,
@@ -1509,7 +1452,6 @@ async def test_grace_window_expiry_cancels_active_execution(notebook_session):
 
 @pytest.mark.asyncio
 async def test_last_websocket_disconnect_cancels_running_execution(notebook_session):
-    """Closing the final socket should cancel the active notebook execution."""
     from strata.notebook.ws import (
         _ensure_execution_state,
         _notebook_execution_state,
@@ -1589,7 +1531,6 @@ async def test_cell_cancel(notebook_session):
 
 @pytest.mark.asyncio
 async def test_cell_cancel_interrupts_running_execution(notebook_session, monkeypatch):
-    """A cell_cancel must cancel its own in-flight execution."""
     from strata.notebook.executor import CellExecutor
     from strata.notebook.ws import _handle_cell_cancel, _handle_cell_execute
 
@@ -1629,7 +1570,7 @@ async def test_cell_cancel_interrupts_running_execution(notebook_session, monkey
 
 @pytest.mark.asyncio
 async def test_stale_cell_cancel_does_not_clobber_ready_state(notebook_session):
-    """A late cancel should not rewrite a completed cell back to idle."""
+    """A late cancel does not rewrite a completed cell back to idle."""
     from strata.notebook.ws import _handle_cell_cancel
 
     _, session = notebook_session
@@ -1671,9 +1612,9 @@ async def test_malformed_cell_execute_missing_cell_id(notebook_session):
 
 @pytest.mark.asyncio
 async def test_variant_add_broadcasts_new_cell():
-    """variant_add must broadcast notebook_state (with the new cell's full
-    payload), not just dag_update — otherwise the frontend skips the new
-    cell and the user sees the active variant 'disappear'."""
+    """variant_add broadcasts notebook_state with the new cell's payload; dag_update alone makes the
+    frontend skip the cell.
+    """
     from strata.notebook.ws import _handle_variant_add
 
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -1705,7 +1646,7 @@ async def test_variant_add_broadcasts_new_cell():
 
 @pytest.mark.asyncio
 async def test_unknown_notebook_closes_upgrade(monkeypatch):
-    """Connecting to a non-existent notebook should close the upgrade, not accept."""
+    """A non-existent notebook closes the upgrade instead of accepting it."""
     from strata.notebook import ws as notebook_ws
 
     monkeypatch.setattr(
@@ -1721,7 +1662,7 @@ async def test_unknown_notebook_closes_upgrade(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_endpoint_dispatch_handles_malformed_message(notebook_session):
-    """Driving the endpoint with a scripted malformed message returns an error frame."""
+    """A scripted malformed message through the endpoint returns an error frame."""
     from strata.notebook.ws import notebook_websocket
 
     _, session = notebook_session
@@ -1750,13 +1691,9 @@ async def test_endpoint_dispatch_unknown_message_type(notebook_session):
 
 
 class TestWebSocketOwnerGate:
-    """Direct WS-upgrade owner-gate coverage (#52).
+    """WS-upgrade owner gate, mirroring ``test_routes::TestPersonalModeUserScoping``.
 
-    Mirrors ``test_routes::TestPersonalModeUserScoping`` for the WS surface:
-    owner allowed, wrong-header refused, missing-header refused, legacy
-    unowned passthrough. Driven through ``notebook_websocket`` against a fake
-    WS so there's no anyio portal — the gate closes with 1008 (the WS twin of
-    the REST 404) and never accepts on refusal.
+    Refusal closes with 1008 (the WS twin of the REST 404) and never accepts.
     """
 
     HEADER = "X-Strata-Test-User"
@@ -1778,7 +1715,6 @@ class TestWebSocketOwnerGate:
 
     @pytest.mark.asyncio
     async def test_owner_allowed(self, notebook_session, monkeypatch):
-        """The owner connecting with a matching header is accepted."""
         from strata.notebook.ws import notebook_websocket
 
         _, session = notebook_session
@@ -1808,7 +1744,7 @@ class TestWebSocketOwnerGate:
 
     @pytest.mark.asyncio
     async def test_missing_header_refused(self, notebook_session, monkeypatch):
-        """When scoping is on, omitting the identity header must not bypass the gate."""
+        """With scoping on, omitting the identity header must not bypass the gate."""
         from strata.notebook.ws import notebook_websocket
 
         _, session = notebook_session
@@ -1823,7 +1759,7 @@ class TestWebSocketOwnerGate:
 
     @pytest.mark.asyncio
     async def test_legacy_unowned_notebook_passthrough(self, notebook_session, monkeypatch):
-        """An ``owner = None`` notebook stays accessible to any caller, even with scoping on."""
+        """An ``owner = None`` notebook stays open to any caller, even with scoping on."""
         from strata.notebook.ws import notebook_websocket
 
         _, session = notebook_session
@@ -1838,7 +1774,7 @@ class TestWebSocketOwnerGate:
 
 
 class TestWsOwnerAllowedHelper:
-    """Unit coverage for the extracted ``_ws_owner_allowed`` decision helper."""
+    """Unit coverage for the ``_ws_owner_allowed`` decision helper."""
 
     def _scoping(self, monkeypatch, *, enabled):
         if enabled:
@@ -1889,22 +1825,18 @@ class TestWsOwnerAllowedHelper:
 
 
 class TestRunningPayloadHelper:
-    """Tests for the ``_running_payload`` helper that decorates the
-    ``cell_status: running`` broadcast with remote worker metadata.
+    """``_running_payload`` decorates ``cell_status: running`` with remote worker metadata.
 
-    Local cells must keep the existing, minimal payload so existing clients
-    don't regress. Remote cells must include ``remote_worker`` and
-    ``remote_transport`` so the UI can render a live dispatch badge while
-    the cell executes on the remote worker.
+    Local cells keep the minimal payload; remote cells add ``remote_worker`` and
+    ``remote_transport`` for the UI's live dispatch badge.
     """
 
     @staticmethod
     def _build_session(tmp_path, cells):
         """Build a NotebookSession with the given (cell_id, source) pairs.
 
-        The notebook is created with two pre-registered workers: a DataFusion
-        cluster at port 9000 and a GPU worker at 9001, both configured as
-        HTTP executors.
+        Two HTTP-executor workers are registered: a DataFusion cluster on 9000 and a GPU worker on
+        9001.
         """
         from strata.notebook.models import WorkerBackendType, WorkerSpec
         from strata.notebook.session import NotebookSession
@@ -1989,9 +1921,9 @@ class TestRunningPayloadHelper:
 async def test_make_executor_with_progress_wires_prompt_delta_broadcast(
     notebook_session, monkeypatch
 ):
-    """``_make_executor_with_progress`` must wire ``on_prompt_delta`` to a
-    ``cell_output_delta`` broadcast, mirroring the loop-progress wiring.
-    Tested through the callback directly (fake broadcast, no WS upgrade)."""
+    """``on_prompt_delta`` is wired to a ``cell_output_delta`` broadcast, tested through the
+    callback.
+    """
     from strata.notebook import ws as ws_module
     from strata.notebook.ws import _make_executor_with_progress
 
@@ -2020,10 +1952,9 @@ async def test_make_executor_with_progress_wires_prompt_delta_broadcast(
 
 @pytest.mark.asyncio
 async def test_final_output_seq_is_newer_than_streamed_deltas(notebook_session, monkeypatch):
-    """Streaming frames draw from the same per-notebook counter as the
-    execution envelope; the canonical ``cell_output`` must carry a seq
-    LATER than every delta it supersedes, or seq-ordering clients treat
-    the final result as stale (PR #111 review finding)."""
+    """Deltas share the per-notebook seq counter, so the final ``cell_output`` must carry a later
+    seq than every delta or seq-ordering clients treat it as stale.
+    """
     from strata.notebook import ws as ws_module
     from strata.notebook.executor import CellExecutionResult
     from strata.notebook.ws import _ensure_execution_state, execute_cell_and_broadcast
@@ -2037,8 +1968,7 @@ async def test_final_output_seq_is_newer_than_streamed_deltas(notebook_session, 
     monkeypatch.setattr(ws_module, "_broadcast_message", fake_broadcast)
 
     class _StreamingStubExecutor:
-        """Stands in for CellExecutor inside _make_executor_with_progress:
-        emits two prompt deltas mid-"execution", then returns success."""
+        """Emits two prompt deltas mid-execution, then returns success."""
 
         def __init__(self, session, warm_pool=None):
             self.on_iteration_complete = None
@@ -2081,8 +2011,9 @@ async def test_final_output_seq_is_newer_than_streamed_deltas(notebook_session, 
 
 @pytest.mark.asyncio
 async def test_widget_update_persists_value_and_stales_downstream(tmp_path):
-    """widget_update: persist the new value, re-materialize the widget artifact,
-    and flip the downstream consumer to STALE (P3, Tier 0)."""
+    """widget_update persists the value, re-materializes the widget artifact, and marks the
+    downstream consumer STALE.
+    """
     from strata.notebook.models import CellLanguage, CellStatus
     from strata.notebook.runtime_state import load_runtime_state
     from strata.notebook.session import NotebookSession
@@ -2234,12 +2165,10 @@ async def test_live_cost_gate_leaves_expensive_downstream_stale(tmp_path):
 
 @pytest.mark.asyncio
 async def test_live_widget_reruns_all_downstream_leaves(tmp_path):
-    """A `# @live` change must re-run EVERY cheap downstream cell, not just the
-    first. Two sibling leaves read the control; running the first triggers a
-    staleness recompute that demotes the second from STALE to IDLE, and a
-    per-iteration status check used to skip it — so the table updated but the
-    plot didn't. The cascade snapshots its targets up front to stay
-    order-independent.
+    """A `# @live` change reruns every cheap downstream cell, not just the first.
+
+    Running one sibling recomputes staleness and demotes the other from STALE to IDLE, so the
+    cascade snapshots its targets up front.
     """
     from strata.notebook.models import CellLanguage, CellStatus
     from strata.notebook.session import ExecutionSample, NotebookSession
@@ -2286,8 +2215,9 @@ async def test_live_widget_reruns_all_downstream_leaves(tmp_path):
 
 @pytest.mark.asyncio
 async def test_read_only_viewer_rejects_mutations_but_allows_widget_update(tmp_path):
-    """A `?role=viewer` (app-mode) connection can drive widgets + sync, but every
-    mutation frame is rejected with a `read_only` error."""
+    """A `?role=viewer` (app-mode) connection can drive widgets and sync; every mutation frame gets
+    a `read_only` error.
+    """
     from strata.notebook.ws import notebook_websocket
 
     notebook_dir = create_notebook(tmp_path, "App View")
@@ -2319,7 +2249,7 @@ async def test_read_only_viewer_rejects_mutations_but_allows_widget_update(tmp_p
 
 @pytest.mark.asyncio
 async def test_editor_connection_allows_mutations(tmp_path):
-    """A normal (no role) connection is not read-only — mutations pass the gate."""
+    """A connection with no role is not read-only; mutations pass the gate."""
     from strata.notebook.ws import notebook_websocket
 
     notebook_dir = create_notebook(tmp_path, "Editor")
@@ -2340,8 +2270,7 @@ async def test_editor_connection_allows_mutations(tmp_path):
 
 
 class _GatedStubExecutor:
-    """Executor stub whose execute blocks on an event, so tests can hold a
-    run "in flight" while asserting the reservation excludes others."""
+    """Executor stub whose execute blocks on an event, holding a run in flight."""
 
     started: asyncio.Event
     release: asyncio.Event
@@ -2363,8 +2292,7 @@ class _GatedStubExecutor:
 
 @pytest.mark.asyncio
 async def test_exclusive_run_rejects_concurrent_run(notebook_session, monkeypatch):
-    """A second REST/MCP-driven run while one is in flight must raise
-    NotebookBusyError, not execute concurrently on the session."""
+    """A second REST/MCP run while one is in flight raises NotebookBusyError."""
     from strata.notebook import ws as ws_module
     from strata.notebook.ws import NotebookBusyError, execute_cell_exclusive
 
@@ -2393,8 +2321,7 @@ async def test_exclusive_run_rejects_concurrent_run(notebook_session, monkeypatc
 
 @pytest.mark.asyncio
 async def test_exclusive_run_blocks_ws_reservation(notebook_session, monkeypatch):
-    """While a REST/MCP run is in flight, the WS reservation path must see
-    the notebook as busy (previously the REST run was invisible to it)."""
+    """While a REST/MCP run is in flight, the WS reservation path sees the notebook as busy."""
     from strata.notebook import ws as ws_module
     from strata.notebook.ws import (
         _ensure_execution_state,
@@ -2420,8 +2347,9 @@ async def test_exclusive_run_blocks_ws_reservation(notebook_session, monkeypatch
 
 @pytest.mark.asyncio
 async def test_exclusive_run_is_cancellable(notebook_session, monkeypatch):
-    """The REST/MCP run registers as the execution task, so cell_cancel /
-    grace teardown can cancel it (previously active_task() was None)."""
+    """The REST/MCP run registers as the execution task, so cell_cancel and grace teardown can
+    cancel it.
+    """
     from strata.notebook import ws as ws_module
     from strata.notebook.ws import _ensure_execution_state, execute_cell_exclusive
 
@@ -2448,10 +2376,11 @@ async def test_exclusive_run_is_cancellable(notebook_session, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_reservation_released_when_plan_raises(notebook_session, monkeypatch):
-    """An exception between reserve and schedule (e.g. CascadePlanner.plan
-    raising) must release the reservation — previously requested_cell
-    stayed set and, with a second tab keeping execution state alive,
-    every later run was refused as busy."""
+    """An exception between reserve and schedule (e.g. CascadePlanner.plan) releases the
+    reservation.
+
+    Otherwise, with a second tab keeping execution state alive, every later run is refused as busy.
+    """
     from strata.notebook import ws as ws_module
     from strata.notebook.ws import (
         _handle_cell_execute,
@@ -2483,9 +2412,9 @@ async def test_reservation_released_when_plan_raises(notebook_session, monkeypat
 
 @pytest.mark.asyncio
 async def test_broadcast_survives_mid_iteration_removal(notebook_session):
-    """A client removed from the live connections list during a broadcast's
-    send await must not make the NEXT client miss the frame (list mutation
-    during iteration skips an element)."""
+    """A client removed during a broadcast's send await must not make the next client miss the
+    frame.
+    """
     from strata.notebook.ws import _broadcast_message, _notebook_connections
 
     _, session = notebook_session
@@ -2515,12 +2444,7 @@ async def test_broadcast_survives_mid_iteration_removal(notebook_session):
 
 @pytest.fixture
 def _server_state(monkeypatch, tmp_path):
-    """Install a ServerState so the WS auth gate has a config to read.
-
-    Not autouse: with no state the gate treats the process as unconfigured
-    (see ``ws._configured_auth_mode``), which is what every other notebook
-    test wants and already got before the gate existed.
-    """
+    """Install a ServerState so the WS auth gate has a config to read (not autouse)."""
     import strata.server as server_module
     from strata.config import StrataConfig
     from strata.server import ServerState
@@ -2539,7 +2463,7 @@ def personal_mode(_server_state):
 
 @pytest.fixture
 def trusted_proxy_mode(_server_state):
-    """Put the server in service/trusted-proxy mode for the duration of a test."""
+    """Put the server in service/trusted-proxy mode for the test."""
     _server_state.auth_mode = "trusted_proxy"
     _server_state.proxy_token = "sekrit"
     return _server_state
@@ -2555,9 +2479,7 @@ def _auth_headers(scopes: str, *, token: str = "sekrit", principal: str = "alice
 
 @pytest.mark.asyncio
 async def test_ws_upgrade_rejected_without_proxy_token(notebook_session, trusted_proxy_mode):
-    """No HTTP middleware runs for a WS upgrade, so the endpoint must verify
-    the proxy token itself — otherwise anything that can open a socket in
-    service mode gets arbitrary code execution."""
+    """No HTTP middleware runs for a WS upgrade, so the endpoint checks the proxy token itself."""
     from strata.notebook.ws import notebook_websocket
 
     _, session = notebook_session
@@ -2585,7 +2507,7 @@ async def test_ws_upgrade_rejected_with_wrong_proxy_token(notebook_session, trus
 
 @pytest.mark.asyncio
 async def test_ws_upgrade_rejected_without_principal(notebook_session, trusted_proxy_mode):
-    """A valid proxy token but no principal header must not authenticate."""
+    """A valid proxy token without a principal header must not authenticate."""
     from strata.notebook.ws import notebook_websocket
 
     _, session = notebook_session
@@ -2600,8 +2522,7 @@ async def test_ws_upgrade_rejected_without_principal(notebook_session, trusted_p
 
 @pytest.mark.asyncio
 async def test_ws_read_scope_cannot_execute(notebook_session, trusted_proxy_mode):
-    """The advertised notebook:read/write/execute scopes must actually gate:
-    a read-only principal could previously run arbitrary Python."""
+    """The notebook:read/write/execute scopes gate frames: a read-only principal cannot run code."""
     from strata.notebook.ws import notebook_websocket
 
     _, session = notebook_session
@@ -2672,7 +2593,7 @@ async def test_ws_admin_wildcard_grants_every_frame(notebook_session, trusted_pr
 
 @pytest.mark.asyncio
 async def test_ws_personal_mode_unchanged(notebook_session, personal_mode):
-    """auth_mode='none' deployments must keep connecting with no headers."""
+    """auth_mode='none' deployments keep connecting with no headers."""
     from strata.notebook.ws import notebook_websocket
 
     _, session = notebook_session
@@ -2697,12 +2618,9 @@ def test_unknown_frames_default_to_execute_scope():
 
 @pytest.mark.asyncio
 async def test_a_failed_run_still_relabels_what_its_upstreams_changed(tmp_path):
-    """Round 4: a failing target re-ran a fresh upstream on its way to failing.
+    """A failing target that re-ran a ``@nocache`` upstream must still refresh staleness.
 
-    ``avg`` holds a result from the producer's previous read. Running the
-    failing diagnostic ``diag`` materialised the ``@nocache`` producer again,
-    so ``avg`` is now out of date, but only a *successful* run refreshed
-    staleness, and ``avg`` kept saying ready with no reasons.
+    ``avg`` holds a result from the producer's previous read, so it must stop reporting ready.
     """
     from strata.notebook.models import CellStatus
 
@@ -2745,10 +2663,7 @@ async def test_a_failed_run_still_relabels_what_its_upstreams_changed(tmp_path):
 async def test_busy_widget_update_leaves_the_stored_value_alone(tmp_path):
     """A widget_update refused as busy must not change what the next run computes.
 
-    The handler used to persist the new values before taking the execution
-    reservation, so a rejected update was already on disk: the reply said the
-    notebook was busy, nothing re-materialized, and the *next* materialization
-    silently used the value the server had refused.
+    Persisting before the reservation would leave the refused value on disk for the next run.
     """
     from strata.notebook.models import CellLanguage
     from strata.notebook.runtime_state import load_runtime_state
@@ -2807,11 +2722,9 @@ async def test_busy_widget_update_leaves_the_stored_value_alone(tmp_path):
 
 @pytest.mark.asyncio
 async def test_widget_update_shows_the_new_value_in_the_session_payload(tmp_path):
-    """The serialized session must report what the control is set to.
+    """The serialized session reports the control's current value.
 
-    The handler persisted to ``runtime.json`` without touching the live cell, so
-    every payload built from the session reported an empty ``values`` map and a
-    reconnecting client could not tell the selection from the declared default.
+    Otherwise a reconnecting client cannot tell the selection from the declared default.
     """
     from strata.notebook.models import CellLanguage
     from strata.notebook.session import NotebookSession

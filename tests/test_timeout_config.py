@@ -4,10 +4,7 @@ import pytest
 
 
 class TestTimeoutConfig:
-    """Tests for timeout configuration in StrataConfig."""
-
     def test_default_timeouts(self):
-        """Test default timeout values."""
         from strata.config import StrataConfig
 
         config = StrataConfig()
@@ -21,7 +18,6 @@ class TestTimeoutConfig:
         assert config.s3_request_timeout_seconds == 30.0
 
     def test_custom_timeouts(self):
-        """Test custom timeout values."""
         from strata.config import StrataConfig
 
         config = StrataConfig(
@@ -43,7 +39,6 @@ class TestTimeoutConfig:
         assert config.s3_request_timeout_seconds == 60.0
 
     def test_get_timeout_config(self):
-        """Test get_timeout_config() method."""
         from strata.config import StrataConfig
 
         config = StrataConfig()
@@ -65,11 +60,11 @@ class TestTimeoutConfig:
 
 
 class TestTimeoutEndpointIntegration:
-    """Integration tests for timeout endpoint."""
+    """The timeout config endpoint."""
 
     @pytest.mark.asyncio
     async def test_timeout_endpoint(self, tmp_path):
-        """Test /v1/config/timeouts endpoint."""
+        """/v1/config/timeouts."""
         from httpx import ASGITransport, AsyncClient
 
         import strata.server as server_module
@@ -126,7 +121,7 @@ class TestTimeoutEndpointIntegration:
 
     @pytest.mark.asyncio
     async def test_timeout_endpoint_custom_values(self, tmp_path):
-        """Test /v1/config/timeouts with custom timeout values."""
+        """/v1/config/timeouts with custom values."""
         from httpx import ASGITransport, AsyncClient
 
         import strata.server as server_module

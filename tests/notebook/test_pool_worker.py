@@ -1,10 +1,7 @@
-"""Unit tests for ``pool_worker.execute_harness`` — the in-process cell
-executor that the warm pool dispatches into.
+"""Unit tests for ``pool_worker.execute_harness``, the warm pool's in-process executor.
 
-These tests exercise the manifest → result function directly without
-spinning up the warm pool itself; the pool's job is just to feed a
-manifest path through stdin and read the result line, so the contract
-worth pinning here is the result dict produced for tricky input states.
+The pool only pipes a manifest in and a result line out, so the result dict
+is the contract pinned here.
 """
 
 from __future__ import annotations
@@ -15,14 +12,10 @@ from strata.notebook.pool_worker import execute_harness
 
 
 class TestExecuteHarnessRdsInput:
-    """An R-only RDS upstream consumed by a Python cell must surface
-    the structured ``StrataRArtifactError`` instead of swallowing it
-    and regressing to ``NameError: name 'fit' is not defined`` once
-    the cell body runs.
+    """An RDS upstream raises ``StrataRArtifactError``, not a later ``NameError``.
 
-    The warm pool is the default WebSocket execution path, so a
-    swallow here breaks the common user experience even when the
-    cold-subprocess harness (``harness.py``) handles it correctly.
+    The warm pool is the default WebSocket path, so a swallow here breaks the
+    common case even when ``harness.py`` is correct.
     """
 
     def test_rds_input_surfaces_structured_error(self, tmp_path: Path) -> None:
@@ -57,14 +50,8 @@ class TestExecuteHarnessRdsInput:
 
 
 class TestExecuteHarnessTableInjection:
-    """``@table`` declarations must inject ``<name>`` and
-    ``<name>_snapshot`` into the warm-worker namespace.
-
-    The warm pool is the default WebSocket execution path. It injected
-    mounts but not tables, so an ``@table`` cell run through the pool
-    failed with ``NameError`` for the injected URI variable while the
-    cold ``harness.py`` path (which injects both) worked — the cell body
-    references ``trips`` before it is ever defined.
+    """``@table`` injects ``<name>`` and ``<name>_snapshot`` into the warm namespace,
+    matching ``harness.py``.
     """
 
     def test_table_vars_injected(self, tmp_path: Path) -> None:
@@ -89,11 +76,10 @@ class TestExecuteHarnessTableInjection:
 
 
 class TestExecuteHarnessClientInjection:
-    """A ``strata_url`` in the manifest injects an ambient ``strata``
-    client into the warm-worker namespace — so a cell can call
-    ``strata.materialize(...)`` without constructing a client — and it is
-    closed after the cell (the warm process is reused; a leaked
-    ``httpx.Client`` would accumulate sockets) and excluded from outputs.
+    """``strata_url`` injects an ambient ``strata`` client, excluded from outputs.
+
+    It is closed after the cell: the warm process is reused, so a leaked
+    ``httpx.Client`` would accumulate sockets.
     """
 
     def test_client_injected_and_not_an_output(self, tmp_path: Path) -> None:
@@ -127,9 +113,7 @@ class TestExecuteHarnessClientInjection:
 
 
 class TestExecuteHarnessClientCellId:
-    """The injected ``strata`` client carries the originating cell id (from
-    the manifest) so its named put/materialize can stamp ``nb_cell`` — the
-    data behind the per-cell registry strip."""
+    """The injected client carries the cell id so named writes can stamp ``nb_cell``."""
 
     def test_cell_id_reaches_injected_client(self, tmp_path: Path) -> None:
         manifest = {
@@ -144,8 +128,7 @@ class TestExecuteHarnessClientCellId:
         assert result["variables"]["cid"]["preview"] == "cell-xyz"
 
     def test_remote_store_headers_reach_injected_client(self, tmp_path: Path) -> None:
-        """strata_headers (remote shared-store auth/tenant) must reach the warm
-        worker's client — the default WS path used to drop them."""
+        """strata_headers (remote store auth/tenant) reach the warm worker's client."""
         manifest = {
             "source": "principal = strata._headers.get('X-Strata-Principal', '')",
             "inputs": {},
@@ -159,9 +142,8 @@ class TestExecuteHarnessClientCellId:
 
 
 class TestExecuteHarnessDisplayDeduplication:
-    """The warm pool is the default execution path, so it needs the same
-    display deduplication as the cold subprocess: a cell ending in a bare
-    consumed variable must not serialize that object a second time."""
+    """A cell ending in a bare consumed variable must not serialize it twice, as in the cold
+    path."""
 
     def test_display_that_is_a_variable_reuses_its_payload(self, tmp_path: Path) -> None:
         manifest = {

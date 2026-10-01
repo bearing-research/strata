@@ -1,9 +1,7 @@
-"""Execution tests for widget cells (P2).
+"""Execution tests for widget cells.
 
-A widget cell materializes one ``json/object`` value artifact per control with
-no subprocess; a downstream Python cell consumes those values like any upstream
-output. Values come from ``runtime.json`` (P3 writes them), falling back to the
-declared defaults.
+A widget cell materializes one ``json/object`` artifact per control with no subprocess. Values come
+from ``runtime.json``, falling back to the declared defaults.
 """
 
 from __future__ import annotations
@@ -110,7 +108,7 @@ def test_persist_cell_widget_values_merges(tmp_path):
 
 
 def test_serialize_cell_emits_widget_block(widget_session):
-    """serialize_cell attaches descriptors + current values for widget cells."""
+    """serialize_cell attaches descriptors and current values for widget cells."""
     controls = widget_session.notebook_state.get_cell("controls")
     controls.widget_values = {"alpha": 0.25}
 
@@ -131,14 +129,10 @@ def test_serialize_cell_no_widget_block_for_python(widget_session):
 
 @pytest.mark.asyncio
 async def test_widget_publishes_artifact_uris_for_downstream_provenance(widget_session):
-    """Regression: a widget value change must reach downstream provenance.
+    """A widget value change must reach downstream provenance.
 
-    The widget cell must publish each control's value artifact onto
-    ``cell.artifact_uris`` (like a Python cell's multi-output vars). Without it,
-    a downstream consumer's ``_collect_input_hashes`` finds no upstream
-    artifact, its provenance is blind to the control value, and it cache-hits
-    the stale output — i.e. dragging a slider never updates downstream cells,
-    which is exactly what live mode / the interactive app view depend on.
+    Without each control's artifact on ``cell.artifact_uris``, ``_collect_input_hashes`` finds no
+    upstream artifact and the consumer cache-hits stale output when a slider moves.
     """
     from strata.notebook.runtime_state import persist_cell_widget_values
 

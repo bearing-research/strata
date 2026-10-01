@@ -1,10 +1,7 @@
-"""Tests for the per-language executor registry.
+"""Tests for the per-language executor registry surface.
 
-End-to-end behaviour is exercised by the full notebook suite (cell
-execution, batching, staleness). These tests target the registry
-surface — adding a language, looking one up, the failure shape for an
-unregistered language, and the behaviour-flag projections each adapter
-exposes.
+Registration, lookup, the unregistered-language failure, and each adapter's
+behaviour flags; execution itself is covered by the wider notebook suite.
 """
 
 from __future__ import annotations
@@ -20,8 +17,7 @@ from strata.notebook.models import CellLanguage
 
 
 class TestBuiltInRegistrations:
-    """The five shipped languages must resolve at import time (R registers its
-    adapter at ``languages.r`` package import)."""
+    """The five shipped languages resolve at import (R registers on ``languages.r`` import)."""
 
     @pytest.mark.parametrize(
         "language",
@@ -41,7 +37,6 @@ class TestBehaviourFlags:
     """Behaviour flags drive staleness gates in session.compute_staleness."""
 
     def test_markdown_skips_execution_provenance(self):
-        """Markdown short-circuits the entire provenance chain."""
         assert get_language_executor(CellLanguage.MARKDOWN).skips_execution_provenance is True
 
     def test_others_compute_provenance(self):
@@ -49,7 +44,7 @@ class TestBehaviourFlags:
             assert get_language_executor(lang).skips_execution_provenance is False, lang
 
     def test_prompt_and_sql_have_alternate_cache_scheme(self):
-        """Per-language cache hash → the generic miss check needs to preserve READY."""
+        """A per-language cache hash means the generic miss check must preserve READY."""
         assert get_language_executor(CellLanguage.PROMPT).has_alternate_cache_scheme is True
         assert get_language_executor(CellLanguage.SQL).has_alternate_cache_scheme is True
 
@@ -73,11 +68,7 @@ class TestRegisterIsExtensible:
     """A new language can register without touching dispatch sites."""
 
     def test_register_overrides_existing(self):
-        """Re-registering a language replaces the prior adapter.
-
-        Matches the analyzer registry's behaviour. Tests rely on this
-        to swap in fakes; production code shouldn't.
-        """
+        """Re-registering replaces the prior adapter; tests rely on this to swap in fakes."""
 
         class FakeExecutor:
             skips_execution_provenance = False
@@ -117,12 +108,9 @@ class TestIsBatchableShortcuts:
         [CellLanguage.PROMPT, CellLanguage.SQL, CellLanguage.MARKDOWN, CellLanguage.R],
     )
     def test_non_python_languages_return_false(self, language):
-        """No need to fabricate a cell; the adapter ignores it for these.
+        """The adapter ignores the cell for these, so a sentinel suffices.
 
-        The PYTHON adapter's ``is_batchable`` runs the full
-        worker/loop/timeout/mount check and needs a real cell + executor;
-        end-to-end behaviour is covered in ``test_executor_batch.py``.
-        R defers batching to a future phase per #57.
+        Python's ``is_batchable`` needs a real cell; see ``test_executor_batch.py``.
         """
         # Sentinel cell + executor; must never be touched.
         sentinel = object()

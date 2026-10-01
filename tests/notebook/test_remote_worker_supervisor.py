@@ -1,9 +1,7 @@
-"""Tests for the RemoteWorkerSupervisor (P2 of the SSH remote-worker path).
+"""Tests for the RemoteWorkerSupervisor of the SSH remote-worker path.
 
-Every external effect is faked — the tunnel launcher, the health probe, the port
-picker, and the SSH runner — so these assert the supervisor's orchestration
-(provision → tunnel → health-check → record, plus reconcile / teardown /
-shutdown) with no real ssh, socket, or HTTP.
+Tunnel launcher, health probe, port picker and SSH runner are faked, so these assert the
+orchestration (provision, tunnel, health-check, record, reconcile, teardown, shutdown).
 """
 
 from __future__ import annotations
@@ -20,9 +18,7 @@ from tests.notebook.test_ssh_worker import ScriptedSshRunner, _ok
 
 @pytest.fixture(autouse=True)
 def _clear_worker_tokens():
-    """The supervisor publishes tokens into the process-global
-    worker_secrets registry; clear them so tests in other modules
-    (test_worker_secrets) don't observe leftovers under xdist."""
+    """Clear the process-global worker_secrets tokens so other modules don't see leftovers."""
     yield
     for name in ("gpu", "a", "b"):
         clear_runtime_worker_token(name)
@@ -34,7 +30,7 @@ _NO_UV = "worker=\nuv=\nplatform=Linux x86_64\nversion=\n"
 
 
 def _runner(detect: str = _INSTALLED):
-    """A scripted SSH runner for a box that provisions + launches cleanly."""
+    """A scripted SSH runner for a box that provisions and launches cleanly."""
     return ScriptedSshRunner(
         [
             (lambda c: c == "true", _ok()),  # preflight
@@ -145,11 +141,11 @@ def test_establish_is_idempotent_per_name():
 
 
 def test_re_establish_publishes_a_token_the_remote_worker_actually_has():
-    """Re-establish tears the tunnel down but deliberately leaves the remote
-    worker running, so the relaunch used to adopt it — while publishing a newly
-    generated token locally. The worker enforces the token it was started with,
-    so every dispatch 401s, and the unauthenticated ``/health`` probe still
-    reports it healthy. The published token must be one a worker was given."""
+    """Re-establish keeps the remote worker running, so its token must not be regenerated.
+
+    The worker enforces the token it started with: a fresh local token 401s every dispatch
+    while the unauthenticated ``/health`` probe still reports healthy.
+    """
     runner = ScriptedSshRunner(
         [
             (lambda c: c == "true", _ok()),
@@ -264,9 +260,8 @@ def test_shutdown_clears_runtime_tokens():
 
 
 def test_concurrent_establish_same_name_is_rejected():
-    """Two concurrent establishes for one name must not double-launch (the
-    second used to pass the existence check too, orphaning the first
-    ssh -L). The name is reserved for the whole establish."""
+    """The name is reserved for the whole establish, so a second one can't orphan the first ssh
+    -L."""
     import threading
     from concurrent.futures import ThreadPoolExecutor
 
@@ -329,8 +324,7 @@ def test_failed_establish_releases_the_name():
 
 
 def test_shutdown_snapshot_tolerates_concurrent_teardown():
-    """shutdown() iterates a snapshot, so a concurrent teardown can't make
-    it die with 'dictionary changed size during iteration'."""
+    """shutdown() iterates a snapshot, so a concurrent teardown can't change the dict under it."""
     sup, launcher, _ = _supervisor()
     sup.establish("a", "user@box")
     sup.establish("b", "user@box")

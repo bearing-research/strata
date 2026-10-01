@@ -1,10 +1,8 @@
 """What a cell is given must not depend on where it runs.
 
-``_dispatch_execution`` hands the local and embedded backends
-``mutation_defines`` and ``tables``; the HTTP branch did not take them, so a
-cell that mutates a value in place recaptured it locally and silently did not
-on a worker -- under the same provenance hash, which is a wrong answer served
-from cache forever -- and an ``@table`` name was simply undefined there.
+The HTTP branch must forward ``mutation_defines`` and ``tables`` like the local backends, or an
+in-place mutation is not recaptured on a worker (a wrong answer under the same hash) and an
+``@table`` name is undefined there.
 """
 
 from __future__ import annotations
@@ -36,9 +34,9 @@ def _session(tmp_path: Path, name: str):
 async def test_a_table_reaches_the_cell_on_a_worker(
     tmp_path, transport, notebook_executor_server, notebook_build_server
 ):
-    """``@table`` resolves to a uri and a snapshot id the server already
-    folded into the provenance hash. Dropped on the way, the cell ran with a
-    correct key and no variable: NameError on a worker, fine locally."""
+    """The table's uri and snapshot are already in the provenance hash; dropped, the cell ran with a
+    correct key and a NameError.
+    """
     session = _session(tmp_path, f"tables-{transport}")
     worker = WorkerSpec(
         name="w",
@@ -73,8 +71,7 @@ async def test_a_table_reaches_the_cell_on_a_worker(
 
 
 def test_a_worker_puts_both_into_the_harness_manifest(monkeypatch, tmp_path):
-    """The worker's own half: whatever it is sent has to reach the manifest
-    the harness reads, or forwarding them changed nothing."""
+    """The worker's half: what it is sent must reach the manifest the harness reads."""
     from strata.notebook import remote_executor
 
     monkeypatch.delenv("STRATA_WORKER_TOKEN", raising=False)

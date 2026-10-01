@@ -1,8 +1,7 @@
-"""`strata watch` dispatch — the watch-only TUI attach.
+"""`strata watch` dispatch to the watch-only TUI.
 
-The spectator itself blocks on a live Textual app, so these tests monkeypatch
-``run_spectator`` and assert the subcommand routes its target (a local notebook
-dir or a ``--session`` id) and server through to it.
+``run_spectator`` is monkeypatched (it blocks on a live Textual app); these assert the target
+(notebook dir or ``--session`` id) and server reach it.
 """
 
 from __future__ import annotations

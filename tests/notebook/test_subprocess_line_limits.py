@@ -1,12 +1,9 @@
-"""Regression tests for subprocess line-limit handling (code-review fix).
+"""Subprocess line-limit handling.
 
-asyncio's StreamReader defaults to a 64 KiB line limit, and readline()
-raises ValueError past it. Harness frames and warm-pool result lines
-legitimately embed full stdout captures and base64 display payloads, so
-the notebook's subprocess readers must (a) carry a far larger limit and
-(b) fail a run cleanly, not crash the caller, when even that is exceeded.
-Also covers the warm-pool timeout contract: a cell timeout must surface
-as TimeoutError, not silently trigger a cold re-execution.
+asyncio's StreamReader raises ValueError past 64 KiB, but harness frames and warm-pool result lines
+embed stdout captures and base64 displays. Readers need a far larger limit, and must fail the run
+cleanly when even that is exceeded. Also: a warm-pool cell timeout raises TimeoutError instead of a
+cold re-execution.
 """
 
 from __future__ import annotations
@@ -22,8 +19,7 @@ from strata.notebook.process_tree import SUBPROCESS_LINE_LIMIT
 
 @pytest.mark.asyncio
 async def test_stream_reader_limit_accepts_large_frames():
-    """A 1 MiB frame line (a cached PNG display) must survive readline —
-    it raised ValueError under the 64 KiB default."""
+    """A 1 MiB frame line (a cached PNG display) must survive readline."""
     reader = asyncio.StreamReader(limit=SUBPROCESS_LINE_LIMIT)
     payload = b"x" * (1024 * 1024) + b"\n"
     reader.feed_data(payload)
@@ -62,10 +58,9 @@ class _FakePool:
 
 @pytest.mark.asyncio
 async def test_pool_timeout_raises_instead_of_cold_fallback(tmp_path):
-    """A cell exceeding its timeout in the warm worker must raise
-    TimeoutError (surfaced as a cell timeout by the executor) — returning
-    None meant the caller re-ran the whole cell body cold: paying the
-    timeout twice and repeating side effects."""
+    """Returning None would rerun the whole cell cold: the timeout paid twice and side effects
+    repeated.
+    """
 
     class _NeverStdout:
         async def readline(self):
@@ -81,9 +76,9 @@ async def test_pool_timeout_raises_instead_of_cold_fallback(tmp_path):
 
 @pytest.mark.asyncio
 async def test_batch_service_loop_survives_oversized_frame(tmp_path):
-    """A frame exceeding even the raised limit must end the batch as
-    subprocess_died — previously the ValueError propagated uncaught,
-    aborting run-all and leaking the harness subprocess."""
+    """A frame past even the raised limit ends the batch as subprocess_died instead of aborting
+    run-all and leaking the harness subprocess.
+    """
     from strata.notebook.executor import CellExecutor
 
     class _OverflowReader:

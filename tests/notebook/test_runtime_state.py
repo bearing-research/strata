@@ -1,7 +1,4 @@
-"""Tests for ``.strata/runtime.json`` — the per-notebook runtime state
-that lives outside ``notebook.toml`` so example notebooks don't churn
-under Git every time someone runs them.
-"""
+"""Tests for ``.strata/runtime.json``, the runtime state kept out of ``notebook.toml``."""
 
 from __future__ import annotations
 
@@ -169,9 +166,7 @@ def notebook_with_legacy_toml(tmp_path: Path):
 def test_parse_notebook_migrates_and_rewrites_toml_on_first_open(
     notebook_with_legacy_toml: Path,
 ):
-    """Opening a legacy notebook migrates the runtime fields out and
-    the on-disk notebook.toml no longer carries the ``artifacts`` or
-    ``cache`` sections."""
+    """Opening a legacy notebook moves ``artifacts`` and ``cache`` out of notebook.toml."""
     import tomllib
 
     from strata.notebook.parser import parse_notebook
@@ -252,8 +247,7 @@ def test_persist_cell_provenance_sets_and_clears_fields(tmp_path: Path):
 
 
 def test_parse_notebook_hydrates_provenance_hashes(tmp_path: Path):
-    """Opening a notebook restores persisted provenance hashes onto the
-    cell state so ``compute_staleness`` has the history it needs."""
+    """Restored hashes give ``compute_staleness`` the history it needs."""
     from strata.notebook.parser import parse_notebook
     from strata.notebook.runtime_state import persist_cell_provenance
     from strata.notebook.writer import add_cell_to_notebook, create_notebook, write_cell
@@ -301,14 +295,9 @@ def test_update_cell_display_outputs_clears_entry(tmp_path: Path):
 
 
 def test_runtime_state_writes_do_not_bump_notebook_toml_updated_at(tmp_path: Path):
-    """Runtime-state writes must not touch ``notebook.toml``.
+    """Executing a cell leaves ``notebook.toml`` byte-identical.
 
-    ``updated_at`` is the signal we want to reserve for structural
-    changes (add/remove/reorder cells, change worker/timeout/env/mounts)
-    so version-controlled notebooks don't churn under Git every time
-    someone runs a cell. Display-output, console, provenance-hash, and
-    environment-metadata updates all live in ``.strata/`` — so executing
-    a cell must leave ``notebook.toml`` byte-identical.
+    ``updated_at`` is reserved for structural changes, so committed notebooks don't churn.
     """
     import tomllib
 
@@ -385,11 +374,9 @@ def test_persist_cell_execution_sample_keeps_only_the_newest(tmp_path: Path):
 
 
 def test_execution_samples_survive_a_new_session(tmp_path: Path):
-    """Profiling used to reset to zero whenever the server restarted.
+    """A new ``NotebookSession`` over the same directory stands in for a restart.
 
-    A new ``NotebookSession`` over the same directory stands in for a restart:
-    it is a fresh object with a fresh ``execution_history``, so anything the
-    summary still reports has come back off disk.
+    Its ``execution_history`` starts fresh, so anything the summary reports came from disk.
     """
     from strata.notebook.parser import parse_notebook
     from strata.notebook.session import NotebookSession
@@ -419,13 +406,10 @@ def test_execution_samples_survive_a_new_session(tmp_path: Path):
 
 
 def test_a_team_hit_is_priced_by_the_publishers_run(tmp_path: Path):
-    """The case the ordinary estimator cannot price.
+    """A teammate's result is priced by the publisher's run, not a local one.
 
-    Local savings are estimated against the last uncached run of the same cell
-    — the best available evidence for what running it again would cost. Someone
-    served a teammate's result never made such a run, so with nothing carried
-    on the sample the shared cache would report saving **zero** in exactly the
-    case it saved the most.
+    Local savings are estimated from the last uncached run of the cell; a team hit never made
+    one, so without a saving carried on the sample the shared cache would report zero.
     """
     from strata.notebook.parser import parse_notebook
     from strata.notebook.session import NotebookSession
@@ -454,7 +438,7 @@ def test_a_team_hit_is_priced_by_the_publishers_run(tmp_path: Path):
 
 
 def test_local_and_team_savings_are_reported_separately(tmp_path: Path):
-    """The total alone cannot answer "is the shared store earning its keep?"."""
+    """The total alone can't say whether the shared store earns its keep."""
     from strata.notebook.parser import parse_notebook
     from strata.notebook.session import NotebookSession
     from strata.notebook.writer import add_cell_to_notebook, create_notebook, write_cell
@@ -487,8 +471,7 @@ def test_local_and_team_savings_are_reported_separately(tmp_path: Path):
 
 
 def test_team_attribution_survives_a_restart(tmp_path: Path):
-    """Same reason the durations had to: a number that resets on restart is not
-    a number anyone trusts."""
+    """A number that resets on restart is not one anyone trusts."""
     from strata.notebook.parser import parse_notebook
     from strata.notebook.session import NotebookSession
     from strata.notebook.writer import add_cell_to_notebook, create_notebook, write_cell
@@ -514,7 +497,7 @@ def test_team_attribution_survives_a_restart(tmp_path: Path):
 
 
 def test_the_promotions_behind_team_hits_are_listed_and_survive_a_restart(tmp_path: Path):
-    """Which shared results a notebook drew on, when someone promoted them."""
+    """Which shared results a notebook drew on, and when they were promoted."""
     from strata.notebook.parser import parse_notebook
     from strata.notebook.session import NotebookSession
     from strata.notebook.writer import add_cell_to_notebook, create_notebook, write_cell
@@ -544,8 +527,7 @@ def test_the_promotions_behind_team_hits_are_listed_and_survive_a_restart(tmp_pa
 
 
 def test_a_solo_notebook_records_no_team_keys(tmp_path: Path):
-    """The runtime file is rewritten on every execution, so two dead keys per
-    sample is a cost every solo notebook would pay forever."""
+    """The file is rewritten every execution; dead keys would cost every solo notebook."""
     import json as json_module
 
     from strata.notebook.runtime_state import persist_cell_execution_sample
@@ -558,12 +540,10 @@ def test_a_solo_notebook_records_no_team_keys(tmp_path: Path):
 
 
 def test_a_team_hit_from_an_anonymous_publisher_still_counts(tmp_path: Path):
-    """An unauthenticated store publishes with no principal.
+    """An unauthenticated store publishes with no principal; the hit must still count.
 
-    That is a flagged-but-supported deployment, and it must not make the hit
-    invisible. Counting team hits by "did we learn an author" produced a
-    summary reporting team *savings* alongside zero team *hits* — the reason
-    the flag is passed explicitly rather than inferred.
+    Inferring team hits from "did we learn an author" reported team savings with zero hits,
+    so the flag is passed explicitly.
     """
     from strata.notebook.parser import parse_notebook
     from strata.notebook.session import NotebookSession

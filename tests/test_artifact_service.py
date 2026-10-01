@@ -1,9 +1,7 @@
-"""Unit tests for ``ArtifactService`` — pure graph logic, no server/DB.
+"""Unit tests for ``ArtifactService``: pure graph logic, no server or DB.
 
-The whole point of the service extraction (P2): the lineage BFS is testable with
-plain artifact stubs and a fake store, no TestClient and no SQLite. ``build_lineage``
-only reads attributes off the artifact records and calls ``store.get_artifact``,
-so ``SimpleNamespace`` stubs suffice.
+``build_lineage`` only reads record attributes and calls ``store.get_artifact``, so
+``SimpleNamespace`` stubs and a fake store suffice.
 """
 
 import json
@@ -137,9 +135,9 @@ def test_lineage_marks_cross_tenant_input_as_unknown_stub():
 
 
 def test_lineage_walks_through_a_superseded_step():
-    """Rerunning a cell supersedes its earlier version, which the published
-    chain still names and still reads. The walk stopped there and rendered the
-    step and everything upstream of it as unknown."""
+    """A rerun supersedes a version the published chain still names; the walk must continue through
+    it instead of rendering it and its upstream as unknown.
+    """
     root = _art("R", 1, inputs={"strata://artifact/A@v=1": "A@v=1"})
     a = _art(
         "A",
@@ -197,12 +195,8 @@ def test_dependents_caps_list_at_limit_but_total_counts_all():
 
 
 def test_lineage_reports_who_computed_each_step_and_where():
-    """Lineage's reason to exist changed when results became shareable.
-
-    Before a shared store, "who produced this" was always you and "in which
-    environment" was always this machine, so neither was worth a column. Once a
-    graph can contain a step a teammate ran on another machine, they are the
-    questions it is being opened to answer.
+    """Once a graph can hold a step a teammate ran elsewhere, who and where are the questions
+    lineage answers.
     """
     upstream = _art(
         "raw",
@@ -247,9 +241,9 @@ def test_lineage_reports_who_computed_each_step_and_where():
 
 
 def test_lineage_reports_nothing_rather_than_guessing():
-    """Tables, core transforms, and anything stored before these fields existed
-    record none of it. Empty is the honest answer — a plausible default would be
-    a claim about a machine nobody observed."""
+    """Tables, core transforms and older artifacts record none of it; a default would be a
+    fabricated claim.
+    """
     root = _art("plain", 1, inputs={"file:///wh#ns.tbl@snapshot=7": "snapshot=7"})
 
     graph = artifact_service.build_lineage(
@@ -267,9 +261,7 @@ def test_lineage_reports_nothing_rather_than_guessing():
 
 
 def test_lineage_survives_a_transform_spec_it_cannot_parse():
-    """``transform_spec`` is client-opaque. A malformed one means "not
-    recorded", the same reading ``_transform_ref`` already takes — not a 500 on
-    a read path over metadata nothing depends on."""
+    """``transform_spec`` is client-opaque; a malformed one reads as "not recorded", not a 500."""
     root = _art("odd", 1, transform_spec="{not json at all")
 
     graph = artifact_service.build_lineage(
@@ -286,14 +278,9 @@ def test_lineage_survives_a_transform_spec_it_cannot_parse():
 
 
 def test_lineage_exposes_the_environment_identity_of_each_step():
-    """ "You got a cache hit and I did not" is the question a shared cache
-    generates on day one, and comparing environment identities is the only way
-    to answer it.
+    """Comparing environment identities is how "you hit and I did not" gets answered.
 
-    ``env_hash`` has always participated in the provenance key and has never
-    been readable through anything — fine while a cache is one person's,
-    useless the moment it is a team's. With ``build_env`` it says which package
-    set, on what.
+    ``env_hash`` (which package set) and ``build_env`` (on what) are both exposed.
     """
     upstream = _art(
         "raw",

@@ -1,8 +1,7 @@
-"""Storage + parse round-trip for per-cell unit tests.
+"""Storage and parse round-trip for per-cell unit tests.
 
-Covers the committed ``cells/{id}.test.py`` sibling (writer/parser) and the
-``CellTestResult`` persistence in ``.strata/runtime.json`` (runtime_state),
-all without spawning pytest — those are the executor/runner tests.
+Covers the ``cells/{id}.test.py`` sibling and ``CellTestResult`` persistence in
+``.strata/runtime.json``, without spawning pytest.
 """
 
 from __future__ import annotations

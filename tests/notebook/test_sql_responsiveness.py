@@ -1,14 +1,8 @@
 """A SQL cell must not hold the server, and a failure must name the cell it hit.
 
-Round 8. A SQL query ran its driver work directly on the event loop, so for as
-long as the query lasted nothing else on the server was served: an independent
-health check took 2.9 seconds against 0.003 idle, and a `cell_cancel` could not
-even be delivered until the query it meant to stop had finished on its own.
-
-Separately, a SQL cell that failed while being materialized for a downstream
-consumer said nothing about it. The consumer reported the failure; the cell that
-caused it stayed `idle`, with no error and its last successful table still
-showing, which is the state of a cell that never ran.
+Driver work runs off the event loop so other requests (including ``cell_cancel``) are served during
+a query. A SQL cell that fails while materialized for a downstream consumer shows its own error
+instead of staying ``idle`` with its last table.
 """
 
 from __future__ import annotations
@@ -85,12 +79,10 @@ async def _run(session: Any, cell_id: str, mode: str = "normal") -> Any:
 
 @pytest.mark.asyncio
 async def test_the_driver_does_not_run_on_the_event_loop(tmp_path, monkeypatch):
-    """Asserted as the mechanism, not as a duration.
+    """Checks where the driver call runs, not a duration.
 
-    Counting how much other work got scheduled proves little: the surrounding
-    async machinery yields either way, so a loop-blocking query still lets a
-    heartbeat tick. What decides whether the rest of the server is served is
-    plainly where the driver call runs, so that is what this checks.
+    Counting other scheduled work proves little: the async machinery yields either way, so a
+    loop-blocking query still lets a heartbeat tick.
     """
     import threading
 
@@ -116,7 +108,6 @@ async def test_the_driver_does_not_run_on_the_event_loop(tmp_path, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_a_write_cell_does_not_run_on_the_event_loop(tmp_path, monkeypatch):
-    """The write path blocks the same way the read path did."""
     import threading
 
     from strata.notebook.sql import cell_executor
@@ -145,8 +136,7 @@ async def test_a_write_cell_does_not_run_on_the_event_loop(tmp_path, monkeypatch
 
 @pytest.mark.asyncio
 async def test_a_cancelled_query_stops_waiting_and_publishes_nothing(tmp_path):
-    """Cancel could not be delivered at all until the query returned, and the
-    run then published its result as though nothing had been asked."""
+    """Cancel must arrive before the query returns, and the run must not publish its result."""
     from strata.notebook.ws import _ensure_execution_state, _handle_cell_cancel
 
     session = _session(_notebook(tmp_path, [("q", "sql", SLOW)]))
@@ -169,7 +159,7 @@ async def test_a_cancelled_query_stops_waiting_and_publishes_nothing(tmp_path):
 
 @pytest.mark.asyncio
 async def test_the_notebook_runs_again_after_a_cancelled_query(tmp_path):
-    """The reservation the cancelled run held has to come back."""
+    """The cancelled run's reservation must be released."""
     from strata.notebook.ws import _ensure_execution_state, _handle_cell_cancel
 
     nb = _notebook(tmp_path, [("q", "sql", SLOW), ("fast", "sql", GOOD)])
@@ -190,10 +180,9 @@ async def test_the_notebook_runs_again_after_a_cancelled_query(tmp_path):
 
 @pytest.mark.asyncio
 async def test_a_failure_while_materializing_names_the_cell_it_hit(tmp_path):
-    """Run only the consumer, with SQL that has never failed before.
+    """Runs only the consumer, with SQL this notebook has never seen.
 
-    A source that failed here previously can restore the recorded error and
-    hide the gap, so the broken query has to be one this notebook has not seen.
+    A source that failed before can restore its recorded error and hide the gap.
     """
     nb = _notebook(tmp_path, [("q", "sql", GOOD), ("py", "python", CONSUMER)])
     session = _session(nb)
@@ -235,13 +224,10 @@ async def test_both_cells_recover_when_the_query_is_fixed(tmp_path):
 
 @pytest.mark.asyncio
 async def test_every_outbound_frame_gets_its_own_sequence(tmp_path):
-    """The protocol reference promises one counter that increments on every
-    server-to-client message, and tells clients to dedupe on ``seq``.
+    """The protocol promises one counter per server message, and clients dedupe on ``seq``.
 
-    A whole batch of staleness frames shared one number, and a sync reply and
-    an agent note were hard-coded to 0, so a client following that advice threw
-    away legitimate frames -- including the status saying a cell had finished --
-    and read the reply to its own sync as a gap.
+    Shared or hard-coded numbers made such a client drop real frames, including a cell's finished
+    status.
     """
     from typing import cast
 

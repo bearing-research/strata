@@ -6,10 +6,7 @@ import pytest
 
 
 class TestHealthStatus:
-    """Tests for HealthStatus enum."""
-
     def test_health_status_values(self):
-        """Test HealthStatus enum values."""
         from strata.health import HealthStatus
 
         assert HealthStatus.HEALTHY.value == "healthy"
@@ -18,10 +15,7 @@ class TestHealthStatus:
 
 
 class TestDependencyCheck:
-    """Tests for DependencyCheck dataclass."""
-
     def test_to_dict_basic(self):
-        """Test basic conversion to dict."""
         from strata.health import DependencyCheck, HealthStatus
 
         check = DependencyCheck(
@@ -38,7 +32,6 @@ class TestDependencyCheck:
         assert "details" not in d
 
     def test_to_dict_with_message_and_details(self):
-        """Test conversion with message and details."""
         from strata.health import DependencyCheck, HealthStatus
 
         check = DependencyCheck(
@@ -55,10 +48,7 @@ class TestDependencyCheck:
 
 
 class TestHealthReport:
-    """Tests for HealthReport dataclass."""
-
     def test_to_dict(self):
-        """Test report conversion to dict."""
         from strata.health import DependencyCheck, HealthReport, HealthStatus
 
         checks = [
@@ -84,10 +74,8 @@ class TestHealthReport:
 
 
 class TestDiskCacheCheck:
-    """Tests for disk cache health check."""
-
     def test_healthy_cache(self, tmp_path):
-        """Test healthy disk cache check (may be degraded if disk is full)."""
+        """May report degraded when the disk is full."""
         from strata.health import HealthStatus, check_disk_cache
 
         cache_dir = tmp_path / "cache"
@@ -103,7 +91,6 @@ class TestDiskCacheCheck:
         assert "available_bytes" in result.details
 
     def test_missing_cache_dir(self, tmp_path):
-        """Test check with missing cache directory."""
         from strata.health import HealthStatus, check_disk_cache
 
         cache_dir = tmp_path / "nonexistent"
@@ -116,10 +103,7 @@ class TestDiskCacheCheck:
 
 
 class TestMetadataStoreCheck:
-    """Tests for metadata store health check."""
-
     def test_healthy_store(self, tmp_path):
-        """Test healthy metadata store check."""
         from strata.health import HealthStatus, check_metadata_store
 
         cache_dir = tmp_path / "cache"
@@ -133,10 +117,7 @@ class TestMetadataStoreCheck:
 
 
 class TestArrowMemoryCheck:
-    """Tests for Arrow memory health check."""
-
     def test_arrow_memory_check(self):
-        """Test Arrow memory pool check."""
         from strata.health import HealthStatus, check_arrow_memory
 
         result = check_arrow_memory()
@@ -148,10 +129,7 @@ class TestArrowMemoryCheck:
 
 
 class TestThreadPoolsCheck:
-    """Tests for thread pools health check."""
-
     def test_thread_pools_check(self):
-        """Test thread pools health check."""
         from strata.health import HealthStatus, check_thread_pools
         from strata.pool_metrics import get_pool_tracker, reset_metrics
 
@@ -177,10 +155,7 @@ class TestThreadPoolsCheck:
 
 
 class TestRateLimiterCheck:
-    """Tests for rate limiter health check."""
-
     def test_rate_limiter_not_initialized(self):
-        """Test check when rate limiter not initialized."""
         from strata.health import HealthStatus, check_rate_limiter
         from strata.rate_limiter import reset_rate_limiter
 
@@ -193,7 +168,6 @@ class TestRateLimiterCheck:
         assert result.details.get("enabled") is False
 
     def test_rate_limiter_healthy(self):
-        """Test check with healthy rate limiter."""
         from strata.health import HealthStatus, check_rate_limiter
         from strata.rate_limiter import RateLimitConfig, init_rate_limiter, reset_rate_limiter
 
@@ -210,10 +184,7 @@ class TestRateLimiterCheck:
 
 
 class TestCacheEvictionsCheck:
-    """Tests for cache evictions health check."""
-
     def test_no_evictions(self):
-        """Test check with no evictions."""
         from strata.cache_metrics import reset_eviction_tracker
         from strata.health import HealthStatus, check_cache_evictions
 
@@ -227,10 +198,8 @@ class TestCacheEvictionsCheck:
 
 
 class TestRunHealthChecks:
-    """Tests for run_health_checks function."""
-
     def test_all_healthy(self, tmp_path):
-        """Test running all health checks (may be degraded if disk is full)."""
+        """May report degraded when the disk is full."""
         from strata.cache_metrics import reset_eviction_tracker
         from strata.health import HealthStatus, run_health_checks
         from strata.pool_metrics import get_pool_tracker, reset_metrics
@@ -268,11 +237,9 @@ class TestRunHealthChecks:
 
 
 class TestHealthEndpointIntegration:
-    """Integration tests for health endpoint."""
-
     @pytest.mark.asyncio
     async def test_health_dependencies_endpoint(self, tmp_path):
-        """Test /health/dependencies endpoint."""
+        """/health/dependencies endpoint."""
         from httpx import ASGITransport, AsyncClient
 
         import strata.server as server_module
@@ -319,7 +286,7 @@ class TestHealthEndpointIntegration:
 
     @pytest.mark.asyncio
     async def test_health_endpoint(self, tmp_path):
-        """Test basic /health endpoint."""
+        """Basic /health endpoint."""
         from httpx import ASGITransport, AsyncClient
 
         import strata.server as server_module
@@ -350,10 +317,9 @@ class TestHealthEndpointIntegration:
 
 
 class TestReportedVersionIsTheInstalledOne:
-    """``/health`` reports the running version so an operator can confirm what
-    a rollout actually landed. It was hardcoded to ``"0.2.0"`` and stayed there
-    through three releases, so the field read the same before and after a
-    deploy — worse than absent, because it looks authoritative.
+    """``/health`` reports the installed version so an operator can confirm a rollout.
+
+    A hardcoded version reads the same before and after a deploy and still looks authoritative.
     """
 
     def test_version_matches_package_metadata(self):
@@ -376,8 +342,7 @@ class TestReportedVersionIsTheInstalledOne:
 
 
 def test_the_app_and_its_traces_report_the_installed_version():
-    """The OpenAPI document and the trace resource were hardcoded to "0.2.0"
-    after /health stopped being."""
+    """The OpenAPI document and the trace resource report the installed version too."""
     from strata.health import _package_version
     from strata.server import app
 

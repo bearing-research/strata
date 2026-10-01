@@ -1,11 +1,7 @@
 """A catalog whose backing connection dies must not stay cached.
 
-``PyIcebergCatalog`` caches one ``Catalog`` per warehouse. When that catalog's
-connection goes bad — the observed case is a SqlCatalog on SQLite returning
-``disk I/O error`` (SQLITE_IOERR) — the object lived on in the cache, so every
-later read of that warehouse failed the same way until the process restarted.
-Retrying at the call site could never help, which is why a bounded retry loop
-in the smoke test still lost all four attempts.
+``PyIcebergCatalog`` caches one ``Catalog`` per warehouse. A SqlCatalog on SQLite returning ``disk
+I/O error`` would otherwise fail every later read of that warehouse until restart.
 """
 
 from __future__ import annotations

@@ -1,13 +1,7 @@
-"""Cross-language R cell integration tests — the #59 capstone suite.
+"""Cross-language R cell integration tests.
 
-This file pins the end-to-end "Python ↔ R" story: Python cells produce
-artifacts that R cells consume via Arrow IPC, R cells produce artifacts
-that downstream Python cells read back. All gated on Rscript + the R
-``arrow`` package being available; tests skip cleanly otherwise.
-
-First slice (this PR): one smoke test that exercises the full
-Py → R → Py loop. Cross-language error shapes, provenance / cache
-behaviour, annotations, and real-renv restore land in follow-up PRs.
+Python cells produce artifacts R cells read via Arrow IPC, and back. Every test
+skips unless Rscript and the R ``arrow`` package are available.
 """
 
 from __future__ import annotations
@@ -33,32 +27,10 @@ pytestmark = [skip_if_no_r, skip_if_no_r_arrow]
 
 @pytest.mark.asyncio
 async def test_py_to_r_to_py_arrow_roundtrip(r_notebook):
-    """A Python DataFrame round-trips through an R cell back into Python.
+    """Python -> R -> Python over Arrow IPC, with DAG edges wired off bare names.
 
-    Three cells:
-      c1 (Python) — build a ``pandas.DataFrame`` and bind it as ``df``.
-      c2 (R)      — read ``df`` as a ``data.frame``, append a derived
-                    column, bind the result as ``df_r``.
-      c3 (Python) — read ``df_r`` back (as a pandas DataFrame via the
-                    Arrow IPC handoff) and compute a scalar.
-
-    What this pins:
-      * R harness ingests an Arrow IPC artifact produced by the Python
-        harness (``arrow::read_ipc_stream`` round-trips
-        column names + types).
-      * R harness emits an Arrow IPC artifact via
-        ``arrow::write_ipc_stream``, picked up by the Python harness on
-        the next cell with no extra coercion.
-      * DAG analysis on a mixed-language notebook wires Python ↔ R
-        upstream/downstream edges off bare variable names — no
-        language-specific annotation needed.
-
-    Materialisation: each cell runs with ``materialize_upstreams=True``
-    (the default), so calling ``execute_cell("c3", ...)`` would also
-    walk back through c2 and c1. Spelling each ``execute_cell`` out
-    here keeps the failure-localisation obvious — if c2 breaks, the
-    test surfaces it on the c2 assertion rather than a confusing
-    cascade error on c3.
+    Each cell is executed explicitly so a failure points at the cell that broke,
+    not at a cascade error on c3.
     """
     py_c1 = "import pandas as pd\ndf = pd.DataFrame({'x': [1, 2, 3], 'y': [10, 20, 30]})\n"
     r_c2 = "df_r <- df\ndf_r$z <- df_r$x + df_r$y\n"
@@ -96,29 +68,10 @@ async def test_py_to_r_to_py_arrow_roundtrip(r_notebook):
 
 @pytest.mark.asyncio
 async def test_r_only_rds_artifact_rejected_by_downstream_python_cell(r_notebook):
-    """An R cell that produces a non-tabular value stores it as RDS;
-    a downstream Python cell consuming it fails with the structured
-    ``StrataRArtifactError`` instead of a ``NameError``.
+    """An RDS-only R value fails a Python consumer with ``StrataRArtifactError``.
 
-    Two cells:
-      c1 (R)      — build a classed list (``structure(list(...),
-                    class = ...)``). Not a ``data.frame``, not a bare
-                    list (``is.object()`` is TRUE), so harness.R's
-                    serializer falls through to the ``write_rds``
-                    tier with ``content_type =
-                    "application/x-r-rds"``.
-      c2 (Python) — references ``model``. The harness's
-                    ``deserialize_inputs`` hits the registered
-                    RDS handler, which raises ``StrataRArtifactError``
-                    with the upstream variable name. The cell fails
-                    *before* the body runs — no chance for a confusing
-                    ``NameError: 'model'`` to surface.
-
-    This is the cross-language counterpart to the unit tests in
-    ``test_serializer.py::TestRdsArtifactRefusal`` and
-    ``test_harness.py::TestHarnessRdsInput``. Those pin the
-    deserializer + harness re-raise in isolation; this test pins the
-    full notebook-level flow that #58 was designed for.
+    c1 builds a classed list, which serializes as RDS. c2 must fail before its body
+    runs, so the error is the structured one rather than ``NameError: 'model'``.
     """
     r_c1 = 'model <- structure(list(coef = 1.5, intercept = 0.0), class = "fit_model")\n'
     py_c2 = "score = model['coef']\n"
@@ -152,24 +105,10 @@ async def test_r_only_rds_artifact_rejected_by_downstream_python_cell(r_notebook
 
 @pytest.mark.asyncio
 async def test_python_only_pickle_artifact_rejected_by_downstream_r_cell(r_notebook):
-    """A Python cell that produces a pickle-only value; a downstream R cell
-    consuming it fails with a *structured* ``success:false`` result, not a
-    crashed Rscript scraped for stderr.
+    """A pickle-only Python value fails an R consumer with a structured result.
 
-    This is the mirror image of
-    ``test_r_only_rds_artifact_rejected_by_downstream_python_cell``. Two cells:
-      c1 (Python) — bind a ``set`` (not Arrow-/JSON-representable, so the
-                    serializer falls through to ``pickle/object``).
-      c2 (R)      — references ``pyobj``. The R harness's
-                    ``deserialize_input`` hits the ``pickle/object`` branch,
-                    raises, and — now wrapped in a ``tryCatch`` — writes a
-                    structured failure envelope before the cell body runs.
-
-    Regression guard: pre-fix the ``stop()`` aborted Rscript *before* any
-    ``harness-result.json`` was written, so the executor fell back to its
-    "Rscript exited without producing a result manifest" stderr-scrape. The
-    error now rides the normal result envelope, symmetric with the RDS→Python
-    direction.
+    The R harness must write a ``success: false`` envelope rather than abort
+    Rscript, which would leave the executor scraping stderr.
     """
     py_c1 = "pyobj = {1, 2, 3}\n"
     r_c2 = "n <- length(pyobj)\n"
@@ -205,17 +144,10 @@ async def test_python_only_pickle_artifact_rejected_by_downstream_r_cell(r_noteb
 
 @pytest.mark.asyncio
 async def test_python_numpy_array_into_r_warns_on_shape_flattening(r_notebook):
-    """A numpy ndarray crosses into R flattened, with a console warning.
+    """A 2-D ndarray reaches R as a flat column, and the harness warns in stderr.
 
-    R's Arrow reader is shape-blind — it can't reconstruct the
-    ``strata.arrow.shape=tensor`` an ndarray carries, so a 2-D array arrives
-    as a 1-column ``data.frame``. The handoff still *works* (the cell runs),
-    but it's a silent fidelity change without a warning. The harness now reads
-    the shape metadata and surfaces a warning in the cell's stderr console.
-
-    Two cells:
-      c1 (Python) — bind a 2×2 ``numpy`` array (``arrow/ipc`` shape=tensor).
-      c2 (R)      — read ``arr``; the harness warns before running the body.
+    R's Arrow reader cannot rebuild the tensor shape, so the cell runs but loses
+    fidelity; the warning is the only signal.
     """
     py_c1 = "import numpy as np\narr = np.array([[1, 2], [3, 4]])\n"
     r_c2 = "n <- nrow(arr)\n"
@@ -243,25 +175,10 @@ async def test_python_numpy_array_into_r_warns_on_shape_flattening(r_notebook):
 
 @pytest.mark.asyncio
 async def test_r_cell_mount_injects_path_and_reads_file(r_notebook, tmp_path):
-    """``# @mount data file://<path>`` binds ``data`` inside an R cell
-    the same way it binds inside a Python cell.
+    """``# @mount`` binds the mount name to a path string inside an R cell.
 
-    The R harness's ``inject_mounts`` (in ``harness.R``) assigns each
-    mount-name → ``local_path`` string into the cell environment. R
-    has no native ``Path`` type, so the binding is a plain character
-    vector — ``file.path(data, "x.txt")`` constructs the full path
-    just like ``data / "x.txt"`` would in Python.
-
-    This test exercises:
-      * Annotation parsing on R cells (the same parser handles both
-        languages — see #54's dispatch refactor).
-      * Mount resolution + injection through ``_resolve_mounts`` /
-        ``inject_mounts``.
-      * ``readLines`` against a file under the mount root.
-
-    Read-only ``file://`` mount — no need to exercise rw / cloud
-    scheme variants here; those have dedicated coverage in
-    ``test_mounts.py`` and the e2e_mounts_* files.
+    R has no ``Path`` type, so the binding is a character vector usable with
+    ``file.path``.
     """
     mount_dir = tmp_path / "shared_data"
     mount_dir.mkdir()
@@ -289,14 +206,7 @@ async def test_r_cell_mount_injects_path_and_reads_file(r_notebook, tmp_path):
 async def test_r_syntax_error_surfaces_as_failure(r_notebook):
     """An unparseable R cell fails the cell, not the harness.
 
-    Distinct from a runtime ``stop()`` — R signals parse errors via
-    ``parse()`` before any user code runs. harness.R's outer
-    ``tryCatch`` around ``parse(text = source_text)`` catches it,
-    records the message + ``sys.calls()`` traceback, and writes
-    ``success: false`` to ``harness-result.json``.
-
-    Runtime errors are pinned separately in
-    ``test_language_r_executor.py::TestExecuteSimpleRCell::test_runtime_error_surfaces_as_failure``.
+    Parse errors happen before any user code runs, unlike a runtime ``stop()``.
     """
     src = "x <-"  # incomplete expression, no RHS
     _, session = r_notebook(cells=[("c1", None, src, "r")])
@@ -319,26 +229,10 @@ async def test_r_syntax_error_surfaces_as_failure(r_notebook):
 
 @pytest.mark.asyncio
 async def test_r_cell_cache_hits_on_unchanged_re_run(r_notebook):
-    """Running the same R cell twice: second run is a cache hit.
+    """Running the same R cell twice: the second run is a cache hit.
 
-    Provenance is language-agnostic (``(source_hash, env_hash,
-    sorted_inputs)``) so R cells use the exact same cache path as
-    Python cells. This test is the R analogue of
-    ``test_executor.py``'s display-cache-hit cases — pins that the
-    R execution flow ends with a stored artifact + cached metadata,
-    and that a second invocation skips the harness spawn.
-
-    Why a downstream consumer cell: the executor's cache lookup
-    keys off ``derive_subkey(provenance_hash, first_consumed_var)``
-    when ``consumed_variables`` is non-empty, matching the per-var
-    artifact-store path used at write time. A leaf cell with no
-    downstream consumer falls through the alternate ``find_cached
-    (provenance_hash)`` branch where storage and lookup keys
-    differ, and the second run looks like a cache miss for
-    bookkeeping reasons rather than a real one. The smoke + RDS
-    + mount cases earlier in this file all run as the *producer*
-    side of a multi-cell chain, so this is the only spot the
-    distinction matters.
+    The downstream consumer matters: a leaf cell is stored and looked up under
+    different keys, so its second run looks like a miss for bookkeeping reasons.
     """
     src = "value <- 7"
     py_downstream = "scaled = value\n"
@@ -368,13 +262,7 @@ async def test_r_cell_cache_hits_on_unchanged_re_run(r_notebook):
 
 @pytest.mark.asyncio
 async def test_r_cell_source_change_invalidates_cache(r_notebook):
-    """Editing the cell source flips the provenance hash → cache miss.
-
-    The cell ID stays the same; only the body changes. Pins that
-    ``source_hash`` participates in provenance for R cells the same
-    way it does for Python cells (and that the R harness re-runs on
-    the new body).
-    """
+    """Editing the source of the same cell id gives a cache miss."""
     # The downstream Python cell makes ``value`` a consumed variable, so the cache
     # lookup uses ``derive_subkey(provenance, "value")`` like the per-var write path.
     src_v1 = "value <- 1"
@@ -405,19 +293,10 @@ async def test_r_cell_source_change_invalidates_cache(r_notebook):
 
 @pytest.mark.asyncio
 async def test_r_cell_renv_lock_change_invalidates_cache(r_notebook):
-    """Editing ``renv.lock`` in the notebook dir invalidates R cell caches.
+    """Editing ``renv.lock`` changes the env hash, so the next R run is a cache miss.
 
-    Pins the #59 acceptance criterion "renv.lock change invalidates
-    all R cells (env hash changed)". The actual env-hash extension
-    is unit-tested in ``test_env.py`` (no R needed); this end-to-end
-    test confirms the executor's R cell path picks up the new hash
-    and treats the next run as a cache miss.
-
-    No real ``renv::restore()`` happens — the system R + the
-    ``arrow`` / ``jsonlite`` packages installed via the ``r-tests``
-    CI step are what the cell actually loads against. We're only
-    pinning that the lockfile's *content* feeds provenance, not
-    that the libraries it pins are the ones loaded.
+    No ``renv::restore()`` runs: only the lockfile's content feeding provenance is
+    pinned, not which libraries load.
     """
     src = "value <- 99"
     py_downstream = "passthrough = value\n"
@@ -450,15 +329,7 @@ async def test_r_cell_renv_lock_change_invalidates_cache(r_notebook):
 
 @pytest.mark.asyncio
 async def test_r_cell_env_annotation_visible_to_rscript(r_notebook):
-    """``# @env KEY=value`` injects into the R cell's Sys.getenv().
-
-    The annotation parser (``annotations.py``) is language-agnostic
-    — it scans the leading ``#``-comment block of *any* cell — and
-    harness.R's ``Sys.setenv`` block applies the manifest's ``env``
-    dict to the R process before the cell body runs. This test pins
-    that contract end-to-end: an annotation declared on an R cell
-    is readable via ``Sys.getenv`` from inside the same cell.
-    """
+    """``# @env KEY=value`` on an R cell is visible to ``Sys.getenv`` in that cell."""
     src = "# @env STRATA_TEST_VAR=hello-from-annotation\nvalue <- Sys.getenv('STRATA_TEST_VAR')\n"
     _, session = r_notebook(cells=[("c1", None, src, "r")])
     executor = CellExecutor(session)
@@ -487,12 +358,7 @@ def _assert_png_display(display: dict) -> None:
 async def test_r_cell_base_graphics_emitted_as_png_display(r_notebook):
     """A base-graphics plot in an R cell becomes an image/png display.
 
-    Base graphics (``plot``) draw straight to the harness's capture
-    device during ``eval`` (the ``plot.new`` hook marks the page as
-    real), so the page is re-homed to ``__display__0.png`` and
-    surfaced through the same ``_store_display_outputs`` chain the
-    Python matplotlib path uses. No extra R packages needed — this is
-    the CI-safe core of #80.
+    Needs no extra R packages, so this is the CI-safe plot case.
     """
     src = "plot(1:10, (1:10)^2, main = 'quadratic')\n"
     _, session = r_notebook(cells=[("c1", None, src, "r")])
@@ -507,7 +373,6 @@ async def test_r_cell_base_graphics_emitted_as_png_display(r_notebook):
 
 @pytest.mark.asyncio
 async def test_r_cell_multiple_plots_emit_ordered_displays(r_notebook):
-    """Two plots in one R cell produce two ordered image/png displays."""
     src = "plot(1:10)\nhist(c(1, 1, 2, 3, 3, 3))\n"
     _, session = r_notebook(cells=[("c1", None, src, "r")])
     executor = CellExecutor(session)
@@ -526,10 +391,8 @@ async def test_r_cell_multiple_plots_emit_ordered_displays(r_notebook):
 async def test_r_cell_without_plot_emits_no_display(r_notebook):
     """A non-plotting R cell emits no displays and keeps stdout clean.
 
-    Guards the capture device's blank-page handling: the trailing
-    blank PNG an unused device writes on close must not be mistaken
-    for a real plot, and closing the device must not leak
-    ``null device 1`` into the captured stdout.
+    The blank PNG an unused device writes on close must not count as a plot, and
+    closing it must not leak ``null device 1`` into stdout.
     """
     src = "x <- mean(1:100)\ncat('no plots here\\n')\n"
     _, session = r_notebook(cells=[("c1", None, src, "r")])
@@ -546,14 +409,7 @@ async def test_r_cell_without_plot_emits_no_display(r_notebook):
 
 @pytest.mark.asyncio
 async def test_r_cell_trailing_expression_auto_prints(r_notebook):
-    """A bare trailing expression auto-prints its value to stdout.
-
-    Regression guard: the plot-capture rewrite once gated auto-printing
-    to plot-like values only, so a cell ending in ``summary(df)`` / a bare
-    value produced empty stdout. The harness now prints every *visible*
-    top-level value (REPL semantics), so a result-displaying cell shows
-    its output again.
-    """
+    """A bare trailing expression auto-prints, not only plot-like values."""
     src = "df <- data.frame(a = c(1L, 2L, 3L))\nsum(df$a)\n"
     _, session = r_notebook(cells=[("c1", None, src, "r")])
     executor = CellExecutor(session)
@@ -568,13 +424,10 @@ async def test_r_cell_trailing_expression_auto_prints(r_notebook):
 
 @pytest.mark.asyncio
 async def test_r_cell_grid_draw_captured_as_png_display(r_notebook):
-    """Low-level grid drawing (no grid.newpage) is captured as a PNG.
+    """``grid.draw()`` without ``grid.newpage`` is still captured as a PNG.
 
-    Regression guard: capture used to gate on a ``grid.newpage`` /
-    ``plot.new`` page count, which ``grid.draw()`` doesn't trigger — so
-    real grid output drawn onto the device's first page was silently
-    dropped. Capture now keys off the files the device actually wrote.
-    ``grid`` ships with R, so no extra package gating is needed.
+    Capture keys off the files the device wrote, not a page count that
+    ``grid.draw()`` never bumps.
     """
     src = "library(grid)\ngrid.draw(circleGrob(r = 0.3))\n"
     _, session = r_notebook(cells=[("c1", None, src, "r")])
@@ -590,14 +443,7 @@ async def test_r_cell_grid_draw_captured_as_png_display(r_notebook):
 @skip_if_no_r_ggplot2
 @pytest.mark.asyncio
 async def test_r_cell_ggplot_emitted_as_png_display(r_notebook):
-    """A bare trailing ggplot object auto-renders to an image/png display.
-
-    The harness auto-prints the visible value of a top-level expression,
-    so a notebook-style last-line ``p`` renders without an explicit
-    ``print(p)`` — mirroring the REPL. ``print.ggplot`` draws to the
-    capture device. Gated on ggplot2 being installed; skips cleanly in CI
-    where it isn't.
-    """
+    """A bare trailing ggplot object renders without ``print(p)``; skips without ggplot2."""
     src = (
         "library(ggplot2)\n"
         "df <- data.frame(x = 1:10, y = (1:10)^2)\n"
@@ -616,23 +462,10 @@ async def test_r_cell_ggplot_emitted_as_png_display(r_notebook):
 
 @pytest.mark.asyncio
 async def test_renv_restore_populates_project_library_and_runs_cell(r_notebook_renv):
-    """A real ``renv::restore`` from a committed lockfile populates the
-    project library, and an R cell then runs against it — no mocks.
+    """A real ``renv::restore`` populates the project library and a cell runs on it.
 
-    This is the renv capstone the #59 suite deferred: ``test_renv_sync.py``
-    monkeypatches ``subprocess.run``, and the plain ``r_notebook`` fixture
-    runs R cells against the system library. Here the committed
-    ``renv_jsonlite`` scaffold ships a lockfile but no built library, so
-    ``_renv_sync`` has to do a genuine restore. Pinned to ``jsonlite``
-    only, which restores in seconds from a binary.
-
-    Asserts, in order:
-      1. The scaffold has no project library yet (restore is the work).
-      2. ``_renv_sync`` reports success.
-      3. ``jsonlite`` is now installed under ``renv/library`` — proof the
-         restore actually populated the project-scoped library rather than
-         silently falling back to the system one.
-      4. An R cell that loads jsonlite executes against that library.
+    No mocks: the scaffold ships a lockfile but no library, so the restore does the
+    work. Checking ``renv/library`` proves it did not fall back to the system library.
     """
     src = "library(jsonlite)\nout <- as.character(toJSON(list(ok = TRUE), auto_unbox = TRUE))\n"
     notebook_dir, session = r_notebook_renv(cells=[("c1", None, src, "r")])

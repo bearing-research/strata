@@ -1,9 +1,7 @@
 """Getting a cell's display output out as a file.
 
-An agent that runs a plotting cell gets back `content_type: image/png` and a
-null preview. There is no text an image can be flattened into, so metadata
-alone told it that *something* was drawn and nothing about what. The bytes
-were in the artifact store the whole time with no way to ask for them.
+An image output has a null preview, so an agent needs the bytes from the artifact store
+to know what was drawn.
 """
 
 from __future__ import annotations
@@ -198,8 +196,8 @@ def test_the_cli_refuses_a_directory_that_is_not_there(tmp_path: Path, capsys):
 def test_the_cli_says_so_when_the_target_is_not_writable(tmp_path: Path, capsys):
     """A parent that exists is not a path that can be written.
 
-    `--out` naming an existing directory passed the parent check and then
-    raised IsADirectoryError out of the command as a traceback.
+    `--out` naming an existing directory passes the parent check; it must not end in an
+    IsADirectoryError traceback.
     """
     from strata.cli import main
 
@@ -223,9 +221,8 @@ Note()
 def test_local_and_remote_agree_on_a_text_content_type(tmp_path: Path, monkeypatch):
     """Starlette appends `; charset=utf-8` to text/* responses.
 
-    The remote backend copied that header verbatim, so a markdown output was
-    `text/markdown` locally and `text/markdown; charset=utf-8` remotely. The
-    two backends are meant to be one view of the same notebook.
+    The remote backend must not copy that header verbatim: both backends report the same
+    content type for one notebook.
     """
     from fastapi import FastAPI
     from fastapi.testclient import TestClient

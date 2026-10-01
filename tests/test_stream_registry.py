@@ -1,8 +1,6 @@
-"""Unit tests for StreamRegistry (#302, phase 1).
+"""Unit tests for StreamRegistry: the live stream table and per-stream TTL cleanup.
 
-The registry owns the live stream table + per-stream TTL cleanup tasks that
-``server.py`` used to hold inline. These drive it directly — no TestClient, no
-ServerState — with a tiny TTL so the expiry path runs in real time.
+Driven directly, with a tiny TTL so the expiry path runs in real time.
 """
 
 from __future__ import annotations
@@ -56,15 +54,10 @@ async def test_schedule_cleanup_expires_stream_and_runs_on_expire():
 
 
 async def test_schedule_cleanup_recovers_the_scan_id_when_omitted():
-    """Omitting scan_id used to leak the ReadPlan for the process lifetime.
+    """Omitting scan_id must not leak the ReadPlan for the process lifetime.
 
-    ``schedule_cleanup`` cancels any pending cleanup for the stream first, so a
-    call without a scan_id *replaced* the scan-aware cleanup registered at
-    stream creation with one that only pops ``_streams``. ``expire_scan`` — the
-    only caller of ``pop_scan`` / ``discard_prefetch`` — runs from
-    ``on_expire``, which fires only when scan_id is not None, so the plan's
-    tasks, schema and any prefetched row group stayed resident forever. The
-    registry now recovers the id from the registered stream.
+    ``schedule_cleanup`` replaces the pending cleanup, and only a scan-aware one frees the plan, so
+    the registry recovers the id from the registered stream.
     """
     expired: list[str] = []
     reg = StreamRegistry(ttl_seconds=0.01, on_expire=expired.append)
@@ -79,7 +72,7 @@ async def test_schedule_cleanup_recovers_the_scan_id_when_omitted():
 
 @pytest.mark.asyncio
 async def test_schedule_cleanup_without_a_registered_stream_is_a_noop():
-    """Nothing to recover an id from — must not raise."""
+    """Nothing to recover an id from; must not raise."""
     expired: list[str] = []
     reg = StreamRegistry(ttl_seconds=0.01, on_expire=expired.append)
 
@@ -141,10 +134,11 @@ if __name__ == "__main__":  # pragma: no cover
 
 
 def test_a_cleanup_whose_loop_closed_under_it_closes_without_raising():
-    """A bare ``TestClient(app)`` runs each request on its own event loop and
-    closes it after, stranding the TTL task mid-sleep. When its coroutine is
-    later closed outside any loop, the cleanup bookkeeping must not run: it
-    called ``asyncio.current_task()`` there, which raised."""
+    """A bare ``TestClient(app)`` closes each request's loop, stranding the TTL task.
+
+    When its coroutine is later closed outside any loop, the bookkeeping (which calls
+    ``asyncio.current_task()``) must not run.
+    """
     reg = StreamRegistry(ttl_seconds=60)
     reg.register(_stream())
 

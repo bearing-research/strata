@@ -1,9 +1,7 @@
-"""Unit tests for ``BuildService.assemble_manifest`` — pure, no server/DB.
+"""Unit tests for ``BuildService.assemble_manifest``: pure, no server or DB.
 
-The signing itself (``generate_build_manifest``) is its own concern and is
-stubbed here; these tests cover the service's own logic: resolving a build's
-input URIs to ``(artifact_id, version)`` pairs, raising on an unresolvable
-input, and assembling the executor metadata.
+Signing is stubbed; these cover resolving input URIs to ``(artifact_id, version)``, raising on an
+unresolvable input, and the executor metadata.
 """
 
 from types import SimpleNamespace
@@ -36,10 +34,8 @@ def _build(**kw):
 
 @pytest.fixture
 def captured_manifest():
-    """A stub signer that captures its ``generate_build_manifest`` kwargs.
-
-    Returns a namespace exposing ``.signer`` (passed to ``assemble_manifest``)
-    and ``.calls`` (the captured kwargs).
+    """A stub signer exposing ``.signer`` and the captured ``generate_build_manifest`` kwargs as
+    ``.calls``.
     """
     calls: dict = {}
 

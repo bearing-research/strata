@@ -1,11 +1,7 @@
-"""Guard against Grafana dashboard / metrics drift.
+"""Guard against Grafana dashboard and metrics drift.
 
-The provisioned dashboard silently rotted: QoS metrics gained a ``qos_`` prefix
-(``strata_bulk_slots_used`` → ``strata_qos_bulk_slots``) but the dashboard kept
-the old names, so its panels showed "No data" with nothing to flag it. This test
-asserts every ``strata_*`` metric the dashboard references is one the server
-actually exposes on ``/metrics/prometheus`` — so the next rename fails CI instead
-of a dashboard.
+Every ``strata_*`` metric the dashboard references must be one ``/metrics/prometheus`` exposes, so a
+rename fails CI instead of leaving panels on "No data".
 """
 
 from __future__ import annotations

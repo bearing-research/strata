@@ -1,15 +1,9 @@
-"""A worker that accepts a job and runs it later. Item 48.
+"""A worker that accepts a job and runs it later.
 
-The executor protocol was one synchronous request, so queueing, booting and
-pulling an environment all spent the cell's own timeout. A worker, or a pool in
-front of one, may now answer 202 with a job to poll: the wait for the job to
-start is bounded by the provisioning deadline, and the cell's timeout starts
-when it runs.
-
-The facade here stands in for a pool: it accepts the manifest, reports scripted
-states, and at ``finished`` runs the manifest on a real worker. Time is a fake
-clock the facade advances on every status read, so deadlines are exercised
-without waiting for them.
+A worker, or a pool in front of one, may answer 202 with a job to poll: the wait for it to
+start is bounded by the provisioning deadline, and the cell's timeout starts when it runs.
+The facade stands in for a pool and runs the manifest on a real worker at ``finished``. A
+fake clock advances on every status read, so deadlines are exercised without waiting.
 """
 
 from __future__ import annotations

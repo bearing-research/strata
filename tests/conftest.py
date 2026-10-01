@@ -1,10 +1,7 @@
 """Shared pytest fixtures and helpers for Strata tests.
 
-This module provides:
-- Common utility functions (find_free_port, wait_for_server, etc.)
-- IPC conversion helpers (table_to_ipc_bytes, ipc_bytes_to_table)
-- Server context managers for running test servers
-- Base fixtures (temp_warehouse, strata_config, server_with_client)
+Ports and server polling, Arrow IPC conversion, test-server context managers, and the
+base fixtures (temp_warehouse, strata_config, server_with_client).
 """
 
 import io
@@ -50,11 +47,8 @@ from strata.config import StrataConfig
 def prepared_venv(notebook_dir: Path) -> None:
     """Give a notebook a ``.venv`` whose interpreter is this one, for ``--no-sync``.
 
-    ``--no-sync`` takes the interpreter at ``.venv/bin/python`` and refuses a
-    venv without one. An empty ``.venv`` directory used to pass, and the cells
-    then ran with whatever ``python`` was on PATH; that fallback is what the
-    check removed. No Windows venv has ``bin/python``, and the notebook
-    subsystem is skipped there (ci.yml), so a test that needs this is too.
+    ``--no-sync`` refuses a venv without ``.venv/bin/python``. No Windows venv has one, and
+    the notebook subsystem is skipped there, so a test needing this is too.
     """
     if os.name == "nt":
         pytest.skip("Strata's venv interpreter path is bin/python; not a Windows venv layout")
@@ -72,13 +66,8 @@ def prepared_venv(notebook_dir: Path) -> None:
 def _home_is_a_temp_dir(tmp_path_factory, monkeypatch):
     """Every Strata default under ``~/.strata`` lands in this test's temp dir.
 
-    A personal-mode ``StrataConfig`` with no ``artifact_dir`` uses
-    ``~/.strata/artifacts``, and the same goes for ``cache_dir``,
-    ``metadata_db``, the notebook storage dir, worker envs and the mount
-    cache. Dozens of tests build a config with only the fields they care
-    about, and the developer's real store had 45,000 rows of their leftovers.
-    Each default is computed from ``Path.home()``, so this is the one seam
-    that catches all of them, now and for the next config a test writes.
+    Each default derives from ``Path.home()``, so this one seam keeps tests that build a
+    partial config out of the developer's real store.
     """
     # Its own directory, not under ``tmp_path``: some tests assert that
     # ``tmp_path`` is left empty.
@@ -90,33 +79,18 @@ def _home_is_a_temp_dir(tmp_path_factory, monkeypatch):
 def _never_publish_into_the_real_store(monkeypatch):
     """Keep ``strata artifact publish`` away from the developer's own store.
 
-    Publishing resolves the *server's* artifact directory through
-    ``StrataConfig.load()`` and copies into it, so a link minted from a
-    notebook resolves. Loaded in a test that sets no override, that is
-    ``~/.strata/artifacts`` — and a CLI test duly wrote four fixture artifacts
-    and two publications into the real one before this existed.
-
-    Returning ``None`` makes ``cmd_publish`` mint in whatever store the test
-    opened, which is what every test but the bridge one wants. The bridge test
-    monkeypatches this again, and being function-scoped it wins.
+    With ``None``, ``cmd_publish`` mints in the store the test opened rather than the
+    server's ``~/.strata/artifacts``. The bridge test overrides this.
     """
     monkeypatch.setattr("strata.artifact_cli._server_store", lambda: None)
 
 
 @pytest.fixture(autouse=True)
 def _reset_process_globals():
-    """Nuke process-global server state after every test.
+    """Reset process-global server state after every test.
 
-    ``strata.server._state`` (plus the tenant registry and artifact-store
-    singletons) are process globals shared by every test on a pytest-xdist
-    worker. A test that sets ``_state`` — e.g. a notebook route test configuring
-    ``notebook_storage_dir`` — could leak it into an unrelated later test on the
-    same worker, which surfaced under xdist as
-    ``TestCellIterationsEndpoint`` getting a 400 "must be inside configured
-    notebook storage" (it passes serially / at a different worker count because
-    test→worker packing differs). Most fixtures already reset on teardown; this
-    autouse teardown is the belt-and-suspenders guarantee that no test starts
-    with a dirty global, so the suite is safe to run in parallel.
+    ``strata.server._state``, the tenant registry and the artifact-store singleton are shared
+    by every test on an xdist worker, so a leaked value fails an unrelated later test.
     """
     yield
     import strata.server as server_module
@@ -169,18 +143,9 @@ MINIO_IMAGE = f"cgr.dev/chainguard/minio@{_MINIO_DIGEST}"
 def start_container_or_skip(container, *, label: str, ready=None):
     """Start a testcontainers container, skipping the module if startup fails.
 
-    The S3/GCS/Azure mount e2e tests spin up emulator containers (MinIO,
-    fake-gcs-server, Azurite). When the Docker image pull times out — a
-    common Docker Hub flake, and the norm on dependabot/fork CI that can't
-    reach the registry with the right secrets — testcontainers raises during
-    ``start()``, turning every test in the module into an ERROR. A pull/start
-    failure means the backend is simply unavailable, which is a skip, not a
-    failure. Only the startup phase is converted to a skip; anything raised
-    after the container is up (i.e. a real test failure) propagates normally.
-
-    ``ready`` is an optional callable run after start (e.g. a ``wait_for_logs``
-    readiness probe); a failure there is also treated as "backend unavailable".
-    Returns the started container — the caller owns ``stop()``.
+    A failed image pull (a Docker Hub flake, or fork CI without registry secrets) means the
+    backend is unavailable: a skip, not a failure. Only startup and the optional ``ready``
+    probe are converted; later errors propagate. The caller owns ``stop()``.
     """
     try:
         container.start()
@@ -196,13 +161,10 @@ def start_container_or_skip(container, *, label: str, ready=None):
 
 
 def _reset_transform_singletons() -> None:
-    """Reset build store + runner globals between test servers.
+    """Reset build store and runner globals between test servers.
 
-    The personal-mode lifespan now starts an embedded build runner; the
-    build store singleton caches its first db_path forever, so without a
-    reset every later test server would create build records in the FIRST
-    server's database while its own runner polls a different one — builds
-    sit in pending until the wait times out.
+    The build store singleton caches its first db_path, so a later server's builds would land
+    in the first server's database and sit in pending.
     """
     from strata.transforms.build_store import reset_build_store
     from strata.transforms.runner import reset_build_runner
@@ -212,10 +174,7 @@ def _reset_transform_singletons() -> None:
 
 
 def find_free_port() -> int:
-    """Find an available port on localhost.
-
-    Uses SO_REUSEADDR to avoid "address already in use" errors.
-    """
+    """Find an available port on localhost."""
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.bind(("127.0.0.1", 0))
         return s.getsockname()[1]
@@ -224,23 +183,10 @@ def find_free_port() -> int:
 def wait_for_server(
     port: int, timeout: float = 60.0, thread: threading.Thread | None = None
 ) -> bool:
-    """Wait for server to be ready by polling /health endpoint.
+    """Poll /health until the server answers; True if ready, False if it died or timed out.
 
-    The timeout is a hang guard, not a statement about how fast startup ought
-    to be, so it is generous: a Windows runner under xdist can stall long
-    enough to blow a tighter budget while the server is perfectly fine. Pass
-    `thread` to keep that generosity from costing anything when the server is
-    genuinely broken — a serving thread that has exited (a failed bind being
-    the usual reason) will never answer, so we stop immediately instead of
-    waiting out the clock and then reporting a timeout that explains nothing.
-
-    Args:
-        port: Port the server is running on
-        timeout: Maximum time to wait in seconds
-        thread: Optional uvicorn serving thread, to fail fast when it dies
-
-    Returns:
-        True if server is ready, False if it died or timed out
+    ``timeout`` (seconds) is a generous hang guard, since a Windows runner under xdist can
+    stall. Pass the serving ``thread`` to stop at once if it exits, e.g. on a failed bind.
     """
     deadline = time.time() + timeout
     while time.time() < deadline:
@@ -260,14 +206,7 @@ def wait_for_server(
 
 
 def table_to_ipc_bytes(table: pa.Table) -> bytes:
-    """Convert Arrow table to IPC stream bytes.
-
-    Args:
-        table: PyArrow Table to convert
-
-    Returns:
-        Bytes representing the Arrow IPC stream
-    """
+    """Convert an Arrow table to IPC stream bytes."""
     sink = pa.BufferOutputStream()
     with ipc.new_stream(sink, table.schema) as writer:
         writer.write_table(table)
@@ -275,14 +214,7 @@ def table_to_ipc_bytes(table: pa.Table) -> bytes:
 
 
 def ipc_bytes_to_table(data: bytes) -> pa.Table:
-    """Convert IPC stream bytes to Arrow table.
-
-    Args:
-        data: Arrow IPC stream bytes
-
-    Returns:
-        PyArrow Table
-    """
+    """Convert IPC stream bytes to an Arrow table."""
     reader = ipc.open_stream(io.BytesIO(data))
     return reader.read_all()
 
@@ -292,15 +224,7 @@ def ipc_bytes_to_table(data: bytes) -> pa.Table:
 
 @dataclass
 class ServerContext:
-    """Context for a running test server.
-
-    Attributes:
-        config: StrataConfig used by the server
-        port: Port the server is running on
-        base_url: Base URL for HTTP requests
-        server_instance: The uvicorn Server instance (if using uvicorn.Server)
-        thread: The thread running the server
-    """
+    """Context for a running test server."""
 
     config: StrataConfig
     port: int
@@ -311,20 +235,10 @@ class ServerContext:
 
 @contextmanager
 def run_server(config: StrataConfig, reset_caches: bool = False) -> Iterator[str]:
-    """Run a Strata server in a background thread using uvicorn.run.
+    """Run a Strata server in a daemon thread via uvicorn.run and yield its base URL.
 
-    This is the basic server context manager that yields the base URL.
-    Server runs as a daemon thread and is killed on exit.
-
-    Args:
-        config: StrataConfig with host/port settings
-        reset_caches: If True, reset global metadata caches before starting
-
-    Yields:
-        Base URL string (e.g., "http://127.0.0.1:8765")
-
-    Raises:
-        RuntimeError: If server fails to start within 5 seconds
+    ``reset_caches`` resets the global metadata caches first. Raises RuntimeError if the
+    server does not answer /health within 20 seconds.
     """
     import strata.server as server_module
     from strata.artifact_store import reset_artifact_store
@@ -390,23 +304,10 @@ def run_server_with_context(
     deployment_mode: Literal["personal", "service"] = "personal",
     **config_overrides,
 ) -> Iterator[ServerContext]:
-    """Run a server with full context including graceful shutdown.
+    """Run a server and yield a ServerContext for graceful shutdown.
 
-    This context manager provides more control than run_server():
-    - Returns ServerContext with server instance for graceful shutdown
-    - Supports artifact_dir configuration
-    - Resets artifact store on cleanup
-
-    Args:
-        cache_dir: Path for cache directory
-        artifact_dir: Optional path for artifact storage
-        deployment_mode: "personal" or "service"
-
-    Yields:
-        ServerContext with server details
-
-    Raises:
-        RuntimeError: If server fails to start
+    Unlike ``run_server`` it supports ``artifact_dir`` and resets the artifact store on
+    cleanup. Raises RuntimeError if the server fails to start.
     """
     from strata import server
     from strata.artifact_store import reset_artifact_store
@@ -472,15 +373,7 @@ def run_server_with_context(
 
 @pytest.fixture
 def temp_warehouse(tmp_path):
-    """Create a temporary warehouse with a sample Iceberg table.
-
-    Skipped on Windows: pyiceberg's PyArrowFileIO strips ``file://``
-    to a path like ``/C:/...`` which Windows pyarrow LocalFileSystem
-    can't resolve. The stack is pyiceberg + pyarrow upstream; working
-    around it here would mean bypassing the normal catalog code path.
-    Iceberg scanning on Windows is a tier-2 target — skip the tests
-    that need a real warehouse.
-    """
+    """A temporary warehouse with a sample Iceberg table; skipped on Windows (pyiceberg paths)."""
     if sys.platform == "win32":
         pytest.skip("pyiceberg + pyarrow LocalFileSystem path handling broken on Windows")
     warehouse_path = tmp_path / "warehouse"
@@ -547,13 +440,7 @@ def strata_config(tmp_path):
 
 @pytest.fixture
 def server_with_client(temp_warehouse, tmp_path):
-    """Start a server and provide a client.
-
-    Yields a dict with:
-        - client: StrataClient connected to the running server
-        - config: StrataConfig used by the server
-        - warehouse: temp_warehouse dict with table_uri, catalog, etc.
-    """
+    """Start a server and yield a dict with ``client``, ``config`` and ``warehouse``."""
     import strata.server as server_module
     from strata.server import ServerState, app
 
@@ -619,16 +506,9 @@ def seed_build_targets(
 ) -> None:
     """Create the artifact versions that build rows are allowed to reference.
 
-    ``artifact_builds`` declares a foreign key on ``(artifact_id, version)``,
-    and both production callers create the artifact version first — the server
-    at ``server.py`` and the notebook executor, which calls ``create_artifact``
-    immediately before ``create_build``. A build row for an artifact that never
-    existed is an impossible state, so a build-store test that fabricates one
-    needs this to supply the other half.
-
-    Constructing the artifact store also creates ``artifact_versions`` in the
-    shared database: a build store opened on a file of its own has no such
-    table, and the foreign key cannot even be resolved against it.
+    ``artifact_builds`` has a foreign key on ``(artifact_id, version)`` and production always
+    creates the version first. Opening the artifact store also creates ``artifact_versions``
+    in the shared database, without which the key cannot resolve.
     """
     from strata.artifact_store import ArtifactStore
 
@@ -646,12 +526,9 @@ def seed_build_targets(
 class RebindingDNS:
     """Name resolution that answers a name differently on each lookup.
 
-    ``answers[name]`` is a list of answers, each a list of addresses; every
-    lookup of *name* takes the next one and the last repeats. Any other name
-    goes to the real resolver, so an IP literal still resolves to itself.
-    Patched in as ``socket.getaddrinfo``, the one function both the guard and
-    the socket layer resolve with, so it stands for a DNS server an attacker
-    controls.
+    ``answers[name]`` is a list of address lists; each lookup takes the next and the last
+    repeats, and other names go to the real resolver. Patched in as ``socket.getaddrinfo``,
+    which both the guard and the socket layer use.
     """
 
     def __init__(self) -> None:

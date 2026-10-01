@@ -1,8 +1,7 @@
 """Migrating a populated SQLite artifact store onto Postgres.
 
-Driven against a real server, because the things that break a migration are
-things SQLite does not have: enforced foreign keys, a sequence standing beside
-a generated key, and narrower column types.
+Runs against a real server: enforced foreign keys, sequences and narrower column types are what
+break a migration, and SQLite has none of them.
 """
 
 from __future__ import annotations
@@ -19,13 +18,8 @@ from strata.sql_backend import PostgresDialect, SqliteDialect
 def _insert_dangling_build(db_path, build_id: str) -> None:
     """Write a build row pointing at an artifact that does not exist.
 
-    Foreign keys are enforced now, so this state can no longer be produced
-    through the build store — which is the point of the fix that enforced them.
-    Databases written before it are full of these, though: garbage_collect and
-    delete_artifact removed artifact_versions rows without touching
-    artifact_builds for as long as they have existed. The migration still has
-    to carry such a store onto Postgres, which has always refused them, so the
-    row is written the way that older Strata left it: with enforcement off.
+    Foreign-key enforcement now prevents this, but older stores hold such rows and the migration
+    must carry them, so the row is written with enforcement off.
     """
     import sqlite3
 
@@ -82,11 +76,7 @@ def populated_sqlite(tmp_path):
 
 @pytest.fixture
 def target(postgres_dsn, tmp_path):
-    """An empty Postgres store with the schema already created.
-
-    Mirrors the documented flow: boot Strata against the target once so the
-    stores create their own schema, then migrate.
-    """
+    """An empty Postgres store whose schema Strata has already created."""
     dialect = PostgresDialect(postgres_dsn)
     conn = dialect.connect()
     try:
@@ -290,14 +280,9 @@ class TestMigration:
     def test_a_rejected_row_does_not_take_its_batch_with_it(
         self, populated_sqlite, target, tmp_path
     ):
-        """The worst failure this tool can have: reporting success while losing rows.
+        """One rejected row must not roll back the rest of its batch while ``copied`` counts them.
 
-        Without a per-row savepoint, the rollback for one bad row discards
-        every uncommitted insert in the same batch, and ``copied`` has already
-        counted them. Measured at 99 of 100 lost, reported as copied.
-
-        The earlier dangling-build test used a single row -- the rejected one
-        -- so it could not see this.
+        This needs a per-row savepoint; a single-row batch could not show the loss.
         """
         from strata.transforms.build_store import BuildStore
 

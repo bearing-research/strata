@@ -27,7 +27,7 @@ from tests.notebook.e2e_fixtures import (
 
 
 class TestCascadeAfterEdit:
-    """Run c3 after editing c1 — should cascade through all three cells."""
+    """Run c3 after editing c1: the cascade goes through all three cells."""
 
     @pytest.fixture
     def setup(self):
@@ -43,7 +43,6 @@ class TestCascadeAfterEdit:
             yield client, nb
 
     def test_cascade_reruns_all_after_edit(self, setup):
-        """Edit c1, run c3 → cascade runs c1, c2, c3 and prints new value."""
         client, nb = setup
 
         with open_notebook_session(client, nb.path) as (sid, session):
@@ -93,12 +92,10 @@ class TestCascadeAfterEdit:
                 assert "3" in stdout, f"Expected '3' in stdout but got: {stdout!r}"
 
     def test_cascade_works_when_cells_added_incrementally(self, setup):
-        """Simulate UI workflow: run c1+c2, THEN add c3, then edit c1, run c3.
+        """Run c1 and c2, then add c3, edit c1 and run c3, as users do in the UI.
 
-        This is the most common UI pattern — users add cells one at a time
-        and run them as they go.  When c2 was first run, c3 didn't exist yet
-        so consumed_variables[c2] was empty and y was never stored.
-        The cascade must still work.
+        When c2 first ran, c3 did not exist, so ``consumed_variables[c2]`` was empty and ``y``
+        was never stored.
         """
         client, nb = setup
 
@@ -152,10 +149,8 @@ class TestCascadeAfterEdit:
                 assert not errors, f"Unexpected errors during cascade: {errors}"
 
     def test_cascade_from_cold_start(self, setup):
-        """After server restart (no prior execution), edit c1, run c3.
-
-        All cells are idle with no artifact_uris. The cascade must run
-        c1→c2→c3 from scratch and produce correct output.
+        """Cold start: every cell is idle with no artifact_uris, so the cascade runs c1→c2→c3 from
+        scratch.
         """
         client, nb = setup
 
@@ -222,12 +217,7 @@ class TestCascadeAfterEdit:
                 )
 
     def test_artifact_store_state_after_cascade(self, setup):
-        """Verify artifact store has correct artifacts after cascade.
-
-        This is a regression test for the bug where c1's artifact was
-        not stored during cascade, causing c2 to fail with
-        'name x is not defined'.
-        """
+        """The cascade stores c1's artifact; without it c2 fails with 'name x is not defined'."""
         client, nb = setup
 
         with open_notebook_session(client, nb.path) as (sid, session):
@@ -301,9 +291,8 @@ class TestCascadeAfterEdit:
     def test_upstream_rerun_on_missing_artifact(self, setup):
         """If an upstream artifact is missing, the upstream cell is re-run.
 
-        Simulates the real-server failure mode: c1 runs and succeeds but
-        its artifact is deleted/missing.  When c2 tries to resolve 'x' it
-        should detect the gap, re-run c1 automatically, and proceed.
+        c1 succeeds but its artifact is gone; resolving ``x`` for c2 detects the gap and re-runs
+        c1.
         """
         client, nb = setup
 
@@ -346,21 +335,9 @@ class TestCascadeAfterEdit:
     def test_provenance_dedup_does_not_break_cascade(self, setup):
         """Provenance dedup must not poison the canonical artifact ID.
 
-        Regression test for a bug where:
-        1. An artifact with matching provenance exists under a different ID
-           (e.g. from a previous cell layout or a notebook copy).
-        2. ``finalize_artifact`` detects the duplicate and marks the
-           canonical ``nb_..._cell_c1_var_x`` as "failed".
-        3. ``find_by_provenance`` returns the OTHER artifact → cache hit.
-        4. ``get_latest_version("nb_..._cell_c1_var_x")`` finds only the
-           "failed" entry → None.
-        5. Downstream cells fail with "name 'x' is not defined".
-
-        The fix ensures:
-        - ``store_cell_output`` forces the canonical version to "ready"
-          even when provenance dedup would mark it as failed.
-        - The cache-hit path validates that canonical IDs are resolvable
-          before accepting the hit.
+        A foreign artifact with c1's provenance under another ID (an old cell layout or a copied
+        notebook) gives a cache hit, but the canonical ``nb_..._cell_c1_var_x`` must still end up
+        ready, or downstream cells fail with "name 'x' is not defined".
         """
         client, nb = setup
 
@@ -447,13 +424,10 @@ class TestCascadeAfterEdit:
                 assert not errors, f"Unexpected errors: {errors}"
 
     def test_rest_edit_then_ws_run_triggers_cascade(self, setup):
-        """Edit via REST PUT, then run via WebSocket → cascade must trigger.
+        """Edit via REST PUT, then run via WebSocket: the cascade must trigger.
 
-        Regression test: the frontend updates source via the REST API
-        (PUT /v1/notebooks/{id}/cells/{cell_id}), NOT via the WebSocket
-        ``cell_source_update`` message.  If the REST endpoint forgets
-        to recompute staleness, all cells stay "ready" on the backend
-        and the cascade planner says "no cascade needed".
+        The REST endpoint must recompute staleness, or every cell stays "ready" and the planner
+        sees no cascade.
         """
         client, nb = setup
 

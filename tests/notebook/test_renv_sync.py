@@ -1,13 +1,7 @@
-"""Tests for ``_renv_sync`` + the ``[r]`` block schema.
+"""Tests for ``_renv_sync`` and the ``[r]`` block schema.
 
-Same two-tier shape as ``test_language_r_analyzer.py``:
-
-- Unit tests monkeypatch ``shutil.which`` + ``subprocess.run`` to cover
-  the wrapper's success / failure / timeout / missing-Rscript paths.
-- Schema tests pin that the ``[r]`` block round-trips through the
-  writer + parser.
-
-The capstone real-renv integration tests land with #59.
+Unit tests monkeypatch ``shutil.which`` and ``subprocess.run``; real renv
+restores are in ``test_r_cells.py``.
 """
 
 from __future__ import annotations
@@ -33,10 +27,9 @@ from strata.notebook.writer import _renv_sync, create_notebook, write_notebook_t
 
 
 class TestRenvSyncMissingRscript:
-    """When Rscript isn't on PATH **and** there's a lockfile, return False."""
+    """When Rscript isn't on PATH and there is a lockfile, return False."""
 
     def test_returns_false_without_rscript_when_lockfile_exists(self, monkeypatch, tmp_path):
-        """A real restore is needed but R isn't available — surface the failure."""
         monkeypatch.setattr(shutil, "which", lambda name: None)
         (tmp_path / "renv.lock").write_text("")
         assert _renv_sync(tmp_path) is False
@@ -45,12 +38,8 @@ class TestRenvSyncMissingRscript:
 class TestRenvSyncNoLockfile:
     """Missing ``renv.lock`` is success regardless of R availability.
 
-    The pre-bootstrap state (notebook has R cells, ``renv::init()``
-    hasn't run yet) must not surface as a failure — that's the
-    expected initial state, not an error. Particularly important
-    when R isn't installed locally: we don't want notebook open to
-    fail "renv sync failed" for a user who hasn't even installed R
-    yet but is editing R cells via the Vue UI.
+    Before ``renv::init()`` that is the normal state, even for a user editing R
+    cells without R installed.
     """
 
     def test_returns_true_when_lockfile_missing_with_rscript(self, monkeypatch, tmp_path):
@@ -68,19 +57,14 @@ class TestRenvSyncNoLockfile:
         assert called == [], "should not invoke Rscript when nothing to restore"
 
     def test_returns_true_when_lockfile_missing_without_rscript(self, monkeypatch, tmp_path):
-        """The "R not installed" case: still nothing to do, still success.
-
-        Lockfile check runs before ``shutil.which("Rscript")`` so a
-        user without R installed who hasn't yet bootstrapped renv
-        doesn't get a spurious failure. Review feedback on PR #68.
-        """
+        """The lockfile check runs before ``shutil.which("Rscript")``, so no R is still success."""
         monkeypatch.setattr(shutil, "which", lambda name: None)
         # No renv.lock in tmp_path.
         assert _renv_sync(tmp_path) is True
 
 
 class TestRenvSyncSubprocessFailures:
-    """Subprocess failures surface as ``False`` + a warning log."""
+    """Subprocess failures surface as ``False`` plus a warning log."""
 
     def _setup(self, monkeypatch, tmp_path):
         monkeypatch.setattr(shutil, "which", lambda name: "/fake/Rscript")
@@ -108,7 +92,7 @@ class TestRenvSyncSubprocessFailures:
 
 
 class TestRenvSyncHappyPath:
-    """Rscript exits 0 with a lockfile present → True."""
+    """Rscript exits 0 with a lockfile present: True."""
 
     def test_returns_true_on_success(self, monkeypatch, tmp_path):
         monkeypatch.setattr(shutil, "which", lambda name: "/fake/Rscript")
@@ -134,15 +118,8 @@ class TestRenvSyncHappyPath:
         assert cwd == str(tmp_path)
 
     def test_does_not_pass_vanilla_or_no_init_file(self, monkeypatch, tmp_path):
-        """``.Rprofile`` must run — it's what activates the project's renv.
-
-        Review feedback on PR #68: ``--no-init-file`` / ``--vanilla``
-        flags disable ``.Rprofile``, which is what sources
-        ``renv/activate.R`` to put the project library on
-        ``.libPaths()``. Without it ``renv::restore()`` can't see the
-        project library and tries to install everything into the
-        user's default lib — usually failing because that lib doesn't
-        even have renv installed.
+        """``.Rprofile`` must run: it sources ``renv/activate.R``, which puts the project
+        library on ``.libPaths()``. ``--vanilla`` / ``--no-init-file`` would skip it.
         """
         monkeypatch.setattr(shutil, "which", lambda name: "/fake/Rscript")
         (tmp_path / "renv.lock").write_text("")
@@ -161,7 +138,7 @@ class TestRenvSyncHappyPath:
 
 
 class TestRenvSyncDefaultTimeout:
-    """Default timeout is generous enough for CRAN compile times."""
+    """The default timeout is generous enough for CRAN compile times."""
 
     def test_default_timeout_is_at_least_5_minutes(self, monkeypatch, tmp_path):
         monkeypatch.setattr(shutil, "which", lambda name: "/fake/Rscript")
@@ -220,21 +197,18 @@ def _hold_renv_lock_in_subprocess(notebook_dir: Path):
 class TestRenvCrossProcessLock:
     """renv mutations are mutually exclusive across processes.
 
-    Issue #102: ``renv::restore()`` from a server and ``strata run``
-    (or two CLI runs) in separate processes used to hit the same
-    ``renv/library`` + ``renv.lock`` concurrently — the
-    ``threading.Lock`` in ``dependencies.py`` only serializes within
-    one process and renv has no locking of its own.
+    The ``threading.Lock`` in ``dependencies.py`` covers one process only, and
+    renv has no locking of its own.
     """
 
     def test_lock_file_lives_under_strata_runtime_dir(self, tmp_path):
-        """The lock is runtime state — ``.strata/``, never committed."""
+        """The lock is runtime state under ``.strata/``, never committed."""
         lock = renv_process_lock(tmp_path)
         assert Path(lock.lock_file) == tmp_path / ".strata" / "renv-process.lock"
         assert (tmp_path / ".strata").is_dir()
 
     def test_renv_sync_blocked_by_other_process_returns_false(self, monkeypatch, tmp_path):
-        """Lock held elsewhere → give up after *timeout*, never spawn Rscript."""
+        """A lock held elsewhere: give up after *timeout* without spawning Rscript."""
         (tmp_path / "renv.lock").write_text("")
         monkeypatch.setattr(shutil, "which", lambda name: "/fake/Rscript")
 
@@ -281,7 +255,7 @@ class TestRenvCrossProcessLock:
 
 
 class TestRBlockSchema:
-    """The ``[r]`` block round-trips through writer + parser."""
+    """The ``[r]`` block round-trips through writer and parser."""
 
     def test_default_is_empty_dict(self):
         toml = NotebookToml(notebook_id="n1", name="N1")
@@ -309,7 +283,6 @@ class TestRBlockSchema:
         assert state.r["r_version"] == "4.4.1"
 
     def test_empty_r_block_not_written(self, tmp_path: Path):
-        """An empty ``[r]`` block stays out of the file to avoid noise."""
         notebook_dir = create_notebook(tmp_path, "Empty R Block", initialize_environment=False)
         toml = NotebookToml(notebook_id="empty-r", name="Empty R Block", r={})
         write_notebook_toml(notebook_dir, toml)
@@ -326,19 +299,10 @@ class TestRBlockSchema:
 
 
 class TestEnsureRenvSynced:
-    """``ensure_renv_synced`` is the session-side hook that runs
-    ``_renv_sync`` on open. Pins:
+    """``ensure_renv_synced``, the session hook that runs ``_renv_sync`` on open.
 
-    * No-op without a lockfile (Python-only notebooks pay nothing).
-    * Successful sync persists to ``.strata/runtime.json`` (not to
-      committed ``notebook.toml`` — runtime state lives in
-      ``runtime.json`` so reopens don't churn the committed file).
-    * Reopens short-circuit only when both the lockfile hash AND
-      the on-disk renv library match. Library deleted out from
-      under us → force a real re-sync.
-    * Failed sync records the error but preserves the last-good
-      ``lock_hash`` / ``r_version`` / ``last_synced_at`` so the UI
-      can still show "you had a working env at <T>".
+    Results go to ``runtime.json``, never ``notebook.toml``. Reopens skip the sync
+    only when the lockfile hash and the on-disk library both match.
     """
 
     def _make_session(self, notebook_dir):
@@ -366,16 +330,9 @@ class TestEnsureRenvSynced:
 
     @staticmethod
     def _seed_renv_library(notebook_dir: Path) -> None:
-        """Create the ``renv/library`` directory **with at least one
-        entry** so ``_renv_library_present`` returns True.
+        """Create ``renv/library/<platform>/<entry>`` so ``_renv_library_present`` is True.
 
-        The fake ``_renv_sync`` doesn't actually install anything;
-        the short-circuit path needs the library to look like a real
-        renv project's library, not just an empty directory. We
-        write a single sentinel directory under
-        ``renv/library/<platform>/`` to mirror renv's actual
-        layout — the probe stops at the first child entry so we
-        don't have to build a full package tree.
+        The fake sync installs nothing, and an empty library dir does not count.
         """
         library = notebook_dir / "renv" / "library" / "x86_64-pc-linux-gnu-R-4.4"
         library.mkdir(parents=True, exist_ok=True)
@@ -384,10 +341,7 @@ class TestEnsureRenvSynced:
         (library / "stub_package").mkdir(exist_ok=True)
 
     def test_no_op_without_renv_lock(self, tmp_path: Path, monkeypatch):
-        """Python-only notebook: ``_renv_sync`` never called, runtime
-        ``r`` block stays at the empty default, and the committed
-        ``notebook.toml`` is byte-identical before and after.
-        """
+        """Python-only notebook: no sync, empty runtime ``r`` block, ``notebook.toml`` unchanged."""
         calls = self._stub_renv_sync(monkeypatch, ok=True)
         notebook_dir = create_notebook(tmp_path, "No R", initialize_environment=False)
         toml_before = (notebook_dir / "notebook.toml").read_bytes()
@@ -400,10 +354,8 @@ class TestEnsureRenvSynced:
         assert (notebook_dir / "notebook.toml").read_bytes() == toml_before
 
     def test_success_persists_to_runtime_json(self, tmp_path: Path, monkeypatch):
-        """A successful sync writes ``r`` into ``runtime.json``, not into
-        the committed ``notebook.toml``. P2 from #87 review: per-session
-        timestamps must not bump ``notebook.toml``'s ``updated_at``.
-        """
+        """A successful sync writes ``r`` into ``runtime.json`` and leaves ``notebook.toml``
+        alone."""
         import hashlib
 
         self._stub_renv_sync(monkeypatch, ok=True)
@@ -427,10 +379,7 @@ class TestEnsureRenvSynced:
         assert (notebook_dir / "notebook.toml").read_bytes() == toml_before
 
     def test_hash_and_library_match_short_circuits(self, tmp_path: Path, monkeypatch):
-        """A second open against the same lockfile + present library
-        must NOT spawn Rscript. The session-reuse path calls
-        ``ensure_renv_synced`` on every reopen; the short-circuit
-        keeps that free."""
+        """A reopen with the same lockfile and a present library does not spawn Rscript."""
         calls = self._stub_renv_sync(monkeypatch, ok=True)
         notebook_dir = create_notebook(tmp_path, "Cached R", initialize_environment=False)
         renv_content = '{"R": {"Version": "4.4.1"}}\n'
@@ -452,11 +401,10 @@ class TestEnsureRenvSynced:
         assert first_runtime == second_runtime
 
     def test_short_circuit_requires_library_on_disk(self, tmp_path: Path, monkeypatch):
-        """Hash match alone is NOT enough — if the project library
-        directory has been deleted out from under us, force a real
-        ``_renv_sync`` to restore it. Otherwise the runtime metadata
-        would survive while the actual library doesn't, and the next
-        R cell would fail with "no package called ...".
+        """A hash match with the library deleted forces a real sync.
+
+        Otherwise the metadata survives while the next R cell fails with
+        "no package called ...".
         """
         import shutil as _shutil
 
@@ -481,13 +429,7 @@ class TestEnsureRenvSynced:
         )
 
     def test_short_circuit_rejects_empty_library_directory(self, tmp_path: Path, monkeypatch):
-        """``renv/library/`` existing as an empty directory does NOT count
-        as a healthy library. Pre-fix the probe only checked
-        ``.exists()`` — an empty dir (left over from an aborted
-        restore, manual cleanup that wiped the contents but not the
-        parent, or a test fixture) would pass and the UI would
-        report "in sync" while packages are missing.
-        """
+        """An empty ``renv/library/`` (an aborted restore, say) is not a healthy library."""
         calls = self._stub_renv_sync(monkeypatch, ok=True)
         notebook_dir = create_notebook(tmp_path, "Empty Library", initialize_environment=False)
         (notebook_dir / "renv.lock").write_text("{}\n", encoding="utf-8")
@@ -507,8 +449,6 @@ class TestEnsureRenvSynced:
         )
 
     def test_lockfile_edit_triggers_resync(self, tmp_path: Path, monkeypatch):
-        """Editing ``renv.lock`` invalidates the hash, so the next call
-        runs ``_renv_sync`` and updates the runtime entry."""
         calls = self._stub_renv_sync(monkeypatch, ok=True)
         notebook_dir = create_notebook(tmp_path, "Edited R", initialize_environment=False)
         (notebook_dir / "renv.lock").write_text('{"R": {"Version": "4.4.0"}}\n', encoding="utf-8")
@@ -526,12 +466,7 @@ class TestEnsureRenvSynced:
         assert first_hash != second_hash
 
     def test_failure_preserves_last_good_state(self, tmp_path: Path, monkeypatch):
-        """``_renv_sync`` returning False records ``sync_error`` but
-        preserves the last-good ``lock_hash`` / ``r_version`` /
-        ``last_synced_at``. The UI can then show "last good sync
-        was at T, latest attempt failed" instead of losing the prior
-        state.
-        """
+        """A failed sync records ``sync_error`` but keeps the last-good hash, version and time."""
         self._stub_renv_sync(monkeypatch, ok=False)
         notebook_dir = create_notebook(tmp_path, "Failing R", initialize_environment=False)
         (notebook_dir / "renv.lock").write_text("{}\n", encoding="utf-8")
@@ -557,9 +492,7 @@ class TestEnsureRenvSynced:
         assert runtime.sync_error != ""
 
     def test_lockfile_removed_clears_runtime_entry(self, tmp_path: Path, monkeypatch):
-        """When a notebook removes its ``renv.lock``, the runtime entry
-        clears back to the empty default — no phantom hash or error
-        hangs around."""
+        """Removing ``renv.lock`` resets the runtime entry, leaving no phantom hash or error."""
         self._stub_renv_sync(monkeypatch, ok=True)
         notebook_dir = create_notebook(tmp_path, "Cleared R", initialize_environment=False)
         (notebook_dir / "renv.lock").write_text("{}\n", encoding="utf-8")
@@ -579,11 +512,10 @@ class TestEnsureRenvSynced:
 
 
 class TestSerializeREnvironmentState:
-    """``serialize_r_environment_state`` derives ``has_lockfile`` and
-    ``sync_state`` from current disk state + runtime metadata so the
-    UI sees the truth — particularly important for never-synced and
-    failed-sync notebooks where the panel must STILL render so the
-    user can see *why* the env is broken.
+    """``serialize_r_environment_state`` derives ``has_lockfile`` and ``sync_state``.
+
+    Never-synced and failed notebooks must still render, so the user can see why
+    the env is broken.
     """
 
     def _make_session(self, notebook_dir):
@@ -600,8 +532,7 @@ class TestSerializeREnvironmentState:
         assert payload["sync_error"] is None
 
     def test_lockfile_but_never_synced_renders_never(self, tmp_path: Path):
-        """User adds renv.lock but the sync hasn't run yet. UI must
-        still render the R section so they can see the state."""
+        """A lockfile that has never synced still renders, as ``never``."""
         notebook_dir = create_notebook(tmp_path, "Pending R", initialize_environment=False)
         (notebook_dir / "renv.lock").write_text('{"R": {"Version": "4.4.1"}}\n', encoding="utf-8")
 
@@ -612,10 +543,7 @@ class TestSerializeREnvironmentState:
         assert payload["sync_error"] is None
 
     def test_failed_sync_surfaces_failed_state(self, tmp_path: Path):
-        """A failed sync stays visible via ``sync_state='failed'`` +
-        ``sync_error``. The panel must NOT hide — the user needs to
-        see *why* their R env is broken (the exact regression Codex
-        called out)."""
+        """A failed sync shows as ``sync_state='failed'`` with ``sync_error``; the panel stays."""
         notebook_dir = create_notebook(tmp_path, "Broken R", initialize_environment=False)
         (notebook_dir / "renv.lock").write_text("{}\n", encoding="utf-8")
         state = load_runtime_state(notebook_dir)
@@ -630,9 +558,7 @@ class TestSerializeREnvironmentState:
         assert "Rscript" in payload["sync_error"]
 
     def test_outdated_when_lockfile_edited_after_last_good_sync(self, tmp_path: Path):
-        """User edits renv.lock between syncs: on-disk hash diverges
-        from runtime.r.lock_hash, no sync_error yet. UI shows
-        'outdated' so the user knows to re-sync."""
+        """A lockfile edited after the last good sync reads ``outdated``."""
         notebook_dir = create_notebook(tmp_path, "Outdated R", initialize_environment=False)
         (notebook_dir / "renv.lock").write_text('{"R": {"Version": "4.4.1"}}\n', encoding="utf-8")
         state = load_runtime_state(notebook_dir)
@@ -651,8 +577,6 @@ class TestSerializeREnvironmentState:
         assert payload["r_version"] == "4.4.0"
 
     def test_ok_when_hash_matches(self, tmp_path: Path):
-        """Happy path: current renv.lock hash matches runtime.lock_hash,
-        no error → ``sync_state='ok'``."""
         import hashlib
 
         notebook_dir = create_notebook(tmp_path, "Healthy R", initialize_environment=False)
@@ -680,14 +604,12 @@ class TestSerializeREnvironmentState:
 
 @pytest.mark.skipif(sys.platform == "win32", reason="the recording Rscript is a shell script")
 class TestRCodeRunsAsTheHarnessUser:
-    """``renv::restore()`` builds source packages, which runs their configure
-    scripts, and every Rscript started in a notebook directory sources the
-    notebook's ``.Rprofile``. Where cells run as the harness user, so does
-    that code; a service-mode server with no harness user runs none of it.
+    """R code from a restore runs as the harness user, like cells do.
 
-    The harness user here is the current user, as in ``test_harness_user.py``:
-    dropping to someone else needs root. What shows the drop is the identity
-    the spawn is given and the environment it is filtered to.
+    ``renv::restore()`` runs packages' configure scripts and every Rscript sources
+    ``.Rprofile``; with no harness user in service mode, none of it runs. The harness
+    user here is the current user (dropping needs root), so the spawn's identity and
+    filtered environment are what is checked.
     """
 
     @pytest.fixture
@@ -769,10 +691,9 @@ class TestRCodeRunsAsTheHarnessUser:
     def test_a_library_link_is_handed_over_only_inside_the_shared_store(
         self, tmp_path, recorded, monkeypatch, points_into_the_store
     ):
-        """Cell code runs as the harness user, which owns renv/ after a restore
-        and can repoint renv/library. The next restore runs as the server and
-        hands the link's target to the harness user: anywhere the link names
-        would become that user's, so only the shared store's libraries are."""
+        """The next restore hands renv/library's link target to the harness user, so it is
+        honoured only inside the shared store; the harness user can repoint the link.
+        """
         from strata.notebook import writer
         from strata.notebook.harness_user import HarnessUser
 
@@ -837,9 +758,11 @@ class TestRCodeRunsAsTheHarnessUser:
     async def test_installing_a_package_is_refused_where_cells_are_isolated(
         self, tmp_path, recorded, monkeypatch, user
     ):
-        """renv writes ``renv.lock`` and ``.Rprofile`` into the notebook
-        directory, which the harness user cannot write, so an install cannot
-        drop to it; it does not run as the server either."""
+        """Installs are refused where cells are isolated.
+
+        renv writes into the notebook directory, which the harness user cannot write,
+        and the install must not run as the server either.
+        """
         self._server(monkeypatch, mode="service", user=self._me().pw_name if user else None)
 
         added = await renv_add(tmp_path, "ggplot2", timeout=5)

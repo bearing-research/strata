@@ -22,11 +22,7 @@ def test_coerce_none_passes_through():
 
 
 def test_coerce_bool_preserves_type_identity():
-    """``True`` must come back as ``bool``, not as ``int``. Order in
-    the accept list (bool before int) is irrelevant under ``type() is``
-    semantics — what matters is that we don't auto-cast. Provenance
-    hashing in slice 8 will treat ``bool`` and ``int`` as distinct,
-    so widening here would silently change cache identity."""
+    """``True`` stays ``bool``; provenance treats bool and int as distinct."""
     out = coerce_bind_value("flag", True)
     assert out is True
     assert type(out) is bool
@@ -50,11 +46,10 @@ def test_coerce_str_passes_through():
 
 
 def test_coerce_str_with_sql_injection_attempt_is_accepted_unchanged():
-    """The whole point: adversarial strings round-trip as plain bind
-    values. ADBC's parameter binding handles escaping at the wire
-    layer, so we accept any string and document that we do *not*
-    string-substitute. If this ever fails, our injection-defense
-    story is broken."""
+    """Adversarial strings pass through unchanged as bind values, never substituted.
+
+    ADBC binding does the escaping; if this fails, the injection defense is broken.
+    """
     payload = "'; DROP TABLE users; --"
     assert coerce_bind_value("name", payload) == payload
 
@@ -65,8 +60,7 @@ def test_coerce_bytes_passes_through():
 
 
 def test_coerce_bytearray_is_normalized_to_bytes():
-    """``bytearray`` is mutable; ADBC doesn't universally accept it
-    and a downstream hash needs an immutable byte-sequence anyway."""
+    """``bytearray`` becomes ``bytes``: ADBC may reject it and hashing needs immutable bytes."""
     out = coerce_bind_value("b", bytearray(b"data"))
     assert out == b"data"
     assert type(out) is bytes
@@ -130,8 +124,7 @@ def test_coerce_rejects_set():
 
 
 def test_coerce_rejects_complex():
-    """``complex`` isn't generally bindable in SQL — and silently
-    coercing to float would lose the imaginary component."""
+    """Coercing ``complex`` to float would lose the imaginary part."""
     with pytest.raises(BindError, match=r":x.*complex"):
         coerce_bind_value("x", complex(1, 2))
 
@@ -145,8 +138,7 @@ def test_coerce_rejects_arbitrary_object():
 
 
 def test_coerce_rejects_callable():
-    """Catches the easy mistake of writing ``:foo`` when there's a
-    function ``foo`` in scope."""
+    """Catches ``:foo`` written when a function ``foo`` is in scope."""
 
     def fn():
         return 42
@@ -156,8 +148,7 @@ def test_coerce_rejects_callable():
 
 
 def test_coerce_error_lists_accepted_types():
-    """The error message must enumerate the accepted types so users
-    can fix the upstream cell without consulting docs."""
+    """The error lists accepted types so the user can fix the upstream without docs."""
     with pytest.raises(BindError) as exc:
         coerce_bind_value("x", [1, 2])
     msg = str(exc.value)
@@ -166,11 +157,7 @@ def test_coerce_error_lists_accepted_types():
 
 
 def test_coerce_rejects_int_subclass():
-    """``isinstance``-based acceptance would silently widen a
-    user-defined ``MyInt`` (or numpy.int64) into ``int``. Strict
-    ``type() is`` semantics rejects them so the user converts
-    explicitly — which makes overflow/nullability assumptions
-    visible in the cell."""
+    """``type() is`` semantics reject int subclasses, so conversion is explicit."""
 
     class MyInt(int):
         pass
@@ -180,10 +167,7 @@ def test_coerce_rejects_int_subclass():
 
 
 def test_coerce_rejects_bytearray_subclass():
-    """Codex review fix: the ``bytearray`` shortcut used ``isinstance``
-    which silently widened user-subclassed ``bytearray`` types
-    against the rest of the contract. ``type() is`` semantics now
-    rejects subclasses everywhere, including the bytearray path."""
+    """Subclasses of ``bytearray`` are rejected too."""
 
     class TaggedBytes(bytearray):
         pass
@@ -193,10 +177,7 @@ def test_coerce_rejects_bytearray_subclass():
 
 
 def test_coerce_rejects_datetime_subclass():
-    """Same strictness rationale for ``datetime``: a
-    ``pandas.Timestamp`` is a ``datetime`` subclass with different
-    nullability semantics (``NaT``). User converts via
-    ``.to_pydatetime()``; we don't paper over it."""
+    """A ``pandas.Timestamp`` is rejected: it is a datetime subclass with ``NaT``."""
 
     class FancyDateTime(dt.datetime):
         pass
@@ -207,10 +188,7 @@ def test_coerce_rejects_datetime_subclass():
 
 
 def test_coerce_rejects_numpy_scalars_when_available():
-    """numpy.int64 / numpy.float64 are not Python ints/floats and
-    have surprising overflow behavior at SQL boundaries. Reject so
-    the user converts via ``int(x)`` / ``float(x)`` and the intent
-    is visible."""
+    """numpy scalars overflow differently at SQL boundaries, so the user converts explicitly."""
     np = pytest.importorskip("numpy")
 
     with pytest.raises(BindError, match=r":n.*int64"):
@@ -240,8 +218,7 @@ def test_resolve_preserves_placeholder_order():
 
 
 def test_resolve_ignores_unreferenced_namespace_entries():
-    """The namespace can carry every upstream variable; we only pull
-    the placeholders the SQL body actually references."""
+    """Only placeholders the SQL references are pulled from the namespace."""
     out = resolve_bind_params(
         ["wanted"],
         {"wanted": "ok", "ignored": object()},
@@ -255,16 +232,12 @@ def test_resolve_missing_name_raises_bind_error():
 
 
 def test_resolve_unsupported_type_raises_bind_error():
-    """Resolution coerces every value through ``coerce_bind_value``,
-    so the type-rejection error surfaces here too."""
     with pytest.raises(BindError, match=r":xs.*list"):
         resolve_bind_params(["xs"], {"xs": [1, 2]})
 
 
 def test_resolve_short_circuits_on_first_failure():
-    """``resolve_bind_params`` doesn't accumulate diagnostics — the
-    analyzer's validation pass surfaces every missing reference up
-    front, and at execute time we fail fast."""
+    """Resolution fails fast; the analyzer already reports every missing reference."""
     namespace = {"good": 1}
     with pytest.raises(BindError, match=r":bad.*not found"):
         # ``later_bad`` would also fail (unsupported type), but we
@@ -273,22 +246,13 @@ def test_resolve_short_circuits_on_first_failure():
 
 
 def test_resolve_handles_duplicate_placeholder_names():
-    """The analyzer dedupes ``references`` for the DAG, but exposes a
-    parallel ``placeholder_positions`` list with duplicates kept —
-    that's what the executor passes here when the SQL body repeats
-    ``:foo`` (e.g. ``SELECT :foo + :foo``). The integration test
-    below pipes the analyzer through to confirm the contract holds
-    end-to-end; this test pins the local behavior."""
+    """A repeated placeholder resolves once per occurrence, as in ``SELECT :foo + :foo``."""
     out = resolve_bind_params(["foo", "bar", "foo"], {"foo": 1, "bar": 2})
     assert out == (1, 2, 1)
 
 
 def test_resolve_consumes_analyzer_placeholder_positions_for_duplicates():
-    """Codex review fix: ``resolve_bind_params``'s duplicate
-    semantics were unreachable — the analyzer's ``references`` is
-    deduplicated. The fix added ``SqlAnalysis.placeholder_positions``
-    that preserves duplicates; this test exercises the wire-up so
-    the duplicate behavior is actually reachable from real callers."""
+    """The analyzer's ``placeholder_positions`` makes repeats reachable from real callers."""
     from strata.notebook.sql.analyzer import analyze_sql_cell
 
     analysis = analyze_sql_cell(
@@ -307,16 +271,12 @@ def test_resolve_consumes_analyzer_placeholder_positions_for_duplicates():
 
 
 def test_resolve_passes_none_through_for_null_binds():
-    """A ``None`` upstream variable binds as SQL NULL — must not be
-    confused with "missing name"."""
+    """A ``None`` value binds as SQL NULL, not as a missing name."""
     out = resolve_bind_params(["maybe"], {"maybe": None})
     assert out == (None,)
 
 
 def test_resolve_returns_tuple_not_list():
-    """The executor downstream expects a tuple (immutable, hashable).
-    A list would still work for ADBC.execute, but we want the
-    immutability for safety when this value is captured by the
-    provenance hash in slice 8."""
+    """A tuple, so the value captured in the provenance hash is immutable."""
     out = resolve_bind_params(["x"], {"x": 1})
     assert isinstance(out, tuple)

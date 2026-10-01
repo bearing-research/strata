@@ -33,21 +33,18 @@ class _FakeServerConfig:
 
 
 class TestResolveLlmConfig:
-    """Tests for LLM config resolution.
+    """``resolve_llm_config`` must not read process env vars.
 
-    Process env vars must NOT be consulted by ``resolve_llm_config`` — only
-    explicit server config, notebook env vars (Runtime panel), and the
-    notebook.toml [ai] section. All tests run with os.environ cleared to
-    make accidental regressions obvious.
+    Only server config, notebook env (Runtime panel) and notebook.toml ``[ai]`` count; tests
+    run with os.environ cleared.
     """
 
     def test_returns_none_when_no_key(self):
-        """No key anywhere → None."""
         with patch.dict(os.environ, {}, clear=True):
             assert resolve_llm_config() is None
 
     def test_process_env_is_ignored(self):
-        """Shell-exported keys must NOT leak into notebooks."""
+        """Shell-exported keys must not leak into notebooks."""
         with patch.dict(
             os.environ,
             {
@@ -61,7 +58,6 @@ class TestResolveLlmConfig:
             assert resolve_llm_config() is None
 
     def test_notebook_env_anthropic(self):
-        """Notebook env ANTHROPIC_API_KEY → Anthropic defaults."""
         with patch.dict(os.environ, {}, clear=True):
             config = resolve_llm_config(notebook_env={"ANTHROPIC_API_KEY": "sk-ant-nb"})
             assert config is not None
@@ -70,7 +66,6 @@ class TestResolveLlmConfig:
             assert "claude" in config.model
 
     def test_notebook_env_openai(self):
-        """Notebook env OPENAI_API_KEY → OpenAI defaults."""
         with patch.dict(os.environ, {}, clear=True):
             config = resolve_llm_config(notebook_env={"OPENAI_API_KEY": "sk-test"})
             assert config is not None
@@ -85,7 +80,6 @@ class TestResolveLlmConfig:
             assert config.api_key == "sk-generic"
 
     def test_notebook_toml_overrides_server_and_env(self):
-        """notebook.toml [ai] beats notebook env and server config."""
         with patch.dict(os.environ, {"ANTHROPIC_API_KEY": "sk-shell"}, clear=True):
             config = resolve_llm_config(
                 notebook_config={
@@ -102,7 +96,6 @@ class TestResolveLlmConfig:
             assert config.model == "llama3"
 
     def test_notebook_env_overrides_server_config(self):
-        """Notebook env (Runtime panel) takes priority over server-wide defaults."""
         with patch.dict(os.environ, {}, clear=True):
             config = resolve_llm_config(
                 notebook_env={"ANTHROPIC_API_KEY": "sk-notebook"},
@@ -132,7 +125,7 @@ class TestResolveLlmConfig:
 
 
 class TestInferProviderName:
-    """Tests for provider name inference."""
+    """Provider name inference."""
 
     def test_anthropic(self):
         assert infer_provider_name("https://api.anthropic.com/v1") == "anthropic"
@@ -209,8 +202,7 @@ class TestResponseFormatFor:
         assert rf["json_schema"]["strict"] is True
 
     def test_openai_incomplete_required_falls_back_to_non_strict(self):
-        """User-declared optional field — strict mode would reject it,
-        so we turn strict off rather than silently promoting the field."""
+        """Strict mode would reject an optional field, so strict is turned off instead."""
         schema = {
             "type": "object",
             "properties": {
@@ -255,7 +247,7 @@ class TestResponseFormatFor:
 
 
 class TestEstimateTokens:
-    """Tests for token estimation."""
+    """Token estimation."""
 
     def test_basic(self):
         assert estimate_tokens("hello world") > 0
@@ -270,7 +262,7 @@ class TestEstimateTokens:
 
 
 class TestRenderPromptTemplate:
-    """Tests for safe prompt template rendering."""
+    """Safe prompt template rendering."""
 
     def test_renders_attribute_access_without_eval(self):
         variables = {"obj": SimpleNamespace(value=42)}
@@ -304,7 +296,7 @@ _SIMPLE_SCHEMA = {
 
 
 class TestAnthropicToolUseBody:
-    """Pure-function tests for the native Anthropic request body."""
+    """The native Anthropic request body."""
 
     def test_body_has_forced_tool_choice(self):
         body = build_anthropic_tool_use_body(
@@ -354,7 +346,7 @@ class TestAnthropicToolUseBody:
 
 
 class TestAnthropicToolUseParse:
-    """Tests for extracting the forced tool call from the response."""
+    """Extracting the forced tool call from the response."""
 
     def test_extracts_tool_use_input_as_json(self):
         data = {
@@ -386,8 +378,7 @@ class TestAnthropicToolUseParse:
             parse_anthropic_tool_use_response(data, fallback_model="claude")
 
     def test_skips_non_tool_use_blocks_before_tool_use(self):
-        """Real responses often begin with a text block before the
-        tool call — the parser must keep scanning."""
+        """Real responses often start with a text block before the tool call."""
         data = {
             "content": [
                 {"type": "text", "text": "Thinking..."},
@@ -402,8 +393,7 @@ class TestAnthropicToolUseParse:
 
 
 class TestChatCompletionDispatch:
-    """End-to-end dispatch: Anthropic + schema hits /v1/messages; others
-    hit /v1/chat/completions."""
+    """Anthropic + schema hits /v1/messages; everything else hits /v1/chat/completions."""
 
     @pytest.mark.asyncio
     async def test_anthropic_with_schema_routes_to_messages_endpoint(self, monkeypatch):
@@ -495,11 +485,9 @@ class TestChatCompletionDispatch:
 
 
 class TestChatCompletionStreamRequestShape:
-    """``chat_completion_stream`` shapes its request body like the unary
-    OpenAI-compat path (issue #110): ``temperature`` and a
-    provider-appropriate ``response_format`` ride along with
-    ``stream: true``, and both stay off the body when not requested so
-    the agent chat caller is byte-identical to before.
+    """``chat_completion_stream`` sends ``temperature`` and ``response_format`` like the unary path.
+
+    Both stay off the body when not requested.
     """
 
     _SSE_BODY = (
@@ -569,8 +557,7 @@ class TestChatCompletionStreamRequestShape:
 
     @pytest.mark.asyncio
     async def test_defaults_leave_body_unchanged(self, monkeypatch):
-        """No kwargs → no ``temperature`` / ``response_format`` keys, so
-        the pre-existing agent chat caller sends the same body as before."""
+        """No kwargs means no ``temperature`` / ``response_format`` keys in the body."""
         from strata.notebook.llm import LlmConfig, chat_completion_stream
 
         captured: list[dict] = []

@@ -1,9 +1,4 @@
-"""Tests for the markdown cell language.
-
-Markdown cells are pure prose: no Python execution, no DAG edges, no
-provenance chain. These tests pin the contract so a future regression
-can't accidentally drag them through the executor or analyzer pipelines.
-"""
+"""Markdown cells are pure prose: no execution, no DAG edges, no provenance chain."""
 
 from __future__ import annotations
 
@@ -23,7 +18,6 @@ from strata.notebook.writer import (
 
 class TestMarkdownCellPersistence:
     def test_add_markdown_cell_creates_md_file(self, tmp_path):
-        """A markdown cell should land in a ``.md`` file, not ``.py``."""
         nb_dir = create_notebook(tmp_path, "md_persist")
         add_cell_to_notebook(nb_dir, "abc12345", language="markdown")
 
@@ -32,13 +26,11 @@ class TestMarkdownCellPersistence:
         assert not (cells_dir / "abc12345.py").exists()
 
     def test_python_cell_still_uses_py_file(self, tmp_path):
-        """Don't accidentally regress the existing Python cell file naming."""
         nb_dir = create_notebook(tmp_path, "py_persist")
         add_cell_to_notebook(nb_dir, "py_cell1", language="python")
         assert (nb_dir / "cells" / "py_cell1.py").exists()
 
     def test_parse_round_trip_preserves_markdown_source(self, tmp_path):
-        """Source written to a .md file round-trips through parse."""
         nb_dir = create_notebook(tmp_path, "md_roundtrip")
         add_cell_to_notebook(nb_dir, "doc01234", language="markdown")
         write_cell(nb_dir, "doc01234", "# Hello\n\nMarkdown body.")
@@ -51,7 +43,6 @@ class TestMarkdownCellPersistence:
 
 class TestMarkdownCellAnalysis:
     def test_markdown_has_no_defines_or_references(self, tmp_path):
-        """Markdown cells must not produce DAG edges — they're prose."""
         nb_dir = create_notebook(tmp_path, "md_dag")
         # Source that *would* parse as Python with defines+references: treated as
         # Python, it would record ``x`` as a define.
@@ -75,9 +66,7 @@ class TestMarkdownCellExecution:
     def test_executor_short_circuits_with_no_output(self, tmp_path):
         """``execute_cell`` returns success with no display outputs.
 
-        The frontend already renders the markdown source in-place via the
-        cell's preview view; emitting it as a display output would
-        duplicate the same content in the output panel below.
+        The frontend already renders the source in place; an output would duplicate it.
         """
         nb_dir = create_notebook(tmp_path, "md_exec")
         add_cell_to_notebook(nb_dir, "md_cell", language="markdown")
@@ -102,13 +91,10 @@ class TestMarkdownCellExecution:
 
 
 class TestHarnessCrashDiagnostic:
-    """When the harness dies on import, the executor must surface stderr.
+    """When the harness dies on import, the executor surfaces its stderr.
 
-    Regression for a real bug: notebooks missing harness runtime deps
-    (orjson, pyarrow, cloudpickle) failed with a generic "Unknown error"
-    because the executor read the leftover input manifest as if it were
-    the result. We now detect a manifest that lacks the ``success`` key
-    and surface the subprocess's stderr instead.
+    A manifest without a ``success`` key is the leftover input, not a result;
+    reading it as one gave a generic "Unknown error" for missing harness deps.
     """
 
     @pytest.mark.integration
@@ -176,7 +162,6 @@ class TestHarnessCrashDiagnostic:
 
 class TestMarkdownCellStaleness:
     def test_markdown_cells_are_always_ready(self, tmp_path):
-        """Markdown cells should never appear stale — they have no inputs."""
         nb_dir = create_notebook(tmp_path, "md_stale")
         add_cell_to_notebook(nb_dir, "md_cell", language="markdown")
         write_cell(nb_dir, "md_cell", "# Doc")

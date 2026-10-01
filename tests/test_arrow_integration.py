@@ -7,10 +7,7 @@ from strata_client.integration.arrow import StrataDataset, dataset
 
 
 class TestStrataDataset:
-    """Tests for StrataDataset class."""
-
     def test_context_manager(self, server_with_client):
-        """StrataDataset works as context manager."""
         config = server_with_client["config"]
         table_uri = server_with_client["warehouse"]["table_uri"]
 
@@ -20,7 +17,6 @@ class TestStrataDataset:
             assert table.num_rows > 0
 
     def test_table_uri_property(self, server_with_client):
-        """table_uri property returns the URI."""
         config = server_with_client["config"]
         table_uri = server_with_client["warehouse"]["table_uri"]
 
@@ -31,7 +27,6 @@ class TestStrataDataset:
             ds.close()
 
     def test_schema_property(self, server_with_client):
-        """schema property returns Arrow schema."""
         config = server_with_client["config"]
         table_uri = server_with_client["warehouse"]["table_uri"]
 
@@ -45,7 +40,6 @@ class TestStrataDataset:
             ds.close()
 
     def test_to_table(self, server_with_client):
-        """to_table() returns Arrow Table."""
         config = server_with_client["config"]
         table_uri = server_with_client["warehouse"]["table_uri"]
 
@@ -58,7 +52,6 @@ class TestStrataDataset:
             ds.close()
 
     def test_to_table_with_columns(self, server_with_client):
-        """to_table() respects column projection."""
         config = server_with_client["config"]
         table_uri = server_with_client["warehouse"]["table_uri"]
 
@@ -73,7 +66,6 @@ class TestStrataDataset:
             ds.close()
 
     def test_to_batches(self, server_with_client):
-        """to_batches() yields RecordBatches."""
         config = server_with_client["config"]
         table_uri = server_with_client["warehouse"]["table_uri"]
 
@@ -90,7 +82,6 @@ class TestStrataDataset:
             ds.close()
 
     def test_count_rows(self, server_with_client):
-        """count_rows() returns correct count."""
         config = server_with_client["config"]
         table_uri = server_with_client["warehouse"]["table_uri"]
 
@@ -102,7 +93,6 @@ class TestStrataDataset:
             ds.close()
 
     def test_head(self, server_with_client):
-        """head() returns first N rows."""
         config = server_with_client["config"]
         table_uri = server_with_client["warehouse"]["table_uri"]
 
@@ -115,7 +105,6 @@ class TestStrataDataset:
             ds.close()
 
     def test_head_with_columns(self, server_with_client):
-        """head() respects column projection."""
         config = server_with_client["config"]
         table_uri = server_with_client["warehouse"]["table_uri"]
 
@@ -130,10 +119,7 @@ class TestStrataDataset:
 
 
 class TestStrataScanner:
-    """Tests for StrataScanner class."""
-
     def test_scanner_to_batches(self, server_with_client):
-        """scanner.to_batches() yields RecordBatches."""
         config = server_with_client["config"]
         table_uri = server_with_client["warehouse"]["table_uri"]
 
@@ -147,7 +133,6 @@ class TestStrataScanner:
             ds.close()
 
     def test_scanner_to_table(self, server_with_client):
-        """scanner.to_table() returns Arrow Table."""
         config = server_with_client["config"]
         table_uri = server_with_client["warehouse"]["table_uri"]
 
@@ -161,7 +146,6 @@ class TestStrataScanner:
             ds.close()
 
     def test_scanner_to_reader(self, server_with_client):
-        """scanner.to_reader() returns RecordBatchReader."""
         config = server_with_client["config"]
         table_uri = server_with_client["warehouse"]["table_uri"]
 
@@ -177,11 +161,8 @@ class TestStrataScanner:
             ds.close()
 
     def test_scanner_with_filter(self, server_with_client):
-        """scanner accepts filter parameter for row-group pruning.
-
-        Note: Filters are used for row-group pruning based on min/max
-        statistics, not row-level filtering. A filter that matches the
-        row group's range won't reduce results.
+        """Filters prune row groups by min/max stats, not rows; a filter matching the range keeps
+        all.
         """
         config = server_with_client["config"]
         table_uri = server_with_client["warehouse"]["table_uri"]
@@ -197,10 +178,7 @@ class TestStrataScanner:
             ds.close()
 
     def test_scanner_with_multiple_filters(self, server_with_client):
-        """scanner accepts filter list for row-group pruning.
-
-        Note: Multiple filters are combined for row-group pruning.
-        """
+        """Multiple filters are combined for row-group pruning."""
         config = server_with_client["config"]
         table_uri = server_with_client["warehouse"]["table_uri"]
 
@@ -214,7 +192,6 @@ class TestStrataScanner:
             ds.close()
 
     def test_scanner_count_rows(self, server_with_client):
-        """scanner.count_rows() returns correct count."""
         config = server_with_client["config"]
         table_uri = server_with_client["warehouse"]["table_uri"]
 
@@ -227,7 +204,6 @@ class TestStrataScanner:
             ds.close()
 
     def test_scanner_head(self, server_with_client):
-        """scanner.head() returns first N rows."""
         config = server_with_client["config"]
         table_uri = server_with_client["warehouse"]["table_uri"]
 
@@ -241,10 +217,7 @@ class TestStrataScanner:
 
 
 class TestDatasetFunction:
-    """Tests for the dataset() convenience function."""
-
     def test_dataset_function(self, server_with_client):
-        """dataset() creates StrataDataset."""
         config = server_with_client["config"]
         table_uri = server_with_client["warehouse"]["table_uri"]
 
@@ -256,7 +229,6 @@ class TestDatasetFunction:
             ds.close()
 
     def test_dataset_with_snapshot_id(self, server_with_client):
-        """dataset() accepts snapshot_id."""
         config = server_with_client["config"]
         table_uri = server_with_client["warehouse"]["table_uri"]
 
@@ -268,10 +240,9 @@ class TestDatasetFunction:
 
 
 class TestIntegrationWithOtherLibraries:
-    """Tests demonstrating integration patterns with other libraries."""
+    """Integration patterns with other libraries."""
 
     def test_reader_to_polars(self, server_with_client):
-        """RecordBatchReader can be consumed by Polars."""
         pl = pytest.importorskip("polars")
 
         config = server_with_client["config"]
@@ -285,7 +256,6 @@ class TestIntegrationWithOtherLibraries:
             assert df.columns == ["id", "value"]
 
     def test_reader_to_duckdb(self, server_with_client):
-        """RecordBatchReader can be consumed by DuckDB."""
         import duckdb
 
         config = server_with_client["config"]

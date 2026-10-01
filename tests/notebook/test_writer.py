@@ -38,7 +38,6 @@ from strata.notebook.writer import (
 
 
 def test_create_notebook():
-    """Test creating a new notebook."""
     with tempfile.TemporaryDirectory() as tmpdir:
         tmpdir_path = Path(tmpdir)
 
@@ -85,7 +84,6 @@ def test_create_notebook_project_mount_rejects_bad_identifier():
 def test_update_environment_metadata_reads_pyvenv_cfg_without_subprocess(
     monkeypatch: pytest.MonkeyPatch,
 ):
-    """Refreshing environment metadata should reuse pyvenv.cfg when available."""
     with tempfile.TemporaryDirectory() as tmpdir:
         notebook_dir = create_notebook(Path(tmpdir), "Metadata Probe Test")
 
@@ -108,7 +106,6 @@ def test_update_environment_metadata_reads_pyvenv_cfg_without_subprocess(
 
 
 def test_write_cell():
-    """Test writing cell source."""
     with tempfile.TemporaryDirectory() as tmpdir:
         tmpdir_path = Path(tmpdir)
 
@@ -127,7 +124,6 @@ def test_write_cell():
 
 
 def test_write_cell_not_found():
-    """Test writing to a non-existent cell."""
     with tempfile.TemporaryDirectory() as tmpdir:
         tmpdir_path = Path(tmpdir)
 
@@ -138,7 +134,6 @@ def test_write_cell_not_found():
 
 
 def test_add_cell():
-    """Test adding cells."""
     with tempfile.TemporaryDirectory() as tmpdir:
         tmpdir_path = Path(tmpdir)
 
@@ -157,15 +152,9 @@ def test_add_cell():
 
 
 def test_add_cell_picks_extension_by_language():
-    """Cell source files use language-matching extensions.
+    """Languages with a dedicated extension get it; others default to ``.py``.
 
-    Pre-PR-A every non-markdown language wrote ``.py``, so an R cell
-    added from the UI landed in ``cells/<id>.py`` despite the
-    ``language = "r"`` entry in ``notebook.toml``. Tools opening the
-    cell file from outside the UI (R-aware editors, lint passes,
-    grep-based scripts) would misclassify it. Verify each language
-    that has a dedicated extension gets the right one, and that
-    languages without one still default to ``.py``.
+    Tools opening cell files outside the UI (R-aware editors, linters, grep) rely on it.
     """
     with tempfile.TemporaryDirectory() as tmpdir:
         notebook_dir = create_notebook(Path(tmpdir), "Extension Test")
@@ -197,7 +186,6 @@ def test_add_cell_picks_extension_by_language():
 
 
 def test_add_cell_after():
-    """Test adding cell after a specific cell."""
     with tempfile.TemporaryDirectory() as tmpdir:
         tmpdir_path = Path(tmpdir)
 
@@ -220,7 +208,6 @@ def test_add_cell_after():
 
 
 def test_remove_cell():
-    """Test removing cells."""
     with tempfile.TemporaryDirectory() as tmpdir:
         tmpdir_path = Path(tmpdir)
 
@@ -240,7 +227,6 @@ def test_remove_cell():
 
 
 def test_remove_cell_not_found():
-    """Test removing a non-existent cell."""
     with tempfile.TemporaryDirectory() as tmpdir:
         tmpdir_path = Path(tmpdir)
 
@@ -251,7 +237,6 @@ def test_remove_cell_not_found():
 
 
 def test_reorder_cells():
-    """Test reordering cells."""
     with tempfile.TemporaryDirectory() as tmpdir:
         tmpdir_path = Path(tmpdir)
 
@@ -274,7 +259,6 @@ def test_reorder_cells():
 
 
 def test_rename_notebook():
-    """Test renaming a notebook."""
     with tempfile.TemporaryDirectory() as tmpdir:
         tmpdir_path = Path(tmpdir)
 
@@ -287,7 +271,6 @@ def test_rename_notebook():
 
 
 def test_write_notebook_toml():
-    """Test writing notebook.toml."""
     with tempfile.TemporaryDirectory() as tmpdir:
         tmpdir_path = Path(tmpdir)
 
@@ -364,7 +347,6 @@ def test_write_notebook_toml():
 
 
 def test_update_notebook_worker():
-    """Test persisting notebook-level worker configuration."""
     with tempfile.TemporaryDirectory() as tmpdir:
         notebook_dir = create_notebook(Path(tmpdir), "Worker Notebook")
         update_notebook_worker(notebook_dir, "gpu-default")
@@ -374,7 +356,6 @@ def test_update_notebook_worker():
 
 
 def test_update_notebook_workers():
-    """Test persisting notebook-scoped worker definitions."""
     with tempfile.TemporaryDirectory() as tmpdir:
         notebook_dir = create_notebook(Path(tmpdir), "Worker Catalog Notebook")
         update_notebook_workers(
@@ -401,7 +382,6 @@ def test_update_notebook_workers():
 
 
 def test_update_notebook_timeout_and_env():
-    """Test persisting notebook-level timeout/env configuration."""
     with tempfile.TemporaryDirectory() as tmpdir:
         notebook_dir = create_notebook(Path(tmpdir), "Notebook Runtime")
         update_notebook_timeout(notebook_dir, 7.5)
@@ -413,7 +393,6 @@ def test_update_notebook_timeout_and_env():
 
 
 def test_update_notebook_env_preserves_ai_config():
-    """Notebook runtime edits should not strip [ai] configuration."""
     with tempfile.TemporaryDirectory() as tmpdir:
         notebook_dir = create_notebook(Path(tmpdir), "Notebook AI Runtime")
 
@@ -433,12 +412,7 @@ def test_update_notebook_env_preserves_ai_config():
 
 
 def test_sensitive_only_env_block_is_not_persisted():
-    """When every env entry is a blanked sensitive key, skip the block.
-
-    Earlier behavior left ``[env]\nOPENAI_API_KEY = ""`` in the
-    committed notebook.toml — noise for shared/example notebooks with
-    no real config value persisted.
-    """
+    """An env block of only blanked sensitive keys is skipped; it is noise in shared notebooks."""
     with tempfile.TemporaryDirectory() as tmpdir:
         notebook_dir = create_notebook(Path(tmpdir), "Sensitive Only Test")
 
@@ -451,11 +425,8 @@ def test_sensitive_only_env_block_is_not_persisted():
 
 
 def test_update_notebook_writers_are_no_op_when_value_unchanged():
-    """The write-if-changed invariant across update_notebook_* writers.
-
-    Each of these touches notebook.toml and bumps updated_at — but
-    only when the persisted value actually changed. A redundant call
-    with the current value should leave the file byte-identical.
+    """Each update_notebook_* writer bumps updated_at only on a real change; a redundant call leaves
+    the file byte-identical.
     """
     from strata.notebook.writer import (
         rename_notebook,
@@ -508,10 +479,7 @@ def test_update_notebook_writers_are_no_op_when_value_unchanged():
 
 
 def test_sensitive_only_env_is_no_op_no_updated_at_bump():
-    """Typing an API key in the Runtime panel shouldn't churn
-    notebook.toml: no persistable change → no rewrite → no updated_at
-    bump. Otherwise examples get git diffs for invisible edits.
-    """
+    """Typing an API key must not churn notebook.toml, or examples get diffs for invisible edits."""
     with tempfile.TemporaryDirectory() as tmpdir:
         notebook_dir = create_notebook(Path(tmpdir), "No Churn Test")
         notebook_toml = notebook_dir / "notebook.toml"
@@ -529,18 +497,9 @@ def test_sensitive_only_env_is_no_op_no_updated_at_bump():
 def test_writer_emits_native_toml_datetime_and_array_of_tables(tmp_path: Path):
     """notebook.toml writes use native TOML shapes, not stringified ones.
 
-    Two regressions were observed in committed example notebooks after a
-    routine variant switch:
-
-    1. ``updated_at`` flipped from a native TOML datetime to a quoted
-       ISO string because the writer called ``.isoformat()``.
-    2. ``[[variant_group]]`` collapsed to inline
-       ``variant_group = [{...}]`` because ``tomli_w`` chooses inline
-       form for simple list-of-dicts. Same applies to ``workers`` and
-       ``mounts``.
-
-    Both surfaced as noisy diffs on every legitimate edit. This test
-    pins the on-disk shape so they don't regress.
+    ``updated_at`` stays a TOML datetime (not an ``.isoformat()`` string), and
+    ``[[variant_group]]``, ``workers`` and ``mounts`` stay arrays of tables, not the inline form
+    ``tomli_w`` picks for simple list-of-dicts. Either regression makes noisy diffs on every edit.
     """
     from strata.notebook.writer import (
         update_notebook_mounts,
@@ -591,7 +550,7 @@ def test_writer_emits_native_toml_datetime_and_array_of_tables(tmp_path: Path):
 
 
 def test_env_block_persists_when_mixed_with_non_sensitive():
-    """A sensitive key alongside any non-sensitive value keeps the slot."""
+    """A sensitive key alongside any non-sensitive value keeps the block."""
     with tempfile.TemporaryDirectory() as tmpdir:
         notebook_dir = create_notebook(Path(tmpdir), "Mixed Env Test")
 
@@ -610,11 +569,7 @@ def test_env_block_persists_when_mixed_with_non_sensitive():
 
 
 def test_parse_notebook_cleans_up_stale_empty_env_block(tmp_path: Path):
-    """Opening a notebook with a legacy sensitive-only env block rewrites it.
-
-    Covers the migration path for notebooks checked in with noise from
-    an earlier Runtime-panel interaction.
-    """
+    """Opening a notebook with a legacy sensitive-only env block rewrites it."""
     notebook_dir = create_notebook(tmp_path, "Stale Env Cleanup")
     # An empty [env] block holding only a blanked sensitive-key placeholder.
     notebook_toml = notebook_dir / "notebook.toml"
@@ -629,7 +584,6 @@ def test_parse_notebook_cleans_up_stale_empty_env_block(tmp_path: Path):
 
 
 def test_sensitive_env_values_stripped_on_write():
-    """API keys, tokens, and passwords should not be persisted to disk."""
     with tempfile.TemporaryDirectory() as tmpdir:
         notebook_dir = create_notebook(Path(tmpdir), "Secrets Test")
 
@@ -660,7 +614,6 @@ def test_sensitive_env_values_stripped_on_write():
 
 
 def test_create_notebook_preserves_existing_id():
-    """Re-creating at the same path must keep the original notebook_id."""
     with tempfile.TemporaryDirectory() as tmpdir:
         nb_dir = create_notebook(Path(tmpdir), "Stable ID")
         add_cell_to_notebook(nb_dir, "c1")
@@ -681,9 +634,9 @@ def test_create_notebook_preserves_existing_id():
 
 
 def test_create_notebook_leaves_an_existing_notebook_as_it_is():
-    """``strata new`` on an existing notebook kept its id and cells but
-    rewrote notebook.toml without its env, workers, mounts or connections,
-    and pyproject.toml without its dependencies."""
+    """``strata new`` on an existing notebook must keep its env, workers, mounts, connections and
+    dependencies, not just its id and cells.
+    """
     with tempfile.TemporaryDirectory() as tmpdir:
         nb_dir = create_notebook(Path(tmpdir), "Configured", initialize_environment=False)
         add_cell_to_notebook(nb_dir, "c1")
@@ -704,10 +657,7 @@ def test_create_notebook_leaves_an_existing_notebook_as_it_is():
 
 
 def test_update_notebook_connections_round_trip():
-    """``update_notebook_connections`` writes a [connections.<name>]
-    block that survives a parser round-trip. SQLite path stays
-    relative on disk; resolution against the notebook dir happens
-    on read."""
+    """SQLite paths stay relative on disk; they resolve against the notebook dir on read."""
     from strata.notebook.models import ConnectionSpec
     from strata.notebook.parser import parse_notebook
 
@@ -742,9 +692,7 @@ def test_update_notebook_connections_round_trip():
 
 
 def test_update_notebook_connections_blanks_literal_secrets():
-    """A literal password is scrubbed at write time. The on-disk
-    body keeps the key (so the user knows which slot is configured)
-    but the value is blanked."""
+    """The key stays (showing which slot is configured) but the literal value is blanked."""
     from strata.notebook.models import ConnectionSpec
     from strata.notebook.parser import parse_notebook
 
@@ -770,7 +718,6 @@ def test_update_notebook_connections_blanks_literal_secrets():
 
 
 def test_set_variant_active_appends_entry():
-    """First call appends a [[variant_group]] entry to notebook.toml."""
     with tempfile.TemporaryDirectory() as tmpdir:
         notebook_dir = create_notebook(Path(tmpdir), "Variants")
         set_variant_active(notebook_dir, "model", "gpt4")
@@ -781,7 +728,7 @@ def test_set_variant_active_appends_entry():
 
 
 def test_set_variant_active_updates_existing_entry():
-    """Second call to same group updates the existing entry in place."""
+    """A second call for the same group updates its entry in place."""
     with tempfile.TemporaryDirectory() as tmpdir:
         notebook_dir = create_notebook(Path(tmpdir), "Variants")
         set_variant_active(notebook_dir, "model", "gpt4")
@@ -793,7 +740,7 @@ def test_set_variant_active_updates_existing_entry():
 
 
 def test_set_variant_active_no_op_when_unchanged():
-    """Repeated identical writes don't bump updated_at."""
+    """Repeated identical writes do not bump updated_at."""
     with tempfile.TemporaryDirectory() as tmpdir:
         notebook_dir = create_notebook(Path(tmpdir), "Variants")
         set_variant_active(notebook_dir, "model", "gpt4")
@@ -819,7 +766,6 @@ def test_remove_variant_group_entry_drops_block_when_empty():
 
 
 def test_set_variant_active_round_trips_through_parse():
-    """Parser surfaces variant_active_selections from notebook.toml."""
     with tempfile.TemporaryDirectory() as tmpdir:
         notebook_dir = create_notebook(Path(tmpdir), "Variants")
         set_variant_active(notebook_dir, "model", "claude")
@@ -828,8 +774,7 @@ def test_set_variant_active_round_trips_through_parse():
 
 
 def test_update_notebook_connections_empty_drops_block():
-    """Sending an empty list deletes the [connections] table from
-    notebook.toml entirely so the file doesn't carry a stub."""
+    """An empty list deletes the [connections] table rather than leaving a stub."""
     from strata.notebook.models import ConnectionSpec
     from strata.notebook.parser import parse_notebook
 
@@ -852,9 +797,7 @@ def test_update_notebook_connections_empty_drops_block():
 
 
 def test_update_notebook_connections_empty_on_empty_is_noop():
-    """Empty save on a notebook that never had a [connections] block
-    must not rewrite the file — otherwise ``updated_at`` churns and
-    array-of-tables get re-serialized as inline arrays on every UI save."""
+    """Otherwise ``updated_at`` churns and arrays of tables reserialize inline on every UI save."""
     with tempfile.TemporaryDirectory() as tmpdir:
         notebook_dir = create_notebook(Path(tmpdir), "ConnNoopEmpty")
         notebook_toml = notebook_dir / "notebook.toml"
@@ -868,8 +811,6 @@ def test_update_notebook_connections_empty_on_empty_is_noop():
 
 
 class TestUpdateRequiresPython:
-    """update_requires_python rewrites the pyproject's requires-python line."""
-
     def test_rewrites_to_new_minor(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             nb = create_notebook(
@@ -914,8 +855,7 @@ class TestUpdateRequiresPython:
             update_requires_python(tmp_path, "3.12")
 
     def test_legacy_range_spec_is_rewritten_to_canonical(self):
-        """An existing notebook with the legacy range form is rewritten
-        to the canonical ``==X.Y.*`` form on update."""
+        """A legacy range spec is rewritten to the canonical ``==X.Y.*`` form on update."""
         with tempfile.TemporaryDirectory() as tmpdir:
             nb = create_notebook(
                 Path(tmpdir),
@@ -934,8 +874,7 @@ class TestUpdateRequiresPython:
 
 
 def test_worker_config_model_round_trips_through_toml(tmp_path):
-    """WorkerConfig (typed known keys + extra='allow') survives a TOML write/read,
-    extras included; an empty config is omitted from the serialized worker."""
+    """Typed known keys and extras survive a TOML round-trip; an empty config is omitted."""
     from strata.notebook.models import WorkerBackendType, WorkerConfig, WorkerSpec
     from strata.notebook.parser import parse_notebook
     from strata.notebook.writer import update_notebook_workers
@@ -967,9 +906,9 @@ def test_worker_config_model_round_trips_through_toml(tmp_path):
 
 
 class TestAtomicNotebookTomlWrites:
-    """notebook.toml rewrites must be atomic: a crash mid-dump (or a full
-    disk) must leave the previous complete file in place, never an empty
-    or torn one — the committed cell list and worker config live there."""
+    """A crash or full disk mid-dump must leave the previous complete notebook.toml, never an empty
+    or torn one.
+    """
 
     def test_failed_dump_leaves_previous_file_intact(self, monkeypatch):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -999,9 +938,9 @@ class TestAtomicNotebookTomlWrites:
 
 
 def test_update_notebook_env_keeps_writer_conventions():
-    """The env writer must match every other notebook.toml writer: native
-    TOML datetime for updated_at (not an ISO string) and [[workers]]
-    array-of-tables form preserved (not collapsed to inline)."""
+    """Like every notebook.toml writer: native TOML datetime for updated_at and [[workers]] kept as
+    an array of tables.
+    """
     with tempfile.TemporaryDirectory() as tmpdir:
         notebook_dir = create_notebook(Path(tmpdir), "Env Conventions")
         update_notebook_workers(
@@ -1025,14 +964,10 @@ def test_update_notebook_env_keeps_writer_conventions():
 
 
 def test_reorder_cells_keeps_cells_the_caller_never_saw():
-    """Reordering must never be able to delete a cell.
+    """Reordering must never delete a cell.
 
-    ``reorder_cells`` rebuilt ``notebook.toml``'s cell list from ``cell_ids``
-    alone, so anything absent from it was dropped — silently, from committed
-    config, orphaning the cell's source file and making its artifacts
-    unreachable. Callers pass a snapshot taken when they opened the notebook,
-    so any cell added since (by a live server session, the TUI, or a second
-    CLI process) was destroyed by an unrelated reorder.
+    Callers pass a snapshot from when they opened the notebook, so a cell added since (by a server
+    session, the TUI or another CLI process) would be dropped from committed config.
     """
     with tempfile.TemporaryDirectory() as tmpdir:
         notebook_dir = create_notebook(Path(tmpdir), "Concurrent Reorder")
@@ -1051,7 +986,7 @@ def test_reorder_cells_keeps_cells_the_caller_never_saw():
 
 
 def test_reorder_cells_renumbers_every_cell_contiguously():
-    """Preserved cells must get an order too, or they sort unpredictably."""
+    """Preserved cells need an order too, or they sort unpredictably."""
     with tempfile.TemporaryDirectory() as tmpdir:
         notebook_dir = create_notebook(Path(tmpdir), "Renumber")
         for cell_id in ("a", "b", "c"):

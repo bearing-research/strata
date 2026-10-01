@@ -20,9 +20,10 @@ class TestURLSigner:
     """The signer is keyed by its secret, with no shared process state."""
 
     def test_same_secret_verifies_different_signer_rejects(self):
-        """A URL verifies under any signer holding the same secret, and is
-        rejected by a signer with a different secret — the property that makes a
-        configured (pinned) secret survive restarts and match across replicas."""
+        """A URL verifies under any signer with the same secret, and no other.
+
+        This is what lets a pinned secret survive restarts and match across replicas.
+        """
         signer = URLSigner(b"stable-deployment-secret-000001")
         url = signer.generate_download_url(
             base_url="http://localhost:8765",
@@ -48,7 +49,7 @@ class TestURLSigner:
 
 
 class TestSigningSecretConfig:
-    """The signing secret is configurable (so it can be pinned across restarts)."""
+    """The signing secret is configurable, so it can be pinned across restarts."""
 
     def test_field_default_is_none(self):
         from strata.config import StrataConfig
@@ -69,13 +70,10 @@ class TestSigningSecretConfig:
 
 
 class TestDownloadURL:
-    """Tests for download URL generation and verification."""
-
     def setup_method(self):
         self.signer = URLSigner(_SECRET)
 
     def test_generate_download_url(self):
-        """Generate a signed download URL."""
         url = self.signer.generate_download_url(
             base_url="http://localhost:8765",
             artifact_id="test-artifact",
@@ -93,7 +91,6 @@ class TestDownloadURL:
         assert "signature=" in url.url
 
     def test_verify_download_signature_valid(self):
-        """Verify a valid download signature."""
         url = self.signer.generate_download_url(
             base_url="http://localhost:8765",
             artifact_id="test-artifact",
@@ -114,7 +111,6 @@ class TestDownloadURL:
         assert valid is True
 
     def test_verify_download_signature_expired(self):
-        """Expired signatures are rejected."""
         url = self.signer.generate_download_url(
             base_url="http://localhost:8765",
             artifact_id="test-artifact",
@@ -157,13 +153,10 @@ class TestDownloadURL:
 
 
 class TestUploadURL:
-    """Tests for upload URL generation and verification."""
-
     def setup_method(self):
         self.signer = URLSigner(_SECRET)
 
     def test_generate_upload_url(self):
-        """Generate a signed upload URL."""
         url = self.signer.generate_upload_url(
             base_url="http://localhost:8765",
             build_id="build-123",
@@ -179,7 +172,6 @@ class TestUploadURL:
         assert "signature=" in url.url
 
     def test_verify_upload_signature_valid(self):
-        """Verify a valid upload signature."""
         url = self.signer.generate_upload_url(
             base_url="http://localhost:8765",
             build_id="build-123",
@@ -198,7 +190,6 @@ class TestUploadURL:
         assert valid is True
 
     def test_verify_upload_signature_expired(self):
-        """Expired upload signatures are rejected."""
         url = self.signer.generate_upload_url(
             base_url="http://localhost:8765",
             build_id="build-123",
@@ -217,7 +208,6 @@ class TestUploadURL:
         assert valid is False
 
     def test_verify_upload_signature_tampered_max_bytes(self):
-        """Tampered max_bytes is rejected."""
         url = self.signer.generate_upload_url(
             base_url="http://localhost:8765",
             build_id="build-123",
@@ -237,13 +227,11 @@ class TestUploadURL:
 
 
 class TestBuildManifest:
-    """Tests for build manifest generation."""
-
     def setup_method(self):
         self.signer = URLSigner(_SECRET)
 
     def test_generate_build_manifest(self):
-        """Generate a complete build manifest."""
+        """A complete build manifest."""
         manifest = self.signer.generate_build_manifest(
             base_url="http://localhost:8765",
             build_id="build-123",
@@ -268,7 +256,6 @@ class TestBuildManifest:
         assert "signature=" in manifest.finalize_url
 
     def test_build_manifest_to_dict(self):
-        """Build manifest can be serialized to dict."""
         manifest = self.signer.generate_build_manifest(
             base_url="http://localhost:8765",
             build_id="build-123",
@@ -292,7 +279,6 @@ class TestBuildManifest:
         assert d["finalize_url"].startswith("http://localhost:8765/v1/builds/build-123/finalize?")
 
     def test_build_manifest_empty_inputs(self):
-        """Build manifest can have no inputs."""
         manifest = self.signer.generate_build_manifest(
             base_url="http://localhost:8765",
             build_id="build-123",
@@ -308,13 +294,10 @@ class TestBuildManifest:
 
 
 class TestFinalizeURL:
-    """Tests for finalize URL generation and verification."""
-
     def setup_method(self):
         self.signer = URLSigner(_SECRET)
 
     def test_generate_finalize_url(self):
-        """Generate a signed finalize URL."""
         url = self.signer.generate_finalize_url(
             base_url="http://localhost:8765",
             build_id="build-123",
@@ -328,7 +311,6 @@ class TestFinalizeURL:
         assert "signature=" in url.url
 
     def test_verify_finalize_signature_valid(self):
-        """Verify a valid finalize signature."""
         url = self.signer.generate_finalize_url(
             base_url="http://localhost:8765",
             build_id="build-123",
@@ -345,7 +327,6 @@ class TestFinalizeURL:
         assert valid is True
 
     def test_verify_finalize_signature_expired(self):
-        """Expired finalize signatures are rejected."""
         url = self.signer.generate_finalize_url(
             base_url="http://localhost:8765",
             build_id="build-123",
@@ -387,12 +368,9 @@ class TestFinalizeURL:
         )
 
     def test_a_url_minted_without_a_lease_still_verifies(self):
-        """URLs from before this existed, and the in-process notebook path.
+        """The in-process notebook path mints without a lease and never claims.
 
-        Both mint without a lease, and both must keep working: the notebook
-        assembles its manifest in-process and never claims, and a URL signed by
-        an older server is in flight for at most its expiry window across an
-        upgrade.
+        A URL signed by an older server is also in flight for up to its expiry across an upgrade.
         """
         url = self.signer.generate_finalize_url(
             base_url="http://localhost:8765", build_id="build-1"
@@ -424,12 +402,10 @@ class TestFinalizeURL:
 
 
 class TestNonAsciiSignaturesAreRejectedNotCrashed:
-    """A signature is a URL query parameter, so its content is entirely
-    attacker-chosen. ``hmac.compare_digest`` refuses to compare non-ASCII
-    ``str`` values and raises ``TypeError``, so ``?signature=ü`` produced an
-    unhandled 500 instead of a clean rejection — an error-rate spike anyone
-    could trigger without credentials. Comparing UTF-8 bytes is still
-    constant-time and never raises.
+    """A non-ASCII signature is rejected, not a 500.
+
+    ``hmac.compare_digest`` raises ``TypeError`` on non-ASCII ``str``, so anyone could trigger 500s
+    without credentials. Comparing UTF-8 bytes is still constant-time.
     """
 
     def test_non_ascii_download_signature_is_rejected(self):

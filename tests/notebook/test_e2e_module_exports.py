@@ -69,9 +69,9 @@ class TestLocalModuleExports:
                 assert result2["payload"]["outputs"]["result"]["preview"] == 12.56637
 
     def test_cross_cell_runtime_value_injection(self, setup):
-        """A def closing over an UPSTREAM runtime value exports via injection,
-        and the downstream consumer gets that value hydrated. This pattern was
-        previously rejected ("cannot be shared across cells yet")."""
+        """A def closing over an upstream runtime value exports via injection, and the downstream
+        consumer gets that value hydrated.
+        """
         client, tmp = setup
         nb = (
             NotebookBuilder(tmp)
@@ -93,8 +93,9 @@ class TestLocalModuleExports:
                 assert result3["payload"]["outputs"]["result"]["preview"] == 18
 
     def test_same_cell_runtime_value_injection(self, setup):
-        """A def closing over a SAME-CELL runtime value is shareable: the value
-        is stored and hydrated into the synthetic module (Phase 2)."""
+        """A def closing over a same-cell runtime value is shareable: the value is stored and
+        hydrated into the synthetic module.
+        """
         client, tmp = setup
         nb = (
             NotebookBuilder(tmp)
@@ -134,9 +135,9 @@ class TestLocalModuleExports:
                 assert result2["payload"]["outputs"]["result"]["preview"] == 7
 
     def test_literal_constant_coexists_with_def_in_module_cell(self, setup):
-        """A literal constant alongside a def should export as part of
-        the same module — no cell split required. Both names become
-        available downstream."""
+        """A literal constant beside a def exports in the same module, with no cell split; both
+        names reach downstream.
+        """
         client, tmp = setup
         nb = (
             NotebookBuilder(tmp)
@@ -161,9 +162,7 @@ class TestLocalModuleExports:
                 assert result2["payload"]["outputs"]["result"]["preview"] == 5.5
 
     def test_pure_constant_cell_uses_normal_artifact_path(self, setup):
-        """A cell that defines only a literal constant (no defs/classes)
-        should serialize through the normal artifact path — it's plain
-        data, not code, and shouldn't be wrapped in a synthetic module."""
+        """A cell defining only a literal constant is plain data, not a synthetic module."""
         client, tmp = setup
         nb = (
             NotebookBuilder(tmp)
@@ -184,9 +183,8 @@ class TestLocalModuleExports:
                 assert result2["payload"]["outputs"]["result"]["preview"] == 84
 
     def test_cross_cell_def_export_with_runtime_state_alongside(self, setup):
-        """The producing cell mixes a runtime statement with a self-
-        contained def. Slicing should let the def export cleanly while
-        the runtime variable flows through the regular artifact path.
+        """The producer mixes a runtime statement with a self-contained def: slicing exports the
+        def, and the runtime variable goes through the regular artifact path.
         """
         client, tmp = setup
         nb = (
@@ -306,9 +304,9 @@ class TestDirectHttpModuleExports:
                 assert result2["payload"]["outputs"]["result"]["preview"] == 12.56637
 
     def test_injection_export_over_direct_http_worker(self, setup, notebook_executor_server):
-        """A def closing over a runtime value, hydrated via injection, works when
-        the consuming cell runs on a remote HTTP worker — the injected blob and
-        spec must ride the worker transport."""
+        """A def closing over a runtime value works when the consumer runs on a remote HTTP worker;
+        the injected blob and spec must ride the worker transport.
+        """
         client, tmp = setup
         nb = (
             NotebookBuilder(tmp)

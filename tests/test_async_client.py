@@ -20,11 +20,8 @@ def build_scan_transform(columns: list[str] | None = None, filters=None) -> dict
 
 
 class TestAsyncStrataClient:
-    """Tests for AsyncStrataClient class."""
-
     @pytest.mark.asyncio
     async def test_context_manager(self, server_with_client):
-        """AsyncStrataClient works as async context manager."""
         config = server_with_client["config"]
         table_uri = server_with_client["warehouse"]["table_uri"]
 
@@ -39,7 +36,6 @@ class TestAsyncStrataClient:
 
     @pytest.mark.asyncio
     async def test_health(self, server_with_client):
-        """health() returns server health status."""
         config = server_with_client["config"]
 
         async with AsyncStrataClient(base_url=f"http://127.0.0.1:{config.port}") as client:
@@ -48,7 +44,6 @@ class TestAsyncStrataClient:
 
     @pytest.mark.asyncio
     async def test_metrics(self, server_with_client):
-        """metrics() returns server metrics."""
         config = server_with_client["config"]
 
         async with AsyncStrataClient(base_url=f"http://127.0.0.1:{config.port}") as client:
@@ -57,7 +52,6 @@ class TestAsyncStrataClient:
 
     @pytest.mark.asyncio
     async def test_fetch_returns_table(self, server_with_client):
-        """fetch() returns Arrow Table."""
         config = server_with_client["config"]
         table_uri = server_with_client["warehouse"]["table_uri"]
 
@@ -72,7 +66,6 @@ class TestAsyncStrataClient:
 
     @pytest.mark.asyncio
     async def test_materialize_returns_artifact(self, server_with_client):
-        """materialize() returns Artifact with metadata."""
         config = server_with_client["config"]
         table_uri = server_with_client["warehouse"]["table_uri"]
 
@@ -88,7 +81,7 @@ class TestAsyncStrataClient:
 
     @pytest.mark.asyncio
     async def test_artifact_mode_waits_for_identity_build(self, server_with_client):
-        """artifact mode polls the build-status endpoint and waits for readiness."""
+        """Artifact mode polls the build-status endpoint until the build is ready."""
         config = server_with_client["config"]
         table_uri = server_with_client["warehouse"]["table_uri"]
 
@@ -105,7 +98,6 @@ class TestAsyncStrataClient:
 
     @pytest.mark.asyncio
     async def test_column_projection(self, server_with_client):
-        """materialize respects column projection."""
         config = server_with_client["config"]
         table_uri = server_with_client["warehouse"]["table_uri"]
 
@@ -122,7 +114,6 @@ class TestAsyncStrataClient:
 
     @pytest.mark.asyncio
     async def test_with_filters(self, server_with_client):
-        """materialize accepts filters for row-group pruning."""
         config = server_with_client["config"]
         table_uri = server_with_client["warehouse"]["table_uri"]
 
@@ -137,11 +128,8 @@ class TestAsyncStrataClient:
 
 
 class TestAsyncConcurrency:
-    """Tests for concurrent async operations."""
-
     @pytest.mark.asyncio
     async def test_concurrent_fetches(self, server_with_client):
-        """Multiple fetches can run concurrently."""
         config = server_with_client["config"]
         table_uri = server_with_client["warehouse"]["table_uri"]
 
@@ -176,7 +164,6 @@ class TestAsyncConcurrency:
 
     @pytest.mark.asyncio
     async def test_concurrent_fetches_different_projections(self, server_with_client):
-        """Concurrent fetches with different projections work correctly."""
         config = server_with_client["config"]
         table_uri = server_with_client["warehouse"]["table_uri"]
 
@@ -203,11 +190,8 @@ class TestAsyncConcurrency:
 
 
 class TestAsyncClientManualClose:
-    """Tests for manual client lifecycle management."""
-
     @pytest.mark.asyncio
     async def test_manual_close(self, server_with_client):
-        """Client can be manually closed."""
         config = server_with_client["config"]
         table_uri = server_with_client["warehouse"]["table_uri"]
 
@@ -224,7 +208,6 @@ class TestAsyncClientManualClose:
 
     @pytest.mark.asyncio
     async def test_multiple_operations_same_client(self, server_with_client):
-        """Single client can perform multiple operations."""
         config = server_with_client["config"]
         table_uri = server_with_client["warehouse"]["table_uri"]
 

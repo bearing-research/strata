@@ -10,7 +10,6 @@ from strata import fast_io
 
 
 def create_stream_bytes(batch: pa.RecordBatch) -> bytes:
-    """Create Arrow IPC stream bytes from a batch."""
     sink = pa.BufferOutputStream()
     writer = ipc.new_stream(sink, batch.schema)
     writer.write_batch(batch)
@@ -19,15 +18,11 @@ def create_stream_bytes(batch: pa.RecordBatch) -> bytes:
 
 
 class TestFastIoAvailability:
-    """Tests for Rust module availability."""
-
     def test_is_rust_available(self):
-        """Test that Rust availability check works."""
         result = fast_io.is_rust_available()
         assert isinstance(result, bool)
 
     def test_rust_module_has_expected_functions(self):
-        """If Rust is available, verify it has the expected functions."""
         if fast_io.is_rust_available():
             from strata import _strata_core
 
@@ -40,7 +35,7 @@ class TestReadFileMmapThreshold:
     """The mmap read routes only large files through Rust (small ones regress)."""
 
     def _spy_rust(self, monkeypatch):
-        """Replace the Rust reader with a spy that records if it was called."""
+        """Replace the Rust reader with a spy that records whether it was called."""
         if not fast_io.is_rust_available():
             pytest.skip("Rust module not available")
         calls: list[str] = []
@@ -75,15 +70,11 @@ class TestReadFileMmapThreshold:
 
 
 class TestConcatStreamBytes:
-    """Tests for concat_stream_bytes function."""
-
     def test_concat_empty_list(self):
-        """Test concatenating an empty list returns empty bytes."""
         result = fast_io.concat_stream_bytes([])
         assert result == b""
 
     def test_concat_single_segment(self):
-        """Test concatenating a single segment returns it unchanged."""
         batch = pa.RecordBatch.from_pydict({"id": [1, 2, 3]})
         stream_bytes = create_stream_bytes(batch)
 
@@ -95,7 +86,6 @@ class TestConcatStreamBytes:
         assert batches[0].num_rows == 3
 
     def test_concat_multiple_segments(self):
-        """Test concatenating multiple segments combines them."""
         segments = []
         total_rows = 0
         for i in range(3):
@@ -112,7 +102,6 @@ class TestConcatStreamBytes:
         assert sum(b.num_rows for b in batches) == total_rows
 
     def test_concat_preserves_schema(self):
-        """Test that concat preserves the schema."""
         batch = pa.RecordBatch.from_pydict(
             {
                 "id": [1, 2, 3],
@@ -128,7 +117,6 @@ class TestConcatStreamBytes:
         assert reader.schema == batch.schema
 
     def test_concat_with_empty_segment(self):
-        """Test that empty segments are handled."""
         batch = pa.RecordBatch.from_pydict({"id": [1, 2, 3]})
         stream_bytes = create_stream_bytes(batch)
 
@@ -140,12 +128,10 @@ class TestConcatStreamBytes:
         assert sum(b.num_rows for b in batches) == 6
 
     def test_concat_all_empty_segments(self):
-        """Test that all empty segments returns empty bytes."""
         result = fast_io.concat_stream_bytes([b"", b"", b""])
         assert result == b""
 
     def test_concat_accepts_bytearray_segments(self):
-        """Bytearray inputs should round-trip through the concat path."""
         batch1 = pa.RecordBatch.from_pydict({"id": [1, 2]})
         batch2 = pa.RecordBatch.from_pydict({"id": [3, 4]})
 
@@ -163,7 +149,6 @@ class TestConcatStreamBytes:
         assert batches[1].column("id").to_pylist() == [3, 4]
 
     def test_concat_accepts_memoryview_segments(self):
-        """Memoryview inputs should avoid a Python-side bytes coercion step."""
         batch1 = pa.RecordBatch.from_pydict({"id": [10]})
         batch2 = pa.RecordBatch.from_pydict({"id": [20, 30]})
 
@@ -181,7 +166,6 @@ class TestConcatStreamBytes:
         assert batches[1].column("id").to_pylist() == [20, 30]
 
     def test_concat_accepts_mixed_bytes_like_segments(self):
-        """Mixed bytes / bytearray / memoryview inputs should dispatch cleanly."""
         batch1 = pa.RecordBatch.from_pydict({"id": [1]})
         batch2 = pa.RecordBatch.from_pydict({"id": [2, 3]})
         batch3 = pa.RecordBatch.from_pydict({"id": [4, 5, 6]})
@@ -199,7 +183,7 @@ class TestConcatStreamBytes:
         assert [b.column("id").to_pylist() for b in batches] == [[1], [2, 3], [4, 5, 6]]
 
     def test_concat_accepts_non_contiguous_memoryview_segments(self):
-        """Non-contiguous memoryviews should copy through the fallback path."""
+        """Non-contiguous memoryviews copy through the fallback path."""
         batch = pa.RecordBatch.from_pydict({"id": [7, 8, 9]})
         original = create_stream_bytes(batch)
 
@@ -217,7 +201,7 @@ class TestConcatStreamBytes:
         assert batches[1].column("id").to_pylist() == [7, 8, 9]
 
     def test_concat_single_memoryview_returns_bytes(self):
-        """Single-segment fast path should still normalize to bytes."""
+        """The single-segment fast path still normalizes to bytes."""
         batch = pa.RecordBatch.from_pydict({"id": [1, 2, 3]})
         segment = memoryview(create_stream_bytes(batch))
 
@@ -230,7 +214,6 @@ class TestConcatStreamBytes:
         assert batches[0].column("id").to_pylist() == [1, 2, 3]
 
     def test_concat_preserves_data_values(self):
-        """Test that concatenation preserves actual data values."""
         batch1 = pa.RecordBatch.from_pydict({"id": [1, 2], "value": ["a", "b"]})
         batch2 = pa.RecordBatch.from_pydict({"id": [3, 4], "value": ["c", "d"]})
         batch3 = pa.RecordBatch.from_pydict({"id": [5], "value": ["e"]})
@@ -256,7 +239,6 @@ class TestConcatStreamBytes:
         assert all_values == ["a", "b", "c", "d", "e"]
 
     def test_concat_with_multiple_batches_per_segment(self):
-        """Test segments that contain multiple batches each."""
         sink = pa.BufferOutputStream()
         schema = pa.schema([("id", pa.int64())])
         writer = ipc.new_stream(sink, schema)
@@ -281,7 +263,6 @@ class TestConcatStreamBytes:
         assert all_ids == [1, 2, 3, 4, 5]
 
     def test_concat_large_number_of_segments(self):
-        """Test concatenating many segments (stress test)."""
         segments = []
         expected_total = 0
         for i in range(100):
@@ -298,15 +279,11 @@ class TestConcatStreamBytes:
 
 
 class TestStreamConcatIpcSegments:
-    """Tests for stream_concat_ipc_segments streaming function."""
-
     def test_stream_empty_iterator(self):
-        """Test streaming an empty iterator returns no chunks."""
         chunks = list(fast_io.stream_concat_ipc_segments(iter([])))
         assert chunks == []
 
     def test_stream_single_segment(self):
-        """Test streaming a single segment yields valid IPC."""
         batch = pa.RecordBatch.from_pydict({"id": [1, 2, 3]})
         segment = create_stream_bytes(batch)
 
@@ -322,7 +299,6 @@ class TestStreamConcatIpcSegments:
         assert batches[0].num_rows == 3
 
     def test_stream_multiple_segments(self):
-        """Test streaming multiple segments yields valid combined IPC."""
         segments = []
         expected_ids = []
         for i in range(3):
@@ -346,7 +322,6 @@ class TestStreamConcatIpcSegments:
         assert actual_ids == expected_ids
 
     def test_stream_skips_empty_segments(self):
-        """Test that empty segments are skipped."""
         batch = pa.RecordBatch.from_pydict({"id": [1]})
         segment = create_stream_bytes(batch)
 
@@ -358,12 +333,10 @@ class TestStreamConcatIpcSegments:
         assert len(batches) == 2
 
     def test_stream_all_empty_segments(self):
-        """Test that all empty segments returns no chunks."""
         chunks = list(fast_io.stream_concat_ipc_segments(iter([b"", b"", b""])))
         assert chunks == []
 
     def test_stream_preserves_schema(self):
-        """Test that streaming preserves the schema."""
         batch = pa.RecordBatch.from_pydict(
             {
                 "id": [1, 2],
@@ -380,7 +353,6 @@ class TestStreamConcatIpcSegments:
         assert reader.schema == batch.schema
 
     def test_stream_handles_multi_batch_segments(self):
-        """Test segments with multiple batches are streamed correctly."""
         sink = pa.BufferOutputStream()
         schema = pa.schema([("id", pa.int64())])
         writer = ipc.new_stream(sink, schema)
@@ -407,10 +379,9 @@ class TestStreamConcatIpcSegments:
         assert all_ids == [1, 2, 3, 4, 5]
 
     def test_stream_is_lazy(self):
-        """Test that streaming is lazy - segments are fetched on demand.
+        """Segments are fetched on demand.
 
-        Note: With boundary threshold optimization, small segments may be
-        coalesced, so we test with larger data to ensure lazy behavior.
+        Small segments may be coalesced below the boundary threshold, so the data here is large.
         """
         fetch_count = 0
 
@@ -435,7 +406,6 @@ class TestStreamConcatIpcSegments:
         assert fetch_count == 3
 
     def test_stream_vs_concat_produce_same_result(self):
-        """Test that streaming and buffered concat produce identical output."""
         segments = []
         for i in range(5):
             batch = pa.RecordBatch.from_pydict({"id": [i * 100 + j for j in range(10)]})
@@ -448,15 +418,7 @@ class TestStreamConcatIpcSegments:
         assert buffered_result == streaming_result
 
     def test_stream_emits_single_schema_multiple_batches(self):
-        """Test that concatenation emits schema once, then all batches.
-
-        This is the IPC stream contract:
-        - One schema message at the start
-        - Multiple record batch messages
-        - EOS marker at the end
-
-        Client must be able to read the entire stream with ipc.open_stream().
-        """
+        """The IPC stream contract: one schema, then every batch, then EOS."""
         schema = pa.schema([("id", pa.int64()), ("value", pa.float64())])
 
         def make_segment(ids, values):
@@ -492,12 +454,7 @@ class TestStreamConcatIpcSegments:
         assert all_values == [1.0, 2.0, 3.0, 4.0, 5.0, 6.0]
 
     def test_stream_dictionary_encoded_columns(self):
-        """Test that dictionary-encoded columns are handled correctly.
-
-        Dictionary encoding uses a separate dictionary array and indices.
-        The IPC format handles dictionaries specially - this test ensures
-        the streaming concatenation preserves dictionary encoding correctly.
-        """
+        """Dictionary-encoded columns survive streaming concatenation."""
 
         def make_dict_segment(categories: list[str], ids: list[int]) -> bytes:
             cat_array = pa.array(categories).dictionary_encode()
@@ -548,11 +505,7 @@ class TestStreamConcatIpcSegments:
         assert combined == buffered
 
     def test_stream_respects_min_chunk_size(self):
-        """Test that streaming buffers until min_chunk_size is reached.
-
-        With a high min_chunk_size, small batches should be coalesced
-        into fewer, larger chunks.
-        """
+        """Small batches are buffered into fewer chunks of at least min_chunk_size."""
         # Each ~100-200 bytes
         segments = []
         for i in range(20):
@@ -580,11 +533,7 @@ class TestStreamConcatIpcSegments:
         assert all_ids == list(range(20))
 
     def test_stream_large_batches_yield_immediately(self):
-        """Test that large batches (> min_chunk_size) yield without waiting.
-
-        When a single batch exceeds the threshold, it should be yielded
-        immediately rather than buffering further.
-        """
+        """A batch larger than min_chunk_size is yielded without further buffering."""
         large_data = list(range(100000))  # ~800KB as int64
         batch = pa.RecordBatch.from_pydict({"id": large_data})
         segment = create_stream_bytes(batch)
@@ -601,14 +550,9 @@ class TestStreamConcatIpcSegments:
         assert batches[0].num_rows == 100000
 
     def test_stream_schema_mismatch_raises_error(self):
-        """Test that schema mismatch across segments raises clear error.
+        """Mismatched schemas fail early with a clear error, not corrupt output.
 
-        If segments have different schemas, we should fail early with a
-        clear error message rather than producing corrupt output or
-        confusing Arrow decode errors on the client.
-
-        Note: With boundary threshold optimization, small segments may be
-        coalesced and the error may be raised during the first next() call.
+        Coalescing may raise it on the first next() call.
         """
         segment1 = create_stream_bytes(
             pa.RecordBatch.from_pydict({"id": [1, 2], "value": [1.0, 2.0]})
@@ -623,7 +567,7 @@ class TestStreamConcatIpcSegments:
             list(gen)
 
     def test_stream_schema_mismatch_column_order(self):
-        """Test that column order differences are detected as schema mismatch."""
+        """A column-order difference counts as a schema mismatch."""
         segment1 = create_stream_bytes(pa.RecordBatch.from_pydict({"a": [1], "b": [2]}))
         segment2 = create_stream_bytes(pa.RecordBatch.from_pydict({"b": [3], "a": [4]}))
 
@@ -634,10 +578,9 @@ class TestStreamConcatIpcSegments:
 
 
 class TestStreamEnforcementHooks:
-    """Tests for stream_concat_ipc_segments enforcement hooks."""
+    """Enforcement hooks on stream_concat_ipc_segments."""
 
     def test_max_output_bytes_aborts_on_exceed(self):
-        """Test that exceeding max_output_bytes raises StreamLimitExceeded."""
         # ~1KB of output
         batch = pa.RecordBatch.from_pydict({"id": list(range(100))})
         segment = create_stream_bytes(batch)
@@ -651,7 +594,6 @@ class TestStreamEnforcementHooks:
             list(gen)
 
     def test_max_output_bytes_allows_under_limit(self):
-        """Test that staying under max_output_bytes works normally."""
         batch = pa.RecordBatch.from_pydict({"id": [1, 2, 3]})
         segment = create_stream_bytes(batch)
 
@@ -669,7 +611,7 @@ class TestStreamEnforcementHooks:
         assert batches[0].num_rows == 3
 
     def test_max_output_bytes_partial_stream_before_abort(self):
-        """Test that some data is yielded before limit is hit."""
+        """Some data is yielded before the limit is hit."""
         segments = []
         for i in range(10):
             batch = pa.RecordBatch.from_pydict({"id": list(range(1000))})
@@ -696,7 +638,6 @@ class TestStreamEnforcementHooks:
         assert len(chunks) < 10
 
     def test_deadline_aborts_when_exceeded(self):
-        """Test that exceeding deadline raises StreamDeadlineExceeded."""
         import time
 
         batch = pa.RecordBatch.from_pydict({"id": [1, 2, 3]})
@@ -713,7 +654,6 @@ class TestStreamEnforcementHooks:
             list(gen)
 
     def test_deadline_allows_before_expiry(self):
-        """Test that streaming works when deadline is in the future."""
         import time
 
         batch = pa.RecordBatch.from_pydict({"id": [1, 2, 3]})
@@ -736,8 +676,7 @@ class TestStreamEnforcementHooks:
     def test_deadline_checked_per_segment(self, monkeypatch):
         """The deadline is checked at segment boundaries, after earlier output.
 
-        A fake clock passes the deadline once the first segment is consumed, so
-        the first segment's output is out before the check that aborts.
+        A fake clock passes the deadline once the first segment is consumed.
         """
         from types import SimpleNamespace
 
@@ -762,7 +701,6 @@ class TestStreamEnforcementHooks:
         assert len(chunks) >= 1
 
     def test_both_limits_can_be_set(self):
-        """Test that both max_output_bytes and deadline can be used together."""
         import time
 
         batch = pa.RecordBatch.from_pydict({"id": [1, 2, 3]})
@@ -782,7 +720,7 @@ class TestStreamEnforcementHooks:
         assert len(batches) == 1
 
     def test_size_limit_takes_precedence_over_deadline(self):
-        """Test that size limit error is raised even if deadline also exceeded."""
+        """The size limit error wins when the deadline has also passed."""
         import time
 
         batch = pa.RecordBatch.from_pydict({"id": list(range(10000))})
@@ -799,7 +737,6 @@ class TestStreamEnforcementHooks:
             list(gen)
 
     def test_no_limits_by_default(self):
-        """Test that without limits, streaming works for any size."""
         batch = pa.RecordBatch.from_pydict({"id": list(range(100000))})
         segment = create_stream_bytes(batch)
 
@@ -812,10 +749,10 @@ class TestStreamEnforcementHooks:
 
 
 class TestIncrementalIpcMerger:
-    """Tests for the push-style IPC stream merger (regression for #121)."""
+    """The push-style IPC stream merger."""
 
     def test_feed_and_finish_produce_single_stream(self):
-        """Merging N complete streams yields ONE stream with all rows."""
+        """Merging N complete streams yields one stream with all rows."""
         merger = fast_io.IncrementalIpcMerger()
         pieces = []
         expected_ids = []
@@ -835,7 +772,7 @@ class TestIncrementalIpcMerger:
         assert table.column("id").to_pylist() == expected_ids
 
     def test_merged_output_is_exactly_one_stream(self):
-        """No trailing concatenated streams hide after the first EOS."""
+        """No concatenated streams hide after the first EOS."""
         merger = fast_io.IncrementalIpcMerger()
         pieces = []
         for i in range(3):
@@ -860,7 +797,6 @@ class TestIncrementalIpcMerger:
         assert total_rows == 3
 
     def test_matches_concat_stream_bytes(self):
-        """Push-style merge reads back identically to the buffered concat."""
         segments = []
         for i in range(3):
             batch = pa.RecordBatch.from_pydict({"id": [i, i + 100]})
@@ -896,13 +832,12 @@ class TestIncrementalIpcMerger:
         assert table.column("id").to_pylist() == [1, 2]
 
     def test_finish_without_feed_returns_empty(self):
-        """finish() before any feed yields nothing."""
         merger = fast_io.IncrementalIpcMerger()
         assert merger.finish() == b""
 
 
 class TestValidateIpcStream:
-    """Tests for the write-time integrity gate (#123)."""
+    """The write-time IPC integrity gate."""
 
     def test_valid_single_stream(self):
         batch = pa.RecordBatch.from_pydict({"id": [1, 2, 3]})
@@ -917,7 +852,7 @@ class TestValidateIpcStream:
         assert fast_io.validate_ipc_stream(sink.getvalue().to_pybytes()) == 3
 
     def test_concatenated_streams_rejected(self):
-        """The #121 corruption shape: complete streams butted together."""
+        """Complete streams butted together, the shape a bad merge produces."""
         segment = create_stream_bytes(pa.RecordBatch.from_pydict({"id": [1]}))
         with pytest.raises(ValueError, match="Trailing bytes"):
             fast_io.validate_ipc_stream(segment + segment)
@@ -931,7 +866,7 @@ class TestValidateIpcStream:
 
 
 class TestValidateIpcStreamReader:
-    """The bounded (file-like) variant used for write-through-persisted blobs."""
+    """The bounded file-like variant used for write-through-persisted blobs."""
 
     def test_valid_single_stream_returns_rows_and_schema(self):
         batch = pa.RecordBatch.from_pydict({"id": [1, 2, 3]})
@@ -951,7 +886,7 @@ class TestValidateIpcStreamReader:
         assert rows == 3
 
     def test_concatenated_streams_rejected(self):
-        """Same #121 guard as the bytes variant, from a file-like source."""
+        """Same guard as the bytes variant, from a file-like source."""
         segment = create_stream_bytes(pa.RecordBatch.from_pydict({"id": [1]}))
         with pytest.raises(ValueError, match="Trailing bytes"):
             fast_io.validate_ipc_stream_reader(io.BytesIO(segment + segment))
@@ -964,16 +899,10 @@ class TestValidateIpcStreamReader:
 
 
 class TestConcatRefusesDamagedSegments:
-    """A damaged segment must fail loudly, never shorten the result silently.
+    """A damaged segment must fail loudly, never silently shorten the result.
 
-    The byte-level fast path locates each segment's record batches by reading
-    the schema message's length field. When that field is nonsense it used to
-    skip the segment and return success, so the caller received a well-formed
-    stream that was simply missing rows — with nothing raised anywhere.
-
-    That shape is reachable: the disk cache validates only a segment's leading
-    continuation marker and trailing EOS marker, so an entry damaged in the
-    middle passes validation and reaches concat.
+    The disk cache validates only a segment's head and tail markers, so a segment damaged in the
+    middle reaches concat, whose fast path reads the schema-message length.
     """
 
     @staticmethod
@@ -1001,7 +930,7 @@ class TestConcatRefusesDamagedSegments:
             fast_io.concat_stream_bytes([good, b"\xff\xff\xff\xff"])
 
     def test_well_formed_segments_are_unaffected(self):
-        """The guard must not disturb the ordinary multi-segment path."""
+        """The guard leaves the ordinary multi-segment path alone."""
         first = create_stream_bytes(pa.RecordBatch.from_pydict({"id": [1, 2, 3]}))
         second = create_stream_bytes(pa.RecordBatch.from_pydict({"id": [4, 5]}))
 

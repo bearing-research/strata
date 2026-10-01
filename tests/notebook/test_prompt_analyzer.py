@@ -71,7 +71,7 @@ class TestPromptAnalyzer:
         assert result.validate_retries is None
 
     def test_validate_retries_zero_ignored(self):
-        """A value of 0 would disable the first call entirely — ignore it."""
+        """A value of 0 would skip the first call entirely, so it is ignored."""
         result = analyze_prompt_cell("# @validate_retries 0\nHi")
         assert result.validate_retries is None
 

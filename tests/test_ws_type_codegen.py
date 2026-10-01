@@ -1,10 +1,7 @@
 """The generated TypeScript and the payload models must not drift apart.
 
-``frontend/src/types/ws-payloads.generated.ts`` is committed so the frontend
-build needs no Python step. That only helps while it matches the models it was
-generated from, which is what these check: a field added to a payload model
-without regenerating leaves the frontend compiling against a type that no longer
-describes the wire.
+``frontend/src/types/ws-payloads.generated.ts`` is committed so the frontend build needs no Python;
+a stale file leaves the frontend compiling against types that no longer describe the wire.
 """
 
 from __future__ import annotations
@@ -50,12 +47,9 @@ def test_every_registered_frame_is_a_real_message_type() -> None:
 
 
 def test_every_payload_model_is_registered() -> None:
-    """A model nobody registers is invisible to the frontend.
+    """An unregistered model reaches the frontend as ``unknown``.
 
-    Typing a frame and then not listing it means the work looks done from the
-    Python side while the client still gets ``unknown`` -- exactly the gap the
-    registry exists to close. Nested models (the building blocks of a payload)
-    are excluded: they reach the frontend through the payload that holds them.
+    Nested models are excluded: they reach the frontend through the payload that holds them.
     """
     import strata.notebook.ws_payloads as module
 
@@ -83,8 +77,7 @@ def test_every_payload_model_is_registered() -> None:
 
 
 def test_a_field_too_long_for_one_line_is_broken_as_prettier_breaks_it() -> None:
-    """The frontend's prettier hook rewrites the committed file; a line the
-    emitter left too long would come back as drift on the next ``--check``."""
+    """Prettier rewrites the committed file, so an overlong line would show up as drift."""
     import importlib.util
 
     spec = importlib.util.spec_from_file_location("generate_ws_types", _SCRIPT)

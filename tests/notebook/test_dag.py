@@ -23,9 +23,11 @@ def _analyzed_cell(cell_id: str, source: str) -> CellAnalysisWithId:
 
 
 class TestInplaceMutationRouting:
-    """An ``inplace=True`` method call makes the mutating cell a (re)producer
-    of the receiver, so downstream reads resolve to the post-mutation value in
-    both single-cell and batch execution (issue: batch input-isolation gap)."""
+    """An ``inplace=True`` method call makes the mutating cell a (re)producer of the receiver.
+
+    Downstream reads then resolve to the post-mutation value in both single-cell and batch
+    execution.
+    """
 
     def test_inplace_mutation_routes_downstream_through_mutating_cell(self):
         cells = [
@@ -46,7 +48,7 @@ class TestInplaceMutationRouting:
         assert dag.consumed_variables["load"] == {"df"}
 
     def test_non_inplace_method_does_not_reroute(self):
-        """Without inplace=True the call is a pure read — df still flows load → use."""
+        """Without inplace=True the call is a pure read; df still flows load → use."""
         cells = [
             _analyzed_cell("load", "df = load_data()"),
             _analyzed_cell("peek", "head = df.head()"),
@@ -59,10 +61,7 @@ class TestInplaceMutationRouting:
 
 
 class TestDagBuildingBasics:
-    """Test basic DAG construction."""
-
     def test_single_cell_no_deps(self):
-        """Single cell with no dependencies."""
         cells = [CellAnalysisWithId(id="a", defines=["x"], references=[])]
         dag = NotebookDag.from_cells(cells)
 
@@ -127,7 +126,6 @@ class TestDagBuildingBasics:
         assert dag.leaves == {"d"}
 
     def test_multiple_roots(self):
-        """DAG with multiple root cells."""
         cells = [
             CellAnalysisWithId(id="a", defines=["x"], references=[]),
             CellAnalysisWithId(id="b", defines=["y"], references=[]),
@@ -139,7 +137,6 @@ class TestDagBuildingBasics:
         assert dag.leaves == {"c"}
 
     def test_multiple_leaves(self):
-        """DAG with multiple leaf cells."""
         cells = [
             CellAnalysisWithId(id="a", defines=["x"], references=[]),
             CellAnalysisWithId(id="b", defines=["y"], references=["x"]),
@@ -152,8 +149,6 @@ class TestDagBuildingBasics:
 
 
 class TestDagMultipleVariables:
-    """Test DAG with multiple variables between cells."""
-
     def test_multiple_vars_one_edge(self):
         """Two cells sharing multiple variables create one edge per variable."""
         cells = [
@@ -193,10 +188,7 @@ class TestDagMultipleVariables:
 
 
 class TestDagConsumedVariables:
-    """Test consumed_variables tracking."""
-
     def test_consumed_variables_basic(self):
-        """Track which variables are consumed by downstream cells."""
         cells = [
             CellAnalysisWithId(id="a", defines=["x", "y"], references=[]),
             CellAnalysisWithId(id="b", defines=[], references=["x"]),
@@ -207,7 +199,6 @@ class TestDagConsumedVariables:
         assert dag.consumed_variables["a"] == {"x"}
 
     def test_unconsumed_variables_not_cached(self):
-        """Variables not consumed by downstream are not cached."""
         cells = [
             CellAnalysisWithId(id="a", defines=["df", "temp"], references=[]),
             CellAnalysisWithId(id="b", defines=[], references=["df"]),
@@ -219,10 +210,7 @@ class TestDagConsumedVariables:
 
 
 class TestTopologicalSort:
-    """Test topological sorting."""
-
     def test_topo_sort_simple(self):
-        """Simple topological sort."""
         cells = [
             CellAnalysisWithId(id="a", defines=["x"], references=[]),
             CellAnalysisWithId(id="b", defines=["y"], references=["x"]),
@@ -233,7 +221,6 @@ class TestTopologicalSort:
         assert dag.topological_order == ["a", "b", "c"]
 
     def test_topo_sort_diamond(self):
-        """Topological sort of diamond DAG."""
         cells = [
             CellAnalysisWithId(id="a", defines=["x"], references=[]),
             CellAnalysisWithId(id="b", defines=["y"], references=["x"]),
@@ -249,7 +236,6 @@ class TestTopologicalSort:
         assert set(order[1:3]) == {"b", "c"}
 
     def test_topo_sort_multiple_roots(self):
-        """Topological sort with multiple roots."""
         cells = [
             CellAnalysisWithId(id="a", defines=["x"], references=[]),
             CellAnalysisWithId(id="b", defines=["y"], references=[]),
@@ -264,10 +250,7 @@ class TestTopologicalSort:
 
 
 class TestCycleDetection:
-    """Test cycle detection."""
-
     def test_no_cycle_linear(self):
-        """Linear chain has no cycle."""
         cells = [
             CellAnalysisWithId(id="a", defines=["x"], references=[]),
             CellAnalysisWithId(id="b", defines=["y"], references=["x"]),
@@ -279,13 +262,10 @@ class TestCycleDetection:
         assert cycles == []
 
     def test_forward_reference_no_cycle(self):
-        """A references y (defined later by B): no cycle, no edge.
+        """A references y, defined later by B: no cycle and no edge.
 
-        The single-pass DAG builder resolves each cell's references
-        against producers available at its own position. A forward
-        reference leaves the consuming cell without an upstream edge
-        and the runtime surfaces a NameError, which is the honest
-        signal. No error-style ValueError is raised at build time.
+        References resolve against producers before each cell, so the runtime reports a NameError
+        rather than the build raising.
         """
         cells = [
             CellAnalysisWithId(id="a", defines=["x"], references=["y"]),
@@ -297,13 +277,9 @@ class TestCycleDetection:
         assert dag.cell_upstream["b"] == ["a"]
 
     def test_self_reference_is_not_a_cycle(self):
-        """``x = x + 1`` with no upstream is valid intra-cell rebind.
+        """``x = x + 1`` with no upstream is an intra-cell rebind, not a cycle.
 
-        Old behavior raised "cycle detected"; the new model treats a
-        reference-to-own-define as a pure rebind with no external
-        producer. (The filter in analyze_cell strips ``x`` from
-        references when it's a pure define, so this case rarely
-        reaches NotebookDag.from_cells in practice.)
+        analyze_cell usually strips ``x`` from references already; this pins the DAG side.
         """
         cells = [
             CellAnalysisWithId(id="a", defines=["x"], references=["x"]),
@@ -329,10 +305,7 @@ class TestCycleDetection:
 
 
 class TestCascadePlan:
-    """Test cascade planning."""
-
     def test_cascade_linear(self):
-        """Cascade for target cell in linear chain."""
         cells = [
             CellAnalysisWithId(id="a", defines=["x"], references=[]),
             CellAnalysisWithId(id="b", defines=["y"], references=["x"]),
@@ -347,7 +320,6 @@ class TestCascadePlan:
         assert plan == ["a", "b"]  # In execution order
 
     def test_cascade_diamond(self):
-        """Cascade for target cell in diamond DAG."""
         cells = [
             CellAnalysisWithId(id="a", defines=["x"], references=[]),
             CellAnalysisWithId(id="b", defines=["y"], references=["x"]),
@@ -374,7 +346,6 @@ class TestCascadePlan:
         assert plan == ["a"]
 
     def test_cascade_no_deps(self):
-        """Cascade for cell with no upstream deps."""
         cells = [
             CellAnalysisWithId(id="a", defines=["x"], references=[]),
             CellAnalysisWithId(id="b", defines=["y"], references=[]),
@@ -387,8 +358,6 @@ class TestCascadePlan:
 
 
 class TestRealWorldDAGs:
-    """Test DAGs from real-world notebook patterns."""
-
     def test_data_analysis_pipeline(self):
         """Typical data analysis: load → clean → aggregate → plot."""
         cells = [
@@ -479,13 +448,11 @@ class TestRealWorldDAGs:
 
 
 class TestAfterEdges:
-    """Tests for the ``@after`` ordering-only edge wiring.
+    """``@after`` ordering-only edges.
 
-    SQL cells whose dependency is on an upstream side effect (e.g.
-    a setup cell that seeds a SQLite file) declare it via
-    ``# @after <cell-id>``. The DAG edge participates in
-    upstream/downstream wiring and the topological order without
-    contributing a variable to ``consumed_variables``.
+    A cell that depends on an upstream side effect (a setup cell seeding a SQLite file)
+    declares ``# @after <cell-id>``. The edge joins the wiring and topological order but adds
+    nothing to ``consumed_variables``.
     """
 
     def test_after_creates_upstream_edge(self):
@@ -499,7 +466,6 @@ class TestAfterEdges:
         assert dag.topological_order == ["setup", "query"]
 
     def test_after_edge_carries_no_variable(self):
-        """Ordering-only — no variable, so consumed_variables stays empty."""
         cells = [
             CellAnalysisWithId(id="setup", defines=[], references=[]),
             CellAnalysisWithId(id="query", defines=[], references=[], after=["setup"]),
@@ -509,9 +475,9 @@ class TestAfterEdges:
         assert all(e.variable == "" for e in dag.edges if e.from_cell_id == "setup")
 
     def test_after_dangling_id_silently_dropped(self):
-        """Reference to a cell that doesn't exist — no edge, no
-        crash. ``annotation_validation`` is the surface that flags
-        this for the user; the DAG builder stays robust."""
+        """A reference to a missing cell adds no edge and does not crash; ``annotation_validation``
+        flags it for the user.
+        """
         cells = [
             CellAnalysisWithId(id="query", defines=[], references=[], after=["does-not-exist"]),
         ]
@@ -736,11 +702,11 @@ class TestVariantGroups:
 
 
 class TestBuiltinShadowingEdges:
-    """A variable named after a builtin (``input``, ``type``, ``id``) must
-    still wire producer → consumer edges. ``references`` filters builtin
-    names for display, so the DAG resolves the companion
-    ``builtin_references`` list against the producer map — a name no cell
-    shadows has no producer and wires nothing."""
+    """A variable named after a builtin (``input``, ``type``, ``id``) still wires edges.
+
+    ``references`` drops builtin names for display, so the DAG resolves
+    ``builtin_references`` against the producer map; an unshadowed builtin wires nothing.
+    """
 
     def test_shadowed_builtin_wires_edge_and_consumption(self):
         cells = [

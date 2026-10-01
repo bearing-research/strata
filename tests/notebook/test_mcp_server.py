@@ -1,10 +1,7 @@
-"""Unit tests for the MCP server tool logic + mount gating (Phase 1, read tools).
+"""Unit tests for the MCP server's tool logic and mount gating.
 
-The tools' logic lives in module-level ``_*`` functions that take a
-``SessionManager``, so these tests exercise them directly — no MCP client, no
-live socket (avoids the TestClient-WS portal hang, and keeps them fast). A
-notebook session is built in-process and registered without a venv sync, since
-the read tools never execute a cell.
+The tools' logic lives in module-level ``_*`` functions taking a
+``SessionManager``, so these call them directly: no MCP client, no socket.
 """
 
 from __future__ import annotations
@@ -177,9 +174,11 @@ async def test_run_cell_broadcasts_and_maps(sm_with_session, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_run_cell_caps_console_returned_to_the_agent(sm_with_session, monkeypatch):
-    """A cell's stdout is captured whole and travels uncapped to here, so a
-    print-heavy cell would return megabytes straight into an agent's context.
-    The agent-facing result caps each stream and says how much it dropped."""
+    """Each console stream returned to the agent is capped and says how much it dropped.
+
+    The cell's stdout arrives uncapped, so a print-heavy cell would otherwise put
+    megabytes into the agent's context.
+    """
     sm, session_id, _ = sm_with_session
     flood = "x" * 50_000
 
@@ -344,9 +343,10 @@ async def test_authoring_add_edit_move_remove_and_broadcast(sm_with_session, mon
 
 @pytest.mark.asyncio
 async def test_an_agent_edit_honours_the_soft_lock(sm_with_session, monkeypatch):
-    """An MCP edit wrote a cell without the soft lock REST and the WebSocket
-    enforce, so an agent could overwrite a cell a person changed moments ago,
-    and its own change held nothing against them."""
+    """MCP edits honour the same soft lock as REST and the WebSocket.
+
+    Otherwise an agent could overwrite a cell a person just changed.
+    """
 
     async def fake_sync(*_args, **_kwargs):
         return None
@@ -539,8 +539,7 @@ def test_without_the_mcp_extra_there_is_no_endpoint(sm_with_session, monkeypatch
 
 
 def test_mcp_1_turns_the_endpoint_off_and_says_why(sm_with_session, monkeypatch, caplog):
-    """mcp 2 moved FastMCP to mcp.server.mcpserver.MCPServer. An mcp 1 left in
-    the environment used to read as "extra absent" and dropped /mcp silently."""
+    """An mcp 1 left installed must not read as "extra absent" and drop /mcp silently."""
     sm, _, _ = sm_with_session
     monkeypatch.setitem(__import__("sys").modules, "mcp.server.mcpserver", None)
     monkeypatch.setattr("importlib.metadata.version", lambda name: "1.26.0")
@@ -551,8 +550,7 @@ def test_mcp_1_turns_the_endpoint_off_and_says_why(sm_with_session, monkeypatch,
 
 
 def test_mcp_2_missing_a_dependency_names_the_dependency(sm_with_session, monkeypatch, caplog):
-    """An mcp 2 whose own dependency is absent is not too old: the warning
-    used to blame the mcp version for the missing module."""
+    """An mcp 2 missing its own dependency is not too old; the warning names the module."""
     import sys
 
     class _NoMcpTypes:
@@ -573,8 +571,7 @@ def test_mcp_2_missing_a_dependency_names_the_dependency(sm_with_session, monkey
 
 
 def test_mcp_without_distribution_metadata_still_warns(sm_with_session, monkeypatch, caplog):
-    """An importable mcp with no metadata has no version; the warning must
-    not raise PackageNotFoundError out of server startup."""
+    """An importable mcp with no metadata must not raise PackageNotFoundError at startup."""
     from importlib.metadata import PackageNotFoundError
 
     def no_metadata(name):
@@ -594,11 +591,7 @@ def test_mcp_without_distribution_metadata_still_warns(sm_with_session, monkeypa
 
 @pytest.fixture
 def sm_with_a_stored_output(sm_with_session):
-    """The session above, with cell ``a``'s ``x`` actually stored.
-
-    The tools resolve a variable to the artifact behind it, so a session whose
-    cells have never run has nothing for them to find.
-    """
+    """The session above, with cell ``a``'s ``x`` actually stored."""
     sm, session_id, nb_dir = sm_with_session
     manager = sm._sessions[session_id].get_artifact_manager()
     manager.store_cell_output(
@@ -615,8 +608,7 @@ def sm_with_a_stored_output(sm_with_session):
 
 class TestResolvingAnOutput:
     def test_an_unknown_variable_says_what_is_stored(self, sm_with_a_stored_output):
-        """Only variables a downstream cell reads become artifacts, so the
-        useful error names the ones that did rather than just saying no."""
+        """Only variables a downstream cell reads become artifacts, so the error names those."""
         from strata.notebook.mcp_server import _cell_output
 
         sm, session_id, _ = sm_with_a_stored_output
@@ -661,8 +653,7 @@ class TestPromote:
 
 class TestPublishPreflight:
     def test_it_lists_what_the_link_would_expose(self, sm_with_a_stored_output):
-        """The chain travels with a publication, which is the point of one and
-        the part worth reading before minting it."""
+        """The chain travels with a publication, so the preflight shows it before minting."""
         from strata.notebook.mcp_server import _publish_preflight
 
         sm, session_id, _ = sm_with_a_stored_output
@@ -732,9 +723,10 @@ class TestPublish:
     def test_it_copies_the_chain_into_the_store_the_link_resolves_from(
         self, sm_with_a_stored_output, tmp_path, monkeypatch
     ):
-        """A notebook writes to its own .strata/artifacts; the server serves
-        whatever artifact_dir it was configured with. Minting into the
-        notebook's store gives a link the page route never reads."""
+        """Promote mints into the server's artifact_dir, not the notebook's .strata/artifacts.
+
+        The page route reads only the server's store, so a link minted elsewhere is dead.
+        """
         from types import SimpleNamespace
 
         import strata.server as server_module
@@ -761,8 +753,7 @@ class TestPublish:
 async def test_publish_records_who_published_it_and_whose_it_is(
     sm_with_a_stored_output, tmp_path, monkeypatch
 ):
-    """The REST route and the CLI both stamp the caller; without it the audit
-    row names nobody."""
+    """Without the caller stamped, the audit row names nobody (REST and CLI stamp it too)."""
     from types import SimpleNamespace
 
     import strata.server as server_module

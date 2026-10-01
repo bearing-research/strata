@@ -85,15 +85,12 @@ def temp_warehouse(tmp_path):
 
 @pytest.fixture
 def strata_config(tmp_path):
-    """Create a test configuration."""
     cache_dir = tmp_path / "cache"
     cache_dir.mkdir()
     return StrataConfig(cache_dir=cache_dir)
 
 
 class TestTableIdentity:
-    """Tests for TableIdentity."""
-
     def test_from_table_id(self):
         identity = TableIdentity.from_table_id("test_db.events")
         assert identity.catalog == "strata"
@@ -114,8 +111,6 @@ class TestTableIdentity:
 
 
 class TestCacheKey:
-    """Tests for CacheKey."""
-
     def test_to_hex(self):
         identity = TableIdentity.from_table_id("test_db.events")
         key = CacheKey(
@@ -153,8 +148,6 @@ class TestCacheKey:
 
 
 class TestFilter:
-    """Tests for Filter."""
-
     def test_matches_stats_eq(self):
         f = Filter(column="x", op=FilterOp.EQ, value=50)
         assert f.matches_stats(0, 100) is True
@@ -176,8 +169,6 @@ class TestFilter:
 
 
 class TestDiskCache:
-    """Tests for DiskCache."""
-
     def test_put_get(self, strata_config):
         cache = DiskCache(strata_config)
         identity = TableIdentity.from_table_id("test_db.events")
@@ -227,8 +218,6 @@ class TestDiskCache:
 
 
 class TestReadPlanner:
-    """Tests for ReadPlanner."""
-
     def test_plan_basic(self, temp_warehouse, strata_config):
         planner = ReadPlanner(strata_config)
 
@@ -266,8 +255,6 @@ class TestReadPlanner:
 
 
 class TestCachedFetcher:
-    """Tests for CachedFetcher."""
-
     def test_fetch_and_cache(self, temp_warehouse, strata_config):
         fetcher = CachedFetcher(strata_config)
         planner = ReadPlanner(strata_config)
@@ -286,11 +273,11 @@ class TestCachedFetcher:
 
 
 class TestEndToEnd:
-    """End-to-end integration tests."""
+    """End-to-end tests against a running server."""
 
     @pytest.fixture
     def server_with_client(self, temp_warehouse, strata_config, tmp_path):
-        """Start a server and provide a client."""
+        """A running server and a client for it."""
         import socket
 
         from strata.artifact_store import reset_artifact_store
@@ -359,7 +346,7 @@ class TestEndToEnd:
         reset_artifact_store()
 
     def test_fetch_and_cache_hit(self, server_with_client):
-        """Test fetching twice to demonstrate cache hit."""
+        """The second fetch is a cache hit."""
         client = server_with_client["client"]
         table_uri = server_with_client["warehouse"]["table_uri"]
 
@@ -384,7 +371,6 @@ class TestEndToEnd:
         assert artifact2.artifact_id == artifact1.artifact_id
 
     def test_fetch_with_filters(self, server_with_client):
-        """Test fetching with filters."""
         client = server_with_client["client"]
         table_uri = server_with_client["warehouse"]["table_uri"]
 
@@ -402,7 +388,6 @@ class TestEndToEnd:
         assert table.num_rows >= 0
 
     def test_duckdb_integration(self, server_with_client):
-        """Test DuckDB integration."""
         config = server_with_client["config"]
         table_uri = server_with_client["warehouse"]["table_uri"]
 
@@ -423,7 +408,7 @@ class TestEndToEnd:
             scanner.close()
 
     def test_metadata_stats_endpoint(self, server_with_client):
-        """Test the /v1/metadata/stats endpoint."""
+        """/v1/metadata/stats."""
         import requests
 
         client = server_with_client["client"]
@@ -464,7 +449,7 @@ class TestEndToEnd:
             assert "stale_invalidations" in store_stats
 
     def test_metadata_cleanup_endpoint(self, server_with_client):
-        """Test the /v1/metadata/cleanup endpoint."""
+        """/v1/metadata/cleanup."""
         import requests
 
         config = server_with_client["config"]
@@ -478,7 +463,7 @@ class TestEndToEnd:
         assert isinstance(result["stale_entries_removed"], int)
 
     def test_health_ready_endpoint(self, server_with_client):
-        """Test the /health/ready endpoint."""
+        """/health/ready."""
         import requests
 
         config = server_with_client["config"]
@@ -501,7 +486,7 @@ class TestEndToEnd:
         assert "active_scans" in checks
 
     def test_prometheus_metrics_endpoint(self, server_with_client):
-        """Test the /metrics/prometheus endpoint."""
+        """/metrics/prometheus."""
         import requests
 
         client = server_with_client["client"]
@@ -534,7 +519,7 @@ class TestEndToEnd:
         assert "# TYPE strata_cache_hits_total counter" in content
 
     def test_debug_cache_inspect_endpoint(self, server_with_client):
-        """Test the /v1/debug/cache/inspect endpoint."""
+        """/v1/debug/cache/inspect."""
         import requests
 
         client = server_with_client["client"]
@@ -590,7 +575,7 @@ class TestEndToEnd:
         assert result["total_matched"] == 0
 
     def test_cache_warm_endpoint(self, server_with_client):
-        """Test the /v1/cache/warm endpoint."""
+        """/v1/cache/warm."""
         import requests
 
         config = server_with_client["config"]
@@ -640,7 +625,7 @@ class TestEndToEnd:
         assert result2["bytes_written"] == 0
 
     def test_cache_warm_with_invalid_table(self, server_with_client):
-        """Test cache warming with an invalid table URI."""
+        """Cache warming with an invalid table URI."""
         import requests
 
         config = server_with_client["config"]
@@ -660,10 +645,10 @@ class TestEndToEnd:
 
 
 class TestEagerWarmup:
-    """Tests for eager warmup at server startup."""
+    """Eager warmup at server startup."""
 
     def test_eager_warmup_returns_timing_info(self, tmp_path):
-        """Test that _eager_warmup returns timing information."""
+        """_eager_warmup returns timing information."""
         from strata.config import StrataConfig
         from strata.server import _eager_warmup
 
@@ -683,7 +668,6 @@ class TestEagerWarmup:
         assert "sqlite_entries" in warmup_times
 
     def test_warmup_initializes_metadata_store(self, tmp_path):
-        """Test that warmup initializes the metadata store."""
         import strata.metadata_cache
         from strata.config import StrataConfig
         from strata.metadata_cache import get_metadata_store

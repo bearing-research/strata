@@ -1,7 +1,4 @@
-"""Tests for the BigQuery DriverAdapter — contract, identity hash,
-and probe shape with mocked ADBC connections. Real-BigQuery
-integration tests are out of scope locally (would need a paid
-project + network access)."""
+"""BigQuery DriverAdapter: contract, identity hash, and probe shape with mocked ADBC."""
 
 from __future__ import annotations
 
@@ -16,13 +13,10 @@ from strata.notebook.sql.drivers.bigquery import BigQueryAdapter
 
 
 class _FakeCursor:
-    """Minimal DBAPI cursor that returns scripted rows.
+    """Minimal DBAPI cursor that returns scripted rows and records every (sql, params).
 
-    ``scripts`` is a list of (query_substring, result) pairs; the
-    next ``fetchone`` / ``fetchall`` call uses the result whose
-    query substring matches the most recently executed SQL. The
-    cursor records every (sql, params) pair so tests can assert
-    what the adapter actually issued.
+    ``scripts`` is a list of (query_substring, result) pairs matched against the
+    most recently executed SQL.
     """
 
     def __init__(self, scripts: list[tuple[str, object]]):
@@ -85,8 +79,7 @@ def test_capabilities_match_design():
 
 
 def test_connection_id_uses_project_and_dataset(tmp_path):
-    """Project + dataset are identity-shaping. Two connections
-    that point at different datasets must produce different ids."""
+    """Different datasets must produce different ids."""
     a = BigQueryAdapter()
     base = ConnectionSpec(
         name="x",
@@ -103,9 +96,7 @@ def test_connection_id_uses_project_and_dataset(tmp_path):
 
 
 def test_connection_id_includes_credentials_principal(tmp_path):
-    """The service account's ``client_email`` is what BigQuery
-    actually keys visibility on. Different SAs → different views,
-    so the cache must segregate them."""
+    """BigQuery keys visibility on the service account's ``client_email``, so the cache must too."""
     sa1 = tmp_path / "sa1.json"
     sa2 = tmp_path / "sa2.json"
     sa1.write_text(json.dumps({"client_email": "reader@acme-prod.iam.gserviceaccount.com"}))
@@ -124,10 +115,7 @@ def test_connection_id_includes_credentials_principal(tmp_path):
 
 
 def test_connection_id_falls_back_to_path_when_principal_unreadable(tmp_path):
-    """When the credentials file isn't readable (relative path
-    that hasn't been resolved, file moved between machines), the
-    path itself folds into the identity so two distinct
-    *unread* credentials still produce distinct ids."""
+    """An unreadable credentials file folds its path in, so distinct unread files stay distinct."""
     a = BigQueryAdapter()
     base = ConnectionSpec(
         name="x",
@@ -140,13 +128,9 @@ def test_connection_id_falls_back_to_path_when_principal_unreadable(tmp_path):
 
 
 def test_connection_id_write_credentials_only_in_write_identity(tmp_path):
-    """``write_credentials_path`` joins identity only when
-    ``read_only=False``.
+    """``write_credentials_path`` joins identity only when ``read_only=False``.
 
-    Read cells never apply write_credentials_path at open time, so
-    changing it must not churn read-cell caches. Write cells *do*
-    use those credentials, so the cache identity for write cells
-    must distinguish them from the read-side principal.
+    Read cells never use it, so changing it must not churn read-cell caches.
     """
     sa_ro = tmp_path / "ro.json"
     sa_rw = tmp_path / "rw.json"
@@ -176,10 +160,11 @@ def test_connection_id_write_credentials_only_in_write_identity(tmp_path):
 
 
 def test_connection_id_ambient_adc_sentinel_when_no_credentials():
-    """When no credentials are configured for the active side,
-    identity carries an ``ambient_adc`` sentinel. Without it, two
-    laptops running gcloud auth as different humans would alias
-    onto the same connection_id and poison each other's cache."""
+    """With no credentials, identity carries an ``ambient_adc`` sentinel.
+
+    Otherwise two laptops authed as different humans would share a connection_id
+    and poison each other's cache.
+    """
     a = BigQueryAdapter()
     spec = ConnectionSpec(name="x", driver="bigquery", project_id="acme")
 
@@ -197,7 +182,6 @@ def test_connection_id_ambient_adc_sentinel_when_no_credentials():
 
 
 def test_open_uses_credentials_for_read_cells(tmp_path):
-    """``read_only=True`` selects ``credentials_path``."""
     sa = tmp_path / "ro.json"
     sa.write_text("{}")
     captured: list[dict] = []
@@ -218,9 +202,8 @@ def test_open_uses_credentials_for_read_cells(tmp_path):
 
 
 def test_open_uses_write_credentials_for_write_cells(tmp_path):
-    """``read_only=False`` switches to ``write_credentials_path``
-    when configured. This is the BigQuery analogue of Snowflake's
-    ``write_role`` — makes ``# @sql write=true`` meaningful."""
+    """``read_only=False`` switches to ``write_credentials_path`` (like Snowflake's
+    ``write_role``)."""
     sa_ro = tmp_path / "ro.json"
     sa_rw = tmp_path / "rw.json"
     sa_ro.write_text("{}")
@@ -243,9 +226,10 @@ def test_open_uses_write_credentials_for_write_cells(tmp_path):
 
 
 def test_open_falls_back_to_read_credentials_when_no_write(tmp_path):
-    """Without ``write_credentials_path``, write cells inherit
-    the read credentials. Documented behavior — the IAM grants
-    on that SA decide whether the write succeeds."""
+    """Without ``write_credentials_path``, write cells use the read credentials.
+
+    That SA's IAM grants decide whether the write succeeds.
+    """
     sa = tmp_path / "ro.json"
     sa.write_text("{}")
     captured: list[dict] = []
@@ -265,9 +249,7 @@ def test_open_falls_back_to_read_credentials_when_no_write(tmp_path):
 
 
 def test_probe_freshness_groups_tables_by_dataset():
-    """One ``__TABLES__`` query per (project, dataset). Tables
-    grouped by their effective project/dataset get one round-trip
-    per group."""
+    """One ``__TABLES__`` query per (project, dataset) group."""
     cur = _FakeCursor(
         [("__TABLES__", ("events", 1714596000000))],
     )
@@ -287,8 +269,6 @@ def test_probe_freshness_groups_tables_by_dataset():
 
 
 def test_probe_freshness_token_changes_on_last_modified():
-    """Same table, different ``last_modified_time`` → different
-    token."""
     a = BigQueryAdapter()
     tables = [QualifiedTable(catalog="acme", schema="events", name="orders")]
 
@@ -300,8 +280,7 @@ def test_probe_freshness_token_changes_on_last_modified():
 
 
 def test_probe_freshness_uses_session_defaults_for_unqualified_tables():
-    """Tables without a (project, dataset) fall back to
-    ``@@project_id`` and ``@@dataset_id``."""
+    """Unqualified tables fall back to ``@@project_id`` and ``@@dataset_id``."""
     cur = _FakeCursor(
         [
             ("@@project_id, @@dataset_id", ("acme-prod", "events")),
@@ -317,9 +296,7 @@ def test_probe_freshness_uses_session_defaults_for_unqualified_tables():
 
 
 def test_probe_freshness_no_dataset_yields_sentinel():
-    """If neither the table nor the session has a dataset, fold a
-    ``no-dataset`` sentinel rather than crash or run the query
-    against an unknown view."""
+    """No dataset anywhere folds a ``no-dataset`` sentinel instead of crashing or guessing."""
     cur = _FakeCursor([])
     a = BigQueryAdapter()
     tables = [QualifiedTable(catalog=None, schema=None, name="orders")]
@@ -341,7 +318,7 @@ def test_probe_freshness_missing_table_distinct_from_present():
 
 
 def test_probe_freshness_empty_tables():
-    """No tables → empty token, no queries issued."""
+    """No tables gives an empty token and issues no queries."""
     cur = _FakeCursor([])
     a = BigQueryAdapter()
     token = a.probe_freshness(_FakeConn(cur), [])

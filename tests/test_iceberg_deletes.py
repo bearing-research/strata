@@ -1,10 +1,7 @@
-"""Iceberg merge-on-read: a scan drops the rows a snapshot's positional deletes name. #536.
+"""Iceberg merge-on-read: a scan drops the rows a snapshot's positional deletes name.
 
-pyiceberg rewrites copy-on-write when it deletes, so these tests write a real
-positional delete file and attach it to the scan the way pyiceberg's planner
-does for a table another engine deleted from. tests/test_lake_catalogs_integration.py
-runs the same scan over deletes DuckDB wrote, through a REST catalog, where
-pyiceberg does the attaching itself.
+pyiceberg deletes copy-on-write, so these tests write a positional delete file and attach it as
+pyiceberg's planner would. test_lake_catalogs_integration.py covers deletes DuckDB wrote.
 """
 
 from __future__ import annotations
@@ -185,8 +182,7 @@ def test_the_persisted_manifest_keeps_the_deletes(tmp_path, table, attach):
 
 
 def test_a_metadata_store_from_another_version_is_discarded(tmp_path):
-    """0.8.0 persisted manifests without their delete files, and on pyiceberg
-    before 0.12 could have missed a table's deletes altogether."""
+    """Older stores persisted manifests without their delete files."""
     import sqlite3
 
     db = tmp_path / "metadata.sqlite"

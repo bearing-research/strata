@@ -1,13 +1,7 @@
 """Bearer-token auth on the remote executor's /v1/* endpoints.
 
-The worker app exposes a public HTTP surface. When ``STRATA_WORKER_TOKEN``
-is set the v1 execution endpoints require ``Authorization: Bearer
-<token>``. When unset the endpoints stay open, matching the original
-behaviour (backward compatibility with deployments that don't enforce
-a token yet).
-
-``/health`` always stays open — platform liveness probes can't carry
-the secret.
+With ``STRATA_WORKER_TOKEN`` set they require ``Authorization: Bearer <token>``;
+unset, they stay open. ``/health`` is always open for liveness probes.
 """
 
 from __future__ import annotations
@@ -37,16 +31,13 @@ def test_health_open_when_token_unset(client_without_token):
 
 
 def test_health_open_even_when_token_set(client_with_token):
-    """Platform health probes (Fly, Cloudflare, k8s) can't always carry
-    the auth header, so /health stays open even with auth enabled."""
+    """/health stays open with auth on; platform probes cannot always carry the header."""
     resp = client_with_token.get("/health")
     assert resp.status_code == 200
 
 
 def test_v1_execute_rejects_no_auth_when_token_set(client_with_token):
-    """Without a token, the endpoint returns 401 immediately —
-    request body isn't even read, so misformed payloads don't leak
-    error details that fingerprint the protocol version."""
+    """No token gives 401 before the body is read, so payload errors leak nothing."""
     resp = client_with_token.post("/v1/execute", content=b"")
     assert resp.status_code == 401
     detail = resp.json()["detail"]
@@ -64,9 +55,7 @@ def test_v1_execute_rejects_wrong_token(client_with_token):
 
 
 def test_v1_execute_accepts_correct_token(client_with_token):
-    """Correct token gets past auth; the request fails downstream
-    with 400 because the body has no ``metadata`` form field. That
-    400 is the proof auth passed and the endpoint started parsing."""
+    """The correct token passes auth; the 400 for missing ``metadata`` proves parsing began."""
     resp = client_with_token.post(
         "/v1/execute",
         content=b"",
@@ -77,29 +66,23 @@ def test_v1_execute_accepts_correct_token(client_with_token):
 
 
 def test_v1_execute_open_when_token_unset(client_without_token):
-    """Backward compat: deployments without STRATA_WORKER_TOKEN reach
-    the endpoint without any Authorization header. The request still
-    fails downstream on missing metadata, proving auth was bypassed."""
+    """With no token configured, a request without auth reaches body parsing."""
     resp = client_without_token.post("/v1/execute", content=b"")
     assert resp.status_code == 400
 
 
 def test_v1_notebook_execute_also_gated(client_with_token):
-    """All v1 endpoints share the auth dependency; check the older
-    /v1/notebook-execute endpoint also enforces."""
     resp = client_with_token.post("/v1/notebook-execute", content=b"")
     assert resp.status_code == 401
 
 
 def test_v1_execute_manifest_also_gated(client_with_token):
-    """And the signed-URL manifest endpoint."""
     resp = client_with_token.post("/v1/execute-manifest", json={})
     assert resp.status_code == 401
 
 
 def test_malformed_authorization_header_rejected(client_with_token):
-    """Anything that doesn't start with ``Bearer `` fails the same way
-    as a missing header — no leakage of expected scheme."""
+    """A header not starting with ``Bearer `` fails like a missing one, hiding the scheme."""
     for bad in ["", "Token foo", "bearer test-secret-xyz", "Basic test-secret-xyz"]:
         resp = client_with_token.post(
             "/v1/execute",
@@ -110,12 +93,10 @@ def test_malformed_authorization_header_rejected(client_with_token):
 
 
 class TestPoolContractPath:
-    """``POST /execute`` — the path ``strata-pool`` dispatches to.
+    """``POST /execute``, the path ``strata-pool`` dispatches to.
 
-    The pool forwards a job payload verbatim and sets no content type, so
-    these pin the wire shape it actually produces rather than a convenient
-    one. A worker that only answered a well-formed JSON request would look
-    healthy here and 400 in production.
+    The pool forwards the job payload verbatim with no content type; these pin that
+    real wire shape, not a well-formed JSON request.
     """
 
     def test_requires_the_bearer_token(self, client_with_token):
@@ -123,12 +104,7 @@ class TestPoolContractPath:
         assert resp.status_code == 401
 
     def test_accepts_the_token_the_pool_mints(self, client_with_token):
-        """Not 401. The manifest is empty, so a 400 is the expected rejection.
-
-        What matters is that it got *past* auth: the pool mints
-        ``STRATA_WORKER_TOKEN`` per machine, which is the same variable this
-        app reads, so the two halves agree on the secret without translation.
-        """
+        """The pool's per-machine ``STRATA_WORKER_TOKEN`` passes auth (400: empty manifest)."""
         resp = client_with_token.post(
             "/execute",
             content=b"{}",
@@ -137,12 +113,9 @@ class TestPoolContractPath:
         assert resp.status_code == 400
 
     def test_parses_a_body_sent_without_a_content_type(self, client_without_token):
-        """The pool posts ``content=<bytes>``, which sets no Content-Type.
+        """A body sent with no Content-Type is still parsed as JSON.
 
-        If the body were only parsed when declared as JSON, every pool
-        dispatch would fail — so this asserts the header's *absence* is fine.
-        A 400 naming the manifest proves the body was read and understood as
-        JSON, not rejected unparsed.
+        A 400 naming the manifest proves the body was read, not rejected unparsed.
         """
         resp = client_without_token.post("/execute", content=b'{"metadata": {}}')
         assert "content-type" not in {k.lower() for k in resp.request.headers}

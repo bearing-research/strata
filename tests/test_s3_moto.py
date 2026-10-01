@@ -1,13 +1,6 @@
-"""Tests for S3 storage support.
+"""S3 support: path normalization and joining, S3FileSystem config, metadata extraction.
 
-These tests verify S3 integration:
-1. Path normalization and joining (unit tests)
-2. S3FileSystem configuration (unit tests with mocking)
-3. S3 path handling in extract_parquet_meta (unit tests with local files)
-
-Note: PyArrow's S3FileSystem uses its own AWS SDK implementation and does not
-go through boto3, so moto cannot mock it directly. For real S3 integration tests,
-use a local MinIO instance or actual AWS S3.
+PyArrow's S3FileSystem bypasses boto3, so moto cannot mock it; test_s3_integration.py uses MinIO.
 """
 
 import pyarrow as pa
@@ -23,7 +16,7 @@ from strata.types import Task
 
 
 class MockObject:
-    """Simple mock object that records attribute access and calls."""
+    """Records attribute access and calls."""
 
     def __init__(self, **kwargs):
         self._calls = []
@@ -36,7 +29,7 @@ class MockObject:
 
 
 class TestS3PathNormalization:
-    """Tests for S3 path normalization utility."""
+    """The S3 path normalization utility."""
 
     @pytest.mark.parametrize(
         "input_path,expected",
@@ -75,17 +68,15 @@ class TestS3PathNormalization:
         ],
     )
     def test_normalize_s3_path(self, input_path, expected):
-        """S3 paths are normalized correctly."""
         assert _normalize_s3_path(input_path) == expected
 
     def test_normalize_non_s3_path_unchanged(self):
-        """Non-S3 paths are returned unchanged."""
         path = "/local/path/to/file.parquet"
         assert _normalize_s3_path(path) == path
 
 
 class TestS3PathJoin:
-    """Tests for S3 path joining utility."""
+    """The S3 path joining utility."""
 
     @pytest.mark.parametrize(
         "base,relative,expected",
@@ -127,13 +118,11 @@ class TestS3PathJoin:
         ],
     )
     def test_join_s3_path(self, base, relative, expected):
-        """S3 paths are joined correctly."""
         assert _join_s3_path(base, relative) == expected
 
 
 @pytest.fixture
 def sample_parquet_data():
-    """Create sample Parquet data."""
     return pa.table(
         {
             "id": pa.array([1, 2, 3, 4, 5]),
@@ -145,17 +134,16 @@ def sample_parquet_data():
 
 @pytest.fixture
 def local_parquet_file(tmp_path, sample_parquet_data):
-    """Create a local Parquet file for testing."""
     path = tmp_path / "test.parquet"
     pq.write_table(sample_parquet_data, path)
     return path
 
 
 class TestS3MetadataExtraction:
-    """Tests for S3 path handling in metadata extraction."""
+    """S3 path handling in metadata extraction."""
 
     def test_extract_parquet_meta_with_s3_filesystem(self, local_parquet_file):
-        """extract_parquet_meta accepts optional s3_filesystem parameter."""
+        """extract_parquet_meta accepts an optional s3_filesystem."""
         mock_fs = MockObject()
         meta = extract_parquet_meta(str(local_parquet_file), s3_filesystem=mock_fs)
 
@@ -165,10 +153,9 @@ class TestS3MetadataExtraction:
 
 
 class TestS3MetadataCache:
-    """Tests for metadata cache with S3 paths."""
+    """The metadata cache with S3 paths."""
 
     def test_cache_loads_local_metadata(self, local_parquet_file):
-        """ParquetMetadataCache can load metadata from local files."""
         reset_caches()
         cache = ParquetMetadataCache(max_size=10)
         metadata = cache.get_or_load(str(local_parquet_file))
@@ -178,7 +165,6 @@ class TestS3MetadataCache:
         assert metadata.arrow_schema is not None
 
     def test_cache_with_s3_filesystem_parameter(self, local_parquet_file):
-        """ParquetMetadataCache accepts s3_filesystem parameter."""
         reset_caches()
         cache = ParquetMetadataCache(max_size=10, s3_filesystem=MockObject())
         metadata = cache.get_or_load(str(local_parquet_file))
@@ -187,7 +173,7 @@ class TestS3MetadataCache:
         assert metadata.num_row_groups >= 1
 
     def test_cache_persists_metadata(self, tmp_path, sample_parquet_data):
-        """Metadata is persisted to SQLite store."""
+        """Metadata is persisted to the SQLite store."""
         reset_caches()
         pq_path = tmp_path / "test.parquet"
         pq.write_table(sample_parquet_data, pq_path)
@@ -222,7 +208,7 @@ class TestS3MetadataCache:
 
 
 class TestS3Fetcher:
-    """Tests for Fetcher with S3 path handling."""
+    """Fetcher with S3 paths."""
 
     @pytest.mark.parametrize(
         "columns,expected_cols",
@@ -233,7 +219,6 @@ class TestS3Fetcher:
         ],
     )
     def test_fetcher_column_projection(self, local_parquet_file, columns, expected_cols):
-        """Fetcher respects column projection."""
         fetcher = create_fetcher()
         task = Task(
             file_path=str(local_parquet_file),
@@ -250,7 +235,6 @@ class TestS3Fetcher:
         assert batch.num_columns == expected_cols
 
     def test_fetcher_accepts_s3_filesystem(self, local_parquet_file):
-        """Fetcher accepts s3_filesystem parameter."""
         fetcher = PyArrowFetcher(s3_filesystem=MockObject())
         task = Task(
             file_path=str(local_parquet_file),
@@ -265,8 +249,10 @@ class TestS3Fetcher:
         assert batch.num_rows == 5
 
     def test_fetcher_opens_s3_reads_with_the_cached_footer(self, monkeypatch):
-        """The first read of a file parses its footer; later reads reuse it
-        through ``metadata=``, and every read closes the handle it opened."""
+        """Later reads reuse the first read's footer via ``metadata=``.
+
+        Every read closes the handle it opened.
+        """
         import pyarrow as pa
 
         import strata.fetcher as fetcher_module
@@ -308,7 +294,7 @@ class TestS3Fetcher:
 
 
 class TestS3ConfigIntegration:
-    """Tests for S3 config integration."""
+    """S3 config integration."""
 
     @pytest.mark.parametrize(
         "config_kwargs,expected_fs_kwargs",
@@ -349,7 +335,7 @@ class TestS3ConfigIntegration:
     def test_config_creates_s3_filesystem(
         self, tmp_path, monkeypatch, config_kwargs, expected_fs_kwargs
     ):
-        """Config creates S3FileSystem with correct options."""
+        """Config creates an S3FileSystem with the right options."""
         import pyarrow.fs as pafs
 
         config = StrataConfig(cache_dir=tmp_path, **config_kwargs)
@@ -374,7 +360,7 @@ class TestS3ConfigIntegration:
         ],
     )
     def test_planner_s3_fs_creation(self, tmp_path, monkeypatch, has_s3_config, expected_calls):
-        """ReadPlanner creates S3FileSystem only when S3 config is present."""
+        """ReadPlanner creates an S3FileSystem only when S3 config is present."""
         config_kwargs = {"cache_dir": tmp_path}
         if has_s3_config:
             config_kwargs["s3_endpoint_url"] = "http://minio:9000"
@@ -398,10 +384,7 @@ class TestS3ConfigIntegration:
 
 
 class TestS3EdgeCases:
-    """Tests for S3 edge cases."""
-
     def test_empty_parquet_file(self, tmp_path):
-        """Empty Parquet files work correctly."""
         empty_table = pa.table({"id": pa.array([], type=pa.int64())})
         path = tmp_path / "empty.parquet"
         pq.write_table(empty_table, path)
@@ -412,7 +395,7 @@ class TestS3EdgeCases:
         assert "id" in meta.column_names
 
     def test_file_prefix_stripped(self, tmp_path, sample_parquet_data):
-        """file:// prefix is handled correctly in planner."""
+        """The planner handles the file:// prefix."""
         from strata.planner import ReadPlanner
 
         pq_path = tmp_path / "test.parquet"

@@ -1,16 +1,8 @@
-"""End-to-end: drive RemoteNotebookOps against the *real* FastAPI app.
+"""End-to-end: drive RemoteNotebookOps against the real FastAPI app.
 
-``test_ops_remote.py`` exercises the remote backend with an ``httpx.MockTransport``
-and hand-built payloads — fast, but blind to drift between the server's real
-``serialize()`` output and the wire mappers. This module closes that gap: it
-points ``RemoteNotebookOps`` at the live app via Starlette's ``TestClient`` (an
-in-process ASGI ``httpx.Client``), opens a real session, and round-trips the
-read + authoring verbs. A field rename in ``serialize_cell`` / ``_format_dag``
-or a changed response envelope fails here even though the mock tests would pass.
-
-REST only (no WebSocket), so it sidesteps the py3.12-macOS TestClient-WS hang.
-Remote *execution* mapping (``run``/``tests``) is covered by the route-dispatch
-test plus the mock unit tests; it is not re-driven here.
+Catches drift between the server's real ``serialize()`` output and the wire
+mappers that the MockTransport tests cannot. REST only, which avoids the
+py3.12-macOS TestClient WebSocket hang; remote execution is not re-driven here.
 """
 
 from __future__ import annotations
@@ -28,7 +20,7 @@ from strata.notebook.writer import add_cell_to_notebook, create_notebook, write_
 
 @pytest.fixture(autouse=True)
 def _no_uv_sync(monkeypatch):
-    """Skip real venv/pool creation — we only exercise HTTP + serialization."""
+    """Skip real venv/pool creation; only HTTP and serialization are exercised."""
     monkeypatch.setattr("strata.notebook.session._uv_sync", lambda path, **kw: True)
 
     async def _fake_stream(*args, **kwargs):
@@ -57,10 +49,7 @@ def app():
 
 @pytest.fixture
 def remote(app, tmp_path):
-    """A RemoteNotebookOps wired to a live session on the real app via TestClient.
-
-    Returns ``(ops, client)``; the notebook has cells a (`x = 1`) → b (`y = x+1`).
-    """
+    """RemoteNotebookOps on a live session via TestClient; returns ``(ops, client)`` for a -> b."""
     nb = create_notebook(tmp_path, "E2E Notebook", initialize_environment=False)
     add_cell_to_notebook(nb, "a", None, language="python")
     write_cell(nb, "a", "x = 1\n")

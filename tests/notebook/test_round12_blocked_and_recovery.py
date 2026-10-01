@@ -1,18 +1,7 @@
 """What a failed run publishes, and what a recovered one says.
 
-Round 12.
-
-Continuing a Run All past a failure ran every later cell with upstream
-materialization turned off, so a cell downstream of the failure read the
-artifacts from before it and published a fresh success built on them. The run
-ended with those cells marked stale, but the artifacts and the frames were
-already out, and a cell with side effects would have had them.
-
-And a run that rebuilt a broken upstream said so only with a status. A status
-changes a badge; the output the cell is showing is replaced by a result, so a
-client that had been told about the error kept showing it over a result that
-was no longer wrong. Confirmed against the terminal view model, which keeps a
-cell's error across snapshots until something replaces it.
+A cell downstream of a failure must not run against the artifacts from before
+it, and a rebuilt upstream must send the result that replaces a shown error.
 """
 
 from __future__ import annotations
@@ -62,9 +51,8 @@ class Observer:
 def inventory(tmp_path) -> Path:
     """SQL, two Python cells reading it in turn, and one that reads nothing.
 
-    The SQL cell cannot batch, so the Python cells form a batch of their own
-    that ends early when the first of them fails. The cell after it is the one
-    the old continuation ran against the artifacts from before the failure.
+    The SQL cell cannot batch, so the Python cells form their own batch, which
+    ends early when the first fails.
     """
     db = tmp_path / "stock.db"
     with sqlite3.connect(db) as conn:
@@ -140,9 +128,7 @@ def _fix_sql(nb: Path, session: Any) -> None:
 
 @pytest.mark.asyncio
 async def test_a_cell_behind_a_failure_publishes_nothing(inventory):
-    """It cannot be computed, so it does not run and nothing is published for
-    it. The old continuation gave it the artifacts from before the failure and
-    let it report success on them."""
+    """A cell behind a failure does not run, so nothing is published for it."""
     session = _session(inventory)
     await _run_all(session, _watch(session), rerun=False)
     assert all(c.status == CellStatus.READY for c in session.notebook_state.cells)
@@ -195,8 +181,7 @@ async def test_a_rebuilt_upstream_sends_the_result_that_clears_its_error(invento
 
 @pytest.mark.asyncio
 async def test_an_ordinary_upstream_is_not_announced_again(inventory):
-    """Only the cells a client could be holding something wrong about. A cache
-    hit behind an already-green cell has nothing to correct."""
+    """A cache hit behind an already-green cell has nothing to correct, so no frame."""
     session = _session(inventory)
     await _run(session, "rep")
 
@@ -223,10 +208,8 @@ FLAKY = (
 def flaky_chain(tmp_path) -> Path:
     """A cell that works once and then fails, with a consumer.
 
-    The point is *when* it fails: after a clean run the consumer is ready, so
-    the failure has a ready downstream to invalidate. Editing a cell to break
-    it instead recomputes staleness first, and the downstream is already stale
-    before the run starts.
+    Failing after a clean run gives the failure a ready downstream to invalidate.
+    Editing a cell to break it would mark the downstream stale before the run.
     """
     marker = tmp_path / "runs.txt"
     nb = create_notebook(tmp_path / "nb", "flaky")
@@ -243,12 +226,7 @@ def flaky_chain(tmp_path) -> Path:
 
 @pytest.mark.asyncio
 async def test_a_batch_failure_blocks_what_read_from_it(flaky_chain):
-    """The batch reports a failure as ``cell_error``, not ``error``.
-
-    Matching the wrong spelling left the blocked set empty for every failure
-    that happened inside a batch, so the consumer ran against the artifacts
-    from the clean run before it.
-    """
+    """A batch reports failure as ``cell_error``; the blocked set must match that spelling."""
     session = _session(flaky_chain)
     await _run(session, "down")
     assert session.notebook_state.get_cell("down").status == CellStatus.READY
@@ -264,9 +242,7 @@ async def test_a_batch_failure_blocks_what_read_from_it(flaky_chain):
 
 @pytest.mark.asyncio
 async def test_the_cells_a_failure_invalidates_are_numbered_apart(flaky_chain):
-    """The frames marking a failure's downstream stale, which nothing reached
-    before: every other way of breaking a cell leaves its consumers already
-    stale, so the batch was empty and never sent."""
+    """The frames marking a failure's downstream stale are sent as their own batch."""
     session = _session(flaky_chain)
     await _run(session, "down")
 
@@ -286,9 +262,7 @@ async def test_the_cells_a_failure_invalidates_are_numbered_apart(flaky_chain):
 
 @pytest.mark.asyncio
 async def test_both_broken_upstreams_are_reported_in_one_run(tmp_path):
-    """Two upstreams, both broken. Stopping at the first left the other
-    untouched and unmentioned, so fixing the one the message named and running
-    again only turned up the next."""
+    """Both broken upstreams are reported in one run, not one per attempt."""
     nb = create_notebook(tmp_path / "nb", "siblings")
     after = None
     for cell_id, source in (

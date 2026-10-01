@@ -1,9 +1,7 @@
 """The frame-ancestors middleware controls who may embed the app view.
 
-Strata sends no framing header by default historically; the embed feature adds
-``Content-Security-Policy: frame-ancestors`` so an operator opts specific host
-origins into iframing a notebook's app view (and, as a side effect, closes the
-gap where any page could silently frame Strata).
+Operators opt host origins into iframing a notebook's app view with ``Content-Security-Policy:
+frame-ancestors``.
 """
 
 from __future__ import annotations

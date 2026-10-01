@@ -1,9 +1,7 @@
-"""Tests for RemoteNotebookOps — the read-only remote inspect backend (P3b).
+"""Tests for RemoteNotebookOps, the read-only remote inspect backend.
 
-Drives a canned session-state endpoint through an httpx ``MockTransport`` (no
-server, no WebSocket) and asserts the remote backend projects the server's JSON
-through the *same* wire mapper the local backend uses — so a remote view is
-byte-for-byte the local view for that notebook.
+A canned session endpoint behind an httpx ``MockTransport`` (no server, no
+WebSocket); the remote view must match the local view byte for byte.
 """
 
 from __future__ import annotations
@@ -65,10 +63,7 @@ def _session_payload(local: LocalNotebookOps) -> dict:
 
 @pytest.fixture
 def remote_ops(tmp_path):
-    """A RemoteNotebookOps backed by a MockTransport serving a real notebook.
-
-    Returns ``(remote, local)`` so tests can assert remote ≡ local.
-    """
+    """A RemoteNotebookOps over a MockTransport on a real notebook; returns ``(remote, local)``."""
     nb = _build_notebook(tmp_path, cells=[("a", "x = 1", None), ("b", "y = x + 1", "a")])
     local = LocalNotebookOps(nb)
     payload = _session_payload(local)
@@ -393,7 +388,7 @@ def test_cli_cell_run_routes_to_remote(monkeypatch, capsys):
 
 
 def _wire_cell(cell_id: str, source: str, *, name: str = "") -> dict:
-    """A minimal serialized-cell wire dict (what the server returns for a cell)."""
+    """A minimal serialized-cell wire dict."""
     return {
         "id": cell_id,
         "language": "python",
@@ -631,9 +626,7 @@ def test_cli_cell_test_file_sets_then_runs(monkeypatch, tmp_path, capsys):
 
 
 def test_remote_writes_carry_the_author_when_one_is_given():
-    """`strata cell add --server … --author X` used to record `local`: the
-    remote backend never sent the field the routes accept, so an agent editing
-    a live session looked exactly like a person typing in the browser."""
+    """`--author` reaches a remote write, so an agent's edit is not recorded as `local`."""
     bodies: list[dict] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -655,8 +648,7 @@ def test_remote_writes_carry_the_author_when_one_is_given():
 
 
 def test_an_over_long_author_is_bounded_before_it_is_sent():
-    """The routes cap `author`, so an unbounded name failed a remote write with
-    a 422 that the same command against a local directory never produced."""
+    """`author` is bounded before sending, since the routes 422 on an over-long one."""
     bodies: list[dict] = []
 
     def handler(request: httpx.Request) -> httpx.Response:

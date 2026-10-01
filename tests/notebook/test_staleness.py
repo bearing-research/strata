@@ -8,7 +8,7 @@ from strata.notebook.session import NotebookSession
 
 @pytest.fixture
 def three_cell_notebook(tmp_path):
-    """Create a 3-cell notebook with dependencies."""
+    """A 3-cell notebook with dependencies."""
     notebook_dir = tmp_path / "notebook"
     notebook_dir.mkdir()
 
@@ -50,7 +50,6 @@ def three_cell_notebook(tmp_path):
 
 
 def test_fresh_notebook_all_idle(three_cell_notebook):
-    """Fresh notebook → all cells should be idle."""
     notebook_dir, notebook_state = three_cell_notebook
 
     session = NotebookSession(notebook_state, notebook_dir)
@@ -63,14 +62,9 @@ def test_fresh_notebook_all_idle(three_cell_notebook):
 
 
 def test_staleness_updates_cells_when_dag_is_invalid(tmp_path):
-    """When session.dag is None, compute_staleness still authoritatively
-    marks cells idle and clears cached causality data.
+    """With ``session.dag`` None, cells are still marked idle and causality data is cleared.
 
-    The single-pass DAG builder no longer produces cycles from plain
-    cell sources (forward references simply leave the cell without an
-    upstream edge), so we exercise the ``dag is None`` branch directly
-    by nulling it after construction — simulating any future failure
-    mode that leaves the session without a DAG.
+    Plain sources no longer produce cycles, so the test nulls the DAG directly.
     """
     notebook_dir = tmp_path / "null_dag_notebook"
     notebook_dir.mkdir()
@@ -107,19 +101,16 @@ def test_staleness_updates_cells_when_dag_is_invalid(tmp_path):
 
 
 class TestStalenessOffTheEventLoop:
-    """Deciding whether a cell is stale reads the outside world -- an @fetch
-    URL, a @dataset registry, an @table catalog -- through synchronous calls
-    with timeouts measured in tens of seconds. On the event loop one
-    unreachable host stalled every notebook's socket and every stream in
-    flight, so the async callers hand the work to a thread."""
+    """Staleness reads @fetch URLs, @dataset registries and @table catalogs through blocking calls
+    with long timeouts, so async callers run it on a thread to keep the event loop free.
+    """
 
     def test_the_lock_is_free_while_the_outside_world_is_read(
         self, three_cell_notebook, monkeypatch
     ):
-        """Serializing the walk is not licence to hold the lock across a
-        sixty-second fetch. The broadcast path takes this lock on the event
-        loop, so a thread holding it out there is every socket in the process
-        waiting on someone else's network."""
+        """The broadcast path takes this lock on the event loop, so holding it across a slow fetch
+        would stall every socket in the process.
+        """
         import threading
 
         notebook_dir, notebook_state = three_cell_notebook
@@ -180,11 +171,9 @@ class TestStalenessOffTheEventLoop:
     async def test_a_caller_that_stayed_on_the_loop_does_not_interleave(
         self, three_cell_notebook, monkeypatch
     ):
-        """Not every caller was moved off the loop -- the broadcast path runs
-        between a cell's result and the frames describing it, where an await
-        reorders them. So the one in the thread and the one on the loop walk
-        the same cells, writing each cell's status, and the cascade planner
-        reads exactly that."""
+        """The broadcast path stays on the loop (an await would reorder result and status frames),
+        so the thread and loop callers walk and write the same cells the cascade planner reads.
+        """
         import asyncio
         import threading
 
@@ -218,7 +207,7 @@ class TestStalenessOffTheEventLoop:
 
     @pytest.mark.asyncio
     async def test_two_at_once_do_not_overlap(self, three_cell_notebook, monkeypatch):
-        """It mutates the cells it walks. On the loop that was free."""
+        """The walk mutates the cells it visits, so two concurrent walks must serialize."""
         import asyncio
         import threading
 

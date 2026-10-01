@@ -1,9 +1,7 @@
-"""One renv library per renv.lock, shared by the notebooks that have it. Item 47.
+"""One renv library per renv.lock, shared by the notebooks that have it.
 
-Most of this runs without R: the restore and the Rscript that installs are
-stood in for, and what is under test is where the library is, who shares it,
-and that changing one notebook's packages leaves the others' alone. The last
-test restores a real lockfile twice and runs an R cell against the link.
+Most tests stand in for restore and Rscript; the last restores a real lockfile
+twice and runs an R cell against the link.
 """
 
 from __future__ import annotations
@@ -235,8 +233,7 @@ async def test_a_real_lock_restores_once_and_an_r_cell_runs_on_the_link(
 
 
 def test_a_failed_restore_leaves_the_library_the_notebook_had(tmp_path, shared, monkeypatch):
-    """CRAN unreachable, or a package that will not build, must not cost a
-    notebook the packages it already had installed."""
+    """A failed restore (CRAN unreachable, a package that won't build) keeps the old library."""
     monkeypatch.setattr(shared_env, "r_build", lambda: "R version 4.4.0 aarch64")
     notebook = _notebook(tmp_path, "nb")
     for package in ("ggplot2", "dplyr"):
@@ -258,9 +255,10 @@ def test_a_failed_restore_leaves_the_library_the_notebook_had(tmp_path, shared, 
 async def test_a_failed_install_keeps_what_the_restore_had_put_back(
     tmp_path, shared, fake_r, monkeypatch
 ):
-    """The notebook detaches onto a private library and restores into it; if
-    the install then fails there is no built library for the new lock, so the
-    private one stays rather than being replaced by an empty link."""
+    """If the install fails after detaching, the private library stays.
+
+    There is no built library for the new lock, so an empty link must not replace it.
+    """
     notebook = _notebook(tmp_path, "nb")
     assert writer._renv_sync(notebook)
 

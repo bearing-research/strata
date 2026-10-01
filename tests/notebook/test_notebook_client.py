@@ -1,10 +1,7 @@
 """Unit tests for the path-loaded notebook ``strata`` client shim.
 
-The shim runs in the notebook venv (pyarrow + stdlib only) and must NOT
-import strata — it's loaded by file path exactly like the harness loads it.
-These tests cover the offline pieces (Arrow IPC, URI parsing, the Artifact
-wrapper, surface). The HTTP wire protocol is validated live against a real
-server elsewhere.
+The shim runs in the notebook venv (pyarrow + stdlib only) and must not import
+strata. Only offline pieces are covered here; the wire protocol is tested live.
 """
 
 from __future__ import annotations
@@ -18,8 +15,7 @@ import pytest
 
 
 def _load_shim():
-    """Load notebook_client.py by path — the way the harness does, so the
-    test exercises the real (strata-free) load mechanism."""
+    """Load notebook_client.py by path, as the harness does, so strata is never imported."""
     path = Path("src/strata/notebook/notebook_client.py")
     spec = importlib.util.spec_from_file_location("_nb_client_under_test", path)
     module = importlib.util.module_from_spec(spec)
@@ -98,9 +94,7 @@ def test_client_accepts_cell_id(shim):
 
 
 def test_materialize_rejects_non_stream_mode(shim):
-    """Only synchronous stream materialization is supported here. mode='artifact'
-    starts an async server build the slim client can't poll, so to_arrow() would
-    hit /data on a pending build and 400 — fail fast before any request."""
+    """mode='artifact' is refused before any request; the slim client cannot poll a build."""
     c = shim.StrataClient(base_url="http://x")
     with pytest.raises(ValueError, match="mode='stream'"):
         c.materialize([], {"executor": "scan@v1", "params": {}}, mode="artifact")
@@ -120,11 +114,8 @@ def test_stamp_cell_is_noop_without_cell_or_name(shim):
 def test_get_bytes_drains_large_response_in_chunks(shim, monkeypatch):
     """``_get_bytes`` reads a streamed response in bounded chunks, intact.
 
-    Regression: a single ``resp.read()`` of a large *live* materialize stream
-    let the server's send buffer fill, tripped its ``is_disconnected()`` check,
-    and aborted the stream (``IncompleteRead`` + a poisoned ``failed`` artifact).
-    The client now drains in chunks (like httpx). The fake response rejects an
-    all-at-once read, so reverting to ``resp.read()`` fails this test.
+    One large ``resp.read()`` of a live stream let the server's send buffer fill
+    and abort the stream. The fake response rejects an all-at-once read.
     """
     import urllib.request
 
@@ -153,10 +144,7 @@ def test_get_bytes_drains_large_response_in_chunks(shim, monkeypatch):
 
 
 def test_remote_store_headers_attached_to_requests(shim, monkeypatch):
-    """When pointed at a remote store, the ambient client attaches its auth
-    headers (e.g. trusted-proxy identity/token) to every request — JSON, GET
-    bytes, and multipart put — so a notebook can publish/consume against a
-    central shared store (W3)."""
+    """With a remote store, auth headers go on every request: JSON, GET bytes and multipart put."""
     import urllib.request
 
     captured = []
@@ -200,7 +188,6 @@ def test_remote_store_headers_attached_to_requests(shim, monkeypatch):
 
 
 def test_no_headers_by_default(shim, monkeypatch):
-    """Local (no remote store) → no extra headers, unchanged behavior."""
     import urllib.request
 
     captured = []
@@ -226,9 +213,7 @@ def test_no_headers_by_default(shim, monkeypatch):
 class TestPromote:
     """``strata.promote("rows", name=...)`` from inside a cell.
 
-    A cell reads its upstreams by variable name; the artifact ids the notebook
-    minted for them are not something a researcher ever sees, so the variable
-    is the reference the API takes.
+    It takes the variable name because researchers never see minted artifact ids.
     """
 
     def _client(self, shim, **overrides):
@@ -275,8 +260,7 @@ class TestPromote:
         assert seen["path"].endswith("/artifacts/other/v/7/promote")
 
     def test_no_team_store_is_answered_here_not_by_a_round_trip(self, shim):
-        """The notebook server would 409; saying so locally is the same answer
-        without the wait, and names the setting to change."""
+        """Without a team store the client refuses locally, naming the setting, instead of a 409."""
         client = self._client(shim, promote_url=None)
 
         with pytest.raises(RuntimeError, match="notebook_remote_store_url"):

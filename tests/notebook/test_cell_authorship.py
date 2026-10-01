@@ -1,9 +1,7 @@
 """Which cells an agent wrote, and which a person did.
 
-A notebook had an owner; a cell had nobody. Runs are attributed through the
-artifact's ``principal``, but only for remote builds and team-store offers, so
-an edit left no record beyond git — and on a server where an agent and a person
-both write cells, "which of these did the agent write" had no answer. Item 31.
+Each cell records who added it and who last changed it, so on a server where an agent
+and a person both write cells the agent's work can be told apart.
 """
 
 from __future__ import annotations
@@ -29,9 +27,9 @@ def _cells(notebook):
 
 class TestResolving:
     def test_a_declared_author_is_taken_when_nobody_is_authenticated(self):
-        """A personal server authenticates nobody, so the client's claim is the
-        only thing available — and it is a claim, which is the honest amount of
-        trust on a machine where anyone who can reach the server owns it."""
+        """A personal server authenticates nobody, so the client's claim is all there is, and a
+        claim is the honest amount of trust there.
+        """
         assert resolve_author("agent:claude/1") == "agent:claude/1"
 
     def test_declaring_nothing_is_local(self):
@@ -72,7 +70,6 @@ class TestAdding:
         assert _cells(notebook)["c1"]["updated_by"] == "agent:claude"
 
     def test_adding_without_an_author_records_nobody(self, notebook):
-        """What every cell added before this has."""
         add_cell_to_notebook(notebook, "c1", None)
 
         assert "created_by" not in _cells(notebook)["c1"]
@@ -89,10 +86,9 @@ class TestEditing:
         assert cell["updated_by"] == "local"
 
     def test_editing_your_own_cell_does_not_rewrite_the_toml(self, notebook):
-        """Source updates are a runtime concern that never touches committed
-        config. Recording the author on every debounced flush would turn typing
-        into a stream of commit-worthy diffs, so the write only happens when
-        the answer actually changes."""
+        """Recording the author on every debounced flush would turn typing into commit-worthy
+        diffs, so ``notebook.toml`` is written only when the author changes.
+        """
         add_cell_to_notebook(notebook, "c1", None, author="local")
         toml_path = notebook / "notebook.toml"
         before = toml_path.stat().st_mtime_ns
@@ -126,8 +122,7 @@ class TestEditing:
 
 class TestItReachesTheView:
     def test_a_cell_added_through_mcp_shows_its_author(self, tmp_path, monkeypatch):
-        """The case the item exists for: an agent's edits are distinguishable
-        on a server that authenticates nobody."""
+        """An agent's edits are distinguishable on a server that authenticates nobody."""
         import asyncio
 
         from strata.notebook.mcp_server import _add_cell
@@ -148,9 +143,7 @@ class TestItReachesTheView:
 
 class TestRoundTrip:
     def test_write_notebook_toml_keeps_the_fields(self, notebook):
-        """It rebuilds each cell entry field by field, so anything not listed
-        is erased rather than merely unwritten — a landmine for the next
-        caller, since only create_notebook reaches it today."""
+        """It rebuilds each cell entry field by field, so a field it does not list is erased."""
         from strata.notebook.models import CellMeta, NotebookToml
         from strata.notebook.writer import write_notebook_toml
 
@@ -175,11 +168,8 @@ class TestRoundTrip:
 class TestAddingAVariant:
     """Who added the variant, not who wrote the cell it was cloned from.
 
-    The first pass at this inherited the origin cell's author, reasoning that
-    the clone contains their code. But `created_by` records who *added* a cell,
-    and whoever asked for the variant added this one — so inheriting wrote one
-    principal's id as another's action, and reported a hand-made variant of an
-    assistant's cell as the assistant's.
+    `created_by` records who added a cell, so a person's variant of an assistant's cell
+    reads as the person's.
     """
 
     def _variant_notebook(self, tmp_path, origin_author: str):
@@ -203,7 +193,6 @@ class TestAddingAVariant:
         assert cell["updated_by"] == "local"
 
     def test_a_human_variant_of_an_assistant_cell_reads_as_human(self, tmp_path):
-        """The inversion the old behaviour produced, stated as its own case."""
         session = self._variant_notebook(tmp_path, "assistant")
 
         _name, new_cell_id = session.add_variant("model", author="local")
@@ -220,15 +209,11 @@ class TestAddingAVariant:
 
 class TestConcurrentStructuralEdit:
     def test_a_cell_added_while_a_flush_is_in_flight_survives(self, notebook, monkeypatch):
-        """`write_cell` used to rewrite the whole file from a snapshot loaded
-        before it wrote the source, so a structural edit landing in between was
-        dropped — the added cell vanished from committed config and left an
-        orphaned source file.
+        """A structural edit landing inside `write_cell` survives it.
 
-        The window is *inside* `write_cell`, between reading notebook.toml and
-        stamping the author, so the concurrent add has to land there. Doing it
-        before the call would leave the snapshot fresh and the test would pass
-        against the bug.
+        The window is between reading notebook.toml and stamping the author, so the concurrent
+        add lands there; adding before the call would leave the snapshot fresh and pass against
+        a lost-update bug.
         """
         import builtins
 
@@ -273,9 +258,9 @@ class TestUpdatedAtStaysStructural:
 
 class TestTheEditFrameCarriesIt:
     def test_dag_update_names_the_author(self):
-        """The browser only hears about an edit through `dag_update`. Without
-        the fields there, the header keeps the previous author until a full
-        reload — and the payload model drops keys it does not declare."""
+        """The browser hears about an edit only through `dag_update`, and the payload model drops
+        keys it does not declare; without the fields the header keeps the previous author.
+        """
         from strata.notebook.ws_payloads import dag_update_payload
 
         wire = dag_update_payload(

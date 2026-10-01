@@ -1,13 +1,8 @@
 """Tests for notebook module-export planning.
 
-Module export takes a cell source and produces a "synthetic module" the
-producing cell's defs/classes can be re-imported from in downstream
-cells. The planner *slices* the source — keeps imports, defs, classes,
-and literal-constant assignments; drops everything else — and validates
-that the slice is self-contained (free vars in defs/classes resolve to
-slice-local bindings or builtins). Cells that mix runtime work and
-library code can export the library code cleanly; pure module cells
-keep behaving exactly as before.
+The planner slices a cell to imports, defs, classes and literal constants so
+downstream cells can import them, and blocks export when the slice is not
+self-contained.
 """
 
 from strata.notebook.module_export import build_module_export_plan
@@ -83,7 +78,7 @@ def test_tuple_unpacking_of_literals_is_exportable() -> None:
 
 
 def test_pure_cell_keeps_original_source_bytes() -> None:
-    """Pure cells should round-trip verbatim — no ast.unparse reformatting."""
+    """Pure cells round-trip verbatim, without ast.unparse reformatting."""
     src = "import math\n\ndef pi():\n    # the ratio\n    return math.pi\n"
     plan = build_module_export_plan(src)
     assert plan.is_exportable is True
@@ -96,10 +91,7 @@ def test_pure_cell_keeps_original_source_bytes() -> None:
 
 
 def test_runtime_statement_alongside_self_contained_def_is_exportable() -> None:
-    """The classic case: a setup line followed by a def the user wants
-    to share. The def has no free vars and is exportable; the setup
-    line is dropped from the slice.
-    """
+    """A setup line beside a self-contained def: the def exports, the setup line is dropped."""
     plan = build_module_export_plan(
         """
 df = load_data()
@@ -117,9 +109,7 @@ def double(x):
 
 
 def test_runtime_statement_alongside_def_using_literal_const_is_exportable() -> None:
-    """A def that closes over a literal-const sibling is fine — the
-    constant is in the slice, so the def's free var resolves.
-    """
+    """A def closing over a literal-const sibling exports; the constant is in the slice."""
     plan = build_module_export_plan(
         """
 df = load_data()
@@ -136,10 +126,7 @@ def is_outlier(x):
 
 
 def test_def_with_unresolved_free_var_blocks_export() -> None:
-    """When the def's body references a runtime-only name, the
-    synthetic module would NameError at call time. Block it explicitly
-    and name the unresolved variable so the user knows where to fix.
-    """
+    """A def referencing a runtime-only name would NameError at call time; the error names it."""
     plan = build_module_export_plan(
         """
 x = compute()
@@ -159,9 +146,7 @@ def add(y):
 
 
 def test_class_with_unresolved_base_blocks_export() -> None:
-    """A base class is evaluated at module load; if it isn't in the
-    slice, the synthetic module's import itself raises NameError.
-    """
+    """An unresolved base class would make the synthetic module's import itself raise."""
     plan = build_module_export_plan(
         """
 Parent = build_parent()
@@ -176,8 +161,6 @@ class Child(Parent):
 
 
 def test_decorator_resolved_in_slice_is_exportable() -> None:
-    """A decorator imported in the same cell is part of the slice and
-    resolves at module load."""
     plan = build_module_export_plan(
         """
 from functools import lru_cache
@@ -210,9 +193,6 @@ def f():
 
 
 def test_def_using_builtin_is_exportable() -> None:
-    """Python builtins are always available — ``len`` shouldn't count
-    as an unresolved name.
-    """
     plan = build_module_export_plan(
         """
 df = load_data()
@@ -226,11 +206,7 @@ def count(items):
 
 
 def test_def_with_inner_closure_over_parameter_is_exportable() -> None:
-    """A nested lambda that closes over its outer function's parameter
-    should NOT be flagged as referencing an unbound name. Python's
-    symtable marks these as ``is_free()`` and resolves them via the
-    closure chain, not via module globals.
-    """
+    """A nested lambda closing over the outer parameter is free, not an unbound global."""
     plan = build_module_export_plan(
         """
 def sort_by_score(items):
@@ -242,10 +218,7 @@ def sort_by_score(items):
 
 
 def test_control_flow_alongside_self_contained_def_is_exportable() -> None:
-    """Control flow at module scope is dropped from the slice. As long
-    as the def doesn't depend on names bound by that control flow, it
-    exports cleanly.
-    """
+    """Module-scope control flow is dropped; a def that does not depend on it still exports."""
     plan = build_module_export_plan(
         """
 if True:
@@ -261,9 +234,6 @@ def add(y):
 
 
 def test_def_referencing_control_flow_assigned_name_blocks() -> None:
-    """If a def references a name assigned only inside dropped control
-    flow, the slice can't resolve it.
-    """
     plan = build_module_export_plan(
         """
 if some_cond():
@@ -281,10 +251,7 @@ def use():
 
 
 def test_top_level_lambda_assignment_is_blocking() -> None:
-    """Lambda assignments look like library code but can't be shared
-    via the synthetic module path — they're dropped from the slice and
-    flagged as blocking so downstream consumers see a clear error.
-    """
+    """Lambda assignments are dropped from the slice and flagged as blocking."""
     plan = build_module_export_plan("add = lambda y: y + 1")
     assert plan.is_exportable is False
     assert "top-level lambdas are not shareable across cells" in plan.format_error()
@@ -292,10 +259,7 @@ def test_top_level_lambda_assignment_is_blocking() -> None:
 
 
 def test_kept_def_rebound_at_runtime_blocks_export() -> None:
-    """``def f(): ...`` followed by ``f = wrap(f)`` is a real divergence
-    risk: the cell's runtime ``f`` is wrapped, but the slice's ``f`` is
-    bare. Block to keep the synthetic module honest.
-    """
+    """f = wrap(f) after def f would make the slice's bare f diverge from runtime."""
     plan = build_module_export_plan(
         """
 def f():
@@ -311,9 +275,7 @@ f = wrap(f)
 
 
 def test_kept_constant_rebound_at_runtime_blocks_export() -> None:
-    """A literal const reassigned at runtime would cause the slice to
-    snapshot the wrong value. Block to avoid silent divergence.
-    """
+    """A literal const reassigned at runtime would snapshot the wrong value in the slice."""
     plan = build_module_export_plan(
         """
 THRESHOLD = 0.5
@@ -328,9 +290,7 @@ def is_outlier(x):
 
 
 def test_augmented_assignment_to_kept_name_blocks_export() -> None:
-    """``x = 1; x += 1`` — the slice's ``x`` is 1 but the cell's ``x``
-    is 2. Block.
-    """
+    """x = 1; x += 1: the slice's x is 1 but the cell's is 2."""
     plan = build_module_export_plan("x = 1\nx += 1")
     assert plan.is_exportable is False
 
@@ -339,11 +299,7 @@ def test_augmented_assignment_to_kept_name_blocks_export() -> None:
 
 
 def test_runtime_only_cell_has_empty_slice_and_no_error() -> None:
-    """A cell that's just runtime work with nothing to share has an
-    empty slice. There's no error to report — downstream consumers of
-    the cell's runtime variables flow through the regular artifact
-    path.
-    """
+    """A runtime-only cell exports nothing, and that is not an error."""
     plan = build_module_export_plan("STEP = some_fn()")
     assert plan.is_exportable is True
     assert plan.module_source == ""
@@ -352,8 +308,6 @@ def test_runtime_only_cell_has_empty_slice_and_no_error() -> None:
 
 
 def test_nested_non_literal_in_container_drops_silently() -> None:
-    """Same as runtime-only: the assignment isn't a shareable literal,
-    so it's dropped and the cell carries nothing through module-export."""
     plan = build_module_export_plan("ITEMS = [1, 2, x]")
     assert plan.is_exportable is True
     assert plan.exported_symbols == {}
@@ -361,8 +315,6 @@ def test_nested_non_literal_in_container_drops_silently() -> None:
 
 
 def test_annotated_without_value_drops_silently() -> None:
-    """``x: int`` without a value doesn't bind anything at runtime, so
-    there's nothing to share. Drop and move on."""
     plan = build_module_export_plan("x: int")
     assert plan.is_exportable is True
     assert plan.exported_symbols == {}
@@ -374,10 +326,7 @@ def test_annotated_without_value_drops_silently() -> None:
 
 
 def test_def_referencing_cross_cell_import_blocks_export() -> None:
-    """Limitation: ``import math`` in another cell doesn't help. The
-    def's same cell must carry the import for the synthetic module to
-    resolve ``math`` at call time.
-    """
+    """Limitation: an import in another cell does not count; the def's own cell needs it."""
     plan = build_module_export_plan(
         """
 def pi():
@@ -390,11 +339,7 @@ def pi():
 
 
 def test_def_referencing_cross_cell_helper_blocks_export() -> None:
-    """Limitation: a def can't call a helper function defined in
-    another cell. The synthetic module is built from this cell's
-    source only — there's no transitive composition with upstream
-    cells.
-    """
+    """Limitation: the slice comes from this cell only, with no composition across cells."""
     plan = build_module_export_plan(
         """
 def use_helper(x):
@@ -407,11 +352,10 @@ def use_helper(x):
 
 
 def test_annotation_reference_blocks_without_future_import() -> None:
-    """Annotation references to unbound names block the slice on every
-    Python version. Pre-3.14 the annotation evaluates at def-time and
-    would NameError on module load; on 3.14+ PEP 749 defers evaluation
-    but the reference is still broken and ``__annotations__`` access
-    will lazily NameError. We block in both cases.
+    """Unbound annotation references block on every Python version.
+
+    Before 3.14 they NameError at def time; on 3.14+ (PEP 749) the deferred
+    __annotations__ access still NameErrors.
     """
     plan = build_module_export_plan(
         """
@@ -424,12 +368,9 @@ def transform(x: Df) -> Df:
 
 
 def test_future_annotations_relaxes_annotation_check() -> None:
-    """With ``from __future__ import annotations`` (PEP 563), type
-    annotations are stringified rather than evaluated. ``symtable``
-    correctly drops them from the reference set, so a def with an
-    annotation that's not bound in the slice still exports cleanly.
-    Without this, every cell that uses cross-cell types would have to
-    duplicate imports just for the type names.
+    """With PEP 563 annotations stringified, an unbound annotation name does not block.
+
+    Otherwise cross-cell types would force duplicate imports just for type names.
     """
     plan = build_module_export_plan(
         """
@@ -444,11 +385,7 @@ def transform(x: Df) -> Df:
 
 
 def test_sliced_source_loses_comments_in_synthetic_module() -> None:
-    """Limitation: ``ast.unparse`` doesn't preserve comments. Sliced
-    cells lose comments in the synthetic module's source (the cell's
-    on-disk file is untouched). Pure module cells keep their bytes
-    verbatim — see ``test_pure_cell_keeps_original_source_bytes``.
-    """
+    """Limitation: a sliced cell loses its comments; a pure cell keeps its bytes."""
     plan = build_module_export_plan(
         """
 df = load()  # runtime setup, will be dropped
@@ -466,11 +403,7 @@ def helper(x):
 
 
 def test_star_import_is_blocked() -> None:
-    """Limitation: ``from foo import *`` binds names the slicer can't
-    enumerate. The slice can't validate that a def's free vars are
-    covered by the star import, so we drop the import and refuse to
-    export.
-    """
+    """Limitation: a star import binds names the slicer cannot enumerate, so export is refused."""
     plan = build_module_export_plan(
         """
 from math import *
@@ -487,8 +420,7 @@ def circle(r):
 
 
 def test_injectable_upstream_name_unblocks_and_records_injection() -> None:
-    """A def closing over an upstream name is exportable when that name is
-    injectable, and the name is recorded for hydration rather than blocking."""
+    """An upstream name that is injectable unblocks export and is recorded for hydration."""
     src = "def add(y):\n    return x + y"
     assert build_module_export_plan(src).is_exportable is False  # baseline blocks
     plan = build_module_export_plan(src, injectable=frozenset({"x"}))
@@ -499,8 +431,7 @@ def test_injectable_upstream_name_unblocks_and_records_injection() -> None:
 
 
 def test_injectable_only_covers_named_upstreams() -> None:
-    """A def referencing both an injectable and a truly-unknown name stays
-    blocked, and the error names only the hard one."""
+    """An injectable name does not unblock a def that also references an unknown name."""
     src = "def add(y):\n    return x + y + z"
     plan = build_module_export_plan(src, injectable=frozenset({"x"}))
     assert plan.is_exportable is False
@@ -510,8 +441,7 @@ def test_injectable_only_covers_named_upstreams() -> None:
 
 
 def test_injectable_module_load_default_unblocks() -> None:
-    """A default value referencing an upstream name (evaluated at module load)
-    is injectable too."""
+    """A default value referencing an upstream name (evaluated at load) is injectable too."""
     src = "def add(y, base=BASE):\n    return base + y"
     assert build_module_export_plan(src).is_exportable is False
     plan = build_module_export_plan(src, injectable=frozenset({"BASE"}))
@@ -528,8 +458,7 @@ def test_injectable_class_base_unblocks() -> None:
 
 
 def test_injectable_ignored_when_name_already_bound_in_slice() -> None:
-    """A literal bound in-cell resolves from the slice; passing it as injectable
-    must not spuriously record it for hydration."""
+    """A literal bound in-cell is not recorded for hydration even when passed as injectable."""
     src = "x = 1\n\ndef add(y):\n    return x + y"
     plan = build_module_export_plan(src, injectable=frozenset({"x"}))
     assert plan.is_exportable is True

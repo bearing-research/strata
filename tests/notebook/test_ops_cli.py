@@ -1,8 +1,7 @@
-"""Tests for the NotebookOps core + the `strata cell|dag|status` inspect CLI (P0).
+"""Tests for the NotebookOps core and the `strata cell|dag|status` inspect CLI.
 
-Read-only, local backend — no server, no env sync. Builds a tiny two-cell
-notebook with a real upstream→downstream edge and asserts the operation shapes
-(which match the server's REST API) plus the CLI exit-code contract.
+Read-only local backend on a two-cell notebook with a real edge: operation
+shapes (matching the REST API) and the CLI exit-code contract.
 """
 
 from __future__ import annotations
@@ -46,11 +45,7 @@ def test_local_ops_get_cell_and_unknown(chain_nb):
 
 
 def test_the_cell_view_names_what_the_cell_produces(chain_nb):
-    """`get_notebook`'s MCP description has always promised defines/references.
-
-    Without them on the view, an agent asking what a cell produces had to make
-    a second call to `dag` and match cells up by id.
-    """
+    """The cell view carries defines/references, as `get_notebook`'s MCP description promises."""
     ops = LocalNotebookOps(chain_nb)
     assert ops.get_cell("a").defines == ["x"]
     assert ops.get_cell("b").references == ["x"]
@@ -75,13 +70,9 @@ def test_local_ops_status_summary(chain_nb):
 
 
 def test_an_offline_handle_reports_the_staleness_it_computed(chain_nb):
-    """Only the server's session manager computed staleness on open, so an
-    offline handle reported the answer a cold session starts with -- every cell
-    idle, no reasons -- whatever the notebook actually looked like. It is the
-    surface agents and the CLI read.
+    """An offline handle reports computed staleness, not a cold session's all-idle.
 
-    The scenario has to be one where idle is the *wrong* answer, or it passes
-    on a notebook where everything is idle anyway.
+    The scenario must be one where idle is the wrong answer, or it proves nothing.
     """
     import json
 
@@ -485,13 +476,10 @@ def test_cli_dag_and_status_json(chain_nb, capsys):
 
 
 class TestMoveCellDoesNotLoseConcurrentEdits:
-    """``move_cell`` built its order from the snapshot taken when the ops
-    object was constructed, and ``reorder_cells`` then wrote only those ids.
+    """``move_cell`` must not drop cells added since the ops object was built.
 
-    The documented ``strata agent`` workflow has a server session open on the
-    notebook while an agent drives the CLI, so this is the normal case, not a
-    corner: the human adds a cell, the agent's next reorder erases it from
-    committed config and orphans ``cells/<id>.py``.
+    With a server session open while an agent drives the CLI, a stale snapshot
+    would erase the human's new cell from config and orphan ``cells/<id>.py``.
     """
 
     def _notebook(self, tmp_path):
@@ -533,15 +521,10 @@ class TestMoveCellDoesNotLoseConcurrentEdits:
 
 
 class TestAFailedDagBuildIsNotReportedAsAnEmptyGraph:
-    """``session.dag`` is set to ``None`` when the build raises, and every
-    consumer projected that as an empty graph.
+    """A failed DAG build is reported as a failure, not an empty graph.
 
-    An empty graph is a legitimate answer for a notebook with no dependencies,
-    so the two were indistinguishable: ``strata dag`` reported no edges for a
-    notebook full of them, and the "is this variable defined?" lookup answered
-    a confident no for a variable that is defined — leading an agent to
-    recreate work that already existed. The real reason was logged to stderr
-    and discarded.
+    An empty graph is a legitimate answer, so conflating them made agents
+    recreate variables that were in fact defined.
     """
 
     def _broken_notebook(self, tmp_path):

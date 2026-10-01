@@ -1,4 +1,4 @@
-"""Tests for the uv-managed-runtime startup guard."""
+"""The uv-managed-runtime startup guard."""
 
 from __future__ import annotations
 
@@ -66,8 +66,7 @@ def test_assert_uv_managed_runtime_exits_without_marker(tmp_path, monkeypatch, c
 
 
 def test_assert_uv_managed_runtime_names_a_conda_or_system_python(tmp_path, monkeypatch, capsys):
-    """A conda env or a system Python has no pyvenv.cfg at all. The message
-    used to tell such users to look for a marker in a file they do not have."""
+    """A conda env or system Python has no pyvenv.cfg, so the message must not point at one."""
     monkeypatch.setattr("sys.prefix", str(tmp_path))
 
     with pytest.raises(SystemExit):

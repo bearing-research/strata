@@ -1,8 +1,7 @@
-"""Tests for NotebookArtifactManager — the notebook/artifact-store bridge.
+"""Tests for NotebookArtifactManager, the notebook's bridge to the artifact store.
 
-Focuses on the per-iteration artifact id scheme introduced for loop cells;
-regular single-artifact behaviour is exercised implicitly by the executor
-and cache-hit tests.
+Focuses on loop cells' per-iteration artifact ids; single-artifact behaviour is covered
+by the executor and cache-hit tests.
 """
 
 from __future__ import annotations
@@ -29,7 +28,7 @@ class TestCellArtifactId:
         assert manager.cell_artifact_id("c1", "state", 3) == "nb_nb1_cell_c1_var_state@iter=3"
 
     def test_iteration_zero_gets_suffix(self, manager):
-        """iteration=0 is distinct from None — we still want ``@iter=0`` visible."""
+        """iteration=0 is distinct from None: ``@iter=0`` stays visible."""
         assert manager.cell_artifact_id("c1", "state", 0) == "nb_nb1_cell_c1_var_state@iter=0"
 
 
@@ -66,9 +65,9 @@ class TestPerIterationArtifacts:
         assert manager.load_iteration_blob("c1", "state", 0) is None
 
     def test_iteration_artifact_does_not_collide_with_regular(self, manager):
-        """Storing ``state`` both without and with an iteration suffix must
-        produce two distinct artifacts so a cell's one-shot output is never
-        overwritten by a loop cell's iteration 0."""
+        """``state`` stored without and with an iteration suffix gives two artifacts, so loop
+        iteration 0 never overwrites a cell's one-shot output.
+        """
         manager.store_cell_output(
             cell_id="c1",
             variable_name="state",
@@ -125,8 +124,7 @@ class TestPerIterationArtifacts:
             assert artifact.id.endswith(f"@iter={k}")
 
     def test_list_iterations_skips_non_iteration_artifacts(self, manager):
-        """A regular ``store_cell_output`` (no iteration) does not appear
-        in the iteration list — the id lacks the ``@iter=`` suffix."""
+        """A regular ``store_cell_output`` id lacks ``@iter=``, so it is not listed."""
         manager.store_cell_output(
             cell_id="c1",
             variable_name="state",
@@ -150,9 +148,7 @@ class TestPerIterationArtifacts:
         assert manager.list_iterations("c1", "state") == []
 
     def test_transform_spec_records_iteration(self, manager):
-        """The stored transform_spec should carry the iteration index so
-        other subsystems (inspector, diagnostics) can read it back without
-        parsing the artifact id."""
+        """transform_spec carries the iteration index, so readers need not parse the id."""
         import json as _json
 
         manager.store_cell_output(
@@ -172,8 +168,6 @@ class TestPerIterationArtifacts:
 
 
 class TestListCellArtifacts:
-    """``list_cell_artifacts`` was a NotImplementedError stub; now it works."""
-
     def test_lists_each_variable_once(self, manager):
         manager.store_cell_output(
             cell_id="c1",
@@ -195,9 +189,9 @@ class TestListCellArtifacts:
         assert names == {"x", "y"}
 
     def test_excludes_iteration_artifacts(self, manager):
-        """Loop-iteration ids carry @iter=k; those belong to list_iterations,
-        not the canonical list. Including them here would surface every
-        iteration of every variable in cell-level UIs."""
+        """Loop-iteration ids (@iter=k) belong to list_iterations; listing them here would surface
+        every iteration of every variable in cell-level UIs.
+        """
         manager.store_cell_output(
             cell_id="c1",
             variable_name="state",
@@ -249,8 +243,7 @@ class TestListCellArtifacts:
 
 
 class TestGetArtifactInfo:
-    """get_artifact_info used to return content_type='unknown' always; now
-    it reads the value from transform_spec.params like get_artifact_preview."""
+    """get_artifact_info reads content_type from transform_spec.params, like the preview does."""
 
     def test_content_type_round_trips(self, manager):
         manager.store_cell_output(
@@ -273,10 +266,11 @@ class TestGetArtifactInfo:
 
 
 class TestPublishedArtifactsDashboard:
-    """``GET /v1/notebooks/{id}/artifacts`` (list_notebook_published_artifacts)
-    powers the per-cell registry strip: for each cell it surfaces the ready
-    registry artifacts stamped ``nb_cell=<id>``, with their names and tags
-    (the ``nb_cell`` tag itself hidden)."""
+    """``GET /v1/notebooks/{id}/artifacts`` powers the per-cell registry strip.
+
+    For each cell it lists the ready registry artifacts tagged ``nb_cell=<id>``, with their
+    names and tags (the ``nb_cell`` tag itself hidden).
+    """
 
     def _state(self, artifact_dir: Path):
         from types import SimpleNamespace
@@ -334,8 +328,9 @@ class TestPublishedArtifactsDashboard:
             reset_artifact_store()
 
     def test_empty_when_store_unreachable_in_service_mode(self, tmp_path, monkeypatch):
-        """Service mode 403s the published-tier store; the strip degrades to an
-        empty map rather than erroring (graceful until the registry refactor)."""
+        """Service mode 403s the published-tier store; the strip degrades to an empty map rather
+        than erroring.
+        """
         import asyncio
         from types import SimpleNamespace
 
@@ -361,7 +356,7 @@ class TestPublishedArtifactsDashboard:
 
 
 class TestVariantArtifacts:
-    """Sweep-v2 fan-out artifact identity (``@variant={name}`` suffix)."""
+    """Fan-out artifact identity (``@variant={name}`` suffix)."""
 
     def _blob(self, manager, artifact_id):
         latest = manager.artifact_store.get_latest_version(artifact_id)
@@ -445,12 +440,9 @@ class TestVariantArtifacts:
 class TestLineageRefShape:
     """The recorded ``input_versions`` shape the lineage walk resolves.
 
-    The walk follows an input only when its key is a ``strata://artifact/``
-    URI and its value carries ``@v=``. Recording raw provenance digests
-    instead made every upstream an unidentifiable leaf, so these pin the shape
-    producers have to write. Which refs a cell writes is decided by
-    ``NotebookSession._collect_input_refs`` and proved end-to-end against a
-    real run in ``test_e2e_provenance_persistence``.
+    The walk follows an input only when its key is a ``strata://artifact/`` URI and its value
+    carries ``@v=``. Which refs a cell writes is tested end to end in
+    ``test_e2e_provenance_persistence``.
     """
 
     def test_lineage_walks_transitively_through_resolved_refs(self, manager):
@@ -504,13 +496,9 @@ class TestLineageRefShape:
     def test_a_shared_store_moves_ready_to_the_newest_writer(self, tmp_path):
         """Why refs are not resolved from provenance hashes.
 
-        The cell id is not folded into a provenance hash, so an identical cell
-        in another notebook sharing this store hashes the same. Storing it
-        supersedes the first row and takes ``ready``, and
-        ``find_by_provenance`` filters to ``ready`` — so the lookup returns the
-        *other* notebook's artifact while this notebook goes on reading its
-        own. This pins the collision, so reintroducing that shortcut fails a
-        test rather than silently misattributing a producer.
+        The cell id is not in a provenance hash, so an identical cell in another notebook sharing
+        the store hashes the same, and its write takes ``ready``. ``find_by_provenance`` would
+        then return the other notebook's artifact.
         """
         shared_dir = tmp_path / "shared"
         mine = NotebookArtifactManager("mine", artifact_dir=shared_dir)

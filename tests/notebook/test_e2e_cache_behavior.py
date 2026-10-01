@@ -1,11 +1,6 @@
 """E2E tests: artifact caching and provenance deduplication.
 
-Validates that re-executing an unchanged cell produces a cache hit,
-and that changing source produces a cache miss.
-
-Note: Cache hits only apply to cells whose outputs are consumed by
-downstream cells (stored in the artifact store via consumed_variables).
-Leaf cells without downstream consumers don't get their outputs stored.
+Only consumed outputs are stored, so only cells with downstream consumers can cache-hit.
 """
 
 from __future__ import annotations
@@ -37,7 +32,7 @@ class TestCacheHit:
     """Re-executing an unchanged cell whose output is consumed should cache."""
 
     def test_upstream_cell_cache_hit(self, setup):
-        """Execute c1→c2 pipeline twice — c1 should cache on second run."""
+        """Run c1→c2 twice; c1 caches on the second run."""
         client, tmp = setup
         nb = NotebookBuilder(tmp).add_cell("c1", "x = 42").add_cell("c2", "y = x + 1", after="c1")
 
@@ -55,7 +50,6 @@ class TestCacheHit:
                 assert r2["payload"].get("cache_hit") is True
 
     def test_cache_hit_reports_execution_method(self, setup):
-        """Cache hits should report execution_method='cached'."""
         client, tmp = setup
         nb = NotebookBuilder(tmp).add_cell("c1", "x = 1").add_cell("c2", "y = x + 1", after="c1")
 
@@ -107,7 +101,6 @@ class TestCacheMiss:
     """Changing cell source should invalidate the cache."""
 
     def test_source_change_invalidates(self, setup):
-        """Editing source → re-execute should be a cache miss."""
         client, tmp = setup
         nb = NotebookBuilder(tmp).add_cell("c1", "x = 1").add_cell("c2", "y = x + 1", after="c1")
 
@@ -127,10 +120,8 @@ class TestCacheMiss:
 
 
 class TestCascadeCache:
-    """Cache behavior across multi-cell cascades."""
-
     def test_cascade_then_direct_rerun(self, setup):
-        """Run full cascade, then re-run upstream directly — cache hit."""
+        """Run the full cascade, then re-run the upstream directly: a cache hit."""
         client, tmp = setup
         nb = NotebookBuilder(tmp).add_cell("c1", "x = 1").add_cell("c2", "y = x + 1", after="c1")
 
@@ -149,7 +140,6 @@ class TestCascadeCache:
                 assert downstream.status == "ready"
 
     def test_leaf_cell_not_cached(self, setup):
-        """A leaf cell (no downstream consumers) is not cached."""
         client, tmp = setup
         nb = NotebookBuilder(tmp).add_cell("c1", "x = 42")
 

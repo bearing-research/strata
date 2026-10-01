@@ -1,7 +1,6 @@
-"""Unit tests for ``RegistryService.summary`` — pure aggregation, no server/DB.
+"""Unit tests for ``RegistryService.summary``: pure aggregation with a fake store.
 
-The summary aggregation groups aliases per name and hides internal ``nb_*``
-stamps from the user-facing table. Both are exercised here with a fake store.
+Aliases group per name, and internal ``nb_*`` stamps stay out of the user-facing table.
 """
 
 from types import SimpleNamespace

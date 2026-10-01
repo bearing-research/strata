@@ -1,8 +1,7 @@
 """Iceberg equality deletes: a scan drops every older row whose key a delete names.
 
-pyiceberg refuses to plan these tables, and cannot write them either, so the
-snapshots here are built by tests/iceberg_fixtures.py the way Flink's upsert
-sink commits them.
+pyiceberg can neither plan nor write these tables, so tests/iceberg_fixtures.py builds the snapshots
+the way Flink's upsert sink commits them.
 """
 
 from __future__ import annotations
@@ -107,11 +106,11 @@ def test_rows_with_a_deleted_key_are_gone_and_stay_gone_from_the_cache(people):
 
 
 def test_a_filtered_scan_still_applies_a_delete_whose_keys_miss_the_filter(people):
-    """The delete's key bounds (2..2) miss `id >= 3`, so pyiceberg's planner
-    prunes it. That is right for a reader that filters rows; Strata returns
-    whole row groups, and the first one still holds id 2. The filtered scan
-    used to return the deleted row and cache it under a key with no filter,
-    where the next unfiltered scan found it."""
+    """The delete's key bounds (2..2) miss `id >= 3`, so pyiceberg's planner prunes it.
+
+    Strata returns whole row groups, and the first still holds id 2. The deleted row must not be
+    returned or cached under the unfiltered key.
+    """
     catalog, uri, config = people
     table = _table(catalog)
     commit_files(
@@ -142,8 +141,7 @@ def test_a_filtered_scan_still_applies_a_delete_whose_keys_miss_the_filter(peopl
     ids=["date", "decimal"],
 )
 def test_a_null_key_of_any_type_deletes_the_null_rows(tmp_path, key_type, values):
-    """Matching nulls used to fill them with `pa.array([0]).cast(type)`, which
-    date and decimal keys cannot take."""
+    """Null keys of date and decimal type, which cannot be cast from an int fill."""
     catalog, uri = _catalog(tmp_path)
     schema = pa.schema([("k", key_type), ("name", pa.string())])
     catalog.create_table("db.t", schema=schema).append(
@@ -280,10 +278,10 @@ NANOS = 1_704_153_600_000_000_123  # 2024-01-02 plus 123 ns
     ids=["microseconds", "other nanoseconds"],
 )
 def test_a_nanosecond_key_is_compared_at_the_tables_unit(tmp_path, deleted):
-    """A v2 table's timestamps are microseconds, but a file registered from
-    elsewhere can hold nanoseconds, which the scan truncates. A JVM writer
-    deletes a row by the value it read, microseconds; the key was compared at
-    nanoseconds instead, so the delete never matched."""
+    """A file holding nanoseconds is matched at the table's microseconds.
+
+    A JVM writer deletes a row by the microsecond value it read.
+    """
     catalog, uri = _catalog(tmp_path)
     schema = pa.schema([("ts", pa.timestamp("us")), ("name", pa.string())])
     catalog.create_table("db.t", schema=schema).append(
@@ -301,8 +299,7 @@ def test_a_nanosecond_key_is_compared_at_the_tables_unit(tmp_path, deleted):
 
 
 def test_keys_of_one_type_in_another_arrow_form_match():
-    """A uuid key read as Arrow's uuid type on one side and its 16-byte storage
-    on the other, or a string dictionary-encoded on one side, still match."""
+    """A uuid as Arrow uuid vs 16-byte storage, or a dictionary-encoded string, still matches."""
     import uuid
 
     from strata.iceberg_equality import deleted_mask
@@ -385,10 +382,11 @@ def test_a_delete_in_one_partition_leaves_the_others(tmp_path):
 
 
 def test_an_identity_partition_column_the_file_omits_reads_its_partition_value(tmp_path):
-    """A Hive-layout file registered with add_files often omits its identity
-    partition column, whose value is the file's partition. It read as nulls,
-    as pyiceberg does not, and a delete keyed on it never matched. Each file
-    reads its own value, from a restarted planner's persisted manifest too."""
+    """A Hive-layout file often omits its identity partition column.
+
+    Each file reads its own partition value (also from a restarted planner's persisted manifest), so
+    a delete keyed on it matches.
+    """
     catalog, uri = _catalog(tmp_path)
     schema = Schema(
         NestedField(1, "id", LongType(), required=False),
@@ -524,8 +522,7 @@ def test_the_persisted_manifest_keeps_the_equality_deletes(people):
 
 
 def test_a_scan_artifact_counts_the_rows_left_and_a_refusal_says_why(people, tmp_path):
-    """Through a server: the build's row count is the rows sent (it fails its
-    own check otherwise), and a refused table is a 422 with the reason."""
+    """Through a server: the build's row count is the rows sent, and a refused table is a 422."""
     import httpx
     from strata_client.client import StrataClient
 
@@ -555,8 +552,7 @@ def test_a_scan_artifact_counts_the_rows_left_and_a_refusal_says_why(people, tmp
 
 
 def test_a_key_the_file_predates_matches_on_its_v3_initial_default():
-    """A data file written before its key column existed holds that column's
-    initial-default, not nulls, so a delete of the default removes its rows."""
+    """A file predating its key column holds the initial-default, not nulls."""
     from strata.iceberg_equality import deleted_mask
     from strata.metadata_cache import EqualityDeleteEntry
 

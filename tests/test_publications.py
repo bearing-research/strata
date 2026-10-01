@@ -1,10 +1,7 @@
 """Publications: opt-in public read grants and the page they resolve to.
 
-The security surface here is unusual for this codebase — these are the only
-routes that answer an unauthenticated caller with artifact contents. Most of
-what follows guards the *edges* of that: which routes are exempt from auth,
-what a revoked token does, and whether user-written text reaches the page
-unescaped.
+These are the only routes that serve artifact contents to an unauthenticated caller. Most tests
+guard the edges: auth exemptions, revoked tokens, and user text reaching the page unescaped.
 """
 
 from __future__ import annotations
@@ -38,9 +35,7 @@ class TestPublicationGrants:
     def test_publishing_records_the_digest_of_the_published_bytes(self, store):
         """The only checkable integrity claim the page can make.
 
-        Nothing else in the store records a digest of the *content* —
-        ``provenance_hash`` covers inputs and transform — so without this the
-        page could assert nothing a reader is able to test.
+        ``provenance_hash`` covers inputs and transform, not content.
         """
         payload = b"figure-bytes"
         version = _ready_artifact(store, "fig", payload)
@@ -50,11 +45,7 @@ class TestPublicationGrants:
         assert publication.content_sha256 == hashlib.sha256(payload).hexdigest()
 
     def test_publishing_twice_returns_the_same_token(self, store):
-        """Two live URLs for one artifact would make revocation a lie.
-
-        Someone withdrawing "the" link would believe the artifact was no longer
-        public while the other token still served it.
-        """
+        """Two live URLs for one artifact would make revocation a lie."""
         version = _ready_artifact(store, "fig", b"x")
 
         first = store.publish_artifact("fig", version)
@@ -97,9 +88,8 @@ class TestPublicationGrants:
 class TestAuthExemption:
     """Which routes the auth and tenant middleware let through unauthenticated.
 
-    This predicate is the whole boundary. If it widens by accident, routes that
-    mint or withdraw grants — or enumerate what a tenant has published — become
-    reachable by anyone who can address the server.
+    This predicate is the whole boundary: if it widens, routes that mint, withdraw or enumerate
+    grants become public.
     """
 
     @staticmethod
@@ -206,17 +196,14 @@ class TestPublicationPage:
         )
 
     def test_cell_source_is_escaped(self, store):
-        """Cell source is written by whoever used the notebook, and this page is
-        served unauthenticated to anyone holding the link."""
+        """Cell source is user-written and the page is served unauthenticated."""
         html = self._render(store, source="rows = []  # <script>alert(1)</script>")
 
         assert "<script>alert(1)</script>" not in html
         assert "&lt;script&gt;" in html
 
     def test_an_identifier_that_is_not_a_url_is_printed_not_linked(self, store):
-        """``url`` takes whatever it is handed, escaping leaves the scheme
-        alone, and this page is served unauthenticated to anyone with the
-        link -- on this server's own origin."""
+        """``url`` takes anything and escaping leaves the scheme alone, on this server's origin."""
         html = self._render(
             store,
             source="rows = []",
@@ -252,20 +239,16 @@ class TestPublicationPage:
         assert "&lt;img src=x" in html
 
     def test_it_shows_the_chain_not_just_the_artifact(self, store):
-        """The upstream step's code is the point — a plot with no visible
-        ancestry answers nothing a referee asked."""
+        """The upstream step's code is the point; a plot with no ancestry answers nothing."""
         html = self._render(store, source="rows = [1, 2, 3]")
 
         assert "plt.plot(rows)" in html, "the artifact's own source"
         assert "rows = [1, 2, 3]" in html, "the upstream step's source"
 
     def test_sibling_variables_from_one_cell_show_their_code_once(self, store):
-        """A cell defining several consumed variables contributes one ancestor
-        each, all carrying that cell's source.
+        """A cell defining several consumed variables contributes one ancestor each.
 
-        Printed straight, a cell defining five variables repeats its code five
-        times on the page, which reads as a rendering fault rather than as five
-        artifacts from one step.
+        Printing each would repeat the cell's code and read as a rendering fault.
         """
         from strata.api.publication_page import render_publication
         from strata.notebook.artifact_integration import NotebookArtifactManager
@@ -318,12 +301,10 @@ class TestPublicationPage:
         assert "Produced by the same cell as" in html
 
     def test_it_never_claims_the_result_was_verified_or_reproduced(self, store):
-        """A green check reads as 'someone reproduced this' to a referee.
+        """A green check reads as "someone reproduced this" to a referee.
 
-        Reproduction needs a re-run, and randomness, thread counts, float
-        accumulation order and unavailable input data each break it. A badge
-        that can be wrong is worse than no badge, so the page states what it
-        checked in words instead.
+        Reproduction needs a re-run and many things break it, so the page states in words what it
+        checked.
         """
         html = self._render(store, source="rows = []")
 
@@ -331,13 +312,10 @@ class TestPublicationPage:
         assert "does <em>not</em> claim the result was reproduced" in html
 
     def test_it_distinguishes_who_published_from_who_computed(self, store):
-        """Two different facts, and stacking them confused the page.
+        """The byline names the publisher; the table row names who produced the bytes.
 
-        The byline names whoever published; the table row names whoever
-        produced the bytes, which for a local run is nobody the store can
-        attest to. Labelling the second "Author" put "Published by X" directly
-        above "Author: not recorded", which reads as a contradiction rather
-        than the distinction it is.
+        Labelling the second "Author" read as a contradiction ("Published by X" over "Author: not
+        recorded").
         """
         html = self._render(store, source="rows = []")
 
@@ -345,8 +323,7 @@ class TestPublicationPage:
         assert ">Author<" not in html
 
     def test_a_withdrawn_publication_says_so_rather_than_404ing(self, store):
-        """A reader chasing a footnote deserves 'withdrawn', not what reads as
-        a typo — and the page says the link was never repointed."""
+        """A reader chasing a footnote gets "withdrawn", and that the link was never repointed."""
         html = self._render(store, source="rows = []", revoke=True)
 
         assert "withdrawn" in html.lower()
@@ -356,11 +333,9 @@ class TestPublicationPage:
 
 @pytest.fixture
 def published_server(tmp_path):
-    """A running server with one published artifact.
+    """A running server with one published artifact; yields ``(base_url, token, payload)``.
 
-    Yields ``(base_url, token, payload)``. Uses a real server rather than
-    ``TestClient`` because the middleware exemption is half of what is under
-    test here, and it only runs on a real request path.
+    A real server, because the middleware exemption under test only runs on a real request path.
     """
     import httpx
 
@@ -406,11 +381,7 @@ class TestPublicRoutesEndToEnd:
         assert verified["actual_sha256"] == hashlib.sha256(payload).hexdigest()
 
     def test_verify_reports_a_mismatch_when_the_bytes_change(self, published_server, tmp_path):
-        """The failure this check exists to catch.
-
-        A digest routine that returns "matches" unconditionally passes the test
-        above; only tampering with the blob distinguishes it.
-        """
+        """Only tampering with the blob catches a check that always says "matches"."""
         import httpx
 
         base_url, token, _ = published_server
@@ -448,10 +419,8 @@ class TestPublicRoutesEndToEnd:
 class TestPublishDestination:
     """Where a grant is written, and whether the caller is told.
 
-    ``--artifact-dir`` says where to read. Where the publication lands is a
-    different question, and it used to be answered from configuration without
-    ever being named — which is how a test run wrote fixtures into a
-    developer's real ``~/.strata/artifacts``.
+    ``--artifact-dir`` says where to read, not where the publication lands; an unnamed destination
+    is how a test run once wrote into a developer's ``~/.strata/artifacts``.
     """
 
     @staticmethod
@@ -488,9 +457,7 @@ class TestPublishDestination:
     def test_the_destination_is_always_reported(self, tmp_path, capsys):
         """Even when nothing is copied.
 
-        A caller who is never told where the grant lives cannot tell a working
-        link from one their own server will never resolve — and the silent case
-        was exactly the one where source and destination already matched.
+        Without it a caller cannot tell a working link from one their own server will never resolve.
         """
         out, _ = self._publish(tmp_path, capsys, here=True)
 
@@ -516,8 +483,7 @@ class TestPublishDestination:
         assert len(ArtifactStore(tmp_path / "source").list_publications()) == 1
 
     def test_into_and_here_are_mutually_exclusive(self, tmp_path):
-        """Naming both a directory and "the source" is a contradiction, not a
-        preference, so it should be refused rather than silently resolved."""
+        """Naming both a directory and "the source" is a contradiction, so it is refused."""
         from strata.cli import main
 
         with pytest.raises(SystemExit) as exit_info:
@@ -538,20 +504,12 @@ class TestPublishDestination:
 class TestImportAcrossStores:
     """Copying an artifact into the store that will serve it.
 
-    Notebook cells write to the notebook's own ``.strata/artifacts``; the server
-    serves whatever ``artifact_dir`` it was configured with. Publishing minted a
-    token in a store the page route never reads, so the link 404'd — the primary
-    case the feature exists for, working only when the two directories happened
-    to coincide.
+    Cells write to the notebook's ``.strata/artifacts`` while the server serves its
+    ``artifact_dir``, so a token minted in the first store 404s unless the chain is copied.
     """
 
     def test_import_preserves_the_version(self, store, tmp_path):
-        """Lineage edges are ``id@v=N`` strings.
-
-        A copy that let the destination assign a fresh version would land
-        ancestors under numbers the descendants' edges do not name, producing an
-        imported graph that resolves to nothing.
-        """
+        """Lineage edges are ``id@v=N`` strings, so a fresh version would orphan them."""
         other = ArtifactStore(tmp_path / "other")
         _ready_artifact(other, "pad", b"a")
         _ready_artifact(other, "pad", b"b")  # so the next id would not be v=1
@@ -575,11 +533,9 @@ class TestImportAcrossStores:
         assert other.import_artifact(record, b"x").written is False
 
     def test_publishing_copies_the_chain_into_the_served_store(self, store, tmp_path, monkeypatch):
-        """The end-to-end fix: a token minted here resolves over there.
+        """A token minted here resolves over there, with its whole chain.
 
-        The ancestry has to travel too — the page shows the code and
-        environment of every upstream step, so copying the artifact alone would
-        publish a result whose chain resolves to nothing.
+        The page shows every upstream step, so copying the artifact alone is not enough.
         """
         from strata.artifact_cli import cmd_publish
         from strata.notebook.artifact_integration import NotebookArtifactManager
@@ -648,10 +604,8 @@ class TestImportAcrossStores:
     ):
         """A provenance hash does not carry the cell id.
 
-        Two people whose notebooks ran the identical cell produce the same hash
-        under different notebook-derived ids, and the store permits one ready
-        row per ``(tenant, provenance_hash)``. Importing the second used to
-        raise a bare ``IntegrityError``.
+        Identical cells in two notebooks share a hash under different ids, and the store allows one
+        ready row per ``(tenant, provenance_hash)``; this must not raise ``IntegrityError``.
         """
         alice = ArtifactStore(tmp_path / "alice")
         bob = ArtifactStore(tmp_path / "bob")
@@ -672,11 +626,7 @@ class TestImportAcrossStores:
         assert second.ref == first.ref, "the second import must resolve to the row already here"
 
     def test_import_does_not_deduplicate_across_tenants(self, tmp_path):
-        """The uniqueness the dedup mirrors is per tenant, and so is this.
-
-        Resolving one tenant's import onto another tenant's row would handa
-        caller a ref it cannot read.
-        """
+        """Dedup is per tenant: another tenant's row would hand out a ref the caller cannot read."""
         target = ArtifactStore(tmp_path / "central")
         record = ArtifactVersion(
             id="shared",
@@ -692,11 +642,10 @@ class TestImportAcrossStores:
         assert target.import_artifact(other_tenant, b"x").written is True
 
     def test_an_import_that_dies_before_the_row_leaves_nothing_readable(self, store, tmp_path):
-        """The row is what makes a version readable, so it goes last.
+        """The row makes a version readable, so it is committed last.
 
-        Committing it first left a ready artifact whose page could not serve
-        its bytes, and — worse — the ``(id, version)`` check then read that row
-        as a finished import, so no retry could ever repair it.
+        A row committed first looks like a finished import, so no retry could repair the missing
+        bytes.
         """
         target = ArtifactStore(tmp_path / "central")
         version = _ready_artifact(store, "fig", b"x")
@@ -724,11 +673,8 @@ class TestImportAcrossStores:
     def test_a_shared_upstream_still_resolves_for_the_second_publisher(self, tmp_path, monkeypatch):
         """Two chains over one computation, published into one served store.
 
-        The realistic case for a team: two people share a data-prep cell and
-        make different figures from it. The second publisher's upstream
-        deduplicates onto the first's row, so the second figure's edge has to
-        be rewritten to name it — otherwise the chain the page exists to show
-        resolves to nothing.
+        The second publisher's upstream dedups onto the first's row, so the second figure's edge
+        must be rewritten to name it.
         """
         from strata.artifact_cli import cmd_publish
         from strata.notebook.artifact_integration import NotebookArtifactManager
@@ -806,10 +752,8 @@ class TestPublicationRetention:
     def _chain(self, store):
         """An upstream, a figure that names it, and a newer upstream version.
 
-        This is the ordinary notebook workflow: publish a figure, then re-run
-        the cell that produced its input. The first upstream version is now
-        neither named nor the latest of its id, which is exactly what the
-        sweep collects.
+        The first upstream version is neither named nor the latest of its id: exactly what the sweep
+        collects.
         """
         upstream_v1 = _ready_artifact(store, "rows", b"[1]")
         ref = f"rows@v={upstream_v1}"
@@ -837,11 +781,7 @@ class TestPublicationRetention:
         )
 
     def test_a_withdrawn_publication_still_protects_its_chain(self, store):
-        """A withdrawal must not destroy the record of what was withdrawn.
-
-        The row is kept so the token fails closed rather than being reissued;
-        the chain behind it stays readable for audit.
-        """
+        """A withdrawal keeps its chain readable for audit."""
         upstream_v1, figure_version, publication = self._chain(store)
         store.revoke_publication(publication.token)
 
@@ -863,12 +803,7 @@ class TestEmbedding:
     """The card, and the oEmbed endpoint that unfurls a pasted link."""
 
     def test_the_card_carries_the_link_to_the_provenance(self, published_server):
-        """An embed that is only an image defeats its own purpose.
-
-        The card lives in someone else's page, so the one thing it must always
-        show — whatever the figure's shape — is that there is a chain behind
-        this and where to see it.
-        """
+        """An embed that is only an image defeats its purpose: it must link to the chain."""
         import httpx
 
         base_url, token, _ = published_server
@@ -880,10 +815,9 @@ class TestEmbedding:
         assert f"{base_url}/p/{token}" in card.text
 
     def test_the_card_may_be_framed_anywhere(self, published_server):
-        """The default `frame-ancestors 'self'` protects the notebook app view.
+        """The default `frame-ancestors 'self'` protects the app view, not the embed card.
 
-        Applied here it would make an embed framable only by its own origin,
-        which is not an embed. The full page keeps the restrictive default.
+        The full page keeps the restrictive default.
         """
         import httpx
 
@@ -902,10 +836,8 @@ class TestEmbedding:
     def test_only_the_real_embed_route_may_be_framed(self, published_server, path):
         """The SPA catch-all serves index.html for any unmatched path.
 
-        A suffix test on "/embed" therefore also opened `/anything/embed`, and
-        the frontend is hash-routed — so framing `/x/embed#/notebook/<session>`
-        from any origin handed an attacker the live notebook app, which is the
-        surface this middleware exists to close.
+        A suffix match on "/embed" would let any origin frame `/x/embed#/notebook/<session>`, the
+        live notebook app.
         """
         import httpx
 
@@ -916,11 +848,7 @@ class TestEmbedding:
         assert response.headers["content-security-policy"] == "frame-ancestors 'self'"
 
     def test_oembed_matches_a_host_written_differently(self, published_server):
-        """A consumer pastes whatever the address bar held.
-
-        Case and an explicit default port name the same server; 404ing over
-        that would reject the tools this endpoint exists for.
-        """
+        """Case and an explicit default port name the same server."""
         import httpx
 
         base_url, token, _ = published_server
@@ -945,8 +873,7 @@ class TestEmbedding:
         assert payload["width"] > 0 and payload["height"] > 0
 
     def test_oembed_refuses_a_url_on_another_host(self, published_server):
-        """A provider that described other people's URLs would be answering
-        for pages it has never seen."""
+        """A provider must not describe pages it has never seen."""
         import httpx
 
         base_url, token, _ = published_server
@@ -973,8 +900,7 @@ class TestEmbedding:
         assert response.status_code == 501
 
     def test_the_page_advertises_the_oembed_endpoint(self, published_server):
-        """Discovery is how a wiki turns a pasted link into the card without
-        being told the endpoint exists."""
+        """Discovery lets a wiki unfurl a pasted link without being told the endpoint."""
         import httpx
 
         base_url, token, _ = published_server
@@ -993,7 +919,7 @@ class TestEmbedding:
 
 
 class TestRoCrate:
-    """The chain as RO-Crate JSON-LD — the form software reads."""
+    """The chain as RO-Crate JSON-LD, the form software reads."""
 
     @staticmethod
     def _crate(store, tmp_path, *, source="rows = [1]"):
@@ -1058,9 +984,7 @@ class TestRoCrate:
                 yield from TestRoCrate._refs(inner)
 
     def test_every_reference_resolves_inside_the_crate(self, store, tmp_path):
-        """A dangling @id makes the graph useless to the software it is for,
-        and nothing about the crate looks wrong until something tries to walk
-        it."""
+        """A dangling @id makes the graph useless, and nothing looks wrong until it is walked."""
         crate, _, _ = self._crate(store, tmp_path)
         ids = {entity["@id"] for entity in crate["@graph"]}
 
@@ -1076,10 +1000,8 @@ class TestRoCrate:
     def test_a_table_input_is_declared_not_just_referenced(self, store, tmp_path):
         """Non-artifact inputs are named by ``object`` and need an entity.
 
-        The first version of this only emitted entities for artifact nodes, so
-        a figure read from an Iceberg table produced a reference to a
-        `@id` nothing declared. The dangling-reference test missed it because
-        its fixture had only artifact inputs.
+        A figure read from an Iceberg table would otherwise reference an undeclared `@id`; the
+        dangling-reference test only has artifact inputs.
         """
         from strata.api.provenance_ld import build_crate
         from strata.notebook.artifact_integration import NotebookArtifactManager
@@ -1128,9 +1050,7 @@ class TestRoCrate:
     def test_two_versions_of_one_id_get_separate_entities(self, store, tmp_path):
         """JSON-LD flattening merges nodes that share an @id.
 
-        Fragment ids keyed on the artifact id alone collapsed two versions of a
-        cell's output into one, asserting that a single source blob produced
-        both — silently wrong for exactly the machine consumers this is for.
+        Ids keyed on the artifact alone would collapse two versions into one entity.
         """
         from strata.api.provenance_ld import _action_id, _source_id
 
@@ -1143,9 +1063,7 @@ class TestRoCrate:
         assert _action_id(_Node(1)) != _action_id(_Node(2))
 
     def test_the_digest_survives_json_ld_expansion(self, store, tmp_path):
-        """`sha256` is not an RO-Crate 1.1 term, and undefined terms are
-        discarded on expansion — the integrity claim would look present in the
-        raw JSON and be invisible in RDF."""
+        """`sha256` is not an RO-Crate 1.1 term, and undefined terms vanish on expansion."""
         crate, _, _ = self._crate(store, tmp_path)
 
         context = crate["@context"]
@@ -1156,9 +1074,7 @@ class TestRoCrate:
         )
 
     def test_an_author_with_a_space_is_a_usable_identifier(self, store, tmp_path):
-        """`--author "F. Li"` produced `@id: "#agent-F. Li"`. A space is
-        illegal in an IRI, so strict processors drop the node and the
-        authorship link vanishes."""
+        """A space is illegal in an IRI, so strict processors would drop `#agent-F. Li`."""
         crate, _, _ = self._crate(store, tmp_path)
 
         agents = [e for e in crate["@graph"] if e.get("@type") == "Person"]
@@ -1167,9 +1083,7 @@ class TestRoCrate:
         assert all(" " not in agent["@id"] for agent in agents)
 
     def test_upstream_steps_are_described_but_not_claimed_as_files(self, store, tmp_path):
-        """Publishing shows which steps produced a result; it does not hand
-        over the upstream data. Listing them under hasPart would assert files
-        that are not in the crate — a lie no validator would catch."""
+        """Upstream data is not in the crate, so listing it under hasPart would be false."""
         crate, upstream, _ = self._crate(store, tmp_path)
         root = next(e for e in crate["@graph"] if e["@id"] == "./")
         upstream_id = f"{upstream.id}@v={upstream.version}"
@@ -1196,8 +1110,7 @@ class TestRoCrate:
         assert source["text"] == "plt.plot(rows)"
 
     def test_the_deposited_crate_declares_what_it_conforms_to(self, store, tmp_path):
-        """Without the descriptor a repository has a folder of JSON, not a
-        crate it can recognise."""
+        """Without the descriptor a repository sees a folder of JSON, not a crate."""
         crate, _, _ = self._crate(store, tmp_path)
 
         descriptor = next(e for e in crate["@graph"] if e["@id"] == "ro-crate-metadata.json")
@@ -1206,9 +1119,7 @@ class TestRoCrate:
         assert descriptor["about"]["@id"] == "./"
 
     def test_source_cannot_break_out_of_the_inline_script(self, store, tmp_path):
-        """Cell source is user-written and the page embeds it inside a
-        <script> block, where html.escape would corrupt the JSON while leaving
-        the injection."""
+        """Cell source sits in a <script> block, where html.escape would not stop injection."""
         import json as jsonlib
         import re
 
@@ -1248,9 +1159,8 @@ class TestRoCrate:
 class TestBadge:
     """The README pill, and the claim its shape invites.
 
-    A shields-style badge reads `label | status`, green for good — a grammar
-    that asserts. Everything else here has been careful not to say a result was
-    verified, so these pin the ways the badge could quietly start saying it.
+    A shields-style `label | status` badge asserts; these pin the ways it could start saying a
+    result was verified.
     """
 
     def test_it_reports_the_chain_size_and_claims_nothing(self, published_server):
@@ -1267,11 +1177,7 @@ class TestBadge:
             assert claim not in svg.text.lower(), f"the badge asserts {claim!r}"
 
     def test_it_is_not_green(self, published_server):
-        """Green is the badge convention for "passing".
-
-        Borrowing it would smuggle back the reading every other surface here
-        refuses, without a word of text changing.
-        """
+        """Green means "passing" by badge convention."""
         import httpx
 
         base_url, token, _ = published_server
@@ -1282,9 +1188,7 @@ class TestBadge:
             assert green not in svg
 
     def test_a_withdrawn_publication_still_renders_and_says_so(self, published_server):
-        """A broken image in someone's README tells a reader nothing except
-        that the server is unwell. The badge has to keep rendering and stop
-        asserting."""
+        """A broken image says only that the server is unwell; the badge keeps rendering."""
         import httpx
 
         base_url, token, _ = published_server
@@ -1296,11 +1200,10 @@ class TestBadge:
         assert "withdrawn" in svg.text
 
     def test_the_text_cannot_overflow_its_pill(self, published_server):
-        """Widths are estimated from a font this server cannot know renders.
+        """Widths are estimated from a font the server cannot know renders.
 
-        Every run is drawn with `textLength`, so a bad estimate looks loose or
-        tight but never spills text past the edge — which is the one failure
-        that would look like a broken build rather than a design choice.
+        Every run uses `textLength`, so a bad estimate looks loose or tight but never spills past
+        the edge.
         """
         from strata.api.badge import render_badge
 
@@ -1322,7 +1225,7 @@ class TestBadge:
 
 
 class TestExternalInputs:
-    """Bytes a cell fetched from a URL, listed by URL, digest and time. Item 44."""
+    """Bytes a cell fetched from a URL, listed by URL, digest and time."""
 
     DIGEST = "d" * 64
 
@@ -1377,8 +1280,7 @@ class TestExternalInputs:
         assert html.count(url) == 1
 
     def test_a_hostile_url_is_printed_not_linked(self, tmp_path):
-        """The record is the page's only source, and a record is not trusted to
-        hold only https."""
+        """The record is not trusted to hold only https."""
         html = self._page(*self._published(tmp_path, "javascript:alert(1)//<script>x</script>"))
 
         assert "<script>x</script>" not in html
@@ -1407,8 +1309,7 @@ class TestExternalInputs:
 
 
 class TestWhatPublishingRequires:
-    """A publication is the strongest read there is: anyone with the link gets
-    the bytes, with no credentials at all."""
+    """A publication is the strongest read: anyone with the link gets the bytes."""
 
     @staticmethod
     def _service(monkeypatch, tmp_path, acl):
@@ -1509,9 +1410,10 @@ class TestACitationCannotBeRepointed:
 
 class TestWhatTheSweepProtects:
     def test_a_published_figures_inputs_survive_when_the_edge_is_a_name(self, store):
-        """A ``@dataset`` cell, and any input given as ``strata://name/…``,
-        records the name it asked for against the version that answered. The
-        sweep has to follow that edge, or the page's chain loses its inputs."""
+        """A ``@dataset`` or ``strata://name/…`` input records a name edge.
+
+        The sweep must follow it, or the page's chain loses its inputs.
+        """
         rows = _ready_artifact(store, "rows", b"[1]")
         store.set_name("team/rows", "rows", rows)
         figure = store.create_artifact(

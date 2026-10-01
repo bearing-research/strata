@@ -1,6 +1,4 @@
-"""Tests for the PostgreSQL DriverAdapter — contract and fingerprint
-shape with mocked ADBC connections. Real-DB integration tests live in
-a separate testcontainers-backed slice."""
+"""PostgreSQL DriverAdapter contract and fingerprint shape, with mocked ADBC connections."""
 
 from __future__ import annotations
 
@@ -19,11 +17,8 @@ from strata.notebook.sql.drivers.postgresql import PostgresAdapter, _splice_user
 class _FakeCursor:
     """Minimal DBAPI cursor that returns scripted rows.
 
-    ``rows`` is a list of (query_substring, result) pairs; the next
-    ``fetchone``/``fetchall`` call uses the result whose query
-    substring matches the most recently executed SQL. ``executions``
-    records every (sql, params) pair so tests can assert what the
-    adapter ran.
+    ``rows`` is a list of (query_substring, result) pairs: a fetch returns the result whose
+    substring matches the last executed SQL. ``executions`` records every (sql, params).
     """
 
     def __init__(self, scripts: list[tuple[str, object]]):
@@ -84,8 +79,7 @@ def test_capabilities_match_design_doc():
 
 
 def test_connection_id_stable_across_url_and_components():
-    """Two specs that describe the same connection produce the same id —
-    one via uri, the other via discrete fields."""
+    """The same connection via uri and via discrete fields produces the same id."""
     a = PostgresAdapter()
     via_uri = ConnectionSpec(
         name="x",
@@ -104,9 +98,7 @@ def test_connection_id_stable_across_url_and_components():
 
 
 def test_connection_id_excludes_password_and_runtime_tunables():
-    """Password is a secret; application_name and connect_timeout are
-    runtime tunables that don't change object visibility. None of
-    them belong in the cache key."""
+    """Password, application_name and connect_timeout don't change object visibility."""
     a = PostgresAdapter()
     base = ConnectionSpec(
         name="x",
@@ -137,8 +129,7 @@ def test_connection_id_excludes_password_and_runtime_tunables():
 
 
 def test_connection_id_changes_on_identity_shaping_fields():
-    """Host, port, database, user, role, search_path all change object
-    visibility — distinct connection ids."""
+    """Host, port, database, user, role and search_path all change object visibility."""
     a = PostgresAdapter()
     base = ConnectionSpec(
         name="x",
@@ -175,9 +166,7 @@ def test_connection_id_changes_on_identity_shaping_fields():
 
 
 def test_connection_id_resolves_auth_user_indirection(monkeypatch):
-    """Two specs that reference the same env var as ``auth.user``
-    produce the same connection_id, and changing the env var changes
-    the id (because the resolved user differs)."""
+    """Same ``auth.user`` env var gives the same id; changing its value changes the id."""
     a = PostgresAdapter()
     monkeypatch.setenv("PGUSER", "alice")
     spec = ConnectionSpec(
@@ -197,9 +186,7 @@ def test_connection_id_resolves_auth_user_indirection(monkeypatch):
 
 
 def test_connection_id_falls_back_when_auth_var_missing(monkeypatch):
-    """If the auth env var isn't set yet (e.g. notebook just opened),
-    the canonicalization shouldn't crash — it falls back to the raw
-    spec value so the id stays stable across reads."""
+    """An unset auth env var falls back to the raw spec value, so the id stays stable."""
     a = PostgresAdapter()
     monkeypatch.delenv("PGUSER", raising=False)
     spec = ConnectionSpec(
@@ -218,8 +205,7 @@ def test_connection_id_falls_back_when_auth_var_missing(monkeypatch):
 
 
 def test_open_with_read_only_sets_session_read_only():
-    """Read-only enforcement is the security boundary — must run the
-    SET statement before the cell can issue queries."""
+    """Read-only is the security boundary: the SET runs before the cell can query."""
     cursor = _FakeCursor(scripts=[])
     conn = _FakeConn(cursor)
     a = PostgresAdapter(connect_fn=lambda uri: conn)
@@ -233,9 +219,7 @@ def test_open_with_read_only_sets_session_read_only():
 
 
 def test_open_without_read_only_skips_set():
-    """A non-read-only open shouldn't run the SET — that mode is
-    reserved for SQL cells, not for general adapter use (e.g.
-    administrative work that might write)."""
+    """Read-only mode is for SQL cells, not general adapter use that might write."""
     cursor = _FakeCursor(scripts=[])
     conn = _FakeConn(cursor)
     a = PostgresAdapter(connect_fn=lambda uri: conn)
@@ -307,7 +291,6 @@ def test_open_builds_uri_from_components(monkeypatch):
 
 
 def test_splice_userinfo_preserves_path_and_port():
-    """Spec contract for the URI splicer used by open()."""
     out = _splice_userinfo(
         "postgresql://existing@db.host:5432/events?sslmode=require",
         "alice",
@@ -318,8 +301,7 @@ def test_splice_userinfo_preserves_path_and_port():
 
 
 def test_splice_userinfo_handles_special_chars():
-    """Passwords with @ / : / # must round-trip through the URI
-    correctly (percent-encoded), not break the parser."""
+    """Passwords with @ / : / # are percent-encoded, not broken by the parser."""
     out = _splice_userinfo(
         "postgresql://existing@h/d",
         "user@home",
@@ -343,10 +325,10 @@ def test_probe_freshness_empty_tables_returns_empty_token():
 
 
 def test_probe_freshness_token_reflects_dml_relfilenode_and_schema():
-    """Same (dml, relfilenode, resolved_schema) → same token. Any of
-    the three changing flips it. Resolved-schema is in there so an
-    unqualified name pointing at a different schema across
-    connections produces a different fingerprint."""
+    """Any of (dml, relfilenode, resolved_schema) changing flips the token.
+
+    Resolved schema is folded in so an unqualified name that resolves elsewhere differs.
+    """
     a = PostgresAdapter()
 
     def make_token(dml: int, relfilenode: int, resolved_schema: str = "public") -> bytes:
@@ -364,8 +346,7 @@ def test_probe_freshness_token_reflects_dml_relfilenode_and_schema():
 
 
 def test_probe_freshness_is_order_invariant():
-    """Sorting tables internally means the token doesn't depend on
-    which order the SQL parser yielded them."""
+    """The token doesn't depend on the order the SQL parser yielded the tables."""
     a = PostgresAdapter()
     # Map identifier-string → (dml, relfilenode, resolved_schema).
     rows = {
@@ -398,10 +379,7 @@ def test_probe_freshness_is_order_invariant():
 
 
 def test_probe_freshness_missing_table_marks_session_only():
-    """When ``to_regclass`` returns NULL (table doesn't exist or the
-    name doesn't resolve under the current ``search_path``), we can't
-    derive a stable fingerprint and must surface it as a session-only
-    token."""
+    """A NULL ``to_regclass`` (missing or unresolvable table) gives a session-only token."""
     a = PostgresAdapter()
     cursor = _FakeCursor(scripts=[("to_regclass", None)])
     conn = _FakeConn(cursor)
@@ -410,9 +388,7 @@ def test_probe_freshness_missing_table_marks_session_only():
 
 
 def test_probe_freshness_uses_to_regclass_for_qualified_name():
-    """A schema-qualified table is passed as ``"schema"."name"`` to
-    ``to_regclass``; an unqualified table is passed as ``"name"``
-    alone, so the connection's ``search_path`` does the resolution."""
+    """A qualified table goes to ``to_regclass`` as ``"schema"."name"``, an unqualified one bare."""
     a = PostgresAdapter()
     cursor = _FakeCursor(scripts=[("to_regclass", (1, 2, "analytics"))])
     conn = _FakeConn(cursor)
@@ -426,10 +402,7 @@ def test_probe_freshness_uses_to_regclass_for_qualified_name():
 
 
 def test_probe_freshness_lets_search_path_resolve_unqualified_name():
-    """Unqualified names must NOT be hardcoded to public — the probe
-    has to let the connection's effective ``search_path`` resolve
-    them, otherwise we fingerprint the wrong table when search_path
-    starts with anything other than ``public``."""
+    """Unqualified names resolve via the live ``search_path``, not a hardcoded ``public``."""
     a = PostgresAdapter()
     cursor = _FakeCursor(scripts=[("to_regclass", (1, 2, "analytics"))])
     conn = _FakeConn(cursor)
@@ -442,9 +415,7 @@ def test_probe_freshness_lets_search_path_resolve_unqualified_name():
 
 
 def test_probe_freshness_resolved_schema_distinguishes_unqualified_collisions():
-    """Two connections with different search_paths probing the same
-    unqualified name produce different tokens — the fingerprint folds
-    in the resolved schema, not just the input string."""
+    """Different search_paths probing one unqualified name produce different tokens."""
     a = PostgresAdapter()
 
     def token_for_resolved(resolved_schema: str) -> bytes:
@@ -461,8 +432,7 @@ def test_probe_freshness_resolved_schema_distinguishes_unqualified_collisions():
 
 
 def test_probe_schema_token_reflects_columns():
-    """Identical column list → identical token. Add/remove a column
-    or change a type → different token."""
+    """Adding or removing a column, or changing a type, changes the token."""
     a = PostgresAdapter()
 
     def make_token(rows):
@@ -493,9 +463,7 @@ def test_probe_schema_token_reflects_columns():
 
 
 def test_probe_schema_uses_to_regclass():
-    """Schema probe must use the same ``to_regclass`` resolution as
-    the freshness probe so unqualified names use the live
-    search_path."""
+    """The schema probe resolves names with ``to_regclass``, like the freshness probe."""
     a = PostgresAdapter()
     cursor = _FakeCursor(scripts=[("pg_attribute", [])])
     conn = _FakeConn(cursor)
@@ -506,10 +474,11 @@ def test_probe_schema_uses_to_regclass():
 
 
 def test_probes_ask_for_the_names_postgres_stores():
-    """Postgres folds an unquoted identifier to lowercase, so ``FROM
-    Analytics.Events`` reads ``analytics.events``. The probe quotes what it is
-    given, and asking for ``"Analytics"."Events"`` found nothing: the token
-    never moved however the table changed. A quoted name is stored as written."""
+    """Postgres folds unquoted identifiers to lowercase; the probe must ask for that.
+
+    ``FROM Analytics.Events`` reads ``analytics.events``; probing ``"Analytics"."Events"``
+    finds nothing and the token never moves. A quoted name is stored as written.
+    """
     from strata.notebook.sql.analyzer import analyze_sql_cell
 
     analysis = analyze_sql_cell(
@@ -543,9 +512,7 @@ def test_probe_schema_empty_tables_returns_empty_token():
 
 
 def test_open_applies_role():
-    """Codex review fix: ``role`` is in connection_id, so open() must
-    actually apply it to the live session — otherwise cache identity
-    diverges from execution semantics."""
+    """``role`` is in connection_id, so open() must apply it to the live session."""
     cursor = _FakeCursor(scripts=[])
     conn = _FakeConn(cursor)
     a = PostgresAdapter(connect_fn=lambda uri: conn)
@@ -562,8 +529,7 @@ def test_open_applies_role():
 
 
 def test_open_rejects_role_with_invalid_chars():
-    """``SET ROLE`` doesn't accept bind parameters; the role identifier
-    must be validated strictly to prevent injection."""
+    """``SET ROLE`` takes no bind parameters, so the role is validated strictly."""
     a = PostgresAdapter(connect_fn=lambda uri: _FakeConn(_FakeCursor(scripts=[])))
     spec = ConnectionSpec(
         name="x",
@@ -634,8 +600,7 @@ def test_open_rejects_search_path_with_invalid_entries():
 
 
 def test_postgres_adapter_is_auto_registered():
-    """Importing the sql package should register the Postgres adapter
-    so SQL cell validation can recognize the driver."""
+    """Importing the sql package registers the driver so SQL cell validation knows it."""
     from strata.notebook.sql import get_adapter, known_drivers
 
     assert "postgresql" in known_drivers()
@@ -643,11 +608,7 @@ def test_postgres_adapter_is_auto_registered():
 
 
 def test_every_advertised_builtin_driver_registers():
-    """Codex review fix: catch the failure mode where a driver name
-    appears in ``_BUILTIN_DRIVERS`` but the corresponding module
-    doesn't exist (or doesn't expose ``register()``). Without this
-    test, an extra in pyproject.toml could advertise a driver that
-    silently fails to register."""
+    """Every name in ``_BUILTIN_DRIVERS`` has a module exposing ``register()``."""
     from strata.notebook.sql import known_drivers
     from strata.notebook.sql.drivers import (
         builtin_driver_names,

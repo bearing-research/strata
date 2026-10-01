@@ -1,9 +1,7 @@
 """Unit tests for the typed data-plane dependencies (``strata.api.dependencies``).
 
-The point of the dependencies is that a read route structurally cannot have
-opened the write gate. These tests exercise that at the dependency layer,
-without HTTP: under one service-mode config the read dependency yields a store
-while the registry write path is refused.
+A read route structurally cannot open the write gate: under one service-mode config the read
+dependency yields a store while the registry write path is refused.
 """
 
 import pytest
@@ -40,12 +38,8 @@ def _restore_state():
 
 
 def test_read_dependency_cannot_reach_write_gate_in_service_mode(tmp_path):
-    """Same service-mode config: reads open, the registry write gate is refused.
-
-    A read route asking for ``ReadStore`` gets a usable store; the registry
-    decision path (which opens the service-mode write gate) 403s without
-    ``service_writes_enabled``. The read handler has no way to express the write
-    gate — that is the invariant the decomposition exists to protect.
+    """Same service-mode config: ``ReadStore`` resolves, the registry write gate 403s without
+    ``service_writes_enabled``.
     """
     _set_state(deployment_mode="service", artifact_dir=str(tmp_path / "artifacts"))
 
@@ -60,7 +54,7 @@ def test_read_dependency_cannot_reach_write_gate_in_service_mode(tmp_path):
 
 
 def test_personal_mode_opens_both_gates(tmp_path):
-    """Personal mode is the single operator: read + registry write both resolve."""
+    """Personal mode is the single operator: read and registry write both resolve."""
     _set_state(deployment_mode="personal", artifact_dir=str(tmp_path / "artifacts"))
 
     assert read_store() is not None
@@ -74,10 +68,7 @@ def test_personal_mode_opens_both_gates(tmp_path):
 
 
 def test_build_transport_gate_open_in_personal_mode(tmp_path):
-    """Personal mode (``writes_enabled``) makes signed build transport available.
-
-    ``BuildTransportStore`` then resolves to a real build store rather than 404ing.
-    """
+    """Personal mode (``writes_enabled``) makes ``BuildTransportStore`` resolve to a real store."""
     _set_state(deployment_mode="personal", artifact_dir=str(tmp_path / "artifacts"))
 
     assert build_transport_available() is True
@@ -85,9 +76,8 @@ def test_build_transport_gate_open_in_personal_mode(tmp_path):
 
 
 def test_build_transport_gate_404s_in_service_mode(tmp_path):
-    """Service mode without server transforms cannot issue/honor signed build URLs.
-
-    The transport dependency 404s — the gate the manifest + finalize routes adopt.
+    """Service mode without server transforms cannot honor signed build URLs, so the dependency
+    404s.
     """
     _set_state(deployment_mode="service", artifact_dir=str(tmp_path / "artifacts"))
 
@@ -100,10 +90,8 @@ def test_build_transport_gate_404s_in_service_mode(tmp_path):
 def test_require_build_store_500s_without_artifact_dir(tmp_path, monkeypatch):
     """An uninitialized build store is a 500 (misconfiguration), not a 404.
 
-    ``runtime_build_store`` returns ``None`` when there is nowhere to track builds;
-    the ``RequiredBuildStore`` dependency surfaces that as a 500 before the body
-    runs. (Simulated by forcing the resolver to ``None`` so the test does not
-    depend on a mode that forbids an ``artifact_dir``.)
+    The resolver is forced to ``None`` so the test does not depend on a mode without
+    ``artifact_dir``.
     """
     _set_state(deployment_mode="personal", artifact_dir=str(tmp_path / "artifacts"))
 
@@ -114,20 +102,16 @@ def test_require_build_store_500s_without_artifact_dir(tmp_path, monkeypatch):
 
 
 def test_runtime_build_store_resolves_when_artifact_dir_set(tmp_path):
-    """With an ``artifact_dir``, the resolver hands back a real build store."""
     _set_state(deployment_mode="personal", artifact_dir=str(tmp_path / "artifacts"))
 
     assert runtime_build_store() is not None
 
 
 class TestArtifactInputTenantGate:
-    """Artifact transform-inputs must clear the same tenant gate a direct
-    ``GET /v1/artifacts/{id}`` runs.
+    """Artifact transform inputs clear the same tenant gate as ``GET /v1/artifacts/{id}``.
 
-    Before this, ``strata://artifact/{id}@v={n}`` was parsed by regex with no
-    store lookup and no tenant filter at any layer, so naming another tenant's
-    artifact as a transform input read its blob — and in pull mode handed back
-    a signed download URL for it.
+    Otherwise naming another tenant's artifact as an input reads its blob, or in pull mode yields a
+    signed download URL for it.
     """
 
     def _seed(self, tmp_path, *, tenant):
@@ -176,10 +160,7 @@ class TestArtifactInputTenantGate:
 
 
 class TestArtifactListPaginationIsBounded:
-    """``limit`` / ``offset`` flowed straight into "LIMIT ? OFFSET ?", and
-    SQLite treats a NEGATIVE limit as unbounded — so ``?limit=-1``
-    materialized every artifact_versions row into a single response. On a
-    store with millions of versions that is an OOM, not a slow query."""
+    """SQLite treats a negative LIMIT as unbounded, so ``?limit=-1`` would load every row."""
 
     def test_negative_and_oversized_limits_are_rejected(self, tmp_path):
         from fastapi.testclient import TestClient

@@ -28,7 +28,7 @@ from strata.types import (
 
 @pytest.fixture
 def temp_warehouse_multi_files(tmp_path):
-    """Create a warehouse with multiple Parquet files for file-level pruning tests."""
+    """A warehouse with several Parquet files, for file-level pruning tests."""
     if sys.platform == "win32":
         pytest.skip("pyiceberg + pyarrow LocalFileSystem path handling broken on Windows")
     warehouse_path = tmp_path / "warehouse"
@@ -96,15 +96,12 @@ def temp_warehouse_multi_files(tmp_path):
 
 @pytest.fixture
 def strata_config(tmp_path):
-    """Create a test configuration."""
     cache_dir = tmp_path / "cache"
     cache_dir.mkdir()
     return StrataConfig(cache_dir=cache_dir)
 
 
 class TestFilterFingerprint:
-    """Tests for compute_filter_fingerprint."""
-
     def test_empty_filters_returns_nofilter(self):
         assert compute_filter_fingerprint(None) == "nofilter"
         assert compute_filter_fingerprint([]) == "nofilter"
@@ -126,7 +123,6 @@ class TestFilterFingerprint:
         assert compute_filter_fingerprint(filters1) != compute_filter_fingerprint(filters2)
 
     def test_filter_order_does_not_affect_fingerprint(self):
-        """Filters in different order should produce same fingerprint."""
         filters1 = [
             Filter(column="value", op=FilterOp.GT, value=100),
             Filter(column="id", op=FilterOp.LT, value=50),
@@ -144,7 +140,6 @@ class TestFilterFingerprint:
         assert len(fingerprint) == 16
 
     def test_datetime_fingerprint_is_stable(self):
-        """Same datetime should produce same fingerprint."""
         dt1 = datetime(2024, 1, 1, 12, 0, 0, tzinfo=UTC)
         dt2 = datetime(2024, 1, 1, 12, 0, 0, tzinfo=UTC)
         filters1 = [Filter(column="timestamp", op=FilterOp.GT, value=dt1)]
@@ -153,8 +148,6 @@ class TestFilterFingerprint:
 
 
 class TestFiltersToIcebergExpression:
-    """Tests for filters_to_iceberg_expression."""
-
     def test_empty_filters_returns_none(self):
         assert filters_to_iceberg_expression(None) is None
         assert filters_to_iceberg_expression([]) is None
@@ -187,13 +180,13 @@ class TestFiltersToIcebergExpression:
         assert isinstance(expr, And)
 
     def test_nested_column_filters_skipped(self):
-        """Filters on nested columns (with dots) should be skipped."""
+        """Filters on nested (dotted) columns are skipped."""
         filters = [Filter(column="nested.field", op=FilterOp.EQ, value="test")]
         expr = filters_to_iceberg_expression(filters)
         assert expr is None
 
     def test_mixed_nested_and_flat_filters(self):
-        """Only flat column filters should be included."""
+        """Only flat column filters are included."""
         from pyiceberg.expressions import EqualTo
 
         filters = [
@@ -205,10 +198,7 @@ class TestFiltersToIcebergExpression:
 
 
 class TestBuildColumnIndexMap:
-    """Tests for _build_column_index_map."""
-
     def test_flat_schema(self):
-        """Test with a simple flat schema."""
         import tempfile
 
         import pyarrow.parquet as pq
@@ -241,8 +231,6 @@ class TestBuildColumnIndexMap:
 
 
 class TestCompileFilters:
-    """Tests for _compile_filters."""
-
     def test_all_columns_exist(self):
         col_index_map = {"id": 0, "value": 1, "name": 2}
         filters = [
@@ -292,8 +280,6 @@ class TestPruningKeepsNaNRows:
 
 
 class TestFilterMatching:
-    """Tests for Filter.matches_stats."""
-
     def test_eq_in_range(self):
         f = Filter(column="value", op=FilterOp.EQ, value=50)
         assert f.matches_stats(0, 100) is True
@@ -361,7 +347,7 @@ class TestFilterMatching:
         assert f.matches_stats(0, 100) is False
 
     def test_null_stats_returns_true(self):
-        """If stats are None, can't prune - return True."""
+        """With no stats the row group cannot be pruned."""
         f = Filter(column="value", op=FilterOp.GT, value=50)
         assert f.matches_stats(None, 100) is True
         assert f.matches_stats(0, None) is True
@@ -369,12 +355,12 @@ class TestFilterMatching:
 
 
 class TestTwoTierPruning:
-    """Integration tests for two-tier pruning (Iceberg file + Parquet row-group)."""
+    """Two-tier pruning: Iceberg files, then Parquet row groups."""
 
     def test_planning_with_filters_includes_fingerprint(
         self, temp_warehouse_multi_files, strata_config
     ):
-        """Verify that planning with filters uses filter fingerprint in cache key."""
+        """The filter fingerprint is part of the cache key."""
         planner = ReadPlanner(strata_config)
 
         filters = [Filter(column="value", op=FilterOp.LT, value=150)]
@@ -385,7 +371,7 @@ class TestTwoTierPruning:
     def test_different_filters_produce_separate_cache_entries(
         self, temp_warehouse_multi_files, strata_config
     ):
-        """Different filters should use different manifest cache entries."""
+        """Different filters use different manifest cache entries."""
         planner = ReadPlanner(strata_config)
 
         filters1 = [Filter(column="value", op=FilterOp.LT, value=50)]
@@ -399,7 +385,7 @@ class TestTwoTierPruning:
         assert stats["filtered"]["misses"] >= 2
 
     def test_same_filters_reuse_cache(self, temp_warehouse_multi_files, strata_config):
-        """Same filters should reuse manifest cache entry."""
+        """Same filters reuse the manifest cache entry."""
         planner = ReadPlanner(strata_config)
 
         filters = [Filter(column="value", op=FilterOp.LT, value=150)]
@@ -412,7 +398,7 @@ class TestTwoTierPruning:
         assert stats["filtered"]["hits"] >= 1
 
     def test_no_filters_uses_unfiltered_cache(self, temp_warehouse_multi_files, strata_config):
-        """Queries without filters should use unfiltered manifest cache."""
+        """A query without filters uses the unfiltered manifest cache."""
         planner = ReadPlanner(strata_config)
 
         planner.plan(temp_warehouse_multi_files["table_uri"])
@@ -422,7 +408,6 @@ class TestTwoTierPruning:
         assert stats["unfiltered"]["hits"] >= 1
 
     def test_filter_on_string_column(self, temp_warehouse_multi_files, strata_config):
-        """Test filtering on string columns."""
         planner = ReadPlanner(strata_config)
 
         filters = [Filter(column="category", op=FilterOp.EQ, value="A")]
@@ -432,7 +417,7 @@ class TestTwoTierPruning:
         assert len(plan.tasks) >= 0  # May or may not prune depending on stats
 
     def test_combined_filters(self, temp_warehouse_multi_files, strata_config):
-        """Test multiple filters combined with AND logic."""
+        """Multiple filters combine with AND."""
         planner = ReadPlanner(strata_config)
 
         filters = [
@@ -445,12 +430,10 @@ class TestTwoTierPruning:
 
 
 class TestIcebergExpressionFallback:
-    """Test that Iceberg expression failures fall back gracefully."""
-
     def test_invalid_filter_falls_back_to_unfiltered(
         self, temp_warehouse_multi_files, strata_config
     ):
-        """If Iceberg expression fails, should fall back to unfiltered scan."""
+        """A failing Iceberg expression falls back to an unfiltered scan."""
         planner = ReadPlanner(strata_config)
 
         # An unknown column exercises the fallback path when Iceberg cannot use a filter.
@@ -463,17 +446,13 @@ class TestIcebergExpressionFallback:
 
 
 class TestScanProjectionContract:
-    """A scan's ``columns`` list was neither validated nor reflected."""
+    """A scan's ``columns`` list is validated and reflected in the response schema."""
 
     def test_a_column_that_does_not_exist_is_refused(self, temp_warehouse, strata_config):
-        """It used to return another column's data under the requested name.
+        """An unknown column must not come back holding another column's data.
 
-        Nothing validated the projection of a single-file table.
-        ``_project_batch`` then resolves
-        each name with ``schema.get_field_index(name)``, which returns ``-1``
-        for an unknown name, and ``batch.column(-1)`` is the LAST column. So
-        ``columns=["id", "nope"]`` came back as a two-column batch whose
-        ``nope`` held the final column's values, with no error anywhere.
+        ``get_field_index`` returns -1 for an unknown name, and ``batch.column(-1)`` is the last
+        column.
         """
         planner = ReadPlanner(strata_config)
 
@@ -491,13 +470,9 @@ class TestScanProjectionContract:
     def test_an_empty_result_advertises_the_same_columns_as_a_full_one(
         self, temp_warehouse, strata_config
     ):
-        """``plan.schema`` IS the response schema when there are no tasks.
+        """``plan.schema`` is the response schema when there are no tasks.
 
-        Neither the Parquet file schema nor the Iceberg table schema is
-        projected, so a scan for one column that matched rows streamed one
-        column, while the same scan matching none streamed every column —
-        the shape depended on the data, which breaks anything concatenating
-        partitioned scans or asserting on the schema.
+        An unprojected schema makes the response shape depend on whether any rows matched.
         """
         planner = ReadPlanner(strata_config)
         uri = temp_warehouse["table_uri"]
@@ -520,12 +495,9 @@ class TestScanProjectionContract:
         assert plan.schema.names == ["name", "id"]
 
     def test_the_fetcher_helper_is_loud_rather_than_wrong(self):
-        """Defense in depth for the same hazard.
+        """Defense in depth: the planner already rejects unknown columns.
 
-        The planner now rejects an unknown column before a task exists, so
-        this should be unreachable — but the helper indexed by
-        ``get_field_index``, whose -1 for an unknown name silently selected
-        the last column. Indexing by name costs the same and raises.
+        Indexing by name raises where ``get_field_index``'s -1 would select the last column.
         """
         import pyarrow as pa
 

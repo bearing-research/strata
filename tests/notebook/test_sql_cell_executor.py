@@ -27,8 +27,7 @@ def _seed_sqlite(path: Path) -> None:
 
 
 def _with_unresolved_table(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Make the executor's analysis report a table named only at run time,
-    as Snowflake's ``IDENTIFIER($tbl)`` does, on top of the real analysis."""
+    """Make analysis report a table named only at run time, like Snowflake ``IDENTIFIER($tbl)``."""
     import dataclasses
 
     from strata.notebook.sql import cell_executor
@@ -43,9 +42,11 @@ def _with_unresolved_table(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.mark.asyncio
 async def test_a_table_named_at_run_time_is_never_served_from_cache(tmp_path, monkeypatch):
-    """Under the default fingerprint cache, a table the analyzer cannot name
-    is missing from the freshness token, so a cached result could outlive a
-    change to it: the cell runs the query every time."""
+    """Under the default fingerprint policy, a table the analyzer cannot name forces a run.
+
+    It is missing from the freshness token, so a cached result could outlive a
+    change to it.
+    """
     db_path = tmp_path / "events.db"
     _seed_sqlite(db_path)
     nb_dir = _build_notebook_with_sql_cell(
@@ -67,8 +68,7 @@ async def test_a_table_named_at_run_time_is_never_served_from_cache(tmp_path, mo
 
 @pytest.mark.asyncio
 async def test_a_declared_cache_policy_still_reuses_a_run_time_table(tmp_path, monkeypatch):
-    """``# @cache session`` says what the rows depend on without a probe, so
-    a table named at run time does not stop the cell from reusing them."""
+    """``# @cache session`` needs no probe, so a run-time table does not block reuse."""
     db_path = tmp_path / "events.db"
     _seed_sqlite(db_path)
     nb_dir = _build_notebook_with_sql_cell(
@@ -96,8 +96,7 @@ def _build_notebook_with_sql_cell(
     cell_id: str = "c1",
     cell_source: str,
 ) -> Path:
-    """Materialize a notebook directory with one [connections.db] +
-    one SQL cell. Returns the notebook directory."""
+    """Write a notebook directory with one [connections.db] and one SQL cell; returns its path."""
     from strata.notebook.writer import add_cell_to_notebook, create_notebook, write_cell
 
     nb_dir = create_notebook(tmp_path, "sql_e2e")
@@ -163,8 +162,7 @@ async def test_sql_cell_executes_and_returns_arrow_table(tmp_path):
 
 @pytest.mark.asyncio
 async def test_sql_cell_cache_hit_on_unchanged_inputs(tmp_path):
-    """``# @cache forever`` skips the freshness probe; running twice
-    in a row must return the same artifact with cache_hit=True."""
+    """``# @cache forever`` skips the probe; the second run returns the same artifact as a hit."""
     db_path = tmp_path / "events.db"
     _seed_sqlite(db_path)
     nb_dir = _build_notebook_with_sql_cell(
@@ -189,20 +187,11 @@ async def test_sql_cell_cache_hit_on_unchanged_inputs(tmp_path):
 
 @pytest.mark.asyncio
 async def test_sql_cell_fingerprint_invalidates_on_schema_change(tmp_path):
-    """Fingerprint policy folds SQLite's ``PRAGMA schema_version``
-    into the hash. After an external DDL change, the second run
-    must re-execute rather than serve the stale artifact.
+    """External DDL changes SQLite's ``schema_version``, so the next run re-executes.
 
-    Note: ``PRAGMA data_version`` *also* feeds the freshness token,
-    but it's only meaningful when the probe connection stays open
-    across the write — a fresh-open / read / close cycle always
-    starts at 1 cross-process. SQLite's design treats data_version
-    as "this connection's view of the file's write counter," not
-    "the file's absolute write counter." The schema_version value
-    in contrast does refresh on each fresh open, so DDL changes
-    invalidate cleanly. DML invalidation in a multi-process SQLite
-    setup is a known limitation; users with that workload should
-    pin ``# @cache session`` or accept the coarser granularity."""
+    ``PRAGMA data_version`` also feeds the token but starts at 1 on every fresh
+    connection, so DML across processes does not invalidate: a known limitation.
+    """
     db_path = tmp_path / "events.db"
     _seed_sqlite(db_path)
     nb_dir = _build_notebook_with_sql_cell(
@@ -239,18 +228,11 @@ async def test_sql_cell_fingerprint_invalidates_on_schema_change(tmp_path):
 
 @pytest.mark.asyncio
 async def test_sql_cell_read_only_enforces_no_writes(tmp_path):
-    """A SQL cell that tries to INSERT must fail and leave the DB
-    untouched. The executor opens the connection in enforced
-    read-only mode (URI ``mode=ro`` plus ``PRAGMA query_only=ON``);
-    that is the security boundary, not SQL-text keyword filtering.
+    """An INSERT fails and leaves the DB untouched; the read-only connection is the boundary.
 
-    Note: ADBC's SQLite driver collapses SQLite's "attempt to write
-    a readonly database" message into a generic ``InternalError``
-    at the Python surface (the descriptive OperationalError fires
-    during statement finalization in ``__del__`` and is only
-    logged). The cell-level contract Strata pins is "this fails
-    and the DB is untouched"; pinning the exact message text would
-    couple us to ADBC internals."""
+    ADBC reports the read-only write as a generic ``InternalError``, so the
+    message text is not pinned.
+    """
     db_path = tmp_path / "events.db"
     _seed_sqlite(db_path)
     nb_dir = _build_notebook_with_sql_cell(
@@ -278,9 +260,7 @@ async def test_sql_cell_read_only_enforces_no_writes(tmp_path):
 
 @pytest.mark.asyncio
 async def test_sql_cell_bind_param_from_upstream_python_cell(tmp_path):
-    """Cross-language wiring: a Python cell defines a variable, a
-    SQL cell binds against it via ``:name``. This is the integration
-    test that exercises every slice 6–9 piece together."""
+    """A Python cell's variable binds into a SQL cell via ``:name``."""
     from strata.notebook.parser import parse_notebook
     from strata.notebook.session import NotebookSession
     from strata.notebook.writer import (
@@ -353,13 +333,11 @@ async def test_sql_cell_missing_connection_yields_clear_error(tmp_path):
 
 @pytest.mark.asyncio
 async def test_sql_cell_stays_ready_after_staleness_recompute(tmp_path):
-    """Codex review fix: SQL cells must participate in the notebook's
-    standard staleness machinery so a recompute or reopen keeps them
-    READY. The SQL executor stores artifacts under a SQL-specific
-    per-variable hash that ``compute_staleness`` doesn't recompute,
-    so we have to persist the generic provenance triplet via
-    ``record_successful_execution_provenance`` and let the
-    ``can_preserve_uncached_ready`` path mark the cell READY."""
+    """SQL cells stay READY after a staleness recompute.
+
+    Their artifacts sit under a SQL-specific hash that ``compute_staleness`` does
+    not recompute, so the recorded generic provenance triplet is what keeps them READY.
+    """
     from strata.notebook.executor import CellExecutor
     from strata.notebook.models import CellStatus
 
@@ -400,13 +378,11 @@ async def test_sql_cell_stays_ready_after_staleness_recompute(tmp_path):
 
 @pytest.mark.asyncio
 async def test_sql_cell_artifact_uri_visible_to_downstream_python(tmp_path):
-    """Codex review fix: ``cell.artifact_uris`` must be set after a
-    successful SQL execution so a downstream Python cell's
-    ``_collect_input_hashes`` finds the upstream artifact. Without
-    this, the downstream provenance hash is computed without the
-    SQL input hash — silently identical across SQL-content changes,
-    so the downstream cell would serve a stale cached value after
-    the SQL upstream's data shifts."""
+    """``cell.artifact_uris`` is set after a SQL run so downstream provenance includes it.
+
+    Otherwise the downstream hash ignores the SQL input and serves a stale value
+    after the SQL data shifts.
+    """
     from strata.notebook.executor import CellExecutor
     from strata.notebook.parser import parse_notebook
     from strata.notebook.session import NotebookSession
@@ -464,9 +440,7 @@ async def test_sql_cell_artifact_uri_visible_to_downstream_python(tmp_path):
 
 @pytest.mark.asyncio
 async def test_sql_cell_executor_dispatched_via_main_executor(tmp_path):
-    """The ``CellExecutor`` dispatches ``language='sql'`` to the SQL
-    path. This is the wiring point that makes the slice 8 helpers
-    no longer dead code in production — see the prior Codex review."""
+    """``CellExecutor`` dispatches ``language='sql'`` to the SQL path."""
     from strata.notebook.executor import CellExecutor
 
     db_path = tmp_path / "events.db"
@@ -512,10 +486,7 @@ def _load_artifact_as_arrow(session: Any, uri: str) -> Any:
 
 @pytest.mark.asyncio
 async def test_sql_write_cell_creates_table_and_inserts_rows(tmp_path):
-    """A write cell opens the connection writable, splits the body
-    into statements via sqlglot, and runs each in sequence. The
-    cell still produces an Arrow artifact (a status table) so
-    downstream cells can find it via cell.artifact_uris."""
+    """A write cell runs each statement and still stores a status artifact for downstreams."""
     db_path = tmp_path / "fresh.db"
     nb_dir = _build_notebook_with_sql_cell(
         tmp_path,
@@ -543,9 +514,7 @@ async def test_sql_write_cell_creates_table_and_inserts_rows(tmp_path):
 
 @pytest.mark.asyncio
 async def test_sql_write_cell_caches_within_session(tmp_path):
-    """Default cache policy for write cells is ``session`` — re-run
-    inside the same session cache-hits, dedup'ing minor edits to
-    downstream cells. (A new session would re-execute.)"""
+    """Write cells default to ``session`` caching, so a re-run in the same session hits."""
     db_path = tmp_path / "cache.db"
     nb_dir = _build_notebook_with_sql_cell(
         tmp_path,
@@ -575,8 +544,7 @@ async def test_sql_write_cell_caches_within_session(tmp_path):
 
 @pytest.mark.asyncio
 async def test_sql_write_cell_rejects_fingerprint_policy(tmp_path):
-    """Probe-based policies don't apply to writes — surface a clear
-    error instead of silently coercing."""
+    """Probe-based policies do not apply to writes; the error is explicit, not a coercion."""
     db_path = tmp_path / "x.db"
     nb_dir = _build_notebook_with_sql_cell(
         tmp_path,
@@ -595,9 +563,7 @@ async def test_sql_write_cell_rejects_fingerprint_policy(tmp_path):
 
 @pytest.mark.asyncio
 async def test_sql_write_false_still_blocks_writes(tmp_path):
-    """Without ``write=true``, the read-only enforcement still fires
-    — adding the new flag doesn't broaden the security boundary
-    for the default case."""
+    """Without ``write=true`` the read-only enforcement still fires."""
     _seed_sqlite(tmp_path / "events.db")
     nb_dir = _build_notebook_with_sql_cell(
         tmp_path,
@@ -619,9 +585,7 @@ async def test_sql_write_false_still_blocks_writes(tmp_path):
 
 @pytest.mark.asyncio
 async def test_sql_write_cell_makes_db_visible_to_read_cell(tmp_path):
-    """End-to-end: a write cell creates the DB, a read cell queries
-    it. This is the core "use a SQL cell instead of a Python seed"
-    workflow the example should support."""
+    """A write cell creates the DB and a read cell queries it."""
     from strata.notebook.executor import CellExecutor
     from strata.notebook.parser import parse_notebook
     from strata.notebook.session import NotebookSession
@@ -682,13 +646,10 @@ async def test_sql_write_cell_makes_db_visible_to_read_cell(tmp_path):
 
 @pytest.mark.asyncio
 async def test_sql_write_cell_resolves_bind_placeholders_from_upstream(tmp_path):
-    """Codex review fix: write cells go through the same analyzer +
-    bind layer as read cells. ``INSERT INTO t VALUES (:n)`` resolves
-    ``:n`` against the upstream namespace, type-checks via the bind
-    allowlist, and rewrites to the dialect's positional form before
-    cursor.execute. Without this, the write path bypassed binds
-    entirely and a ``:n`` token would appear verbatim in the
-    statement (or silently fail)."""
+    """Write cells resolve ``:n`` binds against upstreams, as read cells do.
+
+    Without binds the literal ``:n`` token would reach the driver.
+    """
     from strata.notebook.executor import CellExecutor
     from strata.notebook.parser import parse_notebook
     from strata.notebook.session import NotebookSession
@@ -737,10 +698,7 @@ async def test_sql_write_cell_resolves_bind_placeholders_from_upstream(tmp_path)
 
 @pytest.mark.asyncio
 async def test_sql_write_cell_invalidates_on_upstream_value_change(tmp_path):
-    """Codex review fix: upstream_input_hashes feeds the write
-    cell's provenance hash. Same source + different upstream value
-    must miss the cache (otherwise the seed silently re-uses the
-    old value)."""
+    """Same source with a different upstream value misses the cache."""
     from strata.notebook.executor import CellExecutor
     from strata.notebook.parser import parse_notebook
     from strata.notebook.session import NotebookSession
@@ -798,12 +756,7 @@ async def test_sql_write_cell_invalidates_on_upstream_value_change(tmp_path):
 
 @pytest.mark.asyncio
 async def test_sql_write_cell_honors_at_name_for_artifact_key(tmp_path):
-    """Codex review fix: the write path used to hardcode
-    ``output_name = "result"``, mismatching what the analyzer's
-    ``defines`` advertised when the cell carried ``# @name``.
-    Downstream cells looking up the named output by canonical id
-    would miss it. Now both the analyzer and the executor agree
-    on the name."""
+    """The write path keys its artifact by ``# @name``, matching the analyzer's ``defines``."""
     from strata.notebook.parser import parse_notebook
     from strata.notebook.session import NotebookSession
     from strata.notebook.sql.cell_executor import execute_sql_cell
@@ -839,11 +792,7 @@ async def test_sql_write_cell_honors_at_name_for_artifact_key(tmp_path):
 
 @pytest.mark.asyncio
 async def test_sql_write_cell_propagates_commit_failure(tmp_path, monkeypatch):
-    """Codex review fix: the write path used to swallow every
-    exception from ``conn.commit()``, so a real deferred-constraint
-    or transport failure surfaced as a misleading ``success=True``
-    with nothing actually persisted. Now commit errors propagate
-    as a normal cell error."""
+    """A failing ``conn.commit()`` fails the cell instead of reporting a false success."""
     from strata.notebook.sql.cell_executor import execute_sql_cell
     from strata.notebook.sql.drivers.sqlite import SqliteAdapter
 
@@ -881,13 +830,9 @@ async def test_sql_write_cell_propagates_commit_failure(tmp_path, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_sql_write_cell_emits_per_statement_status_table(tmp_path):
-    """The write-cell artifact is a per-statement table: one row
-    per statement with ``stmt`` (1-indexed), ``kind`` (CREATE
-    TABLE / INSERT / ...), and ``rows_affected`` (nullable; None
-    when the driver doesn't report — typically DDL). The earlier
-    one-row {statements_executed, last_rowcount} shape masked the
-    middle of multi-statement bodies and showed -1 for DDL,
-    confusing for users."""
+    """The write artifact has one row per statement: ``stmt`` (1-indexed), ``kind``,
+    and ``rows_affected`` (None when the driver does not report, typically DDL).
+    """
     db_path = tmp_path / "perstmt.db"
     nb_dir = _build_notebook_with_sql_cell(
         tmp_path,
@@ -925,10 +870,7 @@ async def test_sql_write_cell_emits_per_statement_status_table(tmp_path):
 
 @pytest.mark.asyncio
 async def test_sql_write_cell_recovers_rowcount_from_sqlite_changes(tmp_path):
-    """ADBC SQLite never populates cursor.rowcount (always -1).
-    The cell executor falls back to ``SELECT changes()`` so the
-    user sees the real count for INSERT / UPDATE / DELETE. Pins
-    that behavior across DML operations."""
+    """ADBC SQLite leaves rowcount at -1, so ``SELECT changes()`` supplies the DML count."""
     db_path = tmp_path / "rowcount.db"
     nb_dir = _build_notebook_with_sql_cell(
         tmp_path,
@@ -961,11 +903,7 @@ async def test_sql_write_cell_recovers_rowcount_from_sqlite_changes(tmp_path):
 
 
 def _load_arrow_from_uri(session: Any, uri: str) -> Any:
-    """Pull an artifact's bytes back and decode as a pyarrow Table.
-
-    Older tests in this file hand-rolled this; refactoring the
-    helper out keeps the per-statement test self-contained.
-    """
+    """Pull an artifact's bytes back and decode as a pyarrow Table."""
     return _load_artifact_as_arrow(session, uri)
 
 
@@ -973,12 +911,7 @@ def _load_arrow_from_uri(session: Any, uri: str) -> Any:
 
 
 def test_resolve_runtime_spec_rebases_credentials_paths(tmp_path):
-    """``credentials_path`` and ``write_credentials_path`` are
-    declared in ``notebook.toml`` and should be relative to the
-    notebook directory — same convention as SQLite ``path``. The
-    server's CWD is unrelated, so without rebasing a relative
-    ``creds/ro.json`` would be looked up under the launching
-    process's directory and fail to open."""
+    """Relative credentials paths resolve against the notebook dir, not the server's CWD."""
     from strata.notebook.models import ConnectionSpec
     from strata.notebook.sql.cell_executor import _resolve_runtime_spec
 
@@ -998,8 +931,7 @@ def test_resolve_runtime_spec_rebases_credentials_paths(tmp_path):
 
 
 def test_resolve_runtime_spec_leaves_absolute_credentials_paths_alone(tmp_path):
-    """An absolute ``credentials_path`` is already meaningful on
-    its own — don't munge it by joining with the notebook dir."""
+    """An absolute ``credentials_path`` is not joined with the notebook dir."""
     from strata.notebook.models import ConnectionSpec
     from strata.notebook.sql.cell_executor import _resolve_runtime_spec
 
@@ -1020,12 +952,7 @@ duckdb_lib = pytest.importorskip("duckdb")
 
 
 def _seed_duckdb(path: Path) -> None:
-    """Create a DuckDB file the cells can query.
-
-    Mirrors ``_seed_sqlite`` shape (``events`` with id/name/value/timestamp).
-    Using the native duckdb package directly — no harness, no notebook
-    yet — keeps this fixture independent of the rest of the SQL pipeline.
-    """
+    """Create a DuckDB file shaped like ``_seed_sqlite``'s ``events`` table."""
     conn = duckdb_lib.connect(str(path))
     try:
         conn.execute("CREATE TABLE events (id INTEGER PRIMARY KEY, name VARCHAR, value INTEGER)")
@@ -1043,7 +970,7 @@ def _build_notebook_with_duckdb_cell(
     cell_id: str = "c1",
     cell_source: str,
 ) -> Path:
-    """Materialize a notebook with a single DuckDB-bound SQL cell."""
+    """Write a notebook with a single DuckDB-bound SQL cell."""
     from strata.notebook.writer import add_cell_to_notebook, create_notebook, write_cell
 
     nb_dir = create_notebook(tmp_path, "duckdb_e2e")
@@ -1059,10 +986,7 @@ def _build_notebook_with_duckdb_cell(
 
 @pytest.mark.asyncio
 async def test_duckdb_cell_executes_and_returns_arrow_table(tmp_path):
-    """End-to-end: open notebook → execute SQL cell against DuckDB →
-    verify the artifact carries the rows. Exercises canonicalize →
-    open(read_only=True) → query → store-as-Arrow on a real DuckDB
-    file."""
+    """A SQL cell runs against a real DuckDB file and stores the rows as Arrow."""
     db_path = tmp_path / "events.duckdb"
     _seed_duckdb(db_path)
     nb_dir = _build_notebook_with_duckdb_cell(
@@ -1091,11 +1015,7 @@ async def test_duckdb_cell_executes_and_returns_arrow_table(tmp_path):
 
 @pytest.mark.asyncio
 async def test_duckdb_cell_read_only_blocks_writes(tmp_path):
-    """A SQL cell that tries to INSERT against a DuckDB connection
-    must fail and leave the DB untouched. The adapter opens the
-    file with ``read_only=True``, so the engine refuses the write
-    before it touches storage — no SQL-text keyword filtering
-    needed."""
+    """An INSERT fails and leaves the DB untouched; DuckDB is opened ``read_only=True``."""
     db_path = tmp_path / "events.duckdb"
     _seed_duckdb(db_path)
     nb_dir = _build_notebook_with_duckdb_cell(
@@ -1125,12 +1045,9 @@ async def test_duckdb_cell_read_only_blocks_writes(tmp_path):
 class TestSafelyClose:
     """A handle whose close fails must not be closed again at collection.
 
-    adbc's ``Cursor.close()`` sets ``_closed = True`` only after
-    ``_stmt.close()`` returns, and a write to a read-only connection is
-    reported *by* that close — so the cursor stayed marked open and its
-    finalizer closed it a second time, underflowing the driver's child count.
-    The result was an unraisable exception surfacing at whatever unrelated
-    moment the collector happened to run.
+    adbc's ``Cursor.close()`` sets ``_closed`` only after ``_stmt.close()``
+    returns, and a read-only write error is raised by that close. The finalizer then
+    closed it again, underflowing the driver's child count at a random moment.
     """
 
     def test_a_handle_whose_close_raises_is_marked_closed(self):
@@ -1149,8 +1066,8 @@ class TestSafelyClose:
         assert handle._closed is True, "its finalizer will try again"
 
     def test_a_handle_without_the_flag_is_not_given_one(self):
-        """Only a flag the object already keeps is corrected. Inventing one on
-        an unrelated library's object would be lying to code we do not own."""
+        """Only a flag the object already keeps is corrected; none is invented on a foreign
+        object."""
         from strata.notebook.sql.cell_executor import _safely_close
 
         class Handle:
@@ -1187,10 +1104,11 @@ class TestSafelyClose:
 
 
 class TestWhatASqlCellRemembersAcrossAReopen:
-    """A SQL cell's artifacts are keyed under the SQL hash, which the generic
-    staleness lookup cannot see; the generic triplet it records is what keeps
-    it ready. Status is not persisted, so a cold open starts it idle — and the
-    branch that preserves ready used to require ready."""
+    """SQL cells across a reopen.
+
+    Their artifacts are keyed under the SQL hash, so the recorded generic triplet
+    is what keeps them ready. Status is not persisted, so a cold open starts idle.
+    """
 
     @pytest.mark.asyncio
     async def test_reopening_keeps_it_ready_and_its_output_reachable(self, tmp_path):
@@ -1246,8 +1164,7 @@ class TestWhatASqlCellRemembersAcrossAReopen:
 
     @pytest.mark.asyncio
     async def test_pointing_the_connection_at_another_database_is_not_ready(self, tmp_path):
-        """The same SELECT against a different database is a different answer,
-        and the generic triplet the cell records sees no connection at all."""
+        """A different database is a different answer, and the generic triplet cannot see it."""
         from strata.notebook.models import CellStatus
 
         status = await self._run_then_reopen(
@@ -1260,8 +1177,7 @@ class TestWhatASqlCellRemembersAcrossAReopen:
 
     @pytest.mark.asyncio
     async def test_a_session_policy_does_not_survive_the_session(self, tmp_path):
-        """``# @cache session`` says the rows are good for this session. A
-        reopen is a new one, so the cell is invalid by its own declaration."""
+        """``# @cache session`` is invalid after a reopen, which is a new session."""
         from strata.notebook.models import CellStatus
 
         status = await self._run_then_reopen(
@@ -1272,8 +1188,7 @@ class TestWhatASqlCellRemembersAcrossAReopen:
 
     @pytest.mark.asyncio
     async def test_the_default_policy_waits_to_be_asked(self, tmp_path):
-        """``fingerprint`` -- the default -- is a promise to check the source
-        before trusting the cache, and opening a notebook does not check."""
+        """``fingerprint`` promises to check the source, and opening a notebook does not check."""
         from strata.notebook.models import CellStatus
 
         status = await self._run_then_reopen(
@@ -1284,9 +1199,7 @@ class TestWhatASqlCellRemembersAcrossAReopen:
 
     @pytest.mark.asyncio
     async def test_the_run_that_just_happened_stays_ready(self, tmp_path):
-        """The default policy cannot be re-established on a cold open, but a
-        cell that ran in *this* session has already established it -- asking
-        again would send a cell idle the moment after it succeeded."""
+        """A cell that ran in this session has already checked, so it stays ready."""
         from strata.notebook.executor import CellExecutor
         from strata.notebook.models import CellStatus
 

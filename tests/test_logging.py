@@ -5,10 +5,7 @@ from typing import cast
 
 
 class TestRequestContext:
-    """Tests for request context management."""
-
     def test_request_context_sets_and_clears(self):
-        """Test that RequestContext properly sets and clears context."""
         from strata.logging import RequestContext, get_request_context
 
         assert get_request_context() == {}
@@ -21,7 +18,7 @@ class TestRequestContext:
         assert get_request_context() == {}
 
     def test_nested_request_contexts(self):
-        """Test nested contexts properly restore parent context."""
+        """Nested contexts restore the parent context."""
         from strata.logging import RequestContext, get_request_context
 
         with RequestContext(request_id="outer"):
@@ -37,7 +34,6 @@ class TestRequestContext:
             assert "scan_id" not in ctx
 
     def test_generate_request_id(self):
-        """Test request ID generation."""
         from strata.logging import generate_request_id
 
         id1 = generate_request_id()
@@ -49,10 +45,7 @@ class TestRequestContext:
 
 
 class TestStructuredFormatter:
-    """Tests for JSON log formatting."""
-
     def test_json_format_basic(self):
-        """Test basic JSON log format."""
         import io
         import logging
 
@@ -76,7 +69,6 @@ class TestStructuredFormatter:
         assert log_entry["logger"] == "test.json.basic"
 
     def test_json_format_with_context(self):
-        """Test JSON format includes request context."""
         import io
         import logging
 
@@ -101,10 +93,8 @@ class TestStructuredFormatter:
 
 
 class TestStructuredLogger:
-    """Tests for the structured logger class."""
-
     def test_logger_with_structured_data(self):
-        """Test logger accepts structured data as kwargs."""
+        """The logger accepts structured data as kwargs."""
         import io
         import logging
 
@@ -131,10 +121,10 @@ class TestStructuredLogger:
 
 
 class TestTraceContextIntegration:
-    """Tests for OpenTelemetry trace context integration."""
+    """OpenTelemetry trace context integration."""
 
     def test_trace_context_when_disabled(self, monkeypatch):
-        """Test trace context returns empty when tracing disabled."""
+        """Trace context is empty when tracing is disabled."""
         monkeypatch.setenv("STRATA_TRACING_ENABLED", "false")
 
         import strata.tracing
@@ -148,7 +138,6 @@ class TestTraceContextIntegration:
         assert ctx == {}
 
     def test_trace_context_when_enabled(self, monkeypatch):
-        """Test trace context returns trace_id when tracing enabled."""
         monkeypatch.setenv("STRATA_TRACING_ENABLED", "true")
 
         import strata.tracing
@@ -171,10 +160,7 @@ class TestTraceContextIntegration:
 
 
 class TestMiddleware:
-    """Tests for request context middleware."""
-
     def test_middleware_sets_request_id(self):
-        """Test middleware sets request_id in context."""
         from fastapi import FastAPI
         from fastapi.testclient import TestClient
 
@@ -200,7 +186,7 @@ class TestMiddleware:
         assert data["request_id"] == response.headers["X-Request-ID"]
 
     def test_middleware_uses_provided_request_id(self):
-        """Test middleware uses X-Request-ID header if provided."""
+        """The middleware uses the X-Request-ID header when provided."""
         from fastapi import FastAPI
         from fastapi.testclient import TestClient
 
@@ -224,10 +210,7 @@ class TestMiddleware:
 
 
 class TestScanMetricsCorrelation:
-    """Tests for ScanMetrics correlation ID support."""
-
     def test_scan_metrics_includes_request_id(self):
-        """Test ScanMetrics.to_dict includes request_id when set."""
         from strata.metrics import ScanMetrics
 
         metrics = ScanMetrics(
@@ -240,7 +223,6 @@ class TestScanMetricsCorrelation:
         assert data["request_id"] == "req-abc"
 
     def test_scan_metrics_excludes_empty_request_id(self):
-        """Test ScanMetrics.to_dict excludes request_id when empty."""
         from strata.metrics import ScanMetrics
 
         metrics = ScanMetrics(

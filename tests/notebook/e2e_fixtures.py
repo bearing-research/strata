@@ -33,19 +33,12 @@ from strata.notebook.ws import (
 
 
 class FakeNotebookWebSocket:
-    """In-process stand-in for a Starlette ``WebSocket`` for notebook tests.
+    """In-process stand-in for a Starlette ``WebSocket`` in notebook tests.
 
-    The notebook WS handlers only ever call ``send_text`` (the handlers
-    broadcast through ``_broadcast_message`` / ``_send_message``, which both
-    bottom out at ``send_text``); ``notebook_websocket`` additionally calls
-    ``accept``, ``close``, ``receive_text``, and reads ``headers``. This fake
-    implements exactly that surface so tests can drive handlers (and the
-    endpoint) directly in the event loop — no anyio portal, no real upgrade.
-
-    Drive an inbound message script by pushing raw JSON strings onto
-    ``inbound``; ``receive_text`` pops them in order and raises
-    ``WebSocketDisconnect`` once the queue drains (mirroring a client that
-    closed the socket), which is how ``notebook_websocket`` exits its loop.
+    Implements only what the handlers use (``send_text``, ``accept``, ``close``,
+    ``receive_text``, ``headers``), so tests drive handlers in the event loop with no anyio
+    portal. Push raw JSON onto ``inbound``; ``receive_text`` pops in order and raises
+    ``WebSocketDisconnect`` once it drains, which ends ``notebook_websocket``'s loop.
     """
 
     def __init__(
@@ -125,9 +118,9 @@ class WebSocketTestHelper:
         timeout: float = 10.0,
         max_messages: int = 50,
     ) -> dict[str, Any]:
-        """Receive messages until one matches the given type (and optional filters).
+        """Receive until a message matches the type (and filters) and return it.
 
-        Returns the matching message. All received messages are stored in self.messages.
+        Every received message is kept in ``self.messages``.
         """
         for _ in range(max_messages):
             msg = self.receive(timeout=timeout)
@@ -163,7 +156,6 @@ class WebSocketTestHelper:
         return [m for m in self.messages if m["type"] == msg_type]
 
     def clear(self) -> None:
-        """Clear stored messages."""
         self.messages.clear()
 
     def execute_cell(self, cell_id: str) -> None:
@@ -211,7 +203,6 @@ class NotebookBuilder:
         self.cell_ids: list[str] = []
 
     def add_cell(self, cell_id: str, source: str, after: str | None = None) -> NotebookBuilder:
-        """Add a cell with given source."""
         add_cell_to_notebook(self.notebook_dir, cell_id, after)
         write_cell(self.notebook_dir, cell_id, source)
         self.cell_ids.append(cell_id)
@@ -261,11 +252,7 @@ def tmp_notebook_dir():
 
 @contextmanager
 def open_notebook_session(client: TestClient, notebook_dir: Path):
-    """Context manager: open a notebook and yield (session_id, session).
-
-    Uses the REST API to open the notebook, which registers it with the
-    session manager.
-    """
+    """Open a notebook through the REST API and yield (session_id, session)."""
     session_manager = get_session_manager()
     session = session_manager.open_notebook(notebook_dir)
     yield session.id, session
@@ -282,9 +269,8 @@ def execute_cell_and_wait(
     helper: WebSocketTestHelper,
     cell_id: str,
 ) -> dict[str, Any]:
-    """Execute a cell via WebSocket and wait for it to finish.
+    """Execute a cell over the WebSocket, auto-accepting a cascade.
 
-    Handles cascade auto-accept if needed.
     Returns the final cell_output or cell_error message.
     """
     helper.execute_cell(cell_id)

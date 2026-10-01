@@ -1,8 +1,7 @@
 """Tests for the SQLite DriverAdapter.
 
-Includes a real-DB integration block at the bottom — SQLite is local
-and free, so we don't need testcontainers to exercise the full open →
-probe → write → reprobe cycle.
+The real-DB block at the bottom runs the full open, probe, write, reprobe cycle; SQLite is local, so
+no testcontainers are needed.
 """
 
 from __future__ import annotations
@@ -21,11 +20,7 @@ from strata.notebook.sql.drivers.sqlite import SqliteAdapter
 
 
 class _FakeCursor:
-    """Scripted cursor: maps query-substring → result.
-
-    Each ``execute`` records its SQL + params; ``fetchone`` and
-    ``fetchall`` return the most recently matched script entry.
-    """
+    """Scripted cursor mapping query substring to result; records each SQL and params."""
 
     def __init__(self, scripts: list[tuple[str, object]]):
         self._scripts = scripts
@@ -67,16 +62,12 @@ class _FakeConn:
 
 @contextmanager
 def cursor_expected_to_fail_on_close(conn):
-    """A cursor for a statement ADBC will reject when the statement closes.
+    """A cursor for a statement ADBC rejects on close (a write to a read-only connection).
 
-    That is how a write to a read-only connection is reported, and
-    ``Cursor.close()`` sets ``_closed = True`` only *after* ``_stmt.close()``
-    returns — so a close that raises leaves the cursor marked open and its
-    ``__del__`` closes it a second time, underflowing the driver's child count
-    and surfacing as an unraisable exception attached to whatever ran next.
-
-    Production code corrects the same flag in ``cell_executor._safely_close``.
-    A test that drives a cursor itself has to do it itself.
+    ``Cursor.close()`` sets ``_closed`` only after ``_stmt.close()`` returns, so a raising close
+    leaves the cursor open and ``__del__`` closes it again, underflowing the driver's child count.
+    Production code fixes the flag in ``cell_executor._safely_close``; a test driving a cursor
+    directly must do the same.
     """
     cursor = conn.cursor()
     try:
@@ -104,11 +95,10 @@ def test_capabilities_match_design_doc():
 
 
 def test_connection_id_canonicalizes_relative_paths(tmp_path, monkeypatch):
-    """Two specs that resolve to the same absolute path produce the
-    same id, regardless of how the path was written. macOS's
-    /var → /private/var symlink dance is the reason we use the
-    fixture-supplied tmp_path and resolve both sides through abspath
-    on the same root."""
+    """Specs resolving to the same absolute path share an id.
+
+    Both sides resolve through ``tmp_path`` because of macOS's /var to /private/var symlink.
+    """
     a = SqliteAdapter()
     nested = tmp_path / "nested"
     nested.mkdir()
@@ -135,8 +125,7 @@ def test_connection_id_distinguishes_paths():
 
 
 def test_connection_id_strips_read_only_query_params():
-    """``mode=ro`` and ``immutable=1`` change *how* we open, not which
-    objects we see — must not perturb the cache key."""
+    """``mode=ro`` and ``immutable=1`` change how we open, not which objects we see."""
     a = SqliteAdapter()
     base = ConnectionSpec(name="db", driver="sqlite", uri="file:/tmp/db.sqlite")
     with_ro = ConnectionSpec(name="db", driver="sqlite", uri="file:/tmp/db.sqlite?mode=ro")
@@ -156,15 +145,11 @@ def test_connection_id_memory_distinct_from_file():
 
 
 def test_connection_id_preserves_identity_shaping_query_params():
-    """Codex review fix: the canonicalizer must NOT drop all query
-    params — ``cache=shared``, ``mode=memory``, ``vfs=`` etc. all
-    affect which database is opened, and collapsing them onto the
-    same id would alias distinct connections.
+    """``cache=shared``, ``mode=memory``, ``vfs=`` and the like choose which database opens.
 
-    Before the fix, ``file:memdb1?mode=memory&cache=shared`` and
-    ``file:memdb1`` produced the same id; they describe completely
-    different databases (a shared in-memory DB vs a literal file
-    named ``memdb1`` in cwd)."""
+    ``file:memdb1?mode=memory&cache=shared`` is a shared in-memory DB; ``file:memdb1`` is a file
+    named ``memdb1`` in cwd. They must not alias.
+    """
     a = SqliteAdapter()
     shared_memory = ConnectionSpec(
         name="db",
@@ -186,8 +171,6 @@ def test_connection_id_preserves_identity_shaping_query_params():
 
 
 def test_connection_id_distinguishes_named_memory_dbs():
-    """Two named in-memory DBs (different names) must produce
-    different connection_ids — they're distinct logical databases."""
     a = SqliteAdapter()
     db1 = ConnectionSpec(
         name="db",
@@ -203,8 +186,7 @@ def test_connection_id_distinguishes_named_memory_dbs():
 
 
 def test_connection_id_preserves_vfs_param():
-    """``vfs=`` selects an alternate VFS implementation — affects
-    *which* file is opened in some configurations. Identity-shaping."""
+    """``vfs=`` can change which file is opened, so it shapes identity."""
     a = SqliteAdapter()
     base = ConnectionSpec(name="db", driver="sqlite", uri="file:/tmp/db.sqlite")
     custom = ConnectionSpec(name="db", driver="sqlite", uri="file:/tmp/db.sqlite?vfs=unix-dotfile")
@@ -241,9 +223,7 @@ def test_open_without_read_only_uses_bare_path():
 
 
 def test_open_memory_db_passes_through_unchanged_uri():
-    """``:memory:`` databases can't take ``mode=ro`` in the URI; the
-    pragma in ``open()`` is what enforces read-only for them.
-    The URI itself stays as the literal."""
+    """``:memory:`` cannot take ``mode=ro``; the pragma in ``open()`` enforces read-only instead."""
     captured_uri: dict[str, str] = {}
     cursor = _FakeCursor(scripts=[])
     conn = _FakeConn(cursor)
@@ -259,10 +239,7 @@ def test_open_memory_db_passes_through_unchanged_uri():
 
 
 def test_open_read_only_always_issues_query_only_pragma():
-    """The session-level guard is the universal read-only enforcement —
-    runs after every ``open(read_only=True)`` regardless of URI form,
-    so that file-handle ``mode=ro`` failure (or its absence on memory
-    DBs) is backstopped at the engine."""
+    """The session pragma backstops ``mode=ro`` (absent on memory DBs) for every URI form."""
     cases = [
         ConnectionSpec(name="db", driver="sqlite", path="/tmp/a.sqlite"),
         ConnectionSpec(name="db", driver="sqlite", path=":memory:"),
@@ -307,10 +284,9 @@ def test_open_existing_uri_appends_mode_ro_when_missing():
 
 
 def test_open_existing_uri_overrides_user_supplied_mode_rwc():
-    """Codex review fix: ``mode=rwc`` (or any user-supplied
-    access-mode) MUST be overridden to ``mode=ro`` when read_only=True.
-    Letting the user's writability hint win would silently break the
-    read-only contract."""
+    """A user's ``mode=rwc`` must become ``mode=ro`` under read_only, or the contract silently
+    breaks.
+    """
     captured: dict[str, str] = {}
 
     def fake_connect(uri):
@@ -330,9 +306,7 @@ def test_open_existing_uri_overrides_user_supplied_mode_rwc():
 
 
 def test_open_existing_uri_with_mode_memory_keeps_memory():
-    """``mode=memory`` and ``mode=ro`` are mutually exclusive in
-    SQLite. The URI stays as ``mode=memory``; ``PRAGMA query_only``
-    is the read-only enforcement."""
+    """``mode=memory`` and ``mode=ro`` are exclusive; ``PRAGMA query_only`` enforces read-only."""
     captured: dict[str, str] = {}
 
     def fake_connect(uri):
@@ -394,8 +368,7 @@ def test_probe_freshness_token_changes_on_data_version():
 
 
 def test_probe_freshness_ignores_table_list_db_wide():
-    """Capability flag says per_table_freshness=False — the token is
-    DB-wide, so different table sets must produce the same token."""
+    """``per_table_freshness=False``: the token is DB-wide, so table sets do not change it."""
     a = SqliteAdapter()
 
     def make_token(tables):
@@ -464,11 +437,9 @@ def test_probe_schema_uses_pragma_table_info():
 
 
 def test_probe_schema_qualifies_attached_database():
-    """Codex review fix: when ``QualifiedTable.schema`` is set (the
-    SQLite attached-database name), the pragma must run against THAT
-    database, not the default ``main``. Otherwise ``aux.events``
-    silently fingerprints ``main.events`` (or whatever the search
-    order resolves)."""
+    """A set ``QualifiedTable.schema`` targets that attached DB, so ``aux.events`` is not read as
+    ``main.events``.
+    """
     a = SqliteAdapter()
     cursor = _FakeCursor(scripts=[("pragma_table_info", [])])
     conn = _FakeConn(cursor)
@@ -479,8 +450,6 @@ def test_probe_schema_qualifies_attached_database():
 
 
 def test_probe_schema_unqualified_uses_default_pragma():
-    """Without an attached-DB schema, the default-DB pragma form
-    runs — preserves backward compatibility with simple cases."""
     a = SqliteAdapter()
     cursor = _FakeCursor(scripts=[("pragma_table_info", [])])
     conn = _FakeConn(cursor)
@@ -492,12 +461,10 @@ def test_probe_schema_unqualified_uses_default_pragma():
 
 
 def test_probe_schema_distinguishes_same_table_in_different_attached_dbs():
-    """The fingerprint must differ between ``aux.events`` and
-    ``main.events`` even when both happen to have identical column
-    structure right now — the qualified pragma queries different
-    objects, and the QualifiedTable.render() in the hash already
-    differs. This belt-and-suspenders test guards against a
-    regression that probed both against ``main``."""
+    """``aux.events`` and ``main.events`` fingerprint apart even with identical columns.
+
+    Guards a regression that probed both against ``main``.
+    """
     a = SqliteAdapter()
 
     rows = [("id", "INTEGER", 1, None, 1)]
@@ -515,11 +482,9 @@ def test_probe_schema_distinguishes_same_table_in_different_attached_dbs():
 
 
 def test_probe_schema_rejects_invalid_attached_db_name():
-    """Pragma functions don't accept bind params in the schema
-    position, so the schema name is splice-inlined. Identifier
-    validation is the injection guard — anything that doesn't match
-    the SQLite identifier pattern raises before SQL hits the
-    connection."""
+    """Pragma functions take no bind params for the schema, so identifier validation is the
+    injection guard.
+    """
     a = SqliteAdapter()
     conn = _FakeConn(_FakeCursor(scripts=[]))
     bad_table = QualifiedTable(None, '"; DROP TABLE x; --', "events")
@@ -558,11 +523,10 @@ pytestmark_real_db = pytest.mark.skipif(
 
 @pytestmark_real_db
 def test_real_open_read_only_rejects_write(tmp_path):
-    """Read-only enforcement must be the engine's job, not text
-    filtering. A DML statement issued through a read-only connection
-    has to error at the SQLite engine — though the error may surface
-    on cursor close rather than on execute, depending on whether the
-    failed statement is reported synchronously."""
+    """The SQLite engine, not text filtering, rejects DML on a read-only connection.
+
+    The error may surface on cursor close rather than on execute.
+    """
     db_path = tmp_path / "rw.sqlite"
     seed = sqlite3.connect(db_path)
     seed.execute("CREATE TABLE t (x INTEGER)")
@@ -586,10 +550,7 @@ def test_real_open_read_only_rejects_write(tmp_path):
 
 @pytestmark_real_db
 def test_real_read_only_rejects_write_for_mode_rwc_uri(tmp_path):
-    """Codex review fix verification: a user-supplied URI with
-    ``mode=rwc`` must NOT remain writable when read_only=True.
-    Both the URI override (mode=ro) and the ``PRAGMA query_only``
-    fallback exist to make sure this can't slip through."""
+    """A user URI with ``mode=rwc`` must not stay writable when read_only=True."""
     db_path = tmp_path / "rwc.sqlite"
     seed = sqlite3.connect(db_path)
     seed.execute("CREATE TABLE t (x INTEGER)")
@@ -613,14 +574,11 @@ def test_real_read_only_rejects_write_for_mode_rwc_uri(tmp_path):
 
 @pytestmark_real_db
 def test_real_query_only_pragma_alone_rejects_writes(tmp_path):
-    """Codex review fix verification: ``PRAGMA query_only = ON`` is
-    the universal session-level enforcement that backstops ``mode=ro``
-    URI flag — for in-memory DBs and any future quirk where ``mode=ro``
-    might not propagate. Verify the pragma alone rejects writes when
-    applied to an otherwise-writable file connection.
+    """``PRAGMA query_only = ON`` alone rejects writes on an otherwise writable file connection.
 
-    DDL is also blocked by ``query_only``, so we can't open a fresh
-    DB inside the read-only session — seed it externally first."""
+    It backstops ``mode=ro`` for in-memory DBs. DDL is blocked too, so the DB is seeded outside the
+    read-only session.
+    """
     db_path = tmp_path / "qo.sqlite"
     seed = sqlite3.connect(db_path)
     seed.execute("CREATE TABLE t (x INTEGER)")
@@ -644,12 +602,9 @@ def test_real_query_only_pragma_alone_rejects_writes(tmp_path):
 
 @pytestmark_real_db
 def test_real_schema_version_changes_on_ddl(tmp_path):
-    """``schema_version`` is the more reliable cross-implementation
-    signal — Python's stdlib ``sqlite3`` and ADBC's bundled SQLite
-    are different builds, so ``data_version``'s "writes by another
-    connection" semantics aren't guaranteed across them. Schema
-    changes always bump ``schema_version`` and must move the
-    freshness token."""
+    """Stdlib ``sqlite3`` and ADBC's SQLite are different builds, so ``data_version`` is not
+    reliable across them; ``schema_version`` always moves on DDL.
+    """
     db_path = tmp_path / "ddl.sqlite"
     seed = sqlite3.connect(db_path)
     seed.execute("CREATE TABLE t (x INTEGER)")
@@ -681,9 +636,7 @@ def test_real_schema_version_changes_on_ddl(tmp_path):
 
 @pytestmark_real_db
 def test_real_schema_fingerprint_changes_on_add_column(tmp_path):
-    """A schema-only edit (no row changes) must move the schema
-    fingerprint even when freshness sees the new ``schema_version``
-    too — both probes must catch this."""
+    """A schema-only edit (no row changes) must move both the freshness and schema probes."""
     db_path = tmp_path / "schema.sqlite"
     seed = sqlite3.connect(db_path)
     seed.execute("CREATE TABLE t (x INTEGER)")
@@ -717,9 +670,7 @@ def test_real_schema_fingerprint_changes_on_add_column(tmp_path):
 
 
 def test_sqlite_list_schema_returns_tables_and_columns(tmp_path):
-    """list_schema enumerates tables + columns from sqlite_master /
-    pragma_table_info. Powers the schema sidebar so users can see
-    what's available before writing SQL."""
+    """Reads tables and columns from sqlite_master and pragma_table_info for the schema sidebar."""
     import sqlite3
 
     db = tmp_path / "schema.db"
@@ -770,7 +721,6 @@ def test_sqlite_list_schema_returns_tables_and_columns(tmp_path):
 
 
 def test_sqlite_list_schema_empty_database(tmp_path):
-    """A brand-new SQLite file has no tables — list_schema returns []."""
     pytest.importorskip("adbc_driver_sqlite")
 
     from strata.notebook.models import ConnectionSpec

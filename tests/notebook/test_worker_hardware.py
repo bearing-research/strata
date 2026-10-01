@@ -1,9 +1,7 @@
-"""The hardware a worker runs on, from the worker. Item 53.
+"""The hardware a worker runs on, reported by the worker.
 
-A caller that wanted to know which accelerator, driver or CUDA version a
-machine has used to submit a job that ran ``nvidia-smi``. A fake
-``nvidia-smi`` on ``PATH`` stands in for the driver here, so the parsing and
-the subprocess call are the real ones.
+A fake ``nvidia-smi`` on ``PATH`` stands in for the driver, so parsing and the subprocess call are
+real.
 """
 
 from __future__ import annotations
@@ -84,8 +82,7 @@ class TestTheProbe:
 def test_health_and_a_cell_run_report_the_same_hardware(
     tmp_path, monkeypatch, notebook_executor_server
 ):
-    """The worker answers ``/health`` with the accelerator, and the artifact a
-    cell run on it produces records the same values."""
+    """``/health`` and a cell run's artifact report the same accelerator values."""
     import asyncio
 
     import httpx

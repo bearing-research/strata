@@ -1,11 +1,7 @@
-"""Hardening tests for v1 production quality.
+"""Hardening tests for production failure modes.
 
-These tests cover failure modes that occur in production:
-- Restart persistence: data + metadata caches persist across restarts
-- Corrupted cache: self-healing by delete and refetch
-- Concurrent requests: no thundering herd for same data
-- Stale metadata: invalidated correctly when files change
-- Large scan streaming: doesn't buffer entire response in memory
+Covers restart persistence, corrupted-cache self-healing, concurrent requests, stale metadata and
+bounded-memory streaming.
 """
 
 import asyncio
@@ -29,7 +25,6 @@ from strata.planner import ReadPlanner
 
 
 def build_materialize_request(table_uri: str, columns: list[str] | None = None) -> dict:
-    """Build a materialize request for the given table and columns."""
     params = {}
     if columns is not None:
         params["columns"] = columns
@@ -41,7 +36,7 @@ def build_materialize_request(table_uri: str, columns: list[str] | None = None) 
 
 
 def append_rows(table, start: int, count: int) -> None:
-    """Append a small batch so scans span multiple files/row groups."""
+    """Append a small batch so scans span multiple files and row groups."""
     stop = start + count
     table.append(
         pa.table(
@@ -100,10 +95,7 @@ def temp_warehouse(tmp_path):
 
 
 class TestRestartPersistence:
-    """Test that caches persist across server/planner restarts."""
-
     def test_data_cache_persists_across_planner_instances(self, temp_warehouse, tmp_path):
-        """Data cache entries survive planner restart."""
         cache_dir = tmp_path / "cache"
         table_uri = temp_warehouse["table_uri"]
 
@@ -137,7 +129,7 @@ class TestRestartPersistence:
         assert cache_hits == len(plan2.tasks), "All tasks should hit cache after restart"
 
     def test_metadata_cache_persists_across_planner_instances(self, temp_warehouse, tmp_path):
-        """Metadata cache (SQLite) survives planner restart."""
+        """The SQLite metadata cache survives a planner restart."""
         from strata.metadata_cache import get_metadata_store, reset_caches
 
         cache_dir = tmp_path / "cache"
@@ -167,10 +159,8 @@ class TestRestartPersistence:
 
 
 class TestCorruptedCacheSelfHealing:
-    """Test that corrupted cache entries are detected and self-heal."""
-
     def test_corrupted_data_cache_triggers_refetch(self, temp_warehouse, tmp_path):
-        """Corrupted cache file is deleted and data is refetched."""
+        """A corrupted cache file is deleted and the data refetched."""
         cache_dir = tmp_path / "cache"
         table_uri = temp_warehouse["table_uri"]
 
@@ -207,7 +197,6 @@ class TestCorruptedCacheSelfHealing:
             )
 
     def test_corrupted_metadata_sidecar_handled_gracefully(self, temp_warehouse, tmp_path):
-        """Corrupted metadata sidecar doesn't break cache operation."""
         from strata.cache import CACHE_META_EXTENSION
 
         cache_dir = tmp_path / "cache"
@@ -232,10 +221,7 @@ class TestCorruptedCacheSelfHealing:
 
 
 class TestConcurrentRequestsNoThunderingHerd:
-    """Test that concurrent requests for same data don't cause thundering herd."""
-
     def test_concurrent_fetches_share_cache(self, temp_warehouse, tmp_path):
-        """Multiple concurrent fetches for same data share cache efficiently."""
         cache_dir = tmp_path / "cache"
         table_uri = temp_warehouse["table_uri"]
 
@@ -270,7 +256,7 @@ class TestConcurrentRequestsNoThunderingHerd:
         assert all(r == results[0] for r in results)
 
     def test_server_concurrent_scans_use_semaphore(self, temp_warehouse, tmp_path):
-        """Server properly limits concurrent scans via semaphore."""
+        """The server limits concurrent scans with a semaphore."""
         import socket
 
         cache_dir = tmp_path / "cache"
@@ -339,10 +325,8 @@ class TestConcurrentRequestsNoThunderingHerd:
 
 
 class TestStaleMetadataInvalidation:
-    """Test that stale metadata is correctly invalidated."""
-
     def test_modified_file_invalidates_parquet_metadata(self, temp_warehouse, tmp_path):
-        """Parquet metadata is invalidated when underlying file changes."""
+        """Parquet metadata is invalidated when the underlying file changes."""
         from strata.metadata_cache import get_metadata_store, reset_caches
 
         cache_dir = tmp_path / "cache"
@@ -381,10 +365,9 @@ class TestStaleMetadataInvalidation:
 
 
 class TestLargeScanStreaming:
-    """Test that large scans stream data without buffering entire response."""
+    """Large scans stream without buffering the whole response."""
 
     def test_streaming_does_not_buffer_all_batches(self, temp_warehouse, tmp_path):
-        """Verify scan streams batches without holding all in memory."""
         cache_dir = tmp_path / "cache"
         table_uri = temp_warehouse["table_uri"]
 
@@ -406,7 +389,6 @@ class TestLargeScanStreaming:
         assert total_rows == temp_warehouse["num_rows"]
 
     def test_ipc_streaming_yields_bytes_incrementally(self, temp_warehouse, tmp_path):
-        """IPC streaming yields bytes for each batch separately."""
         cache_dir = tmp_path / "cache"
         table_uri = temp_warehouse["table_uri"]
 
@@ -431,7 +413,7 @@ class TestLargeScanStreaming:
         assert total_bytes > 0
 
     def test_response_size_limit_rejects_large_scans(self, temp_warehouse, tmp_path):
-        """max_response_bytes causes large scans to fail with 413."""
+        """max_response_bytes rejects a large scan with 413."""
         cache_dir = tmp_path / "cache"
         table_uri = temp_warehouse["table_uri"]
 
@@ -452,11 +434,11 @@ class TestLargeScanStreaming:
 
 
 class TestStreamingIntegration:
-    """Integration tests for HTTP streaming endpoint."""
+    """The HTTP streaming endpoint against a running server."""
 
     @pytest.fixture
     def server_with_client(self, temp_warehouse, tmp_path):
-        """Start a server and provide a client."""
+        """A running server and a client for it."""
         import socket
 
         sock = socket.socket()
@@ -502,16 +484,7 @@ class TestStreamingIntegration:
         client.close()
 
     def test_multi_row_group_stream_produces_valid_ipc(self, server_with_client):
-        """Streaming multiple row groups produces valid Arrow IPC.
-
-        This is a critical contract test: when scanning multiple row groups,
-        the server streams them as a single valid Arrow IPC stream with:
-        - One schema message at the start
-        - Multiple record batch messages (one per row group)
-        - Proper EOS marker at the end
-
-        Client must be able to decode the full stream with ipc.open_stream().
-        """
+        """Multiple row groups stream as one valid IPC stream: one schema, the batches, EOS."""
         import httpx
 
         config = server_with_client["config"]
@@ -548,7 +521,7 @@ class TestStreamingIntegration:
             assert total_rows == expected_rows, f"Expected {expected_rows} rows, got {total_rows}"
 
     def test_streamed_artifact_records_real_row_count(self, server_with_client):
-        """Stream-finalized artifacts store actual rows, not task count."""
+        """Stream-finalized artifacts store the actual row count, not the task count."""
         import httpx
 
         config = server_with_client["config"]
@@ -580,7 +553,7 @@ class TestStreamingIntegration:
             assert info_response.json()["row_count"] == expected_rows
 
     def test_empty_scan_returns_empty_response(self, server_with_client, tmp_path):
-        """Empty scan (all row groups pruned) returns empty response."""
+        """A scan with every row group pruned returns an empty response."""
         import httpx
         from pyiceberg.catalog.sql import SqlCatalog
         from pyiceberg.schema import Schema
@@ -630,7 +603,7 @@ class TestStreamingIntegration:
             assert len(batches) == 0, "Should have no batches for empty table"
 
     def test_scan_response_includes_estimated_bytes(self, server_with_client):
-        """Materialize response includes estimated_bytes from Parquet metadata."""
+        """The materialize response carries estimated_bytes from Parquet metadata."""
         import httpx
 
         config = server_with_client["config"]
@@ -648,15 +621,9 @@ class TestStreamingIntegration:
             assert "stream_url" in data
 
     def test_client_disconnect_releases_resources(self, server_with_client):
-        """Client disconnect during streaming releases semaphore.
+        """A client dropping mid-stream releases the semaphore and does not fail the artifact.
 
-        This test verifies that when a client disconnects mid-stream:
-        1. The artifact build is decoupled from the read — a dropped client
-           does NOT fail the artifact; the background build finalizes it ready.
-        2. Resources (semaphore) are released in the finally block
-        3. Subsequent scans can proceed normally
-
-        This is critical for preventing resource leaks under client failures.
+        The background build still finalizes the artifact, and later scans proceed.
         """
         import httpx
 
@@ -738,15 +705,7 @@ class TestStreamingIntegration:
             assert len(batches) > 0
 
     def test_timeout_aborts_stream_with_error(self, temp_warehouse, tmp_path):
-        """Scan timeout during streaming aborts connection.
-
-        This test verifies that when a scan exceeds the timeout:
-        1. The server raises an error (doesn't silently truncate)
-        2. Client receives incomplete/error response
-        3. Resources are cleaned up
-
-        We use a very short timeout to trigger this behavior.
-        """
+        """A scan past its (very short) timeout errors instead of truncating silently."""
         import socket
 
         import httpx
@@ -840,11 +799,11 @@ class TestStreamingIntegration:
 
 
 class TestStreamAbortMetrics:
-    """Tests for stream abort metrics tracking."""
+    """Stream abort counters."""
 
     @pytest.fixture
     def server_with_metrics(self, temp_warehouse, tmp_path):
-        """Start a server and provide access to metrics."""
+        """A running server with access to its metrics."""
         import socket
 
         sock = socket.socket()
@@ -894,7 +853,6 @@ class TestStreamAbortMetrics:
     # test_semaphore_leak.test_concurrent_disconnects_no_leak.
 
     def test_timeout_increments_counter(self, temp_warehouse, tmp_path):
-        """Scan timeout increments stream_aborts_timeout counter."""
         import socket
 
         import httpx
@@ -1017,7 +975,6 @@ class TestStreamAbortMetrics:
         assert state.metrics.stream_aborts_size > initial_size_aborts
 
     def test_metrics_endpoint_includes_abort_counters(self, server_with_metrics):
-        """GET /metrics includes stream abort counters."""
         import requests
 
         config = server_with_metrics["config"]
@@ -1031,7 +988,6 @@ class TestStreamAbortMetrics:
         assert "client_disconnects" in metrics
 
     def test_prometheus_metrics_includes_abort_counters(self, server_with_metrics):
-        """GET /metrics/prometheus includes stream abort counters."""
         import requests
 
         config = server_with_metrics["config"]
@@ -1046,12 +1002,14 @@ class TestStreamAbortMetrics:
 
 
 class TestActiveScanCount:
-    """Tests for active scan counting and limiter management."""
+    """Active scan counting and limiter management."""
 
     def test_saturation_tracks_registry_limiters(self, tmp_path):
-        """Saturation is measured on the per-tenant admission limiters, not the
-        never-acquired global ones; a server with no live limiters is idle, not
-        saturated (finding 2)."""
+        """Saturation is measured on the per-tenant admission limiters.
+
+        The global limiters are never acquired; a server with no live limiters is idle, not
+        saturated.
+        """
         from strata.server import ServerState, _update_saturation_tracking
         from strata.tenant_registry import get_tenant_registry, reset_tenant_registry
 
@@ -1081,11 +1039,9 @@ class TestActiveScanCount:
         reset_tenant_registry()
 
     def test_get_active_scan_count_matches_limiter(self, temp_warehouse, tmp_path):
-        """_get_active_scan_count counts the per-tenant admission limiters.
+        """Stream admission acquires the tenant-registry limiters, so the count must track them.
 
-        Stream admission acquires the tenant-registry limiters, not the global
-        ServerState ones, so the count must track the registry (otherwise
-        graceful shutdown drains past live streams — finding 2).
+        Otherwise graceful shutdown drains past live streams.
         """
         cache_dir = tmp_path / "cache"
         config = StrataConfig(
@@ -1129,7 +1085,6 @@ class TestActiveScanCount:
         reset_tenant_registry()
 
     def test_active_scans_released_on_completion(self, temp_warehouse, tmp_path):
-        """Active scan count returns to zero after scan completes."""
         import socket
 
         import httpx
@@ -1189,13 +1144,10 @@ class TestActiveScanCount:
 
 
 class TestConcurrentScans:
-    """Tests verifying concurrent scans complete correctly."""
-
     def test_concurrent_scans_all_succeed(self, temp_warehouse, tmp_path):
-        """Five concurrent scans against the same table all return 200 with
-        valid IPC bytes. If concurrency were broken (e.g. a shared
-        non-thread-safe cursor, a deadlock, a corrupted shared cache), one
-        or more requests would error or hang past the per-request timeout.
+        """Five concurrent scans of one table all return 200 with valid IPC.
+
+        A shared non-thread-safe cursor, a deadlock or a corrupted shared cache would error or hang.
         """
         import socket
         from concurrent.futures import as_completed
@@ -1263,20 +1215,13 @@ class TestConcurrentScans:
 
 
 class TestNonBlockingLogging:
-    """Tests for non-blocking metrics logging.
+    """MetricsCollector logs through a queue so request handlers never block on I/O.
 
-    These tests verify that the MetricsCollector uses a queue + background writer
-    to prevent logging from blocking request handlers. This prevents the pipe buffer
-    deadlock that occurred when:
-    1. Server was started with stdout=subprocess.PIPE
-    2. Parent didn't read from pipe, so buffer filled up (~64KB)
-    3. MetricsCollector._write_log() called flush() while holding _lock
-    4. flush() blocked waiting for buffer space
-    5. /metrics endpoint needed _lock, causing deadlock
+    A full stdout pipe once blocked ``flush()`` while ``_lock`` was held, deadlocking /metrics.
     """
 
     def test_metrics_collector_uses_queue_based_logging(self):
-        """MetricsCollector should use a queue for non-blocking writes."""
+        """MetricsCollector uses a queue for non-blocking writes."""
         import io
         import queue as queue_module
 
@@ -1304,7 +1249,7 @@ class TestNonBlockingLogging:
             collector.shutdown()
 
     def test_logging_drops_when_queue_full(self):
-        """Logs should be dropped (not blocked) when queue is full."""
+        """Logs are dropped, not blocked, when the queue is full."""
         import io
 
         from strata.metrics import MetricsCollector
@@ -1330,7 +1275,7 @@ class TestNonBlockingLogging:
             collector.shutdown()
 
     def test_get_aggregate_stats_never_blocks_on_logging(self):
-        """get_aggregate_stats() reads in-memory counters (no I/O to block on)."""
+        """get_aggregate_stats() reads in-memory counters, with no I/O to block on."""
         import io
 
         from strata.metrics import MetricsCollector
@@ -1354,7 +1299,6 @@ class TestNonBlockingLogging:
             collector.shutdown()
 
     def test_dropped_logs_counter_in_stats(self):
-        """dropped_logs counter should be exposed in aggregate stats."""
         import io
 
         from strata.metrics import MetricsCollector
@@ -1376,7 +1320,6 @@ class TestNonBlockingLogging:
             collector.shutdown()
 
     def test_logging_thread_shuts_down_gracefully(self):
-        """Background writer thread should shut down cleanly."""
         import io
 
         from strata.metrics import MetricsCollector
@@ -1392,8 +1335,6 @@ class TestNonBlockingLogging:
 
 
 class TestCacheVersioning:
-    """Test that cache versioning works correctly."""
-
     def test_another_cache_version_is_removed_and_the_current_one_kept(
         self, temp_warehouse, tmp_path
     ):

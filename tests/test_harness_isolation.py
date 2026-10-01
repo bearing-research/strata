@@ -1,11 +1,7 @@
 """What a cell actually sees, driven through a real harness spawn.
 
-Lives outside ``tests/notebook/`` on purpose: that package's conftest swaps the
-harness command to skip ``uv run``, and here the shipping command runs too.
-Item 49.
-
-The harness-user check at the bottom needs root and a second OS user, so it runs
-only where both are arranged: ``STRATA_TEST_HARNESS_USER`` names the user.
+Lives outside ``tests/notebook/``, whose conftest skips ``uv run``, so the shipping command runs.
+The harness-user check needs root and a second OS user, named by ``STRATA_TEST_HARNESS_USER``.
 """
 
 from __future__ import annotations
@@ -50,8 +46,7 @@ def _run(nb, capsys):
 
 
 def test_without_the_setting_a_cell_reads_the_servers_secrets(tmp_path, capsys):
-    """Stated as a test because it is what every deployment does today, and
-    the reason the setting exists."""
+    """The default every deployment has, and the reason the setting exists."""
     assert "TOKEN: shhh" in _run(_notebook(tmp_path), capsys)
 
 
@@ -74,9 +69,7 @@ _HARNESS_USER = os.environ.get("STRATA_TEST_HARNESS_USER")
     reason="needs Linux, root, and STRATA_TEST_HARNESS_USER naming a second user",
 )
 def test_a_cell_run_as_the_harness_user_cannot_read_the_servers_environment(tmp_path, monkeypatch):
-    """The property the allowlist alone could not give: the server's
-    environment is readable through /proc by anyone running as the server, and
-    by nobody else."""
+    """/proc exposes the server's environment to its own user only, which the allowlist cannot."""
     import pwd
 
     from strata.notebook.executor import CellExecutor

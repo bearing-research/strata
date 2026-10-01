@@ -1,12 +1,4 @@
-"""Tests for artifact store.
-
-These tests verify:
-1. Artifact creation, finalization, and state transitions
-2. Provenance hash computation and deduplication
-3. Name pointer CRUD operations
-4. Blob I/O (write/read)
-5. Cleanup of failed artifacts
-"""
+"""Tests for the artifact store: lifecycle, provenance dedup, names, blob I/O, cleanup."""
 
 import json
 
@@ -31,15 +23,12 @@ def artifact_dir(tmp_path):
 
 @pytest.fixture
 def store(artifact_dir):
-    """Create an artifact store."""
+    """An artifact store."""
     return ArtifactStore(artifact_dir)
 
 
 class TestTransformSpec:
-    """Tests for TransformSpec serialization."""
-
     def test_to_json(self):
-        """TransformSpec serializes to JSON."""
         spec = TransformSpec(
             executor="local://duckdb_sql@v1",
             params={"sql": "SELECT * FROM input"},
@@ -52,7 +41,6 @@ class TestTransformSpec:
         assert data["inputs"] == ["strata://table/db.events"]
 
     def test_from_json(self):
-        """TransformSpec deserializes from JSON."""
         json_str = json.dumps(
             {
                 "executor": "local://duckdb_sql@v1",
@@ -66,7 +54,6 @@ class TestTransformSpec:
         assert spec.inputs == []
 
     def test_roundtrip(self):
-        """TransformSpec survives JSON roundtrip."""
         original = TransformSpec(
             executor="local://polars_expr@v1",
             params={"expr": "col('a') + 1"},
@@ -79,10 +66,7 @@ class TestTransformSpec:
 
 
 class TestProvenanceHash:
-    """Tests for provenance hash computation."""
-
     def test_deterministic(self):
-        """Provenance hash is deterministic."""
         spec = TransformSpec(
             executor="local://duckdb_sql@v1",
             params={"sql": "SELECT 1"},
@@ -93,7 +77,6 @@ class TestProvenanceHash:
         assert hash1 == hash2
 
     def test_input_order_independent(self):
-        """Provenance hash is independent of input order."""
         spec = TransformSpec(
             executor="local://duckdb_sql@v1",
             params={"sql": "SELECT 1"},
@@ -104,7 +87,6 @@ class TestProvenanceHash:
         assert hash1 == hash2
 
     def test_different_inputs_different_hash(self):
-        """Different inputs produce different hashes."""
         spec = TransformSpec(
             executor="local://duckdb_sql@v1",
             params={"sql": "SELECT 1"},
@@ -115,7 +97,6 @@ class TestProvenanceHash:
         assert hash1 != hash2
 
     def test_different_transform_different_hash(self):
-        """Different transforms produce different hashes."""
         spec1 = TransformSpec(
             executor="local://duckdb_sql@v1",
             params={"sql": "SELECT 1"},
@@ -132,10 +113,8 @@ class TestProvenanceHash:
 
 
 class TestArtifactCRUD:
-    """Tests for artifact CRUD operations."""
-
     def test_create_artifact(self, store):
-        """Create artifact starts in building state."""
+        """A created artifact starts in building state."""
         version = store.create_artifact(
             artifact_id="test-id",
             provenance_hash="hash123",
@@ -150,7 +129,6 @@ class TestArtifactCRUD:
         assert artifact.provenance_hash == "hash123"
 
     def test_create_increments_version(self, store):
-        """Each create increments the version number."""
         v1 = store.create_artifact("test-id", "hash1")
         v2 = store.create_artifact("test-id", "hash2")
         v3 = store.create_artifact("test-id", "hash3")
@@ -160,7 +138,6 @@ class TestArtifactCRUD:
         assert v3 == 3
 
     def test_create_with_transform_spec(self, store):
-        """Create artifact with transform spec."""
         spec = TransformSpec(
             executor="local://duckdb_sql@v1",
             params={"sql": "SELECT 1"},
@@ -175,7 +152,6 @@ class TestArtifactCRUD:
         assert artifact.transform_spec == spec.to_json()
 
     def test_finalize_artifact(self, store):
-        """Finalize transitions to ready state."""
         version = store.create_artifact("test-id", "hash123")
         store.finalize_artifact(
             artifact_id="test-id",
@@ -192,13 +168,12 @@ class TestArtifactCRUD:
         assert artifact.byte_size == 1024
 
     def test_finalize_nonexistent_raises(self, store):
-        """Finalize nonexistent artifact raises ValueError."""
         with pytest.raises(ValueError) as exc_info:
             store.finalize_artifact("nonexistent", 1, "{}", 0, 0)
         assert "not found" in str(exc_info.value)
 
     def test_finalize_already_ready_is_idempotent(self, store):
-        """Finalize already-ready artifact is idempotent (returns existing)."""
+        """Finalizing an already-ready artifact returns the existing one."""
         version = store.create_artifact("test-id", "hash123")
         first_result = store.finalize_artifact("test-id", version, "{}", 0, 0)
 
@@ -210,7 +185,6 @@ class TestArtifactCRUD:
         assert second_result.state == "ready"
 
     def test_fail_artifact(self, store):
-        """Fail transitions to failed state."""
         version = store.create_artifact("test-id", "hash123")
         store.fail_artifact("test-id", version)
 
@@ -218,12 +192,11 @@ class TestArtifactCRUD:
         assert artifact.state == "failed"
 
     def test_get_nonexistent(self, store):
-        """Get nonexistent artifact returns None."""
         result = store.get_artifact("nonexistent", 1)
         assert result is None
 
     def test_get_latest_version(self, store):
-        """Get latest ready version."""
+        """Returns the latest ready version."""
         v1 = store.create_artifact("test-id", "hash1")
         store.finalize_artifact("test-id", v1, "{}", 100, 1000)
 
@@ -241,10 +214,7 @@ class TestArtifactCRUD:
 
 
 class TestProvenanceLookup:
-    """Tests for provenance-based deduplication."""
-
     def test_find_by_provenance(self, store):
-        """Find artifact by provenance hash."""
         version = store.create_artifact("test-id", "unique-hash")
         store.finalize_artifact("test-id", version, "{}", 100, 1000)
 
@@ -254,19 +224,16 @@ class TestProvenanceLookup:
         assert found.version == version
 
     def test_find_by_provenance_not_found(self, store):
-        """Find returns None for unknown provenance."""
         found = store.find_by_provenance("unknown-hash")
         assert found is None
 
     def test_find_by_provenance_ignores_building(self, store):
-        """Find ignores artifacts in building state."""
         store.create_artifact("test-id", "hash123")
         # Not finalized, so not found.
         found = store.find_by_provenance("hash123")
         assert found is None
 
     def test_find_by_provenance_ignores_failed(self, store):
-        """Find ignores artifacts in failed state."""
         version = store.create_artifact("test-id", "hash123")
         store.fail_artifact("test-id", version)
 
@@ -275,10 +242,7 @@ class TestProvenanceLookup:
 
 
 class TestBlobIO:
-    """Tests for blob I/O operations."""
-
     def test_write_and_read_blob(self, store):
-        """Write and read blob data."""
         version = store.create_artifact("test-id", "hash123")
         data = b"test arrow data"
 
@@ -288,12 +252,10 @@ class TestBlobIO:
         assert result == data
 
     def test_read_nonexistent_blob(self, store):
-        """Read nonexistent blob returns None."""
         result = store.read_blob("nonexistent", 1)
         assert result is None
 
     def test_blob_exists(self, store):
-        """Check if blob exists."""
         version = store.create_artifact("test-id", "hash123")
 
         assert store.blob_exists("test-id", version) is False
@@ -303,7 +265,7 @@ class TestBlobIO:
         assert store.blob_exists("test-id", version) is True
 
     def test_write_blob_atomic(self, store, artifact_dir):
-        """Write blob is atomic (no partial writes)."""
+        """Blob writes are atomic (no partial writes)."""
         version = store.create_artifact("test-id", "hash123")
         data = b"x" * 10000
 
@@ -316,10 +278,7 @@ class TestBlobIO:
 
 
 class TestNamePointers:
-    """Tests for name pointer operations."""
-
     def test_set_and_resolve_name(self, store):
-        """Set and resolve a name pointer."""
         version = store.create_artifact("test-id", "hash123")
         store.finalize_artifact("test-id", version, "{}", 100, 1000)
 
@@ -331,12 +290,10 @@ class TestNamePointers:
         assert resolved.version == version
 
     def test_resolve_nonexistent_name(self, store):
-        """Resolve nonexistent name returns None."""
         resolved = store.resolve_name("nonexistent")
         assert resolved is None
 
     def test_set_name_requires_ready(self, store):
-        """Set name requires target to be ready."""
         version = store.create_artifact("test-id", "hash123")
         # Not finalized
 
@@ -345,13 +302,11 @@ class TestNamePointers:
         assert "not ready" in str(exc_info.value)
 
     def test_set_name_requires_exists(self, store):
-        """Set name requires target to exist."""
         with pytest.raises(ValueError) as exc_info:
             store.set_name("my-artifact", "nonexistent", 1)
         assert "not found" in str(exc_info.value)
 
     def test_update_name(self, store):
-        """Update name to point to new version."""
         v1 = store.create_artifact("test-id", "hash1")
         store.finalize_artifact("test-id", v1, "{}", 100, 1000)
         store.set_name("my-artifact", "test-id", v1)
@@ -364,7 +319,6 @@ class TestNamePointers:
         assert resolved.version == v2
 
     def test_get_name(self, store):
-        """Get name pointer metadata."""
         version = store.create_artifact("test-id", "hash123")
         store.finalize_artifact("test-id", version, "{}", 100, 1000)
         store.set_name("my-artifact", "test-id", version)
@@ -377,7 +331,6 @@ class TestNamePointers:
         assert name_info.updated_at > 0
 
     def test_delete_name(self, store):
-        """Delete a name pointer."""
         version = store.create_artifact("test-id", "hash123")
         store.finalize_artifact("test-id", version, "{}", 100, 1000)
         store.set_name("my-artifact", "test-id", version)
@@ -386,11 +339,9 @@ class TestNamePointers:
         assert store.resolve_name("my-artifact") is None
 
     def test_delete_nonexistent_name(self, store):
-        """Delete nonexistent name returns False."""
         assert store.delete_name("nonexistent") is False
 
     def test_list_names(self, store):
-        """List all name pointers."""
         for i in range(3):
             v = store.create_artifact(f"id-{i}", f"hash-{i}")
             store.finalize_artifact(f"id-{i}", v, "{}", i * 100, i * 1000)
@@ -402,8 +353,6 @@ class TestNamePointers:
 
 
 class TestCleanup:
-    """Tests for cleanup operations."""
-
     def test_cleanup_failed(self, store, artifact_dir):
         """Cleanup removes failed artifacts older than max age."""
         version = store.create_artifact("test-id", "hash123")
@@ -421,7 +370,6 @@ class TestCleanup:
         assert store.blob_exists("test-id", version) is False
 
     def test_cleanup_preserves_ready(self, store):
-        """Cleanup preserves ready artifacts."""
         version = store.create_artifact("test-id", "hash123")
         store.finalize_artifact("test-id", version, "{}", 100, 1000)
 
@@ -432,10 +380,7 @@ class TestCleanup:
 
 
 class TestStats:
-    """Tests for statistics."""
-
     def test_stats_empty(self, store):
-        """Stats on empty store."""
         stats = store.stats()
         assert stats["total_versions"] == 0
         assert stats["ready_versions"] == 0
@@ -446,7 +391,6 @@ class TestStats:
         assert stats["name_count"] == 0
 
     def test_stats_with_data(self, store):
-        """Stats with artifacts."""
         v1 = store.create_artifact("id-1", "hash1")
         store.finalize_artifact("id-1", v1, "{}", 100, 1000)
 
@@ -468,7 +412,7 @@ class TestStats:
 
 
 def _ipc_bytes(num_rows: int) -> bytes:
-    """Build a single valid Arrow IPC stream with ``num_rows`` rows."""
+    """A single valid Arrow IPC stream with ``num_rows`` rows."""
     import pyarrow as pa
     import pyarrow.ipc as ipc
 
@@ -479,12 +423,11 @@ def _ipc_bytes(num_rows: int) -> bytes:
 
 
 class TestForeignKeyEnforcement:
-    """The declared foreign keys are enforced, and deletes clean up after
-    themselves so that enforcement does not break collection.
+    """Declared foreign keys are enforced, and deletes clean up so enforcement does not break
+    collection.
 
-    SQLite ignores FOREIGN KEY clauses unless ``PRAGMA foreign_keys=ON`` is set
-    per connection, so these constraints were decorative for as long as they
-    have existed. Postgres always enforced them.
+    SQLite ignores FOREIGN KEY clauses unless ``PRAGMA foreign_keys=ON`` is set per connection;
+    Postgres always enforces them.
     """
 
     def _ready(self, store, artifact_id, provenance):
@@ -562,10 +505,8 @@ class TestForeignKeyEnforcement:
 class TestVersionPromotion:
     """Re-pointing ``latest`` at a result the artifact already holds.
 
-    Consumers read an artifact's current value through ``get_latest_version``,
-    so an older version carrying the right bytes is unreachable by pointing at
-    it. Promotion re-records it, which is what makes returning to a previous
-    provenance a cache hit instead of a recomputation.
+    Consumers read through ``get_latest_version``, so returning to a previous provenance is a cache
+    hit only if promotion re-records the older version.
     """
 
     def _ready(self, store, artifact_id, provenance, blob):
@@ -679,7 +620,7 @@ class TestVersionPromotion:
 
 
 class TestRefreshSupersede:
-    """Refresh rebuilds become new versions of the same artifact (#123)."""
+    """Refresh rebuilds become new versions of the same artifact."""
 
     def test_finalize_supersedes_older_ready_version(self, store):
         """Finalizing v2 with v1's provenance demotes v1 to superseded."""
@@ -732,7 +673,7 @@ class TestRefreshSupersede:
 
 
 class TestZombieSweep:
-    """Stale building artifacts are demoted to failed (#123)."""
+    """Stale building artifacts are demoted to failed."""
 
     def test_old_building_demoted(self, store):
         store.create_artifact("zombie", "prov-z")
@@ -755,7 +696,7 @@ class TestZombieSweep:
 
 
 class TestVerifyArtifacts:
-    """Store-wide blob/metadata consistency check (#123)."""
+    """Store-wide blob/metadata consistency check."""
 
     def _make_ready(self, store, artifact_id: str, provenance: str, rows: int) -> None:
         store.create_artifact(artifact_id, provenance)
@@ -777,7 +718,7 @@ class TestVerifyArtifacts:
         assert findings[0]["artifact_id"] == "short"
 
     def test_concatenated_streams_detected(self, store):
-        """The #121 corruption shape is flagged as invalid_stream."""
+        """Concatenated IPC streams are flagged as invalid_stream."""
         store.create_artifact("concat", "prov-c")
         store.write_blob("concat", 1, _ipc_bytes(3) + _ipc_bytes(3))
         store.finalize_artifact("concat", 1, "{}", 6, 100)
@@ -796,7 +737,7 @@ class TestVerifyArtifacts:
 
 
 class TestArtifactVerifyCli:
-    """`strata artifact verify` surfaces store inconsistencies (#123)."""
+    """`strata artifact verify` surfaces store inconsistencies."""
 
     def _run(self, artifact_dir, fmt="human"):
         import argparse
@@ -828,7 +769,7 @@ class TestArtifactVerifyCli:
 
 
 class TestLegacyDefaultTenantNames:
-    """Artifacts stamped with legacy '_default' stay nameable (friction #7)."""
+    """Artifacts stamped with legacy '_default' stay nameable."""
 
     def test_tenantless_request_can_name_default_artifact(self, store):
         store.create_artifact("legacy", "prov-l", tenant="_default")
@@ -855,7 +796,7 @@ def _make_ready_artifact(store, artifact_id: str, provenance: str) -> None:
 
 
 class TestAliases:
-    """Registry aliases: intent pointers on a name (#129)."""
+    """Registry aliases: intent pointers on a name."""
 
     def test_set_and_resolve(self, store):
         _make_ready_artifact(store, "model-a", "prov-a")
@@ -876,7 +817,7 @@ class TestAliases:
         ]
 
     def test_alias_move_keeps_old_version_reachable(self, store):
-        """The friction-#9 scenario: promotion must not lose the old champion."""
+        """Promotion must not lose the old champion."""
         _make_ready_artifact(store, "model-a", "prov-a")
         _make_ready_artifact(store, "model-b", "prov-b")
         store.set_alias("demo/model", "champion", "model-a", 1)
@@ -914,7 +855,7 @@ class TestAliases:
 
 
 class TestTags:
-    """Version tags: facts about one artifact build (#129)."""
+    """Version tags: facts about one artifact build."""
 
     def test_set_get_tags(self, store):
         _make_ready_artifact(store, "model-a", "prov-a")
@@ -940,7 +881,7 @@ class TestTags:
 
 
 class TestRegistryAudit:
-    """Append-only audit of name/alias/tag mutations (#129)."""
+    """Append-only audit of name/alias/tag mutations."""
 
     def test_name_moves_audited_with_history(self, store):
         _make_ready_artifact(store, "m1", "prov-1")
@@ -986,7 +927,7 @@ class TestRegistryAudit:
 
 
 class TestPendingAliasChanges:
-    """Approval-gate mechanics: request / approve / reject (#129 follow-up)."""
+    """Approval-gate mechanics: request, approve, reject."""
 
     def test_request_and_approve_set(self, store):
         _make_ready_artifact(store, "m1", "prov-1")
@@ -1052,7 +993,7 @@ class TestPendingAliasChanges:
 
 
 class TestAliasedArtifactProtection:
-    """GC and delete respect alias pointers (review finding C1)."""
+    """GC and delete respect alias pointers."""
 
     def test_gc_spares_aliased_artifact(self, store):
         _make_ready_artifact(store, "pinned", "prov-p")
@@ -1063,7 +1004,7 @@ class TestAliasedArtifactProtection:
         assert store.resolve_alias("demo/model", "champion") is not None
 
     def test_gc_spares_aliased_superseded_version(self, store):
-        """The C1 failure sequence: champion pins a superseded version."""
+        """An alias pinning a superseded version keeps it from GC."""
         _make_ready_artifact(store, "model", "prov-s")
         store.create_artifact("model", "prov-s")
         store.write_blob("model", 2, _ipc_bytes(1))
@@ -1077,8 +1018,7 @@ class TestAliasedArtifactProtection:
         assert champion is not None and champion.version == 1
 
     def test_gc_still_collects_unreferenced(self, store):
-        """A lone unnamed artifact is a *current value* (get_latest_version
-        resolves it), so reclaiming it now takes the explicit opt-in."""
+        """A lone unnamed artifact is a current value; reclaiming it takes the explicit opt-in."""
         _make_ready_artifact(store, "loose", "prov-l")
         result = store.garbage_collect(max_idle_days=0, collect_latest=True)
         assert result["deleted_count"] == 1
@@ -1098,7 +1038,7 @@ class TestAliasedArtifactProtection:
 
 
 class TestApproveAtomicity:
-    """approve_alias_change is one transaction (review finding M1)."""
+    """approve_alias_change is one transaction."""
 
     def test_dead_target_keeps_pending_intact(self, store):
         _make_ready_artifact(store, "m1", "prov-1")
@@ -1132,7 +1072,7 @@ class TestApproveAtomicity:
 
 
 class TestCreateArtifactVersionRace:
-    """Concurrent creates for one artifact id allocate distinct versions (M2)."""
+    """Concurrent creates for one artifact id allocate distinct versions."""
 
     def test_threaded_creates_never_collide(self, store):
         import threading
@@ -1160,7 +1100,7 @@ class TestCreateArtifactVersionRace:
 
 
 class TestAliasIdempotence:
-    """Identical-target alias writes are no-ops (dogfood finding D4)."""
+    """Identical-target alias writes are no-ops."""
 
     def test_set_alias_same_target_is_noop(self, store):
         _make_ready_artifact(store, "m1", "prov-1")
@@ -1190,7 +1130,7 @@ class TestAliasIdempotence:
 
 
 class TestAuditTenantScoping:
-    """read_audit isolates by tenant for request-serving callers (Vuln 1)."""
+    """read_audit isolates by tenant for request-serving callers."""
 
     def _seed(self, store, tenant, name):
         store.create_artifact(f"{tenant}-a", f"prov-{tenant}", tenant=tenant)
@@ -1211,7 +1151,7 @@ class TestAuditTenantScoping:
         assert all(e["tenant"] == "globex" for e in globex)
 
     def test_default_sentinel_returns_all_tenants(self, store):
-        """No tenant arg = whole-store view (CLI / admin)."""
+        """No tenant arg gives the whole-store view (CLI / admin)."""
         self._seed(store, "acme", "acme/model")
         self._seed(store, "globex", "globex/model")
         tenants = {e["tenant"] for e in store.read_audit()}
@@ -1230,7 +1170,7 @@ class TestAuditTenantScoping:
 
 
 class TestApproveSeparationOfDuty:
-    """approve_alias_change can forbid self-approval (Vuln 2)."""
+    """approve_alias_change can forbid self-approval."""
 
     def _pending(self, store, requester):
         _make_ready_artifact(store, "m1", "prov-1")
@@ -1265,9 +1205,9 @@ class TestApproveSeparationOfDuty:
 
 
 class TestTagAndNameLookups:
-    """Reverse lookups used by the per-cell published-artifacts route:
-    find artifacts a cell published (``nb_cell`` tag) and the names that
-    point at a version."""
+    """Reverse lookups for the per-cell published-artifacts route: artifacts a cell published
+    (``nb_cell`` tag) and the names pointing at a version.
+    """
 
     def test_list_artifacts_by_tag(self, store):
         for aid, h in (("a1", "h1"), ("a2", "h2"), ("a3", "h3")):
@@ -1283,7 +1223,7 @@ class TestTagAndNameLookups:
 
 
 class TestListArtifactsSortAndSince:
-    """The since / sort / order filters that back the artifacts dashboard (B2)."""
+    """The since / sort / order filters behind the artifacts dashboard."""
 
     @staticmethod
     def _add(store, aid, byte_size):
@@ -1324,12 +1264,14 @@ class TestListArtifactsSortAndSince:
 
 
 class TestTenantNormalization:
-    """Tenant stored as '' (never NULL) for tenantless rows, plus the isolation
-    and uniqueness guarantees that depend on it (artifact_store review findings)."""
+    """Tenant is stored as '' (never NULL) for tenantless rows, and the isolation and uniqueness
+    guarantees that depend on it.
+    """
 
     def test_tenantless_provenance_uniqueness_enforced(self, store):
-        """Two tenantless artifacts with the same provenance can't both be ready;
-        the second dedups to the first (finding #2 — NULL-distinctness gap)."""
+        """Two tenantless artifacts with one provenance cannot both be ready; NULL would be
+        distinct.
+        """
         store.create_artifact("art-1", "dup-prov")
         store.finalize_artifact("art-1", 1, "{}", 1, 10)
         store.create_artifact("art-2", "dup-prov")
@@ -1347,8 +1289,7 @@ class TestTenantNormalization:
         assert ready == 1
 
     def test_tenantless_finalize_does_not_dedup_cross_tenant(self, store):
-        """A tenantless finalize must not dedup against a tenant's artifact and
-        point a default-tenant name at it (finding #1)."""
+        """A tenantless finalize must not dedup against a tenant's artifact and name it."""
         store.create_artifact("team-art", "shared-prov", tenant="team-a")
         store.finalize_artifact("team-art", 1, "{}", 1, 10)
 
@@ -1362,17 +1303,12 @@ class TestTenantNormalization:
         assert resolved.id == "none-art"
 
     def test_force_finalize_canonical_retries_past_a_losing_race(self, store):
-        """A competing writer can commit a ready row with our provenance between
-        our supersede and our promote, and the uniqueness index then rejects us.
+        """A competing writer can commit our provenance between our supersede and promote; the retry
+        must still promote.
 
-        Returning the winner would be wrong: the only caller reaches this method
-        *because* finalize landed under a foreign id, so handing that id back
-        leaves the canonical row 'failed' and the caller none the wiser. The
-        retry is what makes the promotion actually happen.
-
-        This cannot occur under SQLite in production -- BEGIN IMMEDIATE locks
-        the whole file -- so the conflict is injected. The retry loop itself is
-        dialect-agnostic, which is what this exercises.
+        Returning the winner would leave the canonical row 'failed'. SQLite's BEGIN IMMEDIATE
+        prevents this in production, so the conflict is injected; the retry loop is
+        dialect-agnostic.
         """
         import sqlite3
 
@@ -1411,8 +1347,7 @@ class TestTenantNormalization:
         assert promoted.state == "ready"
 
     def test_force_finalize_canonical_surfaces_a_persistent_conflict(self, store):
-        """Sustained contention has to stay visible rather than silently report
-        a promotion that did not happen."""
+        """Sustained contention must surface, not report a promotion that did not happen."""
         import sqlite3
 
         store.create_artifact("equiv", "race-prov", tenant="team-a")
@@ -1440,9 +1375,9 @@ class TestTenantNormalization:
             store._get_connection = real_get_connection
 
     def test_force_finalize_canonical_supersedes_conflicting_ready_row(self, store):
-        """Promoting a dedup-failed canonical row supersedes the equivalent ready
-        row so only one ready row per (tenant, provenance) survives (finding #3),
-        and it works for tenant-scoped rows, not just tenantless."""
+        """Promoting a dedup-failed canonical row supersedes the equivalent ready row, leaving one
+        ready row per (tenant, provenance), for tenant-scoped rows too.
+        """
         store.create_artifact("equiv", "canon-prov", tenant="team-a")
         store.finalize_artifact("equiv", 1, "{}", 1, 10)
         # Canonical row dedups to 'equiv' and is marked failed.
@@ -1468,7 +1403,7 @@ class TestTenantNormalization:
         assert store.get_artifact("equiv", 1).state == "superseded"
 
     def test_set_tag_rejects_cross_tenant(self, store):
-        """set_tag enforces ownership like set_alias (finding #4)."""
+        """set_tag enforces ownership like set_alias."""
         store.create_artifact("owned", "p", tenant="acme")
         store.finalize_artifact("owned", 1, "{}", 1, 10)
         with pytest.raises(ValueError, match="cannot tag in tenant"):
@@ -1481,8 +1416,7 @@ class TestTenantNormalization:
             store.set_tag("building", 1, "k", "v")
 
     def test_delete_artifact_refuses_other_tenant(self, store):
-        """delete_artifact's tenant guard refuses to delete another tenant's
-        artifact (finding #5)."""
+        """delete_artifact refuses to delete another tenant's artifact."""
         store.create_artifact("owned", "p", tenant="acme")
         store.finalize_artifact("owned", 1, "{}", 1, 10)
         assert store.delete_artifact("owned", 1, tenant="globex") is False
@@ -1490,9 +1424,9 @@ class TestTenantNormalization:
         assert store.delete_artifact("owned", 1, tenant="acme") is True
 
     def test_migration_normalizes_null_tenant_and_dedups(self, artifact_dir):
-        """Opening a legacy store with NULL tenants + a duplicate ready row
-        (allowed by the old NULL-distinct index) normalizes to '' and collapses
-        the duplicate so the uniqueness index holds."""
+        """A legacy store with NULL tenants and a duplicate ready row normalizes to '' and collapses
+        the duplicate so the uniqueness index holds.
+        """
         import sqlite3
 
         store = ArtifactStore(artifact_dir)
@@ -1554,16 +1488,11 @@ class TestTenantNormalization:
 
 
 class TestGcSparesCurrentValues:
-    """GC must not delete the *current value* of an artifact id.
+    """GC must not delete the current value of an artifact id.
 
-    ``get_latest_version(id)`` is how the store resolves "the current value",
-    and for some producers it is the only handle that ever exists: notebook
-    cell outputs are stored as ``nb_{notebook}_cell_{cell}_var_{name}`` and are
-    never given a name or an alias. The old "unreferenced = no name pointer"
-    rule therefore classified every live notebook variable as garbage, so a
-    routine ``POST /v1/artifacts/gc`` (default cutoff 7 days) deleted the state
-    of any notebook older than a week and the next cell run found its upstream
-    missing.
+    Notebook cell outputs (``nb_{notebook}_cell_{cell}_var_{name}``) are never named, so
+    ``get_latest_version`` is their only handle; treating unnamed as garbage would delete every
+    notebook's state after the GC cutoff.
     """
 
     def test_gc_spares_an_unnamed_notebook_cell_artifact(self, store):
@@ -1575,7 +1504,7 @@ class TestGcSparesCurrentValues:
         assert store.get_latest_version("nb_abc_cell_def_var_model") is not None
 
     def test_gc_still_collects_superseded_versions(self, store):
-        """The useful half of GC is unaffected: older versions still go."""
+        """Older versions are still collected."""
         _make_ready_artifact(store, "model", "prov-v1")
         store.create_artifact("model", "prov-v2")
         store.write_blob("model", 2, _ipc_bytes(1))
@@ -1588,9 +1517,9 @@ class TestGcSparesCurrentValues:
         assert store.get_artifact("model", 2) is not None  # current value kept
 
     def test_gc_spares_the_current_value_while_a_rebuild_is_in_flight(self, store):
-        """A rebuild's ``building`` row is the highest version of the id, so
-        "spare MAX(version)" left the value readers resolve unprotected for the
-        whole build, and for good once the rebuild failed."""
+        """A rebuild's ``building`` row is the highest version, so "spare MAX(version)" would leave
+        the readable value unprotected during the build and after it fails.
+        """
         artifact_id = "nb_x_cell_c1_var_df"
         _make_ready_artifact(store, artifact_id, "prov-v1")
         rebuild = store.create_artifact(artifact_id, "prov-v2")
@@ -1609,10 +1538,9 @@ class TestGcSparesCurrentValues:
 
 
 class TestGcDeletesMetadataBeforeBlobs:
-    """A crash or a raising blob backend mid-GC must not leave ready rows
-    whose blob is gone. Metadata is deleted and committed first; blob removal
-    is best-effort after, so the worst case is orphaned bytes rather than a
-    corrupt store."""
+    """Metadata is deleted and committed before best-effort blob removal, so a mid-GC crash leaves
+    orphaned bytes, not ready rows without blobs.
+    """
 
     def test_blob_failure_does_not_abort_gc_or_strand_ready_rows(self, store, monkeypatch):
         _make_ready_artifact(store, "model", "prov-v1")
@@ -1634,17 +1562,10 @@ class TestGcDeletesMetadataBeforeBlobs:
 
 
 class TestTenantlessArtifactsAreVisibleToScopedQueries:
-    """Tenantless rows are stored as ``''``, not NULL.
+    """Tenantless rows are stored as ``''``, so tenant filters must match ``''``, not only NULL.
 
-    The schema declares ``tenant TEXT NOT NULL DEFAULT ''`` and a migration
-    normalizes any legacy NULLs to ``''``, so ``tenant IS NULL`` matches
-    nothing. Seven tenant filters used only that test, while
-    ``find_by_provenance`` correctly checks ``(tenant = '' OR tenant IS NULL)``.
-
-    The result was a set of artifacts that dedup still resolved against but no
-    listing, usage, stats, verify or GC query could see — invisible and
-    uncollectable, i.e. a permanent leak, despite every one of those call sites
-    documenting that it "includes legacy tenantless artifacts".
+    Otherwise dedup still resolves these rows while listing, usage, stats, verify and GC cannot see
+    them: a permanent leak.
     """
 
     def _seed(self, store):
@@ -1675,9 +1596,7 @@ class TestTenantlessArtifactsAreVisibleToScopedQueries:
         store.verify_artifacts(tenant="team-a")
 
     def test_gc_can_finally_reach_legacy_rows(self, store):
-        """Previously no tenant-scoped GC could ever reach them, so they leaked
-        forever regardless of age. Asserted on reachability rather than an
-        exact count so this doesn't encode the surrounding GC policy."""
+        """Asserts reachability rather than an exact count, so the GC policy is not encoded here."""
         self._seed(store)
         store.create_artifact("legacy", "prov-legacy-v2")  # supersede v1
         store.write_blob("legacy", 2, _ipc_bytes(1))
@@ -1691,10 +1610,9 @@ class TestTenantlessArtifactsAreVisibleToScopedQueries:
 
 
 class TestAnIdTwoComputationsClaim:
-    """``import_artifact`` keeps the id it is given, and ids are not globally
-    unique: a notebook's are built from its own id and its cells', so two
-    people working from one repository produce the same one for cells they
-    have each edited differently."""
+    """``import_artifact`` keeps the given id, and notebook ids derive from notebook and cell ids,
+    so two people from one repo can send the same id for different cells.
+    """
 
     @staticmethod
     def _record(provenance: str):
@@ -1724,8 +1642,9 @@ class TestAnIdTwoComputationsClaim:
         assert again.written is False
 
     def test_a_different_computation_under_that_id_is_refused(self, store):
-        """Keeping the row already here reported success and left the caller's
-        name, tags and descendants pointing at somebody else's bytes."""
+        """Keeping the existing row would leave the caller's name, tags and descendants on someone
+        else's bytes.
+        """
         from strata.artifact_store import ArtifactImportConflict
 
         store.import_artifact(self._record("a" * 64), b"ALICE")
@@ -1737,11 +1656,11 @@ class TestAnIdTwoComputationsClaim:
 
 
 class TestTwoIdsOneComputation:
-    """Two notebook cells with the same source, inputs and lockfile (a
-    duplicated notebook) produce one provenance under two ids. The second to
-    finalize is promoted by ``force_finalize_canonical``, which supersedes the
-    first id's row. That row keeps its bytes, and it is still the first id's
-    current value: its downstream cells load it by ``get_latest_version``."""
+    """A duplicated notebook yields one provenance under two ids.
+
+    ``force_finalize_canonical`` supersedes the first id's row, which keeps its bytes and stays that
+    id's current value for its downstream cells.
+    """
 
     A = "nb_A_cell_c1_var_df"
     B = "nb_B_cell_c1_var_df"

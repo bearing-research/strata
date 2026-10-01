@@ -1,9 +1,4 @@
-"""Unit tests for the pure artifact/name URI parsers.
-
-These parsers were previously private helpers inside ``server.py`` exercised
-only through the ``/v1/materialize`` endpoints; extracting them to
-``strata.artifact_uris`` lets us pin their grammar directly.
-"""
+"""Unit tests for the pure artifact/name URI parsers in ``strata.artifact_uris``."""
 
 from strata.artifact_uris import (
     LATEST_VERSION,

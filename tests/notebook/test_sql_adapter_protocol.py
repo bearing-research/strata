@@ -82,8 +82,7 @@ def test_schema_fingerprint_equality_by_value():
 
 @pytest.fixture
 def clean_registry():
-    """Empty the registry for the test, restore default adapters at
-    teardown so later tests still see auto-registered drivers."""
+    """Empty the registry; restore the default adapters at teardown."""
     _reset_for_tests()
     yield
     _restore_defaults_for_tests()
@@ -126,8 +125,7 @@ def test_get_adapter_unknown_raises_with_known_list(clean_registry):
 
 
 def test_register_replaces_previous(clean_registry):
-    """Re-registration is intentional — tests swap adapters in and out
-    via this path."""
+    """Re-registration is intentional: tests swap adapters through it."""
 
     class _Replacement(_StubAdapter):
         name = "stub"

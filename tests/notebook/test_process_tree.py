@@ -1,17 +1,8 @@
 """Tests for process-tree-aware subprocess termination.
 
-The two things we need to verify:
-
-1. ``terminate_subprocess_tree`` returns promptly for a process that
-   responds to SIGTERM (graceful path).
-2. It still wins against a process that ignores SIGTERM (SIGKILL
-   fallback path) within roughly the grace period.
-3. Most importantly: when the subprocess has children of its own, the
-   helper kills the whole tree, not just the direct child. This is
-   the bug that motivates the module.
-
-Windows is not actively tested here; the helper falls back to
-``proc.kill`` on Windows which is the existing behavior.
+SIGTERM returns promptly, SIGKILL wins over a process that ignores it, and the
+whole tree dies, not just the direct child. Windows (plain ``proc.kill``) is
+not tested here.
 """
 
 from __future__ import annotations
@@ -36,7 +27,7 @@ pytestmark = pytest.mark.skipif(
 
 
 def _is_alive(pid: int) -> bool:
-    """True if pid still exists (sending signal 0 is the standard test)."""
+    """True if pid still exists (signal 0)."""
     try:
         os.kill(pid, 0)
         return True
@@ -46,8 +37,7 @@ def _is_alive(pid: int) -> bool:
 
 @pytest.mark.asyncio
 async def test_graceful_termination_via_sigterm():
-    """A subprocess that respects SIGTERM exits within the grace period
-    and the helper returns without escalating to SIGKILL."""
+    """A SIGTERM-respecting process exits within the grace period, with no SIGKILL."""
     # Python with a signal handler that exits cleanly on SIGTERM.
     proc = await asyncio.create_subprocess_exec(
         sys.executable,
@@ -75,8 +65,6 @@ async def test_graceful_termination_via_sigterm():
 
 @pytest.mark.asyncio
 async def test_sigkill_fallback_when_sigterm_ignored():
-    """A subprocess that swallows SIGTERM gets SIGKILL'd after the
-    grace period."""
     proc = await asyncio.create_subprocess_exec(
         sys.executable,
         "-c",
@@ -101,12 +89,10 @@ async def test_sigkill_fallback_when_sigterm_ignored():
 
 @pytest.mark.asyncio
 async def test_terminates_child_processes_not_just_parent():
-    """The bug this module exists to fix: subprocess spawns children,
-    we terminate the parent, and the children must also be gone.
+    """Children die with the parent, as DataLoader workers must with the harness.
 
-    Mimics PyTorch DataLoader workers: the parent is the harness, the
-    children are multiprocessing workers. Without the new-process-group
-    spawn + ``killpg``, the children survive as orphans of PID 1."""
+    Without the new process group and ``killpg`` they survive as orphans of PID 1.
+    """
     # Parent prints its own pid and the pids of two children, then
     # all three sleep. We read the pids off stdout, terminate the
     # parent's tree, and verify all three pids are gone.
@@ -158,7 +144,6 @@ async def test_terminates_child_processes_not_just_parent():
 
 @pytest.mark.asyncio
 async def test_returns_immediately_for_exited_process():
-    """If the process already exited cleanly, the helper is a no-op."""
     proc = await asyncio.create_subprocess_exec(
         sys.executable,
         "-c",

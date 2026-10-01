@@ -1,8 +1,7 @@
 """What a cell on a worker can see of the worker, and who the server polls.
 
-A worker holds the bearer token that authorizes running code on it and the
-credentials it resolves mount and connection names against. A cell is arbitrary
-code somebody else wrote; it gets what its manifest carries.
+A worker holds the token that authorizes running code on it and the credentials behind mount and
+connection names. A cell is someone else's code; it gets only what its manifest carries.
 """
 
 from __future__ import annotations
@@ -94,9 +93,9 @@ async def test_an_allowlist_narrows_the_rest_of_the_workers_environment(
 
 
 class TestWhereTheServerPolls:
-    """A 202 hands back a job URL. It belongs to the worker the manifest went
-    to: anywhere else and a worker could have the server poll a host of its
-    choosing, carrying the worker's token."""
+    """A 202's job URL must belong to the manifest's worker, or a worker could make the server poll
+    any host with the worker's token.
+    """
 
     @staticmethod
     def _executor(monkeypatch, tmp_path, job_url: str | None):
@@ -174,9 +173,9 @@ def _recording(calls: list[bool]):
 
 
 def test_the_workers_secrets_leave_the_environment_a_cell_can_reach(monkeypatch):
-    """Scrubbing the harness's own copy is not a boundary: the harness runs
-    under the worker's uid, so /proc/<ppid>/environ has whatever the worker
-    still holds. The entry point takes them out of the environment entirely."""
+    """The harness runs under the worker's uid, so /proc/<ppid>/environ exposes whatever the worker
+    still holds; the entry point removes the secrets entirely.
+    """
     import os
 
     from strata.notebook.remote_executor import (
@@ -202,8 +201,7 @@ def test_the_workers_secrets_leave_the_environment_a_cell_can_reach(monkeypatch)
 
 
 def test_an_allowlist_written_as_json_is_read_the_way_the_server_reads_it(monkeypatch):
-    """The setting's validator accepts a JSON array; a worker that read only
-    the comma form would narrow a cell's environment to nothing."""
+    """The validator accepts a JSON array; reading only the comma form would leave no env."""
     from strata.config import StrataConfig
     from strata.notebook.remote_executor import _cell_env
 

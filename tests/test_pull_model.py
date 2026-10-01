@@ -1,12 +1,4 @@
-"""Tests for pull model endpoints (Stage 2).
-
-Tests the complete pull model flow:
-1. Create a build
-2. Get manifest with signed URLs
-3. Download inputs via signed URL
-4. Upload output via signed URL
-5. Finalize build
-"""
+"""Pull-model endpoints: build, manifest with signed URLs, download, upload, finalize."""
 
 from __future__ import annotations
 
@@ -44,14 +36,13 @@ _TEST_SIGNER = URLSigner(_TEST_SECRET)
 
 @pytest.fixture
 def temp_dir():
-    """Create a temporary directory for test data."""
     with tempfile.TemporaryDirectory() as d:
         yield Path(d)
 
 
 @pytest.fixture
 def config(temp_dir):
-    """Create a test config with server transforms enabled."""
+    """A test config with server transforms enabled."""
     return StrataConfig(
         cache_dir=temp_dir / "cache",
         deployment_mode="service",
@@ -68,7 +59,6 @@ def config(temp_dir):
 
 @pytest.fixture
 def artifact_store(config):
-    """Create an artifact store for testing."""
     reset_artifact_store()
     store = get_artifact_store(config.artifact_dir)
     yield store
@@ -77,7 +67,6 @@ def artifact_store(config):
 
 @pytest.fixture
 def build_store(config):
-    """Create a build store for testing."""
     reset_build_store()
     db_path = config.artifact_dir / "artifacts.sqlite"
     store = get_build_store(db_path)
@@ -87,7 +76,7 @@ def build_store(config):
 
 @pytest.fixture
 def client(config, artifact_store, build_store):
-    """Create a test client with pull model enabled."""
+    """A test client for the pull-model routes."""
 
     mock_state = MagicMock()
     mock_state.config = config
@@ -116,7 +105,7 @@ def client(config, artifact_store, build_store):
 
 @pytest.fixture
 def trusted_proxy_client(temp_dir, artifact_store, build_store):
-    """Create a trusted-proxy client for signed URL and tenant ACL tests."""
+    """A trusted-proxy client for signed URL and tenant ACL tests."""
     config = StrataConfig(
         cache_dir=temp_dir / "cache-auth",
         deployment_mode="service",
@@ -145,7 +134,7 @@ def trusted_proxy_client(temp_dir, artifact_store, build_store):
 
 
 def create_test_arrow_blob() -> bytes:
-    """Create a small Arrow IPC stream for testing."""
+    """A small Arrow IPC stream."""
     schema = pa.schema([("id", pa.int64()), ("value", pa.string())])
     data = [
         pa.array([1, 2, 3], type=pa.int64()),
@@ -176,16 +165,7 @@ def _auth_headers(
 
 
 def create_test_artifact(artifact_store, artifact_id: str, finalize: bool = True) -> int:
-    """Helper to create an artifact for testing.
-
-    Args:
-        artifact_store: The artifact store
-        artifact_id: Artifact ID to create
-        finalize: Whether to finalize the artifact
-
-    Returns:
-        Version number
-    """
+    """Create an artifact (finalized unless ``finalize`` is false) and return its version."""
     provenance_hash = f"test-hash-{artifact_id}"
     version = artifact_store.create_artifact(
         artifact_id=artifact_id,
@@ -201,10 +181,9 @@ def create_test_artifact(artifact_store, artifact_id: str, finalize: bool = True
 
 
 class TestBuildManifestEndpoint:
-    """Tests for GET /v1/builds/{build_id}/manifest."""
+    """GET /v1/builds/{build_id}/manifest."""
 
     def test_get_manifest_for_pending_build(self, client, build_store, artifact_store):
-        """Can get manifest for a pending build."""
         input_version = create_test_artifact(artifact_store, "input1", finalize=True)
 
         output_version = create_test_artifact(artifact_store, "output1", finalize=False)
@@ -235,7 +214,7 @@ class TestBuildManifestEndpoint:
         assert "finalize" in data["finalize_url"]
 
     def test_get_manifest_for_building_build(self, client, build_store, artifact_store):
-        """Can get manifest for a build that has already started."""
+        """A manifest is available for a build that has already started."""
         input_version = create_test_artifact(artifact_store, "input-building", finalize=True)
         output_version = create_test_artifact(artifact_store, "output-building", finalize=False)
 
@@ -259,7 +238,7 @@ class TestBuildManifestEndpoint:
         build_store,
         artifact_store,
     ):
-        """Tenant-scoped name inputs should resolve within the owning build tenant."""
+        """Tenant-scoped name inputs resolve within the build's own tenant."""
         version_a = create_test_artifact(artifact_store, "tenant-a-input", finalize=True)
         version_b = create_test_artifact(artifact_store, "tenant-b-input", finalize=True)
         artifact_store.set_name("shared-input", "tenant-a-input", version_a, tenant="team-a")
@@ -306,12 +285,10 @@ class TestBuildManifestEndpoint:
         assert response.status_code == 404
 
     def test_get_manifest_not_found(self, client):
-        """Returns 404 for non-existent build."""
         response = client.get("/v1/builds/nonexistent/manifest")
         assert response.status_code == 404
 
     def test_get_manifest_completed_build_rejected(self, client, build_store, artifact_store):
-        """Cannot get manifest for completed build."""
         version = create_test_artifact(artifact_store, "output2", finalize=False)
         build_store.create_build(
             build_id="build-002",
@@ -328,10 +305,9 @@ class TestBuildManifestEndpoint:
 
 
 class TestDownloadEndpoint:
-    """Tests for GET /v1/artifacts/download."""
+    """GET /v1/artifacts/download."""
 
     def test_download_with_valid_signature(self, client, artifact_store):
-        """Can download artifact with valid signed URL."""
         version = create_test_artifact(artifact_store, "dl-test", finalize=True)
 
         blob = artifact_store.read_blob("dl-test", version)
@@ -363,7 +339,6 @@ class TestDownloadEndpoint:
         assert response.content == blob
 
     def test_download_expired_signature_rejected(self, client, artifact_store):
-        """Expired signature is rejected."""
         version = create_test_artifact(artifact_store, "dl-test2", finalize=True)
 
         signed = _TEST_SIGNER.generate_download_url(
@@ -421,10 +396,9 @@ class TestDownloadEndpoint:
 
 
 class TestUploadEndpoint:
-    """Tests for POST /v1/artifacts/upload."""
+    """POST /v1/artifacts/upload."""
 
     def test_upload_with_valid_signature(self, client, build_store, artifact_store):
-        """Can upload artifact with valid signed URL."""
         version = create_test_artifact(artifact_store, "up-output", finalize=False)
         build_store.create_build(
             build_id="up-build-001",
@@ -466,7 +440,7 @@ class TestUploadEndpoint:
     def test_upload_with_valid_signature_for_building_build(
         self, client, build_store, artifact_store
     ):
-        """Can upload artifact for a build that has already started."""
+        """Upload works for a build that has already started."""
         version = create_test_artifact(artifact_store, "up-output-building", finalize=False)
         build_store.create_build(
             build_id="up-build-building-001",
@@ -501,7 +475,6 @@ class TestUploadEndpoint:
         assert artifact_store.read_blob("up-output-building", version) == blob
 
     def test_upload_exceeds_max_bytes_rejected(self, client, build_store, artifact_store):
-        """Upload exceeding max_bytes is rejected."""
         version = create_test_artifact(artifact_store, "up-output2", finalize=False)
         build_store.create_build(
             build_id="up-build-002",
@@ -572,7 +545,6 @@ class TestUploadEndpoint:
         assert not artifact_store.blob_exists("up-output3", version)
 
     def test_upload_expired_signature_rejected(self, client, build_store, artifact_store):
-        """Expired upload signature is rejected."""
         version = create_test_artifact(artifact_store, "up-output3", finalize=False)
         build_store.create_build(
             build_id="up-build-003",
@@ -606,10 +578,9 @@ class TestUploadEndpoint:
 
 
 class TestFinalizeEndpoint:
-    """Tests for POST /v1/builds/{build_id}/finalize."""
+    """POST /v1/builds/{build_id}/finalize."""
 
     def test_finalize_after_upload(self, client, build_store, artifact_store):
-        """Can finalize a build after uploading blob."""
         version = create_test_artifact(artifact_store, "fin-output", finalize=False)
         build_store.create_build(
             build_id="fin-build-001",
@@ -641,8 +612,7 @@ class TestFinalizeEndpoint:
     def test_finalize_refuses_an_output_over_the_limit(
         self, client, config, build_store, artifact_store
     ):
-        """A presigned upload never passes the upload route's byte count, so
-        finalize checks the size itself before publishing. Item 12."""
+        """A presigned upload bypasses the upload route's byte count, so finalize checks size."""
         version = create_test_artifact(artifact_store, "big-output", finalize=False)
         build_store.create_build(
             build_id="big-build-001",
@@ -665,7 +635,7 @@ class TestFinalizeEndpoint:
     def test_finalize_arrow_validation_runs_off_event_loop(
         self, client, build_store, artifact_store, monkeypatch
     ):
-        """Arrow schema/row-count validation must run in a worker thread."""
+        """Arrow schema and row-count validation runs in a worker thread."""
         import threading
 
         version = create_test_artifact(artifact_store, "fin-output-offload", finalize=False)
@@ -699,7 +669,7 @@ class TestFinalizeEndpoint:
         )
 
     def test_finalize_records_quota_bytes(self, client, build_store, artifact_store):
-        """Pull-model finalize should account for produced bytes against build QoS quota."""
+        """Finalize charges the produced bytes to the build's QoS quota."""
         qos = BuildQoS(BuildQoSConfig(bytes_per_day_limit=10 * 1024 * 1024))
         set_build_qos(qos)
 
@@ -726,7 +696,7 @@ class TestFinalizeEndpoint:
             reset_build_qos()
 
     def test_finalize_after_upload_for_building_build(self, client, build_store, artifact_store):
-        """Can finalize a build after it has already transitioned to building."""
+        """Finalize works after the build has moved to building."""
         version = create_test_artifact(artifact_store, "fin-output-building", finalize=False)
         build_store.create_build(
             build_id="fin-build-building-001",
@@ -747,7 +717,7 @@ class TestFinalizeEndpoint:
     def test_finalize_duplicate_provenance_repoints_build(
         self, client, build_store, artifact_store
     ):
-        """Duplicate finalization returns the canonical artifact URI and repoints the build."""
+        """A duplicate returns the canonical artifact URI and repoints the build."""
         existing_version = artifact_store.create_artifact("canonical-output", "shared-hash")
         artifact_store.finalize_artifact("canonical-output", existing_version, "{}", 3, 100)
 
@@ -781,7 +751,6 @@ class TestFinalizeEndpoint:
         assert duplicate_artifact.state == "failed"
 
     def test_finalize_without_upload_rejected(self, client, build_store, artifact_store):
-        """Cannot finalize without uploading blob first."""
         version = create_test_artifact(artifact_store, "fin-output2", finalize=False)
         build_store.create_build(
             build_id="fin-build-002",
@@ -795,7 +764,6 @@ class TestFinalizeEndpoint:
         assert "Blob not uploaded" in response.json()["detail"]
 
     def test_finalize_already_complete_rejected(self, client, build_store, artifact_store):
-        """Cannot finalize an already complete build."""
         version = create_test_artifact(artifact_store, "fin-output3", finalize=False)
         build_store.create_build(
             build_id="fin-build-003",
@@ -812,7 +780,7 @@ class TestFinalizeEndpoint:
         assert "not in pending or building state" in response.json()["detail"]
 
     def test_finalize_invalid_arrow_fails_build(self, client, build_store, artifact_store):
-        """Finalizing with invalid Arrow data marks build as failed."""
+        """Invalid Arrow data marks the build failed."""
         version = create_test_artifact(artifact_store, "fin-output4", finalize=False)
         build_store.create_build(
             build_id="fin-build-004",
@@ -837,7 +805,7 @@ class TestFinalizeEndpoint:
         build_store,
         artifact_store,
     ):
-        """Unsigned finalize access requires both the owning principal and tenant."""
+        """Unsigned finalize requires both the owning principal and tenant."""
         version = create_test_artifact(artifact_store, "fin-authz-output", finalize=False)
         build_store.create_build(
             build_id="fin-authz-001",
@@ -857,7 +825,7 @@ class TestFinalizeEndpoint:
 
 
 class TestBuildStatusEndpoint:
-    """Tests for build status access control."""
+    """Build status access control."""
 
     def test_build_status_is_tenant_scoped_even_for_same_principal_id(
         self,
@@ -884,10 +852,7 @@ class TestBuildStatusEndpoint:
 
 
 class TestPullModelEndToEnd:
-    """End-to-end test of the complete pull model flow."""
-
     def test_complete_pull_model_flow(self, client, build_store, artifact_store):
-        """Test the complete pull model workflow."""
         input_version = create_test_artifact(artifact_store, "e2e-input", finalize=True)
         input_blob = artifact_store.read_blob("e2e-input", input_version)
 
@@ -949,7 +914,7 @@ class TestPullModelEndToEnd:
         build_store,
         artifact_store,
     ):
-        """Signed pull-model URLs should work without proxy auth headers."""
+        """Signed URLs work without proxy auth headers."""
         input_version = create_test_artifact(artifact_store, "auth-e2e-input", finalize=True)
         output_version = create_test_artifact(artifact_store, "auth-e2e-output", finalize=False)
         build_store.create_build(
@@ -998,8 +963,7 @@ class TestPullModelEndToEnd:
 
 @pytest.fixture
 def unauthenticated_service_client(temp_dir, artifact_store, build_store):
-    """A service-mode server with ``auth_mode="none"`` — a config the coherence
-    validator accepts, and one with no loopback restriction."""
+    """A service-mode server with ``auth_mode="none"`` and no loopback restriction."""
     config = StrataConfig(
         cache_dir=temp_dir / "cache-noauth",
         deployment_mode="service",
@@ -1023,12 +987,10 @@ def unauthenticated_service_client(temp_dir, artifact_store, build_store):
 
 
 class TestManifestMintingRequiresAuth:
-    """The manifest route MINTS capabilities — a signed upload URL plus a
-    finalize URL, with nothing binding the uploaded bytes to the executor's
-    identity. In an unauthenticated service-mode deployment (no loopback
-    restriction), anyone who learned a build id could PUT arbitrary Arrow IPC
-    and finalize it; the forged artifact is keyed by the build's provenance
-    hash, so every later identical materialize serves it as a dedup cache hit.
+    """The manifest route mints capabilities, so it requires auth.
+
+    Without it, anyone with a build id could upload and finalize forged bytes under the build's
+    provenance hash, served to every later identical materialize as a cache hit.
     """
 
     def _seed_build(self, build_store, artifact_store, build_id="build-mint"):
@@ -1063,11 +1025,10 @@ class TestManifestMintingRequiresAuth:
     def test_redeeming_stays_signature_authed(
         self, unauthenticated_service_client, build_store, artifact_store
     ):
-        """Redeeming a capability must NOT require a principal — a worker holds
-        a signed URL, not an identity. That is the whole point of the pull
-        model, and is how the notebook's signed remote workers operate: the
-        notebook assembles the manifest in-process and the worker only redeems.
-        An unsigned redeem is still refused, by the signature check."""
+        """Redeeming needs only the signature: a worker holds a signed URL, not an identity.
+
+        An unsigned redeem is still refused.
+        """
         self._seed_build(build_store, artifact_store, build_id="build-redeem")
         resp = unauthenticated_service_client.post("/v1/builds/build-redeem/finalize")
         # Refused for want of a signature (401/403), not for want of a principal and not
@@ -1076,16 +1037,10 @@ class TestManifestMintingRequiresAuth:
 
 
 class TestManifestClaimsTheBuild:
-    """Issuing a manifest must take the build, so the local runner can't also
-    execute it.
+    """Issuing a manifest claims the build, so the local runner cannot also run it.
 
-    Previously the manifest route left the build in ``pending`` and recorded
-    nothing, so ``BuildRunner``'s poll loop picked the same build up and ran it
-    via v1-push while the pull executor was uploading — two writers on the same
-    ``(artifact_id, version)`` blob, with ``finalize_build`` then validating one
-    blob's schema/row-count while completing a different one.
-    ``_is_runner_managed_build`` only skips builds whose *user-supplied* params
-    carry ``_dispatch_mode == "external"``, which only the notebook path sets.
+    An unclaimed build would have two writers on one ``(artifact_id, version)`` blob, and finalize
+    could validate one blob while completing another.
     """
 
     def _pending(self, build_store, artifact_store, build_id):
@@ -1112,8 +1067,7 @@ class TestManifestClaimsTheBuild:
     def test_runner_cannot_claim_a_build_handed_to_an_executor(
         self, client, build_store, artifact_store
     ):
-        """The runner's own claim must now fail — it is the same atomic
-        ``WHERE state = 'pending'`` update the manifest route used."""
+        """The runner's claim is the same atomic ``WHERE state = 'pending'`` update."""
         self._pending(build_store, artifact_store, "claim-2")
         client.get("/v1/builds/claim-2/manifest")
 
@@ -1122,13 +1076,9 @@ class TestManifestClaimsTheBuild:
     def test_refetching_a_manifest_extends_the_lease_past_the_new_urls(
         self, client, build_store, artifact_store
     ):
-        """A re-fetch mints a fresh set of signed URLs, so the lease has to be
-        pushed out to cover them.
+        """A re-fetch mints fresh URLs, so the lease must cover them.
 
-        The claim only runs while the build is still 'pending', so a re-fetch
-        used to leave the lease on its original deadline while handing out URLs
-        good for a full window past it. That gap is the orphan sweep's window to
-        reclaim the build while the executor can still finalize it.
+        Otherwise the orphan sweep could reclaim the build while the executor can still finalize.
         """
         self._pending(build_store, artifact_store, "claim-refetch")
         assert client.get("/v1/builds/claim-refetch/manifest").status_code == 200
@@ -1159,10 +1109,7 @@ class TestManifestClaimsTheBuild:
     ):
         """An executor whose lease was reclaimed must not publish its result.
 
-        complete_build takes a fencing owner for exactly this ("a runner whose
-        lease was stolen ... published over the runner that legitimately took
-        the build over"), but the finalize route called it without one, so a
-        late executor still recorded its result as authoritative.
+        Finalize passes a fencing owner to complete_build.
         """
         version = create_test_artifact(artifact_store, "fin-fenced", finalize=False)
         build_store.create_build(
@@ -1206,13 +1153,10 @@ class TestManifestClaimsTheBuild:
     def test_a_capability_from_a_previous_claim_publishes_nothing(
         self, client, build_store, artifact_store
     ):
-        """The ordering #582 could not fix by fencing.
+        """Fencing at the end is too late: the artifact and name commit first.
 
-        finalize_and_set_name commits the artifact and moves the name pointer
-        before the fence at the end of the handler runs, so a stale executor
-        used to publish its bytes and only then be told it had lost the build.
-        Rejecting it needs the request to say *which claim* it belongs to,
-        which is what the lease token in the signed URL is for.
+        The lease token in the signed URL says which claim the request belongs to, so a stale one is
+        rejected before publishing.
         """
         self._pending(build_store, artifact_store, "stale-1")
         manifest = client.get("/v1/builds/stale-1/manifest").json()
@@ -1249,12 +1193,9 @@ class TestManifestClaimsTheBuild:
     def test_refetching_a_manifest_retires_the_previous_capability(
         self, client, build_store, artifact_store
     ):
-        """The open question in #583, answered by the deadline moving.
+        """A re-fetch renews the lease, so the earlier URLs stop verifying.
 
-        A re-fetch renews the lease to cover its fresh URLs, so the earlier
-        set stops verifying instead of staying usable alongside them. One live
-        capability set at a time is the property that makes two writers
-        impossible by construction rather than by durations lining up.
+        One live capability set at a time makes two writers impossible by construction.
         """
         self._pending(build_store, artifact_store, "refetch-1")
         first_manifest = client.get("/v1/builds/refetch-1/manifest").json()
@@ -1289,11 +1230,9 @@ class TestManifestClaimsTheBuild:
 class TestARetiredManifestCannotWriteTheOutput:
     """Found by formal verification (BuildLease.tla, NoStaleBytesPublished).
 
-    Re-fetching a manifest retires the previous finalize URL, but the upload
-    URL carried no lease token, so an executor still holding the earlier
-    manifest could upload into the same (artifact_id, version) slot, and the
-    current holder's finalize published those bytes. Each claim now uploads
-    under its own attempt key, and finalize reads only its own.
+    An executor holding a retired manifest could upload into the current slot and have the current
+    holder publish it. Each claim uploads under its own attempt key, and finalize reads only its
+    own.
     """
 
     def test_finalize_publishes_the_current_claims_bytes(self, client, build_store, artifact_store):
@@ -1321,9 +1260,11 @@ class TestARetiredManifestCannotWriteTheOutput:
     def test_a_losing_duplicate_finalize_keeps_the_published_bytes(
         self, client, build_store, artifact_store
     ):
-        """Two finalizes under one lease share an attempt id. The one that
-        loses the commit race cleans up its attempt, which is the attempt the
-        winner just published, so the cleanup must leave it alone."""
+        """Two finalizes under one lease share an attempt id.
+
+        The loser's cleanup targets the attempt the winner just published, so it must leave it
+        alone.
+        """
         version = create_test_artifact(artifact_store, "out-pull-3", finalize=False)
         build_store.create_build(
             build_id="pull-3",
@@ -1367,11 +1308,10 @@ class TestARetiredManifestCannotWriteTheOutput:
 
 
 class TestAnUploadThatIsNeverFinalizedIsSwept:
-    """An executor that uploads under its manifest's attempt key and never
-    finalizes left bytes nothing would read or delete: the blob stores cannot
-    list keys, and a version records only the attempt it was promoted from.
-    Every attempt is now recorded when its manifest is issued, and swept once
-    its build is over and its upload URL can no longer write."""
+    """An attempt uploaded but never finalized is swept once its build is over.
+
+    Blob stores cannot list keys, so every attempt is recorded when its manifest is issued.
+    """
 
     def _uploaded_and_abandoned(self, client, build_store, artifact_store, artifact_id):
         version = create_test_artifact(artifact_store, artifact_id, finalize=False)

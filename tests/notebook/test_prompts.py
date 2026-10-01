@@ -1,9 +1,7 @@
 """Tests for prompt variable rendering and the ``{{ var }}`` template evaluator.
 
-The evaluator is a deliberately tiny AST-walker (no ``eval``) that surfaces
-Python values to an LLM. Its security contract — no private access, no
-arbitrary calls, only a whitelist of zero-arg pandas helpers — is the most
-important thing to pin down, alongside the per-variable rendering/trimming.
+The evaluator walks the AST (no ``eval``). Its security contract matters most:
+no private access, no arbitrary calls, only whitelisted zero-arg pandas helpers.
 """
 
 from __future__ import annotations
@@ -106,7 +104,7 @@ class TestRenderTemplate:
 
 
 class TestTemplateSecurity:
-    """Every unsafe expression must be rejected, leaving the literal in place."""
+    """Every unsafe expression is rejected, leaving the literal in place."""
 
     def test_private_attribute_blocked(self):
         class Obj:
@@ -134,8 +132,7 @@ class TestTemplateSecurity:
 
 
 class TestEvaluatorRaises:
-    """The evaluator raises precise errors (``render_prompt_template`` swallows
-    them; these assert the contract directly)."""
+    """The evaluator's own errors, which ``render_prompt_template`` swallows."""
 
     def test_missing_name_raises_keyerror(self):
         with pytest.raises(KeyError):

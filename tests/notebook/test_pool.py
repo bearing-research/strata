@@ -1,4 +1,4 @@
-"""Tests for the warm process pool (M6)."""
+"""Tests for the warm process pool."""
 
 from __future__ import annotations
 
@@ -14,21 +14,16 @@ pytestmark = [pytest.mark.integration, pytest.mark.warm_pool]
 
 @pytest.fixture
 def notebook_dir(tmp_path):
-    """Create a simple notebook directory for testing.
-
-    Returns:
-        Path to notebook directory
-    """
+    """Create a simple notebook directory."""
     notebook_path = create_notebook(tmp_path, "Test Notebook")
     return notebook_path
 
 
 class TestWarmProcessPool:
-    """Test the warm process pool."""
+    """The warm process pool."""
 
     @pytest.mark.asyncio
     async def test_pool_starts_with_configured_size(self, notebook_dir):
-        """Test that pool starts with correct number of processes."""
         pool = WarmProcessPool(notebook_dir, pool_size=2)
         await pool.start()
 
@@ -38,7 +33,6 @@ class TestWarmProcessPool:
 
     @pytest.mark.asyncio
     async def test_acquire_warm_process(self, notebook_dir):
-        """Test acquiring a warm process."""
         pool = WarmProcessPool(notebook_dir, pool_size=1)
         await pool.start()
 
@@ -52,7 +46,6 @@ class TestWarmProcessPool:
 
     @pytest.mark.asyncio
     async def test_process_killed_after_use(self, notebook_dir):
-        """Test that process is killed and replaced after use."""
         pool = WarmProcessPool(notebook_dir, pool_size=1)
         await pool.start()
 
@@ -67,7 +60,6 @@ class TestWarmProcessPool:
 
     @pytest.mark.asyncio
     async def test_pool_drains_on_close(self, notebook_dir):
-        """Test that pool drains all processes."""
         pool = WarmProcessPool(notebook_dir, pool_size=2)
         await pool.start()
 
@@ -80,7 +72,6 @@ class TestWarmProcessPool:
 
     @pytest.mark.asyncio
     async def test_pool_invalidate_respawns(self, notebook_dir):
-        """Test pool invalidation respawns processes."""
         pool = WarmProcessPool(notebook_dir, pool_size=1)
         await pool.start()
 
@@ -100,7 +91,7 @@ class TestWarmProcessPool:
 
     @pytest.mark.asyncio
     async def test_cold_fallback_when_pool_empty(self, notebook_dir):
-        """Test that acquire returns None when pool is empty."""
+        """acquire returns None when the pool is empty."""
         pool = WarmProcessPool(notebook_dir, pool_size=0)
         # Pool not started.
 

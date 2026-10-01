@@ -33,11 +33,7 @@ _MARKDOWN_LITERAL = '"# Title\\n\\nA **markdown** cell."'
 
 @pytest.fixture
 def sample_notebook(tmp_path):
-    """Create a sample notebook for testing.
-
-    Returns:
-        NotebookSession for the test notebook
-    """
+    """A sample notebook session."""
     from strata.notebook.writer import add_cell_to_notebook, create_notebook
 
     notebook_dir = create_notebook(tmp_path, "Test Notebook")
@@ -55,9 +51,7 @@ def sample_notebook(tmp_path):
 class TestRevertHitsTheCache:
     """Reverting a cell edit must not recompute a result the store already holds.
 
-    Provenance is content-addressed, so P1 -> P2 -> back to P1 has a valid,
-    immutable result for P1 sitting in the store. Re-running it is exactly the
-    work the cache exists to avoid.
+    Provenance is content-addressed, so after P1 -> P2 -> P1 the store holds P1's result.
     """
 
     @pytest.mark.asyncio
@@ -129,11 +123,9 @@ class TestRevertHitsTheCache:
 
     @pytest.mark.asyncio
     async def test_a_cell_that_must_run_anyway_promotes_nothing(self, sample_notebook):
-        """One variable promotable and another not means the cell runs.
+        """One variable promotable and another not means the cell runs and nothing is promoted.
 
-        Promoting the first one regardless would leave its artifact pointing at
-        a result the rest of the cell no longer agrees with, until the run that
-        was going to happen anyway overwrites it.
+        A promoted artifact would disagree with the rest of the cell until the run overwrote it.
         """
         cell1 = next(c for c in sample_notebook.notebook_state.cells if c.id == "cell1")
         cell2 = next(c for c in sample_notebook.notebook_state.cells if c.id == "cell2")
@@ -172,9 +164,11 @@ class TestRevertHitsTheCache:
 
 
 class TestManifestTablesDuplicates:
-    """Duplicate @table names must be rejected before manifest/provenance — the
-    name-keyed snapshot map otherwise collapses them (one wins namespace
-    injection; an unresolved duplicate can borrow a resolved one's snapshot)."""
+    """Duplicate @table names are rejected before manifest and provenance.
+
+    The name-keyed snapshot map would collapse them: one wins namespace injection, and an
+    unresolved duplicate can borrow a resolved one's snapshot.
+    """
 
     def test_duplicate_table_name_rejected(self, sample_notebook):
         from strata.notebook.models import TableSpec
@@ -189,11 +183,8 @@ class TestManifestTablesDuplicates:
 
 
 class TestCellExecutor:
-    """Test basic cell execution."""
-
     @pytest.mark.asyncio
     async def test_execute_simple_assignment(self, sample_notebook):
-        """Test executing a simple assignment."""
         executor = CellExecutor(sample_notebook)
 
         source = "x = 1 + 1"
@@ -208,7 +199,6 @@ class TestCellExecutor:
 
     @pytest.mark.asyncio
     async def test_execute_with_print(self, sample_notebook):
-        """Test that print output is captured."""
         executor = CellExecutor(sample_notebook)
 
         source = 'print("Hello, world!")\ny = 42'
@@ -220,12 +210,8 @@ class TestCellExecutor:
 
     @pytest.mark.asyncio
     async def test_cache_hit_preserves_persisted_console(self, sample_notebook):
-        """A cache-hit re-run must not delete the original run's console file.
-
-        Regression: a cache hit carries no fresh stdout, and the empty
-        console write used to ``unlink`` the file the first run persisted —
-        so a second ``strata run`` silently dropped recoverable print()
-        output. The console from the producing execution must survive.
+        """A cache hit carries no fresh stdout; it must not unlink the console file the first run
+        persisted.
         """
         executor = CellExecutor(sample_notebook)
         console_file = sample_notebook.path / ".strata" / "console" / "cell1.json"
@@ -253,7 +239,6 @@ class TestCellExecutor:
 
     @pytest.mark.asyncio
     async def test_execute_with_error(self, sample_notebook):
-        """Test executing a cell that raises an error."""
         executor = CellExecutor(sample_notebook)
 
         source = "z = 1 / 0"
@@ -265,7 +250,6 @@ class TestCellExecutor:
 
     @pytest.mark.asyncio
     async def test_execute_dataframe(self, sample_notebook):
-        """Test executing a cell that creates a dictionary (simulates DataFrame-like output)."""
         executor = CellExecutor(sample_notebook)
 
         # A dict, since pandas may be absent from the test venv.
@@ -279,7 +263,6 @@ class TestCellExecutor:
 
     @pytest.mark.asyncio
     async def test_execute_multiple_outputs(self, sample_notebook):
-        """Test executing a cell that defines multiple variables."""
         executor = CellExecutor(sample_notebook)
 
         source = """
@@ -297,9 +280,9 @@ z = [1, 2, 3]
 
     @pytest.mark.asyncio
     async def test_shared_mutable_outputs_warns_through_real_execution(self, sample_notebook):
-        """Phase 2b end-to-end: two outputs sharing a mutable object surface a
-        warning all the way through real subprocess execution into
-        ``result.mutation_warnings`` (the flow `strata run` then prints)."""
+        """Two outputs sharing a mutable object warn through real subprocess execution into
+        ``result.mutation_warnings``, which `strata run` prints.
+        """
         executor = CellExecutor(sample_notebook)
 
         # params and trainer share the same list object → decouple once stored.
@@ -312,7 +295,6 @@ z = [1, 2, 3]
 
     @pytest.mark.asyncio
     async def test_execute_dict_output(self, sample_notebook):
-        """Test executing a cell that creates a dict."""
         executor = CellExecutor(sample_notebook)
 
         source = 'data = {"count": 42, "names": ["Alice", "Bob"]}'
@@ -353,9 +335,9 @@ Display()
 
     @pytest.mark.asyncio
     async def test_execute_stdout_is_cached_for_leaf_cells(self, sample_notebook):
-        """A leaf cell that only prints (no display value, no consumer) caches by
-        provenance and replays its stdout on an unchanged re-run — the agent
-        scratchpad case."""
+        """A print-only leaf (no display, no consumer) caches by provenance and replays its stdout
+        on an unchanged re-run: the agent scratchpad case.
+        """
         executor = CellExecutor(sample_notebook)
         source = "print('hello from a leaf cell')\n"
 
@@ -373,8 +355,7 @@ Display()
 
     @pytest.mark.asyncio
     async def test_nocache_annotation_always_reexecutes(self, sample_notebook):
-        """`# @nocache` opts a cell out of provenance caching — it re-runs every
-        time even when its source/inputs/env are unchanged."""
+        """`# @nocache` re-runs a cell every time, even with source, inputs and env unchanged."""
         executor = CellExecutor(sample_notebook)
         source = "# @nocache\nprint('side effect')\n"
 
@@ -388,11 +369,9 @@ Display()
 
     @staticmethod
     def _counting_source(counter, *, prefix: str = "") -> str:
-        """A leaf cell that bumps a file counter and *displays* the new count.
+        """A leaf cell that bumps a file counter and displays the new count.
 
-        The displayed value is what the cell is for, so a replayed display is
-        indistinguishable from the cell not having run at all -- except that
-        the file on disk says how many times it really did.
+        A replayed display looks like a real run; the file says how many times it really ran.
         """
         return (
             f"{prefix}from pathlib import Path\n"
@@ -403,12 +382,10 @@ Display()
 
     @pytest.mark.asyncio
     async def test_nocache_leaf_reexecutes_its_displayed_value(self, sample_notebook, tmp_path):
-        """`# @nocache` must survive the leaf display-replay path too.
+        """`# @nocache` must also gate the leaf display-replay path.
 
-        The print-only case above passed even while the replay was ungated: a
-        leaf's displayed value was resolved before the cache decision, so a
-        cell ending in a bare expression reported a hit and handed back the
-        first run's value forever, side effect and all.
+        A leaf's display is resolved before the cache decision, so an ungated replay would hand
+        back the first run's value forever; the print-only test above cannot catch that.
         """
         executor = CellExecutor(sample_notebook)
         counter = tmp_path / "nocache_counter.txt"
@@ -587,7 +564,6 @@ display(Markdown("# First"))
 
     @pytest.mark.asyncio
     async def test_execute_ignores_private_vars(self, sample_notebook):
-        """Test that private variables (_name) are not included in outputs."""
         executor = CellExecutor(sample_notebook)
 
         source = """
@@ -602,7 +578,6 @@ _private = 2
 
     @pytest.mark.asyncio
     async def test_execute_empty_cell(self, sample_notebook):
-        """Test executing a cell with no outputs."""
         executor = CellExecutor(sample_notebook)
 
         source = "# Just a comment"
@@ -613,7 +588,6 @@ _private = 2
 
     @pytest.mark.asyncio
     async def test_execute_with_import(self, sample_notebook):
-        """Test executing a cell with imports."""
         executor = CellExecutor(sample_notebook)
 
         source = """
@@ -628,7 +602,6 @@ result = math.pi
 
     @pytest.mark.asyncio
     async def test_execute_with_stderr(self, sample_notebook):
-        """Test that stderr is captured."""
         executor = CellExecutor(sample_notebook)
 
         source = """
@@ -801,7 +774,7 @@ token = os.getenv("NOTEBOOK_TOKEN")
         self,
         sample_notebook,
     ):
-        """@worker should fail fast until worker routing is implemented."""
+        """An unregistered @worker fails fast."""
         executor = CellExecutor(sample_notebook)
 
         result = await executor.execute_cell(
@@ -1281,8 +1254,9 @@ class Person:
         notebook_build_server,
         monkeypatch,
     ):
-        """A dispatcher attributes the job and matches it to a cell from the
-        manifest alone, without a GET /v1/builds round trip. Item 16."""
+        """A dispatcher attributes the job and matches it to a cell from the manifest alone,
+        without a GET /v1/builds round trip.
+        """
         from strata.types import Principal
 
         self._signed_worker(sample_notebook, notebook_executor_server, notebook_build_server)
@@ -1696,7 +1670,6 @@ class Person:
 
     @pytest.mark.asyncio
     async def test_execution_duration(self, sample_notebook):
-        """Test that execution duration is measured."""
         executor = CellExecutor(sample_notebook)
 
         source = "x = 42"
@@ -1707,7 +1680,6 @@ class Person:
 
     @pytest.mark.asyncio
     async def test_execute_function_definition(self, sample_notebook):
-        """Test executing a cell that defines a function."""
         executor = CellExecutor(sample_notebook)
 
         source = """
@@ -1855,8 +1827,9 @@ class Person:
 
     @pytest.mark.asyncio
     async def test_execute_shares_export_with_same_cell_runtime_state(self, sample_notebook):
-        """A def closing over a same-cell runtime value is shareable: the value
-        is stored and hydrated into the synthetic module (Phase 2)."""
+        """A def closing over a same-cell runtime value is shareable: the value is stored and
+        hydrated into the synthetic module.
+        """
         cell1 = next(c for c in sample_notebook.notebook_state.cells if c.id == "cell1")
         cell2 = next(c for c in sample_notebook.notebook_state.cells if c.id == "cell2")
         # ``x = len([])`` is a non-literal runtime assignment ``add`` closes over.
@@ -1901,7 +1874,6 @@ def add(y):
     @pytest.mark.integration
     @pytest.mark.warm_pool
     async def test_execute_uses_warm_pool_when_available(self, sample_notebook):
-        """Test executor uses a live warm worker when one is available."""
         sample_notebook.ensure_venv_synced()
         pool = WarmProcessPool(
             sample_notebook.path,
@@ -2295,12 +2267,10 @@ class TestPromptCellExecution:
 
 
 class TestLoopCellExecution:
-    """End-to-end tests for loop cell execution.
+    """End-to-end loop cell execution through the real harness subprocess.
 
-    These exercise the real harness subprocess round-trip, so they are
-    slower than the in-process annotation tests but cover the full path:
-    upstream carry resolution, per-iteration subprocess spawn, ``@loop_until``
-    termination, ``start_from`` forking, and the per-iteration artifact ids.
+    Covers carry resolution, per-iteration spawns, ``@loop_until`` termination,
+    ``start_from`` forking and the per-iteration artifact ids.
     """
 
     @pytest.fixture
@@ -2475,10 +2445,9 @@ class TestLoopCellExecution:
 
     @pytest.mark.asyncio
     async def test_loop_iteration_progress_callback_fires_per_iter(self, loop_notebook):
-        """``on_iteration_complete`` fires exactly once per completed iter,
-        with the artifact URI of the iter just stored. The WS handler wires
-        this callback to broadcast a ``cell_iteration_progress`` message
-        so the UI can update a per-cell progress badge in real time."""
+        """``on_iteration_complete`` fires once per completed iteration with that iteration's
+        artifact URI; the WS handler broadcasts it as ``cell_iteration_progress``.
+        """
         from strata.notebook.writer import write_cell
 
         notebook_dir, session = loop_notebook
@@ -2606,8 +2575,7 @@ class TestLoopCellExecution:
 
     @pytest.mark.asyncio
     async def test_editing_the_loop_body_runs_it_again(self, loop_notebook, tmp_path):
-        """The cache is keyed on the cell's provenance, so an edited body
-        misses it — the loop must not serve the previous source's result."""
+        """The cache is keyed on provenance, so an edited body misses and the loop runs again."""
         from strata.notebook.writer import write_cell
 
         notebook_dir, session = loop_notebook
@@ -2646,11 +2614,10 @@ class TestLoopCellExecution:
 
 
 class TestSkipUpstreamMaterialization:
-    """The ``skip_upstream_materialization`` kwarg is the seam batch
-    continuation uses after a batched cell errors. It must keep the
-    target-cell cache check active but stop ``_materialize_upstreams``
-    from recursively re-running an upstream cell that already failed in
-    the batch.
+    """``skip_upstream_materialization`` keeps the target's cache check but skips upstreams.
+
+    ``_materialize_upstreams`` is not called, so an upstream that already failed is not
+    re-run.
     """
 
     @pytest.mark.asyncio
@@ -2717,9 +2684,8 @@ class TestSkipUpstreamMaterialization:
 
     @pytest.mark.asyncio
     async def test_kwarg_maps_to_internal_flags(self, sample_notebook, monkeypatch):
-        """The kwarg sets ``materialize_upstreams=False`` while keeping
-        ``use_cache=True`` — that's what differentiates it from
-        ``execute_cell_force`` (which also disables cache).
+        """The kwarg sets ``materialize_upstreams=False`` but keeps ``use_cache=True``, unlike
+        ``execute_cell_force``.
         """
         executor = CellExecutor(sample_notebook)
         captured: dict[str, object] = {}
@@ -2744,7 +2710,6 @@ class TestMountCredentialsPassthrough:
     """The mount-credentials kwarg threads through to ``MountResolver``."""
 
     def test_default_is_empty(self, sample_notebook):
-        """Construction without the kwarg yields an empty credentials map."""
         executor = CellExecutor(sample_notebook)
         assert executor._mount_resolver.credentials == {}
 
@@ -2759,7 +2724,7 @@ class TestMountCredentialsPassthrough:
 
 
 class TestAmbientRemoteStore:
-    """W3: the ambient `strata` client can target a remote shared store."""
+    """The ambient `strata` client can target a remote shared store."""
 
     def test_ambient_url_and_headers_default_local(self):
         from unittest.mock import MagicMock
@@ -2795,10 +2760,11 @@ class TestAmbientRemoteStore:
 
 
 class TestNoInterpreterRunsNoCellCode:
-    """A session without an interpreter (none recorded yet, or its sync raised)
-    does not run cell code. The executor used to fall back to whatever
-    ``python`` was on PATH: some other environment, whose results were then
-    stored under this notebook's provenance."""
+    """A session without an interpreter (none recorded yet, or its sync raised) runs no cell code.
+
+    Falling back to ``python`` on PATH would store another environment's results under this
+    notebook's provenance.
+    """
 
     @staticmethod
     def _notebook(tmp_path, marker: Path):

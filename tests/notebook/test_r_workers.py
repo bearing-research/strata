@@ -1,10 +1,8 @@
-"""R cells on remote workers. Item 46.
+"""R cells on remote workers.
 
-A worker runs an R cell's ``harness.R`` under its own ``Rscript``, and says so
-in ``/health``. The first tests need no R: a worker without ``Rscript`` refuses
-an R cell by name, and a stand-in ``Rscript`` shows which harness it is given.
-The rest run R: an R cell with a worker runs there, over both transports, is a
-cache hit locally afterwards, and a downstream Python cell reads its data frame.
+The first tests need no R: a worker without ``Rscript`` refuses an R cell by
+name, and a stand-in ``Rscript`` shows which harness it gets. The rest run R
+on a worker over both transports and read the result from Python.
 """
 
 from __future__ import annotations
@@ -69,8 +67,10 @@ async def test_a_worker_without_rscript_refuses_an_r_cell(monkeypatch):
 
 
 def _stand_in_rscript(tmp_path: Path, monkeypatch) -> Path:
-    """An ``Rscript`` first on PATH that records what it was asked to run and
-    answers as ``harness.R`` does. Returns the file its argv is written to."""
+    """An ``Rscript`` first on PATH that answers like ``harness.R`` and records its argv.
+
+    Returns the file the argv is written to.
+    """
     calls = tmp_path / "calls.json"
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()

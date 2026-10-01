@@ -1,20 +1,8 @@
 """What an attached client is told, and whether it can trust the numbering.
 
-Round 9, all three findings following from round 8.
-
-Persisting a failed upstream's error was only half of it: the WebSocket
-broadcasts from the staleness map, and the override that made a standing
-failure win was applied to the cell and not to the map. So every other reader
-of the session saw `error` while a viewer applying deltas was told `idle` and
-kept the table from before the failure until it resynced.
-
-The sequence contract was fixed for the paths the round-8 trace exercised, and
-presence was not one of them: it read the counter's current value rather than
-allocating, so two focus changes carried the number of whatever was sent before
-them. A client deduping on `seq`, as the reference tells it to, dropped both.
-
-And a write cell regenerated each statement from the parse tree before running
-it, which is not always the statement the cell declares.
+A standing upstream failure must reach WebSocket viewers as `error`, presence
+frames must allocate their own `seq`, and a write cell must run the statement it
+declares rather than one regenerated from the parse tree.
 """
 
 from __future__ import annotations
@@ -129,12 +117,7 @@ async def test_a_watching_client_is_told_the_dependency_failed(tmp_path):
 
 @pytest.mark.asyncio
 async def test_presence_frames_carry_their_own_sequence(tmp_path):
-    """Focus changes are distinct updates on one connected stream.
-
-    The round-8 sequence test drove runs, syncs and notes; presence was never
-    called, and presence was the path still reading the counter rather than
-    advancing it.
-    """
+    """Each focus change allocates a `seq`, so a client deduping on it keeps both."""
     from strata.notebook.ws import _handle_cell_focus, _notebook_connections, broadcast_presence
 
     nb = _notebook(tmp_path, [("q", "sql", GOOD), ("py", "python", CONSUMER)])
@@ -162,8 +145,7 @@ async def test_presence_frames_carry_their_own_sequence(tmp_path):
 
 @pytest.mark.asyncio
 async def test_a_write_cell_runs_the_statement_the_cell_declares(tmp_path):
-    """A named recursive CTE lost its column list when the statement was
-    regenerated from the parse tree, and SQLite refused what came out."""
+    """A named recursive CTE keeps its column list; regenerating it broke SQLite."""
     db = tmp_path / "w.db"
     sqlite3.connect(db).close()
     nb = create_notebook(tmp_path / "nb", "cte")
@@ -196,8 +178,7 @@ async def test_a_write_cell_runs_the_statement_the_cell_declares(tmp_path):
 
 @pytest.mark.asyncio
 async def test_a_multi_statement_write_still_runs_each_statement(tmp_path):
-    """Splitting on the tokenizer's semicolons has to keep every statement,
-    and only the statements: a body ending in one must not run an empty tail."""
+    """Every statement runs, and a trailing semicolon does not run an empty tail."""
     db = tmp_path / "w.db"
     sqlite3.connect(db).close()
     nb = create_notebook(tmp_path / "nb", "multi")

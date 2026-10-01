@@ -1,9 +1,7 @@
 """Naming the hosts a worker may fetch from, instead of disabling the check.
 
-A managed worker talks to the server that dispatched it, and that server is
-usually on a private address — so the SSRF guard has to be relaxed somehow.
-The only lever was STRATA_WORKER_ALLOW_LOCAL_HOSTS, which turns the address
-rule off for *every* host. Item 15.
+A managed worker usually reaches its server on a private address, and
+STRATA_WORKER_ALLOW_LOCAL_HOSTS turns the address rule off for every host.
 """
 
 from __future__ import annotations
@@ -84,12 +82,7 @@ class TestGuard:
 
 
 class TestBypassOrdering:
-    """The wholesale bypass skipped more than it was documented to.
-
-    It returned before the has-a-host check, so with it set — which is on
-    every managed worker today, since it is the documented way to reach a
-    server on a private address — a URL with no host at all was accepted.
-    """
+    """The wholesale bypass must not skip the has-a-host check, or a URL with no host passes."""
 
     def test_a_hostless_url_is_refused_even_with_the_bypass_set(self, monkeypatch):
         monkeypatch.setenv("STRATA_WORKER_ALLOW_LOCAL_HOSTS", "1")
@@ -100,7 +93,7 @@ class TestBypassOrdering:
         assert "missing a host" in excinfo.value.detail
 
     def test_the_bypass_still_relaxes_the_address_rule(self, monkeypatch):
-        """What it is actually for, unchanged."""
+        """It still relaxes the address rule."""
         monkeypatch.setenv("STRATA_WORKER_ALLOW_LOCAL_HOSTS", "1")
 
         _assert_url_safe("http://127.0.0.1:8000/v1/builds/b1/finalize", "finalize_url")
@@ -110,9 +103,9 @@ class TestRebinding:
     def test_an_input_url_that_rebinds_to_loopback_is_not_downloaded(
         self, monkeypatch, rebinding_dns
     ):
-        """The manifest is checked when it arrives and the input is fetched
-        after; a name that answers the check with a public address and the
-        download with 127.0.0.1 used to reach whatever listens there."""
+        """A name that resolves public at check time and to 127.0.0.1 at download time must not be
+        fetched.
+        """
         store = _Store(1024)
         port = store.server.server_address[1]
         manifest = _manifest(store, "x = 1")

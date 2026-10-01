@@ -1,11 +1,8 @@
 """Service mode confines a SQL cell to its own database and lake.
 
-SQL cells run inside the server process. Unconfined, a cell could read any
-file the server can (on Linux ``/proc/self/environ`` holds its secrets) and a
-write cell could ``COPY ... TO`` or ``ATTACH`` any path (SQLite: ``ATTACH``,
-``VACUUM INTO``). Personal mode is the
-user's own machine and stays unconfined. tests/notebook/test_e2e_duckdb_lake.py
-checks that a confined cell still reads a real catalog and S3 mount.
+SQL cells run in the server process, so unconfined they could read any server
+file (``/proc/self/environ``) or write anywhere via ``COPY ... TO``, ``ATTACH``
+or ``VACUUM INTO``. Personal mode stays unconfined.
 """
 
 from __future__ import annotations
@@ -179,8 +176,8 @@ async def test_only_service_mode_refuses_a_sqlite_write_cell_attaching_another_f
 async def test_a_mount_whose_root_holds_server_state_is_refused(
     tmp_path, monkeypatch, mode, readable
 ):
-    """Confinement admits everything under a mount's root, so a notebook that
-    mounts a directory holding the server's artifact store reads the store."""
+    """A mount whose root holds the server's artifact store is refused; it would expose the
+    store."""
     from strata.notebook.models import MountSpec
     from strata.notebook.writer import update_notebook_mounts
 
@@ -214,8 +211,9 @@ async def test_a_mount_whose_root_holds_server_state_is_refused(
 
 
 class TestLocalMountRoots:
-    """Which local roots a confined SQL cell may mount, checked before anything
-    under the root is read (fingerprinting ``/`` would walk the whole disk)."""
+    """Which local roots a confined SQL cell may mount, checked before reading anything
+    under them (fingerprinting ``/`` would walk the whole disk).
+    """
 
     @pytest.fixture
     def config(self, tmp_path):

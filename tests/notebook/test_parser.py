@@ -19,7 +19,6 @@ from strata.notebook.writer import create_notebook, write_cell, write_notebook_t
 
 
 def test_parse_empty_notebook():
-    """Test parsing a notebook with no cells."""
     with tempfile.TemporaryDirectory() as tmpdir:
         tmpdir_path = Path(tmpdir)
 
@@ -34,7 +33,6 @@ def test_parse_empty_notebook():
 
 
 def test_parse_notebook_with_cells():
-    """Test parsing a notebook with multiple cells."""
     with tempfile.TemporaryDirectory() as tmpdir:
         tmpdir_path = Path(tmpdir)
 
@@ -62,7 +60,7 @@ def test_parse_notebook_with_cells():
 
 
 def test_parse_notebook_missing_cells_directory():
-    """Test parsing a notebook with missing cell files (graceful degradation)."""
+    """Missing cell files degrade gracefully."""
     with tempfile.TemporaryDirectory() as tmpdir:
         tmpdir_path = Path(tmpdir)
 
@@ -92,13 +90,12 @@ def test_parse_notebook_missing_cells_directory():
 
 
 def test_parse_notebook_not_found():
-    """Test parsing a non-existent notebook."""
     with pytest.raises(FileNotFoundError):
         parse_notebook(Path("/nonexistent/notebook"))
 
 
 def test_parse_and_reload_after_edit():
-    """Test round-trip: parse, edit, reload."""
+    """Round-trip: parse, edit, reload."""
     with tempfile.TemporaryDirectory() as tmpdir:
         tmpdir_path = Path(tmpdir)
 
@@ -120,7 +117,7 @@ def test_parse_and_reload_after_edit():
 
 
 def test_parse_notebook_merges_notebook_and_cell_mounts():
-    """Cell state should include notebook defaults plus cell-level overrides."""
+    """Cell state merges notebook mount defaults with cell-level overrides."""
     with tempfile.TemporaryDirectory() as tmpdir:
         notebook_dir = Path(tmpdir) / "mount_notebook"
         notebook_dir.mkdir()
@@ -166,7 +163,7 @@ def test_parse_notebook_merges_notebook_and_cell_mounts():
 
 
 def test_parse_notebook_resolves_notebook_and_cell_workers():
-    """Cell state should include notebook worker defaults plus cell overrides."""
+    """Cell state merges notebook worker defaults with cell overrides."""
     with tempfile.TemporaryDirectory() as tmpdir:
         notebook_dir = Path(tmpdir) / "worker_notebook"
         notebook_dir.mkdir()
@@ -207,7 +204,6 @@ def test_parse_notebook_resolves_notebook_and_cell_workers():
 
 
 def test_parse_notebook_preserves_worker_registry():
-    """Notebook-scoped worker definitions should round-trip through parsing."""
     with tempfile.TemporaryDirectory() as tmpdir:
         notebook_dir = Path(tmpdir) / "worker_registry"
         notebook_dir.mkdir()
@@ -244,7 +240,7 @@ def test_parse_notebook_preserves_worker_registry():
 
 
 def test_parse_notebook_resolves_notebook_and_cell_runtime_settings():
-    """Cell state should include notebook timeout/env defaults plus cell overrides."""
+    """Cell state merges notebook timeout/env defaults with cell overrides."""
     with tempfile.TemporaryDirectory() as tmpdir:
         notebook_dir = Path(tmpdir) / "runtime_notebook"
         notebook_dir.mkdir()

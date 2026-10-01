@@ -1,10 +1,7 @@
 """Concurrency tests for the Fetcher's per-file cache.
 
-One ``Fetcher`` is shared by the whole fetch thread pool
-(``max_fetch_workers``, 32 by default), which reads row groups of one file in
-parallel. It once cached open ParquetFile handles and handed one to every
-reader, which pyarrow does not support and pyarrow 25 segfaults on. It now
-caches each file's parsed footer and opens a handle per read.
+One Fetcher serves the whole fetch pool, which reads row groups of one file in parallel. It caches
+parsed footers and opens a handle per read: pyarrow 25 segfaults on a shared ParquetFile.
 """
 
 from __future__ import annotations
@@ -37,9 +34,7 @@ def _task(file_path: str) -> Task:
 
 
 def test_eviction_does_not_close_a_handle_another_thread_is_reading(tmp_path):
-    """The original failure: thread A is inside read_row_group on a handle that
-    thread B evicts and closes, so A dies with 'I/O operation on closed file'
-    mid-stream — after the 200 has already gone out."""
+    """Thread B evicts a handle thread A is reading, mid-stream after the 200 is sent."""
     # Cache of 1 makes every new file evict the previous one.
     fetcher = PyArrowFetcher(max_file_cache_size=1)
     paths = [_write(tmp_path, f"f{i}") for i in range(8)]
@@ -132,8 +127,7 @@ def _recording(monkeypatch, *, fail_reads=False):
 
 
 def test_no_two_threads_read_one_handle_at_once(tmp_path, monkeypatch):
-    """pyarrow does not promise a ParquetFile is safe to read from two threads
-    at once, and pyarrow 25 segfaults when it is."""
+    """pyarrow 25 segfaults when two threads read one ParquetFile."""
     _recording(monkeypatch)
     fetcher = PyArrowFetcher(max_file_cache_size=8)
     path = str(tmp_path / "hot.parquet")
@@ -168,8 +162,7 @@ def test_the_footer_is_parsed_once_per_file(tmp_path, monkeypatch):
 
 
 def test_a_failed_read_still_closes_its_handle(tmp_path, monkeypatch):
-    """A handle whose read failed is in no state to hand to the next reader,
-    and none is: every read opens its own and closes it."""
+    """Every read opens and closes its own handle, even when the read fails."""
     _recording(monkeypatch, fail_reads=True)
     fetcher = PyArrowFetcher(max_file_cache_size=8)
 

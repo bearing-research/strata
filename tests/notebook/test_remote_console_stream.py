@@ -1,8 +1,6 @@
 """A remote cell's console arrives while it runs, not only when it finishes.
 
-Output used to reach the notebook in the result bundle, so a cell dispatched
-to a worker was silent for its whole run — most of an hour for a training
-loop, and for one that dies at hour three the tail is the whole diagnostic.
+For a long training loop that dies, the streamed tail is the whole diagnostic.
 """
 
 from __future__ import annotations
@@ -38,7 +36,7 @@ class TestLogUrlSigning:
         )
 
     def test_a_finalize_capability_cannot_be_replayed_as_a_log_one(self):
-        """Separate ``op``, so one capability is not silently another."""
+        """A finalize capability has its own ``op``, so it cannot be replayed as a log one."""
         from urllib.parse import parse_qs, urlparse
 
         signer = URLSigner(b"secret")
@@ -97,11 +95,7 @@ class TestRelayRouting:
 
     @pytest.mark.asyncio
     async def test_a_chunk_for_an_unknown_build_is_dropped(self, monkeypatch):
-        """A stale worker, or a replica that did not dispatch it.
-
-        Guessing a cell would be worse than showing nothing: the console would
-        appear under someone else's cell.
-        """
+        """A chunk for an unknown build (stale worker, other replica) is dropped, never guessed."""
         sent: list = []
         monkeypatch.setattr(
             "strata.notebook.ws._broadcast_message",
@@ -126,10 +120,9 @@ class TestRelayRouting:
 
 
 class TestNoDoubleDelivery:
-    """The finished-run broadcast must not reprint what was streamed.
+    """The finished-run broadcast does not reprint what was streamed.
 
-    The frontend *appends* console text, so re-sending the complete stdout at
-    the end would show the whole run a second time underneath itself.
+    The frontend appends console text, so resending everything would show it twice.
     """
 
     @pytest.mark.asyncio
@@ -157,7 +150,7 @@ class TestNoDoubleDelivery:
 
     @pytest.mark.asyncio
     async def test_a_cell_that_did_not_stream_still_gets_its_console(self, monkeypatch):
-        """Local cells, and workers that ignore the log URL, are unchanged."""
+        """Local cells, and workers that ignore the log URL, still get their console."""
         from strata.notebook.executor import CellExecutionResult
         from strata.notebook.ws import _broadcast_execution_result
 
@@ -185,7 +178,7 @@ def remote_executor_module():
 class TestWorkerTeeing:
     @pytest.mark.asyncio
     async def test_output_is_forwarded_as_it_is_produced(self, tmp_path, monkeypatch):
-        """The point of the feature: chunks arrive before the process exits."""
+        """Chunks arrive before the process exits."""
         from strata.notebook import remote_executor
 
         posted: list[tuple[str, str]] = []
@@ -222,12 +215,10 @@ class TestWorkerTeeing:
 
     @pytest.mark.asyncio
     async def test_a_real_cell_reaches_the_pipe_the_worker_reads(self, tmp_path):
-        """Driven through the harness, not a stand-in for it.
+        """Driven through the real harness, which replaces ``sys.stdout``.
 
-        The harness replaces ``sys.stdout`` to capture the cell's output for
-        the result manifest. A capture nothing writes through leaves the pipe
-        this feature reads empty for the cell's whole life, so every test
-        above can pass while a worker streams nothing at all.
+        A capture that does not write through leaves the pipe empty, so the tests above
+        could pass while a worker streams nothing.
         """
         import json
 
@@ -266,10 +257,9 @@ class TestWorkerTeeing:
 
     @pytest.mark.asyncio
     async def test_a_run_nobody_is_watching_does_not_pay_for_it(self, tmp_path):
-        """The write-through is for a reader forwarding chunks as they arrive.
-        A local run's reader takes the pipe and discards it -- its console comes
-        from the result -- so teeing there just holds a second copy of
-        everything the cell printed in the parent's memory for the whole run.
+        """A local run does not tee output: its reader discards the pipe and uses the result.
+
+        Teeing would hold a second copy of everything printed in the parent's memory.
         """
         import json
 
@@ -306,7 +296,7 @@ class TestWorkerTeeing:
 
     @pytest.mark.asyncio
     async def test_without_a_log_url_the_output_is_still_collected(self, tmp_path):
-        """A worker given no log URL behaves exactly as it did before."""
+        """A worker given no log URL still collects output into the result."""
         from strata.notebook import remote_executor
 
         script = tmp_path / "quiet.py"
@@ -325,10 +315,11 @@ class TestWorkerTeeing:
 
 
 class TestWhatStreamingDropped:
-    """Forwarding a chunk is best effort: the worker gives it five seconds and
-    swallows failures, a log URL expires, a replica may not hold the route. So
-    the report at the end sends what the notebook has not seen — not all of it
-    again, and not nothing."""
+    """The final report sends only what streaming did not deliver.
+
+    Forwarding is best effort (timeouts, expired URLs, other replicas), so the end
+    sends the undelivered tail, not everything and not nothing.
+    """
 
     @pytest.mark.asyncio
     async def test_the_part_that_never_arrived_is_sent_at_the_end(self, monkeypatch):
@@ -380,8 +371,7 @@ class TestWhatStreamingDropped:
 
 
 class TestForwardingDoesNotHoldTheCell:
-    """Console is advisory and the bundle is the record, so a server that never
-    answers must not cost the cell its own timeout."""
+    """A server that never answers must not cost the cell its timeout; the bundle is the record."""
 
     @pytest.mark.asyncio
     async def test_a_log_server_that_never_answers_still_lets_the_cell_finish(self, tmp_path):
@@ -423,10 +413,11 @@ class TestForwardingDoesNotHoldTheCell:
 
 
 class TestWhatIsShownStaysAPrefix:
-    """The report at the end sends ``text[delivered:]``, so what was streamed
-    has to be a prefix of the whole console. Dropping the oldest queued chunk
-    under backpressure broke that: the start went missing and the end was shown
-    twice."""
+    """What was streamed stays a prefix of the whole console.
+
+    The final report sends ``text[delivered:]``; dropping the oldest chunk under
+    backpressure would lose the start and repeat the end.
+    """
 
     @pytest.mark.asyncio
     async def test_a_burst_the_link_cannot_keep_up_with_keeps_its_beginning(self, tmp_path):

@@ -1,12 +1,4 @@
-"""Tests for Strata Executor Protocol v1.
-
-These tests verify:
-1. Protocol type definitions
-2. Reference executor implementation
-3. Protocol header handling
-4. Input/output serialization
-5. HTTP integration with executor server
-"""
+"""Strata Executor Protocol v1: types, the reference executor, headers and HTTP."""
 
 import json
 import threading
@@ -33,19 +25,14 @@ from tests.conftest import find_free_port, ipc_bytes_to_table, table_to_ipc_byte
 
 
 class TestProtocolTypes:
-    """Tests for protocol type definitions."""
-
     def test_protocol_version_constant(self):
-        """Protocol version is 'v1'."""
         assert EXECUTOR_PROTOCOL_VERSION == "v1"
 
     def test_protocol_headers(self):
-        """Protocol headers are correctly defined."""
         assert EXECUTOR_PROTOCOL_HEADER == "X-Strata-Executor-Protocol"
         assert EXECUTOR_LOGS_HEADER == "X-Strata-Logs"
 
     def test_executor_input_descriptor(self):
-        """ExecutorInputDescriptor serializes correctly."""
         desc = ExecutorInputDescriptor(
             name="input0",
             format="arrow_ipc_stream",
@@ -59,7 +46,6 @@ class TestProtocolTypes:
         assert data["byte_size"] == 1024
 
     def test_executor_transform_spec(self):
-        """ExecutorTransformSpec serializes correctly."""
         spec = ExecutorTransformSpec(
             ref="duckdb_sql@v1",
             code_hash="abc123",
@@ -71,7 +57,6 @@ class TestProtocolTypes:
         assert data["params"]["sql"] == "SELECT * FROM input0"
 
     def test_executor_request_metadata(self):
-        """ExecutorRequestMetadata serializes correctly."""
         meta = ExecutorRequestMetadata(
             build_id="build-123",
             tenant="acme",
@@ -94,7 +79,6 @@ class TestProtocolTypes:
         assert len(data["inputs"]) == 2
 
     def test_executor_response_success(self):
-        """ExecutorResponse for success case."""
         resp = ExecutorResponse(
             success=True,
             duration_ms=150.5,
@@ -107,7 +91,6 @@ class TestProtocolTypes:
         assert data["output_rows"] == 1000
 
     def test_executor_response_error(self):
-        """ExecutorResponse for error case."""
         resp = ExecutorResponse(
             success=False,
             error_code="SQL_ERROR",
@@ -120,7 +103,7 @@ class TestProtocolTypes:
         assert "Syntax error" in data["error_message"]
 
     def test_executor_manifest(self):
-        """ExecutorManifest serializes correctly for pull model."""
+        """ExecutorManifest serializes correctly for the pull model."""
         manifest = ExecutorManifest(
             build_id="build-456",
             metadata={"transform": {"ref": "duckdb_sql@v1"}},
@@ -143,7 +126,6 @@ class TestProtocolTypes:
         assert data["max_output_bytes"] == 1073741824
 
     def test_executor_capabilities(self):
-        """ExecutorCapabilities serializes correctly."""
         caps = ExecutorCapabilities(
             transform_refs=["duckdb_sql@v1", "pandas_transform@v1"],
             max_input_bytes=10 * 1024 * 1024 * 1024,
@@ -157,7 +139,6 @@ class TestProtocolTypes:
         assert data["max_concurrent_executions"] == 10
 
     def test_executor_health_response(self):
-        """ExecutorHealthResponse serializes correctly."""
         health = ExecutorHealthResponse(
             status="healthy",
             capabilities=ExecutorCapabilities(
@@ -174,10 +155,9 @@ class TestProtocolTypes:
 
 
 class TestReferenceExecutor:
-    """Tests for the reference DuckDB executor."""
+    """The reference DuckDB executor."""
 
     def test_duckdb_executor_init(self):
-        """DuckDBExecutor initializes correctly."""
         from strata.transforms.reference_executor import DuckDBExecutor
 
         executor = DuckDBExecutor(max_memory_mb=512)
@@ -185,7 +165,6 @@ class TestReferenceExecutor:
         assert "duckdb_sql@v1" in executor.get_transform_refs()
 
     def test_duckdb_executor_health_check(self):
-        """DuckDBExecutor returns correct health check."""
         from strata.transforms.reference_executor import DuckDBExecutor
 
         executor = DuckDBExecutor()
@@ -196,7 +175,6 @@ class TestReferenceExecutor:
         assert "duckdb_sql@v1" in health["capabilities"]["transform_refs"]
 
     def test_duckdb_executor_simple_query(self):
-        """DuckDBExecutor executes simple SQL query."""
         from strata.transforms.reference_executor import DuckDBExecutor, ExecutorInput
 
         executor = DuckDBExecutor()
@@ -220,7 +198,6 @@ class TestReferenceExecutor:
         assert output_table.column("doubled").to_pylist() == [2, 4, 6]
 
     def test_duckdb_executor_multiple_inputs(self):
-        """DuckDBExecutor handles multiple inputs correctly."""
         from strata.transforms.reference_executor import DuckDBExecutor, ExecutorInput
 
         executor = DuckDBExecutor()
@@ -253,7 +230,6 @@ class TestReferenceExecutor:
         assert output_table.column("total").to_pylist() == [300, 150]
 
     def test_duckdb_executor_missing_sql(self):
-        """DuckDBExecutor returns error for missing SQL."""
         from strata.transforms.reference_executor import DuckDBExecutor
 
         executor = DuckDBExecutor()
@@ -270,7 +246,6 @@ class TestReferenceExecutor:
         assert "sql" in result.error_message.lower()
 
     def test_duckdb_executor_sql_error(self):
-        """DuckDBExecutor handles SQL errors gracefully."""
         from strata.transforms.reference_executor import DuckDBExecutor, ExecutorInput
 
         executor = DuckDBExecutor()
@@ -289,8 +264,6 @@ class TestReferenceExecutor:
 
 
 class TestUtilityFunctions:
-    """Tests for executor utility functions."""
-
     def test_parse_arrow_inputs(self):
         """parse_arrow_inputs extracts and sorts inputs."""
         from strata.transforms.reference_executor import parse_arrow_inputs
@@ -311,7 +284,6 @@ class TestUtilityFunctions:
         assert inputs[1].name == "input1"
 
     def test_serialize_arrow_output(self):
-        """serialize_arrow_output produces valid IPC bytes."""
         from strata.transforms.reference_executor import serialize_arrow_output
 
         table = pa.table({"x": [1, 2, 3]})
@@ -321,7 +293,6 @@ class TestUtilityFunctions:
         assert result.equals(table)
 
     def test_encode_decode_logs_header(self):
-        """encode_logs_header and decode_logs_header are inverses."""
         from strata.transforms.reference_executor import (
             decode_logs_header,
             encode_logs_header,
@@ -334,7 +305,6 @@ class TestUtilityFunctions:
         assert decoded == original
 
     def test_encode_logs_header_unicode(self):
-        """encode_logs_header handles Unicode correctly."""
         from strata.transforms.reference_executor import (
             decode_logs_header,
             encode_logs_header,
@@ -348,10 +318,7 @@ class TestUtilityFunctions:
 
 
 class TestBaseExecutorInterface:
-    """Tests for the BaseExecutor abstract interface."""
-
     def test_custom_executor(self):
-        """Custom executor can be implemented."""
         from strata.transforms.reference_executor import (
             BaseExecutor,
             ExecutionResult,
@@ -359,7 +326,7 @@ class TestBaseExecutorInterface:
         )
 
         class IdentityExecutor(BaseExecutor):
-            """Simple executor that returns first input unchanged."""
+            """Returns the first input unchanged."""
 
             def get_transform_refs(self) -> list[str]:
                 return ["scan@v1"]
@@ -403,7 +370,7 @@ class TestBaseExecutorInterface:
 
 @pytest.fixture
 def executor_server():
-    """Start a reference executor server for integration tests."""
+    """A reference executor server for integration tests."""
     from strata.transforms.reference_executor import create_executor_app
 
     port = find_free_port()
@@ -433,10 +400,7 @@ def executor_server():
 
 
 class TestExecutorHTTPIntegration:
-    """HTTP integration tests for the executor server."""
-
     def test_health_endpoint(self, executor_server):
-        """Health endpoint returns capabilities."""
         resp = httpx.get(f"{executor_server['base_url']}/health")
         assert resp.status_code == 200
 
@@ -446,7 +410,6 @@ class TestExecutorHTTPIntegration:
         assert "duckdb_sql@v1" in data["capabilities"]["transform_refs"]
 
     def test_execute_simple_query(self, executor_server):
-        """Execute simple SQL query via HTTP."""
         base_url = executor_server["base_url"]
 
         input_table = pa.table({"value": [10, 20, 30]})
@@ -481,7 +444,6 @@ class TestExecutorHTTPIntegration:
         assert output_table.column("total").to_pylist() == [60]
 
     def test_execute_with_multiple_inputs(self, executor_server):
-        """Execute query with multiple inputs via HTTP."""
         base_url = executor_server["base_url"]
 
         products = pa.table({"id": [1, 2], "name": ["Widget", "Gadget"], "price": [9.99, 19.99]})
@@ -532,7 +494,7 @@ class TestExecutorHTTPIntegration:
         assert abs(revenues[1] - 29.97) < 0.01  # Widget
 
     def test_execute_logs_in_header(self, executor_server):
-        """Executor logs are returned in header."""
+        """Executor logs come back in a header."""
         from strata.transforms.reference_executor import decode_logs_header
 
         base_url = executor_server["base_url"]
@@ -572,7 +534,6 @@ class TestExecutorHTTPIntegration:
         assert "Result:" in logs
 
     def test_execute_invalid_sql(self, executor_server):
-        """Invalid SQL returns error response."""
         base_url = executor_server["base_url"]
 
         input_table = pa.table({"x": [1]})
@@ -607,7 +568,6 @@ class TestExecutorHTTPIntegration:
         assert data["error_message"] is not None
 
     def test_execute_missing_sql_param(self, executor_server):
-        """Missing SQL param returns error response."""
         base_url = executor_server["base_url"]
 
         input_table = pa.table({"x": [1]})
@@ -643,7 +603,6 @@ class TestExecutorHTTPIntegration:
         assert "sql" in data["error_message"].lower()
 
     def test_execute_unsupported_transform(self, executor_server):
-        """Unsupported transform returns error."""
         base_url = executor_server["base_url"]
 
         metadata = json.dumps(
@@ -668,7 +627,6 @@ class TestExecutorHTTPIntegration:
         assert "Unsupported transform" in resp.json()["detail"]
 
     def test_execute_invalid_protocol_version(self, executor_server):
-        """Invalid protocol version returns error."""
         base_url = executor_server["base_url"]
 
         metadata = json.dumps(

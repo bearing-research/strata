@@ -1,19 +1,7 @@
 """Lifespan shutdown must stop the build runner it started, not the global one.
 
-Startup assigns a local ``build_runner`` (``None`` when transforms are not
-enabled for the mode). Shutdown then *reassigned* that name from
-``get_build_runner()`` and awaited ``stop()`` on whatever was registered — so a
-lifespan that started no runner would adopt one left behind by an earlier
-lifespan in the same process and await a heartbeat task belonging to an event
-loop that no longer exists:
-
-    RuntimeError: Task ... got Future <Task cancelling
-    name=... coro=<BuildRunner._heartbeat_loop()>> attached to a different loop
-
-That is the shape of the intermittent teardown error seen on CI, on whichever
-test happened to boot a lifespan after a runner was left registered on the same
-xdist worker. Ownership is the fix: stop what you started, and clear the
-registry either way so nothing downstream inherits a dead runner.
+Adopting a runner left registered by an earlier lifespan awaits a heartbeat task on a dead event
+loop ("attached to a different loop"). Shutdown also clears the registry.
 """
 
 from __future__ import annotations
@@ -27,9 +15,7 @@ from strata.transforms.runner import get_build_runner, reset_build_runner, set_b
 class _ForeignRunner:
     """A runner registered by someone else, on a loop that is gone.
 
-    ``stop()`` raises the way awaiting a cross-loop task does, so a lifespan
-    that reaches for this object fails its shutdown instead of quietly
-    succeeding.
+    ``stop()`` raises like awaiting a cross-loop task, so reaching for it fails shutdown loudly.
     """
 
     def __init__(self) -> None:

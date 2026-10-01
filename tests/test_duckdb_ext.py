@@ -9,15 +9,11 @@ from strata.types import Filter, FilterOp
 
 
 class TestStrataTableParams:
-    """Tests for StrataTableParams TypedDict."""
-
     def test_required_field(self):
-        """table_uri is the only required field."""
         params: StrataTableParams = {"table_uri": "file:///warehouse#db.table"}
         assert params["table_uri"] == "file:///warehouse#db.table"
 
     def test_all_fields(self):
-        """All optional fields can be specified."""
         params: StrataTableParams = {
             "table_uri": "file:///warehouse#db.table",
             "snapshot_id": 123456789,
@@ -31,10 +27,8 @@ class TestStrataTableParams:
 
 
 class TestRegisterStrataScan:
-    """Tests for register_strata_scan function."""
-
     def test_returns_arrow_table(self, server_with_client):
-        """register_strata_scan returns the Arrow table for reference retention."""
+        """The returned Arrow table is the reference the caller must retain."""
         config = server_with_client["config"]
         table_uri = server_with_client["warehouse"]["table_uri"]
 
@@ -53,7 +47,6 @@ class TestRegisterStrataScan:
             conn.close()
 
     def test_registers_as_queryable_view(self, server_with_client):
-        """Registered table can be queried via DuckDB."""
         config = server_with_client["config"]
         table_uri = server_with_client["warehouse"]["table_uri"]
 
@@ -74,7 +67,6 @@ class TestRegisterStrataScan:
             conn.close()
 
     def test_column_projection(self, server_with_client):
-        """Column projection limits returned columns."""
         config = server_with_client["config"]
         table_uri = server_with_client["warehouse"]["table_uri"]
 
@@ -96,7 +88,6 @@ class TestRegisterStrataScan:
             conn.close()
 
     def test_overwrites_existing_registration(self, server_with_client):
-        """Re-registering with same name overwrites."""
         config = server_with_client["config"]
         table_uri = server_with_client["warehouse"]["table_uri"]
 
@@ -133,10 +124,7 @@ class TestRegisterStrataScan:
 
 
 class TestStrataScanner:
-    """Tests for StrataScanner class."""
-
     def test_context_manager(self, server_with_client):
-        """StrataScanner works as context manager."""
         config = server_with_client["config"]
         table_uri = server_with_client["warehouse"]["table_uri"]
 
@@ -146,7 +134,7 @@ class TestStrataScanner:
             assert result.num_rows == 1
 
     def test_method_chaining(self, server_with_client):
-        """register() returns self for method chaining."""
+        """register() returns self."""
         config = server_with_client["config"]
         table_uri = server_with_client["warehouse"]["table_uri"]
 
@@ -158,7 +146,6 @@ class TestStrataScanner:
             scanner.close()
 
     def test_registered_tables_property(self, server_with_client):
-        """registered_tables returns list of registered names."""
         config = server_with_client["config"]
         table_uri = server_with_client["warehouse"]["table_uri"]
 
@@ -175,7 +162,6 @@ class TestStrataScanner:
             scanner.close()
 
     def test_unregister(self, server_with_client):
-        """unregister() removes a table."""
         config = server_with_client["config"]
         table_uri = server_with_client["warehouse"]["table_uri"]
 
@@ -191,7 +177,6 @@ class TestStrataScanner:
             scanner.close()
 
     def test_unregister_nonexistent_is_safe(self, server_with_client):
-        """unregister() on nonexistent table doesn't raise."""
         config = server_with_client["config"]
 
         scanner = StrataScanner(base_url=f"http://127.0.0.1:{config.port}")
@@ -201,7 +186,6 @@ class TestStrataScanner:
             scanner.close()
 
     def test_replace_false_raises_on_duplicate(self, server_with_client):
-        """replace=False raises ValueError on duplicate registration."""
         config = server_with_client["config"]
         table_uri = server_with_client["warehouse"]["table_uri"]
 
@@ -215,7 +199,7 @@ class TestStrataScanner:
             scanner.close()
 
     def test_replace_true_allows_overwrite(self, server_with_client):
-        """replace=True (default) allows overwriting."""
+        """replace=True is the default."""
         config = server_with_client["config"]
         table_uri = server_with_client["warehouse"]["table_uri"]
 
@@ -228,7 +212,6 @@ class TestStrataScanner:
             scanner.close()
 
     def test_query_returns_arrow_table(self, server_with_client):
-        """query() returns Arrow Table."""
         config = server_with_client["config"]
         table_uri = server_with_client["warehouse"]["table_uri"]
 
@@ -244,7 +227,6 @@ class TestStrataScanner:
             scanner.close()
 
     def test_query_df_returns_dataframe(self, server_with_client):
-        """query_df() returns pandas DataFrame."""
         pytest.importorskip("pandas")
 
         config = server_with_client["config"]
@@ -262,7 +244,7 @@ class TestStrataScanner:
             scanner.close()
 
     def test_duckdb_filter_after_fetch(self, server_with_client):
-        """DuckDB WHERE clause filters already-fetched data."""
+        """A DuckDB WHERE clause filters already-fetched data."""
         config = server_with_client["config"]
         table_uri = server_with_client["warehouse"]["table_uri"]
 
@@ -280,7 +262,6 @@ class TestStrataScanner:
             scanner.close()
 
     def test_join_multiple_tables(self, server_with_client):
-        """Can join multiple registered tables."""
         config = server_with_client["config"]
         table_uri = server_with_client["warehouse"]["table_uri"]
 
@@ -303,7 +284,6 @@ class TestStrataScanner:
             scanner.close()
 
     def test_aggregation(self, server_with_client):
-        """DuckDB aggregations work on registered tables."""
         config = server_with_client["config"]
         table_uri = server_with_client["warehouse"]["table_uri"]
 
@@ -328,10 +308,9 @@ class TestStrataScanner:
 
 
 class TestTableReferenceRetention:
-    """Tests for Arrow table reference retention to prevent GC."""
+    """The scanner holds Arrow table references so DuckDB views do not outlive their data."""
 
     def test_scanner_keeps_table_references(self, server_with_client):
-        """StrataScanner keeps references to prevent GC."""
         config = server_with_client["config"]
         table_uri = server_with_client["warehouse"]["table_uri"]
 
@@ -345,7 +324,6 @@ class TestTableReferenceRetention:
             scanner.close()
 
     def test_close_clears_references(self, server_with_client):
-        """close() clears table references."""
         config = server_with_client["config"]
         table_uri = server_with_client["warehouse"]["table_uri"]
 

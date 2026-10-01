@@ -4,7 +4,7 @@ import pytest
 
 
 class MockClock:
-    """Mock clock for testing time-dependent behavior."""
+    """A controllable clock for time-dependent tests."""
 
     def __init__(self, start_time: float = 0.0):
         self._time = start_time
@@ -17,10 +17,8 @@ class MockClock:
 
 
 class TestTokenBucket:
-    """Tests for TokenBucket."""
-
     def test_initial_tokens(self):
-        """Test bucket starts with full capacity."""
+        """The bucket starts full."""
         from strata.rate_limiter import TokenBucket
 
         clock = MockClock()
@@ -29,7 +27,6 @@ class TestTokenBucket:
         assert bucket.tokens_available() == 10.0
 
     def test_acquire_success(self):
-        """Test acquiring tokens when available."""
         from strata.rate_limiter import TokenBucket
 
         clock = MockClock()
@@ -39,7 +36,6 @@ class TestTokenBucket:
         assert bucket.tokens_available() == 9.0
 
     def test_acquire_multiple(self):
-        """Test acquiring multiple tokens."""
         from strata.rate_limiter import TokenBucket
 
         clock = MockClock()
@@ -49,7 +45,7 @@ class TestTokenBucket:
         assert bucket.tokens_available() == 5.0
 
     def test_acquire_failure(self):
-        """Test acquiring fails when not enough tokens."""
+        """Acquire fails without enough tokens."""
         from strata.rate_limiter import TokenBucket
 
         clock = MockClock()
@@ -62,7 +58,6 @@ class TestTokenBucket:
         assert bucket.tokens_available() == 0.0
 
     def test_refill_over_time(self):
-        """Test tokens refill over time."""
         from strata.rate_limiter import TokenBucket
 
         clock = MockClock()
@@ -76,7 +71,6 @@ class TestTokenBucket:
         assert bucket.tokens_available() == 6.0
 
     def test_refill_caps_at_capacity(self):
-        """Test refill doesn't exceed capacity."""
         from strata.rate_limiter import TokenBucket
 
         clock = MockClock()
@@ -88,7 +82,6 @@ class TestTokenBucket:
         assert bucket.tokens_available() == 10.0
 
     def test_time_until_available(self):
-        """Test calculating time until tokens available."""
         from strata.rate_limiter import TokenBucket
 
         clock = MockClock()
@@ -103,10 +96,7 @@ class TestTokenBucket:
 
 
 class TestRateLimiter:
-    """Tests for RateLimiter."""
-
     def test_default_allows_requests(self):
-        """Test default config allows requests."""
         from strata.rate_limiter import RateLimitConfig, RateLimiter
 
         config = RateLimitConfig()
@@ -116,7 +106,6 @@ class TestRateLimiter:
         assert result.allowed is True
 
     def test_disabled_always_allows(self):
-        """Test disabled limiter always allows."""
         from strata.rate_limiter import RateLimitConfig, RateLimiter
 
         config = RateLimitConfig(enabled=False)
@@ -128,7 +117,6 @@ class TestRateLimiter:
             assert result.allowed is True
 
     def test_global_limit_rejection(self):
-        """Test global limit rejects requests."""
         from strata.rate_limiter import RateLimitConfig, RateLimiter
 
         clock = MockClock()
@@ -149,7 +137,6 @@ class TestRateLimiter:
         assert result.limit_type == "global"
 
     def test_client_limit_rejection(self):
-        """Test per-client limit rejects requests."""
         from strata.rate_limiter import RateLimitConfig, RateLimiter
 
         clock = MockClock()
@@ -171,7 +158,6 @@ class TestRateLimiter:
         assert limiter.check("client2").allowed is True
 
     def test_endpoint_limit_rejection(self):
-        """Test per-endpoint limit rejects requests."""
         from strata.rate_limiter import RateLimitConfig, RateLimiter
 
         clock = MockClock()
@@ -195,7 +181,7 @@ class TestRateLimiter:
         assert limiter.check("client1", endpoint="/health").allowed is True
 
     def test_retry_after_header(self):
-        """Test retry-after is calculated correctly."""
+        """retry-after is calculated correctly."""
         from strata.rate_limiter import RateLimitConfig, RateLimiter
 
         clock = MockClock()
@@ -212,7 +198,6 @@ class TestRateLimiter:
         assert result.retry_after_seconds == pytest.approx(0.5)  # 1 token / 2 per sec
 
     def test_stats_tracking(self):
-        """Test statistics are tracked correctly."""
         from strata.rate_limiter import RateLimitConfig, RateLimiter
 
         clock = MockClock()
@@ -233,7 +218,6 @@ class TestRateLimiter:
         assert stats["active_clients"] == 2
 
     def test_cleanup_stale_clients(self):
-        """Test stale client cleanup."""
         from strata.rate_limiter import RateLimitConfig, RateLimiter
 
         clock = MockClock()
@@ -256,7 +240,6 @@ class TestRateLimiter:
         assert limiter.get_stats()["active_clients"] == 1
 
     def test_reset_stats(self):
-        """Test resetting statistics."""
         from strata.rate_limiter import RateLimitConfig, RateLimiter
 
         config = RateLimitConfig()
@@ -272,10 +255,7 @@ class TestRateLimiter:
 
 
 class TestRateLimiterGlobals:
-    """Tests for global rate limiter functions."""
-
     def test_init_and_get(self):
-        """Test initializing and getting global rate limiter."""
         from strata.rate_limiter import (
             RateLimitConfig,
             get_rate_limiter,
@@ -297,8 +277,7 @@ class TestRateLimiterGlobals:
 
 
 class _SteppableClock:
-    """A clock that only moves when the test says so, so no bucket refills
-    behind the test's back."""
+    """A clock that moves only when the test says so, so no bucket refills unseen."""
 
     def __init__(self, now: float = 1000.0) -> None:
         self._now = now
@@ -311,11 +290,11 @@ class _SteppableClock:
 
 
 class TestRateLimiterIntegration:
-    """Integration tests for rate limiting with server."""
+    """Rate limiting through the server."""
 
     @pytest.mark.asyncio
     async def test_rate_limit_endpoint(self, tmp_path):
-        """Test /v1/debug/rate-limits endpoint."""
+        """/v1/debug/rate-limits."""
         from httpx import ASGITransport, AsyncClient
 
         import strata.server as server_module
@@ -354,7 +333,7 @@ class TestRateLimiterIntegration:
 
     @pytest.mark.asyncio
     async def test_rate_limit_middleware_allows(self, tmp_path):
-        """Test middleware allows requests under limit."""
+        """The middleware allows requests under the limit."""
         from httpx import ASGITransport, AsyncClient
 
         import strata.server as server_module
@@ -392,7 +371,7 @@ class TestRateLimiterIntegration:
 
     @pytest.mark.asyncio
     async def test_rate_limit_middleware_rejects(self, tmp_path):
-        """Test middleware rejects requests over limit."""
+        """The middleware rejects requests over the limit."""
         from httpx import ASGITransport, AsyncClient
 
         import strata.server as server_module
@@ -449,13 +428,8 @@ class TestRateLimiterIntegration:
 class TestClientBucketGrowthIsBounded:
     """The per-client bucket tables must not grow without bound.
 
-    ``cleanup_stale_clients`` existed with a TTL config but had **no caller**
-    anywhere in the codebase, and nothing else bounded the two dicts. The
-    client id is derived from ``X-Forwarded-For``, which the caller controls
-    whenever a proxy appends rather than replaces it — so a client sending a
-    distinct forwarded address per request created a permanent bucket plus a
-    timestamp entry every time: unbounded RSS growth, and (because each new id
-    starts with a full burst) a per-client limit that never limited.
+    The client id comes from ``X-Forwarded-For``, which a caller may control, so a distinct address
+    per request would mint a bucket each time: unbounded memory and a limit that never limits.
     """
 
     def test_idle_buckets_are_reclaimed_without_an_explicit_call(self):
@@ -477,8 +451,7 @@ class TestClientBucketGrowthIsBounded:
         assert limiter.get_stats()["active_clients"] == 1
 
     def test_distinct_ids_cannot_grow_past_the_ceiling(self):
-        """The TTL sweep alone is not a bound — ids can be minted faster than
-        they age out, which is exactly what a spoofed X-Forwarded-For does."""
+        """The TTL sweep is not a bound: spoofed ids arrive faster than they age out."""
         from strata.rate_limiter import RateLimitConfig, RateLimiter
 
         clock = MockClock()
@@ -496,8 +469,7 @@ class TestClientBucketGrowthIsBounded:
         assert limiter.get_stats()["active_clients"] <= 25
 
     def test_active_client_keeps_its_bucket_under_eviction_pressure(self):
-        """Eviction drops the least-recently-seen, so a steadily active client
-        is not the one sacrificed."""
+        """Eviction drops the least recently seen, not a steadily active client."""
         from strata.rate_limiter import RateLimitConfig, RateLimiter
 
         clock = MockClock()
@@ -517,13 +489,8 @@ class TestClientBucketGrowthIsBounded:
 class TestRetryAfterIsNeverZero:
     """A 429 must never tell the client to retry immediately.
 
-    ``Retry-After``'s grammar is whole seconds, and the middleware used to
-    render the limiter's precise wait with ``int()``. The largest wait the
-    limiter can ever compute is one token's worth of refill -- 0.01s at the
-    default 100 requests/sec -- so truncation did not merely lose precision,
-    it produced ``Retry-After: 0`` on every single rejection. The one existing
-    middleware test used a 1 req/sec limit, the only rate whose wait survives
-    truncation, and asserted the header was present rather than what it said.
+    ``Retry-After`` is whole seconds, and the longest wait at the default 100 req/s is 0.01s, so
+    truncating with ``int()`` gives 0 on every rejection. Only a 1 req/s limit hides it.
     """
 
     def test_subsecond_waits_round_up(self):
@@ -546,8 +513,7 @@ class TestRetryAfterIsNeverZero:
         assert _retry_after_header(None, 5.0) == "5"
 
     def test_zero_wait_still_floors_at_one_second(self):
-        """``time_until_available`` can refill to 0.0 between the failed
-        acquire and the header being built."""
+        """The bucket can refill to 0.0 between the failed acquire and the header."""
         from strata.server import _retry_after_header
 
         assert _retry_after_header(0.0, 1.0) == "1"

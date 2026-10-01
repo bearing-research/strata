@@ -1,11 +1,4 @@
-"""Adding a column to a store that already holds data.
-
-Before this existed, the migrations were SQLite-only by construction — PRAGMA
-and sqlite_master, guarded by ``supports_legacy_migration`` — and the Postgres
-path returned as soon as the schema existed. So there was no way at all to
-evolve a Postgres store that held anything. Fine while Postgres was new; not
-fine once one holds something worth keeping.
-"""
+"""Adding a column to a store that already holds data, on SQLite and Postgres."""
 
 from __future__ import annotations
 
@@ -39,7 +32,7 @@ def _version(db_path) -> int:
 
 class TestMigrationList:
     def test_versions_are_unique_and_ordered(self):
-        """Applying by ``version`` means duplicates would silently skip one."""
+        """Applying by ``version`` means a duplicate would silently skip one."""
         versions = [m.version for m in _MIGRATIONS]
         assert versions == sorted(versions)
         assert len(versions) == len(set(versions))
@@ -97,7 +90,7 @@ class TestExistingDatabase:
         assert rows == 1, "a no-op reopen must not stamp another row"
 
     def test_data_survives_a_migration(self, tmp_path):
-        """The whole point: the rows are why the store could not be recreated."""
+        """The rows are why the store could not be recreated."""
         import hashlib
 
         store = ArtifactStore(tmp_path / "old")
@@ -121,13 +114,9 @@ class TestExistingDatabase:
 
 class TestConstantsAndMigrationsAgree:
     def test_a_migrated_database_matches_a_fresh_one(self, tmp_path):
-        """The drift this mechanism is most likely to develop.
+        """A column added to the schema constants without a migration breaks only old stores.
 
-        The schema constants describe the latest shape and the migrations
-        describe the path to it. Someone adding a column to the constants and
-        forgetting the migration gets a fresh database that works and an
-        existing one that does not — and nothing else in the suite would
-        notice, because every test starts from a fresh database.
+        Every other test starts from a fresh database, so nothing else would notice.
         """
         fresh = ArtifactStore(tmp_path / "fresh")
 

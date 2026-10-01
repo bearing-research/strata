@@ -1,29 +1,22 @@
-"""Tests for cache hit behavior.
-
-Note: Full integration tests require a complete notebook environment.
-These tests are simplified unit tests for the artifact caching logic.
-"""
+"""Unit tests for the notebook artifact cache."""
 
 from strata.notebook.artifact_integration import NotebookArtifactManager
 from strata.notebook.provenance import compute_provenance_hash, compute_source_hash
 
 
 def test_artifact_manager_initialization(tmp_path):
-    """Artifact manager should initialize correctly."""
     mgr = NotebookArtifactManager("test_nb", artifact_dir=tmp_path)
     assert mgr.notebook_id == "test_nb"
     assert mgr.artifact_store is not None
 
 
 def test_artifact_manager_find_cached_returns_none_for_empty_store(tmp_path):
-    """Empty store should return None for any provenance hash."""
     mgr = NotebookArtifactManager("test_nb", artifact_dir=tmp_path)
     result = mgr.find_cached("nonexistent_hash")
     assert result is None
 
 
 def test_artifact_manager_store_and_load(tmp_path):
-    """Should be able to store and load artifact data."""
     mgr = NotebookArtifactManager("test_nb", artifact_dir=tmp_path)
 
     source_hash = compute_source_hash("x = 1")

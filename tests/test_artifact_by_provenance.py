@@ -1,19 +1,9 @@
-"""Lookup by provenance hash — the primitive a shared store exists for.
+"""Lookup by provenance hash: the join key a shared store needs.
 
-Every other artifact read starts from an id somebody already holds. This one
-starts from a hash, which is the only identifier two people compute
-independently and arrive at the same value for. Without it a "team cache" has
-no join key: a colleague's copy of the identical computation lives at an
-artifact id nobody else would guess.
-
-So the tests here are about the two things that make it safe to expose:
-
-* a miss is an ordinary answer (404), not a failure, and
-* the hash is a *lookup key*, not a capability — knowing team-a's hash must not
-  read team-a's bytes from team-b.
-
-The tenant test deliberately uses the **same** computation on both sides, so
-the isolation being asserted is scoping and not merely two different hashes.
+A hash is the only identifier two people compute independently and agree on. A miss is an ordinary
+answer (404), and the hash is a lookup key, not a capability: team-b must not read team-a's bytes.
+The tenant test uses the same computation on both sides, so the isolation is scoping, not two
+different hashes.
 """
 
 import json
@@ -69,11 +59,8 @@ def _ref(artifact_uri: str) -> tuple[str, int]:
 def _provenance_of(artifact_dir, artifact_uri: str) -> str:
     """Read a published artifact's provenance hash off disk.
 
-    Nothing in the HTTP surface hands a publisher its own provenance hash back
-    — ``PutArtifactResponse`` carries the URI, not the key — so the test opens
-    the store the server just wrote to. That reads real state rather than
-    recomputing the hash with a copy of the server's formula, which would pass
-    even if both were wrong together.
+    ``PutArtifactResponse`` carries the URI, not the key. Reading real state avoids recomputing with
+    a copy of the server's formula, which would pass even if both were wrong.
     """
     artifact_id, version = _ref(artifact_uri)
     stored = ArtifactStore(artifact_dir).get_artifact(artifact_id, version)
@@ -93,8 +80,7 @@ def personal_server(tmp_path):
 
 @pytest.fixture
 def team_server(tmp_path):
-    """A shared store as it would actually be deployed: service mode, behind a
-    trusted proxy, multi-tenant, with authenticated write-back enabled."""
+    """A shared store as deployed: service mode, trusted proxy, multi-tenant, write-back on."""
     cache_dir = tmp_path / "cache"
     artifact_dir = tmp_path / "artifacts"
     cache_dir.mkdir()
@@ -130,8 +116,7 @@ def test_a_stored_result_is_findable_by_its_provenance_hash(personal_server):
 
 
 def test_a_hash_nobody_computed_is_a_miss_not_an_error(personal_server):
-    """404 is the ordinary answer. Callers branch on it every time they run a
-    cell, so it must not be an exceptional path."""
+    """404 is the ordinary answer; callers branch on it every cell run."""
     response = httpx.get(f"{personal_server['base_url']}/v1/artifacts/by-provenance/{ABSENT_HASH}")
 
     assert response.status_code == 404
@@ -147,20 +132,14 @@ def test_a_hash_nobody_computed_is_a_miss_not_an_error(personal_server):
     ],
 )
 def test_a_malformed_hash_is_rejected_before_the_store(personal_server, bad_hash):
-    """The lookup key reaches SQLite, so its shape is the route's business.
-    Rejecting at the boundary keeps "what can be asked of the store" a property
-    of the route rather than of every handler that might grow one."""
+    """The key reaches SQLite, so the route validates its shape at the boundary."""
     response = httpx.get(f"{personal_server['base_url']}/v1/artifacts/by-provenance/{bad_hash}")
 
     assert response.status_code == 422
 
 
 def test_the_match_carries_enough_to_fetch_the_bytes(team_server):
-    """The team hit, end to end: alice computes, bob has only the hash.
-
-    Bob holds no write scope and never saw alice's artifact id — everything he
-    needs comes back from the lookup.
-    """
+    """The team hit end to end: bob has only the hash, no write scope and no artifact id."""
     base_url = team_server["base_url"]
     dataset = pa.table({"id": [1, 2, 3], "value": [10.0, 20.0, 30.0]})
     uri = _publish(base_url, dataset, _headers("team-a", "alice", scopes="artifacts:write"))
@@ -180,11 +159,8 @@ def test_the_match_carries_enough_to_fetch_the_bytes(team_server):
 
 
 def test_another_teams_identical_computation_is_invisible(team_server):
-    """Both teams run the *same* computation, so both arrive at the same hash.
-
-    That is the case worth testing: isolation here cannot be an accident of
-    two different keys. Team-b must miss on team-a's result and then, once it
-    computes the same thing itself, hit its *own*.
+    """Both teams run the same computation and get the same hash, so isolation is not an accident of
+    different keys. Team-b misses on team-a's result, then hits its own.
     """
     base_url = team_server["base_url"]
     artifact_dir = team_server["artifact_dir"]
@@ -235,9 +211,7 @@ def _publish_by_provenance(
 
 
 def test_a_caller_computed_key_round_trips_with_opaque_bytes(personal_server):
-    """The write half. Bytes that are not Arrow — a pickle here — must survive,
-    because a cell variable is Arrow, JSON, or a pickle and only the notebook's
-    serializer knows which."""
+    """Non-Arrow bytes (a pickle) must survive; only the notebook's serializer knows the format."""
     base_url = personal_server["base_url"]
     provenance = "c" * 64
     blob = b"\x80\x05\x95not-arrow-at-all"
@@ -257,17 +231,10 @@ def test_a_caller_computed_key_round_trips_with_opaque_bytes(personal_server):
 
 
 def test_the_first_writer_of_a_key_wins(personal_server):
-    """A shared cache key must not be reassignable by whoever writes last.
+    """A shared cache key is not reassignable by whoever writes last.
 
-    This is most of what makes accepting a caller-computed key tolerable: it
-    turns "poison the team's cache" into "race to be first", and a team that
-    shares a cache already runs each other's code.
-
-    The *outcome* is also guaranteed one layer down — ``finalize_artifact``
-    collapses a duplicate provenance whatever the route does. What the route's
-    own check adds is that the loser never reaches the disk at all: no blob
-    written, no failed row left behind. The version count is what asserts that
-    part, so it is not merely re-testing the store.
+    This turns "poison the team's cache" into "race to be first". ``finalize_artifact`` collapses
+    duplicates anyway; the version count asserts the route's check keeps the loser off disk.
     """
     base_url = personal_server["base_url"]
     provenance = "d" * 64
@@ -311,7 +278,7 @@ def test_publishing_needs_the_write_scope(team_server):
 
 
 def test_a_published_key_is_only_visible_to_its_own_team(team_server):
-    """The same guarantee as the read side, on the path that creates the data."""
+    """The read side's tenant guarantee, on the path that creates the data."""
     base_url = team_server["base_url"]
     provenance = "f" * 64
 
@@ -330,9 +297,7 @@ def test_a_published_key_is_only_visible_to_its_own_team(team_server):
 
 
 def test_a_publish_without_a_content_type_is_refused(personal_server):
-    """The reader has no other source for it, so an artifact stored without one
-    is one nobody can decode — better refused at the door than discovered on a
-    pull months later."""
+    """Readers have no other source for the content type; without it the artifact is undecodable."""
     response = httpx.put(
         f"{personal_server['base_url']}/v1/artifacts/by-provenance/{'a' * 64}",
         files={
@@ -359,12 +324,11 @@ def test_the_client_publishes_and_finds_its_own_key(personal_server):
 
 
 def test_an_admin_hits_on_what_it_just_published(team_server):
-    """``admin:*`` widens reads by id; it must not *narrow* this one.
+    """``admin:*`` widens reads by id; it must not narrow this one.
 
-    ``CurrentTenant`` yields None for an admin meaning "do not filter", while
-    ``find_by_provenance(tenant=None)`` means the tenantless namespace
-    specifically. Passing one into the other made an admin miss on results it
-    had published seconds earlier and silently recompute them.
+    ``CurrentTenant`` is None for an admin ("do not filter"), but
+    ``find_by_provenance(tenant=None)`` means the tenantless namespace, so an admin missed on its
+    own results.
     """
     base_url = team_server["base_url"]
     admin = _headers("team-a", "root", scopes="admin:*")
@@ -385,9 +349,8 @@ def test_an_admin_hits_on_what_it_just_published(team_server):
 
 
 def test_a_miss_is_marked_so_it_cannot_be_confused_with_a_broken_store(personal_server):
-    """A 404 alone is ambiguous: an old server 404s the unknown path, and a
-    gateway with no artifact store 404s with its own message. Both would read
-    as "nobody computed it" and recompute forever, looking healthy throughout.
+    """An old server or a gateway without a store also 404s; an unmarked 404 would read as a miss
+    and recompute forever.
     """
     base_url = personal_server["base_url"]
 
@@ -403,13 +366,7 @@ def test_a_miss_is_marked_so_it_cannot_be_confused_with_a_broken_store(personal_
 
 
 def test_the_client_raises_rather_than_reporting_a_miss_it_cannot_verify():
-    """An *unmarked* 404 must surface, not become None.
-
-    This is what an older store answers for a route it does not serve, and
-    what a service-mode gateway with no artifact store answers with its own
-    message. Reporting "no result" for a question that was never answered is
-    the failure mode that recomputes forever without ever looking wrong.
-    """
+    """An unmarked 404 must raise, not become None, or an unanswered question recomputes forever."""
     unmarked_404 = httpx.MockTransport(
         lambda request: httpx.Response(404, json={"detail": "Not Found"})
     )
@@ -429,8 +386,9 @@ def test_the_client_raises_rather_than_reporting_a_miss_it_cannot_verify():
 
 
 async def test_the_async_client_answers_the_same_way(personal_server):
-    """The executor's lookup sits inside an already-async cell run, so the
-    sync client would block the event loop once per cell."""
+    """The executor's lookup runs inside an async cell run, where the sync client would block the
+    loop.
+    """
     from strata_client.client import AsyncStrataClient
 
     uri = _publish(personal_server["base_url"], pa.table({"id": [1]}))
@@ -445,8 +403,7 @@ async def test_the_async_client_answers_the_same_way(personal_server):
 
 
 def test_the_client_returns_none_for_a_miss(personal_server):
-    """A miss is a value, not an exception — the caller is on the hot path of
-    "should I run this?" and would otherwise wrap every call in try/except."""
+    """A miss is a value, not an exception: the caller is on the hot "should I run this?" path."""
     with StrataClient(base_url=personal_server["base_url"]) as client:
         uri = _publish(personal_server["base_url"], pa.table({"id": [1]}))
         provenance = _provenance_of(personal_server["artifact_dir"], uri)
@@ -460,13 +417,8 @@ def test_the_client_returns_none_for_a_miss(personal_server):
 
 
 def test_the_build_environment_travels_with_the_result(personal_server):
-    """A shared cache that spans platforms has to say which one it spanned from.
-
-    The provenance key covers the lockfile, not the platform — deliberately,
-    since hashing the platform would drop cross-machine hit rate to nothing —
-    so the store records where a result was produced and hands it back on the
-    lookup. Sharing across platforms *and* recording nothing is the combination
-    that is not defensible.
+    """The provenance key covers the lockfile, not the platform, so the store records and returns
+    where a result was produced.
     """
     base_url = personal_server["base_url"]
     provenance = "b" * 64
@@ -497,9 +449,9 @@ def test_the_build_environment_travels_with_the_result(personal_server):
 
 
 def test_an_artifact_stored_without_a_platform_reports_an_empty_one(personal_server):
-    """Every artifact written before this existed has none, and core transforms
-    never record one. Empty is the honest answer; a plausible default would be
-    a claim about a machine nobody observed."""
+    """Older artifacts and core transforms have none; a plausible default would be a fabricated
+    claim.
+    """
     base_url = personal_server["base_url"]
     provenance = "7" * 64
     _publish_by_provenance(base_url, provenance, b"x")
@@ -509,12 +461,7 @@ def test_an_artifact_stored_without_a_platform_reports_an_empty_one(personal_ser
 
 
 def test_the_environment_identity_round_trips(personal_server):
-    """Both halves of it: which package set (env_hash) and on what (build_env).
-
-    Recorded on every notebook artifact since long before the team store, and
-    readable through nothing until now — the roadmap's "incidental lockfile
-    hash". A shared cache makes it the first thing anyone needs to see.
-    """
+    """Both halves: which package set (env_hash) and on what (build_env)."""
     base_url = personal_server["base_url"]
     provenance = "5" * 64
     response = httpx.put(

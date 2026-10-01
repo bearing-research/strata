@@ -1,8 +1,7 @@
-"""Pins, and garbage collection a platform can run on a shared store. Item 9.
+"""Pins, and garbage collection a platform can run on a shared store.
 
-Publications already protected their chains. A platform also needs to hold
-chains the store has no other reason to keep, a snapshot that must stay
-restorable for instance, and to run the sweep in service mode and on a timer.
+Pins hold chains the store has no other reason to keep (a snapshot that must stay restorable); the
+sweep runs in service mode and on a timer.
 """
 
 from __future__ import annotations

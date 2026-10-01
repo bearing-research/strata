@@ -1,9 +1,7 @@
-"""Sharing a result with the team, on purpose.
+"""Sharing a result with the team on purpose, rather than every consumed intermediate.
 
-The team cache offered every downstream-consumed variable of every successful
-cell, or nothing. On a shared server that is the point; on a personal one it
-means every intermediate a researcher ever computed lands in the team's store
-whether or not they meant to share it. Item 21.
+On a personal server, offering everything to the team cache puts every intermediate a researcher
+computed in the team's store whether or not they meant to share it.
 """
 
 from __future__ import annotations
@@ -80,10 +78,10 @@ def _promote(chain, url, **overrides):
 
 
 class TestIntoACentralStore:
-    """Promotion into a service-mode store behind a trusted proxy: the shape
-    of a personal server promoting to an organization's central store through
-    a listener that injects the organization's tenant and the member's
-    identity."""
+    """Promotion into a service-mode store behind a trusted proxy.
+
+    The listener injects the organization's tenant and the member's identity.
+    """
 
     PROXY_TOKEN = "listener-token"
 
@@ -145,9 +143,10 @@ class TestIntoACentralStore:
 
 class TestPromote:
     def test_the_chain_travels_past_a_superseded_step(self, team_store, team_dir, tmp_path):
-        """A rerun cell supersedes its earlier version, which a downstream
-        result still names. The lineage walk stopped at it, so everything
-        upstream of a rerun step stayed behind."""
+        """A rerun cell supersedes a version a downstream result still names.
+
+        The lineage walk must continue past it, or everything upstream of the rerun stays behind.
+        """
         manager = NotebookArtifactManager("nb", artifact_dir=tmp_path / "notebook")
         refs = []
         for i, source in enumerate(["a = 1", "b = a", "model = fit(b)"]):
@@ -186,12 +185,7 @@ class TestPromote:
         assert response.status_code == 200
 
     def test_the_whole_chain_travels(self, team_store, team_dir, chain):
-        """Not just the artifact.
-
-        The cache is keyed by provenance, so each ancestor that arrives is a
-        hit for the next person whose cell computes the same thing. Sending
-        the result alone would share the answer and none of the work.
-        """
+        """Not just the artifact: each ancestor is a provenance hit for the next person."""
         _promote(chain, team_store)
 
         store = ArtifactStore(team_dir)
@@ -199,12 +193,7 @@ class TestPromote:
         assert store.get_artifact(chain["figure"].id, chain["figure"].version) is not None
 
     def test_an_ancestor_becomes_a_cache_hit(self, team_store, team_dir, chain):
-        """The property the chain exists for, stated as the team sees it.
-
-        A colleague whose cell computes the same upstream looks it up by
-        provenance hash — and finds it, because someone promoted a result
-        built on it.
-        """
+        """A colleague computing the same upstream finds it by provenance hash."""
         _promote(chain, team_store)
 
         store = ArtifactStore(team_dir)
@@ -244,8 +233,7 @@ class TestPromote:
             )
 
     def test_it_mints_no_public_link(self, team_store, team_dir, chain):
-        """Promoting is not publishing. A team name is not a URL anyone can
-        read without credentials."""
+        """Promoting is not publishing; a team name is not a public URL."""
         _promote(chain, team_store)
 
         assert ArtifactStore(team_dir).list_publications() == []
@@ -269,10 +257,7 @@ class TestPromote:
 
 
 class TestAHitSaysWhichPromotionItCameFrom:
-    """A colleague's team-cache hit on a promoted chain could say who computed
-    it and nothing about why it was there to hit. The stamp is what lets it say
-    "this came from taxi/model" — the reason someone promoted in the first
-    place, seen from the side that benefits."""
+    """A team-cache hit on a promoted chain says which promotion put it there."""
 
     def test_everything_the_promotion_wrote_is_stamped(self, team_store, team_dir, chain):
         _promote(chain, team_store)
@@ -283,8 +268,7 @@ class TestAHitSaysWhichPromotionItCameFrom:
             assert tags.get("nb_promotion") == "taxi/model", key
 
     def test_a_row_the_store_already_held_is_not_claimed(self, team_store, team_dir, chain):
-        """It arrived some other way — a cache publish, an earlier promotion —
-        and restamping it would say this promotion put it there."""
+        """A row that arrived some other way is not restamped as this promotion's."""
         from strata.artifact_transfer import RemoteStore
 
         manager = NotebookArtifactManager("nb", artifact_dir=chain["dir"])
@@ -377,11 +361,10 @@ class TestAHitSaysWhichPromotionItCameFrom:
 
 
 class TestPromotionAfterAPartialFailure:
-    """Review follow-ups on #745."""
+    """Promotion that fails part-way, and promotion onto a colleague's row."""
 
     def test_a_refused_name_still_leaves_the_chain_stamped(self, team_store, team_dir, chain):
-        """The retry finds every row already there and writes nothing, so the
-        stamps have to land before the step that can be refused."""
+        """The retry finds every row present and writes nothing, so stamps land before naming."""
         from strata.artifact_transfer import RemoteStore
 
         real = RemoteStore.set_name
@@ -407,8 +390,10 @@ class TestPromotionAfterAPartialFailure:
     def test_a_colleagues_cell_stamp_survives_a_promotion_onto_their_row(
         self, team_store, team_dir, chain
     ):
-        """Deduplicating onto a row a colleague published must not move it off
-        their cell's strip; their own tags are theirs, other tags still apply."""
+        """Deduplicating onto a colleague's row keeps it on their cell's strip.
+
+        Their own tags stay theirs; other tags still apply.
+        """
         from strata.artifact_transfer import RemoteStore, promote_artifact
 
         manager = NotebookArtifactManager("nb", artifact_dir=chain["dir"])
@@ -433,12 +418,7 @@ class TestPromotionAfterAPartialFailure:
 
 class TestRefusals:
     def test_an_unreachable_store_is_not_silently_a_success(self, chain):
-        """It raises rather than returning 0.
-
-        Promoting is how a result reaches colleagues; a command that printed
-        success while the store was unreachable would leave someone believing
-        they had shared something.
-        """
+        """It raises rather than returning 0, so nobody believes they shared something."""
         with pytest.raises((RuntimeError, httpx.HTTPError)):
             _promote(chain, "http://127.0.0.1:1")
 
@@ -471,14 +451,12 @@ class TestPublishPolicy:
     """What the cache offers outward, between "everything" and "nothing"."""
 
     class _Reached(Exception):
-        """Raised in place of building a TeamStore, to say the gate let us by."""
+        """Raised in place of building a TeamStore: the gate let us through."""
 
     def _executor(self, policy: str | None, *, enabled: bool = True):
         """A stand-in with just the state the two gates read.
 
-        The gates run before either method touches the session, so the parts
-        of a real executor they never reach are not built here — but the
-        methods themselves are the real ones, called unbound. Asserting on
+        The gate methods are the real ones, called unbound. Asserting on
         `_team_cache_publish_policy` alone would pass with both gates deleted.
         """
         from types import SimpleNamespace
@@ -534,14 +512,12 @@ class TestPublishPolicy:
         ],
     )
     def test_the_policy_decides_each_direction(self, monkeypatch, policy, offers, pulls):
-        """`promoted` still pulls: someone who shares only on purpose still
-        benefits from work the team already did."""
+        """`promoted` still pulls work the team already did."""
         assert self._talks_to_the_store(monkeypatch, self._executor(policy), "push") is offers
         assert self._talks_to_the_store(monkeypatch, self._executor(policy), "pull") is pulls
 
     def test_a_config_without_the_setting_behaves_as_before(self, monkeypatch):
-        """An older deployment's config object has no such attribute, and the
-        absence must mean the behaviour that existed before the setting did."""
+        """A config object without the attribute behaves as if the policy were `all`."""
         assert self._talks_to_the_store(monkeypatch, self._executor(None), "push") is True
         assert self._talks_to_the_store(monkeypatch, self._executor(None), "pull") is True
 
@@ -559,13 +535,10 @@ class TestPublishPolicy:
 
 
 class TestPromoteRoute:
-    """``POST /v1/notebooks/{id}/artifacts/{id}/v/{n}/promote`` — the same
-    promotion the CLI does, from the button the strip will grow.
+    """``POST /v1/notebooks/{id}/artifacts/{id}/v/{n}/promote``: the CLI's promotion, from the UI.
 
-    The team store here is the server the fixture runs, and the notebook's own
-    store is a directory on disk, which is the real shape: cells write locally
-    and promotion is what crosses the gap. The route is called directly rather
-    than over HTTP so the running server stays the *target*, not the caller.
+    The fixture server is the team store and the notebook store is local, as in real use. The route
+    is called directly so the running server stays the target, not the caller.
     """
 
     def _session(self, chain):
@@ -621,8 +594,7 @@ class TestPromoteRoute:
     def test_without_a_name_the_chain_travels_and_nothing_is_named(
         self, team_store, team_dir, chain, monkeypatch
     ):
-        """What a platform publishing a result needs: the chain in the store
-        the link is served from, and nothing added to the team's registry."""
+        """The chain reaches the store, and nothing is added to the team's registry."""
         result = self._call(chain, team_store, monkeypatch, name=None)
 
         assert result["name"] is None and result["copied"] == 2
@@ -653,10 +625,9 @@ class TestPromoteRoute:
         assert "notebook_remote_store_url" in caught.value.detail
 
     def test_an_artifact_this_notebook_does_not_hold_is_a_404(self, team_store, chain, monkeypatch):
-        """The route reads this notebook's store, and only that one.
+        """The route reads only this notebook's store.
 
-        The id arrives in the URL, so this is what keeps one open notebook
-        from pushing an id it does not own to the team.
+        The id arrives in the URL, so this keeps a notebook from pushing an id it does not own.
         """
         from fastapi import HTTPException
 
@@ -676,9 +647,10 @@ class TestPromoteRoute:
 
 
 class TestEveryOutputIsOfferedForPromotion:
-    """The strip offered Promote only on a result a cell published itself with
-    ``put(name=...)``. Any stored output can be promoted, so the frontend has to
-    learn each one's artifact — ``artifact_uri`` names only one of them."""
+    """Every stored output can be promoted, not only one a cell ``put(name=...)``.
+
+    ``artifact_uri`` names only one of them, so the frontend needs each output's artifact.
+    """
 
     @pytest.mark.asyncio
     async def test_the_output_frame_names_every_stored_variable(self, monkeypatch):
@@ -718,11 +690,8 @@ class TestEveryOutputIsOfferedForPromotion:
 class TestAmbientPromoteWiring:
     """What reaches a cell so ``strata.promote`` can work.
 
-    Three pieces have to agree: the manifest carries the callback URL and the
-    input URIs, and both execution paths — the cold harness and the warm pool
-    worker — hand them to the client. A cell that runs on the pool is the
-    default path, so a mismatch there is the failure nobody would see in a
-    local test.
+    The manifest carries the callback URL and input URIs, and both the cold harness and the warm
+    pool worker hand them to the client. The pool is the default path.
     """
 
     def _executor(self, *, remote_store: str | None, server_url: str = "http://nb.local"):
@@ -739,8 +708,7 @@ class TestAmbientPromoteWiring:
         )
 
     def test_the_url_points_at_this_server_not_the_team_store(self):
-        """The team store cannot read the notebook's artifacts; this server is
-        the only process that can, so it is the one that does the copying."""
+        """Only this server can read the notebook's artifacts, so it does the copying."""
         from strata.notebook.executor import CellExecutor
 
         url = CellExecutor._ambient_promote_url(self._executor(remote_store="http://store.example"))
@@ -753,8 +721,7 @@ class TestAmbientPromoteWiring:
         assert CellExecutor._ambient_promote_url(self._executor(remote_store=None)) == ""
 
     def test_the_manifest_carries_it(self, tmp_path):
-        """The link between the two tests above. Both consumers read
-        ``strata_promote_url``; this is what puts it there."""
+        """Both consumers read ``strata_promote_url``; this puts it there."""
         from strata.notebook.executor import CellExecutor
 
         executor = self._executor(remote_store="http://store.example")
@@ -775,10 +742,10 @@ class TestAmbientPromoteWiring:
         assert manifest["strata_promote_url"] == "http://nb.local/v1/notebooks/sess-1"
 
     def test_the_manifest_carries_no_credential_and_points_at_this_server(self, tmp_path):
-        """The run directory is handed to the harness user so the cell can
-        write into it, so anything in the manifest is the cell's to read. The
-        team store's token is what makes X-Strata-Principal believable: a cell
-        holding it can act as anybody."""
+        """The cell can read the manifest, so it must not hold the team store's token.
+
+        That token makes X-Strata-Principal believable: a cell holding it could act as anybody.
+        """
         from types import SimpleNamespace
 
         from strata.notebook.executor import CellExecutor
@@ -808,12 +775,10 @@ class TestAmbientPromoteWiring:
         assert manifest["strata_url"] == "http://nb.local", "a cell asks this server"
 
     def test_run_all_points_cells_at_the_same_place_a_single_run_does(self):
-        """Structural, because the batch spec is built inline in a handler that
-        needs seven executor internals to fake -- and fakes of those drift.
+        """Structural: the batch spec is built inline, and fakes of its executor internals drift.
 
-        With a team store configured the two urls differ, so a batch that asked
-        for the ambient one sent identical cell source somewhere else than a
-        single-cell run did, with no credential for the place it was sent.
+        With a team store configured the ambient and local URLs differ, so Run All must use the same
+        one a single-cell run does.
         """
         import inspect
 
@@ -828,12 +793,7 @@ class TestAmbientPromoteWiring:
         )
 
     def test_run_all_gives_cells_somewhere_to_promote_to(self):
-        """Structural, for the same reason as the url above it.
-
-        The spec carried the url a cell reads from and not the one it
-        promotes to, so ``strata.promote(...)`` inside Run All told a user
-        who had configured a team store that there was no team store.
-        """
+        """Structural, like the test above: the batch spec must carry the promote URL."""
         import inspect
 
         from strata.notebook import ws
@@ -849,11 +809,10 @@ class TestAmbientPromoteWiring:
         )
 
     def test_run_all_resolves_mount_credentials_the_way_a_single_run_does(self):
-        """``_prepare_mounts`` is not a thin alias for the resolver: it fills in
-        the credential resolver first. Reaching past it to
-        ``_mount_resolver.prepare_mounts`` left a mount naming a credential
-        unresolvable, so ``# mount data s3://... credential=lab`` worked alone
-        and failed in Run All.
+        """``_prepare_mounts`` fills in the credential resolver before resolving.
+
+        Calling ``_mount_resolver.prepare_mounts`` directly leaves ``credential=lab`` mounts
+        unresolvable in Run All.
         """
         import inspect
 

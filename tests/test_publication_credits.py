@@ -1,9 +1,7 @@
 """Who wrote a publication, and what identifies it.
 
-``published_by`` was one free-form string: who made the grant. That is not who
-wrote the work — which has an order, an affiliation and an identifier — and it
-is not a DOI, which is registered against a deposit that already has to be
-reachable and so almost always arrives after the token does. Item 3.
+``published_by`` names who made the grant, not the ordered, affiliated authors. A DOI usually
+arrives after the token, since it is registered against an already reachable deposit.
 """
 
 from __future__ import annotations
@@ -54,7 +52,7 @@ class TestPublishingWithAuthors:
         assert [a["name"] for a in publication.authors] == ["B. Second", "A. First"]
 
     def test_an_author_without_an_orcid_carries_no_empty_one(self, store):
-        """Otherwise a missing identifier becomes the string "None" on a page."""
+        """A missing identifier must not become the string "None" on a page."""
         publication = store.publish_artifact("fig", 1, authors=[{"name": "Solo"}])
 
         assert publication.authors == ({"name": "Solo"},)
@@ -69,8 +67,7 @@ class TestPublishingWithAuthors:
         assert reloaded.authors == publication.authors
 
     def test_publishing_without_them_changes_nothing(self, store):
-        """The property that keeps every link printed before this saying what
-        it said: no authors leaves ``published_by`` as the byline."""
+        """No authors leaves ``published_by`` as the byline, so printed links keep their meaning."""
         publication = store.publish_artifact("fig", 1, published_by="alice")
 
         assert publication.authors == ()
@@ -97,8 +94,7 @@ class TestPatchingIdentifiers:
         assert [a["name"] for a in updated.authors] == ["F. Li"]
 
     def test_it_cannot_repoint_the_token(self, store):
-        """The binding is the whole value of a URL printed in a paper. It is
-        not a parameter here and not a column this write names."""
+        """The token binding is the value of a printed URL; this write cannot change it."""
         second = store.create_artifact("other", "b" * 64)
         store.write_blob("other", second, b"OTHER")
         store.finalize_artifact("other", second, '{"fields": []}', 1, 5)
@@ -146,8 +142,7 @@ class TestThePage:
         assert "by alice" in html
 
     def test_no_identifiers_means_no_citation_line(self, store):
-        """A citation line saying nothing reads as "there is no DOI for this",
-        which is a different claim from nobody having recorded one."""
+        """An empty citation line would claim there is no DOI, not that none was recorded."""
         assert "Cite as" not in self._page(store)
 
 
@@ -175,16 +170,14 @@ class TestTheCrate:
         )
 
     def test_the_root_identifier_is_the_resolvable_doi(self, store):
-        """A bare "10.5281/zenodo.1" is not something an ingesting repository
-        can follow; the URL form is."""
+        """A bare "10.5281/zenodo.1" cannot be followed by an ingesting repository; the URL can."""
         crate = self._crate(store, authors=[{"name": "F. Li"}])
 
         root = next(n for n in crate["@graph"] if n["@id"] == "./")
         assert root["identifier"] == "https://doi.org/10.5281/zenodo.1"
 
     def test_an_author_with_an_orcid_is_identified_by_it(self, store):
-        """An ORCID is a persistent identifier for a person, which is exactly
-        what an ``@id`` is for — two crates naming the same researcher say so."""
+        """An ORCID is a persistent person identifier, which is what ``@id`` is for."""
         crate = self._crate(store, authors=[{"name": "F. Li", "orcid": ORCID}])
 
         root = next(n for n in crate["@graph"] if n["@id"] == "./")
@@ -216,8 +209,7 @@ class TestTheRoute:
         assert record["publication"]["external_ids"][0]["value"] == "10.5281/zenodo.1"
 
     def test_an_unresolvable_scheme_is_refused(self, served):
-        """A record that accepted any scheme name would produce citation lines
-        nobody can follow, and the caller would hear about it from a reader."""
+        """Any scheme name would produce citation lines nobody can follow."""
         base_url, store, version = served
 
         published = httpx.post(
@@ -243,7 +235,7 @@ class TestTheRoute:
 
 class TestTheArchiveManifest:
     def test_it_carries_both(self, store, tmp_path):
-        """The escrow bundle lacking the DOI is the reason this is Phase 1."""
+        """The escrow bundle carries the DOI too."""
         from strata.api.publication_bundle import write_bundle
 
         publication = store.publish_artifact("fig", 1, authors=[{"name": "F. Li", "orcid": ORCID}])
@@ -263,9 +255,7 @@ class TestTheArchiveManifest:
 
 class TestMigration:
     def test_a_store_written_before_the_columns_gains_them(self, tmp_path):
-        """Nothing is backfilled: ``published_by`` stays the byline for every
-        publication made before this, which is what keeps a link printed in a
-        paper saying what it said yesterday."""
+        """Nothing is backfilled: ``published_by`` stays the byline for older publications."""
         store = ArtifactStore(tmp_path / "old")
         version = store.create_artifact("fig", "c" * 64)
         store.write_blob("fig", version, b"PNG")

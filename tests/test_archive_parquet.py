@@ -1,9 +1,7 @@
 """A tabular artifact's bundle carries Parquet beside the archived bytes.
 
-Arrow IPC is a transport format. It has a stability promise, but a data
-repository indexes Parquet, and a reader in a decade reaches for it with
-whatever tool they have. The bundle exists to be opened long after anyone can
-ask how — item 30.
+Arrow IPC is a transport format; data repositories index Parquet, and the bundle must open long
+after anyone can ask how.
 """
 
 from __future__ import annotations
@@ -74,11 +72,7 @@ class TestTabularArtifact:
         assert pq.read_table(dest / "artifact.parquet").equals(TABLE)
 
     def test_the_archived_arrow_bytes_are_still_there(self, tmp_path):
-        """Parquet is added beside them, not instead of them.
-
-        The manifest's digest covers the archived bytes; replacing them would
-        make that digest describe a file the bundle no longer contains.
-        """
+        """Parquet is added beside the archived bytes, which the manifest's digest covers."""
         dest = _archive(tmp_path, "rows", _arrow_bytes())
         manifest = json.loads((dest / "manifest.json").read_text())
 
@@ -96,11 +90,7 @@ class TestTabularArtifact:
         assert manifest["content_sha256"] == hashlib.sha256(named.read_bytes()).hexdigest()
 
     def test_the_manifest_says_which_digest_covers_which_file(self, tmp_path):
-        """With one payload "the digest" was unambiguous. With two it is not.
-
-        A digest that does not say what it covers is worse than none in a
-        bundle meant to be read when nobody is left to ask.
-        """
+        """With two payloads, a digest must say which file it covers."""
         dest = _archive(tmp_path, "rows", _arrow_bytes())
         manifest = json.loads((dest / "manifest.json").read_text())
 
@@ -124,8 +114,7 @@ class TestTabularArtifact:
 class TestNonTabularArtifact:
     @pytest.mark.parametrize("payload", [b"\x89PNG\r\n\x1a\n figure", b"not arrow at all"])
     def test_no_parquet_is_written(self, tmp_path, payload):
-        """An image or a pickle has no rows. A zero-row Parquet would be a
-        confusing lie about what the bundle holds."""
+        """An image or a pickle has no rows; a zero-row Parquet would misdescribe the bundle."""
         dest = _archive(tmp_path, "fig", payload)
 
         assert not (dest / "artifact.parquet").exists()

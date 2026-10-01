@@ -65,10 +65,7 @@ def test_export_renders_arrow_table_preview_as_markdown_table(tmp_path: Path) ->
 
 
 def test_export_renders_arrow_table_with_positional_rows(tmp_path: Path) -> None:
-    """The serializer emits preview rows as positional lists (one entry per
-    column), not dicts. This is the *real* on-disk shape — the dict-row
-    test above mirrors what a hand-written test fixture might look like.
-    """
+    """The serializer emits preview rows as positional lists, not dicts: the real on-disk shape."""
     nb_dir = _make_notebook(tmp_path)
     add_cell_to_notebook(nb_dir, "c1")
     write_cell(nb_dir, "c1", "df = pd.DataFrame(...)\n")
@@ -126,10 +123,8 @@ def test_export_renders_empty_table_with_header(tmp_path: Path) -> None:
 def test_export_code_fence_grows_when_body_contains_triple_backticks(
     tmp_path: Path,
 ) -> None:
-    """Cells that embed fenced markdown examples (typical for prompt cells
-    or library cells documenting their interface) would corrupt the export
-    if we always used three backticks. The fence has to be longer than the
-    longest backtick run in the body.
+    """A body with fenced examples (common in prompt cells) needs a fence longer than its
+    longest backtick run, or the export breaks.
     """
     nb_dir = _make_notebook(tmp_path)
     add_cell_to_notebook(nb_dir, "c1")
@@ -144,13 +139,7 @@ def test_export_code_fence_grows_when_body_contains_triple_backticks(
 
 
 def test_image_output_renders_when_inline_data_url_present() -> None:
-    """Direct renderer test — bypasses the writer's transient-field strip.
-
-    The TOML writer drops inline_data_url on save (it's large); in the
-    real flow hydration via the artifact store re-attaches it. This
-    unit test exercises the renderer assuming hydration has already
-    happened.
-    """
+    """Renderer-only: assumes hydration re-attached ``inline_data_url``, which the writer strips."""
     from strata.notebook.export import _render_display_output
     from strata.notebook.models import CellOutput
 
@@ -292,9 +281,9 @@ def test_export_with_include_inactive_variants_shows_all(tmp_path: Path) -> None
 
 
 def test_export_markdown_cell_renders_without_cell_banner(tmp_path: Path) -> None:
-    """Markdown cells already contain a heading; adding our own '##
-    cell-id' banner above them creates duplicate section titles. The
-    markdown body IS the section divider for these cells."""
+    """A markdown cell's own heading is its section divider; a '## cell-id' banner above it
+    would duplicate titles.
+    """
     nb_dir = _make_notebook(tmp_path)
     add_cell_to_notebook(nb_dir, "intro", language="markdown")
     write_cell(
@@ -312,10 +301,9 @@ def test_export_markdown_cell_renders_without_cell_banner(tmp_path: Path) -> Non
 
 
 def test_export_sanitizes_active_html_in_markdown_cells(tmp_path: Path) -> None:
-    """Markdown cells are user-authored content; the notebook UI runs them
-    through DOMPurify, and the export must match that guarantee before the
-    body reaches python-markdown (which would otherwise pass raw HTML
-    straight through into the published page)."""
+    """The UI runs markdown cells through DOMPurify; the export must match before python-markdown
+    passes raw HTML into the published page.
+    """
     nb_dir = _make_notebook(tmp_path)
     add_cell_to_notebook(nb_dir, "danger", language="markdown")
     write_cell(
@@ -351,9 +339,9 @@ def test_export_sanitizes_active_html_in_markdown_cells(tmp_path: Path) -> None:
 
 
 def test_export_sanitizes_active_html_in_readme(tmp_path: Path) -> None:
-    """The README intro flows through the same MarkdownBlock path and
-    must be sanitized too — otherwise an untrusted notebook's README
-    becomes an XSS vector against viewers of the exported docs."""
+    """The README intro takes the same MarkdownBlock path; unsanitized, an untrusted notebook's
+    README is an XSS vector against viewers of the export.
+    """
     nb_dir = _make_notebook(tmp_path)
     (nb_dir / "README.md").write_text(
         "# Demo\n\n<script>alert('readme')</script>\n",
@@ -368,8 +356,7 @@ def test_export_sanitizes_active_html_in_readme(tmp_path: Path) -> None:
 
 
 def test_export_preserves_benign_inline_html(tmp_path: Path) -> None:
-    """Don't over-escape: ``<sub>``, ``<details>``, ``<sup>`` etc. are
-    common in technical writing and must still flow through unchanged."""
+    """Don't over-escape: ``<sub>``, ``<details>``, ``<sup>`` and similar pass through unchanged."""
     nb_dir = _make_notebook(tmp_path)
     add_cell_to_notebook(nb_dir, "ok", language="markdown")
     write_cell(
@@ -449,10 +436,10 @@ def test_export_truncation_disabled_when_max_bytes_zero(tmp_path: Path) -> None:
 
 
 def test_export_swaps_oversized_image_for_size_note(tmp_path: Path) -> None:
-    """An inline image larger than the cap is replaced with a friendly note,
-    not silently dropped. Tests the renderer directly since we can't easily
-    persist a 1 MB data URL through update_cell_display_outputs (writer
-    strips it as transient)."""
+    """An inline image over the cap becomes a note, not a silent drop.
+
+    Renderer-level because the writer strips a 1 MB data URL as transient.
+    """
     from strata.notebook.export import _render_display_output
     from strata.notebook.models import CellOutput
 
@@ -668,10 +655,8 @@ def test_strata_export_cli_include_inactive_variants_flag(tmp_path: Path) -> Non
 
 
 def test_export_never_emits_prompt_response_marker_for_real_examples() -> None:
-    """For every example with a prompt cell, the privacy note appears
-    and no cached response content can leak. The note is a positive
-    signal that the prompt-cell privacy branch was taken; if it's
-    absent on a notebook containing a prompt cell, the renderer drifted.
+    """For every example with a prompt cell, the privacy note appears and no cached response
+    leaks; a missing note means the renderer drifted.
     """
     repo_root = Path(__file__).resolve().parents[2]
     examples_dir = repo_root / "examples"

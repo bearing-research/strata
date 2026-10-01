@@ -9,10 +9,7 @@ from strata_client.integration.pandas import StrataPandasScanner, scan_to_pandas
 
 
 class TestScanToPandas:
-    """Tests for scan_to_pandas function."""
-
     def test_basic_scan(self, server_with_client):
-        """scan_to_pandas returns a pandas DataFrame."""
         config = server_with_client["config"]
         table_uri = server_with_client["warehouse"]["table_uri"]
 
@@ -22,7 +19,6 @@ class TestScanToPandas:
         assert len(df) == 500  # temp_warehouse creates 500 rows
 
     def test_column_projection(self, server_with_client):
-        """scan_to_pandas respects column projection."""
         config = server_with_client["config"]
         table_uri = server_with_client["warehouse"]["table_uri"]
 
@@ -36,7 +32,6 @@ class TestScanToPandas:
         assert "name" not in df.columns
 
     def test_with_filters(self, server_with_client):
-        """scan_to_pandas accepts filters for row-group pruning."""
         config = server_with_client["config"]
         table_uri = server_with_client["warehouse"]["table_uri"]
 
@@ -51,10 +46,7 @@ class TestScanToPandas:
 
 
 class TestStrataPandasScanner:
-    """Tests for StrataPandasScanner class."""
-
     def test_context_manager(self, server_with_client):
-        """StrataPandasScanner works as context manager."""
         config = server_with_client["config"]
         table_uri = server_with_client["warehouse"]["table_uri"]
 
@@ -64,7 +56,7 @@ class TestStrataPandasScanner:
             assert len(df) == 500
 
     def test_multiple_scans(self, server_with_client):
-        """Scanner can perform multiple scans with same connection."""
+        """One scanner performs several scans over the same connection."""
         config = server_with_client["config"]
         table_uri = server_with_client["warehouse"]["table_uri"]
 
@@ -76,7 +68,6 @@ class TestStrataPandasScanner:
             assert list(df2.columns) == ["value"]
 
     def test_scan_with_filters(self, server_with_client):
-        """Scanner accepts filters for row-group pruning."""
         config = server_with_client["config"]
         table_uri = server_with_client["warehouse"]["table_uri"]
 
@@ -85,7 +76,6 @@ class TestStrataPandasScanner:
             assert isinstance(df, pd.DataFrame)
 
     def test_scan_batches(self, server_with_client):
-        """scan_batches yields Arrow RecordBatches."""
         import pyarrow as pa
 
         config = server_with_client["config"]
@@ -102,7 +92,7 @@ class TestStrataPandasScanner:
             assert total_rows == 500
 
     def test_scan_batches_to_pandas(self, server_with_client):
-        """scan_batches can be converted to pandas incrementally."""
+        """scan_batches converts to pandas incrementally."""
         config = server_with_client["config"]
         table_uri = server_with_client["warehouse"]["table_uri"]
 
@@ -118,10 +108,7 @@ class TestStrataPandasScanner:
 
 
 class TestPandasDataTypes:
-    """Tests for pandas data type handling."""
-
     def test_integer_columns(self, server_with_client):
-        """Integer columns are properly converted."""
         config = server_with_client["config"]
         table_uri = server_with_client["warehouse"]["table_uri"]
 
@@ -134,7 +121,6 @@ class TestPandasDataTypes:
         assert pd.api.types.is_integer_dtype(df["id"]) or pd.api.types.is_numeric_dtype(df["id"])
 
     def test_float_columns(self, server_with_client):
-        """Float columns are properly converted."""
         config = server_with_client["config"]
         table_uri = server_with_client["warehouse"]["table_uri"]
 
@@ -147,7 +133,6 @@ class TestPandasDataTypes:
         assert pd.api.types.is_float_dtype(df["value"])
 
     def test_string_columns(self, server_with_client):
-        """String columns are properly converted."""
         config = server_with_client["config"]
         table_uri = server_with_client["warehouse"]["table_uri"]
 

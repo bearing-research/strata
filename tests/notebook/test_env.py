@@ -10,7 +10,6 @@ from strata.notebook.env import (
 
 
 def test_lockfile_hash_stability(tmp_path):
-    """Same lockfile should produce same hash."""
     lockfile = tmp_path / "uv.lock"
     lockfile.write_text("[[package]]\nname = 'pandas'\n")
 
@@ -21,7 +20,6 @@ def test_lockfile_hash_stability(tmp_path):
 
 
 def test_lockfile_hash_changes_with_content(tmp_path):
-    """Different lockfile content should produce different hash."""
     lockfile = tmp_path / "uv.lock"
     lockfile.write_text("[[package]]\nname = 'pandas'\n")
     hash1 = compute_lockfile_hash(tmp_path)
@@ -43,13 +41,10 @@ def test_lockfile_hash_missing_lockfile(tmp_path):
 
 
 def test_lockfile_hash_unchanged_for_uv_only_notebook(tmp_path):
-    """Adding renv.lock support must not invalidate uv-only notebooks.
+    """A uv-only notebook still hashes to raw sha256(uv.lock).
 
-    Regression for #59 PR 4: ``compute_lockfile_hash`` was extended
-    to fold ``renv.lock`` into the digest, but a Python-only
-    notebook (no renv.lock present) must still produce the same
-    bytes-as-input hash it did pre-change — otherwise every cached
-    R-free notebook on disk loses its cache the moment this lands.
+    Folding ``renv.lock`` into the digest must not change it, or every cached R-free notebook
+    would lose its cache.
     """
     lockfile = tmp_path / "uv.lock"
     lockfile.write_text("[[package]]\nname = 'pandas'\nversion = '2.0'\n")
@@ -73,10 +68,9 @@ def _uv_lock(
 ) -> str:
     """Build a minimal but realistic uv.lock.
 
-    ``runtime`` / ``dev`` map ``name -> version`` for the root's direct runtime /
-    dev-group deps; ``transitive`` maps ``name -> (version, [dep names])`` for
-    resolved packages reached through the graph. Every package gets a synthetic
-    sdist hash derived from its name+version so a version bump changes content.
+    ``runtime`` / ``dev`` map name to version for the root's direct deps; ``transitive`` maps
+    name to ``(version, [dep names])``. Each package gets an sdist hash from its name and
+    version, so a version bump changes content.
     """
     dev = dev or {}
     transitive = transitive or {}
@@ -203,7 +197,7 @@ def test_dev_only_transitive_does_not_change_hash(tmp_path):
 
 
 def test_no_dev_group_uses_raw_bytes(tmp_path):
-    """With no dev group, the hash is still raw sha256(uv.lock) — no re-hash."""
+    """With no dev group, the hash is raw sha256(uv.lock), not a re-hash."""
     lock_text = _uv_lock(runtime={"cloudpickle": "3.1.2"})  # no dev=
     actual = _hash_with(tmp_path, lock_text)
     expected = hashlib.sha256(lock_text.encode()).hexdigest()
@@ -211,7 +205,7 @@ def test_no_dev_group_uses_raw_bytes(tmp_path):
 
 
 def test_unparseable_lock_falls_back_to_raw_bytes(tmp_path):
-    """A malformed uv.lock must not crash — it folds raw bytes (safe fallback)."""
+    """A malformed uv.lock does not crash; the hash folds its raw bytes."""
     lockfile = tmp_path / "uv.lock"
     lockfile.write_text("this is = not [valid toml")
     actual = compute_lockfile_hash(tmp_path)
@@ -220,13 +214,7 @@ def test_unparseable_lock_falls_back_to_raw_bytes(tmp_path):
 
 
 def test_lockfile_hash_renv_lock_changes_digest(tmp_path):
-    """A renv.lock change must produce a different hash.
-
-    Acceptance criterion from #59: ``renv.lock change invalidates
-    all R cells (env hash changed)``. The notebook here has both
-    uv.lock and renv.lock; we mutate only renv.lock and assert the
-    digest drifts.
-    """
+    """Changing only renv.lock changes the hash, invalidating every R cell."""
     (tmp_path / "uv.lock").write_text("[[package]]\nname = 'pandas'\n")
     (tmp_path / "renv.lock").write_text('{"Packages": {"arrow": "1.0"}}')
     before = compute_lockfile_hash(tmp_path)
@@ -238,12 +226,7 @@ def test_lockfile_hash_renv_lock_changes_digest(tmp_path):
 
 
 def test_lockfile_hash_renv_only_notebook(tmp_path):
-    """R-only notebook (no uv.lock, just renv.lock) produces a stable hash.
-
-    Future configuration — there's no concrete user story for an
-    R-only Strata notebook yet, but the helper must not crash, and
-    repeated calls with the same renv.lock must agree.
-    """
+    """An R-only notebook (renv.lock, no uv.lock) hashes without crashing, and stably."""
     (tmp_path / "renv.lock").write_text('{"R": {"Version": "4.4.0"}}')
 
     a = compute_lockfile_hash(tmp_path)
@@ -256,12 +239,7 @@ def test_lockfile_hash_renv_only_notebook(tmp_path):
 
 
 def test_lockfile_hash_uv_and_renv_combined(tmp_path):
-    """Adding renv.lock to an existing uv.lock notebook drifts the hash.
-
-    Pins the rule "renv.lock contributes to the hash" from the
-    *other* direction: not just renv→renv edits, but introducing
-    renv.lock into a previously uv-only notebook also invalidates.
-    """
+    """Adding renv.lock to a uv-only notebook changes the hash too."""
     (tmp_path / "uv.lock").write_text("[[package]]\nname = 'pandas'\n")
     uv_only = compute_lockfile_hash(tmp_path)
 
@@ -272,18 +250,15 @@ def test_lockfile_hash_uv_and_renv_combined(tmp_path):
 
 
 def test_collect_referenced_env_keys_subscript():
-    """``os.environ['KEY']`` should be detected."""
     assert collect_referenced_env_keys("import os\nx = os.environ['APP_MODE']") == {"APP_MODE"}
 
 
 def test_collect_referenced_env_keys_get_and_getenv():
-    """``os.environ.get`` and ``os.getenv`` literal keys are detected."""
     source = "import os\na = os.environ.get('A', 'default')\nb = os.getenv('B')\n"
     assert collect_referenced_env_keys(source) == {"A", "B"}
 
 
 def test_collect_referenced_env_keys_from_os_import_aliases():
-    """``from os import environ, getenv`` usages are detected."""
     source = (
         "from os import environ, getenv\nx = environ['A']\ny = environ.get('B')\nz = getenv('C')\n"
     )
@@ -291,13 +266,12 @@ def test_collect_referenced_env_keys_from_os_import_aliases():
 
 
 def test_collect_referenced_env_keys_ignores_dynamic_lookup():
-    """Non-literal keys are ignored — they cannot be statically resolved."""
+    """Non-literal keys cannot be resolved statically, so they are ignored."""
     source = "import os\nkey = 'A'\nx = os.environ[key]\n"
     assert collect_referenced_env_keys(source) == set()
 
 
 def test_collect_referenced_env_keys_syntax_error_returns_empty():
-    """Invalid source must not crash; return an empty set."""
     assert collect_referenced_env_keys("def broken(:") == set()
 
 
@@ -312,9 +286,9 @@ def test_narrow_env_for_provenance_drops_unreferenced_keys():
 
 
 def test_narrow_env_for_provenance_keeps_declared_keys():
-    """Explicitly declared keys (annotations or persisted overrides) are kept
-    even when the cell body never reads them — the declaration is the
-    explicit opt-in signal."""
+    """Declared keys (annotations or persisted overrides) are kept even when the cell never
+    reads them; the declaration is the opt-in.
+    """
     source = "x = 1"  # no references
     resolved = {"DECLARED": "hello", "AMBIENT": "ignored"}
 

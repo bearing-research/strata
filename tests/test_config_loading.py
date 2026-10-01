@@ -1,8 +1,7 @@
-"""Tests for StrataConfig.load() precedence + normalization (config review findings).
+"""StrataConfig.load() precedence and nested-config normalization.
 
-These pin the documented precedence (defaults < pyproject < env < overrides) and
-the nested-config normalization that ``load()`` performs, by monkeypatching
-``_load_from_pyproject`` so the test controls the "pyproject" layer.
+Precedence is defaults < pyproject < env < overrides. ``_load_from_pyproject`` is monkeypatched so
+each test controls the pyproject layer.
 """
 
 import pytest
@@ -24,7 +23,7 @@ def _pyproject(monkeypatch, data: dict):
 
 
 class TestPrecedence:
-    """Finding #1: env vars must override pyproject.toml values."""
+    """Env vars override pyproject.toml values."""
 
     def test_env_overrides_pyproject(self, monkeypatch, tmp_path):
         _pyproject(monkeypatch, {"host": "1.2.3.4"})
@@ -44,8 +43,7 @@ class TestPrecedence:
         assert config.host == "5.5.5.5"
 
     def test_operational_override_of_pyproject_auth(self, monkeypatch, tmp_path):
-        """The motivating case: STRATA_DEPLOYMENT_MODE must win over a pyproject
-        deployment_mode (else operational overrides are silently ignored)."""
+        """STRATA_DEPLOYMENT_MODE must win over a pyproject deployment_mode."""
         _pyproject(monkeypatch, {"deployment_mode": "service"})
         monkeypatch.setenv("STRATA_DEPLOYMENT_MODE", "personal")
         config = StrataConfig.load(cache_dir=tmp_path / "c", artifact_dir=tmp_path / "a")
@@ -53,7 +51,7 @@ class TestPrecedence:
 
 
 class TestTrustedProxyRequiresToken:
-    """Finding #2: trusted_proxy auth without a token accepts every request."""
+    """trusted_proxy auth without a token would accept every request."""
 
     def test_trusted_proxy_without_token_rejected(self, tmp_path):
         with pytest.raises(ValueError, match="proxy_token"):
@@ -74,7 +72,7 @@ class TestTrustedProxyRequiresToken:
 
 
 class TestAclNormalization:
-    """Finding #3: the documented [tool.strata.acl_config] shape must parse."""
+    """The documented [tool.strata.acl_config] shape must parse."""
 
     _ACL = {
         "default": "deny",
@@ -166,7 +164,7 @@ class TestAclNormalization:
 
 
 class TestNestedConfigMerge:
-    """Findings #4 and #5: env nested overrides must merge, not replace."""
+    """Nested env overrides merge rather than replace."""
 
     def test_transforms_env_toggle_merges_with_pyproject_block(self, monkeypatch, tmp_path):
         _pyproject(
@@ -197,12 +195,9 @@ class TestNestedConfigMerge:
 
 
 class TestGCSBucketLocationRename:
-    """``STRATA_GCS_PROJECT_ID`` never set a project.
+    """``STRATA_GCS_PROJECT_ID`` still reaches ``default_bucket_location``.
 
-    ``GcsFileSystem`` takes no project parameter, so whatever the setting held
-    went to ``default_bucket_location``. The field is named for that now, and
-    the old name still reaches it so a deployment using it keeps the behaviour
-    it had rather than silently losing the setting.
+    ``GcsFileSystem`` takes no project, so the setting always meant the bucket location.
     """
 
     def test_the_new_name_populates_the_field(self, monkeypatch):
@@ -219,10 +214,7 @@ class TestGCSBucketLocationRename:
     def test_the_field_is_not_reachable_without_the_prefix(self, monkeypatch):
         """validation_alias replaces env_prefix rather than combining with it.
 
-        A bare ``gcs_project_id`` in the alias list would therefore make the
-        unprefixed ``GCS_PROJECT_ID`` live config — and in a GCP deployment
-        that variable is ambient, so a project id would land in the location
-        field exactly as before. No other setting is reachable unprefixed.
+        An unprefixed ``GCS_PROJECT_ID`` is ambient in GCP, so it must not become live config.
         """
         monkeypatch.delenv("STRATA_GCS_PROJECT_ID", raising=False)
         monkeypatch.delenv("STRATA_GCS_DEFAULT_BUCKET_LOCATION", raising=False)
@@ -234,10 +226,8 @@ class TestGCSBucketLocationRename:
     def test_env_still_beats_the_legacy_pyproject_key(self, tmp_path, monkeypatch):
         """Documented precedence is pyproject < env.
 
-        load() drops a pyproject key that ``STRATA_{KEY}`` shadows, but this
-        field answers to two env names, so the legacy spelling in a file would
-        otherwise survive and — being passed as an init kwarg — outrank the
-        env source.
+        The field answers to two env names, so the legacy file key would otherwise survive as an
+        init kwarg and outrank the env source.
         """
         (tmp_path / "pyproject.toml").write_text(
             '[tool.strata]\ngcs_project_id = "US"\n', encoding="utf-8"
@@ -249,13 +239,10 @@ class TestGCSBucketLocationRename:
         assert StrataConfig.load().gcs_default_bucket_location == "europe-west1"
 
     def test_the_legacy_env_name_also_beats_the_file(self, tmp_path, monkeypatch):
-        """The case the generic STRATA_{KEY} rule cannot see.
+        """The legacy env name must also shadow the file key.
 
-        After the file key is folded onto the current name, that rule looks for
-        STRATA_GCS_DEFAULT_BUCKET_LOCATION. An operator still using the old env
-        name sets STRATA_GCS_PROJECT_ID, which the rule does not recognise as
-        shadowing anything — so the file key survives and, as an init kwarg,
-        outranks the env source.
+        The generic STRATA_{KEY} rule only looks for STRATA_GCS_DEFAULT_BUCKET_LOCATION, so it
+        misses STRATA_GCS_PROJECT_ID.
         """
         (tmp_path / "pyproject.toml").write_text(
             '[tool.strata]\ngcs_project_id = "US"\n', encoding="utf-8"

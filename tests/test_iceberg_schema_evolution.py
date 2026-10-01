@@ -1,10 +1,7 @@
 """Iceberg schema evolution: a scan reads older data files as the table's schema.
 
-Iceberg names a column by field id, and changing a schema rewrites no data
-files. Strata read columns by name, so dropping a column and adding one of the
-same name served the dropped column's values, a rename served the old name
-(and a projection naming the new one crashed mid-stream), and adding a column
-refused the table. Each test checks the scan against pyiceberg's own read.
+Iceberg names a column by field id and a schema change rewrites no files, so reading by name serves
+wrong data after a drop, re-add or rename. Each test checks against pyiceberg's own read.
 """
 
 from __future__ import annotations
@@ -307,8 +304,7 @@ def nested(tmp_path):
 
 
 def test_nested_fields_are_matched_by_field_id(nested):
-    """Add, rename and widen inside a struct; add inside a list's elements; drop
-    inside a map's values. pyiceberg reads the same."""
+    """Add, rename and widen in a struct; add in list elements; drop in map values."""
     catalog, uri, config = nested
 
     def change(u):
@@ -450,10 +446,10 @@ def _catalog(tmp_path):
 
 
 def test_a_file_holding_nanosecond_timestamps_reads_at_the_tables_unit(tmp_path):
-    """A v1 or v2 table allows only microseconds, but a file registered from
-    elsewhere can hold nanoseconds (INT96 reads as nanoseconds too). Planning
-    used to fail on it; pyiceberg reads it at the table's unit, truncating,
-    and so does the scan."""
+    """A registered file can hold nanoseconds (INT96 reads as nanoseconds too).
+
+    pyiceberg truncates to the table's microseconds, and so does the scan.
+    """
     import datetime
 
     from tests.iceberg_fixtures import commit_files, data_file
@@ -489,8 +485,9 @@ def test_a_file_holding_nanosecond_timestamps_reads_at_the_tables_unit(tmp_path)
 
 def test_a_required_column_made_optional_streams_as_one_schema(tmp_path):
     """The older file says `id` is not null, the newer one that it may be.
-    Each row group carried its own file's nullability, so the stream merge
-    and the plan's schema both rejected the mix."""
+
+    Row groups must take the snapshot's nullability or the merge and plan schema reject the mix.
+    """
     from pyiceberg.schema import Schema
     from pyiceberg.types import NestedField
 
@@ -551,9 +548,7 @@ def test_a_required_column_made_optional_streams_as_one_schema(tmp_path):
     ids=["struct child", "list element", "map value"],
 )
 def test_a_nested_field_made_optional_streams_as_one_schema(tmp_path, column, path, older, newer):
-    """The older file says the nested field is not null, the newer one that it
-    may be. Only a top-level column took the snapshot's nullability, so the
-    row groups of the two files could not be put in one table or stream."""
+    """The nested-field version of the nullability mix above."""
     from pyiceberg.schema import Schema
 
     catalog, uri = _catalog(tmp_path)
@@ -583,9 +578,10 @@ NANOS = 1_704_153_600_000_000_123  # 2024-01-02 plus 123 ns
 
 
 def _nanos_inside(tmp_path, table_type, file_type, first, nanos, evolve=None):
-    """``db.t`` with *first* in ``s`` (of *table_type*), then a file holding
-    *nanos* as *file_type*, as a writer from elsewhere leaves it: field ids on
-    its top-level columns only, so its nested fields go by the name mapping."""
+    """``db.t`` with *first* in ``s``, then a file holding *nanos* as *file_type*.
+
+    Field ids are on the file's top-level columns only, so nested fields go by the name mapping.
+    """
     from pyiceberg.table.name_mapping import create_mapping_from_schema
 
     from tests.iceberg_fixtures import commit_files, data_file
@@ -627,11 +623,10 @@ JAN_1, JAN_2 = datetime.datetime(2024, 1, 1), datetime.datetime(2024, 1, 2)
 def test_nanosecond_timestamps_inside_a_nested_column_read_at_the_tables_unit(
     tmp_path, table_type, file_type, first, nanos, expected
 ):
-    """Only a top-level timestamp was truncated to the table's microseconds;
-    one inside a struct, list or map kept the file's nanoseconds, so its row
-    groups did not match the plan's schema. pyiceberg truncates inside a
-    struct and refuses the lossy cast inside a list or map; the scan
-    truncates in all three."""
+    """A nested timestamp is truncated to microseconds inside a struct, list or map.
+
+    pyiceberg refuses the lossy cast inside a list or map; the scan truncates in all three.
+    """
     _, uri = _nanos_inside(tmp_path, table_type, file_type, first, nanos)
 
     scanned, _ = _scan(StrataConfig(cache_dir=tmp_path / "cache"), uri)
@@ -640,8 +635,7 @@ def test_nanosecond_timestamps_inside_a_nested_column_read_at_the_tables_unit(
 
 
 def test_nanosecond_timestamps_inside_a_reshaped_struct_are_truncated(tmp_path):
-    """A struct that gained a field since is rebuilt field by field; its
-    nanosecond timestamp is truncated too, not refused as a lossy cast."""
+    """A struct rebuilt field by field still truncates its nanoseconds."""
     catalog, uri = _nanos_inside(
         tmp_path,
         pa.struct([("t", US)]),
@@ -657,9 +651,10 @@ def test_nanosecond_timestamps_inside_a_reshaped_struct_are_truncated(tmp_path):
 
 
 def test_a_column_older_files_predate_reads_its_v3_initial_default(tmp_path):
-    """Iceberg v3 lets a new column carry an initial-default: files written
-    before it read that value, not null. pyiceberg cannot write one yet, so the
-    table's metadata gains it in memory."""
+    """Files older than a v3 column read its initial-default, not null.
+
+    pyiceberg cannot write one yet, so the table's metadata gains it in memory.
+    """
     from pyiceberg.schema import Schema
     from pyiceberg.table import Table
     from pyiceberg.types import NestedField

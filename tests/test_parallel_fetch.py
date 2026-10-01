@@ -6,24 +6,20 @@ import uvicorn
 
 
 class TestFetchParallelismConfig:
-    """Tests for fetch_parallelism configuration."""
-
     def test_default_fetch_parallelism(self, tmp_path):
-        """Test that default fetch_parallelism is 4."""
+        """The default fetch_parallelism is 4."""
         from strata.config import StrataConfig
 
         config = StrataConfig(cache_dir=tmp_path / "cache")
         assert config.fetch_parallelism == 4
 
     def test_custom_fetch_parallelism(self, tmp_path):
-        """Test custom fetch_parallelism value."""
         from strata.config import StrataConfig
 
         config = StrataConfig(cache_dir=tmp_path / "cache", fetch_parallelism=8)
         assert config.fetch_parallelism == 8
 
     def test_fetch_parallelism_env_var(self, monkeypatch, tmp_path):
-        """Test STRATA_FETCH_PARALLELISM environment variable."""
         monkeypatch.setenv("STRATA_FETCH_PARALLELISM", "16")
 
         from strata.config import StrataConfig
@@ -33,10 +29,10 @@ class TestFetchParallelismConfig:
 
 
 class TestFetchExecutor:
-    """Tests for dedicated fetch thread pool."""
+    """The dedicated fetch thread pool."""
 
     def test_fetch_executor_created(self, tmp_path):
-        """Test that ServerState creates dedicated fetch executor."""
+        """ServerState creates a dedicated fetch executor."""
         from strata.config import StrataConfig
         from strata.server import ServerState
 
@@ -54,7 +50,6 @@ class TestFetchExecutor:
         state._planning_executor.shutdown(wait=False)
 
     def test_fetch_executor_sizing_uses_max_fetch_workers(self, tmp_path):
-        """Test fetch executor uses max_fetch_workers config."""
         from strata.config import StrataConfig
         from strata.server import ServerState
 
@@ -73,10 +68,9 @@ class TestFetchExecutor:
 
 
 class TestPrometheusMetrics:
-    """Tests for fetch parallelism Prometheus metrics."""
+    """Fetch parallelism Prometheus metrics."""
 
     def test_prometheus_includes_fetch_parallelism(self, tmp_path):
-        """Test Prometheus endpoint includes fetch parallelism metrics."""
         import requests
 
         import strata.server as server_module
@@ -129,10 +123,10 @@ class TestPrometheusMetrics:
 
 
 class TestReorderingBuffer:
-    """Tests for out-of-order fetch completion with reordering."""
+    """Out-of-order fetch completion with reordering."""
 
     def test_segments_yielded_in_order(self):
-        """Test that segments are yielded in correct order despite out-of-order completion."""
+        """Segments are yielded in order despite out-of-order completion."""
         # The real reordering lives in the streaming endpoint, which is hard to unit test;
         # this checks the algorithm.
 
@@ -162,7 +156,7 @@ class TestReorderingBuffer:
         assert completed == {}
 
     def test_reorder_buffer_handles_gaps(self):
-        """Test reorder buffer correctly handles gaps in completion order."""
+        """Gaps in completion order are handled."""
         completed = {}
         next_yield_idx = 0
         yielded = []

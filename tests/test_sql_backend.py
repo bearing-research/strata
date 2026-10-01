@@ -123,11 +123,7 @@ class TestSqliteDialectPreservesTodaysBehavior:
 
 
 class _FakeInner:
-    """Records what the wrapper would send to psycopg.
-
-    Lets the connection adapter be tested without a server, so these stay in
-    the main CI job rather than the container-backed integration one.
-    """
+    """Records what the wrapper would send to psycopg, so no server is needed."""
 
     def __init__(self):
         self.executed: list[tuple[str, tuple]] = []
@@ -138,7 +134,7 @@ class _FakeInner:
 
 
 class TestPostgresConnectionAdapter:
-    """The wrapper is what keeps the store's 103 call sites unchanged."""
+    """The wrapper keeps the store's call sites unchanged."""
 
     def _wrap(self):
         from strata.sql_backend import _PostgresConnection
