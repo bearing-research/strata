@@ -64,8 +64,8 @@ class CellStatusPayload(WsPayload):
     status: str
     remote_worker: str | None = None
     remote_transport: str | None = None
-    # ``starting`` while a remote job is being provisioned, ``running`` once
-    # it is, for a worker that runs cells asynchronously.
+    # ``starting`` while a remote job is provisioned, ``running`` once it is, for a
+    # worker that runs cells asynchronously.
     remote_build_state: str | None = None
     staleness_reasons: list[str] | None = None
     causality: dict[str, Any] | None = None
@@ -306,9 +306,8 @@ class ProfilingSummaryPayload(WsPayload):
     cache_hits: int
     cache_misses: int
     cache_savings_ms: int
-    # The subset of the savings that came from someone else's machine, plus who
-    # contributed. The total alone cannot answer "is the shared store earning
-    # its keep?", which is the question a team is actually asking.
+    # The share of savings from someone else's machine, plus who contributed: the
+    # total alone cannot say whether the shared store earns its keep.
     team_cache_savings_ms: int = 0
     team_cache_hits: int = 0
     team_contributors: list[str] = Field(default_factory=list)
@@ -358,9 +357,7 @@ class CellAnalysisModel(WsPayload):
     variant_active: bool | None = None
     is_module_cell: bool = False
     module_exports: list[ModuleExportModel] | None = None
-    # Who added the cell and who last edited it. Carried here because this is
-    # the frame an edit produces: without it the browser keeps showing the
-    # previous author until the next full reload.
+    # Carried on the edit frame, else the browser shows the previous author until reload.
     created_by: str | None = None
     updated_by: str | None = None
 
@@ -387,9 +384,6 @@ def dag_update_payload(raw: dict[str, Any]) -> dict[str, Any]:
     return DagUpdatePayload.model_validate(raw).model_dump(mode="json")
 
 
-# The machine-readable classes an ``error`` frame can carry. Named so the
-# builder can be typed to it too: a mistyped code at an emit site should be a
-# type error, not a value the frontend silently fails to match.
 class PresenceEntryModel(WsPayload):
     """One identity on a session and the cell it is on."""
 
@@ -411,6 +405,7 @@ class PresencePayload(WsPayload):
     you: str
 
 
+# Typed so a mistyped code at an emit site is a type error, not a silent frontend miss.
 ErrorCode = Literal[
     "ENVIRONMENT_BUSY", "cell_busy", "cell_locked", "read_only", "insufficient_scope"
 ]
@@ -457,14 +452,9 @@ def error_payload(
     )
 
 
-# Which model describes which frame's payload.
-#
-# The frames absent here still send hand-built dicts (the notebook-state
-# aggregate cluster, ``inspect_result``); a client gets ``unknown`` for those
-# and has to read the emit site, which is the situation this registry exists to
-# shrink. Generated TypeScript is derived from this map, so adding a model
-# without registering it means the frontend never learns about it -- a drift
-# test asserts every payload model here is reachable.
+# Which model describes which frame's payload. Frames absent here still send
+# hand-built dicts and a client gets ``unknown`` for them. Generated TypeScript
+# derives from this map; a drift test asserts every payload model is registered.
 FRAME_PAYLOADS: dict[MessageType, type[WsPayload]] = {
     MessageType.CASCADE_PROGRESS: CascadeProgressPayload,
     MessageType.CASCADE_PROMPT: CascadePromptPayload,

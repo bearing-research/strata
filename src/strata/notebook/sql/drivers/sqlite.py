@@ -38,39 +38,28 @@ from strata.notebook.sql.adapter import (
 from strata.notebook.sql.registry import register_adapter
 
 _CAPABILITIES = AdapterCapabilities(
-    # SQLite has no per-table change counter — ``data_version`` is
-    # database-wide, so any write to any table flips the freshness
-    # token. Acceptable for the common "one DB per notebook" case;
-    # documented as a known limitation for shared-DB setups.
+    # ``data_version`` is database-wide, so any write flips the token. Fine for
+    # one DB per notebook; a known limitation for shared DBs.
     per_table_freshness=False,
     supports_snapshot=False,
-    # Pragmas don't have transaction-frozen semantics like Postgres
-    # ``pg_stat_*``; the same connection can probe and query.
+    # Pragmas aren't transaction-frozen, so one connection can probe and query.
     needs_separate_probe_conn=False,
 )
 
-# SQLite attached-database identifier — same shape as Postgres unquoted
-# identifiers. Used to splice the schema name into the qualified pragma
-# form (``"<schema>".pragma_table_info(?)``); pragma functions don't
-# accept bind parameters in the schema position, so identifier
-# validation is what keeps the splice injection-safe.
+# Pragma functions don't accept a bound schema, so identifier validation is
+# what keeps the ``"<schema>".pragma_table_info(?)`` splice injection-safe.
 _SQLITE_IDENT_RE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
 
-# ``pragma_table_info`` is the table-valued form of ``PRAGMA table_info(...)``;
-# it accepts bind parameters and projects standard columns. The default
-# query targets ``main``; the qualified form (``"<schema>".pragma_table_info(?)``)
-# is built on demand for attached-database schemas.
+# Targets ``main``; the qualified form is built on demand for attached schemas.
 _SCHEMA_QUERY_DEFAULT = """
 SELECT name, type, "notnull", dflt_value, pk
 FROM pragma_table_info(?)
 ORDER BY cid
 """
 
-# URI query parameters that don't change which objects the connection
-# sees. Stripped from ``connection_id`` canonicalization so toggling
-# read-only or asserting immutability doesn't perturb the cache key.
-# Everything else (``cache``, ``mode=memory``, ``vfs``, named memory
-# DBs, etc.) IS identity-shaping and MUST be preserved.
+# Access modes don't change which objects the connection sees, so they are
+# stripped from ``connection_id``. Everything else (``cache``,
+# ``mode=memory``, ``vfs``, named memory DBs) shapes identity.
 _NON_IDENTITY_ACCESS_MODES = frozenset({"ro", "rw", "rwc"})
 
 
@@ -154,8 +143,7 @@ def _force_mode_ro_in_uri(uri: str) -> str:
         return f"{uri}?mode=ro"
     pairs = _split_query(query)
     if any(k == "mode" and v == "memory" for k, v in pairs):
-        # Can't combine mode=memory with mode=ro; PRAGMA query_only
-        # is the read-only enforcement for these URIs.
+        # mode=memory can't combine with mode=ro; PRAGMA query_only enforces read-only.
         return uri
     other = [(k, v) for k, v in pairs if k != "mode"]
     other.append(("mode", "ro"))
@@ -199,8 +187,7 @@ def _file_signals(path: str | None) -> list[bytes]:
     except OSError:
         return signals
     if len(header) >= 28:
-        # The header's change counter, bumped on every commit that reaches the
-        # main file — the signal a rollback-journal database changes by.
+        # Bumped on every commit reaching the main file: how a rollback-journal DB signals change.
         signals.append(b"change-counter:" + header[24:28])
     return signals
 
@@ -217,19 +204,13 @@ class SqliteAdapter:
         *,
         connect_fn: Callable[[str], Any] | None = None,
     ) -> None:
-        # Test seam: pass a fake connect callable to bypass the real
-        # ADBC import in unit tests.
+        # Test seam: a fake connect callable bypasses the real ADBC import.
         self._connect_fn = connect_fn
 
     # --- identity ---------------------------------------------------------
 
     def canonicalize_connection_id(self, spec: Any, *, read_only: bool = True) -> str:
-        # ``read_only`` is part of the Protocol so adapters that
-        # route reads vs writes through different principals
-        # (Snowflake's ``write_role``, BigQuery's
-        # ``write_credentials_path``) can include only the
-        # relevant fields. SQLite has no read/write principal
-        # split, so the flag is a no-op here.
+        # SQLite has no read/write principal split.
         del read_only
         """Hash the absolute DB path (or URI / ``:memory:`` literal).
 
@@ -282,7 +263,6 @@ class SqliteAdapter:
         else:
             path_part, query = rest, ""
 
-        # Drop leading "//" authority form.
         if path_part.startswith("//"):
             path_part = path_part[2:]
             if "/" in path_part:
@@ -341,9 +321,7 @@ class SqliteAdapter:
             raise RuntimeError("SQLite connection requires either ``path`` or ``uri`` to be set")
 
         if path == ":memory:":
-            # ``mode=ro`` doesn't apply to in-memory DBs; the
-            # ``PRAGMA query_only = ON`` in ``open()`` is the
-            # enforcement.
+            # ``mode=ro`` doesn't apply in memory; ``PRAGMA query_only`` in ``open()`` enforces it.
             return ":memory:"
 
         abspath = os.path.abspath(path)
@@ -397,9 +375,7 @@ class SqliteAdapter:
             schema_row = cursor.fetchone()
 
         if data_row is None or schema_row is None:
-            # Pragmas always return a row on a healthy SQLite handle;
-            # missing here means the connection is broken. Surface as
-            # a session-only token rather than crashing the executor.
+            # Missing means a broken connection: return a session-only token, don't crash.
             return FreshnessToken(value=b"sqlite-pragma-missing", is_session_only=True)
 
         h.update(b"data_version:")
@@ -478,9 +454,7 @@ class SqliteAdapter:
 
             for name in names:
                 if not _SQLITE_IDENT_RE.fullmatch(name):
-                    # Skip pathological names rather than splice
-                    # them into a pragma — same defense as the
-                    # schema-fingerprint probe.
+                    # Skip unsafe names rather than splice them, as in the schema-fingerprint probe.
                     continue
                 cursor.execute(f'SELECT * FROM pragma_table_info("{name}")')
                 cols: list[ColumnInfo] = []
@@ -509,5 +483,4 @@ def register() -> None:
     register_adapter(_ADAPTER)
 
 
-# Auto-register on first import.
 register()

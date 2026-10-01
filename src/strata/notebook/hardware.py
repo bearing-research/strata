@@ -48,8 +48,7 @@ def probe_hardware() -> dict[str, Any]:
 
 
 def _cpus() -> int | None:
-    # The CPUs this process may run on, which in a container is the limit
-    # rather than the host's count.
+    # Affinity reflects a container's CPU limit; the host count does not.
     if hasattr(os, "sched_getaffinity"):
         return len(os.sched_getaffinity(0))
     return os.cpu_count()

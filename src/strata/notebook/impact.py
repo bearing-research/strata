@@ -70,7 +70,6 @@ class ImpactPreview:
 
         If False, the UI should skip the preview and just run the cell.
         """
-        # Filter out the target cell itself from upstream
         upstream_non_target = [s for s in self.upstream if s.cell_id != self.target_cell_id]
         return len(upstream_non_target) > 0 or len(self.downstream) > 0
 
@@ -99,13 +98,10 @@ class ImpactAnalyzer:
         Returns:
             ImpactPreview with upstream and downstream effects
         """
-        # Upstream: reuse cascade planner
         upstream_steps = self._compute_upstream(cell_id)
 
-        # Downstream: forward walk from target cell
         downstream = self._compute_downstream(cell_id)
 
-        # Estimate total time
         estimated_ms = sum(s.estimated_ms for s in upstream_steps if not s.skip)
 
         return ImpactPreview(
@@ -159,7 +155,7 @@ class ImpactAnalyzer:
             if cell is None:
                 continue
 
-            # Only report cells that are currently ready — they'll become stale
+            # Only ready cells can become stale.
             if cell.status == CellStatus.READY:
                 cell_name = cell.defines[0] if cell.defines else cell.id
                 impacts.append(
@@ -170,7 +166,6 @@ class ImpactAnalyzer:
                     )
                 )
 
-            # Continue walking downstream
             for downstream_id in self.session.dag.cell_downstream.get(current, []):
                 if downstream_id not in visited:
                     queue.append(downstream_id)

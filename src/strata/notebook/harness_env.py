@@ -24,9 +24,8 @@ from __future__ import annotations
 
 import os
 
-# Without these a subprocess does not start, or starts and cannot find its
-# interpreter, its temp directory or its locale. They are the floor, not a
-# judgement about what a cell ought to have.
+# Without these a subprocess cannot start or cannot find its interpreter,
+# temp directory or locale. They are the floor, not a judgement about cells.
 _ESSENTIAL_NAMES = frozenset(
     {
         "PATH",
@@ -56,9 +55,7 @@ _ESSENTIAL_NAMES = frozenset(
     }
 )
 
-# ``uv run`` resolves the notebook's interpreter, and Python's own start-up
-# reads PYTHON*. Both belong to running the cell rather than to the server's
-# secrets.
+# ``uv run`` resolves the notebook's interpreter, and Python start-up reads PYTHON*.
 _ESSENTIAL_PREFIXES = ("UV_", "LC_", "PYTHON", "VIRTUAL_ENV", "CONDA_", "R_", "RSTUDIO_")
 
 _SECRET_PREFIX = "STRATA_"
@@ -69,11 +66,8 @@ def _allowed(name: str, allowlist: list[str]) -> bool:
         return True
     for entry in allowlist:
         if entry.endswith("*"):
-            # A prefix rule is a convenience for a family of related names. It
-            # deliberately cannot reach STRATA_*: the caller who wants one of
-            # those has to name it, because a rule broad enough to catch a
-            # credential by accident is the failure this setting exists to
-            # prevent.
+            # Prefix rules deliberately cannot reach STRATA_*: a rule broad enough to
+            # catch a credential by accident is what this setting exists to prevent.
             if name.startswith(entry[:-1]) and not name.startswith(_SECRET_PREFIX):
                 return True
         elif name == entry:

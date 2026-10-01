@@ -103,13 +103,10 @@ def parse_notebook(directory: Path) -> NotebookState:
     if not notebook_toml_path.exists():
         raise FileNotFoundError(f"notebook.toml not found at {notebook_toml_path}")
 
-    # Read notebook.toml
     with open(notebook_toml_path, "rb") as f:
         toml_data = tomllib.load(f)
 
-    # Move runtime fields (display outputs, cache block) out of
-    # notebook.toml on first open of a legacy notebook. The helper is
-    # additive and a no-op once the migration has happened.
+    # Move legacy runtime fields out of notebook.toml; a no-op once migrated.
     from strata.notebook.runtime_state import (
         load_runtime_state,
         migrate_from_legacy_notebook_toml,
@@ -120,11 +117,7 @@ def parse_notebook(directory: Path) -> NotebookState:
     has_legacy_environment = isinstance(toml_data.get("environment"), dict) and bool(
         toml_data.get("environment")
     )
-    # Drop an ``[env]`` block that has no meaningful content (empty, or
-    # only blanked sensitive-key placeholders). This cleans up pollution
-    # from earlier runs where a user typed an API key in the Runtime
-    # panel and the sensitive-key blanking left an empty slot in the
-    # committed notebook.toml.
+    # Drop an ``[env]`` block that is empty or holds only blanked secrets.
     legacy_env = toml_data.get("env")
     has_empty_env_block = isinstance(legacy_env, dict) and not _env_has_meaningful_content(
         legacy_env
@@ -137,10 +130,8 @@ def parse_notebook(directory: Path) -> NotebookState:
         if has_empty_env_block:
             toml_data.pop("env", None)
         _rewrite_notebook_toml(notebook_toml_path, toml_data)
-    # Even when nothing was migrated (runtime.json already exists), drop
-    # the legacy sections from the in-memory parse result so downstream
-    # code does not see them — the authoritative values live in
-    # runtime.json from here on.
+    # Drop legacy sections even when nothing migrated: runtime.json is
+    # authoritative for them.
     toml_data.pop("artifacts", None)
     toml_data.pop("cache", None)
     toml_data.pop("environment", None)
@@ -148,8 +139,6 @@ def parse_notebook(directory: Path) -> NotebookState:
     runtime_state = load_runtime_state(directory)
     runtime_cells = runtime_state.cells
 
-    # Parse into NotebookToml
-    # Get created_at and updated_at, defaulting to now if not present
     created_at = toml_data.get("created_at")
     if created_at is None:
         created_at = datetime.now(tz=UTC)
@@ -184,11 +173,9 @@ def parse_notebook(directory: Path) -> NotebookState:
         cache=toml_data.get("cache", {}),
     )
 
-    # Load cell sources
     cells_dir = directory / "cells"
     cell_states: list[CellState] = []
 
-    # Build notebook-level mount defaults (keyed by name for cell overrides)
     notebook_mounts = {m.name: m for m in notebook_toml.mounts}
 
     for cell_meta in notebook_toml.cells:
@@ -199,11 +186,7 @@ def parse_notebook(directory: Path) -> NotebookState:
             with open(cell_file, encoding="utf-8") as f:
                 source = f.read()
 
-        # Unit-test source is a committed sibling ``cells/{id}.test.py``
-        # (absent for cells with no tests). Resolve under ``cells/`` and
-        # confirm containment before reading: ids are backend-generated, but a
-        # hand-edited notebook.toml id with path separators must not let the
-        # read escape the notebook tree.
+        # A hand-edited id with path separators must not escape ``cells/``.
         test_path = os.path.realpath(os.path.join(cells_dir, f"{cell_meta.id}.test.py"))
         cells_root = os.path.realpath(cells_dir)
         test_source = ""
@@ -211,7 +194,7 @@ def parse_notebook(directory: Path) -> NotebookState:
             with open(test_path, encoding="utf-8") as f:
                 test_source = f.read()
 
-        # Resolve mounts: notebook-level defaults, overridden by cell-level
+        # Cell-level mounts override notebook-level defaults
         resolved_mounts = dict(notebook_mounts)
         for m in cell_meta.mounts:
             resolved_mounts[m.name] = m
@@ -235,16 +218,12 @@ def parse_notebook(directory: Path) -> NotebookState:
             else None
         )
 
-        # Restore console output from .strata/console/
         from strata.notebook.writer import load_cell_console_output
 
         console_stdout, console_stderr = load_cell_console_output(directory, cell_meta.id)
 
-        # Persisted execution provenance from ``.strata/runtime.json``.
-        # compute_staleness() compares these against freshly-computed
-        # hashes, so hydrating them at open lets a reopened notebook
-        # correctly classify cells as READY / STALE without a
-        # re-execution.
+        # Persisted provenance lets compute_staleness() classify a reopened
+        # notebook's cells as READY / STALE without re-executing.
         cell_states.append(
             CellState(
                 id=cell_meta.id,
@@ -277,7 +256,6 @@ def parse_notebook(directory: Path) -> NotebookState:
             )
         )
 
-    # Sort by order
     cell_states.sort(key=lambda c: c.order)
 
     return NotebookState(

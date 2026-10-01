@@ -133,7 +133,7 @@ def _evaluate(expr, namespace):
         try:
             result = eval(expr, namespace)  # noqa: S307 — user-driven inspect REPL
         except SyntaxError:
-            # Not an expression — run it as a statement.
+            # Not an expression: run it as a statement.
             exec(expr, namespace)  # noqa: S102 — user-driven inspect REPL
             sys.stdout, sys.stderr = old_stdout, old_stderr
             stdout_text = capture_out.getvalue()
@@ -164,7 +164,6 @@ def main():
 
     namespace = _load_namespace(manifest)
 
-    # Signal ready.
     _emit({"ok": True, "result": "ready", "type": "str"})
 
     for line in sys.stdin:

@@ -48,8 +48,8 @@ def _dim(text: str) -> str:
     return _color("90", text)
 
 
-# Managed block markers so a re-run rewrites its guidance in place instead of
-# appending a duplicate, and never clobbers a user's own CLAUDE.md content.
+# Managed block markers: a re-run rewrites its block in place and never touches the
+# user's own CLAUDE.md content.
 _BLOCK_START = "<!-- strata:agent:start -->"
 _BLOCK_END = "<!-- strata:agent:end -->"
 
@@ -292,11 +292,8 @@ def _write_agent_config(notebook_dir: Path, server_url: str, session_id: str) ->
     surgically: only the region between our managed markers is (re)written, so a
     user's own instructions in the same file survive.
     """
-    # Trailing slash is required: the server mounts the MCP app at ``/mcp`` and
-    # Starlette 307-redirects ``/mcp`` → ``/mcp/``. MCP HTTP clients (Claude
-    # Code) drop the POST body across that redirect, so the handshake fails and
-    # the notebook tools never register — the agent then can't drive the
-    # notebook natively. Point straight at ``/mcp/`` and there's no redirect.
+    # Trailing slash required: Starlette 307-redirects ``/mcp`` to ``/mcp/`` and MCP HTTP
+    # clients (Claude Code) drop the POST body across the redirect, so the handshake fails.
     mcp_url = f"{server_url}/mcp/"
     mcp_config = {"mcpServers": {"strata-notebook": {"type": "http", "url": mcp_url}}}
     (notebook_dir / ".mcp.json").write_text(

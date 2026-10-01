@@ -41,9 +41,7 @@ if TYPE_CHECKING:
     from strata.notebook.session import NotebookSession
 
 
-# ---------------------------------------------------------------------------
-# Curated view models — the agent-facing contract.
-# ---------------------------------------------------------------------------
+# --- View models: the agent-facing contract ---
 
 
 class OutputView(BaseModel):
@@ -53,9 +51,8 @@ class OutputView(BaseModel):
     preview: JsonValue = None
     rows: int | None = None
     columns: list[str] | None = None
-    # An image or a binary blob has no useful ``preview``, so metadata alone
-    # said only that *something* was produced. These two say what it is and
-    # how big, and name the thing ``save_output`` writes to a file.
+    # For images and blobs, which have no useful ``preview``; ``save_output``
+    # writes the artifact to a file.
     artifact_uri: str | None = None
     bytes: int = 0
 
@@ -100,8 +97,7 @@ class WidgetControlView(BaseModel):
     kind: str
     params: dict[str, Any] = Field(default_factory=dict)
     default: Any = None
-    # What the control is set to now: the selection when there is one, and the
-    # declared default when there is not, matching what the cell computes with.
+    # The selection, else the declared default: what the cell computes with.
     value: Any = None
 
 
@@ -119,9 +115,7 @@ class CellView(BaseModel):
     status: str
     source: str
     staleness_reasons: list[str]
-    # What the cell produces and what it needs. The MCP `get_notebook`
-    # description has always promised these; the projection did not carry them,
-    # so an agent asking what a cell defines had to go back out to `dag`.
+    # Promised by the MCP `get_notebook` description.
     defines: list[str] = Field(default_factory=list)
     references: list[str] = Field(default_factory=list)
     upstream_ids: list[str]
@@ -129,16 +123,13 @@ class CellView(BaseModel):
     outputs: list[OutputView]
     console_stdout: str
     console_stderr: str
-    # What the last run said went wrong, when the cell's source is still the
-    # one that produced it. ``None`` means nothing has failed here.
+    # Last failure, only while the source is unchanged since.
     error: str | None = None
     test: CellTestView | None = None
-    # Who wrote it. Empty for every cell added before authorship was recorded,
-    # and on a personal server where the client declared nothing.
+    # Empty for older cells and on a personal server with no declared author.
     created_by: str = ""
     updated_by: str = ""
-    # A widget cell's controls with their current selections. Empty for every
-    # other kind of cell.
+    # Widget cells only.
     controls: list[WidgetControlView] = Field(default_factory=list)
 
 
@@ -158,19 +149,13 @@ class DagView(BaseModel):
     leaves: list[str]
     roots: list[str]
     variable_producer: dict[str, str]
-    # Why the graph could not be computed, or None when it is trustworthy.
-    #
-    # Without this a failed build was projected as an EMPTY graph, which is
-    # byte-identical to a notebook that genuinely has no dependencies. An
-    # agent asking "is this variable defined?" got a confident no for a
-    # variable that is defined, and recreated work that already existed.
+    # Why the graph could not be built, or None. Otherwise a failed build
+    # looks identical to a notebook with no dependencies.
     error: str | None = None
 
 
-# Per-stream cap on the console text handed back to an agent. A cell's stdout
-# is captured whole and travels uncapped all the way to here, so one
-# print-heavy cell would otherwise return megabytes into an agent's context.
-# Matches the cap the CLI applies on its own (separate, executor-level) path.
+# Per-stream cap: stdout arrives uncapped, and one print-heavy cell would flood
+# an agent's context. Matches the CLI's own cap.
 MAX_AGENT_CONSOLE_CHARS = 10_000
 
 
@@ -193,8 +178,7 @@ class RunResult(BaseModel):
     stdout: str = ""
     stderr: str = ""
 
-    # Capped here rather than at each caller: this is the one type every
-    # agent-facing run result is projected into, local and remote alike.
+    # Every agent-facing run result, local or remote, passes through here.
     @field_validator("stdout", "stderr")
     @classmethod
     def _truncate_console(cls, value: str) -> str:
@@ -221,9 +205,7 @@ class CellStatusRow(BaseModel):
     language: str
     status: str
     staleness_reasons: list[str]
-    # "Look before you compute" is the workflow the agent skill pushes, and it
-    # starts here: a status listing that names each cell's variables answers
-    # "do I already have this?" without a second call per cell.
+    # Answers "do I already have this?" without a call per cell.
     defines: list[str] = Field(default_factory=list)
 
 
@@ -511,15 +493,13 @@ class LocalNotebookOps:
     """
 
     def __init__(self, notebook_dir: Path, author: str | None = None) -> None:
-        # Lazy heavy imports so ``--help`` / path errors stay cheap.
+        # Lazy imports keep ``--help`` and path errors cheap.
         from strata.notebook.authorship import resolve_author
         from strata.notebook.parser import parse_notebook
         from strata.notebook.session import NotebookSession
 
         self.notebook_dir = notebook_dir
-        # Who edits made through this handle are credited to. Resolved once:
-        # one handle is one caller, and a caller that could change identity
-        # between two edits is not a caller anyone can attribute.
+        # Resolved once: one handle is one caller.
         self.author = resolve_author(author)
         state = parse_notebook(notebook_dir)
         self._session = NotebookSession(state, notebook_dir)
@@ -550,9 +530,7 @@ class LocalNotebookOps:
         ops.author = resolve_author(author)
         ops._session = session
         ops._executor = None
-        # The server computed it when it opened this session and keeps it
-        # current on every edit; this handle is a view onto that, not a
-        # second opinion.
+        # The server keeps staleness current; this handle only views it.
         ops._staleness_computed = True
         return ops
 
@@ -607,7 +585,7 @@ class LocalNotebookOps:
             cells=[_status_row(cell) for cell in state.cells],
         )
 
-    # -- execution (P1) ------------------------------------------------------
+    # -- execution -----------------------------------------------------------
 
     async def sync_environment(self) -> None:
         """Sync the notebook venv (``uv sync``) before executing.
@@ -717,7 +695,7 @@ class LocalNotebookOps:
             self._executor = CellExecutor(self._session)
         return self._executor
 
-    # -- authoring + env (P2) ------------------------------------------------
+    # --- authoring + env ---
 
     _LANGUAGES = ("python", "markdown", "sql", "r", "prompt", "widget")
 
@@ -781,10 +759,8 @@ class LocalNotebookOps:
 
         from strata.notebook.writer import reorder_cells
 
-        # Read the CURRENT order off disk rather than the snapshot taken when
-        # this ops object was constructed. A live server session, the TUI or a
-        # second CLI process may have added or removed cells since, and moving
-        # one cell should not be deciding the fate of those.
+        # Read the current order from disk: a server, the TUI or another CLI
+        # may have added or removed cells since this object was built.
         with open(self.notebook_dir / "notebook.toml", "rb") as handle:
             on_disk = tomllib.load(handle)
         order = [
@@ -920,7 +896,7 @@ class LocalNotebookOps:
                 raise NotebookOpsError(
                     f"no worker named {normalized!r} (add it first, or use 'local')"
                 )
-        # Store None for the implicit-local default so notebook.toml stays clean.
+        # None for the implicit local default keeps notebook.toml clean.
         update_notebook_worker(self.notebook_dir, None if normalized == "local" else normalized)
         self._reload()
         return self.list_workers()
@@ -1000,14 +976,9 @@ class RemoteNotebookOps:
 
         self._base_url = base_url.rstrip("/")
         self._session_id = session_id
-        # Sent on every write. Not resolved here the way LocalNotebookOps does
-        # it: the server is the one that decides, and it ignores this entirely
-        # when it can authenticate the caller.
-        # Trimmed and bounded here, as LocalNotebookOps does through
-        # resolve_author. The routes cap the field, so an over-long name would
-        # otherwise fail the write with a 422 the local path never produces —
-        # and in service mode it would be refused before the server could
-        # ignore it.
+        # The server decides authorship (ignoring this when it can authenticate
+        # the caller). Bounded here because the routes cap the field: an
+        # over-long name would 422 where the local path succeeds.
         self._author = clean_author(author)
 
         self._owns_client = client is None
@@ -1118,10 +1089,8 @@ class RemoteNotebookOps:
             cell_id=cell_id,
             index=resolved,
             path=str(dest),
-            # The route serves the stored type, but Starlette appends
-            # `; charset=utf-8` to any text/* type on the way out. Without
-            # dropping it, a markdown output would read differently remotely
-            # than locally, and the two backends are meant to be one view.
+            # Starlette appends `; charset=utf-8` to text/* types; drop it so
+            # remote matches local.
             content_type=resp.headers.get("content-type", "application/octet-stream")
             .split(";", 1)[0]
             .strip(),
@@ -1253,8 +1222,7 @@ class RemoteNotebookOps:
         if resp.status_code == 409:
             raise NotebookOpsError(f"environment busy: {_error_detail(resp)}")
         if resp.status_code == 400:
-            # A failed `uv` resolve is a structured outcome, not an ops error —
-            # parity with the local backend's DependencyResult(success=False).
+            # A failed resolve is an outcome, not an error, as in the local backend.
             return DependencyResult(
                 package=package,
                 action=action,
@@ -1327,13 +1295,11 @@ class RemoteNotebookOps:
             self._client.close()
 
 
-# ---------------------------------------------------------------------------
-# Projections: domain models → view models.
-# ---------------------------------------------------------------------------
+# --- Projections: domain models to view models ---
 
 
-# Both backends map from the same wire dict — ``CellState.serialize()`` locally,
-# the server's JSON remotely — so the two paths produce identical view models.
+# Both backends project the same wire dict (``CellState.serialize()`` locally,
+# the server's JSON remotely), so their view models match.
 
 
 def display_output_at(cell: CellState, index: int) -> tuple[CellOutput, int]:
@@ -1446,11 +1412,7 @@ def _control_views_from_wire(widget: dict[str, Any] | None) -> list[WidgetContro
             kind=descriptor.get("kind") or "",
             params=dict(descriptor.get("params") or {}),
             default=descriptor.get("default"),
-            # The *effective* value, which is what the cell computes with: the
-            # widget executor falls back to the declared default for a control
-            # nobody has touched. Reporting ``None`` there described the
-            # storage rather than the notebook, and an agent looking for the
-            # input a result came from read it as "unset".
+            # The effective value: untouched controls use the declared default.
             value=values.get(descriptor["name"], descriptor.get("default")),
         )
         for descriptor in widget.get("descriptors") or []

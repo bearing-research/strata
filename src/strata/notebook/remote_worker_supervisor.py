@@ -38,9 +38,8 @@ if TYPE_CHECKING:
 
     from strata.notebook.ssh_worker import SshRunner
 
-# The worker's default bind port on the box. A re-establish adopts a live worker
-# already listening here (see RemoteWorker.launch), so the fixed default is safe;
-# callers that run several workers on one box pass an explicit remote_port.
+# Fixed is safe: a re-establish adopts a worker already listening here. Callers
+# running several workers on one box pass an explicit remote_port.
 DEFAULT_REMOTE_PORT = 9000
 _HEALTH_POLL_INTERVAL = 0.25
 
@@ -75,7 +74,7 @@ class TunnelRecord:
     remote_port: int
     remote_pid: int
     healthy: bool
-    executor_url: str  # http://127.0.0.1:{local_port}/v1/execute — the [[workers]] url
+    executor_url: str  # http://127.0.0.1:{local_port}/v1/execute (the [[workers]] url)
 
 
 class _PopenTunnelHandle:
@@ -103,7 +102,7 @@ class SubprocessTunnelLauncher:
 
         argv = [
             "ssh",
-            "-N",  # no remote command — just the forward
+            "-N",  # forward only, no remote command
             "-o",
             "ExitOnForwardFailure=yes",
             *_SSH_HARDENING,
@@ -163,14 +162,11 @@ class RemoteWorkerSupervisor:
     port_picker: Callable[[], int] = _pick_free_port
     runner_factory: Callable[[SshTarget], SshRunner] | None = None
     _tunnels: dict[str, _ActiveTunnel] = field(default_factory=dict, init=False)
-    # The supervisor is a process-wide singleton whose methods run on
-    # asyncio.to_thread workers — genuinely concurrent OS threads. The
-    # lock guards every ``_tunnels`` access with SHORT critical sections
-    # (never held across ssh/provisioning), so a server shutdown is
-    # never blocked behind a minutes-long remote install. ``_pending``
-    # reserves a name for the duration of its (slow) establish so two
-    # concurrent establishes can't both pass the existence check and
-    # double-launch, orphaning the first tunnel.
+    # Methods run on to_thread workers (real OS threads). The lock guards
+    # ``_tunnels`` in short sections, never across ssh/provisioning, so
+    # shutdown never waits on a slow remote install. ``_pending`` reserves a
+    # name during its establish so two concurrent establishes can't both
+    # pass the existence check and orphan a tunnel.
     _lock: threading.Lock = field(default_factory=threading.Lock, init=False)
     _pending: set[str] = field(default_factory=set, init=False)
 
@@ -276,8 +272,8 @@ class RemoteWorkerSupervisor:
                 local_port=lport,
                 remote_port=running.port,
             )
-        # Publish the token so the executor can authenticate dispatch to this
-        # worker by name, without ever writing the secret to notebook.toml.
+        # Lets the executor authenticate by worker name without writing the
+        # secret to notebook.toml.
         set_runtime_worker_token(name, token)
         return record
 
@@ -321,8 +317,8 @@ class RemoteWorkerSupervisor:
             )
             with self._lock:
                 if self._tunnels.get(name) is not active:
-                    # Torn down (or replaced) while we respawned — don't
-                    # orphan the fresh forward or resurrect the entry.
+                    # Torn down or replaced while respawning: don't orphan
+                    # the fresh forward or resurrect the entry.
                     new_handle.terminate()
                     continue
                 active.handle = new_handle

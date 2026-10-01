@@ -76,8 +76,7 @@ def _get_cell(session_manager: SessionManager, session_id: str, cell_id: str) ->
     return _resolve_ops(session_manager, session_id).get_cell(cell_id).model_dump(mode="json")
 
 
-# Extension by content type, so the file an agent is handed opens in whatever
-# it opens with. Anything unrecognised keeps ``.bin`` rather than pretending.
+# So the handed-over file opens in the right tool. Unknown types keep ``.bin``.
 _OUTPUT_EXTENSIONS = {
     "image/png": ".png",
     "text/markdown": ".md",
@@ -133,9 +132,8 @@ def _get_variable(session_manager: SessionManager, session_id: str, name: str) -
     if producer is None:
         return {"variable": name, "defined": False, "available": sorted(producers)}
     if producer.startswith(("sweep:", "fanout:")):
-        # A variant/sweep group has no single producing cell. Name the
-        # instances behind it and, for each, the spelling `lineage` takes:
-        # without them an agent knows only that the variable is swept.
+        # No single producing cell: list each instance and the name `lineage`
+        # takes for it.
         from strata.notebook.dag import SweepProducer
 
         session = _live_session(session_manager, session_id)
@@ -146,9 +144,8 @@ def _get_variable(session_manager: SessionManager, session_id: str, name: str) -
                 {
                     "variant": variant_name,
                     "cell_id": cell_id,
-                    # A fan-out's instances share one cell and differ by an
-                    # ``@variant=`` subkey; a sweep group's members are cells
-                    # of their own, each storing the plain name.
+                    # Fan-out instances share a cell and differ by ``@variant=``;
+                    # sweep members are separate cells storing the plain name.
                     "lineage_variable": (
                         f"{name}@variant={variant_name}" if group.fanout_cell is not None else name
                     ),
@@ -156,8 +153,7 @@ def _get_variable(session_manager: SessionManager, session_id: str, name: str) -
                 for variant_name, cell_id in group.variants
             ]
         return {"variable": name, "defined": True, "defined_in": producer, "variants": variants}
-    # A plain cell-id producer that get_cell can't fetch is a real error — let it
-    # propagate rather than masking it as "defined".
+    # Let a get_cell failure propagate rather than report "defined".
     cell = ops.get_cell(producer).model_dump(mode="json")
     return {"variable": name, "defined": True, "defined_in": cell["id"], "cell": cell}
 
@@ -205,15 +201,12 @@ async def _set_variant(
                 f"group {group!r} has no variant {active!r}. Variants: {', '.join(names)}"
             )
 
-    # Mode first: `active` is ignored in sweep mode anyway, and this is the
-    # order the route applies them in.
+    # Mode first, matching the route (`active` is ignored in sweep mode).
     if mode is not None:
         session.set_variant_mode(group, mode)
     if active is not None:
         session.set_variant_active(group, active)
-    # Every other notebook-mutating tool reloads and broadcasts; without it an
-    # attached viewer keeps the old tab strip and pre-switch staleness badges
-    # until some unrelated mutation forces a resync.
+    # Without the broadcast an attached viewer keeps stale tabs and badges.
     await _sync_and_broadcast(session_id, session)
     await _agent_note(session_id, "mcp", f"variant {group} → {active or mode}")
     return {
@@ -262,8 +255,7 @@ async def _run_cell(
     if block_reason:
         raise ValueError(block_reason)
 
-    # Same reservation the WS handlers hold — an agent-driven run can't
-    # race a browser Run click on the same session.
+    # Same reservation as the WS handlers, so an agent run can't race a browser.
     try:
         result = await execute_cell_exclusive(
             session,
@@ -312,8 +304,6 @@ async def _set_widget_value(
     descriptors = analyze_widget_cell(cell.source).descriptors
     coerced = coerce_widget_values(descriptors, values)
     if not coerced:
-        # Naming the controls is the whole of the help here: the caller either
-        # misspelled one or sent a value the control cannot take.
         declared = ", ".join(sorted(d.name for d in descriptors)) or "none"
         raise NotebookOpsError(
             f"no value in {sorted(values)} matches a control of cell {cell_id!r} "
@@ -330,10 +320,8 @@ async def _set_widget_value(
             cell_id,
             session_id,
             mode="force",
-            # The same path the WebSocket handler runs, so this is the whole of
-            # what moving the slider does: the values are written under the
-            # reservation, and a `# @live` widget chains the same cost-gated
-            # cascade rather than leaving the downstream stale.
+            # Same path as the WS handler: values written under the reservation,
+            # and a `# @live` widget chains the same cost-gated cascade.
             operation=lambda execution_state: apply_widget_values(
                 session, cell_id, coerced, execution_state, session_id
             ),
@@ -343,11 +331,8 @@ async def _set_widget_value(
     if result is None:
         raise NotebookOpsError(f"widget cell {cell_id!r} could not be re-materialized")
 
-    # No reload here, unlike the tools that edit committed config: this is a
-    # run, and the shared path already broadcast the widget's status, its
-    # output and the downstream staleness, exactly as ``run_cell`` does. A
-    # reload re-derives that state from disk and left the cells the live
-    # cascade had just recomputed labelled stale.
+    # No reload: the shared path already broadcast everything, and a reload
+    # from disk would label the cascade's fresh cells stale.
     await _agent_note(
         session_id,
         "mcp",
@@ -400,9 +385,7 @@ async def _agent_note(session_id: str, source: str, text: str) -> None:
 
     await _broadcast_message(
         session_id,
-        # Its own sequence, like every other outbound frame (a hard-coded 0
-        # reads as a gap to a client watching for one), and the envelope's
-        # timestamp, which this frame alone went without.
+        # A real sequence: a hard-coded 0 reads as a gap to a client.
         _make_message(
             MessageType.AGENT_NOTE,
             next_notebook_sequence(session_id),
@@ -467,9 +450,7 @@ async def _run_snippet(
     """
     view = await _add_cell(session_manager, session_id, source, after, language, author)
     run = await _run_cell(session_manager, session_id, view["id"], "normal")
-    # Re-fetch the post-run cell so the returned view carries its rendered outputs
-    # (a trailing bare expression's value), not just stdout — the view from
-    # _add_cell is pre-run and has none.
+    # The _add_cell view is pre-run; re-fetch to include rendered outputs.
     view = _get_cell(session_manager, session_id, view["id"])
     view["run"] = run
     return view
@@ -799,9 +780,8 @@ def _publish(
     published_id, published_version = artifact.id, artifact.version
     copied = 0
     if served is not None and served.db_path != store.db_path:
-        # A notebook writes to its own .strata/artifacts; the link resolves
-        # from whatever store the server serves. Publishing without the copy
-        # mints a token into a store the page route never reads.
+        # The link resolves from the served store, not the notebook's own;
+        # without the copy the token lands where the page route never reads.
         written, landed = copy_chain(store, served, artifact, 10)
         copied = len(written)
         published_id, _, landed_version = landed.partition("@v=")
@@ -809,10 +789,8 @@ def _publish(
     else:
         served = store
 
-    # Who published it: the REST route and the CLI both stamp the caller, and
-    # without it the audit row names nobody. The tenant is the artifact's own —
-    # what the copy landed as — since the store refuses a publication under a
-    # tenant the artifact does not carry.
+    # Stamp the caller for the audit row, as REST and CLI do. The tenant is
+    # the artifact's own: the store refuses any other.
     caller = get_principal()
     publication = served.publish_artifact(
         published_id,
@@ -862,14 +840,13 @@ def _caller(context: Any) -> Principal | None:
     try:
         request = context.request_context.request
     except ValueError:
-        # mcp 2 raises this for a context outside a request (a tool called
-        # in-process), which has no HTTP caller to read.
+        # mcp 2 raises this outside a request (a tool called in-process).
         return None
     if request is None:
         return None
     headers = dict(request.headers)
-    # The proxy token again, not only the middleware's check: a mount served
-    # some other way would otherwise take the identity headers on trust.
+    # Re-check the proxy token: a mount served another way would otherwise
+    # trust the identity headers.
     if config.auth_mode != "api_key" and not verify_proxy_token(
         request.headers.get(config.proxy_token_header), config.proxy_token
     ):
@@ -895,8 +872,7 @@ def _mcp_import_failure(missing: str | None) -> str:
     try:
         installed = version("mcp")
     except PackageNotFoundError:
-        # Importable without distribution metadata (a bare source tree on
-        # sys.path): no version to judge, so name the missing module.
+        # A bare source tree on sys.path has no distribution metadata.
         installed = "(version unknown)"
     else:
         if Version(installed).major < 2:
@@ -926,9 +902,7 @@ def build_mcp_app(session_manager: SessionManager) -> Starlette | None:
         from mcp.server.mcpserver import MCPServer
     except ModuleNotFoundError as exc:
         if exc.name != "mcp":
-            # mcp is installed, but MCPServer did not import. Another tool in
-            # the environment may need mcp as it is, so say why the endpoint
-            # is off rather than refusing to start.
+            # Another tool may need this mcp version: warn, don't refuse to start.
             logger.warning(_mcp_import_failure(exc.name))
         return None
 
@@ -1339,10 +1313,8 @@ def build_mcp_app(session_manager: SessionManager) -> Starlette | None:
         """
         return _publish(session_manager, session_id, cell_id, variable, title)
 
-    # streamable_http_path="/" so mounting the app at "/mcp" yields the endpoint
-    # at exactly "/mcp" (the default "/mcp" would nest it at "/mcp/mcp").
+    # The default path would nest the endpoint at "/mcp/mcp".
     app = mcp.streamable_http_app(streamable_http_path="/")
-    # So the tool list can be read without an MCP client, e.g. to hold it to
-    # the scope table.
+    # Lets tests read the tool list without an MCP client.
     app.state.mcp_server = mcp
     return app

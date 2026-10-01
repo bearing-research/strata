@@ -45,24 +45,21 @@ from strata.notebook.writer import (
 
 _SUPPRESSED_COMMENT = "# strata: trailing ';' from Jupyter preserved as display-suppression"
 
-# A trailing ';' may be followed by an inline comment ("df;  # don't print")
-# or simply trailing whitespace. Both forms are common in real notebooks.
+# A trailing ';' may be followed by an inline comment or whitespace.
 _SUPPRESSION_TAIL_RE = re.compile(r";[ \t]*(?:#[^\n]*)?\s*\Z")
 
 _LINE_MAGIC_RE = re.compile(r"^(\s*)%([a-zA-Z_]\w*)([^\n]*)$")
 _CELL_MAGIC_RE = re.compile(r"\A[ \t]*%%([a-zA-Z_]\w*)([^\n]*)\n?")
 _SHELL_RE = re.compile(r"^(\s*)!(.*)$")
-# Assignment-form shell escape: ``files = !ls /data``. IPython supports
-# this and binds the lhs to a list of stdout lines. Without explicit
-# handling the line passes through and breaks Python's parser.
+# ``files = !ls /data``: IPython binds the lhs to stdout lines. Unhandled,
+# the line breaks Python's parser.
 _SHELL_ASSIGN_RE = re.compile(r"^(\s*)([A-Za-z_]\w*)(\s*=\s*)!(.+)$")
 _PIP_INSTALL_RE = re.compile(
     r"^\s*(?:pip|pip3|python\s+-m\s+pip|uv\s+pip)\s+install\s+(.+)$",
 )
 
 
-# ---------------------------------------------------------------------------
-# Result types
+# --- Result types ---
 
 
 @dataclass
@@ -96,15 +93,12 @@ class ImportResult:
     dropped_shells: list[str] = field(default_factory=list)
     captured_deps: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
-    # Populated by ``import_notebook`` after the conversion finishes.
-    # Path to the rendered report file, and the same content in memory
-    # so the REST endpoint can return it without re-reading from disk.
+    # Set by ``import_notebook``; the text is kept so REST can return it without re-reading.
     report_path: Path | None = None
     report_text: str = ""
 
 
-# ---------------------------------------------------------------------------
-# Public API
+# --- Public API ---
 
 
 def import_notebook(
@@ -151,10 +145,8 @@ def import_notebook(
     with ipynb_path.open("r", encoding="utf-8") as f:
         nb = json.load(f)
 
-    # Validate the nbformat structure up-front so we don't leave a
-    # half-materialized notebook directory on disk when the source is
-    # malformed (and so AttributeError from a mid-loop ``.get("cell_type")``
-    # surfaces as a 400 at the REST layer, not a 500).
+    # Validate up front so a malformed source leaves no half-built directory and
+    # surfaces as a 400, not a 500 from a mid-loop AttributeError.
     _validate_nbformat_structure(nb)
 
     if out_dir is not None:
@@ -206,8 +198,7 @@ def import_notebook(
             result.dropped_magics.extend(conv.dropped_magics)
             result.dropped_shells.extend(conv.dropped_shells)
             cell_deps.extend(conv.deps)
-            # Scan the *converted* source — magics have been stripped,
-            # so what remains is valid Python the harness will execute.
+            # Converted source: magics are stripped, so it parses as Python.
             scanned_imports |= _scan_imports(conv.source)
             prev_cell_id = cell_id
         elif cell_type is None:
@@ -217,17 +208,11 @@ def import_notebook(
 
     inferred_deps = _imports_to_deps(scanned_imports, local_modules)
 
-    # Merge captured deps into the new notebook's pyproject.toml.
-    # Order matters for the dedup: explicit sources (siblings, %pip
-    # install) come first so their version pins shadow bare scan-
-    # derived names. PEP 503-normalized package-name dedup catches
-    # ``scikit_learn`` vs ``scikit-learn`` collisions.
+    # Explicit sources (siblings, %pip install) come first so their pins shadow
+    # scan-derived names. Dedup is by PEP 503-normalized name.
     all_deps = _dedupe_by_package([*sibling_deps, *cell_deps, *inferred_deps])
-    # Filter pip-only forms (editable installs, bare URLs, paths) that
-    # pyproject.toml dependencies can't represent — those would either
-    # be rejected by uv at sync time or, worse, slip through and corrupt
-    # the TOML (a "; python_version < '3.10'" marker contains literal
-    # characters that need proper escaping).
+    # Drop pip-only forms (editable installs, URLs, paths) that pyproject can't
+    # represent: uv rejects them, or they corrupt the TOML.
     valid_deps = [d for d in all_deps if _is_valid_pep508_dep(d)]
     rejected_deps = [d for d in all_deps if not _is_valid_pep508_dep(d)]
     if valid_deps:
@@ -241,22 +226,14 @@ def import_notebook(
             f"requires PEP 508 specifiers: {sample}{more}"
         )
 
-    # Sanity-check the converted notebook by running the parse →
-    # analyze → DAG-build pass that ``NotebookSession`` would on open.
-    # Failures here mean the user will hit an error the moment they
-    # open the notebook in the UI; surfacing them now in the report
-    # turns that into a fail-fast signal at import time.
+    # Run the parse/analyze/DAG pass NotebookSession runs on open, so errors the
+    # user would hit on open show up in the import report instead.
     _check_openable(notebook_dir, result)
 
-    # ``--check-deps`` runs ``uv lock`` to verify the captured deps
-    # actually resolve. Opt-in because it's seconds-slow on cold
-    # caches and requires the uv CLI.
+    # Opt-in: seconds-slow on cold caches and requires the uv CLI.
     if check_deps:
         _check_resolvable(notebook_dir, result)
 
-    # Write the human-readable report next to notebook.toml. Same
-    # content is returned on the result so callers (REST, CLI) can
-    # serve it without re-reading.
     report_text = format_import_report(result, ipynb_path)
     report_path = notebook_dir / "import_report.md"
     report_path.write_text(report_text, encoding="utf-8")
@@ -266,8 +243,7 @@ def import_notebook(
     return result
 
 
-# ---------------------------------------------------------------------------
-# Post-import sanity checks
+# --- Post-import sanity checks ---
 
 
 def _check_openable(notebook_dir: Path, result: ImportResult) -> None:
@@ -277,8 +253,7 @@ def _check_openable(notebook_dir: Path, result: ImportResult) -> None:
     Doesn't raise — the notebook is already on disk and a partial
     success is more useful than a refused import.
     """
-    # Local imports — these modules import from this one transitively
-    # through the parser test fixtures.
+    # Local: these modules import this one transitively through parser test fixtures.
     from strata.notebook.analyzer import analyze_cell
     from strata.notebook.dag import CellAnalysisWithId, NotebookDag
     from strata.notebook.parser import parse_notebook
@@ -341,15 +316,12 @@ def _check_resolvable(notebook_dir: Path, result: ImportResult) -> None:
         return
 
     if completed.returncode != 0:
-        # Trim noisy stderr to one informative chunk; the user can
-        # always run ``uv lock`` themselves in the notebook directory
-        # to see the full failure.
+        # Trimmed; ``uv lock`` in the notebook directory shows the full failure.
         detail = completed.stderr.strip() or completed.stdout.strip() or "(no output)"
         result.warnings.append(f"dependency resolution failed: {detail[:400]}")
 
 
-# ---------------------------------------------------------------------------
-# Structural validation
+# --- Structural validation ---
 
 
 def _validate_nbformat_structure(nb: object) -> None:
@@ -370,9 +342,8 @@ def _validate_nbformat_structure(nb: object) -> None:
         raise ValueError(
             f"Invalid .ipynb: expected JSON object at top level, got {type(nb).__name__}"
         )
-    # ``cast`` only — ty narrows the isinstance result to dict[Unknown, Unknown]
-    # whose ``.get`` signature resolves to ``(key: Never) -> ...``. The runtime
-    # dict is the standard JSON parse so str-keyed access is safe.
+    # ``cast`` only: ty narrows the isinstance to dict[Unknown, Unknown], whose
+    # ``.get`` takes ``Never``. A JSON parse is str-keyed.
     nb_dict = cast(dict[str, Any], nb)
     cells = nb_dict.get("cells")
     if cells is not None and not isinstance(cells, list):
@@ -384,8 +355,7 @@ def _validate_nbformat_structure(nb: object) -> None:
             )
 
 
-# ---------------------------------------------------------------------------
-# Import report
+# --- Import report ---
 
 
 def format_import_report(result: ImportResult, ipynb_path: Path | str) -> str:
@@ -476,8 +446,7 @@ def format_import_report(result: ImportResult, ipynb_path: Path | str) -> str:
     return "\n".join(lines) + "\n"
 
 
-# ---------------------------------------------------------------------------
-# Source conversion
+# --- Source conversion ---
 
 
 def _source_to_text(source: Any) -> str:
@@ -498,11 +467,8 @@ def _source_to_text(source: Any) -> str:
         text = ""
     else:
         text = str(source)
-    # Strip leading newlines / spaces and trailing whitespace that
-    # would confuse module-level parsing. If the first line is
-    # genuinely indented (rare; cell shouldn't start that way), the
-    # caller still surfaces a syntax error later, but the common
-    # case of " Image(...) " is fixed.
+    # Fixes the common " Image(...) " case; a genuinely indented first line
+    # still surfaces as a syntax error later.
     return text.strip() + "\n" if text.strip() else ""
 
 
@@ -613,8 +579,7 @@ def _suppress_last_expression(source: str) -> str:
     return f"{body}\n{_SUPPRESSED_COMMENT}\npass\n"
 
 
-# ---------------------------------------------------------------------------
-# Magic translation
+# --- Magic translation ---
 
 
 def _translate_line_magic(
@@ -974,9 +939,7 @@ def _dedupe_preserve_order(items: list[str]) -> list[str]:
     return out
 
 
-# Top-level import names whose PyPI package name differs. Anything not
-# in this dict is assumed to use ``import_name == pip_name``, right
-# ~95% of the time in practice. Extend by adding a row.
+# Import names whose PyPI name differs; anything else is assumed identical.
 _IMPORT_TO_PIP: dict[str, str] = {
     # Data science / ML basics
     "cv2": "opencv-python",
@@ -988,7 +951,7 @@ _IMPORT_TO_PIP: dict[str, str] = {
     "yaml": "PyYAML",
     "dotenv": "python-dotenv",
     "dateutil": "python-dateutil",
-    "lxml": "lxml",  # Same name but kept here for documentation
+    "lxml": "lxml",
     # Crypto / security
     "Crypto": "pycryptodome",
     "OpenSSL": "pyOpenSSL",
@@ -1029,8 +992,7 @@ def _scan_imports(source: str) -> set[str]:
             for alias in node.names:
                 names.add(alias.name.split(".", 1)[0])
         elif isinstance(node, ast.ImportFrom):
-            # node.level > 0 is a relative import (``from . import x``),
-            # which can't be a third-party dependency.
+            # level > 0 is a relative import, never a third-party dependency.
             if node.module and node.level == 0:
                 names.add(node.module.split(".", 1)[0])
     return names - sys.stdlib_module_names
@@ -1119,9 +1081,7 @@ def _is_valid_pep508_dep(spec: str) -> bool:
         ("git+", "hg+", "svn+", "bzr+", "file:", "http://", "https://", "/", "./", "../")
     ):
         return False
-    # PEP 508 names start with a letter/digit. Anything else (bare URL
-    # fragments, `.`-style paths sneaking past the prefix list, etc.) is
-    # rejected.
+    # PEP 508 names start with a letter or digit.
     return re.match(r"^[A-Za-z0-9]", spec) is not None
 
 

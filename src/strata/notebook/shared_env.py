@@ -50,8 +50,7 @@ from strata.notebook.dependencies import (
 )
 from strata.notebook.env_backend import _StreamCallback
 
-# Written last, once an install succeeded: a directory without it is a sync
-# that died part way and is installed again.
+# Written last on success: a directory without it is a dead sync to redo.
 COMPLETE_MARKER = ".strata-env-complete"
 _REFS = "refs"
 _PROBE = (
@@ -108,8 +107,7 @@ class SharedEnvBackend:
 
     def __init__(self, notebook_dir: Path, root: Path) -> None:
         self.notebook_dir = Path(notebook_dir)
-        # Absolute, because links point into it and references are compared
-        # against where links point.
+        # Absolute, because references are compared against where links point.
         self.root = Path(root).resolve()
 
     def python_executable(self) -> Path:
@@ -122,8 +120,7 @@ class SharedEnvBackend:
         uv = resolve_uv()
         if uv is None:
             return "uv not found on PATH"
-        # --system: the base interpreter, not the one inside whichever
-        # environment .venv links to now.
+        # --system: the base interpreter, not whichever environment .venv links to now.
         args = [uv, "python", "find", "--system"] + ([python_version] if python_version else [])
         try:
             found = subprocess.run(
@@ -165,7 +162,7 @@ class SharedEnvBackend:
             if previous.parent == self.root and previous.name != key:
                 (self.root / _REFS / previous.name / ref).unlink(missing_ok=True)
         elif venv.exists():
-            # A per-notebook environment from before the switch.
+            # A legacy per-notebook environment.
             shutil.rmtree(venv)
         refs = self.root / _REFS / key
         refs.mkdir(parents=True, exist_ok=True)
@@ -356,20 +353,17 @@ class SharedEnvBackend:
         )
 
 
-# --- R: one renv library per renv.lock ------------------------------------
+# --- R: one renv library per renv.lock ---
 #
-# The same store holds R libraries under ``r/``, one per key of the raw
-# ``renv.lock`` bytes and the exact R build, apart from the Python keys so a
-# change to one lock does not rebuild the other language's environment. A
-# notebook's ``renv/library`` is a link to its key's directory: every Rscript
-# (the harness, the warm pool, a restore) reads the library through renv's
-# project path with nothing to configure. renv's package cache
-# (``RENV_PATHS_CACHE``) lives on the same volume, under ``r/cache``, so a
-# library built for a changed lock links the packages it already has.
+# R libraries live under ``r/``, keyed by the raw ``renv.lock`` bytes and the
+# exact R build, apart from Python keys so one lock change doesn't rebuild the
+# other language. A notebook's ``renv/library`` links to its key's directory,
+# so every Rscript reads it through renv's project path. ``RENV_PATHS_CACHE``
+# is ``r/cache`` on the same volume, so a changed lock links packages it has.
 #
-# A shared library is never changed in place either. Installing a package
-# first detaches the notebook onto a private library restored from the cache,
-# and once ``renv.lock`` is written the library is adopted under its new key.
+# A shared library is never changed in place: installing a package detaches the
+# notebook onto a private library, adopted under its new key once
+# ``renv.lock`` is written.
 
 R_DIR = "r"
 R_CACHE = "cache"
@@ -416,8 +410,7 @@ def _link_r_library(notebook_dir: Path, r_root: Path, key: str) -> None:
         if previous.parent == r_root and previous.name != key:
             (r_root / _REFS / previous.name / ref).unlink(missing_ok=True)
     elif library.exists():
-        # A per-notebook library from before the switch, or a private one
-        # already adopted.
+        # A legacy per-notebook library, or a private one already adopted.
         shutil.rmtree(library)
     refs = r_root / _REFS / key
     refs.mkdir(parents=True, exist_ok=True)
@@ -449,10 +442,8 @@ def restore_r_library(
         target = r_root / key
         if not (target / COMPLETE_MARKER).exists():
             target.mkdir(exist_ok=True)
-            # The restore writes through the link, so the library the notebook
-            # has is moved aside rather than removed: a restore that fails
-            # (CRAN unreachable, a package that will not build) leaves the
-            # notebook with the packages it had this morning.
+            # The restore writes through the link, so move the current library aside:
+            # a failed restore leaves the notebook with the packages it had.
             previous = None
             if library.exists() and not library.is_symlink():
                 previous = library.with_name(f"library.previous-{uuid.uuid4().hex[:8]}")
@@ -568,9 +559,8 @@ def _collect(
         with _key_lock(root, key):
             marker = env_dir / COMPLETE_MARKER
             if not marker.exists():
-                # Not an environment this ever finished building. A half-built
-                # one is rebuilt in place, and anything else under the root is
-                # somebody's directory, not a key.
+                # Never finished building. A half-built one is rebuilt in place; anything
+                # else under the root is not a key.
                 continue
             refs = root / _REFS / key
             live = False
@@ -579,8 +569,7 @@ def _collect(
                     venv = Path(ref.read_text()) / link
                     points_here = venv.is_symlink() and Path(os.readlink(venv)) == env_dir
                 except OSError:
-                    # A notebook on a volume that is not mounted right now says
-                    # nothing about whether it still links here.
+                    # An unmounted volume says nothing about whether it still links here.
                     live = True
                     continue
                 if points_here:

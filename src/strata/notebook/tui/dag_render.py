@@ -83,7 +83,7 @@ def _box_text(cid: str, labels: dict[str, str], statuses: dict[str, str]) -> str
     return f"{glyph} {labels.get(cid, cid)}"
 
 
-# -- layout -----------------------------------------------------------------
+# --- layout ---
 
 
 def _layout(
@@ -115,14 +115,12 @@ def _grandalf_layout(
     graph_edges = [Edge(vertices[a], vertices[b]) for a, b in edges]
     graph = Graph(list(vertices.values()), graph_edges)
 
-    # rank (layer) + raw x for every real vertex; per-edge waypoint chain.
     rank: dict[str, int] = {}
     rawx: dict[str, float] = {}
     edge_chains: list[list[tuple[int, float]]] = []  # [(rank, x), …] per edge
 
-    # grandalf lays out each connected component at the origin; offset each one
-    # to the right of the previous so separate subgraphs / isolated cells don't
-    # overlap.
+    # grandalf lays out each component at the origin; offset each to the right of the
+    # previous so separate subgraphs don't overlap.
     x_offset = 0.0
     for component in graph.C:
         sug = SugiyamaLayout(component)
@@ -209,10 +207,8 @@ def _assemble(
     edge_chains: list[list[tuple[int, float]]],
 ) -> _Layout:
     """Map ranks→rows and raw x→columns, then build boxes + edge polylines."""
-    # Normalize x to non-negative integer columns. grandalf x is roughly in the
-    # character units we gave each view, so a 1:1 map keeps boxes apart; a global
-    # shift then ensures the left-most box edge (not just its center) clears the
-    # margin so nothing clips off the left.
+    # Normalize x to non-negative integer columns (grandalf x is roughly in character
+    # units), then shift so the left-most box edge, not just its center, clears the margin.
     margin = 2
     centers = {cid: int(round(x)) for cid, x in rawx.items()}
     min_left = min(
@@ -262,7 +258,7 @@ class _VertexView:
         self.xy = (0.0, 0.0)
 
 
-# -- rasterization ----------------------------------------------------------
+# --- rasterization ---
 
 
 _SEG = {
@@ -295,9 +291,8 @@ class _Grid:
     rows: int
     cols: int
     _cells: list[list[str]] = field(init=False)
-    # Accumulated connection directions per line cell. Rendering the glyph from
-    # the *union* of directions makes every junction correct by construction:
-    # an elbow → corner, a branch off a shared trunk → tee, a true crossing → ┼.
+    # Connection directions per line cell. Rendering from the union of directions makes
+    # every junction correct by construction (elbow, tee, crossing).
     _dirs: dict[tuple[int, int], set[str]] = field(init=False)
 
     def __post_init__(self) -> None:

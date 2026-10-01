@@ -65,8 +65,7 @@ def establish_ssh_worker(
             worker_name,
             url=record.executor_url,
             transport="direct",
-            # A stable per-target runtime id so this worker's cached results are
-            # keyed apart from local runs (train/serve provenance parity).
+            # Per-target runtime id keeps this worker's cached results apart from local runs.
             runtime_id=f"ssh:{record.ssh_target}",
             set_default=set_default,
         )

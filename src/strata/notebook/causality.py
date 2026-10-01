@@ -150,14 +150,11 @@ def compute_causality_on_staleness(
         mount_fingerprints, has_rw_mount = session._collect_mount_fingerprints(cell)
 
         if has_rw_mount:
-            # RW mounts are intentionally non-cacheable side effects.
-            # They should remain stale/idle without pretending there is a
-            # meaningful cached provenance explanation.
+            # RW mounts are deliberately non-cacheable; there is no cached provenance to explain.
             continue
 
-        # Use the session's single source of truth so sweep refs are grouped
-        # the same way the executor stored them (else a sweep downstream would
-        # always look stale here).
+        # Group sweep refs the way the executor stored them, else a sweep downstream always
+        # looks stale here.
         input_hashes = session._collect_input_hashes(cell_id)
 
         provenance_hash = compute_provenance_hash(
@@ -165,17 +162,13 @@ def compute_causality_on_staleness(
         )
 
         if session._resolve_cached_outputs(cell_id, provenance_hash) is not None:
-            # Cell is ready — no causality needed
             continue
 
-        # Cell is stale — figure out why
-        # Check upstream cells
         for upstream_id in cell.upstream_ids:
             upstream = session.notebook_state.get_cell(upstream_id)
             if upstream is None:
                 continue
 
-            # If upstream is stale or has no artifact, our inputs changed
             if upstream.status in ("stale", "idle", "error"):
                 upstream_name = upstream.defines[0] if upstream.defines else upstream_id
                 details.append(
@@ -185,9 +178,8 @@ def compute_causality_on_staleness(
                         cell_name=upstream_name,
                     )
                 )
-            # If upstream ran and produced a new artifact since our last run
             elif upstream_id in causality_map:
-                # Upstream itself changed — so our inputs changed transitively
+                # Upstream itself changed, so our inputs changed transitively.
                 upstream_name = upstream.defines[0] if upstream.defines else upstream_id
                 details.append(
                     CausalityDetail(
@@ -197,9 +189,8 @@ def compute_causality_on_staleness(
                     )
                 )
 
-        # If no upstream changes detected, it must be source or env
+        # No upstream change: it must be source or env.
         if not details:
-            # Try to decompose by reading stored component hashes
             stored_source_hash = _get_stored_hash(session, cell_id, "source_hash")
             stored_env_hash = _get_stored_hash(session, cell_id, "env_hash")
 
@@ -240,8 +231,7 @@ def compute_causality_on_staleness(
                     )
                 )
             if source_changed or (not env_changed_flag):
-                # If source changed, or if we couldn't determine the cause
-                # (no stored hashes), fall back to source_changed
+                # No stored hashes to decompose: fall back to source_changed.
                 if not details:
                     cell_name = cell.defines[0] if cell.defines else cell_id
                     details.append(
@@ -252,8 +242,7 @@ def compute_causality_on_staleness(
                         )
                     )
 
-        # Determine primary reason — env takes precedence when it's the
-        # *only* change, since source_changed may be a fallback guess.
+        # Env wins when it is the only change, since source_changed may be a fallback guess.
         has_source = any(d.type == CausalityType.SOURCE_CHANGED for d in details)
         has_input = any(d.type == CausalityType.INPUT_CHANGED for d in details)
         has_env = any(d.type == CausalityType.ENV_CHANGED for d in details)

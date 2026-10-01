@@ -19,8 +19,7 @@ from __future__ import annotations
 
 import importlib
 
-# Built-in driver module names. Add an entry only after the
-# corresponding module exists and exposes ``register()``.
+# Add an entry only once the module exists and exposes ``register()``.
 _BUILTIN_DRIVERS: tuple[str, ...] = (
     "postgresql",
     "sqlite",

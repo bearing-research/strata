@@ -40,15 +40,12 @@ from strata.types import PROVENANCE_MISS_HEADER
 
 logger = get_logger(__name__)
 
-# A lookup sits on the miss path of every cell run, so it gets a short leash:
-# waiting on an unreachable store is strictly worse than recomputing, which is
-# the fallback anyway. The download gets a longer one because it is moving the
-# result the user actually wants and its size is not ours to predict.
+# A lookup is on every cell run's miss path, so it gets a short leash (recomputing is
+# the fallback anyway). The download is longer: its size is not ours to predict.
 LOOKUP_TIMEOUT_SECONDS = 10.0
 DOWNLOAD_TIMEOUT_SECONDS = 300.0
-# A publish runs after the cell has already finished, so the user is waiting on
-# nothing — but they are waiting to see their output, so it cannot be
-# open-ended either.
+# A publish runs after the cell finished, but the user is waiting to see output, so
+# it cannot be open-ended.
 PUBLISH_TIMEOUT_SECONDS = 300.0
 
 
@@ -81,18 +78,15 @@ class TeamPull:
     variables: tuple[str, ...]
     principal: str | None
     byte_size: int
-    # Where the result was computed, e.g. ``cpython-3.14-linux-x86_64``. The
-    # provenance key covers the lockfile, not the platform, so a hit can cross
-    # machines — recording which one it crossed from is what keeps that
-    # honest rather than silent. Empty when the producer reported none.
+    # Where the result was computed, e.g. ``cpython-3.14-linux-x86_64``. The provenance
+    # key covers the lockfile, not the platform, so a hit can cross machines; this records
+    # which. Empty when the producer reported none.
     build_env: str = ""
-    # What the publisher's run cost, and therefore what this hit saved. The
-    # puller has no history for a cell they never ran, so without this the
-    # savings estimate credits zero for exactly the case worth counting.
+    # The publisher's run cost, i.e. what this hit saved. The puller has no history for a
+    # cell they never ran.
     saved_ms: int = 0
-    # The promotion that put the result in the store, when one did — someone
-    # shared ``taxi/model`` and this cell's result was part of its chain.
-    # ``None`` when it arrived by a cache publish.
+    # The promotion whose chain put the result in the store; ``None`` when it arrived by
+    # a cache publish.
     promotion: str | None = None
 
 
@@ -116,9 +110,8 @@ class TeamStore:
             client: Injected transport. When supplied it is not closed here;
                 the caller owns what it created.
         """
-        # Requests are built absolute rather than leaning on the client's
-        # ``base_url``, so an injected client cannot silently send relative
-        # paths nowhere. Where to reach the store is this object's business.
+        # Absolute URLs, not the client's ``base_url``, so an injected client cannot send
+        # relative paths nowhere.
         self._base_url = base_url.rstrip("/")
         self._headers = dict(headers or {})
         self._owns_client = client is None
@@ -189,9 +182,8 @@ class TeamStore:
             metadata["build_env"] = build_env
         if build_duration_ms > 0:
             metadata["build_duration_ms"] = str(build_duration_ms)
-        # Half of the environment identity — which package set. The other half,
-        # the platform, rides in build_env. Both travel because "you got a hit
-        # and I did not" is answered by comparing them and by nothing else.
+        # Package-set half of the environment identity; the platform half rides in build_env.
+        # Both travel so "you got a hit and I did not" can be answered.
         if env_hash:
             metadata["env_hash"] = env_hash
         files = {
@@ -214,9 +206,8 @@ class TeamStore:
             return False
 
         if response.status_code >= 400:
-            # 403 here is the common and important one: a read-only member.
-            # That is a legitimate configuration, not a fault, but it should be
-            # visible — otherwise a team wonders why nothing is ever shared.
+            # 403 is usually a read-only member: legitimate, but visible, or a team wonders why
+            # nothing is ever shared.
             logger.warning(
                 "Team store refused to publish %s with HTTP %d; the result stays local",
                 provenance_hash[:12],
@@ -244,11 +235,8 @@ class TeamStore:
             logger.debug("Team store has no result for %s", provenance_hash[:12])
             return None
         if response.status_code >= 400:
-            # Deliberately warn rather than debug. An unmarked 404 is a store
-            # that predates the route or has no artifacts configured; a 403 is
-            # a token that has expired. All three look exactly like an empty
-            # cache from the outside, and would otherwise be an unexplained
-            # permanent slowdown.
+            # Warn, not debug: an unmarked 404 (old store, no artifacts) or a 403 (expired token)
+            # looks exactly like an empty cache and would be an unexplained permanent slowdown.
             logger.warning(
                 "Team store refused a lookup of %s with HTTP %d; recomputing locally",
                 provenance_hash[:12],
@@ -279,9 +267,7 @@ class TeamStore:
             )
             response.raise_for_status()
         except httpx.HTTPError as exc:
-            # A match that cannot be downloaded is the one case worth flagging
-            # loudly: the store said it had the result, so this is not an empty
-            # cache but a store that is answering inconsistently.
+            # The store claimed the result but can't serve it: inconsistent, not an empty cache.
             logger.warning(
                 "Team store matched %s@v=%d but its bytes could not be fetched: %s",
                 artifact_id,
@@ -320,9 +306,8 @@ async def pull_cell_outputs(
     Returns the pull on success, ``None`` on any miss or failure.
     """
     if not consumed_vars:
-        # A cell with nothing downstream has no artifact to share. Its cached
-        # console and display outputs live in the session's runtime state, not
-        # in the artifact store, so there is nothing here to pull.
+        # Nothing downstream means no artifact; console and display outputs live in runtime
+        # state, not the store.
         return None
 
     ordered = sorted(consumed_vars)
@@ -345,20 +330,11 @@ async def pull_cell_outputs(
         if artifact is not None
     ]
 
-    # The publisher's environment identity, kept rather than restamped — same
-    # reason their platform is. An honest pull cannot disagree: env_hash is
-    # part of the provenance key, so a matching provenance implies a matching
-    # env_hash.
-    #
-    # If they disagree anyway, something upstream is wrong, and importing the
-    # value would push that wrongness somewhere it cannot be read as a problem:
-    # `causality._get_stored_hash` prefers the stored env_hash over the cell's
-    # own when explaining staleness, so the cell would report "the environment
-    # changed" forever, with nothing pointing at why. Keep the local value and
-    # say so out loud instead — a signal is only a signal if it surfaces as one.
-    # Every variable, not just the first: they are written from one value, so
-    # checking one and stamping all of them would silently launder a bad
-    # env_hash on any variable that sorted later.
+    # The publisher's env_hash, kept rather than restamped. Provenance folds in env_hash,
+    # so an honest pull cannot disagree. If it does, importing it would make
+    # `causality._get_stored_hash` report "the environment changed" forever with no
+    # visible cause, so keep the local value and warn. Check every variable, not just the
+    # first, or a bad env_hash on a later one is silently laundered.
     disputed = sorted(
         {
             artifact.env_hash
@@ -386,47 +362,32 @@ async def pull_cell_outputs(
             blob_data=artifact.blob,
             content_type=artifact.content_type,
             provenance_hash=artifact.provenance_hash,
-            # The same upstream refs a local run would have recorded. Without
-            # them a pulled artifact has no ancestry at all, and whether a
-            # chain's lineage is complete comes to depend on which of its
-            # cells happened to hit the shared cache.
+            # Same upstream refs a local run records, so lineage doesn't depend on which cells
+            # happened to hit the shared cache.
             input_versions=input_versions or {},
             source_hash=source_hash,
-            # The local source, not the publisher's. A pull happens only on a
-            # provenance match and the provenance folds in ``source_hash``, so
-            # the two are AST-identical — but no more than that:
-            # ``compute_source_hash`` normalizes away comments and formatting,
-            # and a cell's annotations (``# @worker``, ``# @env``, ``# @mount``)
-            # are comments. The recorded text is what this machine would have
-            # run, which is the honest thing to show, and it can differ from
-            # the publisher's in exactly those places.
+            # The local source, not the publisher's: a provenance match only proves AST identity,
+            # and annotations (``# @worker``, ``# @env``) are comments that can differ. Record
+            # what this machine would have run.
             source=source,
             env_hash=published_env_hash or env_hash,
             variant=variant,
-            # Preserved, not restamped. The bytes were produced on the
-            # publisher's machine, so the local copy has to keep saying so —
-            # overwriting it with this machine's identity would turn a record
-            # of where the result came from into a claim we ran it ourselves.
+            # Preserved, not restamped: the bytes came from the publisher's machine.
             build_env=artifact.build_env,
             build_duration_ms=artifact.build_duration_ms,
-            # Persisted, not just logged. The lineage view reads the local
-            # store, so without this the author column stays blank on exactly
-            # the steps someone else produced — the case it exists for.
+            # Persisted, not just logged: lineage reads the local store, so otherwise the author
+            # column is blank on exactly the steps someone else produced.
             principal=artifact.principal,
         )
         total_bytes += len(artifact.blob)
 
-    # Every variable of one cell run was computed together, so they share an
-    # author; reporting the first is reporting all of them.
+    # One cell run computed every variable, so they share an author.
     principal = pulled[0][1].principal
     build_env = pulled[0][1].build_env
-    # One cell run produced every variable together, so its cost is the cost of
-    # the run — not the sum over variables, which would multiply it by the
-    # number of things the cell happened to define.
+    # Cost of the run, not a sum over variables (which would multiply it).
     saved_ms = max(artifact.build_duration_ms for _, artifact in pulled)
-    # Variables of one cell can have arrived separately: one in a promoted
-    # chain, another offered by a cache publish. The hit came from a promotion
-    # if any of what it used did; sorted so which one is reported is stable.
+    # Variables can arrive separately (one promoted, one cache-published). It is a
+    # promotion hit if any was; min() keeps the reported one stable.
     promotion = min((a.promotion for _, a in pulled if a.promotion), default=None)
     logger.info(
         "Team store supplied cell %s (%s, %d bytes, computed by %s on %s); skipped running it",

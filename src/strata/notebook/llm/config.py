@@ -34,10 +34,9 @@ class LlmConfig:
     model: str
     max_output_tokens: int = 4096
     timeout_seconds: float = 60.0
-    # ``None`` when ``base_url`` is trusted: the operator's, a provider default,
-    # or any URL off a service-mode server. Otherwise the notebook chose it on a
-    # shared server, and requests go through the guard ``@fetch`` uses; these
-    # are the hosts it lets through on a private address.
+    # ``None`` when ``base_url`` is trusted (operator's, provider default, or
+    # service mode). Otherwise the notebook chose it on a shared server and
+    # requests go through the ``@fetch`` guard; these hosts may be private.
     guard_hosts: tuple[str, ...] | None = None
 
 
@@ -82,7 +81,7 @@ def resolve_llm_config(
     max_output_tokens = 4096
     timeout_seconds = 60.0
 
-    # Layer 1 (lowest): server config (explicit STRATA_AI_* at startup)
+    # Layer 1 (lowest): server config
     if server_config is not None:
         if getattr(server_config, "ai_api_key", None):
             api_key = server_config.ai_api_key
@@ -95,9 +94,8 @@ def resolve_llm_config(
         if getattr(server_config, "ai_timeout_seconds", None):
             timeout_seconds = server_config.ai_timeout_seconds
 
-    # Layer 2: notebook-level env vars (from Runtime panel).
-    # Setting a provider-specific key here picks up that provider's
-    # default base_url and model unless the notebook.toml overrides them.
+    # Layer 2: notebook env vars. A provider-specific key selects that
+    # provider's default base_url and model unless notebook.toml overrides.
     if notebook_env:
         for env_var, (default_url, default_model) in _PROVIDER_DEFAULTS.items():
             key = notebook_env.get(env_var)
@@ -106,7 +104,7 @@ def resolve_llm_config(
                 base_url = default_url
                 model = default_model
                 break
-        # Generic key (no implicit provider selection)
+        # Generic key: no implicit provider selection
         if not api_key and notebook_env.get("STRATA_AI_API_KEY"):
             api_key = notebook_env["STRATA_AI_API_KEY"]
 
@@ -241,7 +239,6 @@ def llm_config_for_session(session: Any) -> LlmConfig | None:
     except RuntimeError:
         pass
 
-    # Notebook-level env vars (set via the Runtime panel)
     notebook_env = getattr(session.notebook_state, "env", None) or {}
 
     return resolve_llm_config(read_notebook_ai_config(session), server_config, notebook_env)

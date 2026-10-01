@@ -71,12 +71,10 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Global session manager (shared with WebSocket handler)
+# Shared with the WebSocket handler.
 _session_manager = SessionManager()
 
-# Server-owned supervisor for SSH-tunneled workers. The `ssh -L` forwards it
-# holds must be reachable from this process (dispatch runs in-server), so it
-# lives here for the server's lifetime and is torn down in the lifespan.
+# Owns `ssh -L` forwards that in-server dispatch must reach; torn down in the lifespan.
 _worker_supervisor: RemoteWorkerSupervisor | None = None
 
 
@@ -175,7 +173,7 @@ def _require_personal_mode_session_api() -> None:
 
         state = get_state()
     except RuntimeError:
-        # Route unit tests may use the notebook router without a full server state.
+        # Route unit tests may use the router without full server state.
         return
 
     if state.config.deployment_mode != "personal":
@@ -212,9 +210,7 @@ def _get_notebook_storage_root() -> Path | None:
     return Path(configured_path).resolve()
 
 
-# Allowed characters in a per-user storage directory name. Email-shaped
-# inputs map cleanly: alphanumerics, ``.``, ``_``, ``-``, and ``@`` all
-# survive. Anything else is collapsed to ``_`` so a hostile header value
+# Email-shaped names survive; anything else becomes ``_`` so a hostile header
 # can't escape the storage root with ``../`` or null bytes.
 _USER_DIR_SAFE_RE = re.compile(r"[^A-Za-z0-9._@\-]")
 
@@ -263,8 +259,7 @@ def _get_user_storage_root(request: Request | None) -> Path | None:
         return base
 
     user_root = (base / safe).resolve()
-    # Defense-in-depth: even though sanitization should make escape
-    # impossible, double-check the resolved path stays under the base.
+    # Defense-in-depth: sanitization should already make escape impossible.
     if user_root != base and base not in user_root.parents:
         return base
     user_root.mkdir(parents=True, exist_ok=True)
@@ -419,7 +414,6 @@ def _validate_notebook_path(
 
     user_root = _get_user_storage_root(request)
     base_root = _get_notebook_storage_root()
-    # Resolution base: per-user root when scoping is active, else base.
     resolution_root = user_root if user_root is not None else base_root
     resolved = (
         (resolution_root / path).resolve()
@@ -427,9 +421,7 @@ def _validate_notebook_path(
         else path.resolve()
     )
 
-    # Confine to the user's root (per-user scoping) or to the base root
-    # (single-user mode). Returning the resolved path is safe because
-    # we've verified it's contained.
+    # Confine to the per-user root, or the base root in single-user mode.
     boundary = user_root if user_root is not None else base_root
     if boundary is not None and resolved != boundary and boundary not in resolved.parents:
         raise HTTPException(
@@ -528,15 +520,10 @@ def _serialize_notebook_runtime_config(request: Request | None = None) -> dict:
         "available_python_versions": available_python_versions,
         "default_python_version": available_python_versions[0],
         "python_selection_fixed": len(available_python_versions) <= 1,
-        # Registry UI gate: is there a registry to show. It used to mean
-        # "personal mode", because the registry routes went through the bare
-        # ``_get_artifact_store()`` gate and 403'd anywhere else. They read
-        # through the tenant-scoped read gate now, and with a team store
-        # configured they answer from that store — so a shared server showing
-        # its organization's registry is the case this used to hide.
+        # Registry routes read through the tenant-scoped gate (a team store answers
+        # them when configured), so a registry is always available to show.
         "registry_enabled": True,
-        # Whether a cell's output can be promoted to a team store. Without one
-        # the promote route answers 409, so the strip does not offer it.
+        # Without a team store the promote route answers 409, so the strip hides it.
         "team_store_configured": team_store_configured,
     }
 
@@ -642,9 +629,7 @@ def _raise_environment_busy(session: NotebookSession, message: str) -> None:
     )
 
 
-# ============================================================================
-# Request/Response Models
-# ============================================================================
+# --- Request/Response Models ---
 
 
 class OpenNotebookRequest(BaseModel):
@@ -672,9 +657,9 @@ class CreateNotebookRequest(BaseModel):
 class UpdateCellSourceRequest(BaseModel):
     """Request to update cell source."""
 
-    source: str = Field(..., max_length=1_000_000)  # 1M characters (~1-4 MB UTF-8)
+    source: str = Field(..., max_length=1_000_000)  # ~1-4 MB UTF-8
     author: str | None = Field(default=None, max_length=MAX_AUTHOR_LENGTH)
-    # Overwrite a cell someone else changed moments ago (see ``cell_locked``).
+    # Overwrites a cell someone else changed moments ago (see ``cell_locked``).
     force: bool = False
 
 
@@ -689,9 +674,8 @@ class AddCellRequest(BaseModel):
 
     after_cell_id: str | None = None
     language: CellLanguage = CellLanguage.PYTHON
-    # Who to credit, when the caller is not authenticated. Ignored in service
-    # mode, where the principal is the answer and a self-declared name would be
-    # a claim rather than a presentation.
+    # Credit for an unauthenticated caller. Ignored in service mode, where the
+    # principal answers and a self-declared name would be a claim.
     author: str | None = Field(default=None, max_length=MAX_AUTHOR_LENGTH)
 
 
@@ -831,10 +815,8 @@ class EnvironmentJobRequest(BaseModel):
     @classmethod
     def validate_action_field(cls, value: str) -> str:
         normalized = value.strip().lower()
-        # ``r_init`` / ``r_add`` reuse the env-job machinery for the
-        # R side — Rscript subprocess + same job tracking + same WS
-        # broadcast frames. ``change_python`` is the existing
-        # Python-version change action.
+        # ``r_init`` / ``r_add`` reuse the env-job machinery (Rscript subprocess,
+        # job tracking, WS frames).
         if normalized not in {
             "add",
             "remove",
@@ -850,12 +832,8 @@ class EnvironmentJobRequest(BaseModel):
     @field_validator("package")
     @classmethod
     def validate_package_field(cls, value: str | None) -> str | None:
-        # The REST-layer sanitizer rejects shell metacharacters for
-        # *any* action. The R-specific name-shape check (CRAN
-        # convention) runs server-side in ``submit_environment_job``
-        # — combining both layers means a bad R name fails fast at
-        # the REST boundary AND is double-checked before the
-        # Rscript subprocess sees it.
+        # Rejects shell metacharacters for any action; the R name-shape check runs
+        # again in ``submit_environment_job`` before Rscript sees it.
         if value is None:
             return None
         return validate_package_name(value)
@@ -896,9 +874,7 @@ class PromoteArtifactRequest(BaseModel):
     table: str | None = Field(default=None, max_length=1024)
 
 
-# ============================================================================
-# Endpoints
-# ============================================================================
+# --- Endpoints ---
 
 
 @router.post("/open")
@@ -921,7 +897,6 @@ async def open_notebook(req: OpenNotebookRequest, request: Request) -> JSONRespo
             if not notebook_path.exists():
                 raise HTTPException(status_code=404, detail="Notebook directory not found")
 
-        # Create session (parses notebook and triggers DAG analysis)
         with timing.phase("session_open"):
             session = _session_manager.open_notebook(
                 notebook_path,
@@ -929,7 +904,6 @@ async def open_notebook(req: OpenNotebookRequest, request: Request) -> JSONRespo
                 timing=timing,
             )
 
-        # Return notebook state with session ID and DAG
         with timing.phase("serialize"):
             data = session.serialize_notebook_state()
             data["session_id"] = session.id
@@ -986,7 +960,6 @@ async def create_new_notebook(req: CreateNotebookRequest, request: Request) -> J
                     ),
                 )
 
-        # Check if a notebook already exists at this path
         expected_dir = parent_path / req.name.lower().replace(" ", "_")
         if (expected_dir / "notebook.toml").exists():
             raise HTTPException(
@@ -1053,10 +1026,8 @@ async def create_new_notebook(req: CreateNotebookRequest, request: Request) -> J
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-# Bounded upload size. Notebooks bigger than this are almost always
-# packed with embedded image outputs; importing them would put real
-# pressure on the server-side temp file. Limit conservatively.
-_MAX_IPYNB_UPLOAD_BYTES = 50 * 1024 * 1024  # 50 MB
+# Bigger notebooks are almost always embedded image outputs; cap conservatively.
+_MAX_IPYNB_UPLOAD_BYTES = 50 * 1024 * 1024
 
 
 def _resolve_import_target(
@@ -1089,15 +1060,10 @@ def _resolve_import_target(
             )
         target_parent.mkdir(parents=True, exist_ok=True)
 
-    # Pick the notebook name. Use the upload's filename stem unless the
-    # caller overrode it — same slugify rule as `create_notebook` so the
-    # resulting directory layout matches anything the user creates
-    # through the regular UI.
+    # Same slugify rule as `create_notebook`, so layouts match UI-created notebooks.
     raw_name = name or default_stem or "imported"
 
-    # Reject path separators / traversal segments / NUL bytes — the
-    # name flows into a filesystem path, and `target_parent / "../x"`
-    # would otherwise escape the storage root entirely.
+    # The name flows into a filesystem path; `target_parent / "../x"` would escape.
     if "/" in raw_name or "\\" in raw_name or "\0" in raw_name or raw_name in ("..", "."):
         raise HTTPException(
             status_code=400,
@@ -1111,9 +1077,7 @@ def _resolve_import_target(
 
     notebook_dir_name = raw_name.lower().replace(" ", "_")
     candidate_dir = target_parent / notebook_dir_name
-    # Belt-and-braces: after building the path, verify it still resolves
-    # under target_parent. Catches any escape route the textual checks
-    # above might miss (e.g. platform-specific weirdness).
+    # Belt-and-braces against escapes the textual checks miss.
     try:
         candidate_resolved = candidate_dir.resolve()
     except (OSError, RuntimeError) as exc:
@@ -1164,10 +1128,8 @@ async def import_jupyter_notebook(
 
     timing = NotebookTimingRecorder()
 
-    # Read the upload, bounded. Reading once into memory is safer than
-    # streaming to disk and re-reading: we need to verify it's parseable
-    # JSON before we touch the storage tree, and the size cap means this
-    # never grows past ~50 MB.
+    # Read once into memory (bounded by the cap): it must parse as JSON before
+    # anything touches the storage tree.
     with timing.phase("read_upload"):
         try:
             payload = await file.read()
@@ -1181,9 +1143,7 @@ async def import_jupyter_notebook(
             detail=(f".ipynb upload exceeds the {_MAX_IPYNB_UPLOAD_BYTES // (1024 * 1024)} MB cap"),
         )
 
-    # Defensive parse before we materialize anything on disk — surfaces
-    # malformed JSON as a clean 400, not a 500 from deep inside the
-    # converter.
+    # Malformed JSON becomes a clean 400, not a 500 from inside the converter.
     try:
         json.loads(payload)
     except json.JSONDecodeError as exc:
@@ -1198,10 +1158,7 @@ async def import_jupyter_notebook(
         )
     source_filename = file.filename or "imported.ipynb"
 
-    # Persist the upload to a tempdir with the user's original filename
-    # — preserves the filename in the generated import report and in
-    # any path logging the converter does. The tempdir + its contents
-    # are unlinked once the import finishes.
+    # Keeps the original filename for the import report and converter logs.
     upload_basename = Path(source_filename).name or "imported.ipynb"
     if not upload_basename.endswith(".ipynb"):
         upload_basename = f"{Path(upload_basename).stem or 'imported'}.ipynb"
@@ -1221,8 +1178,7 @@ async def import_jupyter_notebook(
             except (ValueError, OSError) as exc:
                 raise HTTPException(status_code=400, detail=f"Import failed: {exc}")
 
-    # Open a session on the newly-imported notebook so the frontend can
-    # navigate to it immediately. Mirrors `create_new_notebook`'s flow.
+    # So the frontend can navigate to it immediately, as `create_new_notebook` does.
     with timing.phase("session_open"):
         session = _session_manager.open_notebook(
             result.notebook_dir,
@@ -1271,10 +1227,9 @@ async def import_jupyter_notebook(
     )
 
 
-# A snapshot with every artifact's bytes is as large as the notebook's store,
-# which is the case `include=all` exists for — so it is streamed to disk rather
-# than read into memory against the .ipynb cap, and bounded far higher.
-_MAX_SNAPSHOT_UPLOAD_BYTES = 2 * 1024 * 1024 * 1024  # 2 GiB
+# A snapshot with every artifact's bytes (`include=all`) is as large as the
+# store, so it streams to disk under a much higher cap than .ipynb.
+_MAX_SNAPSHOT_UPLOAD_BYTES = 2 * 1024 * 1024 * 1024
 _UPLOAD_CHUNK_BYTES = 1024 * 1024
 
 
@@ -1335,11 +1290,9 @@ async def import_snapshot_bundle(
             raise HTTPException(status_code=400, detail="Empty snapshot upload")
 
         with timing.phase("import"):
-            # Ids in use where this caller's notebooks are listed. A copy that
-            # shares one collides the moment both publish to a shared store.
-            # The storage root, never the request's parent_path: which ids are
-            # taken is a question about this caller's notebooks, and a path the
-            # request names is not where those are listed.
+            # A copy sharing an id with this caller's notebooks collides once both
+            # publish to a shared store. Scan the storage root, never the request's
+            # parent_path: that is not where this caller's notebooks are listed.
             scan_root = _get_user_storage_root(request)
             taken = (
                 {
@@ -1463,8 +1416,7 @@ async def _quiesce(root: Path, sessions: list[NotebookSession], req: QuiesceRequ
     for session in sessions:
         if session._has_active_execution():
             cancelled[str(session.path)] = await cancel_notebook_execution(session.id)
-    # Every runtime write is synchronous, so once nothing is running there is
-    # nothing left to flush: runtime.json already says what the artifacts say.
+    # Runtime writes are synchronous, so once idle there is nothing to flush.
     quiesce.settle(hold)
     return {
         "path": str(hold.root),
@@ -1579,10 +1531,8 @@ async def delete_notebook(notebook_id: str, session: SessionDep) -> dict:
     }
 
 
-# Names to skip while recursing into notebook_storage_dir. Large dirs
-# (node_modules, .venv) are noise; hidden dirs (starting with .) are
-# skipped wholesale except for the notebook's own .strata directory
-# which is handled by the ignore below rather than a name match.
+# Large dirs (node_modules, .venv) are noise. Hidden dirs are skipped
+# wholesale; the notebook's own .strata is handled by the ignore below.
 _DISCOVER_SKIP_DIRS = frozenset(
     {
         "node_modules",
@@ -1652,8 +1602,7 @@ def _discover_notebooks(
             metadata = _read_notebook_metadata(notebook_toml)
             if metadata is not None:
                 results.append({"path": str(current.resolve()), **metadata})
-            # Don't descend into a notebook directory — nested notebooks
-            # aren't a supported layout and would create duplicate hits.
+            # Nested notebooks aren't supported and would create duplicate hits.
             continue
 
         if depth >= max_depth:
@@ -1666,8 +1615,7 @@ def _discover_notebooks(
                 continue
             stack.append((entry, depth + 1))
 
-    # Newest first when updated_at is present; fall back to path sort so
-    # ordering is stable when timestamps are missing or equal.
+    # Newest first; path sort keeps order stable for missing or equal timestamps.
     def sort_key(entry: dict[str, Any]) -> tuple[int, str]:
         ts = entry.get("updated_at") or ""
         return (0 if ts else 1, ts or entry["path"])
@@ -1736,7 +1684,7 @@ async def validate_recent_notebooks(req: ValidateRecentsRequest) -> dict:
             if (Path(raw_path) / "notebook.toml").is_file():
                 valid.append(raw_path)
         except OSError:
-            # Permission errors, broken symlinks, etc. — treat as invalid.
+            # Permission errors, broken symlinks, etc.: treat as invalid.
             continue
     return {"valid": valid}
 
@@ -1770,8 +1718,6 @@ async def delete_notebook_by_path(req: DeleteNotebookByPathRequest, request: Req
     if metadata is not None:
         _require_owner(metadata.get("owner"), _caller_identity(request))
 
-    # If a session happens to be open for this path, close it first.
-    # _find_session_by_path takes care of path canonicalization.
     existing = _session_manager._find_session_by_path(notebook_path)
     if existing is not None:
         if existing.has_active_environment_mutation():
@@ -1955,10 +1901,8 @@ async def submit_environment_job(
             environment_yaml_text=req.environment_yaml,
         )
     except ValueError as exc:
-        # Server-side validation (e.g. Rscript missing, renv not
-        # initialised, invalid R package name). Surface as 400 so the
-        # frontend can render a targeted error rather than a generic
-        # 500.
+        # Rscript missing, renv not initialised, bad R package name: a 400 lets the
+        # frontend show a targeted error.
         raise HTTPException(status_code=400, detail=str(exc))
     except RuntimeError as exc:
         _raise_environment_busy(session, str(exc))
@@ -2117,9 +2061,7 @@ async def list_sessions(request: Request) -> dict:
     _require_personal_mode_session_api()
     user_root = _get_user_storage_root(request)
     base_root = _get_notebook_storage_root()
-    # When scoping is on, ``user_root`` is the per-user subdir. When
-    # scoping is off, ``user_root`` equals ``base_root`` and the
-    # containment check is a no-op (every session passes).
+    # With scoping off, ``user_root`` equals ``base_root`` and this is a no-op.
     boundary = user_root if user_root is not None else base_root
 
     sessions = []
@@ -2173,9 +2115,8 @@ async def get_session(session_id: str, request: Request) -> JSONResponse:
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
 
-    # Reject cross-user reconnects: a session_id leaked to user B should
-    # not let them read user A's notebook state. We hide the existence
-    # of the session entirely with a 404.
+    # A leaked session_id must not let another user read this notebook; 404
+    # hides that the session exists.
     _require_owner(session.notebook_state.owner, _caller_identity(request))
 
     with timing.phase("serialize"):
@@ -2282,35 +2223,26 @@ async def update_cell_source(
         )
 
     try:
-        # Write to disk
         write_cell(session.path, cell_id, req.source, author=author)
         session.presence.record_edit(cell_id, author)
         session.presence.api_edit(author, cell_id)
 
-        # Update source in session
         cell_in_session = session.notebook_state.get_cell(cell_id)
         if cell_in_session:
             cell_in_session.source = req.source
-            # The disk knows who edited it; so must the session, or every read
-            # until the next reload reports the previous author.
+            # Or every read until the next reload reports the previous author.
             cell_in_session.updated_by = author
 
-        # Re-analyze just this cell and rebuild DAG
         session.re_analyze_cell(cell_id)
 
-        # Recompute staleness so cell statuses reflect the edit.
-        # Without this, cells keep their old "ready" status and the
-        # cascade planner won't trigger when the user runs a
-        # downstream cell.
+        # Without this, cells keep "ready" and the cascade planner won't trigger.
         await session.compute_staleness_async()
 
-        # Find and return the updated cell with DAG info
         cell = session.notebook_state.get_cell(cell_id)
         if not cell:
             raise HTTPException(status_code=404, detail="Cell not found")
 
-        # Return cell and updated DAG — include all cells so the
-        # frontend can sync staleness/status changes.
+        # All cells, so the frontend can sync staleness/status changes.
         await _broadcast_state(notebook_id, session)
         await broadcast_presence(notebook_id, session)
         return {
@@ -2396,11 +2328,8 @@ async def update_notebook_connections_endpoint(
         seen.add(conn.name)
 
     try:
-        # Preserve any [connections.<name>] blocks that previously
-        # failed to parse — a transient typo in one entry shouldn't
-        # be silently erased by an unrelated edit elsewhere. The
-        # writer's malformed-passthrough is the durable surface for
-        # that contract; the route just has to wire it through.
+        # Keep [connections.<name>] blocks that failed to parse, so a typo in one
+        # isn't erased by an unrelated edit.
         update_notebook_connections(
             session.path,
             req.connections,
@@ -2693,8 +2622,7 @@ async def update_notebook_python_version(
 
     current = read_requested_python_minor(session.path)
     if current == req.python_version:
-        # 200 no-op: idempotent. Avoids the disk write + uv sync when
-        # the user re-confirms the version they already have.
+        # Idempotent: skips the disk write + uv sync.
         return JSONResponse(
             status_code=200,
             content={
@@ -2808,8 +2736,7 @@ async def set_variant_active_endpoint(
     if req.mode is None and not req.active:
         raise HTTPException(status_code=400, detail="Provide `active` and/or `mode`.")
     try:
-        # Mode first: switch→sweep drops the active pointer's relevance, and
-        # ``active`` is ignored in sweep mode anyway.
+        # Mode first: ``active`` is ignored in sweep mode anyway.
         if req.mode is not None:
             session.set_variant_mode(group_id, req.mode)
         if req.active:
@@ -2842,19 +2769,11 @@ async def update_notebook_env_endpoint(
     try:
         update_notebook_env(session.path, req.env)
         session.reload()
-        # The disk writer strips sensitive values (API keys, tokens) so
-        # they don't leak into git. Restore the full values in the
-        # in-memory session so the LLM config and Runtime panel work
-        # for the duration of this session.
+        # The disk writer blanks sensitive values to keep them out of git; restore
+        # them in memory for the LLM config and Runtime panel.
         session.notebook_state.env.update(req.env)
-        # Also rebuild each cell's resolved env from the fresh
-        # notebook-level env plus the preserved per-cell overrides —
-        # otherwise the executor (which reads cell.env) still sees the
-        # blanked values and API-key-dependent cells fail with "key not
-        # set" even though the Runtime panel was updated.
-        # Anything the user just typed in the Runtime panel is a
-        # manual override — mark it as such in env_sources so the UI
-        # shows the correct badge.
+        # Runtime panel edits are manual overrides (for the UI badge). Rebuild each
+        # cell's env too: the executor reads cell.env, which still has blanked values.
         for key in req.env:
             session.notebook_state.env_sources[key] = "manual"
         for cell in session.notebook_state.cells:
@@ -2920,9 +2839,8 @@ async def update_notebook_secret_manager_config(
         config = req.model_dump(exclude_none=True)
         update_notebook_secret_manager(session.path, config)
         session.reload()
-        # After reload, env keys set via the Runtime panel are blanked
-        # on disk — restore whatever the in-memory state had for keys
-        # we're not replacing from the fresh fetch.
+        # Runtime-panel keys are blanked on disk; restore in-memory values for keys
+        # the fetch isn't replacing.
         for cell in session.notebook_state.cells:
             resolved = dict(session.notebook_state.env)
             resolved.update(cell.env_overrides or {})
@@ -2952,8 +2870,7 @@ async def refresh_notebook_secret_manager(notebook_id: str, session: SessionDep)
     """
     try:
         session.refresh_secrets()
-        # Propagate the refreshed env back to each cell's resolved view
-        # so the executor picks up rotated values immediately.
+        # So the executor picks up rotated values immediately.
         for cell in session.notebook_state.cells:
             resolved = dict(session.notebook_state.env)
             resolved.update(cell.env_overrides or {})
@@ -2984,8 +2901,8 @@ async def add_cell(notebook_id: str, session: SessionDep, req: AddCellRequest) -
         New cell state
     """
 
-    # Validate the insertion anchor up front (before the try, so the 400 isn't
-    # masked as a 500 by the catch-all) — matches LocalNotebookOps.add_cell.
+    # Before the try, so the 400 isn't masked as a 500 by the catch-all
+    # (as in LocalNotebookOps.add_cell).
     if req.after_cell_id is not None and not any(
         c.id == req.after_cell_id for c in session.notebook_state.cells
     ):
@@ -2994,10 +2911,8 @@ async def add_cell(notebook_id: str, session: SessionDep, req: AddCellRequest) -
         )
 
     try:
-        # Generate cell ID
         cell_id = str(uuid.uuid4())[:8]
 
-        # Add to notebook
         add_cell_to_notebook(
             session.path,
             cell_id,
@@ -3006,10 +2921,8 @@ async def add_cell(notebook_id: str, session: SessionDep, req: AddCellRequest) -
             author=resolve_author(req.author),
         )
 
-        # Reload notebook state
         session.reload()
 
-        # Find and return the new cell
         cell = session.notebook_state.get_cell(cell_id)
         if not cell:
             raise HTTPException(status_code=500, detail="Failed to create cell")
@@ -3042,24 +2955,16 @@ async def delete_cell(notebook_id: str, session: SessionDep, cell_id: str) -> di
     """
 
     try:
-        # Check if cell exists before deleting
         if not any(c.id == cell_id for c in session.notebook_state.cells):
             raise HTTPException(status_code=404, detail="Cell not found")
 
-        # Variant-aware delete: when the cell is part of a variant group,
-        # session.remove_cell promotes the next variant to active (or
-        # dissolves the group on the last delete) so the toml pointer
-        # stays consistent. Non-variant cells take the same code path
-        # with no extra work.
+        # For a variant member, remove_cell promotes the next variant (or dissolves
+        # the group) so the toml pointer stays consistent.
         session.remove_cell(cell_id)
         await _broadcast_state(notebook_id, session)
 
-        # Return the refreshed variant_groups + serialized cells *and*
-        # the DAG so the client can resync without a separate round-trip.
-        # Deleting a variant member can promote a sibling to active and
-        # re-wire downstream producers; without ``dag`` in the response
-        # the DAG view ends up rendering stale edges and the group
-        # appears orphaned until the next reload.
+        # Include ``dag``: deleting a variant member can promote a sibling and rewire
+        # producers, and without it the DAG view shows stale edges.
         return {
             "message": "Cell deleted",
             "cell_id": cell_id,
@@ -3105,7 +3010,6 @@ async def rename_notebook_endpoint(
     try:
         rename_notebook(session.path, req.name)
 
-        # Reload notebook state
         session.reload()
 
         return {
@@ -3156,8 +3060,8 @@ async def list_notebook_published_artifacts(notebook_id: str, session: SessionDe
     from strata.api.remote_registry import forward, remote_registry
     from strata.services.registry import registry_service
 
-    # One lookup for the whole notebook, keyed back to cells below. Per cell
-    # would be a round trip per cell once the store is somewhere else.
+    # One lookup for the notebook: per cell would be a round trip each once
+    # the store is remote.
     target = remote_registry()
     if target is not None:
         body = await forward(target, "GET", "/v1/registry/artifacts", params={"tag_key": "nb_cell"})
@@ -3166,8 +3070,7 @@ async def list_notebook_published_artifacts(notebook_id: str, session: SessionDe
         from strata.server import _get_artifact_store
 
         try:
-            # allow_read: the strip is a tenant-scoped read, so it is available
-            # in service mode too — it used to 403 there and show nothing.
+            # A tenant-scoped read, so available in service mode too.
             store = _get_artifact_store(allow_read=True)
         except HTTPException:
             return {"cells": {}}
@@ -3178,8 +3081,7 @@ async def list_notebook_published_artifacts(notebook_id: str, session: SessionDe
         by_cell.setdefault(str(item.pop("tag_value", "")), []).append(item)
 
     known = {cell.id for cell in session.notebook_state.cells}
-    # A stamp from a cell this notebook no longer has is not this notebook's
-    # strip; the store keeps the artifact, the panel just has nowhere to put it.
+    # A stamp from a cell no longer in the notebook has nowhere to show.
     return {"cells": {cell_id: items for cell_id, items in by_cell.items() if cell_id in known}}
 
 
@@ -3209,9 +3111,8 @@ async def promote_notebook_artifact(
     config = get_state().config
     base_url = getattr(config, "notebook_remote_store_url", None)
     if not base_url:
-        # There is nowhere to promote to, which is a configuration answer and
-        # not a failure of this request — say which setting is missing rather
-        # than let the UI show a bare 500.
+        # A configuration answer, not a failure: name the missing setting rather
+        # than a bare 500.
         raise HTTPException(
             status_code=409,
             detail=(
@@ -3232,9 +3133,8 @@ async def promote_notebook_artifact(
 
     target = RemoteStore(str(base_url), remote_store_headers(config))
     try:
-        # The copy is a chain of blocking HTTP calls against another machine,
-        # so it goes off the event loop: the notebook's WebSocket has to keep
-        # broadcasting while a large chain moves.
+        # Blocking HTTP calls to another machine; off the event loop so the
+        # WebSocket keeps broadcasting.
         promotion = await asyncio.to_thread(
             promote_artifact,
             store,
@@ -3248,10 +3148,8 @@ async def promote_notebook_artifact(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     except (RuntimeError, httpx.HTTPError) as exc:
-        # 502 rather than 500: this server is fine, the team's store refused or
-        # could not be reached. Whatever copied before that stays — it is keyed
-        # by provenance, so it is a usable cache entry whether or not it ever
-        # got a name.
+        # 502: the team store refused or was unreachable. What already copied stays;
+        # it is keyed by provenance, so it is a usable cache entry.
         raise HTTPException(status_code=502, detail=f"The team store at {base_url}: {exc}")
 
     return {
@@ -3642,10 +3540,7 @@ def _format_dag(session) -> dict:
     from strata.notebook.dag import producer_cell_label
 
     if not session.dag:
-        # An empty graph and an unbuildable one are not the same answer.
-        # Reporting the first for the second told every consumer -- the REST
-        # API, the frontend, the CLI and MCP -- that a notebook full of
-        # dependencies had none.
+        # An unbuildable graph must not be reported as an empty one.
         return {
             "edges": [],
             "topological_order": [],
@@ -3705,16 +3600,13 @@ async def execute_cell(
             },
         )
 
-    # Find the cell
     cell = session.notebook_state.get_cell(cell_id)
     if not cell:
         raise HTTPException(status_code=404, detail="Cell not found")
 
-    # Go through the one shared execute path so a CLI/MCP-driven run broadcasts
-    # the same live frames to WS spectators (the TUI) that a Vue WS-driven run
-    # does — and so REST and WS agree on the running → ready/error transitions.
-    # The exclusive wrapper takes the same reservation the WS handlers hold, so
-    # a REST/MCP run can't race a browser Run click on the same session.
+    # The shared execute path, so REST/CLI/MCP runs broadcast the same frames to
+    # WS spectators. The exclusive wrapper takes the WS handlers' reservation, so
+    # a REST run can't race a browser Run click on the same session.
     from strata.notebook.ws import NotebookBusyError, execute_cell_exclusive
 
     try:
@@ -3927,22 +3819,18 @@ async def export_notebook(
             app_view=bool(app_view),
         )
 
-    # Default: ZIP bundle.
     buf = io.BytesIO()
 
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-        # The committed files and provenance.json, from the same helper
-        # `strata export` uses — the two used to glob cells differently and
-        # disagree about whether provenance.json was part of a bundle.
+        # Same helper `strata export` uses, so both agree on the bundle contents.
         from strata.notebook.snapshot import write_committed_files
 
         write_committed_files(session, zf)
 
         selected_cells: list[str] = [c for c in (cells or "").split(",") if c]
         if fmt == "snapshot":
-            # Everything the ZIP does not already carry: outputs as files, the
-            # per-cell provenance and timings from .strata/runtime.json, the
-            # artifact index, and whichever bytes the caller asked for.
+            # What the ZIP doesn't already carry: output files, per-cell provenance and
+            # timings, the artifact index, and the requested bytes.
             from strata.notebook.snapshot import (
                 unknown_selection,
                 write_snapshot,
@@ -3957,9 +3845,8 @@ async def export_notebook(
             write_snapshot(
                 session,
                 zf,
-                # Narrowed by the check against the three values above, where
-                # the refusal can say which they are; a Literal query parameter
-                # would answer 422 with pydantic's phrasing instead.
+                # Narrowed by the check above, which names the allowed values; a Literal
+                # query parameter would answer 422 in pydantic's phrasing.
                 include=include,
                 selected_cells=selected_cells,
             )

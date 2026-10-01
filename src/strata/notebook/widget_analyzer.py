@@ -25,9 +25,8 @@ import math
 from dataclasses import dataclass, field
 from typing import Any
 
-# Control kind → its positional parameter names, in order. Any keyword argument
-# is accepted too; unknown keywords are captured in ``params`` and flagged by
-# validation, not here. Keep the set small + explicit (JSON-scalar values only).
+# Control kind to positional parameter names. Unknown keywords land in
+# ``params`` and are flagged by validation. JSON-scalar values only.
 _POSITIONAL_PARAMS: dict[str, list[str]] = {
     "slider": ["min", "max"],
     "number": ["default"],
@@ -162,10 +161,8 @@ def analyze_widget_cell(source: str) -> WidgetAnalysis:
 
     seen: set[str] = set()
     for node in tree.body:
-        # Only ``name = control(...)`` statements declare controls. Blank lines,
-        # comments (stripped by the parser), and anything else are ignored so a
-        # stray line doesn't abort the whole panel — but a malformed *control*
-        # (unknown kind, non-literal arg) is reported.
+        # Only ``name = control(...)`` declares a control; other lines are ignored so a
+        # stray line doesn't abort the panel, but a malformed control is reported.
         if not isinstance(node, ast.Assign):
             continue
         if len(node.targets) != 1 or not isinstance(node.targets[0], ast.Name):
@@ -215,8 +212,7 @@ def _coerce_one(descriptor: WidgetDescriptor, value: Any) -> Any:
             num = float(low)
         if isinstance(high, int | float) and num > high:
             num = float(high)
-        # Preserve int-ness when the control's default is an int, so setting an
-        # integer control to its default is a cache hit (10 == 10, not 10.0).
+        # Keep int-ness so an int control at its default is a cache hit (10, not 10.0).
         if isinstance(descriptor.default, int) and not isinstance(descriptor.default, bool):
             if num.is_integer():
                 return int(num)

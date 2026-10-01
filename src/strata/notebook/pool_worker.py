@@ -23,11 +23,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
-# orjson ships as a required dep in every notebook pyproject.toml we
-# generate, so it's guaranteed to be importable in the venv this
-# pool worker runs in. Native datetime / numpy / Decimal support
-# means we don't have to paper over exotic types at the application
-# level like stdlib json forced us to.
+# orjson is a required dep of every generated notebook pyproject.toml.
 import orjson
 
 
@@ -45,9 +41,7 @@ def _dumps_result(result: dict) -> str:
     ).decode("utf-8")
 
 
-# ---------------------------------------------------------------------------
-# Load the shared serializer
-# ---------------------------------------------------------------------------
+# --- Shared serializer ---
 
 
 def _load_local_module(filename: str, module_name: str):
@@ -63,21 +57,18 @@ def _load_local_module(filename: str, module_name: str):
 
 _ser = _load_local_module("serializer.py", "_nb_serializer")
 
-# Sentinel for "input could not be deserialized" (distinct from a real None).
+# Distinct from a real None.
 _MISSING = object()
 _immut = _load_local_module("immutability.py", "_nb_immutability")
 _display = _load_local_module("display/runtime.py", "_nb_display_runtime")
 _client_mod = _load_local_module("notebook_client.py", "_nb_client")
 
-# Harness-injected names that are NOT user inputs — excluded from mutation
-# fingerprinting (the ``display`` helper's buffer grows every run, which would
-# otherwise read as an in-place mutation).
+# Harness-injected names excluded from mutation fingerprinting (the ``display``
+# buffer grows every run and would read as an in-place mutation).
 _AMBIENT_NAMES = frozenset({"strata", *_display.DISPLAY_HELPER_NAMES})
 
 
-# ---------------------------------------------------------------------------
-# Warm-up helpers
-# ---------------------------------------------------------------------------
+# --- Warm-up helpers ---
 
 
 def parse_common_imports() -> list[str]:
@@ -111,9 +102,7 @@ def warm_imports(imports: list[str]) -> None:
             pass
 
 
-# ---------------------------------------------------------------------------
-# Cell execution (mirrors harness.py logic)
-# ---------------------------------------------------------------------------
+# --- Cell execution (mirrors harness.py) ---
 
 
 def _exec_with_display(source: str, namespace: dict) -> Any | None:
@@ -203,15 +192,13 @@ def _inject_client(manifest: dict, namespace: dict[str, Any]) -> Any:
     url = manifest.get("strata_url")
     if not url:
         return None
-    # Path-loaded, not ``import strata`` — the warm worker runs in the
-    # notebook venv (pyarrow + stdlib only); see notebook_client.py.
+    # Path-loaded, not ``import strata``: the warm worker runs in the notebook venv
+    # (pyarrow + stdlib only); see notebook_client.py.
     cell_id = manifest.get("strata_cell_id") or manifest.get("cell_id")
-    # Auth headers when the client targets a remote shared store (empty locally).
-    # The warm pool is the default WS path, so dropping these broke auth / tenant
-    # scoping for shared-store cells. Mirror harness.inject_client.
+    # Auth headers for a remote shared store (empty locally). Mirrors harness.inject_client.
     headers = manifest.get("strata_headers") or None
     # Variable -> artifact URI, so ``strata.promote("rows")`` names an input the
-    # way the cell reads it. Mirror harness.inject_client.
+    # way the cell reads it. Mirrors harness.inject_client.
     input_uris = {
         name: spec.get("uri", "")
         for name, spec in (manifest.get("inputs") or {}).items()
@@ -274,12 +261,8 @@ def execute_harness(manifest: dict) -> dict:
     ambient_client: Any = None
 
     try:
-        # Deserialize inputs. Done inside the try/except so a
-        # StrataRArtifactError (R-only RDS artifact consumed by a
-        # Python cell) produces the same structured error result as
-        # any other failure — previously this loop ran outside the
-        # try and a swallowed RDS error regressed to ``NameError: fit``
-        # once the cell body ran.
+        # Inside the try so a StrataRArtifactError (R-only RDS artifact read by a Python
+        # cell) yields a structured error instead of a later ``NameError``.
         def _deser_one(spec: dict, var_name: str) -> Any:
             """Deserialize one ``{content_type, file}`` spec, or ``_MISSING``."""
             file_name = spec.get("file", "")
@@ -300,17 +283,13 @@ def execute_harness(manifest: dict) -> dict:
                 print(f"Error deserializing {var_name}: {exc}", file=sys.stderr)
                 return _MISSING
 
-        # Opened before deserialization, not just around the cell body. This
-        # worker is warm and reused, and deserializing imports whatever library
-        # produced a value; a library that reads its configuration once at
-        # import — jax and JAX_ENABLE_X64 above all — would otherwise be
-        # configured from the worker's own environment rather than the
-        # notebook's. That silently downcast float64 inputs to float32.
+        # Before deserialization: the worker is reused, and a library that reads config
+        # at import (jax and JAX_ENABLE_X64) would otherwise take the worker's env,
+        # silently downcasting float64 inputs to float32.
         with _apply_env_overrides(manifest):
             for var_name, spec in inputs.items():
-                # Sweep-group input → {variant_name: value} dict (parity with
-                # harness.deserialize_inputs; a pooled @worker cell would otherwise
-                # never bind the var and crash with NameError).
+                # Sweep-group input -> {variant_name: value}; parity with
+                # harness.deserialize_inputs.
                 if isinstance(spec, dict) and spec.get("kind") == "sweep_dict":
                     bundle: dict[str, Any] = {}
                     for variant_name, variant_spec in spec.get("variants", {}).items():
@@ -381,10 +360,7 @@ def execute_harness(manifest: dict) -> dict:
             },
             "displays": serialized_displays,
             "stdout": stdout_buf.getvalue(),
-            # Inputs are deserialized before this buffer is installed, so the
-            # note about x64 is appended here rather than written where it
-            # happens. This worker is the reused one, which is where a
-            # process-wide switch matters most.
+            # Inputs are deserialized before this buffer exists, so the x64 note is appended here.
             "stderr": stderr_buf.getvalue()
             + (_ser.X64_NOTE if _ser.x64_was_enabled_here() else ""),
             "error": None,
@@ -409,9 +385,7 @@ def execute_harness(manifest: dict) -> dict:
         _close_client(ambient_client)
 
 
-# ---------------------------------------------------------------------------
-# Main loop
-# ---------------------------------------------------------------------------
+# --- Main loop ---
 
 
 def main() -> None:

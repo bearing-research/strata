@@ -72,12 +72,10 @@ class NotASnapshotError(ValueError):
 class ImportedSnapshot:
     notebook_dir: Path
     notebook_id: str
-    # The id the bundle carried, when it was taken and had to be replaced.
+    # Set when the bundle's id was taken and had to be replaced.
     replaced_id: str | None
     imported_artifacts: int
-    # Cells whose artifacts the bundle described but did not carry. They open
-    # IDLE; listed so the caller can say which, rather than leave the reader to
-    # discover it one cell at a time.
+    # Cells whose artifacts the bundle described but did not carry; they open IDLE.
     by_reference_cells: list[str] = field(default_factory=list)
 
 
@@ -114,11 +112,9 @@ def import_snapshot(
         new_id = str(uuid.uuid4()) if old_id in taken_ids else old_id
         rename = _renamer(old_id, new_id)
 
-        # Built beside the destination and renamed into place only once it is
-        # whole. A failure part-way used to leave a half-written notebook at
-        # `dest` — listed by discovery as though it were real, and blocking the
-        # retry, which refuses a non-empty destination. The staging name starts
-        # with a dot, which discovery skips.
+        # Built beside the destination and renamed in only once whole, so a failure
+        # leaves no half-written notebook for discovery to list or to block a retry.
+        # The dot-prefixed staging name is skipped by discovery.
         dest.parent.mkdir(parents=True, exist_ok=True)
         staging = dest.parent / f".{dest.name}.importing-{uuid.uuid4().hex[:8]}"
         staging.mkdir()
@@ -130,7 +126,7 @@ def import_snapshot(
             # 2. The committed files.
             _write_committed_files(archive, staging, notebook_toml, old_id, new_id, owner)
 
-            # 3. Runtime state, last: it points at what steps 1 and 2 put there.
+            # 3. Runtime state last: it points at what steps 1 and 2 wrote.
             _write_runtime_state(archive, staging, manifest, landed, rename)
 
             if dest.exists():
@@ -156,9 +152,7 @@ def import_snapshot(
     )
 
 
-# ---------------------------------------------------------------------------
-# Validation
-# ---------------------------------------------------------------------------
+# --- Validation ---
 
 
 def _validate(archive: zipfile.ZipFile) -> tuple[dict[str, Any], dict[str, Any]]:
@@ -175,9 +169,8 @@ def _validate(archive: zipfile.ZipFile) -> tuple[dict[str, Any], dict[str, Any]]
     manifest = json.loads(archive.read("artifacts.json"))
     version = int(manifest.get("format_version", 1))
     if version < SNAPSHOT_FORMAT_VERSION:
-        # A version-1 bundle carries bytes but not the records to rebuild them
-        # from — no content type to read a value back as, no lineage. Importing
-        # it would produce artifacts that load wrong; refusing says why.
+        # A version-1 bundle has bytes but no content types or lineage, so its
+        # artifacts would load wrong.
         raise NotASnapshotError(
             f"this snapshot is format {version}, which does not carry the "
             "artifact records an import needs; export it again"
@@ -202,9 +195,7 @@ def _validate(archive: zipfile.ZipFile) -> tuple[dict[str, Any], dict[str, Any]]
     return manifest, notebook_toml
 
 
-# ---------------------------------------------------------------------------
-# Identity
-# ---------------------------------------------------------------------------
+# --- Identity ---
 
 
 def _renamer(old_id: str, new_id: str):
@@ -233,9 +224,7 @@ def _rename_ref(ref: str, rename) -> str:
     return f"{rename(artifact_id)}{sep}{version}"
 
 
-# ---------------------------------------------------------------------------
-# Artifacts
-# ---------------------------------------------------------------------------
+# --- Artifacts ---
 
 
 def _import_records(
@@ -255,8 +244,7 @@ def _import_records(
         data = records[old_ref]
         record = _record_from(data)
 
-        # Edges name upstream refs, carried or not. Rename them all, then let
-        # where each carried ancestor actually landed win over the rename.
+        # Rename all edges, then let where each carried ancestor landed win.
         edges = json.loads(record.input_versions) if record.input_versions else {}
         edge_refs = {
             uri[len(_ARTIFACT_URI_PREFIX) :]
@@ -284,9 +272,8 @@ def _record_from(data: dict[str, Any]) -> ArtifactVersion:
     if missing:
         raise NotASnapshotError(f"artifact record is missing {', '.join(missing)}")
     artifact_id = str(data["id"])
-    # The id becomes a blob key, so it names a file. Checked here as well as in
-    # the store so a bundle carrying one says it is not a snapshot, the way its
-    # member names and cell ids do.
+    # The id becomes a blob key (a file name). Checked here too so a bad bundle
+    # fails as "not a snapshot", like bad member names and cell ids.
     if "/" in artifact_id or "\\" in artifact_id or ".." in PurePosixPath(artifact_id).parts:
         raise NotASnapshotError(f"the bundle names an artifact it cannot write: {artifact_id!r}")
     return ArtifactVersion(
@@ -323,8 +310,7 @@ def _ancestors_first(records: dict[str, dict[str, Any]]) -> list[str]:
     while pending:
         ready = [ref for ref in pending if parents[ref] <= placed]
         if not ready:
-            # A cycle cannot come from a store, but a hand-edited bundle can
-            # have one; import the rest in a stable order rather than hang.
+            # Only a hand-edited bundle can have a cycle; import the rest in a stable order.
             ready = pending[:1]
         for ref in ready:
             ordered.append(ref)
@@ -333,9 +319,7 @@ def _ancestors_first(records: dict[str, dict[str, Any]]) -> list[str]:
     return ordered
 
 
-# ---------------------------------------------------------------------------
-# Files and state
-# ---------------------------------------------------------------------------
+# --- Files and state ---
 
 
 def _write_committed_files(
@@ -367,12 +351,10 @@ def _write_committed_files(
     if changed:
         _write_notebook_toml_atomic(dest / "notebook.toml", notebook_toml)
     else:
-        # Verbatim when nothing about it changes, so an import round-trips a
-        # hand-edited notebook.toml's comments and layout untouched.
+        # Verbatim when unchanged, preserving a hand-edited notebook.toml's comments and layout.
         (dest / "notebook.toml").write_bytes(archive.read("notebook.toml"))
 
-    # A new notebook directory is ready for git (`strata new` does the same);
-    # an imported one should not commit its own .strata/ by accident.
+    # Keep the imported .strata/ out of git, as `strata new` does.
     write_gitignore(dest)
 
 
@@ -406,21 +388,18 @@ def _write_runtime_state(
         entry.last_source_hash = cell.get("source_hash")
         entry.last_env_hash = cell.get("env_hash")
         entry.execution_samples = list(cell.get("execution_samples") or [])
-        # Absent from snapshots written before the error pair was carried; a
-        # missing pair is simply no recorded failure.
+        # Older snapshots omit the error pair.
         entry.last_error = cell.get("error") or None
         entry.last_error_source_hash = cell.get("error_source_hash") if entry.last_error else None
         entry.display_outputs = [
             {**output, "artifact_uri": rewrite_uri(output.get("artifact_uri"))}
             for output in cell.get("display_outputs") or []
         ]
-        # Absent from snapshots written before widget selections were carried;
-        # those import at each control's default, as they did before.
+        # Older snapshots omit widget selections; controls import at their defaults.
         entry.widget_values = dict(cell.get("widget_values") or {})
 
         if not _SAFE_SEGMENT.match(cell_id):
-            # The manifest names the cell, and the console is written to a path
-            # built from that name.
+            # The console path is built from the cell id.
             raise NotASnapshotError(f"the bundle names a cell it cannot write: {cell_id!r}")
         console_member = f"outputs/{cell_id}/console.json"
         if console_member in names:

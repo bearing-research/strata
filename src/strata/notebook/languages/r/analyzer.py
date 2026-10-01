@@ -45,20 +45,13 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Hard wall on how long ``Rscript`` is given to parse + report on a
-# cell. The helper itself is bounded — no I/O, no network — so anything
-# past 5s is a hung interpreter we'd rather kill than wait on. Mirrors
-# the Python analyzer's behaviour of never blocking on cell analysis.
+# The helper does no I/O, so anything past this is a hung interpreter.
+# Cell analysis must never block, as in the Python analyzer.
 _ANALYZE_TIMEOUT_SECONDS = 5.0
 
-# Embedded R helper. Lives next to this module so ``importlib.resources``-
-# style packaging picks it up cleanly in installed builds.
 _HELPER_PATH = Path(__file__).parent / "analyze_cell.R"
 
-# Cache keyed on ``sha256(source)`` so re-analyzing an unchanged cell
-# doesn't re-spawn ``Rscript``. Survives the session — the cell content
-# *is* the cache key, so source edits invalidate by construction. New
-# entries replace old ones for the same hash (idempotent).
+# Keyed on ``sha256(source)``, so edits invalidate by construction.
 _CACHE: dict[str, AnalyzedCell] = {}
 
 
@@ -134,20 +127,15 @@ def _run_rscript(source: str) -> AnalyzedCell:
         )
         return AnalyzedCell()
 
-    # A parse error from the R interpreter is a normal cell-edit state
-    # (user halfway through typing). The Python analyzer drops the
-    # error message into ``CellAnalysis.error`` and the DAG sees an
-    # empty cell; matching that shape keeps the two languages
-    # consistent. Logging here would be noisy.
+    # A parse error is a normal mid-typing state. Match the Python analyzer:
+    # error in ``CellAnalysis.error``, empty cell for the DAG, no logging.
     if payload.get("parse_error"):
         logger.debug("R cell parse error: %s", payload.get("parse_error"))
         return AnalyzedCell()
 
     defines = list(payload.get("defines") or [])
     references = list(payload.get("references") or [])
-    # R has no equivalent of Python's ``mutation_defines`` (subscript-
-    # assign tracking via ``a[k] <- v``). Treating mutations as defines
-    # is a possible #57+ enhancement; for now leave the field empty.
+    # R has no ``mutation_defines`` equivalent (``a[k] <- v`` tracking) yet.
     return AnalyzedCell(
         defines=defines,
         references=references,
@@ -172,26 +160,18 @@ class _RAnalyzer:
         try:
             result = _run_rscript(source)
         except RscriptUnavailableError:
-            # When R isn't installed, we still need to return *something*
-            # so notebook loading doesn't crash. Empty analysis leaves
-            # R cells isolated in the DAG, which is the right shape —
-            # cells without analysis can't connect to upstream / downstream
-            # nodes, and the executor will refuse to run them with a
-            # clear "R not installed" message once #57 lands.
+            # Without R, return an empty analysis so loading doesn't crash; the cell
+            # stays isolated in the DAG and the executor refuses to run it.
             logger.info(
                 "R cell %s has no DAG analysis: Rscript not on PATH",
                 cell.id,
             )
             result = AnalyzedCell()
-            # Do NOT cache the empty result — once R is installed, we
-            # want the next analyze call to actually invoke Rscript
-            # rather than hit a stale cache miss.
+            # Don't cache: once R is installed the next call must invoke Rscript.
             return result
 
         _CACHE[key] = result
         return result
 
 
-# Register at module load. Importing ``strata.notebook.languages.r``
-# (via the package ``__init__``) wires the adapter into the registry.
 register_language_analyzer(CellLanguage.R, _RAnalyzer())

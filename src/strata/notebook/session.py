@@ -188,11 +188,9 @@ class ExecutionSample:
 
     duration_ms: float
     cache_hit: bool
-    # Set only when the hit came from the shared team store: who computed it,
-    # and what their run cost. A team hit is the case the ordinary estimator
-    # cannot price — it credits the last local uncached run, and someone served
-    # a teammate's result never made one — so the saving has to be carried on
-    # the sample rather than inferred from the history around it.
+    # Set only for a shared team store hit: who computed it and what their run cost.
+    # The estimator prices a hit against the last local uncached run, which a
+    # teammate's hit never had, so the saving rides on the sample.
     from_team: bool = False
     team_principal: str | None = None
     team_saved_ms: int = 0
@@ -282,21 +280,16 @@ class NotebookSession:
         self.id: str = str(uuid.uuid4())
         self.notebook_state = notebook_state
         self.path = Path(path)
-        # Unset until a sync, or ``refresh_environment_runtime``, records the
-        # notebook's interpreter: while it is None, cells do not run. Seeding
-        # it from an existing .venv here would let a sync that raises on open
-        # leave cells running in the old environment with no notice.
+        # Unset until a sync or ``refresh_environment_runtime`` records it; while None,
+        # cells do not run. Seeding it from an existing .venv would let a sync that
+        # raises on open leave cells running in the old environment with no notice.
         self.venv_python: Path | None = None
         self.dag: NotebookDag | None = None
-        # Why the last DAG build failed, or None when it succeeded. Consumers
-        # must distinguish "no dependencies" from "could not be computed".
+        # None when the build succeeded; consumers must tell "no dependencies" from
+        # "could not be computed".
         self.dag_error: str | None = None
-        # Environment backend — Phase 1 always resolves to UvBackend.
-        # Phase 2 will use detection + notebook.toml override to pick
-        # between UvBackend and AttachedBackend.
         self.backend: EnvironmentBackend = get_backend(self.path)
 
-        # M4: Initialize artifact manager
         from strata.notebook.artifact_integration import NotebookArtifactManager
 
         self.artifact_manager = NotebookArtifactManager(
@@ -304,49 +297,32 @@ class NotebookSession:
             artifact_dir=path / ".strata" / "artifacts",
         )
 
-        # One staleness computation at a time: it mutates the cells it walks
-        # -- status, staleness, artifact uris -- which on the event loop it had
-        # to itself. Taken by ``compute_staleness`` itself rather than only by
-        # the off-loop wrapper, because the callers that stayed on the loop
-        # walk the same cells: a thread part-way through a slow fetch and an
-        # on-loop recompute would otherwise write a cell's status over each
-        # other, and the cascade planner reads exactly that.
-        #
-        # Reentrant so the off-loop wrapper can hold it across the call it
-        # makes. A threading lock rather than an asyncio one because a session
-        # outlives any single loop -- one built for a test client's portal,
-        # say -- and an asyncio.Lock awaited from a loop other than the one it
-        # queued its waiter on never wakes.
+        # One staleness computation at a time: it mutates the cells it walks (status,
+        # staleness, artifact uris), and an off-loop walk and an on-loop recompute
+        # would overwrite each other's status, which the cascade planner reads.
+        # Reentrant so the off-loop wrapper can hold it across its call. A threading
+        # lock because a session outlives any single event loop, and an asyncio.Lock
+        # awaited from another loop never wakes.
         self._staleness_lock = threading.RLock()
 
-        # M6: Initialize warm process pool (optional)
         self.warm_pool: WarmProcessPool | None = None
         self.r_warm_pool: WarmProcessPool | None = None
 
-        # Session TTL tracking
         self.last_accessed: float = _time.time()
 
-        # v1.1: Execution history for profiling and duration estimates.
-        # Seeded from ``.strata/runtime.json`` so the profiling summary's
-        # cache-savings figure survives a server restart — it is the
-        # notebook's own evidence that it skipped work, and it used to reset
-        # to zero while every cell was still serving from cache.
+        # Seeded from ``.strata/runtime.json`` so the cache-savings figure survives a restart.
         self.execution_history: dict[str, list[ExecutionSample]] = (
             self._load_persisted_execution_history()
         )
 
-        # v1.1: Causality chains for stale cells
         self.causality_map: dict[str, CausalityChain] = {}
 
-        # Who is on the session and which cell each last changed.
         self.presence = SessionPresence()
 
-        # What each ``@dataset`` last resolved to, keyed by (variable,
-        # reference), with when: staleness re-asks the registry at most every
-        # ``datasets.STALE_CHECK_SECONDS``, and a run's resolution lands here.
+        # Keyed by (variable, reference), with when: staleness re-asks the registry at
+        # most every ``datasets.STALE_CHECK_SECONDS``.
         self._dataset_checks: dict[tuple[str, str], tuple[float, str]] = {}
 
-        # Environment/runtime sync state for the current notebook venv.
         self.environment_sync_state: str = "unknown"
         self.environment_sync_error: str | None = None
         self.environment_sync_notice: str | None = None
@@ -361,11 +337,9 @@ class NotebookSession:
         self._synchronous_environment_mutation: str | None = None
         self._load_environment_job_history()
 
-        # Analyze all cells and build DAG
         self._analyze_and_build_dag()
         self._run_annotation_validation()
-        # Pull secrets from the configured manager (if any) and merge
-        # them into the env map before cells start seeing env.
+        # Merge manager secrets into env before cells see it.
         self._apply_configured_secrets()
 
     def _apply_configured_secrets(self) -> None:
@@ -383,8 +357,7 @@ class NotebookSession:
         from strata.notebook.secret_manager import apply_secrets_to_notebook_state
 
         apply_secrets_to_notebook_state(self.notebook_state)
-        # Rebuild per-cell resolved env, preserving cell-level
-        # overrides — same pattern as update_notebook_env_endpoint.
+        # Preserve cell-level overrides, as update_notebook_env_endpoint does.
         for cell in self.notebook_state.cells:
             resolved = dict(self.notebook_state.env)
             resolved.update(cell.env_overrides or {})
@@ -489,8 +462,7 @@ class NotebookSession:
                 None,
             )
 
-        # Decide the variant_group toml fixup *before* the cell goes away,
-        # while we still have the resolved group's member ordering.
+        # Decide the variant_group toml fixup while the group's member order is still known.
         promote_to: str | None = None
         drop_group = False
         if resolved is not None:
@@ -498,10 +470,8 @@ class NotebookSession:
             if not remaining:
                 drop_group = True
             elif cell.id == resolved.active_cell_id:
-                # The active variant is going away — promote the
-                # first-in-source-order survivor so the toml pointer stays
-                # valid (otherwise reload would emit variant_active_unknown
-                # and fall back implicitly, which works but is noisy).
+                # Promote the first survivor so the toml pointer stays valid (else reload
+                # emits variant_active_unknown).
                 promote_to = remaining[0].name
 
         remove_cell_from_notebook(self.path, cell_id)
@@ -540,8 +510,7 @@ class NotebookSession:
 
         active_cell = self.notebook_state.get_cell(resolved.active_cell_id)
         if active_cell is None:
-            # Defensive: resolution gave us an active_cell_id that doesn't
-            # match any cell. Shouldn't happen but bail cleanly if it does.
+            # Shouldn't happen, but bail cleanly.
             raise ValueError(f"Active variant cell for group {group!r} not found")
 
         taken = {m.name for m in resolved.members}
@@ -549,12 +518,9 @@ class NotebookSession:
         new_cell_id = uuid.uuid4().hex[:8]
         last_member_cell_id = resolved.members[-1].cell_id
 
-        # The caller's authorship, not the cloned cell's. `created_by` records
-        # who *added* a cell, and whoever clicked "add variant" added this one
-        # — inheriting the origin's author would write one principal's id as
-        # another's action in the mode where the field is supposed to be a
-        # fact, and would report a hand-made variant of an agent's cell as the
-        # agent's, inverting the question the field exists to answer.
+        # The caller's authorship, not the cloned cell's: `created_by` records who
+        # added this cell, and inheriting the origin's author would attribute one
+        # principal's action to another.
         add_cell_to_notebook(
             self.path,
             new_cell_id,
@@ -565,8 +531,7 @@ class NotebookSession:
         new_source = _rewrite_variant_annotation(active_cell.source, group, new_name)
         write_cell(self.path, new_cell_id, new_source, author=author)
 
-        # Switch active to the new variant. set_variant_active reloads,
-        # so the DAG / staleness / variant flags refresh in one pass.
+        # set_variant_active reloads, so DAG / staleness / variant flags refresh in one pass.
         self.set_variant_active(group, new_name)
         return new_name, new_cell_id
 
@@ -578,15 +543,11 @@ class NotebookSession:
             for cell in self.notebook_state.cells
         }
         self.notebook_state = parse_notebook(self.path)
-        # Re-analyze all cells and rebuild DAG
         self._analyze_and_build_dag()
         self._run_annotation_validation()
         self._apply_configured_secrets()
-        # Restore prior display outputs and provenance history *before*
-        # computing staleness. compute_staleness() compares the cell's
-        # ``last_provenance_hash`` against the newly-resolved env / source
-        # / inputs — without restoring it first, every cell falls back to
-        # IDLE and we lose the ability to mark cells as STALE.
+        # Restore ``last_provenance_hash`` *before* computing staleness, or every cell
+        # falls back to IDLE and none can be marked STALE.
         self._restore_execution_history(previous_cells)
         self.compute_staleness()
         self._restore_ready_runtime_state(previous_cells, previous_runtime_identities)
@@ -596,8 +557,6 @@ class NotebookSession:
 
         Updates notebook_state with defines/references/upstream/downstream/isLeaf.
         """
-        # Per-language analyzer dispatch lives in ``strata.notebook.languages``;
-        # adding a new language is a registry entry, not a branch here.
         from strata.notebook.languages import analyze_cell_by_language
 
         cell_analyses = []
@@ -607,11 +566,8 @@ class NotebookSession:
             references = list(analyzed.references)
             mutation_defines = list(analyzed.mutation_defines)
 
-            # Loop cells read the carry variable from upstream on iter 0
-            # even when Python scoping sees it as a local (because the
-            # body both reads and rebinds it). Record the carry as a
-            # reference so the DAG links the loop cell to the upstream
-            # that seeds its initial state.
+            # Loop cells read the carry from upstream on iter 0 even though Python scoping
+            # sees it as local, so record it as a reference to wire the seeding upstream.
             annotations = parse_annotations(cell.source)
             if (
                 annotations.loop is not None
@@ -637,17 +593,15 @@ class NotebookSession:
                     per_variant_group=annotations.per_variant_group,
                 )
             )
-            # Update cell with analysis results
             cell.defines = defines
             cell.references = references
             cell.mutation_defines = mutation_defines
             cell.builtin_references = builtin_references
             cell.variant_group = variant_group
             cell.variant_name = variant_name
-            # Default to active until the DAG resolution proves otherwise.
+            # Active until the DAG resolution proves otherwise.
             cell.variant_active = True
 
-        # Build DAG
         try:
             self.dag_error = None
             self.dag = NotebookDag.from_cells(
@@ -656,14 +610,12 @@ class NotebookSession:
                 variant_modes=self.notebook_state.variant_modes,
             )
 
-            # Update cells with DAG information
             for cell in self.notebook_state.cells:
                 cell.upstream_ids = self.dag.cell_upstream.get(cell.id, [])
                 cell.downstream_ids = self.dag.cell_downstream.get(cell.id, [])
                 cell.is_leaf = cell.id in self.dag.leaves
                 cell.variant_active = cell.id not in self.dag.inactive_cells
 
-            # Surface resolved variant groups for the API/frontend.
             self.notebook_state.variant_groups = [
                 VariantGroupState(
                     group=group.group,
@@ -683,15 +635,9 @@ class NotebookSession:
             ]
 
         except ValueError as e:
-            # Cycle detected or variant collision — log but don't crash.
-            #
-            # Keep the reason. Without it every consumer projected ``dag is
-            # None`` as an EMPTY graph, which is byte-identical to a notebook
-            # that genuinely has no dependencies: ``strata dag`` reported no
-            # edges, and "is this variable defined?" answered a confident no
-            # for a variable that is defined, so an agent would recreate work
-            # that already existed. The accurate message was logged here and
-            # thrown away, leaving callers to guess "cycle".
+            # Cycle or variant collision: log, don't crash. Keep the reason, since a None
+            # DAG otherwise reads as a notebook with no dependencies and "is this variable
+            # defined?" would answer a confident no.
             logger.warning("DAG build failed: %s", e)
             self.dag = None
             self.dag_error = str(e)
@@ -796,15 +742,10 @@ class NotebookSession:
         Args:
             cell_id: ID of the cell to re-analyze
         """
-        # Find the cell
         cell = self.notebook_state.get_cell(cell_id)
         if not cell:
             return
 
-        # Per-language analyzer dispatch lives in
-        # ``strata.notebook.languages``; ``analyze_cell_by_language``
-        # returns the unified ``AnalyzedCell`` shape regardless of the
-        # underlying language.
         from strata.notebook.languages import analyze_cell_by_language
 
         analyzed = analyze_cell_by_language(cell, self)
@@ -812,7 +753,7 @@ class NotebookSession:
         cell.references = list(analyzed.references)
         cell.builtin_references = list(analyzed.builtin_references)
 
-        # Rebuild full DAG (since one cell changed, downstream may be affected)
+        # One cell changed, so downstream may be affected.
         self._analyze_and_build_dag()
 
     def get_artifact_manager(self) -> NotebookArtifactManager:
@@ -859,14 +800,9 @@ class NotebookSession:
         Returns:
             Dict mapping cell_id -> CellStaleness
         """
-        # Everything outside this process is read first, before the lock. The
-        # lock serializes the walk because the walk mutates the cells it
-        # visits; the reads mutate nothing, and they are the slow part -- an
-        # ``@fetch`` gets sixty seconds to answer. Held across those, the lock
-        # stopped being a guard on a short mutation and became one thread's
-        # network call blocking every caller of the other kind: the broadcast
-        # path takes it on the event loop, where waiting freezes every socket
-        # the process has.
+        # Outside reads (an ``@fetch`` gets 60s) happen before the lock: they mutate
+        # nothing, and holding the lock across them would block the broadcast path,
+        # which takes it on the event loop and would freeze every socket.
         prefetched = self._outside_world_fingerprints()
         with self._staleness_lock:
             return self._compute_staleness_locked(prefetched, executing)
@@ -908,27 +844,20 @@ class NotebookSession:
         self, prefetched: dict[str, _OutsideWorld], executing: str | None = None
     ) -> dict[str, CellStaleness]:
         staleness_map: dict[str, CellStaleness] = {}
-        stale_cells: set[str] = set()  # Track stale cells for propagation
+        stale_cells: set[str] = set()  # for propagation
         if self.dag is None:
-            # No DAG — all cells are idle
             for cell in self.notebook_state.cells:
                 staleness_map[cell.id] = CellStaleness(status=CellStatus.IDLE)
             self._apply_staleness_map(staleness_map, executing)
             self.causality_map = {}
             return staleness_map
 
-        # Walk cells in topological order
         for cell_id in self.dag.topological_order:
             cell = self.notebook_state.get_cell(cell_id)
             if cell is None:
                 continue
 
-            # Languages that skip the provenance chain (today: markdown,
-            # since it's pure prose with no inputs or subprocess) are
-            # always READY — no hashing, no cache lookup. The protocol
-            # exposes this via ``skips_execution_provenance`` so adding
-            # another no-execution language (TBD) doesn't need an edit
-            # here.
+            # Languages with ``skips_execution_provenance`` (markdown) are always READY.
             from strata.notebook.languages import get_language_executor
 
             language_executor = get_language_executor(cell.language)
@@ -936,18 +865,9 @@ class NotebookSession:
                 staleness_map[cell_id] = CellStaleness(status=CellStatus.READY, reasons=[])
                 continue
 
-            # If ANY upstream cell is stale, this cell's inputs will change
-            # once the upstream re-runs, so it too is out of date and must
-            # re-run before it can be trusted. How we surface that depends
-            # on whether this cell already holds a result (#361):
-            #   - it ran before (``last_provenance_hash`` set) → STALE with
-            #     an UPSTREAM reason, so the UI reads "stale · upstream
-            #     changed" rather than a bare IDLE (matches how a user
-            #     watching a cascade thinks about it).
-            #   - it never ran (fresh notebook) → IDLE: there is no cached
-            #     result to invalidate, and it can't be evaluated until the
-            #     upstream produces its inputs.
-            # Either way it propagates: downstream cells are out of date too.
+            # A stale upstream makes this cell out of date too, and it propagates. If it ran
+            # before (``last_provenance_hash`` set) it shows STALE with an UPSTREAM reason;
+            # if it never ran, IDLE: there is no result to invalidate.
             has_stale_upstream = any(uid in stale_cells for uid in cell.upstream_ids)
 
             if has_stale_upstream:
@@ -970,7 +890,6 @@ class NotebookSession:
                 stale_cells.add(cell_id)
                 continue
 
-            # Compute current provenance hash
             source_hash = compute_source_hash(cell.source)
             runtime_env = self._collect_runtime_env(cell)
             env_hash = compute_execution_env_hash(
@@ -979,14 +898,10 @@ class NotebookSession:
                 runtime_identity=self._effective_worker_runtime_identity(cell),
             )
 
-            # Get input hashes from upstream artifacts. Use the same
-            # per-variable artifact selection as execution, not the legacy
-            # single artifact_uri field.
+            # Same per-variable artifact selection as execution.
             input_hashes = self._collect_input_hashes(cell_id)
-            # Read before the lock. Missing only when the DAG moved between
-            # the two, which is a race this walk loses anyway -- the next
-            # flush recomputes -- so it reads its own rather than skipping a
-            # cell's mounts.
+            # Missing only if the DAG moved meanwhile, a race this walk loses anyway (the
+            # next flush recomputes), so read our own rather than skip the cell's mounts.
             outside = prefetched.get(cell_id)
             if outside is None:
                 outside = self._outside_world_for(cell)
@@ -1006,10 +921,7 @@ class NotebookSession:
                 env_hash,
             )
 
-            # Check if cached artifact exists.
-            # The executor stores per-variable provenance hashes:
-            #   sha256(f"{provenance_hash}:{var_name}")
-            # so we must check with the same scheme.
+            # Per-variable hashes: sha256(f"{provenance_hash}:{var_name}").
             cached_outputs = self._resolve_cached_outputs(cell_id, provenance_hash)
             cached_display_outputs = self._resolve_cached_display_outputs(
                 cell_id,
@@ -1018,13 +930,10 @@ class NotebookSession:
             )
 
             if cached_outputs is None:
-                # A cell whose artifacts are keyed under its own scheme now has
-                # display artifacts like any other, and resolving one says only
-                # that the generic triplet is unchanged. That is not enough to
-                # call such a cell ready: the connection it read and the policy
-                # it cached under are no part of that hash, so the branch below
-                # has to settle it. Restore what it showed either way, since a
-                # cell that is not ready still shows its last result.
+                # Resolving a display artifact for a cell keyed under its own scheme only says
+                # the generic triplet is unchanged; the connection and cache policy aren't in
+                # that hash, so the branch below settles readiness. Restore what it showed
+                # either way.
                 keyed_elsewhere = (
                     language_executor.has_alternate_cache_scheme
                     or parse_annotations(cell.source).per_variant
@@ -1037,48 +946,21 @@ class NotebookSession:
                     if cached_display_outputs:
                         cell.display_outputs = cached_display_outputs
                         cell.display_output = cached_display_outputs[-1]
-                    # Languages with an alternate per-variable cache
-                    # scheme (today PROMPT + SQL) store artifacts under
-                    # a hash the generic per-variable lookup above
-                    # can't match. The wrapper persists the generic
-                    # provenance hash via
-                    # ``record_successful_execution_provenance`` so we
-                    # preserve READY status when it matches despite a
-                    # cache miss. Same logic kicks in for leaf cells,
-                    # and for ``# @per_variant`` fan-out cells — their
-                    # outputs live under variant-scoped ``@variant=``
-                    # artifact ids the generic lookup can't see, while
-                    # the fan-out orchestrator records the base hash.
-                    # A cell whose artifacts are keyed under its own scheme is
-                    # preserved from IDLE as well as READY: a cold open starts
-                    # every cell IDLE (status is not persisted), so requiring
-                    # READY made this branch dead on the path it was written
-                    # for — reopening sent prompt, SQL, widget and fan-out
-                    # cells back to idle, and everything downstream to stale,
-                    # with nothing changed. A leaf still needs READY: its
-                    # structural comparison on reload (mounts, worker, env)
-                    # catches changes its provenance hash does not.
+                    # Alternate-scheme cells (PROMPT, SQL, ``# @per_variant`` fan-out) store under
+                    # hashes the generic lookup can't match; the generic hash is recorded via
+                    # ``record_successful_execution_provenance`` so a match preserves status.
+                    # They are preserved from IDLE too, since a cold open starts every cell IDLE.
+                    # A leaf still needs READY: its structural comparison on reload (mounts,
+                    # worker, env) catches what its hash does not.
                     allowed_status = (
                         (CellStatus.READY, CellStatus.IDLE)
                         if keyed_elsewhere
                         else (CellStatus.READY,)
                     )
-                    # The generic hash is not the whole of what these cells
-                    # cache on: a SQL cell's rows depend on the connection it
-                    # read and the policy it cached under, a prompt cell's
-                    # answer on the model it asked. Preserving READY on the
-                    # generic hash alone called a cell ready after its
-                    # connection was repointed at another database, and after
-                    # a ``@cache session`` cell's session had ended -- green,
-                    # showing the old answer, with nothing marked stale. So
-                    # the cell's own identity has to match what it recorded,
-                    # and a language that cannot settle it without a probe
-                    # says so by returning None.
-                    # Only for the status this branch resurrects. A cell that
-                    # is READY now ran in this session, and preserving that
-                    # across a reload is what it has always done; it is
-                    # bringing one back from IDLE -- a cold open, where the run
-                    # was some other session's -- that needs the identity.
+                    # The generic hash isn't all these cells cache on (a SQL cell's connection and
+                    # cache policy, a prompt's model), so the cell's own identity must match what it
+                    # recorded; None means it can't be settled without a probe. Only needed when
+                    # resurrecting from IDLE (a cold open); a READY cell ran in this session.
                     identity_required = keyed_elsewhere and cell.status == CellStatus.IDLE
                     identity = self.reopen_identity(cell) if identity_required else None
                     identity_holds = not identity_required or (
@@ -1092,30 +974,23 @@ class NotebookSession:
                     )
                     if can_preserve_uncached_ready:
                         staleness_map[cell_id] = CellStaleness(status=CellStatus.READY, reasons=[])
-                        # The cell's outputs live under a per-language scheme
-                        # the generic lookup above cannot see, so its artifact
-                        # uris are still empty here — and a downstream cell
-                        # reads them to build its own provenance.
+                        # Outputs live under a per-language scheme, so artifact uris are still empty
+                        # here, and downstream cells read them to build their provenance.
                         self._restore_alternate_scheme_outputs(cell)
                     elif self._upstream_moved_under(cell, source_hash, env_hash):
-                        # It has a result, made from upstream artifacts that
-                        # have since been replaced by newer versions of the
-                        # same ones, with its own source and environment
-                        # unchanged. That is stale because an upstream moved,
-                        # and saying idle would read as "never ran".
+                        # Upstream artifacts were replaced by newer versions with this cell's source
+                        # and env unchanged: stale, not idle (which would read as "never ran").
                         staleness_map[cell_id] = CellStaleness(
                             status=CellStatus.STALE, reasons=[StalenessReason.UPSTREAM]
                         )
                         stale_cells.add(cell_id)
                     else:
-                        # No cached artifact — cell is stale/idle unless we can
-                        # prove it still matches the last successful uncached run.
+                        # No cached artifact: idle unless it provably matches the last
+                        # successful uncached run.
                         staleness_map[cell_id] = CellStaleness(status=CellStatus.IDLE, reasons=[])
                         stale_cells.add(cell_id)
             else:
-                # Artifact exists — mark as ready
                 staleness_map[cell_id] = CellStaleness(status=CellStatus.READY, reasons=[])
-                # Populate per-variable artifact URIs
                 for var_name, (artifact_id, version) in cached_outputs.items():
                     uri = f"strata://artifact/{artifact_id}@v={version}"
                     cell.artifact_uris[var_name] = uri
@@ -1125,7 +1000,6 @@ class NotebookSession:
 
         self._apply_staleness_map(staleness_map, executing)
 
-        # v1.1: Compute causality chains for stale cells
         self.causality_map = compute_causality_on_staleness(self)
 
         return staleness_map
@@ -1197,8 +1071,8 @@ class NotebookSession:
         """Persist computed staleness back onto in-memory cell state."""
         for cell in self.notebook_state.cells:
             if cell.id == executing:
-                # Still running: a verdict now would tell every client it had
-                # stopped. Out of the map too, which is what gets broadcast.
+                # Still running: a verdict now would tell every client it had stopped.
+                # Removed from the broadcast map too.
                 staleness_map.pop(cell.id, None)
                 continue
             staleness = staleness_map.get(cell.id)
@@ -1206,21 +1080,13 @@ class NotebookSession:
                 continue
             cell.staleness = staleness
             if self._failure_still_stands(cell):
-                # A failed cell stored no artifact for this run, so the walk
-                # calls it idle, or stale when an older result of it exists
-                # and an upstream has since moved, or even ready when a rerun
-                # failed at the key an earlier success is cached under. Any of
-                # those throws away the one thing worth knowing about it: until
-                # it is edited or runs again successfully (a cache hit counts,
-                # and clears the error), the failure is the truth about it.
+                # A failed cell stored no artifact, so the walk may call it idle, stale or even
+                # ready. Until it is edited or succeeds again (a cache hit counts), the
+                # failure is the truth about it.
                 cell.status = CellStatus.ERROR
                 cell.cache_hit = False
-                # And say so in the map, not only on the cell. The map is what
-                # the WebSocket broadcasts from, so overriding one and not the
-                # other told an attached client `idle` for a cell this call
-                # had just decided was failed: a viewer applying deltas kept
-                # the old table until it resynced, while every other reader of
-                # the session saw the error.
+                # The WebSocket broadcasts from the map, so set it there too, or clients see
+                # `idle` for a failed cell.
                 cell.staleness = CellStaleness(status=CellStatus.ERROR, reasons=staleness.reasons)
                 staleness_map[cell.id] = cell.staleness
                 continue
@@ -1306,25 +1172,20 @@ class NotebookSession:
             return
 
         cell.execution_method = result.execution_method
-        # What the run said went wrong, kept against the source that said it.
-        # Without this the traceback lives only in the response to whoever
-        # started the run: an agent that comes back to look at a failed cell
-        # reads an empty console and no error, and has to re-run the failure
-        # (side effects and all) to find out what it was.
+        # Keep the error against its source, so an agent returning to a failed cell
+        # doesn't have to re-run it (side effects and all) to see what went wrong.
         had_error = cell.error is not None
         if result.success:
             cell.error = None
             cell.error_source_hash = None
         else:
-            # A Python traceback ends with the error message, so it is the
-            # fuller form of the same fact when the harness produced one.
+            # A Python traceback is the fuller form of the error message.
             detail = getattr(result, "traceback", None)
             cell.error = (detail or result.error or "").strip()
             cell.error_source_hash = compute_source_hash(cell.source)
         if cell.error is not None or had_error:
-            # Runtime state, not notebook.toml (invariant 6). Written only when
-            # a failure appears or the one before it clears, so the ordinary
-            # green run does not rewrite the file for nothing.
+            # Runtime state, not notebook.toml. Written only when an error appears or
+            # clears, so a green run doesn't rewrite the file.
             from strata.notebook.runtime_state import persist_cell_error
 
             persist_cell_error(
@@ -1333,18 +1194,13 @@ class NotebookSession:
                 error=cell.error,
                 source_hash=cell.error_source_hash,
             )
-        # Persist console on a real execution, and on a cache hit that *replays*
-        # console (a leaf cell whose stdout/stderr were cached by provenance).
-        # We must NOT write on a cache hit that carries no console, because
-        # ``update_cell_console_output`` would *unlink* the file the original
-        # execution wrote — silently deleting recoverable print() output.
-        # A failed run is a real execution: its prints are the last thing that
-        # happened before the traceback, which is exactly what is worth reading.
+        # Write on a real execution or a cache hit that replays console. A hit with no
+        # console must not write: ``update_cell_console_output`` would unlink the
+        # original run's output. A failed run is a real execution.
         if not result.cache_hit or result.stdout or result.stderr:
             cell.console_stdout = result.stdout or ""
             cell.console_stderr = result.stderr or ""
-            # Console output lives in .strata/console/, not notebook.toml —
-            # invariant 6: runtime writers never touch notebook.toml.
+            # Runtime writers never touch notebook.toml.
             from strata.notebook.writer import update_cell_console_output
 
             update_cell_console_output(self.path, cell_id, result.stdout or "", result.stderr or "")
@@ -1409,9 +1265,8 @@ class NotebookSession:
         cell.last_provenance_hash = provenance_hash
         cell.last_source_hash = source_hash
         cell.last_env_hash = env_hash
-        # What the cell's own cache scheme rested on for this run, so a reopen
-        # compares like with like rather than calling it ready on a hash that
-        # never covered the connection it read or the model it asked.
+        # So a reopen compares like with like, not on a hash that never covered the
+        # connection read or the model asked.
         cell.last_reopen_identity = self.reopen_identity(cell)
         persist_cell_provenance(
             self.path,
@@ -1819,12 +1674,8 @@ class NotebookSession:
         else:
             sync_state = "outdated"
 
-        # Listing the project library is a ~1-2s Rscript spawn — the
-        # default ``include_packages=False`` keeps state-sync paths
-        # fast. The dedicated R-packages route opts in by passing
-        # ``include_packages=True``. When the notebook has no
-        # lockfile, skip the spawn even on opt-in — there's no R env
-        # to enumerate.
+        # Listing the library is a ~1-2s Rscript spawn, so only the R-packages route
+        # opts in; with no lockfile there is nothing to enumerate.
         packages: list[dict[str, str]] = []
         packages_status = "absent"
         packages_error: str | None = None
@@ -1837,28 +1688,18 @@ class NotebookSession:
         return {
             "has_lockfile": has_lockfile,
             "current_lock_hash": current_lock_hash,
-            # The fields below are last-successful-sync state.
+            # Last-successful-sync state below.
             "lock_hash": runtime.lock_hash,
-            # ``r_version`` is the version recorded at the last good
-            # renv sync; ``system_r_version`` is the version of the
-            # Rscript on PATH right now. Falls back so the UI can
-            # always show *some* R version next to the status pill
-            # — without this the pre-init R card said "Not set up"
-            # with no other state, which read as broken even when
-            # R cells were running fine against the system library.
+            # ``r_version`` is from the last good renv sync; ``system_r_version`` is the
+            # Rscript on PATH now, so the UI always has some R version to show.
             "r_version": runtime.r_version,
             "system_r_version": self._cached_system_r_version,
             "last_synced_at": runtime.last_synced_at,
             "sync_state": sync_state,
             "sync_error": runtime.sync_error or None,
-            # Package list + listing-probe outcome. ``packages_status``
-            # disambiguates "the probe failed" from "the library is
-            # empty" — both produce an empty ``packages`` array.
-            # ``packages_status`` values: ``"absent"`` (no lockfile or
-            # ``include_packages=False`` — no probe attempted),
-            # ``"ok"``, ``"rscript_missing"``, ``"renv_not_active"``,
-            # or ``"failed"``. ``packages_error`` carries a short
-            # message when ``packages_status == "failed"``.
+            # ``packages_status`` tells a failed probe from an empty library: ``"absent"``
+            # (no lockfile or no probe), ``"ok"``, ``"rscript_missing"``,
+            # ``"renv_not_active"`` or ``"failed"`` (with ``packages_error``).
             "packages": packages,
             "packages_status": packages_status,
             "packages_error": packages_error,
@@ -2086,20 +1927,17 @@ class NotebookSession:
                 return None
             if not by_content:
                 return artifact.provenance_hash
-            # The producer's provenance hash is the same on every run, so on
-            # its own it cannot tell a consumer that the value changed. The
-            # bytes can. Recorded at finalize; backfilled once if absent.
+            # The producer's provenance hash is the same every run, so only the bytes say
+            # the value changed. Recorded at finalize; backfilled once if absent.
             digest = artifact.content_sha256 or store.content_digest(artifact_id, version)
             if digest is None:
                 return artifact.provenance_hash
             return derive_subkey(artifact.provenance_hash, f"content={digest}")
 
-        # What this cell reads. For a producer keyed by content, only these of
-        # its variables are this cell's inputs: a changing sibling it never
-        # reads (a counter beside a constant) otherwise missed its cache on
-        # every run. Producers keyed by provenance keep every variable, because
-        # their variables' hashes only ever move together, and narrowing them
-        # would change the key of every existing downstream cell for nothing.
+        # For a content-keyed producer only the variables this cell reads are inputs,
+        # so a changing sibling it never reads doesn't miss the cache. Provenance-keyed
+        # producers keep every variable: their hashes move together, and narrowing
+        # would rekey every existing downstream cell.
         reads = set(cell.references) | set(cell.builtin_references)
 
         for upstream_id in cell.upstream_ids:
@@ -2121,11 +1959,8 @@ class NotebookSession:
                     and isinstance(fanout, SweepProducer)
                     and fanout.fanout_cell == upstream_id
                 ):
-                    # A @per_variant cell keeps one URI per variable, whichever
-                    # variant stored last, while a consumer reads every
-                    # variant's instance. Keyed on that one URI, a change to any
-                    # other variant left the key where it was and the consumer
-                    # returned the old dict. Key on every instance it reads.
+                    # A @per_variant cell keeps one URI per variable (last variant stored), but a
+                    # consumer reads every instance, so key on all of them.
                     instances = []
                     for variant_name, _ in fanout.variants:
                         instance = store.get_latest_version(
@@ -2216,8 +2051,7 @@ class NotebookSession:
 
         from strata.notebook.dag import SweepProducer
 
-        # What this cell's own instance zips to, when it is itself a fan-out
-        # instance over the same group: the harness binds that one variant as a
+        # A fan-out instance over the same group binds only its own variant as a
         # scalar, so recording the whole set would name variants it never read.
         own_group = self._fanout_group_of(cell_id) if variant is not None else None
 
@@ -2231,12 +2065,8 @@ class NotebookSession:
             for var_name, uri in upstream_cell.artifact_uris.items():
                 producer = self.dag.variable_producer.get(var_name) if self.dag else None
                 if isinstance(producer, SweepProducer) and producer.fanout_cell == upstream_id:
-                    # A fan-out cell keeps one URI per variable, whichever
-                    # variant stored last, while a collapse consumer read them
-                    # all. Recording that one left lineage showing a single
-                    # variant behind a dict built from every instance. A
-                    # chained instance is the other case: it read exactly its
-                    # own variant.
+                    # A fan-out keeps one URI per variable (last variant stored), while a collapse
+                    # consumer read every instance; a chained instance read only its own variant.
                     wanted = (
                         [(variant, None)]
                         if own_group == producer.group and variant is not None
@@ -2252,17 +2082,14 @@ class NotebookSession:
                             uris.append(f"strata://artifact/{instance.id}@v={instance.version}")
                     continue
                 uris.append(uri)
-            # Only when the cell recorded no per-variable URIs at all: a
-            # fan-out upstream whose instances are all missing must not fall
-            # back to the cell-level URI, which names an unrelated variant.
+            # Only with no per-variable URIs at all: a fan-out upstream whose instances are
+            # all missing must not fall back to the cell-level URI (an unrelated variant).
             if not upstream_cell.artifact_uris and upstream_cell.artifact_uri:
                 uris = [upstream_cell.artifact_uri]
 
             for uri in uris:
                 ref = uri.split("/")[-1]
-                # Sweep variants and loop iterations are separate artifacts
-                # and each gets its own edge; unlike the hashed side, nothing
-                # here has to collapse them into one grouped token.
+                # Variants and loop iterations each get their own edge; nothing here groups them.
                 if "@v=" in ref:
                     refs[uri] = ref
         return refs
@@ -2277,9 +2104,8 @@ class NotebookSession:
         annotations = parse_annotations(cell.source)
         merged_mounts = resolve_cell_mounts([], cell.mounts, annotations.mounts)
 
-        # The same storage options the executor fingerprints with — scheme
-        # credentials and named ones — or a mount reached through a credential
-        # lists differently here and the cell never matches its own artifacts.
+        # Same storage options the executor fingerprints with, or a mount reached through
+        # a credential lists differently and the cell never matches its own artifacts.
         from strata.notebook.credentials import CredentialResolver
         from strata.notebook.mounts import MountResolver, mount_fingerprint_sync
 
@@ -2484,9 +2310,7 @@ class NotebookSession:
                 team_promotion=team_promotion,
             )
         )
-        # Mirror to disk so the profiling summary survives a restart. Trimmed
-        # there to the same cap the file keeps, so the in-memory list and the
-        # persisted one do not drift apart across a reopen.
+        # Mirrored to disk; trim to the file's cap so memory and disk don't drift across a reopen.
         self.execution_history[cell_id] = self.execution_history[cell_id][-MAX_EXECUTION_SAMPLES:]
         persist_cell_execution_sample(
             self.path,
@@ -2549,11 +2373,8 @@ class NotebookSession:
                 }
             )
 
-        # Estimate cache savings. A local hit is priced against the last
-        # uncached run of the same cell — the best evidence available for what
-        # running it again would have cost. A *team* hit has no such evidence:
-        # whoever got it never ran the cell, so its price rides along on the
-        # sample, taken from what the publisher's run actually cost.
+        # A local hit is priced against the cell's last uncached run. A team hit has
+        # no such run, so its price rides on the sample from the publisher's run.
         cache_savings_ms = 0
         team_cache_savings_ms = 0
         team_cache_hits = 0
@@ -2583,15 +2404,11 @@ class NotebookSession:
             "cache_hits": cache_hits,
             "cache_misses": cache_misses,
             "cache_savings_ms": cache_savings_ms,
-            # The subset of the above that came from someone else's machine —
-            # the number that answers "is the shared store earning its keep?",
-            # which the total alone cannot.
+            # The share from someone else's machine: is the shared store earning its keep?
             "team_cache_savings_ms": team_cache_savings_ms,
             "team_cache_hits": team_cache_hits,
             "team_contributors": sorted(team_contributors),
-            # What was shared on purpose that these hits drew on. Contributors
-            # say who; this says which promotion, which is what someone asks
-            # when deciding whether promoting is worth the trouble.
+            # Which promotions these hits drew on, for deciding whether promoting is worth it.
             "team_promotions": sorted(team_promotions),
             "total_artifact_bytes": total_artifact_bytes,
             "cell_profiles": cell_profiles,
@@ -2611,10 +2428,9 @@ class NotebookSession:
         if isinstance(self.backend, UvBackend):
             ok = _uv_sync(self.path, python_version=python_version)
         else:
-            # A shared environment is never synced through the notebook's link:
-            # ``uv sync`` there installs — and uninstalls — inside the
-            # environment every other notebook with that lock is using. The
-            # backend syncs into the key and moves this notebook's link.
+            # Never sync a shared environment through the notebook's link: ``uv sync``
+            # would (un)install inside an env other notebooks use. The backend syncs into
+            # the key and moves this notebook's link.
             ok = self.backend.sync(python_version=python_version, timeout=60).success
         self._apply_uv_sync_result(
             ok,
@@ -2646,11 +2462,8 @@ class NotebookSession:
         every cell, and the failure being closed here is the one that happens by
         accident rather than the one that takes effort.
         """
-        # Only a *known* system-python fallback disqualifies. ``unknown`` means
-        # nobody has probed the interpreter yet, which is the normal state for
-        # a directly constructed session — the CLI, the MCP ops layer, an agent
-        # scratchpad — and treating it as a failure switched publishing off for
-        # that entire surface with no way to tell why.
+        # Only a known system-python fallback disqualifies. ``unknown`` is the normal
+        # state for a directly constructed session (CLI, MCP ops, scratchpad).
         if self.environment_interpreter_source == "path":
             return (
                 "the notebook has no venv and is running system python, "
@@ -2663,10 +2476,8 @@ class NotebookSession:
         if realized != compute_lockfile_hash(self.path):
             return "the installed environment does not match uv.lock"
 
-        # The Python attestation covers `compute_lockfile_hash`, which folds
-        # renv.lock in as well — so on an R notebook it can be satisfied by a
-        # `uv sync` that ran before a `renv::restore()` that failed. R records
-        # its own last-good hash, so check that half against its own lockfile.
+        # `compute_lockfile_hash` folds in renv.lock, so a `uv sync` before a failed
+        # `renv::restore()` can satisfy it. Check R against its own last-good hash.
         renv_lock = self.path / "renv.lock"
         if renv_lock.exists():
             from strata.notebook.dependencies import _renv_lockfile_hash
@@ -2690,11 +2501,8 @@ class NotebookSession:
             self.environment_sync_state = "ready"
             self.environment_sync_error = None
             if ok:
-                # Record what was actually installed, not what is declared.
-                # Provenance is computed from the lockfile on disk; when a sync
-                # fails the venv keeps its old contents while that lockfile
-                # moves on, and every artifact produced afterwards is stamped
-                # with an environment it was not built in.
+                # Record what was installed, not what is declared: when a sync fails the venv
+                # keeps its old contents while the lockfile moves on.
                 persist_environment_synced_lockfile_hash(
                     self.path, compute_lockfile_hash(self.path)
                 )
@@ -2768,10 +2576,8 @@ class NotebookSession:
         """
         lockfile = self.path / "renv.lock"
         if not lockfile.exists():
-            # Python-only notebook (or R notebook pre-init). Clear any
-            # stale R runtime state so a notebook that previously had a
-            # lockfile and now doesn't doesn't keep a phantom hash or
-            # error message.
+            # Python-only (or pre-init R): clear stale R state so a removed lockfile leaves
+            # no phantom hash or error.
             self._clear_r_runtime_if_present()
             return
 
@@ -2788,12 +2594,8 @@ class NotebookSession:
             and not previous.sync_error
             and self._renv_library_present()
         ):
-            # Cached restore — the on-disk library already matches the
-            # lockfile, the last sync succeeded, AND the project
-            # library directory hasn't been deleted out from under us.
-            # Skip the ~1-2s Rscript spawn. Matters in particular for
-            # the reuse-existing-session path which fires on every
-            # reopen.
+            # Library matches the lockfile, last sync succeeded and the library dir still
+            # exists: skip the ~1-2s Rscript spawn (this fires on every reopen).
             logger.debug(
                 "renv sync skipped for %s — lockfile hash unchanged + library present (%s)",
                 self.path,
@@ -2806,13 +2608,8 @@ class NotebookSession:
         duration_ms = int((_time.perf_counter() - started) * 1000)
 
         if not ok:
-            # ``_renv_sync`` already logged the cause (Rscript missing,
-            # timeout, non-zero exit). Record the failure in
-            # runtime.json so the UI can render the failed state,
-            # but keep the last-good ``lock_hash`` / ``r_version`` /
-            # ``last_synced_at`` so users see "you had a working env
-            # at <T>, the most recent attempt against <new lockfile>
-            # failed" rather than losing the prior state.
+            # ``_renv_sync`` already logged the cause. Record the failure for the UI but
+            # keep the last-good ``lock_hash`` / ``r_version`` / ``last_synced_at``.
             err_message = (
                 f"renv::restore() failed after {duration_ms}ms. "
                 "Check Rscript is on PATH and renv.lock is well-formed."
@@ -2852,14 +2649,11 @@ class NotebookSession:
         if not library.is_dir():
             return False
         try:
-            # ``next(iter(...))`` returns the first child entry or
-            # raises ``StopIteration`` if the dir is empty.
             next(iter(library.iterdir()))
         except StopIteration:
             return False
         except OSError:
-            # Permission denied / I/O error — assume not usable
-            # rather than short-circuiting against a broken library.
+            # Permission denied / I/O error: assume not usable.
             return False
         return True
 
@@ -2988,13 +2782,9 @@ class NotebookSession:
         self.environment_sync_state = "ready"
         self.environment_sync_error = None
         self.environment_sync_notice = None
-        # Deliberately does NOT attest the environment. This runs on the
-        # session-reuse path too — every reopen of an already-open notebook —
-        # where nothing was installed. Attesting here meant a failed sync could
-        # be laundered by reloading the browser tab: the new lockfile would be
-        # recorded as realized without anything having been installed, and the
-        # next cell would publish a stale-environment result to the team.
-        # The caller that knows an install happened attests instead.
+        # Deliberately does NOT attest the environment: this also runs on every reopen,
+        # where nothing was installed, so a failed sync could be laundered by reloading
+        # the tab. The caller that knows an install happened attests instead.
         self.environment_last_synced_at = persisted.last_synced_at or int(_time.time() * 1000)
         self.environment_last_sync_duration_ms = int((_time.perf_counter() - started) * 1000)
 
@@ -3054,8 +2844,7 @@ class NotebookSession:
             notebook_dir=self.path,
             pool_size=2,
             worker_command=[rscript, str(pool_worker), str(self.path)],
-            # R startup + renv activation can take far longer than the
-            # Python worker's import warm-up.
+            # R startup + renv activation can take far longer than Python's warm-up.
             ready_timeout_seconds=60.0,
         )
         try:
@@ -3107,14 +2896,11 @@ class NotebookSession:
         invalidates the warm pool, and recomputes lockfile hash for
         provenance. Called after ``uv add`` / ``uv remove``.
         """
-        # 1. Dependency mutation already synced .venv. Reuse that interpreter
-        #    instead of immediately running a second uv sync.
+        # 1. Dependency mutation already synced .venv; reuse it instead of a second sync.
         await asyncio.to_thread(self.refresh_environment_runtime)
-        # ``uv add`` / ``uv remove`` installed into the venv on the way here, so
-        # this path realized the lockfile as surely as an explicit sync did —
-        # and unlike ``refresh_environment_runtime`` itself, reaching here means
-        # an install actually happened. Without it, every dependency change
-        # would disable publishing until the next full sync.
+        # ``uv add`` / ``uv remove`` installed into the venv, so this realized the
+        # lockfile; without attesting, every dependency change would disable publishing
+        # until the next full sync.
         await asyncio.to_thread(
             persist_environment_synced_lockfile_hash,
             self.path,
@@ -3122,11 +2908,11 @@ class NotebookSession:
         )
         await self._invalidate_warm_pool_for_environment_change()
 
-        # 2. Recompute lockfile hash (triggers cache invalidation on next exec)
+        # 2. New lockfile hash invalidates caches on next exec.
         new_hash = compute_lockfile_hash(self.path)
         logger.info("Lockfile hash updated to %.12s after dependency change", new_hash)
 
-        # 3. Persist environment metadata in notebook.toml
+        # 3. Persist environment metadata
         try:
             await asyncio.to_thread(update_environment_metadata, self.path)
         except Exception:
@@ -3136,10 +2922,8 @@ class NotebookSession:
         """Apply a dependency mutation without blocking the event loop."""
         from strata.notebook.dependencies import add_dependency, remove_dependency
 
-        # add_dependency and remove_dependency have different keyword-only params,
-        # so a shared `op` variable narrows to a union callable that ty won't pass
-        # to asyncio.to_thread. Dispatch at the call site so each to_thread sees a
-        # single concrete signature (both accept (path, package) positionally).
+        # The two functions have different keyword-only params, so a shared `op` is a
+        # union callable ty won't pass to asyncio.to_thread. Dispatch per call site.
         if action == "add":
             result = await asyncio.to_thread(add_dependency, self.path, package)
         elif action == "remove":
@@ -3216,11 +3000,7 @@ class NotebookSession:
         python_version: str | None = None,
     ) -> EnvironmentJobSnapshot:
         """Start an asynchronous notebook environment job."""
-        # R-side actions (``r_init``, ``r_add``) reuse the env-job
-        # machinery — same job tracking, same WS broadcast frames,
-        # same staleness propagation. The dispatch in
-        # ``_run_environment_job`` switches on ``action`` to call
-        # the right helper.
+        # R actions reuse the env-job machinery; ``_run_environment_job`` dispatches on ``action``.
         valid_actions = {
             "add",
             "remove",
@@ -3242,8 +3022,7 @@ class NotebookSession:
         if action == "change_python" and not python_version:
             raise ValueError("change_python jobs require python_version")
 
-        # R-side validation: catch obvious user errors at submission
-        # rather than letting the subprocess fail mid-job.
+        # Catch obvious user errors at submission rather than mid-job.
         if action in {"r_init", "r_add"} and not shutil.which("Rscript"):
             raise ValueError(
                 "Rscript not found on PATH. Install R "
@@ -3382,13 +3161,8 @@ class NotebookSession:
                 payload.update(
                     {
                         "environment": self.serialize_environment_state(),
-                        # Include r_environment in the finished payload so
-                        # successful r_init / r_add jobs flip the R panel
-                        # to the synced state without a manual reopen.
-                        # Pre-PR H this field was omitted; the store's
-                        # ``syncNotebookREnvironmentFromBackend`` skipped
-                        # the update and the card kept showing the
-                        # pre-job state (System R / outdated).
+                        # So successful r_init / r_add jobs flip the R panel to synced
+                        # without a reopen.
                         "r_environment": self.serialize_r_environment_state(),
                         "dependencies": [
                             {
@@ -3484,13 +3258,9 @@ class NotebookSession:
         if not result.success:
             raise RuntimeError(result.error or f"{job.action} failed")
 
-        # After a successful ``renv::init`` / ``renv::install`` + snapshot
-        # the project library matches the new ``renv.lock``. Persist that
-        # as the last-good sync so ``sync_state`` reports ``ok`` (not
-        # ``never`` / ``outdated``) and the next session open doesn't
-        # spuriously re-run ``renv::restore()`` to rebuild what we just
-        # built. The R version comes from the cached system probe — by
-        # construction the library was just populated with this R.
+        # The library now matches the new ``renv.lock``: record it as the last good
+        # sync so ``sync_state`` reads ``ok`` and the next open doesn't re-restore.
+        # The R version is the cached system probe, which just populated the library.
         renv_lock = self.path / "renv.lock"
         if renv_lock.exists():
             new_lockfile_hash = hashlib.sha256(renv_lock.read_bytes()).hexdigest()
@@ -3607,9 +3377,7 @@ class NotebookSession:
         old_minor = read_requested_python_minor(self.path)
         await asyncio.to_thread(update_requires_python, self.path, new_minor)
 
-        # Wipe the existing .venv so uv sync builds against the new
-        # interpreter rather than reporting an "interpreter mismatch"
-        # error and refusing to proceed.
+        # Otherwise uv sync reports an "interpreter mismatch" and refuses.
         venv_dir = self.path / ".venv"
         if venv_dir.exists():
             await asyncio.to_thread(shutil.rmtree, venv_dir, ignore_errors=True)
@@ -3847,8 +3615,7 @@ def _prune_artifacts_in_background(session: NotebookSession) -> threading.Thread
     """
     from strata.notebook.harness_user import running_server_config
 
-    # Read as harness_user reads it: the config is whatever the running
-    # server holds, and one without these fields prunes nothing.
+    # Read as harness_user reads it: a config without these fields prunes nothing.
     config = running_server_config()
     keep = getattr(config, "notebook_keep_superseded_versions", 0)
     if not keep:
@@ -3888,7 +3655,7 @@ class SessionManager:
     """
 
     MAX_SESSIONS = 50
-    SESSION_TTL_SECONDS = 4 * 3600  # 4 hours
+    SESSION_TTL_SECONDS = 4 * 3600
 
     def __init__(self):
         """Initialize session manager."""
@@ -3946,10 +3713,8 @@ class SessionManager:
                 else:
                     with timing.phase("session_reload"):
                         existing.reload()
-                # A session with no interpreter never got one from a sync (it
-                # raised on open). Refreshing would record whatever .venv holds
-                # and make the cells runnable; syncing again keeps a failure
-                # visible and clears it once the sync succeeds.
+                # No interpreter means the sync raised on open. Refreshing would make cells
+                # runnable on whatever .venv holds; syncing again keeps the failure visible.
                 if existing.venv_python is None:
                     phase, prepare = "session_env_sync", existing.ensure_venv_synced
                 else:
@@ -3962,12 +3727,8 @@ class SessionManager:
                             prepare()
                 except Exception as e:
                     logger.warning("Failed to refresh existing notebook runtime: %s", e)
-                # Re-check renv.lock on every reopen. The hash short-circuit
-                # inside ``ensure_renv_synced`` keeps unchanged-lockfile
-                # reopens free; without this call, a notebook whose
-                # ``renv.lock`` changes while the session is still cached
-                # in the manager would silently run against the old R
-                # library on next open.
+                # Re-check renv.lock on every reopen (cheap when unchanged), or a lockfile
+                # changed while the session was cached runs against the old R library.
                 try:
                     if timing is None:
                         existing.ensure_renv_synced()
@@ -3987,9 +3748,8 @@ class SessionManager:
         session = NotebookSession(notebook_state, Path(directory))
         _prune_artifacts_in_background(session)
 
-        # Ensure venv is ready. Freshly-created notebooks may already have a
-        # synced .venv from writer.create_notebook(), so avoid immediately
-        # paying for a second uv sync and just refresh runtime metadata.
+        # A fresh notebook may already have a synced .venv from create_notebook(), so
+        # refresh runtime metadata instead of a second uv sync.
         try:
             if defer_initial_venv_sync:
                 session.mark_environment_pending()
@@ -4006,15 +3766,10 @@ class SessionManager:
                     with timing.phase("session_env_sync"):
                         session.ensure_venv_synced()
         except Exception as e:
-            # Log warning but don't fail — notebook can still be opened,
-            # it just won't be able to execute cells
+            # The notebook still opens; it just can't execute cells.
             logger.warning("Failed to sync venv: %s", e)
 
-        # Ensure the R environment matches its lockfile. No-op when
-        # the notebook has no ``renv.lock``, so Python-only notebooks
-        # don't pay the Rscript probe cost. Same "log + continue"
-        # contract as the venv sync above: a failed R sync doesn't
-        # block opening the notebook.
+        # No-op without ``renv.lock``. A failed R sync doesn't block opening.
         try:
             if timing is None:
                 session.ensure_renv_synced()
@@ -4024,7 +3779,6 @@ class SessionManager:
         except Exception as e:
             logger.warning("Failed to sync renv: %s", e)
 
-        # M6: Initialize and start warm process pool
         try:
             if session._should_start_warm_pool():
                 if timing is None:
@@ -4035,7 +3789,7 @@ class SessionManager:
                         pool_size=2,
                         python_executable=session.venv_python or Path("python"),
                     )
-                    # Start pool in background (don't block on notebook open)
+                    # Don't block notebook open.
                     import asyncio
 
                     try:
@@ -4052,7 +3806,7 @@ class SessionManager:
                             pool_size=2,
                             python_executable=session.venv_python or Path("python"),
                         )
-                        # Start pool in background (don't block on notebook open)
+                        # Don't block notebook open.
                         import asyncio
 
                         try:
@@ -4063,7 +3817,7 @@ class SessionManager:
         except Exception as e:
             logger.warning("Failed to initialize warm pool: %s", e)
 
-        # R warm pool: only for notebooks that actually contain R cells.
+        # Only for notebooks that contain R cells.
         try:
             session.start_r_pool_background()
         except Exception as e:
@@ -4115,7 +3869,6 @@ class SessionManager:
             logger.info("Evicting stale session %s", sid)
             self.close_session(sid)
 
-        # Enforce max count — evict oldest if over limit
         while len(self._sessions) >= self.MAX_SESSIONS:
             evictable = [sid for sid in self._sessions if not self._has_active_websocket(sid)]
             if not evictable:
@@ -4137,14 +3890,11 @@ class SessionManager:
         session = self._sessions.pop(session_id, None)
         if session is None:
             return
-        # The session's outbound sequence counter outlives a disconnect, so
-        # something has to end it, and this is every way a session ends: the
-        # delete routes, the TTL sweep and the max-count eviction. Imported
-        # here because ws imports this module.
+        # The outbound sequence counter outlives a disconnect, and this is every way a
+        # session ends (delete routes, TTL sweep, eviction). Local import: ws imports this.
         from strata.notebook.ws import forget_notebook_execution_state
 
         forget_notebook_execution_state(session_id)
-        # Drain warm pools if present
         for pool in (session.warm_pool, session.r_warm_pool):
             if pool is None:
                 continue

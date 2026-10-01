@@ -48,7 +48,6 @@ class NotebookArtifactManager:
         """
         self.notebook_id = notebook_id
 
-        # Default artifact directory
         if artifact_dir is None:
             artifact_dir = Path.home() / ".strata" / "notebook_artifacts" / notebook_id
 
@@ -56,7 +55,6 @@ class NotebookArtifactManager:
         artifact_dir.mkdir(parents=True, exist_ok=True)
         self.artifact_dir = artifact_dir
 
-        # Initialize artifact store with local blob storage
         self.artifact_store = ArtifactStore(artifact_dir)
 
     def prune(self, keep_superseded: int, min_idle_seconds: float) -> dict:
@@ -277,13 +275,11 @@ class NotebookArtifactManager:
         Returns:
             The created ArtifactVersion
         """
-        # Artifacts live under the notebook directory, so a result landing
-        # during a copy would leave the copy's runtime.json and its artifacts
-        # describing different moments.
+        # Artifacts live under the notebook dir: a write during a copy would
+        # leave the copy's runtime.json and artifacts out of step.
         assert_writable(self.artifact_dir)
         artifact_id = self.cell_artifact_id(cell_id, variable_name, iteration, variant)
 
-        # Create transform spec (for notebook cells, executor is "notebook/cell@v1")
         params: dict[str, str] = {
             "cell_id": cell_id,
             "variable_name": variable_name,
@@ -311,10 +307,9 @@ class NotebookArtifactManager:
         transform_spec = TransformSpec(
             executor="notebook/cell@v1",
             params=params,
-            inputs=[],  # Notebook cells don't have explicit input URIs in this context
+            inputs=[],  # cell inputs are not URIs
         )
 
-        # Create artifact version in "building" state
         version = self.artifact_store.create_artifact(
             artifact_id=artifact_id,
             provenance_hash=provenance_hash,
@@ -323,12 +318,9 @@ class NotebookArtifactManager:
             principal=principal,
         )
 
-        # Write blob
         self.artifact_store.blob_store.write_blob(artifact_id, version, blob_data)
 
-        # Finalize artifact
         byte_size = len(blob_data)
-        # Provide empty schema JSON if not supplied
         schema_str = schema_json if schema_json is not None else ""
         artifact_version = self.artifact_store.finalize_artifact(
             artifact_id=artifact_id,
@@ -342,14 +334,9 @@ class NotebookArtifactManager:
         if artifact_version is None:
             raise ValueError(f"Failed to finalize artifact {artifact_id}@v={version}")
 
-        # Guard against provenance dedup: finalize_artifact may detect
-        # another artifact with the same provenance under a *different*
-        # id and mark our version as "failed". Notebook cells resolve
-        # inputs by canonical id, so we promote the canonical version
-        # back to ready via the store's public force_finalize_canonical
-        # helper. (Previously this reached into the store's private
-        # SQLite connection — keeping the SQL inside ArtifactStore so
-        # schema changes can't drift between the two definitions.)
+        # finalize_artifact may dedup against the same provenance under a
+        # different id and mark ours "failed". Cells resolve inputs by
+        # canonical id, so promote the canonical version back to ready.
         if artifact_version.id != artifact_id:
             canonical = self.artifact_store.force_finalize_canonical(
                 artifact_id=artifact_id,
@@ -402,7 +389,6 @@ class NotebookArtifactManager:
         if artifact is None:
             raise ValueError(f"Artifact {artifact_id}@v={version} not found")
 
-        # Extract content_type from transform_spec params
         content_type = "unknown"
         if artifact.transform_spec:
             try:
@@ -444,8 +430,6 @@ class NotebookArtifactManager:
         if artifact is None:
             return None
 
-        # Content type lives in transform_spec.params — same source
-        # get_artifact_preview reads from.
         content_type = "unknown"
         if artifact.transform_spec:
             try:

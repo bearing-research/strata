@@ -30,8 +30,7 @@ class Markdown:
         return self.text
 
 
-# Names ``DisplayCapture.install`` injects into the cell namespace. Callers
-# exclude these from mutation fingerprinting (the ``display`` helper accumulates
+# Callers exclude these from mutation fingerprinting (``display`` accumulates
 # captured values, so it "changes" every run) and clear them between batch cells.
 DISPLAY_HELPER_NAMES = ("display", "Markdown")
 
@@ -55,8 +54,7 @@ class DisplayCapture:
     def display(self, value: Any) -> Any:
         """Notebook-visible display helper injected into cell globals."""
         self.capture(value)
-        # Mirror notebook display helpers like IPython.display.display(),
-        # which are side-effecting and do not produce a separate value.
+        # Side-effecting, like IPython.display.display(); no separate value.
         return None
 
     def install(self, namespace: dict[str, Any]) -> None:
@@ -110,10 +108,8 @@ class DisplayCapture:
             self.capture(fig_self)
             return None
 
-        # ``setattr`` deliberately bypasses static attribute typing — the
-        # patched callables intentionally have looser signatures than
-        # ``plt.show`` / ``Figure.show`` (we ignore their kwargs to
-        # capture the figure for display).
+        # ``setattr`` bypasses static typing: the patched callables have looser
+        # signatures than ``plt.show`` / ``Figure.show``.
         if callable(original_show):
             setattr(plt, "show", _patched_show)
         if figure_cls is not None and callable(original_figure_show):

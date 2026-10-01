@@ -47,17 +47,13 @@ _CAPABILITIES = AdapterCapabilities(
     # No per-table snapshot id, but Time Travel queries a table as of a
     # timestamp, so a snapshot is a timestamp (``time_travel.py``).
     supports_snapshot=True,
-    # Snowflake INFORMATION_SCHEMA isn't frozen inside a transaction
-    # the way Postgres's pg_stat_* views are; the probe can share
-    # the query connection.
+    # Snowflake INFORMATION_SCHEMA isn't frozen inside a transaction, so the
+    # probe can share the query connection.
     needs_separate_probe_conn=False,
 )
 
-# Snowflake unquoted identifier pattern. Used to validate role /
-# warehouse / database names before splicing them into ``USE ROLE``
-# statements (Snowflake doesn't accept bind parameters in those
-# positions, so any value we splice must come from a known-safe
-# pattern).
+# Validates role / warehouse / database names spliced into ``USE``
+# statements, which don't accept bind parameters.
 _IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_$]*$")
 
 
@@ -121,10 +117,8 @@ def _parse_snowflake_uri(uri: str) -> dict[str, Any]:
     if parsed.username:
         out["user"] = parsed.username
 
-    # ``urlparse.hostname`` lowercases per RFC, but Snowflake
-    # account identifiers can carry case-sensitive segments
-    # (legacy account-locator format, region suffixes). Parse
-    # ``netloc`` directly to preserve the original case.
+    # ``urlparse.hostname`` lowercases, but Snowflake account identifiers can
+    # be case-sensitive; parse ``netloc`` to preserve case.
     netloc = parsed.netloc or ""
     if "@" in netloc:
         host_part = netloc.rsplit("@", 1)[1]
@@ -185,9 +179,7 @@ class SnowflakeAdapter:
         *,
         connect_fn: Callable[[str], Any] | None = None,
     ) -> None:
-        # Test seam: pass a fake connect callable to bypass the real
-        # ADBC import in unit tests. Production code uses the default
-        # path and lets ``open()`` lazy-import the driver.
+        # Test seam: a fake connect callable bypasses the real ADBC import.
         self._connect_fn = connect_fn
 
     # --- identity ---------------------------------------------------------
@@ -216,13 +208,9 @@ class SnowflakeAdapter:
     def _extract_identity(self, spec: Any, *, read_only: bool = True) -> dict[str, Any]:
         identity: dict[str, Any] = {}
 
-        # If a URI is set, its components are part of the
-        # connection's identity — without this, two connections
-        # whose only configured field is ``uri`` (different DBs,
-        # different roles) would collapse onto the same
-        # connection_id and share cache entries. Discrete fields
-        # below override URI-derived components so the user can
-        # build on a base URI with overrides.
+        # URI components are part of identity, or two uri-only connections to
+        # different DBs or roles would share cache entries. Discrete fields below
+        # override URI-derived ones.
         uri = _spec_attr(spec, "uri")
         if uri:
             identity.update(_parse_snowflake_uri(str(uri)))
@@ -239,27 +227,22 @@ class SnowflakeAdapter:
             if value is not None:
                 identity[key] = value
 
-        # ``write_role`` only joins write-cell identity. When
-        # the cell is read-only, the role applied at open time
-        # is just ``role``, so the cache key shouldn't depend
-        # on the write_role.
+        # A read-only open applies only ``role``, so ``write_role`` joins only
+        # write-cell identity.
         if not read_only:
             write_role = _spec_attr(spec, "write_role")
             if write_role is not None:
                 identity["write_role"] = write_role
 
-        # ``auth.user`` is identity-shaping (different user →
-        # different object visibility). Resolve ${VAR} so two
-        # specs that point at the same effective user produce the
-        # same connection_id.
+        # ``auth.user`` shapes object visibility. Resolve ${VAR} so specs naming the
+        # same effective user get the same connection_id.
         auth = getattr(spec, "auth", None) or {}
         auth_user = auth.get("user")
         if auth_user:
             try:
                 identity["user"] = _resolve_var(auth_user)
             except RuntimeError:
-                # Env var not set yet — fall back to the raw spec
-                # value so the identity stays stable across calls.
+                # Env var unset: use the raw value so identity stays stable.
                 identity["user"] = auth_user
 
         return identity
@@ -295,8 +278,6 @@ class SnowflakeAdapter:
         uri = self._build_uri(spec)
         conn = self._invoke_connect(uri)
 
-        # Pick the role for this open() call based on the
-        # cell's read/write intent.
         ro_role = _spec_attr(spec, "role")
         rw_role = _spec_attr(spec, "write_role") or ro_role
         chosen_role = ro_role if read_only else rw_role
@@ -326,11 +307,8 @@ class SnowflakeAdapter:
                 try:
                     commit()
                 except Exception:
-                    # USE statements are autocommit on Snowflake;
-                    # an explicit commit may surface "no
-                    # transaction in progress." Ignore that
-                    # specific class — applied_any is true so we
-                    # don't lose any writes.
+                    # USE statements autocommit, so an explicit commit may report "no
+                    # transaction in progress"; no writes are lost.
                     pass
 
         return conn
@@ -460,10 +438,8 @@ class SnowflakeAdapter:
                 for table in sorted(group, key=lambda t: t.render()):
                     schema_arg = table.schema or current_schema
                     if not schema_arg:
-                        # Neither the table nor the session has
-                        # a schema. Fold a sentinel rather than
-                        # silently picking PUBLIC — the cache key
-                        # must reflect the unresolved name.
+                        # No schema on table or session: fold a sentinel rather than assume
+                        # PUBLIC, so the key reflects the unresolved name.
                         h.update(b"no-schema:")
                         h.update(effective_db.encode())
                         h.update(b".")
@@ -629,9 +605,8 @@ class SnowflakeAdapter:
             db = str(row[0])
 
             if not _IDENTIFIER_RE.match(db):
-                # Pathological, but defend: ADBC drivers should
-                # quote their own identifiers safely. Skip
-                # enumeration rather than splice an unsafe value.
+                # ADBC drivers should quote their own identifiers; skip rather than splice
+                # an unsafe value.
                 return []
 
             query = (

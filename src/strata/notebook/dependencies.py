@@ -40,9 +40,7 @@ from strata.notebook.harness_user import (
 logger = logging.getLogger(__name__)
 _MAX_OPERATION_LOG_CHARS = 12_000
 
-# Serialize concurrent uv add/remove per notebook directory.
-# Without this, two concurrent ``uv add`` calls for the same notebook
-# can corrupt pyproject.toml / uv.lock.
+# Per-notebook locks: concurrent ``uv add`` calls can corrupt uv.lock.
 _locks: dict[str, threading.Lock] = {}
 _locks_lock = threading.Lock()
 
@@ -75,9 +73,7 @@ def renv_process_lock(notebook_dir: Path) -> filelock.FileLock:
     return filelock.FileLock(str(lock_dir / "renv-process.lock"))
 
 
-# ---------------------------------------------------------------------------
-# Result types
-# ---------------------------------------------------------------------------
+# --- Result types ---
 
 
 @dataclass
@@ -238,12 +234,8 @@ def resolve_uv() -> str | None:
     return None
 
 
-# What points uv at an environment other than the notebook's own ``.venv``.
-# The server started under ``uv run`` carries its own VIRTUAL_ENV, and one
-# started with UV_PROJECT_ENVIRONMENT set would have every notebook command
-# sync, add to, lock against and run in the server's environment instead.
-# uv only warns about a VIRTUAL_ENV that is not the project's, but that warning
-# lands in every operation log a user reads.
+# Vars that point uv at the server's environment instead of the notebook's
+# ``.venv``. A foreign VIRTUAL_ENV only warns, but in every operation log.
 _FOREIGN_ENVIRONMENT_VARS = ("UV_PROJECT_ENVIRONMENT", "VIRTUAL_ENV")
 
 
@@ -297,7 +289,6 @@ def _run_uv_command(
             ),
         )
     command = [uv, *args]
-    # Display the friendly ``uv …`` form, not the resolved absolute path.
     formatted_command = _format_command_for_ui(["uv", *args])
 
     try:
@@ -472,9 +463,7 @@ async def run_uv_command_streaming(
     )
 
 
-# ---------------------------------------------------------------------------
-# Core operations
-# ---------------------------------------------------------------------------
+# --- Core operations ---
 
 
 def list_dependencies(notebook_dir: Path) -> list[DependencyInfo]:
@@ -626,14 +615,9 @@ def list_r_packages(notebook_dir: Path, *, timeout: int = 30) -> RPackageListing
     if rscript is None:
         return RPackageListing(packages=[], status="rscript_missing", error=None)
 
-    # ``installed.packages(lib.loc = renv::paths$library(...))`` is the
-    # canonical way to enumerate just the project library. Wrap the
-    # renv lookup in ``tryCatch`` so a missing renv namespace (pre-
-    # bootstrap or broken activate) doesn't surface as "Rscript exited
-    # non-zero" — instead emit ``RENV_NOT_ACTIVE`` and let the Python
-    # side translate. ``apply`` on a 1-row matrix collapses to a
-    # vector; loop instead so parsing stays uniform regardless of
-    # package count.
+    # ``tryCatch`` turns a missing renv namespace into ``RENV_NOT_ACTIVE``
+    # rather than a bare nonzero exit. Loop, not ``apply``: a 1-row matrix
+    # collapses to a vector.
     r_snippet = "\n".join(
         [
             "lib <- tryCatch(",
@@ -697,20 +681,9 @@ def list_r_packages(notebook_dir: Path, *, timeout: int = 30) -> RPackageListing
     return RPackageListing(packages=packages, status="ok", error=None)
 
 
-# ---------------------------------------------------------------------------
-# R bootstrap + install (parallels ``add_dependency``)
-# ---------------------------------------------------------------------------
-#
-# Mirror of the Python side: ``renv_init`` / ``renv_add`` wrap
-# ``Rscript -e ...`` calls with bounded stdout/stderr capture and
-# the same per-notebook lock so concurrent installs can't clobber
-# ``renv.lock``. Reuse ``EnvironmentOperationLog`` so the env-panel
-# UI renders the operation block identically to ``uv add``.
+# --- R bootstrap + install (same lock and operation log as ``uv add``) ---
 
-# CRAN package names: a letter then letters/digits/periods. No
-# dashes, no shell metacharacters. We reject anything else before
-# it reaches the Rscript snippet to avoid command injection — the
-# package name is concatenated into the snippet body.
+# CRAN names only: the name is interpolated into the Rscript snippet.
 _R_PACKAGE_NAME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9.]*$")
 
 
@@ -1022,10 +995,8 @@ async def _run_renv_mutation(
     )
 
     await asyncio.to_thread(detach_r_library, notebook_dir, root)
-    # Always restore first: the private library has to hold what the lock says
-    # before a package is added to it, or what is adopted afterwards is a
-    # library with one package in it that every notebook on the new lock links
-    # to and never restores.
+    # Restore first, or the adopted library holds only the new package and
+    # every notebook on the new lock links to it without restoring.
     snippet = "renv::restore(prompt = FALSE)\n" + snippet
     result = await run_rscript_command_streaming(
         notebook_dir,
@@ -1038,8 +1009,7 @@ async def _run_renv_mutation(
     if result.success:
         await asyncio.to_thread(adopt_r_library, notebook_dir, root)
     else:
-        # Back to the library for the lock the notebook still has, when one is
-        # built; otherwise its own library stays as the failed run left it.
+        # Relink the library for the unchanged lock, if built.
         await asyncio.to_thread(link_r_library_if_built, notebook_dir, root)
     return result
 
@@ -1100,21 +1070,9 @@ async def _renv_init_locked(
     on_update: Callable[[str, str, bool], Awaitable[None] | None] | None,
 ) -> RJobResult:
     old_hash = _renv_lockfile_hash(notebook_dir)
-    # Bootstrap sequence:
-    #   1. Install renv to the user's site library if missing (CRAN
-    #      cloud mirror is renv's own default).
-    #   2. ``renv::init(bare = TRUE)`` scaffolds ``.Rprofile`` +
-    #      ``renv/activate.R`` and creates an empty project library.
-    #   3. Install harness transport deps (``jsonlite``, ``arrow``).
-    #      The harness needs both to receive cell inputs and emit
-    #      results — without them every R cell fails with
-    #      ``library(jsonlite) : there is no package called 'jsonlite'``
-    #      because ``.Rprofile``'s ``renv::activate()`` has already
-    #      scoped ``.libPaths()`` to the empty project library.
-    #   4. ``renv::snapshot()`` writes ``renv.lock``. ``bare = TRUE``
-    #      skips the implicit post-init snapshot, so without this
-    #      step ``renv.lock`` never appears on disk and the UI
-    #      keeps showing the bootstrap button.
+    # The harness needs jsonlite + arrow in the project library (activate
+    # scopes ``.libPaths()`` to it). ``bare = TRUE`` skips the post-init
+    # snapshot, so snapshot explicitly or ``renv.lock`` never appears.
     snippet = "\n".join(
         [
             'if (!requireNamespace("renv", quietly = TRUE)) {',
@@ -1217,9 +1175,7 @@ async def _renv_add_locked(
     on_update: Callable[[str, str, bool], Awaitable[None] | None] | None,
 ) -> RJobResult:
     old_hash = _renv_lockfile_hash(notebook_dir)
-    # Embed the name as a double-quoted R string literal. ``is_valid_r_package_name``
-    # already rejected anything but [A-Za-z0-9.] so escape concerns are moot —
-    # ``ggplot2`` becomes ``renv::install("ggplot2"); renv::snapshot(type = "all")``.
+    # Safe to embed unescaped: ``is_valid_r_package_name`` allows only [A-Za-z0-9.].
     snippet = f'renv::install("{package}"); renv::snapshot(type = "all", prompt = FALSE)'
     result = await _run_renv_mutation(
         notebook_dir,
@@ -1620,9 +1576,7 @@ def _remove_dependency_locked(
     )
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
+# --- Helpers ---
 
 
 def _lockfile_hash(notebook_dir: Path) -> str:

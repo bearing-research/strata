@@ -107,16 +107,12 @@ class ModuleExportPlan:
     exported_symbols: dict[str, ExportedSymbol] = field(default_factory=dict)
     unsupported_symbols: set[str] = field(default_factory=set)
     blocking_symbols: set[str] = field(default_factory=set)
-    # Names the exported code closes over that aren't bound in the slice but
-    # are produced upstream — resolved from the artifact store and injected
-    # into the synthetic module's namespace before exec, rather than blocking.
+    # Free names of the exported code that are produced upstream: resolved from the
+    # store and injected into the module namespace before exec instead of blocking.
     # Empty unless the caller passes ``injectable``.
     injected_inputs: set[str] = field(default_factory=set)
     unsupported_reasons: list[str] = field(default_factory=list)
-    # True when the slicer dropped any node from the cell. Pure module
-    # cells (no drops) keep this False so callers that want the strict
-    # "this is library code, nothing else" signal — like the UI pill —
-    # can gate on ``not sliced``.
+    # False for pure module cells, so the UI pill can gate on ``not sliced``.
     sliced: bool = False
 
     @property
@@ -179,9 +175,7 @@ def build_module_export_plan(
             continue
 
         if isinstance(node, ast.ImportFrom) and any(alias.name == "*" for alias in node.names):
-            # Star imports bind unknown names; the slice can't validate
-            # against them, so we never keep them. Surface a reason so
-            # the UI explains why.
+            # Star imports bind unknown names the slice can't validate; never keep them.
             star_import_dropped = True
             drop_nodes.append(node)
             continue
@@ -198,9 +192,7 @@ def build_module_export_plan(
             keep_nodes.append(node)
             continue
 
-        # Drop the node. Track lambda-assignments specifically — those
-        # bind names that look like library code, so downstream
-        # consumption should fail loudly.
+        # Lambda assignments look like library code, so consuming them must fail loudly.
         drop_nodes.append(node)
         if isinstance(node, ast.Assign) and isinstance(node.value, ast.Lambda):
             for target in node.targets:
@@ -227,11 +219,8 @@ def build_module_export_plan(
         elif isinstance(node, ast.ClassDef):
             kind_map[node.name] = "class"
 
-    # Divergence check: if a name bound by the slice is *also* rebound
-    # by a dropped statement at module scope, the synthetic module's
-    # value diverges from the cell's final state. Common case:
-    # ``def f(): ...; f = wrap(f)`` — slice exports the unwrapped ``f``
-    # while the cell's runtime ``f`` is wrapped.
+    # A slice-bound name also rebound by a dropped statement diverges from the
+    # cell's final state, e.g. ``def f(): ...; f = wrap(f)``.
     kept_bindings = _kept_bindings(keep_nodes)
     dropped_bindings: set[str] = set()
     for node in drop_nodes:
@@ -247,9 +236,7 @@ def build_module_export_plan(
             f"{', '.join(sorted(divergent))}"
         )
 
-    # Slice-level free-variable analysis. Only needed when the slice
-    # contains at least one def/class — literal-only slices have no
-    # free-var concern.
+    # Literal-only slices have no free-variable concern.
     has_def_or_class = any(
         isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) for n in keep_nodes
     )
@@ -257,8 +244,7 @@ def build_module_export_plan(
         try:
             module_table = symtable.symtable(slice_source, "<slice>", "exec")
         except SyntaxError as exc:
-            # ``ast.unparse`` should always produce parseable text; if
-            # it ever doesn't, surface the failure rather than silently
+            # If ``ast.unparse`` ever yields unparseable text, surface it rather than
             # exporting broken source.
             return ModuleExportPlan(
                 module_source=slice_source,
@@ -268,25 +254,15 @@ def build_module_export_plan(
 
         module_locals = {sym.get_name() for sym in module_table.get_symbols() if sym.is_local()}
 
-        # Names referenced at module scope but not bound there:
-        # decorators, default values, base classes — all evaluated at
-        # module load.
+        # Unbound at module scope: decorators, defaults, base classes (all evaluated at load).
         for sym in module_table.get_symbols():
             name = sym.get_name()
             if sym.is_referenced() and not sym.is_local() and name not in _BUILTIN_NAMES:
                 module_load_unresolved.add(name)
 
-        # Annotation references: walk the AST explicitly instead of
-        # trusting symtable's free-variable report. symtable's verdict
-        # on annotations diverges across Python versions — pre-3.14 it
-        # reports annotation refs as free vars; on 3.14+ (PEP 749 lazy
-        # annotations) it does not. The explicit walk keeps the safety
-        # check version-independent: an annotation that references an
-        # unbound name blocks the slice regardless of whether Python
-        # itself would crash at def-time or later at annotation access.
-        # ``from __future__ import annotations`` (PEP 563) skips this
-        # — the source intent is "annotations are strings, never
-        # evaluated" — so unresolved refs in that case are safe.
+        # Walk annotations explicitly: symtable reports them as free vars before 3.14
+        # but not under PEP 749, so this keeps the check version-independent. Under
+        # ``from __future__ import annotations`` they are never evaluated, so skip.
         if not _has_future_annotations(tree):
             annotation_refs = _collect_annotation_names(keep_nodes)
             annotation_unresolved = {
@@ -296,9 +272,7 @@ def build_module_export_plan(
             }
             module_load_unresolved |= annotation_unresolved
 
-        # Injectable names (produced upstream) don't fail the export — they'll
-        # be hydrated into the module namespace before exec. Only the remaining
-        # "hard" unresolved names block.
+        # Upstream-produced names get hydrated before exec; only the rest block.
         module_load_hard = module_load_unresolved - injectable
         injected_inputs |= module_load_unresolved & injectable
 
@@ -324,23 +298,20 @@ def build_module_export_plan(
                 )
                 continue
             if module_load_hard:
-                # Module-load failure poisons every symbol — the synthetic
-                # module's ``exec`` would raise before binding any of them.
+                # The module's ``exec`` would raise before binding any symbol.
                 unsupported_symbols.add(symbol_name)
                 blocking_symbols.add(symbol_name)
                 continue
             if symbol_name in divergent:
-                # Name diverges from runtime; don't export.
                 continue
-            # Any remaining unresolved names are injectable (hard set empty).
+            # Hard set is empty here, so the rest are injectable.
             injected_inputs |= unresolved
             exported_symbols[symbol_name] = ExportedSymbol(
                 symbol_name, kind_map.get(symbol_name, child.get_type())
             )
 
-    # Literal-constant assignments ride alongside any kept defs/classes.
-    # Skip them when the slice itself can't import (hard module-load free
-    # vars unresolved), and skip names that diverge with runtime drops.
+    # Literal constants ride along with kept defs/classes, unless the slice can't
+    # import or the name diverges with runtime drops.
     if not (module_load_unresolved - injectable):
         for node in keep_nodes:
             if _is_literal_constant_assignment(node):
@@ -401,8 +372,7 @@ def _emit_slice_source(keep_nodes: list[ast.stmt], *, original: str) -> str:
     try:
         tree = ast.parse(original)
     except SyntaxError:
-        # Shouldn't happen — caller already parsed once — but keep this
-        # safe.
+        # The caller already parsed once; stay safe anyway.
         body = ast.unparse(ast.Module(body=keep_nodes, type_ignores=[]))
         return body if body.endswith("\n") else f"{body}\n"
 
@@ -535,7 +505,7 @@ def _has_future_annotations(tree: ast.Module) -> bool:
     """
     for node in tree.body:
         if isinstance(node, ast.Expr) and isinstance(node.value, ast.Constant):
-            # Module docstring — allowed before __future__ imports.
+            # A module docstring may precede __future__ imports.
             continue
         if isinstance(node, ast.ImportFrom) and node.module == "__future__":
             for alias in node.names:
@@ -572,11 +542,8 @@ def _collect_annotation_names(nodes: list[ast.stmt]) -> set[str]:
                 names.add(sub.id)
 
     def _walk(stmt: ast.AST) -> None:
-        # ast.walk yields every descendant in the subtree, but for
-        # functions and classes we need access to the annotation slots
-        # specifically — ast.walk would not distinguish an annotation
-        # expression from a body expression. Iterate the relevant
-        # slots by hand.
+        # Iterate annotation slots by hand: ast.walk alone can't tell an annotation
+        # from a body expression.
         for sub in ast.walk(stmt):
             if isinstance(sub, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 args = sub.args
@@ -642,8 +609,7 @@ def _module_bindings_in(node: ast.stmt) -> set[str]:
         for target in node.targets:
             bindings.update(_target_names(target))
     elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-        # Nested inside a dropped block — its name still binds at
-        # module scope when the block executes.
+        # Nested in a dropped block, it still binds at module scope when the block runs.
         bindings.add(node.name)
     elif isinstance(node, ast.Import):
         for alias in node.names:

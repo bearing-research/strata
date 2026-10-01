@@ -35,20 +35,17 @@ def validate_cell_annotations(
     notebook_state: NotebookState,
 ) -> list[AnnotationDiagnostic]:
     """Validate a cell's annotations against notebook-wide context."""
-    # Variant validation is language-agnostic: any cell language can be
-    # a variant member, so the cross-sibling checks run before language
-    # dispatch.
+    # Language-agnostic: any language can be a variant member, so these run before
+    # language dispatch.
     _cell_annotations = parse_annotations(cell.source)
     variant_diagnostics = _validate_variant_annotation(cell, _cell_annotations, notebook_state)
     variant_diagnostics = variant_diagnostics + _validate_per_variant_annotation(
         cell, _cell_annotations, notebook_state
     )
     if cell.language == CellLanguage.MARKDOWN:
-        # Markdown cells are pure prose; ``# @worker`` etc. would be a
-        # markdown heading, not an annotation. No validation applies.
+        # Pure prose: ``# @worker`` would be a markdown heading, not an annotation.
         return variant_diagnostics
-    # Every language that runs: a dropped ``@fetch`` or ``@dataset`` is a
-    # variable the cell is going to reach for and not find.
+    # A dropped ``@fetch`` or ``@dataset`` is a variable the cell will reach for and miss.
     variant_diagnostics = variant_diagnostics + _validate_recorded_inputs(cell)
     if cell.language == CellLanguage.PROMPT:
         return variant_diagnostics + _validate_prompt_cell_annotations(cell)
@@ -81,7 +78,6 @@ def validate_cell_annotations(
     for mount in annotations.mounts:
         line = _find_annotation_line(cell.source, "mount", mount.name)
 
-        # mount_uri_unsupported
         scheme = mount.uri.split("://")[0].lower() if "://" in mount.uri else ""
         if not scheme or scheme not in _SUPPORTED_MOUNT_SCHEMES:
             diagnostics.append(
@@ -97,7 +93,6 @@ def validate_cell_annotations(
                 )
             )
 
-        # mount_shadows_notebook
         if mount.name in notebook_mount_names:
             diagnostics.append(
                 AnnotationDiagnostic(
@@ -145,10 +140,8 @@ def validate_cell_annotations(
                 )
             )
 
-    # table_duplicate_name: snapshots are keyed by table name, so a duplicate
-    # makes one @table win namespace injection while both feed provenance (and an
-    # unresolved duplicate can borrow a resolved one's snapshot). Execution
-    # rejects this — flag it early.
+    # table_duplicate_name: snapshots are keyed by table name, so a duplicate makes one
+    # @table win injection while both feed provenance. Execution rejects it; flag early.
     table_names = [t.name for t in annotations.tables]
     for dup in sorted({n for n in table_names if table_names.count(n) > 1}):
         diagnostics.append(
@@ -164,7 +157,7 @@ def validate_cell_annotations(
         )
 
     # --- timeout_not_numeric / env_malformed ---
-    # The parser silently swallows these, so we re-scan raw lines.
+    # The parser silently swallows these, so re-scan raw lines.
     for lineno, line_text in iter_annotation_block(cell.source):
         parsed = parse_annotation_directive(line_text)
         if parsed is None:
@@ -276,10 +269,9 @@ def _validate_module_export(
     """
     from strata.notebook.module_export import build_module_export_plan, runtime_binding_names
 
-    # Names an upstream cell defines, or this cell's own runtime values, can be
-    # hydrated into the synthetic module at load time, so a def closing over
-    # them isn't blocked — mirror the executor's injectable set (see
-    # _write_module_export_outputs).
+    # Upstream defines and this cell's runtime values can be hydrated into the synthetic
+    # module, so a def closing over them isn't blocked. Mirrors
+    # _write_module_export_outputs.
     cross_cell = frozenset(
         v
         for v in (*cell.references, *cell.builtin_references)
@@ -300,7 +292,6 @@ def _validate_module_export(
     if not blocked:
         return []
 
-    # No downstream cell wants any of these names — silence the warning.
     referenced_elsewhere: set[str] = set()
     for other in notebook_state.cells:
         if other.id == cell.id:
@@ -457,9 +448,8 @@ def _validate_referenced_connection(
     """
     diagnostics: list[AnnotationDiagnostic] = []
 
-    # Driver registry check. Imported lazily so notebook code paths
-    # that don't touch SQL don't pay the import cost, and so missing
-    # optional ADBC packages don't crash validation.
+    # Lazy import: non-SQL paths skip the cost, and missing optional ADBC packages
+    # don't crash validation.
     try:
         from strata.notebook.sql.registry import known_drivers
 
@@ -481,8 +471,7 @@ def _validate_referenced_connection(
             )
         )
 
-    # Auth literal-secret check. Importing from writer keeps the
-    # contract about what counts as a ${VAR} indirection in one place.
+    # Keeps what counts as a ${VAR} indirection defined in one place.
     from strata.notebook.writer import is_auth_indirection
 
     for key, value in (conn.auth or {}).items():
@@ -570,11 +559,8 @@ def _validate_sql_cell_annotations(
                 )
             )
 
-    # SQL parse errors when a dialect can be resolved. The analyzer
-    # captures sqlglot's syntax / token / optimize errors as
-    # ``parse_error``; surfacing them as a diagnostic is what makes
-    # them survive the session boundary — without this, parse failures
-    # would be silently invisible to the UI.
+    # Surface the analyzer's sqlglot ``parse_error`` as a diagnostic so it survives the
+    # session boundary; otherwise parse failures never reach the UI.
     if (
         sql is not None
         and sql.connection
@@ -592,8 +578,7 @@ def _validate_sql_cell_annotations(
             # name makes the executor re-run the query every time.
             reruns = sql_analysis.cache_policy.kind == "fingerprint"
             if sql_analysis.parse_error:
-                # The executor refuses SQL it cannot parse before it opens a
-                # connection, whatever the cache policy.
+                # The executor refuses unparseable SQL before connecting, whatever the cache policy.
                 diagnostics.append(
                     AnnotationDiagnostic(
                         severity=DiagnosticSeverity.WARN,
@@ -623,12 +608,12 @@ def _validate_sql_cell_annotations(
                     )
                 )
         except (KeyError, ImportError):
-            # Driver not registered (handled by connection_driver_unknown
-            # above) or sqlglot not installed — neither is a parse error.
+            # Driver not registered (connection_driver_unknown covers it) or sqlglot missing:
+            # neither is a parse error.
             pass
         except Exception as exc:
-            # A bug in table extraction, not in the cell. Validation runs on
-            # open, so raising here would keep the whole notebook from opening.
+            # A bug in table extraction, not the cell. Validation runs on open, so raising would
+            # keep the notebook from opening.
             logger.exception("SQL analysis failed for cell %s", cell.id)
             diagnostics.append(
                 AnnotationDiagnostic(
@@ -642,8 +627,7 @@ def _validate_sql_cell_annotations(
                 )
             )
 
-    # Re-scan raw lines to catch malformed @cache values that the
-    # permissive parser silently dropped.
+    # Re-scan raw lines for malformed @cache values the permissive parser dropped.
     for lineno, line_text in iter_annotation_block(cell.source):
         parsed = parse_annotation_directive(line_text)
         if parsed is None or parsed[0] != "cache":
@@ -813,9 +797,7 @@ def _validate_variant_annotation(
     diagnostics: list[AnnotationDiagnostic] = []
     variant_line = _find_annotation_line(cell.source, "variant")
 
-    # Detect the malformed case: a ``@variant`` line is present but
-    # parse_annotations rejected it (wrong number of tokens, or non-
-    # identifier values).
+    # Malformed: a ``@variant`` line is present but parse_annotations rejected it.
     if variant_line is not None and annotations.variant is None:
         diagnostics.append(
             AnnotationDiagnostic(
@@ -840,12 +822,8 @@ def _validate_variant_annotation(
         if c.id != cell.id and c.variant_group == group_id and c.variant_name is not None
     ]
 
-    # variant_contract_mismatch — siblings disagree on defines.
-    # Compare *value defines* only: imports are scaffolding (a variant
-    # using sklearn.linear_model vs sklearn.ensemble is a means, not an
-    # interface). Downstream cells reference produced values, never the
-    # variant's import names, so excluding imports gives the same
-    # correctness guarantee with much less friction.
+    # variant_contract_mismatch: siblings disagree on defines. Compare value defines only;
+    # imports are a means, not an interface, and downstream never references them.
     if siblings:
         own_imports = _collect_top_level_imports(cell.source)
         own_defines = set(cell.defines) - own_imports
@@ -875,8 +853,7 @@ def _validate_variant_annotation(
                 )
                 break
 
-    # variant_mode_invalid — mode is neither "switch" nor "sweep". Execution
-    # treats the unknown value as switch; flag it so the user isn't surprised.
+    # variant_mode_invalid: execution treats an unknown mode as switch; flag the surprise.
     mode = notebook_state.variant_modes.get(group_id, "switch")
     if mode not in ("switch", "sweep"):
         diagnostics.append(
@@ -891,8 +868,7 @@ def _validate_variant_annotation(
             )
         )
 
-    # variant_active_redundant — `active` is set in a sweep-mode group, where
-    # it's ignored (all variants run). Info-level: harmless, just confusing.
+    # variant_active_redundant: `active` is ignored in sweep mode. Harmless, confusing.
     if mode == "sweep":
         active = notebook_state.variant_active_selections.get(group_id)
         if active:
@@ -909,13 +885,10 @@ def _validate_variant_annotation(
                 )
             )
 
-    # variant_active_unknown — toml selects a variant that doesn't exist
-    # in this group. Surface on every member so the user sees it on
-    # whichever variant they're looking at. Skipped in sweep mode, where the
-    # active pointer is intentionally ignored.
+    # variant_active_unknown: toml selects a missing variant. Surfaced on every member;
+    # skipped in sweep mode, where the active pointer is ignored.
     selected = notebook_state.variant_active_selections.get(group_id) if mode != "sweep" else None
-    # Truthy check, not ``is not None``: an empty ``active = ""`` means "first in
-    # source order" (e.g. after a sweep→switch toggle) and isn't an unknown name.
+    # Truthy check: an empty ``active = ""`` means "first in source order", not unknown.
     if selected:
         all_members = [annotations.variant.name] + [s.variant_name for s in siblings]
         if selected not in all_members:

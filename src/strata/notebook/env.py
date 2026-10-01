@@ -138,10 +138,8 @@ def compute_lockfile_hash(notebook_dir: Path) -> str:
     """
     hasher = hashlib.sha256()
     _fold_lockfile_into_hash(hasher, notebook_dir, "uv.lock", tag=None)
-    # Tag prefix prevents an exotic collision between a uv-only
-    # notebook and a renv-only one whose lockfiles happen to share
-    # bytes. The tag itself is fixed bytes, not derived from
-    # notebook state.
+    # Tag prefix keeps a uv-only and an renv-only notebook with identical
+    # lockfile bytes from colliding.
     _fold_lockfile_into_hash(hasher, notebook_dir, "renv.lock", tag=b"\0renv=")
     return hasher.hexdigest()
 
@@ -161,8 +159,6 @@ def _runtime_uv_closure_fingerprint(raw_uv_lock: bytes) -> bytes | None:
     dev install might force — while being invariant to the dev tools themselves.
     """
     try:
-        # tomllib yields dynamically-typed nested structures; treat as Any and
-        # guard each access with isinstance below.
         data: Any = tomllib.loads(raw_uv_lock.decode("utf-8"))
     except (UnicodeDecodeError, tomllib.TOMLDecodeError):
         return None
@@ -186,8 +182,7 @@ def _runtime_uv_closure_fingerprint(raw_uv_lock: bytes) -> bytes | None:
         ):
             root = pkg
 
-    # No identifiable root, or no dev group to exclude → let the caller fold raw
-    # bytes (the historical, byte-identical behavior).
+    # No identifiable root or no dev group: the caller folds raw bytes.
     if root is None or not root.get("dev-dependencies"):
         return None
 
@@ -201,9 +196,7 @@ def _runtime_uv_closure_fingerprint(raw_uv_lock: bytes) -> bytes | None:
                         names.append(dep_name)
         return names
 
-    # Seed with the root's RUNTIME direct deps, then walk each reached package's
-    # own dependencies + optional-dependencies (extras of a runtime dep are
-    # runtime). Dev-only packages are never reached → excluded.
+    # Extras of a runtime dep are runtime; dev-only packages are never reached.
     seen: set[str] = set()
     frontier = _dep_names(root.get("dependencies"))
     while frontier:
@@ -225,7 +218,7 @@ def _runtime_uv_closure_fingerprint(raw_uv_lock: bytes) -> bytes | None:
             hasher.update(name.encode("utf-8"))
             hasher.update(b"@")
             hasher.update(str(pkg.get("version", "")).encode("utf-8"))
-            # Artifact hashes pin content — catches a same-version re-pin.
+            # Artifact hashes catch a same-version re-pin.
             artifact_hashes: list[str] = []
             sdist = pkg.get("sdist")
             if isinstance(sdist, dict) and isinstance(sdist.get("hash"), str):
@@ -266,11 +259,8 @@ def _fold_lockfile_into_hash(
     except OSError as exc:
         logger.warning("Could not read %s: %s", filename, exc)
         return
-    # uv.lock: when a dev group is present, fold a fingerprint of only the
-    # *runtime* dependency closure instead of the raw bytes, so dev tools
-    # (pytest/ruff/ty) don't invalidate cell caches. No dev group (or a parse
-    # failure) → fall through to the raw-bytes fold, byte-identical to the
-    # historical hash (no re-hash for existing/non-dev notebooks).
+    # With a dev group, fold only the runtime dependency closure so dev tools
+    # (pytest/ruff/ty) don't invalidate cell caches. Otherwise fall through to raw bytes.
     if filename == "uv.lock":
         fingerprint = _runtime_uv_closure_fingerprint(content)
         if fingerprint is not None:

@@ -152,7 +152,6 @@ class LoopAnnotation:
     start_from_iter: int | None = None
 
 
-# Pattern for annotation lines: # @<key> <rest>
 _ANNOTATION_RE = re.compile(r"^#\s*@(\w+)\s*(.*?)\s*$")
 
 
@@ -309,37 +308,29 @@ class CellAnnotations:
     # Loop cell annotations
     loop: LoopAnnotation | None = None
 
-    # Widget live mode. ``# @live`` on a widget cell auto-runs the (cheap)
-    # downstream cells when a control changes, instead of leaving them stale
-    # for a manual run. ``# @live off`` disables it.
+    # ``# @live`` on a widget cell auto-runs the (cheap) downstream cells when a control
+    # changes instead of leaving them stale. ``# @live off`` disables it.
     live: bool = False
 
     # SQL cell annotations
     sql: SqlAnnotation | None = None
     cache: CachePolicy | None = None
 
-    # ``# @nocache`` — always re-execute this cell, never serve a provenance
-    # cache hit. For cells run for their side effects or fresh randomness
-    # (a file write, an API call, ``random``/``time.now()``), where replaying a
-    # cached result would skip the effect. Applies to every language.
+    # ``# @nocache``: always re-execute, never serve a cache hit. For side effects or fresh
+    # randomness, where replaying a cached result would skip the effect. Any language.
     nocache: bool = False
 
     # Variant grouping
     variant: VariantAnnotation | None = None
 
-    # Sweep fan-out (v2). ``# @per_variant [group]`` marks a downstream cell
-    # to run once per variant of an upstream sweep group, with the scalar
-    # value bound (rather than consuming the whole ``{variant: value}`` dict).
-    # ``per_variant_group`` is the explicitly-named group, or None to infer
-    # the single sweep group the cell reads from.
+    # ``# @per_variant [group]``: run once per variant of an upstream sweep group with the
+    # scalar value bound. ``per_variant_group`` is the named group, or None to infer the
+    # single sweep group the cell reads.
     per_variant: bool = False
     per_variant_group: str | None = None
 
-    # Explicit ordering dependencies. ``# @after <cell-id>`` adds a DAG
-    # edge from ``<cell-id>`` to this cell without requiring a shared
-    # variable — the ergonomic answer to "this SQL cell reads a SQLite
-    # file the setup cell created" or any other side-effecting upstream.
-    # Multiple ``@after`` lines may stack; each line adds one edge.
+    # ``# @after <cell-id>`` adds a DAG edge without a shared variable (e.g. a SQL cell
+    # reading a file a setup cell wrote). Lines stack; each adds edges.
     after: list[str] = field(default_factory=list)
 
     def to_wire_payload(self) -> AnnotationsWirePayload:
@@ -503,21 +494,18 @@ def parse_annotations(source: str) -> CellAnnotations:
                 result.variant = variant
 
         elif key == "live":
-            # ``# @live`` (on) or ``# @live off`` — auto-run downstream on change.
+            # ``# @live`` (on) or ``# @live off``.
             result.live = value.strip().lower() not in ("off", "false", "no", "0")
 
         elif key == "per_variant":
-            # ``# @per_variant`` (infer the group) or ``# @per_variant <group>``.
-            # First token is the group; extras are ignored (validation flags a
-            # malformed group name separately if needed).
+            # ``# @per_variant`` (infer the group) or ``# @per_variant <group>``. First token is
+            # the group; extras are ignored (validation flags a malformed name).
             result.per_variant = True
             tokens = value.split()
             result.per_variant_group = tokens[0] if tokens else None
 
         elif key == "after":
-            # ``# @after <cell-id>`` declares an ordering dependency
-            # without sharing a variable. Multiple lines stack; one
-            # edge per identifier on the line (whitespace-separated).
+            # One edge per whitespace-separated identifier; multiple lines stack.
             for token in value.split():
                 token = token.strip().rstrip(",")
                 if token and token not in result.after:
@@ -746,7 +734,6 @@ def _parse_mount_annotation(value: str) -> MountSpec | None:
         elif extra.startswith("credential="):
             credential = extra[len("credential=") :] or None
 
-    # Validate name is a valid Python identifier
     if not name.isidentifier():
         return None
 

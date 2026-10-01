@@ -55,7 +55,6 @@ class BindError(ValueError):
     """A SQL cell's ``:name`` bind parameter could not be resolved or coerced."""
 
 
-# Order in this set isn't observable; the lookup is type-identity.
 _ACCEPTED_TYPES: frozenset[type] = frozenset(
     {
         type(None),
@@ -72,8 +71,7 @@ _ACCEPTED_TYPES: frozenset[type] = frozenset(
     }
 )
 
-# Stable user-facing list, used in error messages so the diagnostic
-# always reads the same way regardless of frozenset iteration order.
+# Stable order for error messages (frozenset iteration order is not).
 _ACCEPTED_TYPE_NAMES = "None, bool, int, float, str, bytes, Decimal, UUID, datetime, date, time"
 
 

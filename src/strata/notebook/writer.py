@@ -67,12 +67,8 @@ def _serialize_mounts(mounts: list[MountSpec]) -> list[dict[str, Any]]:
     return result
 
 
-# Sections that should be rendered as ``[[name]]`` array-of-tables blocks
-# rather than tomli_w's default ``name = [{...}]`` inline form. tomli_w
-# has no knob for this — when every item dict only contains simple values
-# it always chooses inline, which doesn't match the shape the example
-# notebooks were committed in and makes structural edits look messy in
-# git diffs.
+# Rendered as ``[[name]]`` blocks: tomli_w always picks the inline
+# ``name = [{...}]`` form for simple dicts, which makes git diffs messy.
 _ARRAY_OF_TABLES_SECTIONS = ("workers", "mounts", "variant_group")
 
 
@@ -224,10 +220,8 @@ def _serialize_connections(
 
     for mal in malformed or []:
         if mal.name in out:
-            # Same name appears as both valid and malformed — the valid
-            # entry wins. This shouldn't happen in practice (the parser
-            # only emits a malformed record when the valid path errors)
-            # but guards against double-write.
+            # The parser only emits a malformed record when the valid path errors; guard
+            # against a double write anyway (valid wins).
             continue
         body = dict(mal.body)
         if isinstance(body.get("auth"), dict):
@@ -244,9 +238,7 @@ def _serialize_workers(workers: list[WorkerSpec]) -> list[dict[str, object]]:
             "name": worker.name,
             "backend": worker.backend.value,
             **({"runtime_id": worker.runtime_id} if worker.runtime_id else {}),
-            # WorkerConfig → a plain dict for TOML; drop unset known keys, and
-            # omit the block entirely when nothing's set (an empty model is still
-            # truthy, unlike the old empty dict).
+            # Drop unset keys, and omit the block when nothing is set (an empty model is truthy).
             **(
                 {"config": cfg}
                 if (cfg := worker.config.model_dump(mode="json", exclude_none=True))
@@ -316,11 +308,9 @@ def write_cell(notebook_dir: Path, cell_id: str, source: str, author: str | None
     notebook_dir = Path(notebook_dir)
     notebook_toml_path = notebook_dir / "notebook.toml"
 
-    # Read current notebook.toml
     with open(notebook_toml_path, "rb") as f:
         toml_data = tomllib.load(f)
 
-    # Find cell metadata
     cells_data = toml_data.get("cells", [])
     cell_meta = None
     for cell in cells_data:
@@ -329,11 +319,9 @@ def write_cell(notebook_dir: Path, cell_id: str, source: str, author: str | None
             break
 
     if cell_meta is None:
-        # FileNotFoundError (not ValueError) so route handlers can map
-        # this to 404 without ambiguity with validation errors.
+        # FileNotFoundError, not ValueError, so handlers can map it to 404.
         raise FileNotFoundError(f"Cell {cell_id} not found in notebook.toml")
 
-    # Write cell file
     cells_dir = notebook_dir / "cells"
     cells_dir.mkdir(exist_ok=True)
     cell_file = cells_dir / cell_meta["file"]
@@ -343,12 +331,10 @@ def write_cell(notebook_dir: Path, cell_id: str, source: str, author: str | None
         f.write(source)
 
     if author and cell_meta.get("updated_by") != author:
-        # Through the helper, which re-reads: rewriting the snapshot loaded at
-        # the top of this function would drop a structural edit that landed
-        # while the source was being written (an offline `strata cell add`, a
-        # reorder) — the new cell would vanish from committed config and leave
-        # its source file orphaned. Without the `updated_at` bump, because an
-        # author change is not a structural edit.
+        # Through the helper, which re-reads: rewriting the snapshot loaded above would
+        # drop a structural edit that landed meanwhile (an offline `strata cell add`, a
+        # reorder) and orphan that cell's source. No `updated_at` bump: an author change
+        # is not a structural edit.
         def _stamp(data: dict[str, Any]) -> bool:
             for entry in data.get("cells", []):
                 if entry.get("id") == cell_id and entry.get("updated_by") != author:
@@ -378,13 +364,11 @@ def write_cell_tests(notebook_dir: Path, cell_id: str, test_source: str) -> None
         toml_data = tomllib.load(f)
 
     if not any(cell.get("id") == cell_id for cell in toml_data.get("cells", [])):
-        # FileNotFoundError (not ValueError) so route/WS handlers can map
-        # this to 404 without ambiguity with validation errors.
+        # FileNotFoundError, not ValueError, so handlers can map it to 404.
         raise FileNotFoundError(f"Cell {cell_id} not found in notebook.toml")
 
     cells_dir = notebook_dir / "cells"
-    # ``cell_id`` is validated against notebook.toml above, but basename it
-    # anyway so a path-separator id can never escape ``cells/``.
+    # Validated above, but basename so a path-separator id can never escape ``cells/``.
     test_file = cells_dir / os.path.basename(f"{cell_id}.test.py")
 
     if test_source.strip():
@@ -414,7 +398,6 @@ def write_notebook_toml(notebook_dir: Path, toml: NotebookToml) -> None:
     notebook_dir = Path(notebook_dir)
     notebook_toml_path = notebook_dir / "notebook.toml"
 
-    # Convert to dict for TOML serialization
     toml_data = {
         "notebook_id": toml.notebook_id,
         "name": toml.name,
@@ -429,8 +412,7 @@ def write_notebook_toml(notebook_dir: Path, toml: NotebookToml) -> None:
                 "order": cell.order,
                 **({"worker": cell.worker} if cell.worker is not None else {}),
                 **({"timeout": cell.timeout} if cell.timeout is not None else {}),
-                # Rebuilt field by field, so anything omitted here is erased on
-                # round-trip rather than merely unwritten.
+                # Rebuilt field by field, so anything omitted here is erased on round-trip.
                 **({"created_by": cell.created_by} if cell.created_by else {}),
                 **({"updated_by": cell.updated_by} if cell.updated_by else {}),
                 **(
@@ -467,8 +449,7 @@ def write_notebook_toml(notebook_dir: Path, toml: NotebookToml) -> None:
                     {
                         "group": vg.group,
                         "active": vg.active,
-                        # Emit ``mode`` only when non-default so existing
-                        # switch-mode notebooks don't churn.
+                        # Only when non-default, so switch-mode notebooks don't churn.
                         **({"mode": vg.mode} if vg.mode != "switch" else {}),
                     }
                     for vg in toml.variant_groups
@@ -480,23 +461,16 @@ def write_notebook_toml(notebook_dir: Path, toml: NotebookToml) -> None:
         **({"ai": toml.ai} if toml.ai else {}),
         **({"secret_manager": toml.secret_manager} if toml.secret_manager else {}),
         **({"r": toml.r} if toml.r else {}),
-        # Runtime state that used to live in this file — ``artifacts``
-        # (display outputs), ``environment`` (sync timestamps, package
-        # counts), ``cache`` — now lives in ``.strata/runtime.json``.
-        # Keeping it out of ``notebook.toml`` means example notebooks
-        # stop producing multi-KB git diffs every time someone runs
-        # them.
+        # Runtime state (display outputs, sync timestamps, cache) lives in
+        # ``.strata/runtime.json`` so running a notebook doesn't churn git diffs.
     }
 
     _write_notebook_toml_atomic(notebook_toml_path, toml_data)
 
 
-# Packages the notebook harness/pool_worker/serializer import directly
-# inside the per-notebook venv. Specifiers come from strata-notebook's
-# own metadata (Requires-Dist) so bounds never drift from what the
-# subprocess code actually uses. pyarrow is in core deps; orjson and
-# cloudpickle are in the [notebook] extra — Requirement.parse handles
-# both shapes.
+# Imported directly by harness/pool_worker/serializer inside the notebook venv.
+# Specifiers come from strata-notebook's own Requires-Dist so bounds never drift;
+# Requirement.parse handles both core deps and the [notebook] extra.
 _NOTEBOOK_RUNTIME_PACKAGES: tuple[str, ...] = ("pyarrow", "orjson", "cloudpickle")
 
 
@@ -575,23 +549,18 @@ def create_notebook(
         else current_python_minor()
     )
 
-    # Validate notebook name
     if "/" in name or "\\" in name or ".." in name or "\0" in name:
         raise ValueError("Notebook name contains invalid characters")
 
-    # Create notebook directory (slugify the name)
     notebook_dir = parent_dir / name.lower().replace(" ", "_")
     notebook_dir.mkdir(exist_ok=True)
 
-    # Create cells subdirectory
     cells_dir = notebook_dir / "cells"
     cells_dir.mkdir(exist_ok=True)
 
-    # An existing notebook is left exactly as it is. Rewriting its
-    # notebook.toml from what this function knows kept the id, the owner and
-    # each cell's file, and dropped its workers, env, mounts, connections, ai
-    # settings, variant groups and every per-cell field; the pyproject.toml
-    # rewrite below dropped its dependencies. Only missing scaffolding is added.
+    # An existing notebook is left as it is: rewriting its notebook.toml and
+    # pyproject.toml from what this function knows would drop its settings and
+    # dependencies. Only missing scaffolding is added.
     if (notebook_dir / "notebook.toml").exists():
         if write_gitignore_file:
             write_gitignore(notebook_dir)
@@ -599,17 +568,14 @@ def create_notebook(
 
     notebook_id = str(uuid.uuid4())
 
-    # Optional project mount: a pinned read-only mount of the project dir, so
-    # cells read project files as `open(<name> / "file")` without absolute paths.
-    # Pinned → no directory hashing and a stable fingerprint (the project's own
-    # churn, including this notebook's .strata/, never re-stales cells).
+    # Pinned read-only mount of the project dir, so cells use `open(<name> / "file")`.
+    # Pinned means no hashing: project churn (including .strata/) never re-stales cells.
     mounts: list[MountSpec] = []
     if project_mount is not None:
         if not project_mount.isidentifier():
             raise ValueError(f"--project-mount name {project_mount!r} must be a valid identifier")
         mounts.append(MountSpec(name=project_mount, uri=f"file://{parent_dir}", pin="project-root"))
 
-    # Create notebook.toml
     now = datetime.now(tz=UTC)
     notebook_toml = NotebookToml(
         notebook_id=notebook_id,
@@ -622,12 +588,8 @@ def create_notebook(
     )
     write_notebook_toml(notebook_dir, notebook_toml)
 
-    # Create pyproject.toml (minimal). The notebook runtime expects
-    # pyarrow (DataFrame / Series / ndarray serialization), orjson
-    # (manifest I/O), and cloudpickle (default object codec) to be
-    # importable inside the notebook venv. They're cheap wheels on all
-    # supported platforms; baking them into the template avoids
-    # silent fallbacks to slower stdlib json / stdlib pickle.
+    # pyarrow, orjson and cloudpickle are baked in to avoid silent fallbacks to
+    # slower stdlib json and pickle.
     pyproject_data: dict[str, Any] = {
         "project": {
             "name": name.lower().replace(" ", "-"),
@@ -642,23 +604,19 @@ def create_notebook(
     with open(notebook_dir / "pyproject.toml", "wb") as f:
         tomli_w.dump(pyproject_data, f)
 
-    # Before any sync: the sync creates .venv, and a directory that gains a
-    # virtualenv before it gains the rule to ignore one is a directory someone
-    # can `git add -A` at exactly the wrong moment.
+    # Before any sync: a directory that gains .venv before its ignore rule can be
+    # `git add -A`'d at exactly the wrong moment.
     if write_gitignore_file:
         write_gitignore(notebook_dir)
 
     if initialize_environment:
-        # Run uv sync to create venv + uv.lock (best-effort)
+        # Best-effort; creates venv + uv.lock
         synced = _uv_sync(notebook_dir, python_version=requested_python_version)
 
-        # Populate environment section with lockfile hash + python version
         _update_environment_metadata(notebook_dir)
 
-        # And separately, what the sync actually realized. The snapshot above
-        # records the lockfile on disk whether or not it was installed; this
-        # records it only when it was. A best-effort sync that fell over must
-        # not leave the notebook claiming an environment it does not have.
+        # Records the lockfile only if it was actually installed: a failed best-effort
+        # sync must not leave the notebook claiming an environment it lacks.
         if synced:
             from strata.notebook.env import compute_lockfile_hash
             from strata.notebook.runtime_state import (
@@ -727,21 +685,14 @@ def _renv_sync(notebook_dir: Path, *, timeout: int = 600) -> bool:
     cost is paid once the notebook actually wants to run an R cell,
     not on every notebook open.
     """
-    # Lockfile check comes BEFORE the Rscript lookup. The common
-    # pre-renv-init state — a notebook with R cells but no
-    # ``renv.lock`` yet — must be a no-op success regardless of
-    # whether R is installed. The bootstrap path (write ``.Rprofile``
-    # + call ``renv::init()``) lands in #57's harness wiring, and
-    # until that ships the absence of a lockfile is the expected
-    # initial state, not a failure.
+    # Before the Rscript lookup: R cells with no ``renv.lock`` yet is the normal
+    # pre-init state and must succeed whether or not R is installed.
     if not (notebook_dir / "renv.lock").exists():
         _logger.debug("renv.lock missing in %s — nothing to restore", notebook_dir)
         return True
 
-    # Building a package from source runs its configure script, code from
-    # wherever the package came from. Where cells run as the harness user, so
-    # does the restore; a service-mode server with no harness user runs no R
-    # code on its own host, so there is nothing to restore for.
+    # Building a package from source runs its configure script, so the restore runs
+    # as the harness user; a service-mode server with no harness user skips it.
     try:
         harness_user = resolve_harness_user()
     except LocalExecutionRefused as exc:
@@ -753,14 +704,10 @@ def _renv_sync(notebook_dir: Path, *, timeout: int = 600) -> bool:
         )
         return False
 
-    # Cross-process mutual exclusion (issue #102): a server serving
-    # this notebook dir and a ``strata run`` in another process must
-    # not run ``renv::restore()`` / ``renv::install()`` concurrently —
-    # renv has no locking of its own. Waiting up to *timeout* is the
-    # right behavior: once the other process finishes its restore,
-    # ours is a fast no-op against the already-restored library.
-    # Acquired before the Rscript lookup so the contended path is
-    # deterministic regardless of whether R is installed.
+    # renv has no locking of its own, so a server and a ``strata run`` in another
+    # process must not restore concurrently. After the other finishes, ours is a
+    # fast no-op. Acquired before the Rscript lookup so the contended path is
+    # deterministic.
     from strata.notebook.dependencies import renv_process_lock
 
     process_lock = renv_process_lock(notebook_dir)
@@ -779,8 +726,7 @@ def _renv_sync(notebook_dir: Path, *, timeout: int = 600) -> bool:
 
         root = shared_root()
         if root is not None:
-            # One library per renv.lock: restored into the shared store once,
-            # linked by every notebook with the same lock.
+            # One library per renv.lock, restored into the shared store once.
             from strata.notebook.shared_env import restore_r_library
 
             return restore_r_library(
@@ -819,11 +765,8 @@ def _renv_restore_locked(
         library = renv_dir / "library"
         cache = (env or {}).get("RENV_PATHS_CACHE")
         if library.is_symlink():
-            # Read before renv/ is handed over, and checked rather than trusted:
-            # cell code runs as the harness user, which owns renv/ after a
-            # restore and so can repoint this link. Handing over whatever it
-            # names would give that user any directory the server owns. Only a
-            # library in the shared store (beside its package cache) is ours.
+            # Checked, not trusted: the harness user owns renv/ after a restore and can
+            # repoint this link. Only a library in the shared store is ours to hand over.
             target = library.resolve()
             store = Path(cache).resolve().parent if cache else None
             if store is None or target.parent != store:
@@ -841,12 +784,8 @@ def _renv_restore_locked(
             hand_over(Path(cache), harness_user)
 
     try:
-        # No ``--vanilla`` / ``--no-init-file``: the project's
-        # ``.Rprofile`` is what sources ``renv/activate.R`` to put the
-        # project library on ``.libPaths()``. Without it ``renv::restore()``
-        # can't see the project library and tries to install everything
-        # into the user's default lib — usually failing because that
-        # lib doesn't have renv installed in the first place.
+        # No ``--vanilla``: the project ``.Rprofile`` sources ``renv/activate.R``, without
+        # which ``renv::restore()`` targets the user's default lib (usually without renv).
         subprocess.run(
             [rscript, "-e", "renv::restore(prompt = FALSE)"],
             cwd=str(notebook_dir),
@@ -933,11 +872,9 @@ def _update_environment_metadata(notebook_dir: Path) -> None:
 
     declared_package_count = len(list_dependencies(notebook_dir))
     state = load_runtime_state(notebook_dir)
-    # Everything below describes what is *declared* on disk and is rewritten
-    # unconditionally. The attestation is the one field that describes what was
-    # *installed*, so it has to survive a refresh it knows nothing about —
-    # rebuilding the record without it silently revoked the attestation on
-    # every sync, dependency change, and environment job.
+    # Everything below is rewritten from what is declared on disk. The attestation
+    # records what was *installed*, so it must survive a refresh or every sync
+    # would silently revoke it.
     realized = state.environment.synced_lockfile_hash
     state.environment = EnvironmentRuntime(
         requested_python_version=requested_python_version,
@@ -988,12 +925,8 @@ def add_cell_to_notebook(
     with open(notebook_toml_path, "rb") as f:
         toml_data = tomllib.load(f)
 
-    # Calculate order. "Right after X" means landing between X and the
-    # next cell in source order — a plain ``X.order + 0.5`` collides
-    # whenever two inserts target the same parent (the second insert
-    # ends up tied with the first, and stable sort makes "after X"
-    # actually mean "after the cell that was added previously"). Use
-    # the midpoint to the next cell instead.
+    # Midpoint to the next cell: ``X.order + 0.5`` ties when two inserts target the
+    # same parent, and stable sort then puts the second after the first insert.
     cells_data = toml_data.get("cells", [])
     if after_cell_id:
         idx = next((i for i, c in enumerate(cells_data) if c.get("id") == after_cell_id), None)
@@ -1010,27 +943,21 @@ def add_cell_to_notebook(
     else:
         order = len(cells_data)
 
-    # Create cell file with a language-matching extension so the source
-    # file is editable + linted outside the notebook UI (markdown editors
-    # for ``.md``, R-aware editors for ``.r``, etc.). Python is the
-    # fallback for anything else (SQL cells use ``.py`` historically;
-    # the cell harness reads source text by content, not extension).
+    # Language-matching extension so the file works in outside editors. The harness
+    # reads source by content, so everything else (SQL included) uses ``.py``.
     extension_by_language = {"markdown": "md", "r": "r", "widget": "widget"}
     extension = extension_by_language.get(language, "py")
     cell_filename = f"{cell_id}.{extension}"
     cells_dir = notebook_dir / "cells"
     cells_dir.mkdir(exist_ok=True)
 
-    # Widget cells seed a starter control so a freshly-added one is usable
-    # immediately (its declaration is editable via the cell's "Edit controls"
-    # toggle). Every other language starts empty.
+    # Widget cells start with a usable starter control; every other language starts empty.
     starter_source = (
         "alpha = slider(0, 1, step=0.01, default=0.5)\n" if language == "widget" else ""
     )
     with open(cells_dir / cell_filename, "w", encoding="utf-8") as f:
         f.write(starter_source)
 
-    # Add to cells list
     entry = {
         "id": cell_id,
         "file": cell_filename,
@@ -1038,14 +965,11 @@ def add_cell_to_notebook(
         "order": order,
     }
     if author:
-        # Both, not just created_by: a cell that has been added and not yet
-        # edited was last changed by whoever added it, and leaving updated_by
-        # empty would make the view read as though nobody had touched it.
+        # Both: an added, unedited cell was last changed by whoever added it.
         entry["created_by"] = author
         entry["updated_by"] = author
     cells_data.append(entry)
 
-    # Re-sort cells by order
     cells_data.sort(key=lambda c: c.get("order", 0))
 
     toml_data["cells"] = cells_data
@@ -1082,17 +1006,14 @@ def remove_cell_from_notebook(notebook_dir: Path, cell_id: str) -> None:
             break
 
     if cell_meta is None:
-        # FileNotFoundError (not ValueError) so route handlers can map
-        # this to 404 without ambiguity with validation errors.
+        # FileNotFoundError, not ValueError, so handlers can map it to 404.
         raise FileNotFoundError(f"Cell {cell_id} not found")
 
-    # Remove cell file
     cells_dir = notebook_dir / "cells"
     cell_file = cells_dir / cell_meta["file"]
     if cell_file.exists():
         cell_file.unlink()
 
-    # Remove from cells list
     cells_data.pop(cell_idx)
     toml_data["cells"] = cells_data
     toml_data["updated_at"] = datetime.now(tz=UTC)
@@ -1116,26 +1037,17 @@ def reorder_cells(notebook_dir: Path, cell_ids: list[str]) -> None:
 
     cells_data = toml_data.get("cells", [])
 
-    # Create mapping of cell_id to metadata
     cell_map = {cell.get("id"): cell for cell in cells_data}
 
-    # Reorder and update order field
     new_cells = []
     for cell_id in cell_ids:
         if cell_id in cell_map:
             new_cells.append(cell_map[cell_id])
 
-    # Keep every cell that is on disk but absent from ``cell_ids``.
-    #
-    # This used to rebuild the list from ``cell_ids`` alone, so anything the
-    # caller had not seen was DELETED from notebook.toml — committed config —
-    # with no error, orphaning its source file and making its artifacts
-    # unreachable. Callers pass a snapshot taken when they opened the
-    # notebook, so any cell added since (by a live server session, the TUI, or
-    # a second CLI process) was silently destroyed by an unrelated reorder.
-    #
-    # Reordering must never be able to lose a cell. Unknown ones keep their
-    # relative order and land after the explicitly ordered ones.
+    # Keep every on-disk cell absent from ``cell_ids``: callers pass a snapshot from
+    # open time, so cells added since (by a server session, the TUI, another CLI)
+    # would otherwise be deleted from committed config. Unknown cells keep their
+    # relative order after the explicitly ordered ones.
     named = set(cell_ids)
     new_cells.extend(cell for cell in cells_data if cell.get("id") not in named)
 
@@ -1176,13 +1088,11 @@ def update_requires_python(notebook_dir: Path, new_minor: str) -> str:
         raise ValueError(f"Notebook pyproject is missing a requires-python line: {pyproject_path}")
 
     old_line = match.group(0)
-    # Capture the old spec value (between quotes) for the return.
     old_spec_match = re.search(r'"([^"]*)"', old_line)
     old_spec = old_spec_match.group(1) if old_spec_match else ""
 
     if old_line == new_line:
-        # Caller is responsible for the equal-to-current no-op short
-        # circuit; if it gets here anyway, no harm done.
+        # The caller handles the no-op case; harmless if it gets here anyway.
         return old_spec
 
     updated = text[: match.start()] + new_line + text[match.end() :]
@@ -1308,10 +1218,8 @@ def update_notebook_connections(
     def mutate(toml_data: dict[str, Any]) -> bool:
         existing = toml_data.get("connections")
         if not new_connections:
-            # Treat "no [connections] block" and "empty dict" as the same
-            # state so an empty save on a notebook that never had
-            # connections doesn't rewrite the file (and re-serialize
-            # array-of-tables to inline, churning updated_at).
+            # No block and an empty dict are the same state, so an empty save doesn't
+            # rewrite the file (churning array-of-tables and updated_at).
             if not existing:
                 return False
             toml_data.pop("connections", None)
@@ -1392,8 +1300,7 @@ def update_notebook_env(notebook_dir: Path, env: dict[str, str]) -> None:
     )
     existing_env = toml_data.get("env")
 
-    # Compare the effective persistable state. ``None`` means "block
-    # should not appear"; equality on dicts handles the value changes.
+    # ``None`` means the block should not appear.
     if new_env == existing_env or (new_env is None and not existing_env):
         return
 
@@ -1503,7 +1410,7 @@ def set_variant_mode(notebook_dir: Path, group: str, mode: str) -> None:
                 toml_data["variant_group"] = entries
                 return True
         if mode == "switch":
-            # No entry and switch is the default — nothing to persist.
+            # Switch is the default; nothing to persist.
             return False
         entries.append({"group": group, "active": "", "mode": mode})
         toml_data["variant_group"] = entries

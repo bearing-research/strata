@@ -88,8 +88,6 @@ class TuiClient:
                 raise TuiClientError(f"export failed ({response.status_code})")
             return response.content
 
-    # -- internals -----------------------------------------------------------
-
     async def _get(self, path: str, params: dict[str, str] | None = None) -> dict[str, Any]:
         async with httpx.AsyncClient(timeout=30.0) as client:
             try:

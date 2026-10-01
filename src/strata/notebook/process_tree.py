@@ -33,13 +33,9 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-# Line limit for the newline-delimited JSON protocols the notebook speaks
-# to its subprocesses (the batch frame pipe, the warm-pool result line).
-# asyncio's StreamReader default is 64 KiB, and readline() raises
-# ValueError on any longer line — but harness frames legitimately embed
-# full captured stdout and base64 display payloads (a cached PNG blows
-# 64 KiB easily). 256 MiB is a ceiling, not an allocation; readers that
-# hit it should fail the run cleanly, not crash the caller.
+# Line limit for the newline-delimited JSON the notebook reads from its subprocesses.
+# asyncio's 64 KiB default raises on longer lines, and harness frames embed full stdout
+# and base64 display payloads. 256 MiB is a ceiling, not an allocation.
 SUBPROCESS_LINE_LIMIT = 256 * 1024 * 1024
 
 
@@ -82,24 +78,21 @@ async def terminate_subprocess_tree(
 
     pid = proc.pid
     if pid is None:
-        # asyncio.Process should always have a pid after spawn; if not,
-        # there's nothing meaningful to do.
         try:
             await proc.wait()
         except Exception:
             pass
         return
 
-    # ---- Stage 1: graceful termination ----
+    # Stage 1: graceful termination.
     try:
         if sys.platform == "win32":
-            # CTRL_BREAK_EVENT reaches the new process group (only works
-            # when CREATE_NEW_PROCESS_GROUP was set on spawn).
+            # Reaches the new process group only if CREATE_NEW_PROCESS_GROUP was set on spawn.
             proc.send_signal(signal.CTRL_BREAK_EVENT)
         else:
             os.killpg(os.getpgid(pid), signal.SIGTERM)
     except ProcessLookupError:
-        # Raced with natural exit; nothing to wait on.
+        # Raced with natural exit.
         return
     except OSError as exc:
         logger.warning(
@@ -118,17 +111,14 @@ async def terminate_subprocess_tree(
             grace_seconds,
         )
     except Exception:
-        # Any other failure waiting falls through to force-kill.
+        # Any other wait failure falls through to force-kill.
         logger.exception("Unexpected error waiting for subprocess pid=%s", pid)
 
-    # ---- Stage 2: force-kill the group ----
+    # Stage 2: force-kill the group.
     try:
         if sys.platform == "win32":
-            # No process-group SIGKILL on Windows; the best we can do is
-            # terminate the direct child. Descendants spawned via subprocess
-            # without job-object containment may still leak. This is the
-            # standard trade-off; full Windows process-tree termination
-            # would need an explicit Win32 Job Object.
+            # No process-group SIGKILL on Windows: kill only the direct child. Descendants may
+            # leak; full tree termination would need a Win32 Job Object.
             proc.kill()
         else:
             os.killpg(os.getpgid(pid), signal.SIGKILL)

@@ -33,29 +33,23 @@ from strata.url_safety import guarded_async_transport, host_is_allowlisted, url_
 
 logger = logging.getLogger(__name__)
 
-# How much of a pipe to take at once. Small enough that a chatty cell surfaces
-# promptly rather than in one lump at the end, large enough that a cell
-# printing per line does not become one HTTP request per line.
+# Small enough that a chatty cell surfaces promptly, large enough that
+# per-line printing isn't one HTTP request per line.
 _LOG_READ_CHUNK_BYTES = 8192
 
 NOTEBOOK_EXECUTOR_PROTOCOL_VERSION = "notebook-cell-v1"
 NOTEBOOK_EXECUTOR_TRANSFORM_REF = "notebook_cell@v1"
 NOTEBOOK_EXECUTOR_MANIFEST_VERSION = "notebook-build-manifest@v1"
 
-# --- Signed-URL manifest trust-model defenses ---------------------------------
+# --- Signed-URL manifest defenses ---
 #
-# The /v1/execute-manifest endpoint accepts a manifest of pre-signed URLs
-# the worker must fetch (inputs) or POST to (upload, finalize). The whole
-# v2 pull model's security story is "those URLs are signed and short-lived",
-# but the worker can't verify the signature itself — it only sees the URL.
-# A compromised or buggy orchestrator could hand the worker URLs that
-# point at internal services (SSRF) or unbounded streams (OOM). The
-# defenses below are cheap and don't depend on the orchestrator behaving
-# correctly.
+# The worker can't verify a signed URL's signature, so a compromised or buggy
+# orchestrator could point it at internal services (SSRF) or unbounded streams
+# (OOM). These checks don't depend on the orchestrator behaving.
 
 # Per-input download cap. Override via STRATA_WORKER_MAX_INPUT_BYTES.
-_DEFAULT_MAX_INPUT_BYTES = 2 * 1024 * 1024 * 1024  # 2 GiB
-# One MiB, matching the server's streamed reads and writes.
+_DEFAULT_MAX_INPUT_BYTES = 2 * 1024 * 1024 * 1024
+# Matches the server's streamed reads and writes.
 _INPUT_CHUNK_BYTES = 1024 * 1024
 
 
@@ -65,8 +59,8 @@ def _input_path(output_dir: Path, file_name: str) -> Path:
 
     The name is already reduced to its last component, and ``..`` is one.
     """
-    # normpath + startswith rather than Path.resolve: the same check, in the
-    # form static analysis recognises as containing a path.
+    # normpath + startswith rather than Path.resolve: the form static analysis
+    # recognises as a path check.
     root = os.path.realpath(output_dir)
     target = os.path.normpath(os.path.join(root, file_name))
     if not target.startswith(root + os.sep) or os.path.dirname(target) != root:
@@ -136,9 +130,7 @@ def _guarded_transport() -> httpx.AsyncHTTPTransport | None:
     return guarded_async_transport(allowed_hosts=_allowed_hosts(), allow_local=_allow_local_hosts())
 
 
-# How many chunks may be waiting to be forwarded before the oldest are
-# dropped. Console is advisory, and a cell that outruns the link to the server
-# must keep running at its own speed rather than the link's.
+# Console is advisory: a cell that outruns the link keeps its own speed.
 _LOG_QUEUE_CHUNKS = 64
 
 
@@ -200,9 +192,8 @@ async def _drain(proc: Any, log_url: str | None) -> tuple[bytes, bytes]:
             collected.append(chunk)
             if queue is not None:
                 if queue.full():
-                    # Drop this chunk rather than the oldest: what has been
-                    # shown stays a prefix of the whole console, so the report
-                    # at the end can send exactly the part that never arrived.
+                    # Drop the new chunk, not the oldest: what was shown stays a prefix, so the
+                    # final report can send exactly the missing part.
                     continue
                 queue.put_nowait((stream, chunk.decode("utf-8", errors="replace")))
         return b"".join(collected)
@@ -217,7 +208,7 @@ async def _drain(proc: Any, log_url: str | None) -> tuple[bytes, bytes]:
         )
         await proc.wait()
         if queue is not None:
-            # The cell is done; give what is still queued its moment to land.
+            # Give what is still queued a moment to land.
             with contextlib.suppress(TimeoutError):
                 await asyncio.wait_for(queue.join(), timeout=10.0)
     finally:
@@ -290,8 +281,7 @@ async def _run_harness(
         return json.load(f)
 
 
-# How long a caller refused for want of a slot is told to wait. A cell holds a
-# slot for as long as it runs, so this is a polling interval, not a promise.
+# A cell holds a slot while it runs, so this is a polling interval, not a promise.
 RETRY_AFTER_SECONDS = 5
 
 
@@ -305,10 +295,8 @@ def _positive_int_env(name: str) -> int | None:
     return value
 
 
-# A worker holds exactly the secrets a cell must not read: the bearer token
-# that authorizes running code on it, and the credentials it resolves mount and
-# connection names against. A cell is handed what its manifest carries, never
-# these — a cell that reads the token can dispatch to the machine as the server.
+# Never handed to a cell: the bearer token (a cell holding it could dispatch
+# as the server) and the credentials mounts and connections resolve against.
 _WORKER_SECRETS = (
     "STRATA_WORKER_TOKEN",
     "STRATA_NOTEBOOK_CREDENTIALS",
@@ -455,9 +443,8 @@ def create_notebook_executor_app(
             free_gpus.append(gpu)
             free_gpus.sort()
 
-    # build_id -> the harness process running it, for cancel. Per app rather
-    # than module-level so two workers in one test process cannot cancel each
-    # other's executions.
+    # build_id -> harness process, for cancel. Per app so two workers in one
+    # test process can't cancel each other's runs.
     in_flight: dict[str, Any] = {}
 
     # ---- Bearer-token gate ----
@@ -465,7 +452,7 @@ def create_notebook_executor_app(
 
     async def require_worker_token(http_request: Request) -> None:
         if expected_token is None:
-            return  # Auth disabled
+            return
         header = http_request.headers.get("Authorization", "")
         if not header.startswith("Bearer "):
             raise HTTPException(
@@ -473,10 +460,8 @@ def create_notebook_executor_app(
                 detail="Missing or malformed Authorization header (expected Bearer token)",
             )
         presented = header[len("Bearer ") :]
-        # Constant-time compare; the public-facing comparison shouldn't
-        # leak token length via timing.
-        # Bytes, not str: a non-ASCII byte in the header decodes to a
-        # non-ASCII str, which makes ``compare_digest`` raise TypeError.
+        # Constant-time, so timing doesn't leak token length. Bytes, because
+        # ``compare_digest`` raises TypeError on non-ASCII str.
         if not hmac.compare_digest(presented.encode(), expected_token.encode()):
             raise HTTPException(status_code=401, detail="Invalid worker token")
 
@@ -543,12 +528,10 @@ def create_notebook_executor_app(
                     detail=(f"Remote execution does not support file:// mount '{mount.name}'"),
                 )
 
-        # Before any input is downloaded, so a refused request costs the worker
-        # nothing; held until the harness exits.
+        # Before any download, so a refused request costs nothing; held until the harness exits.
         gpu = _admit()
         try:
-            # A child of whatever dispatched this, when the dispatcher sent its
-            # trace context: the server's dispatch span, or a pool's in between.
+            # Parented to the dispatcher's span (the server's, or a pool's) when it sent context.
             with trace_span_from(
                 "worker.execute",
                 trace_carrier,
@@ -591,10 +574,8 @@ def create_notebook_executor_app(
         tables: dict[str, dict[str, Any]] | None = None,
     ) -> tuple[Path, Path] | JSONResponse:
         if gpu is not None:
-            # Both the cell's environment and the process's: the manifest env
-            # is applied inside the harness, which is early enough for a cell's
-            # own CUDA init, and the process env covers anything the harness
-            # imports before it gets there.
+            # Set in both: the manifest env reaches the cell's own CUDA init, the process
+            # env covers what the harness imports first.
             runtime_env = {**runtime_env, "CUDA_VISIBLE_DEVICES": str(gpu)}
         tmpdir = Path(tempfile.mkdtemp(prefix="strata_notebook_executor_"))
         try:
@@ -615,9 +596,7 @@ def create_notebook_executor_app(
                     "content_type": content_type,
                     "file": file_name,
                 }
-                # A module/cell export may ship injected values its defs close
-                # over — write each blob and pass the sub-spec so the harness
-                # hydrates the synthetic module.
+                # Injected values a module/cell export's defs close over; the harness hydrates them.
                 injected_map = spec.get("injected")
                 if isinstance(injected_map, dict):
                     resolved_injected: dict[str, dict[str, str]] = {}
@@ -627,10 +606,8 @@ def create_notebook_executor_app(
                             continue
                         inj_name = str(inj_key)
                         inj_ct = str(inj_spec.get("content_type", "pickle/object"))
-                        # The client's file name is only used to look up the
-                        # uploaded blob; the on-disk name is constructed locally
-                        # (indices + a content-type-mapped extension) so no
-                        # request-provided value ever reaches a filesystem path.
+                        # The client's name is only a lookup key; the on-disk name is built locally
+                        # so no request value reaches a filesystem path.
                         inj_lookup = Path(str(inj_spec.get("file", ""))).name
                         safe_file = f"__inj_{len(inputs)}_{inj_index}{_input_extension(inj_ct)}"
                         await write_input(inj_name, inj_lookup, inj_spec, output_dir / safe_file)
@@ -640,9 +617,7 @@ def create_notebook_executor_app(
 
             mount_resolver = MountResolver(
                 cache_dir=output_dir / "mount_cache",
-                # A worker resolves a mount's credential name against its own
-                # configuration and environment; the name travels in the
-                # manifest and the secret never does.
+                # Resolved against the worker's own config; only the name travels.
                 credential_resolver=_worker_credentials(),
             )
             resolved_mounts = await mount_resolver.prepare_mounts(mount_specs)
@@ -661,18 +636,12 @@ def create_notebook_executor_app(
                 "output_dir": str(output_dir),
                 "mounts": manifest_mounts,
                 "env": runtime_env,
-                # What the server says this cell mutates in place and reads
-                # from the lake. Both reach a local harness through its
-                # manifest; a worker got neither, so the same cell recaptured
-                # its mutations in one place and not the other, and an @table
-                # name was simply undefined here.
+                # Same as a local harness manifest: without them the worker skipped mutation
+                # recapture and left @table names undefined.
                 "mutation_defines": list(mutation_defines or []),
                 "tables": tables or {},
-                # Only when a reader is forwarding it: ``_drain`` posts each
-                # chunk to the server's log url as the cell prints, and that
-                # is the whole reason to pay for a second copy of the output.
-                # Without one the bundle carries the console at the end, the
-                # same as a local run.
+                # Only when a reader forwards it (``_drain`` posts chunks to log_url);
+                # otherwise the bundle carries the console at the end.
                 "stream_console": log_url is not None,
             }
             manifest_path = output_dir / "manifest.json"
@@ -683,8 +652,7 @@ def create_notebook_executor_app(
             interpreter: Path | None = None
             prepared = None
             if language == "r":
-                # An R cell runs harness.R under the worker's Rscript and its
-                # library; a notebook's Python lock does not apply to it.
+                # R cells run under the worker's Rscript; the Python lock doesn't apply.
                 rscript = shutil.which("Rscript")
                 if rscript is None:
                     shutil.rmtree(tmpdir, ignore_errors=True)
@@ -730,8 +698,7 @@ def create_notebook_executor_app(
                     await mount_resolver.sync_back(resolved_mounts)
             except TimeoutError:
                 shutil.rmtree(tmpdir, ignore_errors=True)
-                # Lazy import: keep the heavy executor module out of the worker's
-                # module-load; this is a rare error path.
+                # Lazy: keeps the heavy executor module out of worker load on a rare path.
                 from strata.notebook.executor import cell_timeout_message
 
                 return JSONResponse(
@@ -749,8 +716,7 @@ def create_notebook_executor_app(
                 )
 
             bundle_path = output_dir / "notebook-output-bundle.tar"
-            # The hardware beside the interpreter the harness reported, so the
-            # artifact records what computed it and not only what was asked for.
+            # Records the machine that computed it, not only what was asked for.
             result = {**result, "hardware": await asyncio.to_thread(hardware_report)}
             if prepared is not None:
                 result["environment"] = {"key": prepared.key, "installed": prepared.installed}
@@ -788,8 +754,7 @@ def create_notebook_executor_app(
                     status_code=400,
                     detail=f"Missing uploaded input file: {var_name}",
                 )
-            # Copied in chunks: the form parser has already spooled the part to
-            # disk, and reading it whole would put it back in memory.
+            # Chunked: the form parser already spooled the part to disk.
             with open(target, "wb") as out:
                 while chunk := await upload.read(_INPUT_CHUNK_BYTES):
                     out.write(chunk)
@@ -827,8 +792,7 @@ def create_notebook_executor_app(
         description="Reference notebook executor for remote notebook workers",
         version="1.0.0",
     )
-    # Also on app.state so the cancel route can be exercised end to end, and so
-    # an operator can see what a worker believes it is running.
+    # Exposed for the cancel route's end-to-end tests and for operators.
     app.state.in_flight = in_flight
 
     @app.get("/health")
@@ -843,32 +807,22 @@ def create_notebook_executor_app(
                     "output_format": "notebook-output-bundle@v1",
                     "pull_model": True,
                     "cancel": True,
-                    # Runs a cell in the notebook's locked environment when the
-                    # request carries one (``worker_env``) -- which it can only
-                    # do with uv, since building that environment is a
-                    # ``uv sync --frozen``. Claimed unconditionally, this was a
-                    # worker telling the server to send work it would refuse:
-                    # every notebook has a uv.lock, so a pip-installed image
-                    # (the one worker.Dockerfile builds) failed every Python
-                    # cell with a 500. Probed, exactly as ``languages`` below
-                    # probes for Rscript.
+                    # Building the locked env is ``uv sync --frozen``, so probe for uv: claimed
+                    # unconditionally, a pip-installed image would fail every Python cell with 500.
                     "locked_environments": shutil.which("uv") is not None,
-                    # Cell languages this machine can run: R needs Rscript
-                    # with jsonlite and arrow in its library.
+                    # R needs Rscript with jsonlite and arrow in its library.
                     "languages": ["python", "r"] if shutil.which("Rscript") else ["python"],
                 },
             },
             "version": "1.0.0",
             "uptime_seconds": max(0.0, time.time() - started_at),
             "active_executions": active_executions,
-            # So a caller can plan rather than discover the limit by 503.
-            # ``None`` means unlimited / no GPU pinning.
+            # So a caller can plan rather than discover the limit by 503. ``None`` = unlimited.
             "max_concurrent": max_concurrent,
             "gpu_slots": gpu_slots,
             "free_gpu_slots": len(free_gpus) if gpu_slots else None,
-            # What the machine is, from its driver and OS, so a caller can
-            # check a provider's machine against the class it was sold as
-            # without running a job. Missing fields mean unknown.
+            # Lets a caller check a machine against its sold class without a job.
+            # Missing fields mean unknown.
             "hardware": await asyncio.to_thread(hardware_report),
         }
 
@@ -892,8 +846,7 @@ def create_notebook_executor_app(
 
         from strata.notebook.process_tree import terminate_subprocess_tree
 
-        # The tree, not the process: a cell that spawned DataLoader workers or
-        # a multiprocessing pool would otherwise leave them holding the GPU.
+        # The tree: spawned DataLoader workers or pools would otherwise hold the GPU.
         await terminate_subprocess_tree(proc)
         return {"build_id": build_id, "cancelled": True}
 
@@ -992,10 +945,8 @@ def create_notebook_executor_app(
             if not name:
                 raise HTTPException(status_code=400, detail="input descriptor missing name")
             content_type = str(descriptor.get("format", "pickle/object"))
-            # Prefer the client's recorded on-disk filename (which is case-safe:
-            # a name with uppercase gets a hash suffix so it can't collide with a
-            # case-sibling on a case-insensitive FS). Only re-derive when absent
-            # (older clients), where {name}{ext} matched the upload name anyway.
+            # The recorded filename is case-safe (uppercase names get a hash suffix).
+            # Older clients omit it, and their {name}{ext} matched the upload name.
             recorded_file = str(descriptor.get("file", "")).strip()
             raw_inputs[name] = {
                 "content_type": content_type,
@@ -1083,10 +1034,8 @@ def create_notebook_executor_app(
         _assert_url_safe(upload_url, "output.url")
         _assert_url_safe(finalize_url, "finalize_url")
 
-        # Optional: a manifest from a server that predates streamed console
-        # simply has no log_url, and the cell runs exactly as it did. Held to
-        # the same SSRF check as every other URL in the manifest — it is a
-        # server-supplied address this worker will POST to.
+        # Optional (older servers omit it). SSRF-checked like every manifest URL,
+        # since the worker POSTs to it.
         log_url = str(manifest.get("log_url", "")).strip() or None
         if log_url:
             _assert_url_safe(log_url, "log_url")
@@ -1109,10 +1058,8 @@ def create_notebook_executor_app(
                     status_code=400,
                     detail=f"Manifest does not include a signed URL for {input_uri}",
                 )
-            # Streamed to the input file with the cap checked as bytes land,
-            # so the largest input is bounded by the worker's disk rather than
-            # its memory. Content-Length (when present) lets us reject up
-            # front before reading any bytes.
+            # Streamed with the cap checked as bytes land, so inputs are bounded by disk,
+            # not memory. Content-Length, when present, rejects up front.
             max_bytes = _max_input_bytes()
             async with httpx.AsyncClient(
                 timeout=max(timeout_seconds, 30.0), transport=_guarded_transport()
@@ -1163,10 +1110,8 @@ def create_notebook_executor_app(
             write_input=_download_input,
             build_id=str(metadata.get("build_id") or "") or None,
             log_url=log_url,
-            # The headers first: a pool between here and the server forwards
-            # its own span's context there, which is the nearer parent. The
-            # manifest's copy is the server's, for a dispatcher that sends
-            # only the body.
+            # Headers first: a pool in between forwards its own, nearer span. The
+            # manifest's copy is the server's, for dispatchers that send only the body.
             trace_carrier=(
                 dict(http_request.headers) if "traceparent" in http_request.headers else metadata
             ),
@@ -1195,9 +1140,7 @@ def create_notebook_executor_app(
                     timeout=max(timeout_seconds, 30.0), transport=_guarded_transport()
                 ) as client:
                     if isinstance(upload_fields, dict):
-                        # A presigned object-store upload: the policy fields,
-                        # then the bundle as the file part, straight to the
-                        # object store rather than through the server.
+                        # Presigned upload straight to the object store, bypassing the server.
                         with open(bundle_path, "rb") as bundle_file:
                             upload_response = await client.post(
                                 upload_url,
@@ -1332,15 +1275,12 @@ def main(argv: list[str] | None = None) -> int:
         if value is not None and value < 1:
             parser.error(f"{flag} must be a positive integer")
 
-    # Before anything can spawn a cell: a harness under this uid can read
-    # /proc/<ppid>/environ, so the worker's secrets are held in memory here
-    # rather than left in the environment a cell can reach.
+    # Before any cell can spawn: a harness under this uid can read
+    # /proc/<ppid>/environ, so secrets move from the environment into memory.
     capture_worker_secrets()
 
-    # The worker executes arbitrary cell source by design. Binding a
-    # non-loopback interface without a bearer token means anyone who can
-    # reach the port can run code as this user — make that trade-off
-    # loud rather than silent.
+    # Cells run arbitrary code, so a non-loopback bind without a token lets
+    # anyone who reaches the port run code as this user. Make that loud.
     if (
         args.host not in ("127.0.0.1", "localhost", "::1")
         and not worker_secret("STRATA_WORKER_TOKEN").strip()

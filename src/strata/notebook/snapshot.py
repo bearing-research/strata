@@ -31,8 +31,7 @@ IncludeMode = Literal["all", "selected", "none"]
 
 SNAPSHOT_FORMAT_VERSION = 2
 
-# Extension by content type, so an output file in the bundle can be opened by
-# double-clicking it. Mirrors the archive bundle's map for the same reason.
+# So a bundled output file opens on double-click. Mirrors the archive bundle.
 _OUTPUT_EXTENSIONS = {
     "image/png": ".png",
     "text/markdown": ".md",
@@ -54,13 +53,12 @@ def write_committed_files(session: NotebookSession, archive: zipfile.ZipFile) ->
     from strata.notebook.env import compute_lockfile_hash
     from strata.notebook.provenance import compute_source_hash
 
-    # Imported here rather than at module scope: routes imports this module,
-    # so the dependency only points this way inside a call.
+    # Local import: routes imports this module.
     from strata.notebook.routes import _format_dag
 
     nb_dir = session.path
-    # renv.lock too: it is part of the environment hash, so a bundle without it
-    # imports every R cell into a provenance that can never match its artifacts.
+    # renv.lock is in the env hash; without it no imported R cell matches its
+    # artifacts.
     for name in ("notebook.toml", "pyproject.toml", "uv.lock", "renv.lock"):
         member = nb_dir / name
         if member.exists():
@@ -230,22 +228,15 @@ def write_snapshot(
             "source_hash": cell_runtime.last_source_hash if cell_runtime else None,
             "env_hash": cell_runtime.last_env_hash if cell_runtime else None,
             "execution_samples": list(cell_runtime.execution_samples) if cell_runtime else [],
-            # The failure the last run ended with, and the source it was about.
-            # Without them an imported copy of a red cell opened idle: the
-            # console that led up to the error came across and the error did not.
+            # Without these an imported red cell opens idle, console but no error.
             "error": cell_runtime.last_error if cell_runtime else None,
             "error_source_hash": cell_runtime.last_error_source_hash if cell_runtime else None,
             "outputs": outputs,
-            # The persisted form, verbatim, for an importer to write back. The
-            # `outputs` list above is for a reader; this is what the notebook
-            # needs to resolve its cached display outputs on open, which it
-            # does index by index and only when an entry exists for each.
+            # The persisted form for an importer to write back; `outputs` above
+            # is for a reader. Open resolves cached outputs index by index.
             "display_outputs": list(cell_runtime.display_outputs) if cell_runtime else [],
-            # What a widget cell's controls were set to. Without them an
-            # imported copy of a notebook fell back to each control's declared
-            # default and recomputed a different scenario than the one the
-            # bundle was taken from, which is the opposite of a reproducible
-            # handoff.
+            # Without them an import falls back to declared defaults and
+            # recomputes a different scenario than the bundle's.
             "widget_values": dict(cell_runtime.widget_values) if cell_runtime else {},
         }
 
@@ -258,18 +249,15 @@ def write_snapshot(
         record = store.get_artifact(artifact_id, version)
         if reader_cm is None or record is None:
             continue
-        # The record travels with the bytes. Without it an importer has the
-        # bytes and a provenance hash but not the transform spec — so not the
-        # content type the value is read back as — and not the lineage edges.
+        # Without the record an importer lacks the transform spec (so the
+        # content type) and the lineage edges.
         ref = f"{artifact_id}@v={version}"
         records[ref] = {
             **record_metadata(record),
             "content_sha256": store.content_digest(artifact_id, version),
         }
-        # Streamed into the member rather than read whole. ``include=all``
-        # exists for moving a project between servers, which is exactly the
-        # case where the artifacts are large — reading each one into memory to
-        # hand to the zip would make the export cost the size of the store.
+        # Streamed, not read whole: ``include=all`` moves projects between
+        # servers, where artifacts are large.
         member = f"artifacts/{artifact_id}@v={version}"
         with reader_cm as reader, archive.open(member, "w") as out:
             while chunk := reader.read(_BLOB_CHUNK_BYTES):
@@ -277,19 +265,14 @@ def write_snapshot(
         written.append(f"{artifact_id}@v={version}")
 
     manifest = {
-        # Bumped when an importer written against an older bundle would read
-        # this one wrong. 2 added `records`, per-cell `display_outputs` and
-        # renv.lock; a version-1 bundle carries bytes an importer cannot
-        # reconstruct artifacts from.
+        # Bump when an older importer would read this bundle wrong.
         "format_version": SNAPSHOT_FORMAT_VERSION,
         "notebook_id": session.notebook_state.id,
         "include": include,
         "cells": per_cell,
         "artifacts": index,
-        # What is actually in this file, as opposed to what is described in it.
-        # An importer marks cells whose artifacts came only by reference as
-        # stale, and it needs to be told which those are rather than inferring
-        # it from what it failed to find.
+        # What this file actually carries, so an importer can mark cells whose
+        # artifacts came only by reference as stale without guessing.
         "carried": written,
         "records": records,
         "fetches": list_fetches(session),
@@ -298,7 +281,7 @@ def write_snapshot(
     return manifest
 
 
-# One MiB, matching every other streamed read in the store.
+# Matches every other streamed read in the store.
 _BLOB_CHUNK_BYTES = 1024 * 1024
 
 
@@ -326,8 +309,8 @@ def _display_bytes(store, output) -> bytes | str | None:
         try:
             return b64decode(output.inline_data_url.split(",", 1)[1])
         except ValueError:
-            # A data URL we cannot decode is no reason to lose the output; fall
-            # through to the artifact, then to the JSON description.
+            # Undecodable data URL: fall through to the artifact, then to the
+            # JSON description.
             pass
 
     if output.markdown_text is not None:

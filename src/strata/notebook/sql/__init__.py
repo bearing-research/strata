@@ -24,10 +24,8 @@ from strata.notebook.sql.adapter import (
     hash_connection_identity,
 )
 
-# Auto-register built-in driver adapters on first import. Drivers
-# whose optional ADBC package isn't installed are silently skipped —
-# they show up as ``connection_driver_unknown`` only when a SQL cell
-# actually references them.
+# Drivers whose optional ADBC package isn't installed are skipped; they surface as
+# ``connection_driver_unknown`` only when a SQL cell references them.
 from strata.notebook.sql.drivers import register_default_adapters as _register
 from strata.notebook.sql.registry import (
     get_adapter,

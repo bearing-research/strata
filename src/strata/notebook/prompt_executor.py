@@ -32,9 +32,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Default attempt count: one call + two retries. Every attempt can
-# consume tokens, so keep the ceiling low; users who need more can set
-# ``# @validate_retries N``.
+# Every attempt costs tokens, so keep the ceiling low; ``# @validate_retries N`` raises it.
 DEFAULT_VALIDATE_ATTEMPTS = 3
 
 
@@ -54,7 +52,7 @@ def _validation_errors(content: str, schema: dict[str, Any]) -> list[str]:
     try:
         import jsonschema
     except ImportError:
-        # No validator available — fall back to "is it JSON".
+        # No validator available: fall back to "is it JSON".
         return []
 
     validator = jsonschema.Draft202012Validator(schema)
@@ -142,10 +140,8 @@ def prompt_reopen_identity(cell: Any, session: Any) -> str | None:
     from strata.notebook.llm.config import read_notebook_ai_config
 
     analysis = analyze_prompt_cell(cell.source)
-    # The notebook's own [ai] block rather than the fully resolved config: a
-    # resolved one needs an API key to exist at all, so whether it resolves
-    # depends on the caller's context, and an identity that changes with the
-    # context it is computed in never matches the one it was compared to.
+    # The notebook's own [ai] block, not the resolved config: resolving needs an API
+    # key, so it depends on the caller's context and the identity would never match.
     notebook_ai = read_notebook_ai_config(session) or {}
     payload = {
         "model": analysis.model or notebook_ai.get("model"),
@@ -231,20 +227,16 @@ async def execute_prompt_cell(
     analysis = analyze_prompt_cell(source)
     output_name = analysis.name
 
-    # Resolve model config from annotations (override llm_config defaults)
     model = analysis.model or llm_config.model
     temperature = analysis.temperature if analysis.temperature is not None else 0.0
     max_tokens = analysis.max_tokens or llm_config.max_output_tokens
     output_schema = analysis.output_schema
-    # A schema implies JSON — let users omit ``@output json`` when they
-    # supply ``@output_schema``.
+    # A schema implies JSON, so ``@output json`` is optional with ``@output_schema``.
     output_type = analysis.output_type or ("json" if output_schema is not None else "text")
     system_prompt = analysis.system_prompt
 
-    # Load upstream variables from artifacts
     variables, input_hashes = _load_upstream_variables(session, cell_id)
 
-    # Render template
     rendered = render_prompt_template(
         analysis.template_body,
         variables,
@@ -265,7 +257,6 @@ async def execute_prompt_cell(
         input_hashes=input_hashes,
     )
 
-    # Cache check
     artifact_mgr = session.get_artifact_manager()
     notebook_id = session.notebook_state.id
     canonical_id = f"nb_{notebook_id}_cell_{cell_id}_var_{output_name}"
@@ -276,7 +267,6 @@ async def execute_prompt_cell(
         if cached is not None:
             canonical = artifact_mgr.artifact_store.get_latest_version(canonical_id)
             if canonical is not None and canonical.provenance_hash == var_provenance:
-                # Cache hit
                 duration_ms = (time.time() - start_time) * 1000
                 blob = artifact_mgr.load_artifact_data(canonical.id, canonical.version)
                 content_type = "json/object"
@@ -296,9 +286,7 @@ async def execute_prompt_cell(
                     "bytes": len(blob),
                 }
                 display_text = str(preview) if not isinstance(preview, str) else preview
-                # Same key as the fresh-run path: the frontend renders
-                # ``output.scalar`` — a cache hit built with ``preview``
-                # here rendered blank for single-line values.
+                # Same key as the fresh-run path: the frontend renders ``output.scalar``.
                 display_output = {
                     "content_type": "text/markdown" if "\n" in display_text else "json/object",
                     "scalar": display_text,
@@ -320,13 +308,11 @@ async def execute_prompt_cell(
                     "mutation_warnings": [],
                 }
 
-    # Build messages
     messages: list[dict[str, str]] = []
     if system_prompt:
         messages.append({"role": "system", "content": system_prompt})
     messages.append({"role": "user", "content": rendered})
 
-    # Estimate tokens
     input_tokens_est = estimate_tokens(rendered)
     if system_prompt:
         input_tokens_est += estimate_tokens(system_prompt)
@@ -340,11 +326,8 @@ async def execute_prompt_cell(
         output_type,
     )
 
-    # Call LLM — when a schema is set, run a validate-and-retry loop so
-    # non-OpenAI providers (which only guarantee syntactic JSON) still
-    # produce schema-conforming output. The retry feeds the previous
-    # response and the validator errors back to the model.
-    # ``replace`` rather than a new config: the base_url's guard travels with it.
+    # With a schema, validate and retry so providers that only guarantee syntactic
+    # JSON still conform. ``replace``, not a new config: the base_url's guard travels with it.
     call_config = dataclasses.replace(llm_config, model=model, max_output_tokens=max_tokens)
     max_attempts = (
         analysis.validate_retries
@@ -354,10 +337,8 @@ async def execute_prompt_cell(
     if output_schema is None:
         max_attempts = 1  # Nothing to validate against.
 
-    # Stream whenever the unary dispatcher would take the OpenAI-compat
-    # path. Anthropic + schema goes through native /v1/messages tool-use,
-    # which has no streaming equivalent yet (design doc Phase B) — that
-    # combination keeps today's unary behavior and emits no deltas.
+    # Anthropic + schema uses native tool-use, which has no streaming path yet, so
+    # it stays unary and emits no deltas.
     use_streaming = on_delta is not None and not (
         output_schema is not None and infer_provider_name(call_config.base_url) == "anthropic"
     )
@@ -399,8 +380,8 @@ async def execute_prompt_cell(
             validation_errors = []
             break
 
-        # Lenient first pass: providers without enforcement often fence
-        # or preface their JSON — extract it instead of burning a retry.
+        # Providers without enforcement often fence or preface JSON; extract it instead
+        # of burning a retry.
         coerced = _coerce_json_text(result.content)
         validation_errors = _validation_errors(coerced, output_schema)
         if not validation_errors:
@@ -417,10 +398,8 @@ async def execute_prompt_cell(
 
         if attempt < max_attempts:
             validation_retries += 1
-            # Tell the frontend to clear its stream buffer — attempt
-            # N's invalid JSON must not fuse with attempt N+1's
-            # corrected output. ``text`` carries the first validator
-            # error as a human-readable retry notice.
+            # Clear the frontend stream buffer so attempt N's invalid JSON doesn't fuse with
+            # N+1's output. ``text`` carries the first validator error as a retry notice.
             await _emit_delta(
                 on_delta,
                 {
@@ -430,11 +409,8 @@ async def execute_prompt_cell(
                     "text": validation_errors[0],
                 },
             )
-            # Seed the retry with the model's bad answer + the validator
-            # diagnostics. Sending the previous response as an assistant
-            # turn (instead of pasting it into the user turn) lets the
-            # model treat it as history to correct, not as the user's
-            # instructions.
+            # The bad answer goes in as an assistant turn so the model treats it as history
+            # to correct, not as user instructions.
             messages = messages + [
                 {"role": "assistant", "content": result.content},
                 {"role": "user", "content": _format_retry_prompt(validation_errors)},
@@ -449,13 +425,12 @@ async def execute_prompt_cell(
 
     assert result is not None  # loop runs at least once
 
-    # Parse output
     content = result.content
     if output_type == "json":
         try:
             content = json.loads(content)
         except json.JSONDecodeError:
-            # Try to extract JSON from markdown code block
+            # JSON in a markdown code block
             import re
 
             m = re.search(r"```(?:json)?\s*\n([\s\S]*?)\n```", content)
@@ -465,7 +440,6 @@ async def execute_prompt_cell(
                 except json.JSONDecodeError:
                     pass  # Keep as string
 
-    # Serialize and store artifact
     content_type = "json/object"
     blob = json.dumps(content, indent=2, default=str).encode()
 
@@ -482,8 +456,7 @@ async def execute_prompt_cell(
                     "model": model,
                     "temperature": temperature,
                     "output_type": output_type,
-                    # Totals across the validate-and-retry loop, so cost
-                    # accounting reflects what was actually spent.
+                    # Totals across retries, so cost accounting reflects what was spent.
                     "input_tokens": total_input_tokens,
                     "output_tokens": total_output_tokens,
                     "validation_retries": validation_retries,
@@ -508,7 +481,6 @@ async def execute_prompt_cell(
 
     duration_ms = (time.time() - start_time) * 1000
 
-    # Build display output for the frontend
     preview = _preview(content)
     display_entry = {
         "preview": preview,
@@ -516,13 +488,12 @@ async def execute_prompt_cell(
         "bytes": len(blob),
     }
 
-    # The '_' key is the display value the frontend renders
+    # '_' is the display value the frontend renders
     outputs = {
         output_name: display_entry,
         "_": display_entry,
     }
 
-    # Build a display_output dict the frontend can render as text/markdown
     display_text = str(preview) if not isinstance(preview, str) else preview
     display_output = {
         "content_type": "text/markdown" if "\n" in display_text else "json/object",
@@ -615,9 +586,8 @@ async def _stream_completion(
                 },
             )
         elif event["type"] == "notice":
-            # Provider degradation announcement (e.g. response_format
-            # rejected) — surface it on the stream without polluting the
-            # accumulated content.
+            # Provider degradation notice (e.g. response_format rejected): surface it on the
+            # stream without polluting the accumulated content.
             logger.info("prompt_cell_notice %s: %s", cell_id, event["text"])
             await _emit_delta(
                 on_delta,

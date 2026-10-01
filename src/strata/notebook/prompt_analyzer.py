@@ -19,7 +19,6 @@ from strata.notebook.annotations import (
 
 _TEMPLATE_VAR_RE = re.compile(r"\{\{\s*([a-zA-Z_]\w*(?:\.[a-zA-Z_]\w*(?:\([^)]*\))?)*)\s*\}\}")
 
-# Python builtins that should not be treated as upstream references
 _BUILTINS = frozenset(
     {
         "True",
@@ -70,20 +69,14 @@ class PromptAnalysis:
     max_tokens: int | None = None
     system_prompt: str | None = None
     template_body: str = ""
-    # ``@output_schema`` — parsed JSON schema object. When set, we send
-    # provider-native structured output (OpenAI's ``json_schema``, or
-    # ``json_object`` fallback for providers that don't support schemas)
-    # so the response comes back as validated JSON instead of free-form
-    # text. ``output_schema_raw`` keeps the original annotation string so
-    # validators can distinguish "user wrote a bad schema" from "user
-    # didn't write one at all".
+    # Sent as provider-native structured output (``json_schema``, or ``json_object``
+    # where schemas are unsupported). ``output_schema_raw`` keeps the annotation so
+    # validators can tell a bad schema from a missing one.
     output_schema: dict[str, Any] | None = None
     output_schema_raw: str | None = None
     output_schema_error: str | None = None
-    # ``@validate_retries N`` — total attempts for the validate-and-retry
-    # loop (1 initial call + N-1 retries). ``None`` means "use the
-    # executor default". Only has effect when ``output_schema`` is set;
-    # without a schema there's nothing to validate against.
+    # Total attempts (1 + N-1 retries); ``None`` means the executor default.
+    # Only applies with ``output_schema``.
     validate_retries: int | None = None
 
 
@@ -104,9 +97,7 @@ def analyze_prompt_cell(source: str) -> PromptAnalysis:
     """
     result = PromptAnalysis()
 
-    # Walk the leading annotation block via the shared helper so this
-    # path agrees with parse_annotations / annotation_validation on what
-    # counts as a directive line.
+    # Shared helper so this agrees with parse_annotations on what is a directive line.
     for _lineno, line in iter_annotation_block(source):
         parsed = parse_annotation_directive(line)
         if parsed is None:
@@ -155,11 +146,9 @@ def analyze_prompt_cell(source: str) -> PromptAnalysis:
 
     result.template_body = strip_leading_annotations(source).strip()
 
-    # Extract {{ var }} references from template body
     refs: list[str] = []
     for match in _TEMPLATE_VAR_RE.finditer(result.template_body):
         expr = match.group(1)
-        # Extract the root variable name (before any . or ())
         root_var = expr.split(".")[0].split("(")[0]
         if root_var and root_var not in _BUILTINS and root_var not in refs:
             refs.append(root_var)

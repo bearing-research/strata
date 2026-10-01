@@ -38,18 +38,13 @@ _CAPABILITIES = AdapterCapabilities(
     needs_separate_probe_conn=True,
 )
 
-# Postgres unquoted identifier — letters, digits, underscores, with a
-# non-digit first char. ``SET ROLE`` and ``SET search_path`` don't
-# accept bind parameters, so any value we splice in must be validated
-# against this pattern to avoid SQL injection.
+# ``SET ROLE`` and ``SET search_path`` take no bind parameters, so spliced
+# values must match this to rule out injection.
 _IDENTIFIER_RE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
 
-# Probe queries use ``to_regclass($1)`` so unqualified table names
-# resolve through the connection's actual ``search_path`` instead of
-# being pinned to ``public``. The resolved ``nspname`` is selected
-# back out and folded into the fingerprint, so an unqualified name
-# resolving to different schemas across connections produces
-# different tokens.
+# ``to_regclass($1)`` resolves unqualified names through the real
+# ``search_path``; the resolved ``nspname`` goes into the fingerprint so
+# different schemas give different tokens.
 _FRESHNESS_QUERY = """
 SELECT
     COALESCE(s.n_tup_ins, 0)
@@ -63,10 +58,8 @@ LEFT JOIN pg_stat_user_tables s ON s.relid = c.oid
 WHERE c.oid = to_regclass($1)
 """
 
-# Per-table column structure via ``pg_attribute``. Walking
-# ``pg_attribute`` directly (rather than ``information_schema.columns``)
-# lets us filter the ``to_regclass``-resolved OID and avoid a second
-# round-trip just to translate names back to OIDs.
+# ``pg_attribute`` rather than ``information_schema.columns``: filters by the
+# ``to_regclass`` OID without a second round-trip.
 _SCHEMA_QUERY = """
 SELECT
     a.attname,
@@ -111,21 +104,13 @@ class PostgresAdapter:
         *,
         connect_fn: Callable[[str], Any] | None = None,
     ) -> None:
-        # Test seam: pass a fake connect callable to bypass the real
-        # ADBC import in unit tests. Production code uses the default
-        # path and lets ``open()`` lazy-import the driver.
+        # Test seam; by default ``open()`` lazy-imports the ADBC driver.
         self._connect_fn = connect_fn
 
     # --- identity ---------------------------------------------------------
 
     def canonicalize_connection_id(self, spec: Any, *, read_only: bool = True) -> str:
-        # ``read_only`` is part of the Protocol so adapters that
-        # route reads vs writes through different principals
-        # (Snowflake's ``write_role``, BigQuery's
-        # ``write_credentials_path``) can include only the
-        # relevant fields. Postgres has no read/write principal
-        # split — both are governed by the connection's role —
-        # so the flag is a no-op here.
+        # Postgres has no read/write principal split (the role governs both).
         del read_only
         """Hash identity-shaping fields, excluding secrets and runtime tunables.
 
@@ -139,9 +124,7 @@ class PostgresAdapter:
     def _extract_identity(self, spec: Any) -> dict[str, Any]:
         identity: dict[str, Any] = {}
 
-        # If a URI is set, parse out host/port/database/user from it.
-        # `password` lives in the URI for some forms but is never
-        # identity-shaping, so we drop it.
+        # The URI's password is never identity-shaping.
         uri = getattr(spec, "uri", None)
         if uri:
             parsed = urlparse(uri)
@@ -154,29 +137,24 @@ class PostgresAdapter:
             if parsed.username:
                 identity["user"] = parsed.username
 
-        # Discrete top-level keys override URI components and supply
-        # values when no URI is set.
+        # Discrete keys override URI components.
         for key in ("host", "port", "database", "user", "role"):
             value = getattr(spec, key, None)
             if value is not None:
                 identity[key] = value
 
-        # `auth.user` is identity-shaping (different user → different
-        # object visibility). Resolve ${VAR} so two specs that resolve
-        # to the same effective user produce the same connection_id.
-        # `auth.password` is intentionally not included.
+        # `auth.user` changes object visibility. Resolve ${VAR} so specs with
+        # the same effective user share a connection_id. Password excluded.
         auth = getattr(spec, "auth", None) or {}
         auth_user = auth.get("user")
         if auth_user:
             try:
                 identity["user"] = _resolve_var(auth_user)
             except RuntimeError:
-                # Env var not set yet — fall back to the raw spec value
-                # so the identity is still stable across calls.
+                # Env var unset: the raw value keeps the identity stable.
                 identity["user"] = auth_user
 
-        # `search_path` lives in options; it's identity-shaping
-        # (changes which schema unqualified names resolve to).
+        # `search_path` changes which schema unqualified names resolve to.
         options = getattr(spec, "options", None) or {}
         sp = options.get("search_path")
         if sp:
@@ -218,8 +196,7 @@ class PostgresAdapter:
                         f"Connection role {role!r} is not a valid Postgres "
                         "identifier; must match [a-zA-Z_][a-zA-Z0-9_]*"
                     )
-                # SET ROLE doesn't accept bind parameters, so we splice the
-                # validated identifier in. Double-quoted to preserve case.
+                # Validated identifier; double-quoted to preserve case.
                 cursor.execute(f'SET ROLE "{role}"')
                 applied_any = True
 
@@ -392,8 +369,7 @@ class PostgresAdapter:
             cursor.execute(query)
             rows = cursor.fetchall() or []
 
-        # Group columns by (catalog, schema, name) preserving the
-        # ordinal_position order from the query.
+        # Keep the query's ordinal_position order.
         grouped: dict[tuple[str | None, str | None, str], list[ColumnInfo]] = {}
         order: list[tuple[str | None, str | None, str]] = []
         for row in rows:
@@ -505,5 +481,4 @@ def register() -> None:
     register_adapter(_ADAPTER)
 
 
-# Auto-register on first import.
 register()

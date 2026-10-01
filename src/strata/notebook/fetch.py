@@ -134,7 +134,7 @@ class FetchCache:
         self._client = client
         self._clock = clock
 
-    # -- public ----------------------------------------------------------------
+    # --- public ---
 
     def resolve(self, spec: FetchSpec, *, max_age: float | None = None) -> FetchedBytes:
         """Bytes for *spec*, checking the URL according to its policy.
@@ -185,7 +185,7 @@ class FetchCache:
         except FetchError:
             return f"{spec.name}:fetch:unresolved:{hashlib.sha256(os.urandom(32)).hexdigest()}"
 
-    # -- internals ---------------------------------------------------------------
+    # --- internals ---
 
     def _download(self, spec: FetchSpec, record: dict | None) -> FetchedBytes:
         headers: dict[str, str] = {}
@@ -198,8 +198,8 @@ class FetchCache:
 
         client = self._client or httpx.Client(
             timeout=FETCH_TIMEOUT_SECONDS,
-            # The per-hop check below resolves the host; this makes the
-            # connection itself use only an address that passed the same rule.
+            # The per-hop check resolves the host; this pins the connection to an
+            # address that passed the same rule.
             transport=guarded_transport(
                 allowed_hosts=self._allowed_hosts, allow_local=self._allow_local
             ),
@@ -208,9 +208,7 @@ class FetchCache:
         try:
             url = spec.url
             for _ in range(MAX_REDIRECTS + 1):
-                # Every hop through the guard: a client that followed redirects
-                # itself would check only the first URL, and a public host that
-                # redirects to 169.254.169.254 is the request the guard exists for.
+                # Check every hop: a public host can redirect to 169.254.169.254.
                 problem = url_safety_problem(
                     url,
                     f"@fetch {spec.name}",

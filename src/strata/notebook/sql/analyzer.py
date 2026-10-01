@@ -27,9 +27,7 @@ from sqlglot.errors import SqlglotError as _SqlglotError
 from strata.notebook.annotations import CachePolicy, parse_annotations, strip_leading_annotations
 from strata.notebook.sql.adapter import QualifiedTable
 
-# Bind-placeholder pattern. ``(?<![:\w])`` rules out ``::cast`` (Postgres
-# type-cast operator) and identifiers like ``schema:foo`` where the
-# colon is part of a larger token.
+# ``(?<![:\w])`` rules out ``::cast`` and tokens like ``schema:foo``.
 _BIND_PLACEHOLDER_RE = re.compile(r"(?<![:\w]):([a-zA-Z_]\w*)")
 
 
@@ -109,11 +107,8 @@ def analyze_sql_cell(source: str, *, dialect: str | None = None) -> SqlAnalysis:
         try:
             tables, unresolved_tables = _extract_tables(sql_body, dialect)
         except _SqlglotError as exc:
-            # User-authored SQL syntax / token / optimize errors. Caller
-            # surfaces this as a ``sql_parse_error`` diagnostic. Other
-            # exception classes (TypeError, AttributeError, etc.) are
-            # analyzer bugs and propagate normally — masking them as
-            # parse errors would hide real regressions.
+            # User SQL errors only; anything else is an analyzer bug and
+            # must propagate.
             parse_error = str(exc)
 
     return SqlAnalysis(
@@ -130,12 +125,9 @@ def analyze_sql_cell(source: str, *, dialect: str | None = None) -> SqlAnalysis:
     )
 
 
-# Named lazily inside the check: importing sqlglot's expression module at
-# module scope would pull it in for every cell, and only SQL cells need it.
-#
-# What a read cell may run. Everything else — DDL, DML, COPY, ATTACH, USE,
-# CALL, INSTALL, and the transaction statements that end the read-only one the
-# driver opened — belongs to a ``# @sql ... write`` cell.
+# What a read cell may run; the rest (DDL, DML, COPY, ATTACH, transaction
+# statements that would end the driver's read-only one) needs a write cell.
+# Names, not classes, so sqlglot is imported only for SQL cells.
 _READ_STATEMENT_NAMES = (
     "Select",
     "SetOperation",
@@ -150,22 +142,15 @@ _READ_STATEMENT_NAMES = (
     "Pivot",
     "Unpivot",
 )
-# sqlglot parses what it has no grammar for as ``Command``, which is where
-# EXPLAIN and (on some dialects) SHOW land. Naming the read-only ones keeps the
-# rest — ATTACH, CALL, INSTALL — refused with everything else.
+# sqlglot parses ungrammared statements as ``Command`` (EXPLAIN, some SHOW).
+# Only these are read-only; ATTACH, CALL, INSTALL stay refused.
 _READ_COMMANDS = ("EXPLAIN", "SHOW", "DESC", "DESCRIBE")
-# EXPLAIN describes a plan; EXPLAIN ANALYZE *runs* the statement it wraps, so
-# it is the wrapped statement's privilege, not EXPLAIN's. PRAGMA is refused
-# whatever it says: sqlglot parses the reporting form (``PRAGMA table_info(t)``)
-# and the setting form (``PRAGMA journal_mode = WAL``) into the same shape, and
-# the schema panel is how a notebook introspects a connection.
-# Comments are part of the text sqlglot hands back, and a classifier that reads
-# it raw is one ``EXPLAIN /*x*/ ANALYZE`` away from waving a write through.
+# EXPLAIN ANALYZE runs the wrapped statement, so it needs that statement's
+# privilege. PRAGMA is always refused: sqlglot can't tell reporting from setting.
+# Strip comments first, or ``EXPLAIN /*x*/ ANALYZE`` slips a write through.
 _COMMENTS = re.compile(r"/\*.*?\*/|--[^\n]*", re.DOTALL)
-# ``ANALYZE`` leading the argument, bare or parenthesized, and anywhere inside a
-# leading option list -- ``EXPLAIN (FORMAT JSON, ANALYZE)`` runs the statement
-# exactly as ``EXPLAIN ANALYZE`` does. Confined to the option list so that a
-# query merely *mentioning* the word still describes its plan.
+# ``ANALYZE`` leading the argument or anywhere in a leading option list
+# (``EXPLAIN (FORMAT JSON, ANALYZE)``), but not elsewhere in the query.
 _ANALYZE = re.compile(
     r"^\s*(?:\(\s*[^)]*\banaly[sz]e\b|\(?\s*analy[sz]e\b)",
     re.IGNORECASE,
@@ -188,7 +173,7 @@ def read_only_violation(sql: str, dialect: str | None) -> str | None:
     try:
         statements = [statement for statement in sqlglot.parse(sql, dialect=dialect) if statement]
     except _SqlglotError:
-        # The caller already surfaces the parse error, and nothing runs.
+        # The caller surfaces the parse error; nothing runs.
         return None
     for statement in statements:
         name = type(statement).__name__
@@ -362,17 +347,15 @@ def _blank_strings_and_comments(sql: str) -> str:
                 i += 1
             continue
 
-        # ``$tag$...$tag$`` dollar-quoted Postgres string. Allow
-        # empty tags (``$$``) and tags matching ``[a-zA-Z_][a-zA-Z0-9_]*``.
-        # ``$1`` / ``$2`` positional binds fall through here because
-        # the char after ``$`` isn't ``$`` or an identifier-start.
+        # ``$tag$...$tag$`` dollar quote. ``$1`` positional binds fall
+        # through: no ``$`` or identifier-start follows.
         if c == "$":
             tag_end = _scan_dollar_quote_open(sql, i)
             if tag_end is not None:
                 opening = sql[i : tag_end + 1]
                 end_idx = sql.find(opening, tag_end + 1)
                 if end_idx == -1:
-                    # unterminated — consume the rest as blanks
+                    # unterminated; consume the rest as blanks
                     while i < n:
                         out.append(" ")
                         i += 1
@@ -449,8 +432,8 @@ def _scan_dollar_quote_open(sql: str, start: int) -> int | None:
         return None
     j = start + 1
     if j < n and sql[j] == "$":
-        return j  # $$ — empty tag
-    # $tag$ — tag must start with letter/underscore.
+        return j  # $$: empty tag
+    # $tag$: tag must start with a letter or underscore.
     if j < n and (sql[j].isalpha() or sql[j] == "_"):
         while j < n and (sql[j].isalnum() or sql[j] == "_"):
             j += 1
@@ -575,8 +558,7 @@ def _table_reference(table_node: Any, sql: str, dialect: str) -> QualifiedTable 
     return _qualified(table_node, dialect)
 
 
-# What DuckDB reads as a file when it sits where a table name goes (its
-# replacement scans), optionally compressed.
+# Names DuckDB replacement-scans as files in table position.
 _FILE_NAME_RE = re.compile(
     r"\.(parquet|csv|tsv|json|jsonl|ndjson|arrow|orc)(\.(gz|zst|zstd|bz2|xz|lz4))?$",
     re.IGNORECASE,
@@ -643,8 +625,7 @@ def _extract_tables(sql: str, dialect: str) -> tuple[list[QualifiedTable], list[
             for table_node in scope.find_all(exp.Table):
                 source = scope.sources.get(table_node.alias_or_name)
                 if isinstance(source, Scope):
-                    # Reference to a CTE / derived table, not a
-                    # base table.
+                    # A CTE or derived table, not a base table.
                     continue
                 if table_node.args.get("rows_from"):
                     # ``ROWS FROM (f(), g())`` names nothing itself; each
@@ -652,10 +633,8 @@ def _extract_tables(sql: str, dialect: str) -> tuple[list[QualifiedTable], list[
                     continue
                 qt = _table_reference(table_node, sql, dialect)
                 record(qt, "" if qt else _unresolved_text(table_node, sql, dialect))
-            # Snowflake's ``TABLE(...)`` is not an ``exp.Table``, so the walk
-            # above never sees it. With a string literal it names a table;
-            # with ``$var``, ``IDENTIFIER($var)`` or a table function it is
-            # resolved only when the query runs.
+            # Snowflake ``TABLE(...)`` is not an ``exp.Table``. A string literal
+            # names a table; ``$var`` or a function resolves only at run time.
             for rows_node in scope.find_all(exp.TableFromRows):
                 bare = rows_node.copy()
                 bare.set("alias", None)

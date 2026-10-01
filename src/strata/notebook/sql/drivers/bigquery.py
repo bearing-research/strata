@@ -61,22 +61,13 @@ _CAPABILITIES = AdapterCapabilities(
     # No per-table snapshot id, but ``FOR SYSTEM_TIME AS OF`` reads a table
     # as of a timestamp, so a snapshot is a timestamp (``time_travel.py``).
     supports_snapshot=True,
-    # ``__TABLES__`` and ``INFORMATION_SCHEMA`` aren't frozen inside
-    # a transaction — the probe shares the query connection.
+    # ``__TABLES__`` and ``INFORMATION_SCHEMA`` aren't frozen inside a transaction.
     needs_separate_probe_conn=False,
 )
 
-# BigQuery project IDs and dataset IDs follow different rules.
-# Per the GCP docs:
-#   - Project ID: lowercase letters / digits / hyphens, must start
-#     with a letter (GCP enforces 6-30 chars but we accept any
-#     length — the adapter's regex is for splice-injection
-#     defense, not for length validation).
-#   - Dataset ID: letters / digits / underscores, must start with
-#     a letter or underscore.
-# Splice-validated separately so we accept legitimate values from
-# both columns of the ``project.dataset`` path while still rejecting
-# the obvious injection shapes (semicolons, backticks, spaces).
+# Project and dataset IDs follow different GCP rules, so each is validated
+# on its own. The regexes defend against splice injection; they don't
+# enforce GCP's length limits.
 _PROJECT_ID_RE = re.compile(r"^[a-z][a-z0-9-]*$")
 _DATASET_ID_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
@@ -145,9 +136,7 @@ class BigQueryAdapter:
         *,
         connect_fn: Callable[[dict[str, Any]], Any] | None = None,
     ) -> None:
-        # Test seam: pass a fake callable that takes the kwargs
-        # dict the production code would have handed to ADBC.
-        # Production lazy-imports the driver inside ``open()``.
+        # Test seam: a fake taking the kwargs production would hand to ADBC.
         self._connect_fn = connect_fn
 
     # --- identity ---------------------------------------------------------
@@ -191,10 +180,8 @@ class BigQueryAdapter:
             if value is not None:
                 identity[key] = str(value)
 
-        # Read-side credentials always join. Write-side joins only
-        # when ``read_only=False``. This way changing
-        # ``write_credentials_path`` doesn't invalidate read-cell
-        # caches that never touch the write principal.
+        # Write-side credentials join only when ``read_only=False``, so changing
+        # ``write_credentials_path`` doesn't invalidate read-cell caches.
         ro_path = _spec_attr(spec, "credentials_path")
         if ro_path:
             principal = _credentials_principal(ro_path)
@@ -206,12 +193,9 @@ class BigQueryAdapter:
                 principal = _credentials_principal(rw_path)
                 identity["write_credentials_principal"] = principal or str(rw_path)
 
-        # When no credentials are configured at all (for the
-        # active read/write side), the driver will pick up
-        # ambient ADC at execute time. We can't know which
-        # principal that is without a network call, so flag it
-        # explicitly. Notebooks that want machine-portable cache
-        # identity should configure ``credentials_path``.
+        # No credentials: the driver uses ambient ADC, whose principal is unknown
+        # without a network call, so flag it. Set ``credentials_path`` for
+        # machine-portable cache identity.
         active_creds = (
             ro_path if read_only else (_spec_attr(spec, "write_credentials_path") or ro_path)
         )
@@ -290,9 +274,7 @@ class BigQueryAdapter:
             ds = str(row[1]) if len(row) > 1 and row[1] else None
             return proj, ds
         except Exception:  # noqa: BLE001
-            # Not all BigQuery contexts expose @@dataset_id (e.g.
-            # earlier ADBC versions, or BigQuery Omni). Fall back
-            # to "no default" rather than crash the probe.
+            # Some contexts (older ADBC, BigQuery Omni) lack @@dataset_id.
             return None, None
 
     # --- probes ----------------------------------------------------------

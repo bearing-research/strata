@@ -20,8 +20,7 @@ import types
 from dataclasses import dataclass
 from typing import Any, NamedTuple, TypedDict
 
-# Sampling bounds for content fingerprints: never hash a whole value (this runs
-# on every input of every cell execution), only a head/tail sample.
+# Fingerprints sample head/tail only: this runs on every input of every cell execution.
 _MAX_SAMPLE = 5
 _MAX_REPR = 64
 
@@ -123,7 +122,7 @@ def detect_mutations(
 
     for snapshot in snapshots:
         if snapshot.var_name not in namespace:
-            # Variable was deleted — report as mutation
+            # Deleted counts as a mutation.
             warnings.append(
                 MutationWarning(
                     var_name=snapshot.var_name,
@@ -136,18 +135,15 @@ def detect_mutations(
         current_value = namespace[snapshot.var_name]
         current_id = id(current_value)
 
-        # If identity changed, it was reassigned (not a mutation)
+        # Reassigned, not mutated.
         if current_id != snapshot.identity:
             continue
 
-        # If the cell also exported this variable, downstream cells receive the
-        # mutated value — it's a *published* mutation, not the dangerous silent
-        # one. Only warn when a mutated input was NOT exported (→ downstream gets
-        # the pre-mutation value).
+        # An exported mutated input reaches downstream as published. Warn only when it was not
+        # exported, since downstream then gets the pre-mutation value.
         if exported_names is not None and snapshot.var_name in exported_names:
             continue
 
-        # Same identity — check if the object was mutated
         mutation_detected = _check_object_mutation(current_value, snapshot)
 
         if mutation_detected:
@@ -198,12 +194,10 @@ def _check_object_mutation(value: Any, snapshot: InputSnapshot) -> tuple[str, st
 # ---------------------------------------------------------------------------
 # Content fingerprint registry
 #
-# A value's fingerprint is a cheap, sampled digest taken before a cell runs and
-# recompared after. The registry mirrors ``serializer._ARROW_TYPE_RULES``: an
-# ordered list of (matches, fingerprint) pairs, first match wins. Adding a
-# library is one entry. Fingerprints MUST stay cheap (sampled, not full-value)
-# and MUST NOT raise — they run on every input of every cell execution, before
-# the user's code; returning ``None`` means "couldn't fingerprint, skip".
+# A cheap sampled digest taken before a cell runs and recompared after. Ordered
+# (matches, fingerprint) pairs, first match wins (mirrors
+# ``serializer._ARROW_TYPE_RULES``). Fingerprints MUST stay cheap and MUST NOT raise:
+# they run on every input before the user's code. ``None`` means "skip".
 # ---------------------------------------------------------------------------
 
 
@@ -219,8 +213,7 @@ class _FingerprintRule(NamedTuple):
     fingerprint: collections.abc.Callable[[Any], str | None]
 
 
-# Types that can't be mutated in place — identity-only is correct, and
-# fingerprinting them is wasted work (a str/int can't change under your feet).
+# Can't be mutated in place, so identity-only is correct and fingerprinting is waste.
 _IMMUTABLE_SCALARS = (str, bytes, int, float, bool, complex, type(None))
 
 
@@ -241,7 +234,7 @@ def _general_fingerprint(value: Any) -> str | None:
 
         return hashlib.sha256(cloudpickle.dumps(value, protocol=5)).hexdigest()
     except Exception:
-        # Unpicklable or non-deterministic to serialize → can't content-check.
+        # Unpicklable or non-deterministic to serialize: can't content-check.
         return None
 
 
@@ -282,7 +275,7 @@ def _hash_pandas_sample(value: Any) -> str | None:
         if len(value) > _MAX_SAMPLE:
             h.update(value.tail(_MAX_SAMPLE).to_json().encode())
     except (ValueError, OverflowError, TypeError):
-        # to_json() chokes on some object-dtype payloads; degrade gracefully.
+        # to_json() chokes on some object-dtype payloads.
         return None
     return h.hexdigest()
 
@@ -308,16 +301,14 @@ def _hash_ndarray_sample(value: Any) -> str | None:
             flat = np.concatenate([flat[:_MAX_SAMPLE], flat[-_MAX_SAMPLE:]])
         h.update(flat.tobytes())
     except (ValueError, TypeError):
-        # Object/structured dtypes that won't reduce to bytes — skip.
+        # Object/structured dtypes that won't reduce to bytes.
         return None
     return h.hexdigest()
 
 
 def _is_torch(value: Any) -> bool:
-    # A tensor implies torch is imported, so probe sys.modules rather than
-    # importing torch (slow) to reject every value in torch-installed notebooks.
-    # Mirrors serializer._matches_torch. (jax arrays are immutable by design —
-    # no in-place mutation — so they need no rule.)
+    # Probe sys.modules (a tensor implies torch is imported) instead of importing torch,
+    # which is slow. Mirrors serializer._matches_torch.
     torch = sys.modules.get("torch")
     return torch is not None and isinstance(value, torch.Tensor)
 
@@ -367,8 +358,7 @@ def _hash_mapping_sample(value: Any) -> str | None:
 
 
 def _is_sequence(value: Any) -> bool:
-    # Concrete mutable/indexable sequences only — str/bytes are immutable, and
-    # abc.Sequence would wrongly include them.
+    # Concrete sequences only: abc.Sequence would include immutable str/bytes.
     return isinstance(value, (list, tuple))
 
 
@@ -394,9 +384,8 @@ def _hash_sequence_sample(value: Any) -> str | None:
 
 
 def _is_sized(value: Any) -> bool:
-    # Last-resort catch-all for other sized containers (set, frozenset, deque,
-    # custom). Earlier rules claim pandas/numpy/dict/list first. str/bytes are
-    # immutable, so excluded.
+    # Catch-all for other sized containers (set, deque, custom); earlier rules claim
+    # pandas/numpy/dict/list first. str/bytes are immutable, so excluded.
     return isinstance(value, collections.abc.Sized) and not isinstance(
         value, (str, bytes, bytearray)
     )
@@ -410,9 +399,8 @@ def _hash_len_only(value: Any) -> str | None:
         return None
 
 
-# Order: concrete library types first, then the sized catch-all. polars is
-# deferred (its API is mostly immutable); jax needs no rule (jax arrays are
-# immutable). See design-mutation-fingerprint-registry.
+# Concrete library types first, then the sized catch-all. polars is deferred (mostly
+# immutable API); jax arrays are immutable and need no rule.
 _FINGERPRINT_RULES: tuple[_FingerprintRule, ...] = (
     _FingerprintRule(_is_pandas, _hash_pandas_sample),
     _FingerprintRule(_is_numpy, _hash_ndarray_sample),
@@ -454,26 +442,22 @@ def apply_defensive_copy(value: Any, content_type: str) -> Any:
         return copy.copy(value)
     if content_type == "pickle/object":
         return copy.deepcopy(value)
-    # arrow/ipc (fresh on deserialize) or unknown — return as-is.
+    # arrow/ipc (fresh on deserialize) or unknown.
     return value
 
 
 # ---------------------------------------------------------------------------
 # Shared-mutable-object detection across a cell's outputs
 #
-# Strata stores each output variable as an independent artifact. If two outputs
-# share a mutable object by identity — the classic case being an optimizer that
-# holds a model's parameter tensors — storing them separately *decouples* them:
-# downstream they're independent copies, so mutating one no longer affects the
-# other. That silently breaks split model/optimizer training. Detection rides a
-# bounded object-graph walk (no per-library rule); arrays/tensors are recorded
-# as mutable leaves but not traversed into.
+# Each output is stored as an independent artifact, so two outputs sharing a mutable
+# object (an optimizer holding a model's parameter tensors) come back decoupled
+# downstream, silently breaking split model/optimizer training. Detection is a bounded
+# object-graph walk; arrays/tensors are recorded as mutable leaves, not traversed.
 # ---------------------------------------------------------------------------
 
 
-# Shared by nature (imports, defs) and never the "decoupling-relevant" state we
-# care about — skip recording and traversing them, or two outputs that both
-# reference numpy would look like they "share" the module.
+# Shared by nature (imports, defs): skip them, or two outputs that both reference
+# numpy would look like they share the module.
 _SHARED_BY_NATURE = (
     types.ModuleType,
     types.FunctionType,
@@ -530,8 +514,7 @@ def _reachable_mutable_ids(
                     for value in obj_dict.values():
                         stack.append((value, depth + 1))
         except Exception:
-            # Exotic container / proxy whose iteration raised — stop descending
-            # this branch rather than abort the whole walk.
+            # Exotic container whose iteration raised: stop descending this branch only.
             continue
     return found
 
