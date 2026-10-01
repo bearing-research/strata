@@ -20,21 +20,13 @@ class CellAnalysis:
 
     defines: list[str] = field(default_factory=list)
     references: list[str] = field(default_factory=list)
-    # Subset of ``defines`` that came from in-place mutations
-    # (``df["col"] = ...``, ``obj.attr = ...``). The cell both reads
-    # and re-produces these names; the harness uses this to force
-    # serialization even when the mutation preserved ``id()``.
+    # Defines from in-place mutation (``df["col"] = ...``). The harness forces
+    # serialization of these even when the mutation preserved ``id()``.
     mutation_defines: list[str] = field(default_factory=list)
-    # Free names that shadow a Python builtin (``input``, ``type``,
-    # ``id`` …), kept out of ``references`` so every cell calling
-    # ``print``/``len`` doesn't list them. ``defines`` is *not*
-    # builtin-filtered, so a cell CAN produce ``input = load_data()``;
-    # the DAG resolves these against the producer map exactly like
-    # references — a name no cell shadows has no producer and wires
-    # nothing, while a shadowed one gets its edge. Without this
-    # companion list the edge silently vanished: the consumer never
-    # restaled and single-cell execution hit NameError because the
-    # artifact was never stored.
+    # Free names that are builtins, kept out of ``references`` so every
+    # ``print``/``len`` caller doesn't list them. A cell can still define
+    # ``input = ...``, so the DAG resolves these against producers too: an
+    # unshadowed builtin wires nothing, a shadowed one gets its edge.
     builtin_references: list[str] = field(default_factory=list)
     error: str | None = None
 
@@ -95,36 +87,22 @@ class VariableAnalyzer(ast.NodeVisitor):
         """Initialize the analyzer."""
         self.defines: set[str] = set()
         self.references: set[str] = set()
-        # Names that got into ``defines`` via a pure ``x = ...`` target
-        # (not a subscript/attribute mutation). Used to demote a
-        # variable out of ``mutation_defines`` when the same cell does
-        # both — ``df = ...`` followed by ``df["col"] = ...`` is
-        # locally-defined, not a mutation of an upstream.
+        # Pure ``x = ...`` targets. ``df = ...`` then ``df["col"] = ...`` in
+        # one cell is a local define, not a mutation of an upstream.
         self.pure_defines: set[str] = set()
-        # Subset of `defines` that came from subscript/attribute
-        # mutations (``df["col"] = ...``) without a sibling pure
-        # assignment. These still need to appear in references so the
-        # DAG knows we depend on an upstream producer — unlike pure
-        # rebinds (``x = x + 1``) where the reference is intra-cell
-        # and should be filtered out.
+        # Subscript/attribute mutations. Unlike pure rebinds these stay in
+        # references: the cell depends on an upstream producer.
         self.mutation_defines: set[str] = set()
-        # Names whose value is read on the RHS of an assignment that
-        # also defines them at module scope — ``df = df.dropna()`` style.
-        # The reference is genuine (Python evaluates RHS before binding
-        # LHS, so the upstream producer must exist) and survives the
-        # pure-define filter below. Common pattern in Jupyter notebooks.
+        # ``df = df.dropna()`` style: the RHS read is a genuine upstream
+        # reference and survives the pure-define filter.
         self.rebind_with_self_read: set[str] = set()
-        # Names pure-defined earlier in source order in this cell.
-        # Used to distinguish ``x = 0\nx += 1`` (intra-cell rebind, no
-        # upstream needed) from bare ``x += 1`` (genuine upstream read).
-        # Walked incrementally in source order via visit_Module.
+        # Pure defines so far in source order: tells ``x = 0\nx += 1``
+        # (local) from a bare ``x += 1`` (upstream read).
         self._defined_so_far: set[str] = set()
         self._in_nested_scope = False
         self._local_vars: set[str] = set()  # Track local scope variables
-        # Set in visit_Module if the cell carries
-        # ``from __future__ import annotations``. PEP 563 stringifies
-        # annotations, so a name in a parameter or return annotation
-        # shouldn't count as a runtime reference under that flag.
+        # PEP 563 stringifies annotations, so under it they are not
+        # runtime references.
         self._future_annotations: bool = False
 
     def visit_Module(self, node: ast.Module) -> None:
@@ -140,21 +118,15 @@ class VariableAnalyzer(ast.NodeVisitor):
 
     def visit_Assign(self, node: ast.Assign) -> None:
         """Handle: x = ... or x, y = ..."""
-        # Names being pure-assigned by this statement, e.g. ``df`` in
-        # ``df = df.dropna()`` or ``a, b`` in ``a, b = b, a``. We need
-        # them before visiting the RHS so we can record genuine
-        # read-before-write references — including the tuple/list
-        # unpacking case, which is how Python does a swap.
+        # Needed before visiting the RHS to catch read-before-write, including
+        # swaps like ``a, b = b, a``.
         pure_target_names: set[str] = set()
         for target in node.targets:
             _collect_name_targets(target, pure_target_names)
         all_underscore = all(self._is_pure_underscore(target) for target in node.targets)
         if not all_underscore:
-            # Walk the RHS looking for Loads of any target name being
-            # bound here. A name read on the RHS of its own assignment
-            # is an upstream reference UNLESS the cell already pure-
-            # defined that name earlier in source order (``x = 0; x =
-            # x + 1`` reads the local ``x``, not an upstream one).
+            # A target read on its own RHS is an upstream reference unless
+            # the cell pure-defined it earlier (``x = 0; x = x + 1``).
             for child in ast.walk(node.value):
                 if (
                     isinstance(child, ast.Name)
@@ -164,8 +136,6 @@ class VariableAnalyzer(ast.NodeVisitor):
                 ):
                     self.rebind_with_self_read.add(child.id)
             self.visit(node.value)
-        # Collect targets (defines), and remember Name-target binds for
-        # subsequent statements in this cell.
         for target in node.targets:
             self._add_assign_target(target)
             _collect_name_targets(target, self._defined_so_far)
@@ -197,9 +167,7 @@ class VariableAnalyzer(ast.NodeVisitor):
             if node.target.id not in self._defined_so_far:
                 self.references.add(node.target.id)
                 self.rebind_with_self_read.add(node.target.id)
-        # Augmented assignment defines the target
         self._add_assign_target(node.target)
-        # Visit the value
         self.visit(node.value)
         if isinstance(node.target, ast.Name):
             self._defined_so_far.add(node.target.id)
@@ -207,11 +175,7 @@ class VariableAnalyzer(ast.NodeVisitor):
     def visit_AnnAssign(self, node: ast.AnnAssign) -> None:
         """Handle: x: int = ... or x: int (without value)."""
         self._add_assign_target(node.target)
-        # A module-scope annotation is evaluated at runtime (PEP 563 only
-        # stringifies it under ``from __future__ import annotations``), so
-        # a name in it — ``result: MyType = compute()`` — is a genuine
-        # reference to whatever cell defines ``MyType``. Same gate as
-        # function signature annotations.
+        # Module-scope annotations are evaluated at runtime unless PEP 563.
         if not self._future_annotations:
             self.visit(node.annotation)
         if node.value:
@@ -305,8 +269,6 @@ class VariableAnalyzer(ast.NodeVisitor):
     def visit_Import(self, node: ast.Import) -> None:
         """Handle: import foo or import foo as bar."""
         for alias in node.names:
-            # import foo → defines 'foo'
-            # import foo as bar → defines 'bar'
             name = alias.asname if alias.asname else alias.name
             self.defines.add(name)
 
@@ -314,21 +276,16 @@ class VariableAnalyzer(ast.NodeVisitor):
         """Handle: from foo import bar or from foo import *."""
         for alias in node.names:
             if alias.name == "*":
-                # Star imports — we can't determine what's defined
-                # Log would go here, but we just skip for v1
+                # Star imports: defines are unknowable, skip.
                 pass
             else:
-                # from foo import bar → defines 'bar'
-                # from foo import bar as baz → defines 'baz'
                 name = alias.asname if alias.asname else alias.name
                 self.defines.add(name)
 
     def visit_For(self, node: ast.For) -> None:
         """Handle: for x in ... — x is defined at top level."""
         self._add_assign_target(node.target)
-        # Visit iterable (may have references)
         self.visit(node.iter)
-        # Visit body (nested scope, but loop variable is top-level)
         for stmt in node.body:
             self.visit(stmt)
         for stmt in node.orelse:
@@ -340,7 +297,6 @@ class VariableAnalyzer(ast.NodeVisitor):
             if item.optional_vars:
                 self._add_assign_target(item.optional_vars)
             self.visit(item.context_expr)
-        # Visit body (nested scope)
         for stmt in node.body:
             self.visit(stmt)
 
@@ -364,7 +320,6 @@ class VariableAnalyzer(ast.NodeVisitor):
 
     def visit_NamedExpr(self, node: ast.NamedExpr) -> None:
         """Handle: walrus operator := at top level."""
-        # if (x := value) — x is defined
         if isinstance(node.target, ast.Name):
             self.defines.add(node.target.id)
         self.visit(node.value)
@@ -395,7 +350,7 @@ class VariableAnalyzer(ast.NodeVisitor):
     def visit_Name(self, node: ast.Name) -> None:
         """Collect referenced names (Load context)."""
         if isinstance(node.ctx, ast.Load):
-            # Don't add names that are local to current scope (e.g., lambda parameters)
+            # Skip names local to the current scope (e.g. lambda params)
             if node.id not in self._local_vars:
                 self.references.add(node.id)
 
@@ -475,22 +430,15 @@ class VariableAnalyzer(ast.NodeVisitor):
 
     def visit_Lambda(self, node: ast.Lambda) -> None:
         """Lambda expression — arguments are local scope."""
-        # Defaults are evaluated in the *enclosing* scope at creation time
-        # (``lambda x=base_value: x`` reads ``base_value`` now), so visit
-        # them before the parameters shadow anything. Mirrors the
-        # FunctionDef default handling.
+        # Defaults evaluate in the enclosing scope, before params shadow.
         for default in node.args.defaults:
             self.visit(default)
         for default in node.args.kw_defaults:
             if default is not None:
                 self.visit(default)
-        # Save current local vars
         old_local_vars = self._local_vars
-        # Add lambda parameters to local scope
         self._local_vars = self._local_vars | self._get_lambda_params(node.args)
-        # Visit body with parameters in local scope
         self.visit(node.body)
-        # Restore local vars
         self._local_vars = old_local_vars
 
     def _get_lambda_params(self, args: ast.arguments) -> set[str]:
@@ -518,29 +466,22 @@ class VariableAnalyzer(ast.NodeVisitor):
         - Attribute: obj.attr → defines the root name obj
         """
         if isinstance(target, ast.Name):
-            # Simple assignment: x = ...
             self.defines.add(target.id)
             self.pure_defines.add(target.id)
         elif isinstance(target, (ast.Tuple, ast.List)):
-            # Tuple/list unpacking: (a, b) = ... or [a, b] = ...
             for elt in target.elts:
                 self._add_assign_target(elt)
         elif isinstance(target, ast.Subscript):
-            # Subscript mutation: df["col"] = ... — the cell both reads
-            # the existing df AND produces the mutated version that
-            # downstream cells will observe. Record both roles so the
-            # DAG routes downstream reads through the mutating cell
-            # (otherwise downstream cells can run before the mutation
-            # and KeyError on the new column).
+            # df["col"] = ...: reads df and produces the mutated df, so
+            # downstream reads route through this cell (else they can run
+            # before the mutation and KeyError).
             self._add_reference_target(target.value)
             self._add_mutation_define(target.value)
         elif isinstance(target, ast.Attribute):
-            # Attribute mutation: obj.attr = ... — same reasoning as
-            # subscript mutation above.
+            # obj.attr = ...: same as subscript mutation.
             self._add_reference_target(target.value)
             self._add_mutation_define(target.value)
         elif isinstance(target, ast.Starred):
-            # Starred assignment: *rest = ...
             self._add_assign_target(target.value)
 
     def _add_reference_target(self, node: ast.expr) -> None:
@@ -689,64 +630,37 @@ def analyze_cell(source: str) -> CellAnalysis:
         CellAnalysis with defines, references, and optional error message
     """
     if not source or not source.strip():
-        # Empty cell
         return CellAnalysis(defines=[], references=[])
 
     try:
         tree = ast.parse(source)
     except SyntaxError as e:
-        # Syntax error — return empty analysis with error message
         return CellAnalysis(
             defines=[],
             references=[],
             error=f"Syntax error: {e.msg}",
         )
 
-    # Analyze the tree for defines, mutation_defines, and module-scope
-    # references. The AST visitor handles the bookkeeping that's
-    # specific to Strata (mutation_defines, pure_defines for the
-    # demote-on-rebind logic) but it deliberately doesn't recurse into
-    # function/class bodies.
+    # The visitor stops at function/class bodies; symtable covers those.
     analyzer = VariableAnalyzer()
     analyzer.visit(tree)
 
-    # Augment references with names referenced inside function/class
-    # *bodies* — those are nested scopes and the AST visitor stops at
-    # the boundary. ``symtable`` does correct scope analysis: closure
-    # variables (``is_free()``) and parameters don't surface as module
-    # references; only names that fall through to module globals do.
     nested_refs = _collect_body_refs(source)
 
-    # Augment defines with module-scope bindings produced from inside a
-    # function via explicit ``global`` declarations (e.g. lazy-init
-    # patterns). Without this, a downstream cell that consumes such a
-    # name would see no upstream producer. ``global_read_writes`` is
-    # the subset that's also read in the same function — those stay in
-    # references (parallel to ``df["col"] = df["col"] * 2``).
+    # ``global`` writes inside functions are module defines too.
+    # ``global_read_writes`` are also read there, so they stay in references.
     global_writes, global_read_writes = _collect_global_writes(source)
 
-    # Filter: exclude private variables and builtins
     builtin_names = set(dir(builtins)) | {"__name__", "__file__", "__doc__", "__package__"}
     defines = [v for v in (analyzer.defines | global_writes) if not v.startswith("_")]
-    # A name only counts as a mutation-define if the cell didn't also
-    # pure-assign it. If a cell does ``df = ...`` and later
-    # ``df["col"] = ...``, the pure assignment supersedes — ``df`` is
-    # locally produced and shouldn't drag in a phantom upstream.
+    # A pure assignment in the same cell supersedes a mutation-define.
     effective_mutation_defines = {
         v
         for v in (analyzer.mutation_defines | global_read_writes)
         if not v.startswith("_") and v in set(defines) and v not in analyzer.pure_defines
     }
-    # Mutation-defines stay in references (the cell depends on an
-    # upstream producer of the pre-mutation object). Pure defines are
-    # filtered from references — that handles intra-cell rebinds like
-    # ``x = 5\ny = x + 1`` where ``x`` is locally produced before being
-    # read.
-    #
-    # Exception: ``df = df.dropna()``-style rebinds where the RHS
-    # reads the same name being bound. The reference is genuine (RHS
-    # evaluates before LHS binding) and must survive the filter so the
-    # DAG draws the upstream edge.
+    # Pure defines are filtered from references (intra-cell rebinds);
+    # mutation-defines and ``df = df.dropna()`` self-reads are kept.
     pure_defined_names = set(defines) - effective_mutation_defines - analyzer.rebind_with_self_read
     combined_refs = set(analyzer.references) | nested_refs
     references = [
@@ -754,19 +668,12 @@ def analyze_cell(source: str) -> CellAnalysis:
         for v in combined_refs
         if not v.startswith("_") and v not in builtin_names and v not in pure_defined_names
     ]
-    # Builtin-named free vars, partitioned out of ``references`` (same
-    # filter otherwise). ``defines`` keeps builtin-shadowing names, so
-    # the DAG must see these as potential references too — otherwise
-    # ``input = load_data()`` upstream and ``model.fit(input)``
-    # downstream never get an edge. Producer-map resolution drops the
-    # unshadowed ones (``print``, ``len``) for free.
     builtin_references = [
         v
         for v in combined_refs
         if not v.startswith("_") and v in builtin_names and v not in pure_defined_names
     ]
 
-    # Remove duplicates and sort for consistency
     defines = sorted(set(defines))
     references = sorted(set(references))
     mutation_defines = sorted(effective_mutation_defines)

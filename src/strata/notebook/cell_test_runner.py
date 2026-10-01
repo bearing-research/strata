@@ -25,8 +25,7 @@ from strata.notebook.harness_user import HarnessUser, hand_over, spawn_kwargs
 
 _CONFTEST_TEMPLATE = Path(__file__).parent / "cell_test_conftest.py"
 
-# Wall-clock ceiling for a single cell's test run. Cell tests are meant to be
-# quick unit checks; a runaway test shouldn't hang the WS connection forever.
+# Cell tests are quick unit checks; a runaway test must not hang the WS connection.
 _DEFAULT_TIMEOUT_SECONDS = 120.0
 
 
@@ -107,10 +106,9 @@ def run_cell_tests_in_dir(
 
     results_path = rundir / "results.json"
     if not results_path.exists():
-        # pytest exited before ``pytest_sessionfinish`` wrote results — a
-        # collection error in the test file itself (syntax error, bad import)
-        # is the common cause. Surface the captured output as one error so the
-        # user sees *why* nothing ran instead of an empty pass.
+        # pytest exited before ``pytest_sessionfinish`` wrote results, usually a
+        # collection error (syntax error, bad import). Surface the output so the
+        # user sees why nothing ran instead of an empty pass.
         detail = (proc.stdout + proc.stderr).strip() or "pytest produced no results"
         return {
             "passed": 0,

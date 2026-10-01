@@ -57,8 +57,8 @@ def fetch_configured_secrets(state: NotebookState) -> SecretFetchResult | None:
     try:
         return provider.fetch(dict(config))
     except Exception as exc:
-        # Defensive: the protocol says fetch should not raise, but a
-        # buggy provider shouldn't take the session down.
+        # The protocol says fetch should not raise, but a buggy provider
+        # shouldn't take the session down.
         return SecretFetchResult.failure(provider_name, f"provider raised: {exc}")
 
 
@@ -78,9 +78,8 @@ def apply_secrets_to_notebook_state(state: NotebookState) -> SecretFetchResult |
     """
     result = fetch_configured_secrets(state)
 
-    # Keys the provider filled last time. Their values are the provider's, not
-    # the user's, so a refresh replaces them: without this, a rotated secret
-    # was kept at its old value as though someone had set it by hand.
+    # Provider-filled values are the provider's, so a refresh replaces them;
+    # otherwise a rotated secret would keep its old value as if set by hand.
     fetched_before = {
         key for key, source in (state.env_sources or {}).items() if source != MANUAL_SOURCE
     }
@@ -99,6 +98,6 @@ def apply_secrets_to_notebook_state(state: NotebookState) -> SecretFetchResult |
         if existing is None or existing == "" or key in fetched_before:
             state.env[key] = value
             state.env_sources[key] = result.source
-        # else: manual override wins; keep state.env_sources[key] = MANUAL
+        # else: manual override wins.
 
     return result

@@ -47,8 +47,8 @@ class Lake:
     fingerprints: list[str] = field(default_factory=list)
     # (namespace, table) → the snapshot the query reads.
     snapshots: dict[tuple[str, str], int] = field(default_factory=dict)
-    # In service mode, where the handle may still read once confined (see
-    # duckdb._confine): each mount's root and each catalog table's location.
+    # Service mode only (see duckdb._confine): each mount's root and each catalog
+    # table's location, readable once confined.
     locations: list[str] = field(default_factory=list)
 
 
@@ -149,18 +149,16 @@ def resolve_lake(
         for table_spec in specs:
             snapshot = snapshots.get(table_spec.name)
             if snapshot is None:
-                # Unresolved the first time: ask again, so the cell fails with
-                # the catalog's reason, or reads what a retry found.
+                # Unresolved the first time: ask again, so the cell fails with the catalog's
+                # reason or reads what a retry found.
                 try:
                     snapshot = resolve_table_snapshot(table_spec, config)
                 except ValueError as exc:
                     raise LakeError(f"table {table_spec.uri}: {exc}") from exc
             namespace, _, name = table_spec.uri.partition(":")[2].rpartition(".")
             lake.snapshots[(namespace, name)] = snapshot
-            # From the snapshot the query will read, so a catalog that answered
-            # only on the retry still gives the cell a hash it can reproduce —
-            # fingerprint_tables invents a random one for what it could not
-            # resolve, which no later run would ever match.
+            # From the snapshot the query reads, so a catalog that answered only on retry still
+            # gives a reproducible hash (fingerprint_tables invents a random one otherwise).
             lake.fingerprints.append(f"{table_spec.name}:table:{table_spec.uri}:{snapshot}")
             if confined:
                 lake.locations.append(_table_location(table_spec, config))

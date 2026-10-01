@@ -173,10 +173,8 @@ async def _chat_completion_openai_compat(
 
     choice = data["choices"][0]
     usage = data.get("usage", {})
-    # ``content`` can legitimately be null (an empty/refusal turn on
-    # OpenAI-compat providers). Coerce to "" so downstream JSON parsing
-    # raises its handled JSONDecodeError instead of an unhandled
-    # TypeError from json.loads(None).
+    # ``content`` can be null (empty/refusal turn on OpenAI-compat providers). Coerce to
+    # "" so parsing raises the handled JSONDecodeError, not a TypeError.
     result = LlmCompletionResult(
         content=choice["message"]["content"] or "",
         model=data.get("model", config.model),
@@ -227,9 +225,8 @@ async def chat_completion(
     except LlmHttpError as e:
         if response_format is None or not _is_structured_output_rejection(e.status_code, e.body):
             raise
-        # Provider refused the structured-output extension — degrade to
-        # prompt-guided JSON; the caller's validation loop enforces the
-        # schema client-side.
+        # Provider refused the structured-output extension: degrade to prompt-guided JSON;
+        # the caller's validation loop enforces the schema.
         logger.warning(
             "Provider rejected response_format (HTTP %d); degrading to "
             "prompt-guided JSON for model %s",

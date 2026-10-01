@@ -28,8 +28,7 @@ if TYPE_CHECKING:
 
 from strata.notebook.models import CellLanguage
 
-# ANSI colors for human output. Disabled when stdout isn't a tty so that
-# pipes and CI logs stay clean.
+# Disabled when stdout isn't a tty so pipes and CI logs stay clean.
 _USE_COLOR = sys.stdout.isatty()
 
 
@@ -77,9 +76,7 @@ def _format_ms(duration_ms: float | int) -> str:
     return f"{d / 1000:.1f}s"
 
 
-# Per-cell stdout/stderr cap in the JSON payload. Generous enough for
-# verification output, bounded so a print-heavy cell can't balloon the
-# result document.
+# Per-cell console cap so a print-heavy cell can't balloon the JSON result.
 _MAX_JSON_CONSOLE_CHARS = 10_000
 
 
@@ -154,8 +151,8 @@ def _use_existing_environment(session: Any) -> tuple[bool, str | None]:
             f"({venv_python} is missing)\n"
             "hint: run without --no-sync, or `uv sync` in the notebook dir first"
         )
-    # Sets the interpreter and every environment field with it (source,
-    # version, sync state); a session never records an interpreter on its own.
+    # Sets the interpreter together with every environment field; a session never
+    # records an interpreter on its own.
     session.refresh_environment_runtime()
     return True, None
 
@@ -175,13 +172,9 @@ async def _sync_environment(session: Any) -> tuple[bool, str | None]:
     except Exception as exc:
         return False, f"env sync raised: {exc}"
 
-    # ``submit_environment_job`` returns the job snapshot, and
-    # ``_run_environment_job`` mutates *that same object* in place to its
-    # terminal status. Read it directly. ``session.environment_job`` is
-    # the "currently-running" slot and is reset to None the moment the
-    # job finishes — so reading it here always saw None and tripped a
-    # false "env sync finished without a status snapshot" error, which
-    # made ``strata run`` (without --no-sync) fail on every notebook.
+    # ``_run_environment_job`` mutates this returned snapshot in place.
+    # ``session.environment_job`` is reset to None when the job finishes, so it
+    # can't be read here.
     if job.status != "completed":
         message = job.error or f"env sync ended with status={job.status}"
         return False, message
@@ -259,22 +252,14 @@ async def _run_async(args: argparse.Namespace) -> int:
             await _drain_warm_pool(session)
             return 2
 
-    # Restore the R environment from renv.lock, mirroring the server's
-    # session-open behaviour. Idempotent and cheap when the project
-    # library already matches the lockfile (it skips the Rscript spawn),
-    # and a no-op for Python-only notebooks — so it runs on the --no-sync
-    # path too. Without it, an R notebook that ships an renv.lock would
-    # execute its cells against an empty project library and fail with
-    # "there is no package called …". Runs in a thread because
-    # ``_renv_sync`` shells out to Rscript synchronously.
+    # Restore R from renv.lock like the server's session open, on the --no-sync path
+    # too (cheap when already in sync); otherwise R cells run against an empty
+    # project library. Threaded because ``_renv_sync`` shells out synchronously.
     if (notebook_dir / "renv.lock").exists():
         if args.format == "human":
             print(_dim("restoring R environment…"))
-        # ``ensure_renv_synced`` swallows the expected failures (Rscript
-        # missing, timeout, non-zero restore) and records them as runtime
-        # state. Guard the unexpected ones (e.g. a non-executable Rscript
-        # raising) so they surface as a clean exit-2 setup error rather
-        # than an uncaught traceback.
+        # ``ensure_renv_synced`` swallows expected failures; surface unexpected ones
+        # (e.g. a non-executable Rscript) as a clean exit-2 setup error.
         try:
             await asyncio.to_thread(session.ensure_renv_synced)
         except Exception as exc:
@@ -282,7 +267,6 @@ async def _run_async(args: argparse.Namespace) -> int:
             await _drain_warm_pool(session)
             return 2
 
-    # Header
     if args.format == "human":
         print(f"running: {notebook_dir}")
         print()
@@ -293,19 +277,16 @@ async def _run_async(args: argparse.Namespace) -> int:
     failed_cells: set[str] = set()
     start = time.monotonic()
 
-    # One run: each cell executes at most once, so a @nocache producer
-    # with several consumers is not re-executed as each one materialises it.
+    # Each cell executes at most once, so a @nocache producer with several
+    # consumers is not re-executed per consumer.
     with executor.one_run():
         for cell_id in session.dag.topological_order:
             cell = cell_by_id.get(cell_id)
             if cell is None:
-                # Cell in the DAG but not in notebook_state — shouldn't happen,
-                # but don't crash.
+                # In the DAG but not in notebook_state; shouldn't happen.
                 continue
 
-            # Markdown cells are non-executable prose; surface them as
-            # success-with-no-op so ``strata run`` doesn't print a misleading
-            # "skipped: unsupported language" line for documentation cells.
+            # Report markdown prose as a no-op success, not "skipped: unsupported language".
             if cell.language == CellLanguage.MARKDOWN:
                 entry = {
                     "id": cell_id,
@@ -320,11 +301,8 @@ async def _run_async(args: argparse.Namespace) -> int:
                     _print_cell_line(entry)
                 continue
 
-            # Skip languages we can't execute headlessly. R cells run through
-            # the same language-executor dispatch the session uses (Rscript +
-            # harness.R); a missing `Rscript` surfaces as a clean cell error,
-            # not a crash, so R belongs in the executable set rather than the
-            # skip list.
+            # R runs through the same language dispatch as the session; a missing `Rscript`
+            # is a clean cell error.
             if cell.language not in {
                 CellLanguage.PYTHON,
                 CellLanguage.PROMPT,
@@ -344,7 +322,6 @@ async def _run_async(args: argparse.Namespace) -> int:
                     _print_cell_line(entry)
                 continue
 
-            # Skip if any upstream failed.
             upstream = session.dag.cell_upstream.get(cell_id, [])
             if any(u in failed_cells for u in upstream):
                 entry = {
@@ -362,9 +339,8 @@ async def _run_async(args: argparse.Namespace) -> int:
                 continue
 
             try:
-                # --timeout raises the fallback per-cell limit for this run; a
-                # per-cell `# @timeout` / notebook.toml `timeout` still takes
-                # precedence (see CellExecutor._resolve_effective_timeout).
+                # A per-cell `# @timeout` / notebook.toml `timeout` still wins (see
+                # CellExecutor._resolve_effective_timeout).
                 cell_timeout = (
                     args.timeout if args.timeout is not None else DEFAULT_CELL_TIMEOUT_SECONDS
                 )
@@ -398,30 +374,22 @@ async def _run_async(args: argparse.Namespace) -> int:
                 "duration_ms": int(result.duration_ms or 0),
                 "cache_hit": bool(result.cache_hit),
             }
-            # Carry console output so external authors (scripts, coding
-            # agents) can verify computed values from the JSON payload
-            # instead of reaching into .strata/ — which is documented as
-            # hands-off (issue #114 litmus finding). Cache hits replay the
-            # stored result without re-emitting console output, so these
-            # keys can be absent on warm runs.
+            # Lets scripts and agents verify values from the JSON instead of reading
+            # .strata/. Cache hits don't re-emit console output, so these may be absent.
             if result.stdout:
                 entry["stdout"] = _truncate_console(result.stdout)
             if result.stderr:
                 entry["stderr"] = _truncate_console(result.stderr)
-            # In-place mutation of an input is otherwise silent in headless runs (the
-            # warning only reached the WS/UI path). Surface it: a cell that mutates an
-            # input without exporting it means downstream cells see the stale value.
+            # Otherwise silent headless: a cell that mutates an input without exporting it
+            # leaves downstream cells reading the stale value.
             if result.mutation_warnings:
                 entry["mutation_warnings"] = [dict(w) for w in result.mutation_warnings]
             if not result.success:
                 entry["error"] = result.error or "cell failed"
                 failed_cells.add(cell_id)
             else:
-                # What makes two run reports comparable. Without these a report
-                # says "both green" and stops: two machines that computed
-                # different numbers produce identical JSON. Read back from the
-                # store rather than from the result, because a cache hit carries
-                # no outputs and is exactly the run worth comparing.
+                # Makes two run reports comparable: identical "green" JSON can hide different
+                # numbers. Read from the store, since a cache hit carries no outputs.
                 entry.update(_cell_identity(session, cell, cell_id))
             results.append(entry)
             if args.format == "human" and not args.quiet:
@@ -595,11 +563,8 @@ def validate_main(args: argparse.Namespace) -> int:
         )
 
     if session is not None and session.dag is None:
-        # Report what actually went wrong. This used to hardcode "cycle" for
-        # every build failure, so a duplicate `# @variant` name — the other,
-        # more common way the build fails — sent the reader hunting a cycle
-        # that does not exist. ``validate`` is the only command that reports
-        # the failure at all, which makes the wrong diagnosis expensive.
+        # Report the real failure: a duplicate `# @variant` name also fails the build,
+        # and ``validate`` is the only command that reports it.
         detail = getattr(session, "dag_error", None)
         notebook_errors.append(
             {
@@ -873,10 +838,8 @@ def _import_snapshot_bundle(path: Path, args: argparse.Namespace) -> int:
     stem = path.name.removesuffix(".zip").removesuffix(".snapshot")
     dest = Path(args.output_path) if args.output_path else path.with_name(stem)
 
-    # A notebook id already in use where notebooks are looked for is replaced,
-    # so two copies never share one — that collides the moment both publish to
-    # a shared store. The storage root is the scope `strata` itself lists from;
-    # a copy living somewhere else entirely cannot be seen from here.
+    # A notebook id already in use under the storage root is replaced, so two copies
+    # never collide when both publish to a shared store. Copies elsewhere aren't visible.
     root = StrataConfig.load().notebook_storage_dir
     taken = {e["notebook_id"] for e in _discover_notebooks(Path(root)) if e.get("notebook_id")}
 
@@ -885,8 +848,7 @@ def _import_snapshot_bundle(path: Path, args: argparse.Namespace) -> int:
     try:
         result = import_snapshot(path, dest, taken_ids=taken)
     except (NotASnapshotError, FileExistsError, zipfile.BadZipFile) as exc:
-        # A file that is not a bundle at all is an input error like any other,
-        # not a traceback.
+        # Not a bundle: an input error, not a traceback.
         print(f"error: {exc}", file=sys.stderr)
         return 2
 
@@ -919,9 +881,7 @@ def import_main(args: argparse.Namespace) -> int:
         print(f"error: {path} is not a file", file=sys.stderr)
         return 2
     if path.suffix == ".zip":
-        # One verb for "turn a file into a notebook here", told apart by what
-        # the file is. The extension is unambiguous; a zip that turns out not
-        # to be a snapshot is refused by name rather than guessed at.
+        # Told apart by extension; a zip that isn't a snapshot is refused, not guessed at.
         return _import_snapshot_bundle(path, args)
     if path.suffix != ".ipynb":
         print(
@@ -996,8 +956,7 @@ def _write_snapshot_bundle(path: Path, args: argparse.Namespace) -> int:
         return 1
     existing = Path(out_path)
     if existing.exists() and existing.stat().st_size and not getattr(args, "force", False):
-        # The peer, ``strata artifact archive``, refuses the same way: an
-        # export names a path, and a path that already holds something is more
+        # Like ``strata artifact archive``: a path that already holds something is more
         # likely a mistake than an instruction.
         print(f"error: {out_path} already exists; pass --force to overwrite", file=sys.stderr)
         return 2
@@ -1048,11 +1007,8 @@ def export_main(args: argparse.Namespace) -> int:
 
 
 # ---------------------------------------------------------------------------
-# Agent inspect commands (NotebookOps, local backend) — `strata cell …` etc.
-#
-# Read-only P0 of the CLI-hardening phase: a full-feature agent tool over the
-# same NotebookOps core the MCP server will reuse. JSON by default (agent-first);
-# `--format human` gives a compact view. See docs/internal/design-cli-hardening.md.
+# Agent inspect commands (NotebookOps, local backend): `strata cell …` etc.
+# JSON by default (agent-first); `--format human` gives a compact view.
 # ---------------------------------------------------------------------------
 
 
@@ -1313,9 +1269,8 @@ def _print_cell_human(cell: CellView) -> None:
     if cell.staleness_reasons:
         print(f"stale:    {', '.join(cell.staleness_reasons)}")
     if cell.error:
-        # The one thing a status of `error` is useless without. Console and
-        # outputs stay JSON-only; a traceback is what the person asking came
-        # here to read.
+        # Console and outputs stay JSON-only, but an error status is useless without
+        # its traceback.
         print("--- error ---")
         print(cell.error.rstrip())
     print("--- source ---")
@@ -1340,8 +1295,8 @@ def cell_output_main(args: argparse.Namespace) -> int:
             print(f"error: {e}", file=sys.stderr)
             return 1
         except OSError as e:
-            # The parent existing is not the same as the path being writable:
-            # `--out /tmp` names a directory, and a read-only target refuses.
+            # An existing parent doesn't mean writable: `--out /tmp` is a directory, or the
+            # target may be read-only.
             print(f"error: cannot write {dest}: {e.strerror or e}", file=sys.stderr)
             return 2
         if args.format == "json":
@@ -1355,10 +1310,8 @@ def cell_show_main(args: argparse.Namespace) -> int:
     from strata.notebook.ops import NotebookOpsError
 
     var = getattr(args, "var", None)
-    # Two optional positionals (notebook_dir from _add_target_args + cell_id) are
-    # ambiguous for the remote form `cell show --server … <id>`: argparse fills
-    # notebook_dir first, leaving cell_id None. Remote ignores notebook_dir, so
-    # recover the id from it.
+    # argparse fills notebook_dir first in `cell show --server … <id>`, leaving
+    # cell_id None. Remote ignores notebook_dir, so recover the id from it.
     if args.server and args.cell_id is None and args.notebook_dir is not None:
         args.cell_id = args.notebook_dir
     if bool(args.cell_id) == bool(var):
@@ -1393,8 +1346,7 @@ def _cell_show_var(ops: Any, var: str, fmt: str) -> int:
         return _emit_op_error(exc, fmt)
     producer = producers.get(var)
     if producer is None:
-        # Not defined anywhere — surface what *is* available, so the miss doubles
-        # as discovery.
+        # Not defined: list what is available, so the miss doubles as discovery.
         if fmt == "json":
             _emit_json({"variable": var, "defined": False, "available": sorted(producers)})
         else:
@@ -1403,8 +1355,7 @@ def _cell_show_var(ops: Any, var: str, fmt: str) -> int:
                 print(f"available: {', '.join(sorted(producers))}")
         return 0
     if producer.startswith(("sweep:", "fanout:")):
-        # A variant/sweep group has no single producing cell — report the pointer
-        # without a cell view (don't try get_cell, which would fail).
+        # A variant/sweep group has no single producing cell; report the pointer only.
         if fmt == "json":
             _emit_json({"variable": var, "defined": True, "defined_in": producer})
         else:
@@ -1413,9 +1364,7 @@ def _cell_show_var(ops: Any, var: str, fmt: str) -> int:
     try:
         cell = ops.get_cell(producer)
     except NotebookOpsError as exc:
-        # A plain cell-id producer that get_cell can't fetch is a real error
-        # (stale DAG pointer, backend failure) — surface it, don't mask it as
-        # "defined".
+        # A real error (stale DAG pointer, backend failure); don't mask it as "defined".
         return _emit_op_error(exc, fmt)
     if fmt == "json":
         _emit_json(
@@ -1502,9 +1451,7 @@ async def _cell_add_run_async(args: argparse.Namespace, source: str) -> int:
                 return rc
         try:
             result = await ops.run_cell(cell.id, mode="normal")
-            # Re-fetch the post-run cell so the payload carries its rendered
-            # outputs (a trailing bare expression's value), not just stdout — the
-            # pre-run view from add_cell has none.
+            # Re-fetch so the payload carries rendered outputs; add_cell's pre-run view has none.
             cell = ops.get_cell(cell.id)
         except NotebookOpsError as exc:
             return _emit_op_error(exc, args.format)
@@ -1655,11 +1602,9 @@ def add_dep_arguments(parser: argparse.ArgumentParser) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Worker registration commands (NotebookOps local backend) — `strata worker …`
-#
-# Writes notebook-scoped `[[workers]]` definitions to notebook.toml, offline. A
-# running server picks them up on its next session reload; an agent driving a
-# live session should use the MCP worker tools (they reload + broadcast).
+# Worker registration commands (NotebookOps local backend): `strata worker …`
+# Writes `[[workers]]` to notebook.toml offline; a running server picks them up
+# on reload. A live session should use the MCP worker tools (reload + broadcast).
 # ---------------------------------------------------------------------------
 
 
@@ -1816,8 +1761,8 @@ def add_worker_arguments(parser: argparse.ArgumentParser) -> None:
     default_p.add_argument("--format", choices=["human", "json"], default="json")
     default_p.set_defaults(func=worker_default_main)
 
-    # add-ssh / rm-ssh drive a *running* server (the tunnel is server-owned), so
-    # they take --server/--session instead of a local notebook directory.
+    # These drive a running server (the tunnel is server-owned), so they take
+    # --server/--session instead of a notebook directory.
     add_ssh_p = sub.add_parser(
         "add-ssh", help="Provision + tunnel a worker over SSH (needs a running server)"
     )
@@ -1929,7 +1874,7 @@ async def _cell_run_async(args: argparse.Namespace) -> int:
     from strata.notebook.ops import NotebookOpsError
 
     try:
-        # The local backend syncs its venv first; a remote server owns its own.
+        # A remote server owns its own venv.
         if not is_remote:
             rc = await _prepare_env_for_ops(ops, args)
             if rc != 0:
@@ -1973,8 +1918,7 @@ async def _cell_test_async(args: argparse.Namespace) -> int:
     from strata.notebook.ops import NotebookOpsError
 
     try:
-        # --file authors the cell's test source before running it (the one
-        # cell-test affordance that was previously local-edit only).
+        # --file writes the cell's test source before running it.
         if args.file is not None:
             try:
                 test_source = _read_source_arg(args.file)

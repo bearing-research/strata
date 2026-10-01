@@ -92,38 +92,29 @@ class CascadePlanner:
             CascadePlan if upstream cells need to run, None if cell can run immediately
         """
         if not self.session.dag:
-            # No DAG — can't plan cascade
             return None
 
-        # Find the target cell
         target_cell = self.session.notebook_state.get_cell(cell_id)
         if not target_cell:
             return None
 
-        # Check if any upstream inputs are stale
         upstream_cells = self.session.dag.cell_upstream.get(cell_id, [])
         if not upstream_cells:
-            # No upstream — cell can run immediately
             return None
 
-        # Check staleness of upstream cells
         has_stale_upstream = False
         for upstream_id in upstream_cells:
             upstream_cell = self.session.notebook_state.get_cell(upstream_id)
             if not upstream_cell:
                 continue
 
-            # Check if upstream is ready (artifact exists and provenance matches)
             if upstream_cell.status != CellStatus.READY:
                 has_stale_upstream = True
                 break
 
         if not has_stale_upstream:
-            # All upstream cells are ready — can run immediately
             return None
 
-        # Build the cascade plan: get all cells that need to run
-        # in topological order
         plan = self._build_plan(cell_id)
         return plan
 
@@ -139,25 +130,20 @@ class CascadePlanner:
         if not self.session.dag:
             return None
 
-        # Shared BFS-upstream helper — same one ``cascade_plan`` uses,
-        # so both call sites agree on what "reachable upstream" means.
+        # Same helper as ``cascade_plan``, so both agree on "reachable upstream".
         visited = self.session.dag.upstream_reachable(target_cell_id)
 
-        # Order by the DAG's topological sort if available; otherwise the
-        # raw set order is fine (visited as a fallback).
         if self.session.dag.topological_order:
             step_cells = [cid for cid in self.session.dag.topological_order if cid in visited]
         else:
             step_cells = list(visited)
 
-        # Build steps for each cell
         steps: list[CascadeStep] = []
         for step_cell_id in step_cells:
             cell = self.session.notebook_state.get_cell(step_cell_id)
             if not cell:
                 continue
 
-            # Determine reason
             if step_cell_id == target_cell_id:
                 reason = CascadeReason.TARGET
             elif cell.status == CellStatus.STALE:
@@ -165,7 +151,6 @@ class CascadePlanner:
             else:
                 reason = CascadeReason.MISSING
 
-            # Check if can skip (already cached/ready)
             skip = cell.status == CellStatus.READY
 
             step = CascadeStep(
@@ -181,7 +166,7 @@ class CascadePlanner:
             return None
 
         plan = CascadePlan(
-            plan_id="",  # Will be auto-generated
+            plan_id="",  # auto-generated
             target_cell_id=target_cell_id,
             steps=steps,
             estimated_duration_ms=sum(s.estimated_ms for s in steps if not s.skip),

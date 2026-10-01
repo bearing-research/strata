@@ -123,22 +123,17 @@ def compute_provenance_hash(
     Returns:
         SHA-256 hex digest of the combined provenance
     """
-    # Sort input hashes for deterministic ordering
     sorted_inputs = sorted(input_hashes)
 
-    # Combine all components
     hasher = hashlib.sha256()
 
-    # Add sorted input hashes
     for h in sorted_inputs:
         hasher.update(h.encode("utf-8"))
-        hasher.update(b"\x00")  # Separator
+        hasher.update(b"\x00")
 
-    # Add source hash
     hasher.update(source_hash.encode("utf-8"))
     hasher.update(b"\x00")
 
-    # Add environment hash
     hasher.update(env_hash.encode("utf-8"))
 
     return hasher.hexdigest()

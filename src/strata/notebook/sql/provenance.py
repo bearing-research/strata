@@ -107,11 +107,8 @@ class ResolvedCachePolicy:
     snapshot_required: bool
 
 
-# Constant salts used for kinds that don't carry per-call
-# variability. Keeping the prefixes distinct keeps a hand-debugged
-# hash (and any future offline cache inspector) readable: a salt
-# starting with ``strata.cache.forever`` is unambiguously the
-# ``forever`` policy, not a session salt that happens to collide.
+# Distinct prefixes keep a hand-inspected hash readable: ``strata.cache.forever``
+# is unambiguously the ``forever`` policy, never a colliding session salt.
 _SALT_FOREVER = b"strata.cache.forever"
 _SALT_FINGERPRINT = b"strata.cache.fingerprint"
 _SALT_SNAPSHOT = b"strata.cache.snapshot"
@@ -225,8 +222,7 @@ def normalize_query(sql: str, dialect: str | None) -> str:
         return sql.strip()
     if not parsed:
         return sql.strip()
-    # ``comments=False`` drops inline / block comments — they don't
-    # affect query semantics and shouldn't churn the cache.
+    # Comments don't affect semantics and shouldn't churn the cache.
     return ";\n".join(stmt.sql(dialect=dialect, pretty=True, comments=False) for stmt in parsed)
 
 
@@ -286,10 +282,7 @@ def _tag_value(v: Any) -> list[Any]:
         return ["date", v.isoformat()]
     if t is _dt.time:
         return ["time", v.isoformat()]
-    # ``coerce_bind_value`` is the one place that gates types. If a
-    # caller fed an unsupported value past it (or without it), we
-    # fail loudly here rather than silently producing an unstable
-    # hash via ``str()``.
+    # ``coerce_bind_value`` gates types; fail loudly rather than hash an unstable ``str()``.
     raise ValueError(
         f"cannot serialize bind value of type {t.__name__!r} for "
         "provenance hashing — coerce_bind_value should have rejected it"
@@ -328,8 +321,6 @@ def compute_sql_provenance_hash(
         "query": query_normalized,
         "binds": serialize_bind_params(bind_params),
         "connection_id": connection_id,
-        # ``sort_keys=True`` on the outer dump handles this; the
-        # nested dict is included literally and stable-keyed.
         "upstream": dict(sorted(upstream_input_hashes.items())),
         "cache_salt": base64.b64encode(cache_salt).decode("ascii"),
         "freshness": (

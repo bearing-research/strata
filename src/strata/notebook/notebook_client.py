@@ -145,20 +145,14 @@ class StrataClient:
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
         self._cell_id = cell_id
-        # Extra headers attached to every request — auth for a remote shared
-        # store (trusted-proxy identity/token). Empty when targeting the local
-        # server.
+        # Sent on every request: auth for a remote shared store. Empty for the local server.
         self._headers = dict(headers or {})
-        # Where ``promote`` posts. Not ``base_url``: when a team store is
-        # configured the ambient client points *at* that store, and the route
-        # that copies a chain into it runs on the notebook server, which is the
-        # only process that can read the notebook's own artifacts. Absent when
-        # no team store is configured, which is also when promoting is
-        # meaningless.
+        # Where ``promote`` posts. Not ``base_url``: with a team store, the client points at
+        # that store, but the copy route runs on the notebook server, the only process that
+        # can read the notebook's artifacts. None when no team store is configured.
         self._promote_url = (promote_url or "").rstrip("/") or None
-        # Variable name -> ``strata://artifact/<id>@v=<n>`` for this cell's
-        # inputs, so a cell can promote an upstream result by the name it reads
-        # it under rather than by an id it never sees.
+        # Variable name -> artifact URI for this cell's inputs, so a cell can promote an
+        # upstream result by the name it reads it under.
         self._inputs = dict(inputs or {})
 
     def _stamp_cell(self, artifact: Artifact, name: str | None) -> None:
@@ -199,13 +193,9 @@ class StrataClient:
         req = urllib.request.Request(self._url(path), method="GET", headers=dict(self._headers))
         try:
             with urllib.request.urlopen(req, timeout=self.timeout) as resp:
-                # Drain incrementally rather than a single ``resp.read()``. On a
-                # large live materialize stream (a fresh multi-row-group scan over
-                # ``/v1/streams``), one big blocking read lets the server's send
-                # buffer fill; the server's ``is_disconnected()`` check then trips
-                # and aborts the stream — the client sees an ``IncompleteRead`` and
-                # the artifact is finalized as ``failed``. A chunked drain keeps the
-                # socket flowing (as httpx does), so the stream completes.
+                # Drain in chunks: one big blocking read on a large stream lets the server's send
+                # buffer fill, its ``is_disconnected()`` check trips, and the artifact finalizes as
+                # ``failed`` (client sees ``IncompleteRead``).
                 chunks: list[bytes] = []
                 while True:
                     chunk = resp.read(1 << 20)
@@ -258,11 +248,8 @@ class StrataClient:
         mode: str = "stream",
         refresh: bool = False,
     ) -> Artifact:
-        # This ambient client only does synchronous stream materialization.
-        # mode="artifact" kicks off an async server build (returns build_id +
-        # state="pending"); reading it needs build-status polling, which lives in
-        # the standalone strata-client. Without it, Artifact.to_arrow() would hit
-        # /data on a pending build and get rejected — fail fast with guidance.
+        # Only synchronous stream materialization here: mode="artifact" starts an async build
+        # that needs build-status polling (in strata-client), so fail fast with guidance.
         if mode != "stream":
             raise ValueError(
                 f"strata.materialize supports only mode='stream' here; got {mode!r}. "
@@ -393,7 +380,6 @@ class StrataClient:
         return self._request("GET", path).get("entries", [])
 
     def close(self) -> None:
-        # urllib opens a connection per request; nothing persistent to close.
-        # Present so cells written against StrataClient (which has .close())
-        # keep working unchanged.
+        # urllib opens a connection per request. Present so cells written against
+        # StrataClient's .close() keep working.
         return None

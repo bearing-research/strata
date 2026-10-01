@@ -92,7 +92,7 @@ class WarmProcessPool:
         self._warming: int = 0  # Processes currently starting up
         self._started: bool = False
         self._lock = asyncio.Lock()
-        # Track background spawn tasks so drain() can cancel them
+        # So drain() can cancel them
         self._background_tasks: set[asyncio.Task] = set()
 
     async def start(self) -> None:
@@ -105,7 +105,6 @@ class WarmProcessPool:
                 return
             self._started = True
 
-        # Spawn processes in parallel
         tasks = [self._spawn_warm_process() for _ in range(self.pool_size)]
         await asyncio.gather(*tasks, return_exceptions=True)
 
@@ -127,8 +126,7 @@ class WarmProcessPool:
         try:
             harness_user = resolve_harness_user()
         except LocalExecutionRefused as exc:
-            # Nothing to warm on a host that will not start cell code. The cold
-            # path is what tells the person running the cell why.
+            # The cold path tells the user why.
             logger.debug("Not spawning a warm worker: %s", exc)
             return
         self._warming += 1
@@ -143,20 +141,12 @@ class WarmProcessPool:
                     str(self.notebook_dir),
                 ]
 
-            # Spawn the pool worker as a process-group leader so we can
-            # kill the whole descendant tree on cancel / pool drain.
-            # Without this, anything the worker spawns (DataLoader
-            # multiprocessing children, fork servers, …) leaks when
-            # we kill the worker.
-            # limit= raises the stdout StreamReader's line cap past the
-            # 64 KiB default: the worker's one result line embeds the
-            # cell's full captured stdout, and readline() raises on any
-            # longer line — which used to silently fall back to a cold
-            # re-execution (running the cell body twice).
-            # A warm worker runs cell code like any harness, and it is the
-            # default WebSocket path — filtering the cold spawn and not this
-            # one would leave the server's secrets readable from almost every
-            # cell anyone actually runs.
+            # Process-group leader so cancel/drain kills the whole tree
+            # (DataLoader children, fork servers, ...).
+            # limit= lifts the 64 KiB line cap: the one result line embeds the
+            # cell's full stdout, and readline() raises on a longer line.
+            # The env allowlist applies here too: this is the default path, so
+            # skipping it would expose server secrets to most cells.
             allowlist = configured_allowlist()
             process = await asyncio.create_subprocess_exec(
                 *command,
@@ -170,7 +160,6 @@ class WarmProcessPool:
                 **subprocess_kwargs_for_new_group(),
             )
 
-            # Wait for the 'ready' signal
             try:
                 assert process.stdout is not None
                 ready_line = await asyncio.wait_for(
@@ -202,11 +191,8 @@ class WarmProcessPool:
         Returns:
             WarmProcess if available, None if pool is empty or not started
         """
-        # Check started flag first so callers see a clean None after
-        # drain() — without this, a process that drain() raced past
-        # (background spawn finishing just after drain set _started=False)
-        # could still be handed out and then immediately killed by the
-        # next invalidate cycle.
+        # A background spawn finishing just after drain() could otherwise be
+        # handed out and then killed by the next invalidate cycle.
         if not self._started:
             return None
         try:
@@ -221,11 +207,9 @@ class WarmProcessPool:
         Args:
             process: The WarmProcess to kill
         """
-        # Terminate the used process tree (graceful SIGTERM, then SIGKILL).
         if process.process and process.process.returncode is None:
             await terminate_subprocess_tree(process.process)
 
-        # Spawn a replacement in background (tracked so drain() can cancel it)
         task = asyncio.create_task(self._spawn_warm_process())
         self.track_background_task(task)
 
@@ -238,15 +222,13 @@ class WarmProcessPool:
         async with self._lock:
             self._started = False
 
-        # Cancel any in-flight background spawn tasks first so they don't
-        # put new processes into the queue after we've drained it.
+        # Cancel spawns first so they don't refill the queue after the drain.
         for task in list(self._background_tasks):
             task.cancel()
         if self._background_tasks:
             await asyncio.gather(*self._background_tasks, return_exceptions=True)
         self._background_tasks.clear()
 
-        # Drain all processes from queue
         while True:
             try:
                 proc = self._available.get_nowait()
@@ -315,23 +297,19 @@ class PooledCellExecutor:
             # Fall through to the cold path, which refuses with the reason.
             return None
 
-        # Try to acquire a warm process
         warm_proc = await pool.acquire()
         if warm_proc is None:
             return None
-        # The worker writes its outputs beside the manifest, in a run directory
-        # the server made private to itself.
+        # Outputs land beside the manifest, in a run dir private to the server.
         hand_over(manifest_path.parent, harness_user)
 
         try:
-            # Send manifest path to the warm process
             assert warm_proc.process.stdin is not None
             assert warm_proc.process.stdout is not None
             manifest_str = (str(manifest_path) + "\n").encode()
             warm_proc.process.stdin.write(manifest_str)
             await warm_proc.process.stdin.drain()
 
-            # Wait for result
             result_json = await asyncio.wait_for(
                 warm_proc.process.stdout.readline(),
                 timeout=timeout_seconds,
@@ -359,16 +337,13 @@ class PooledCellExecutor:
                     )
             raise
         except TimeoutError:
-            # A cell that exceeds its timeout in the warm worker is a real
-            # cell timeout — surface it as one. Returning None here (the
-            # "pool not available" signal) made the caller re-run the cell
-            # cold from scratch: paying the timeout twice, and running a
-            # side-effecting cell body a second time.
+            # A real cell timeout. Returning None ("pool unavailable") would make
+            # the caller re-run the cell cold: twice the timeout, and side
+            # effects run twice.
             logger.warning("Warm process execution timed out")
             raise
         except Exception as e:
             logger.error(f"Error executing with warm process: {e}")
             return None
         finally:
-            # Kill used process and spawn replacement
             await asyncio.shield(pool.release_and_replace(warm_proc))

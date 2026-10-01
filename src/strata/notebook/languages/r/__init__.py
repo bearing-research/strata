@@ -16,9 +16,6 @@ R support landed incrementally across #53:
 
 from __future__ import annotations
 
-# Importing the analyzer + executor modules runs their respective
-# ``register_language_analyzer`` / ``register_language_executor`` calls
-# at module load time. Anyone importing ``strata.notebook.languages``
-# transitively gets the R analyzer + executor wired in.
+# Imported for their side effect: registering the R analyzer and executor.
 from strata.notebook.languages.r import analyzer as _analyzer  # noqa: F401
 from strata.notebook.languages.r import executor as _executor  # noqa: F401

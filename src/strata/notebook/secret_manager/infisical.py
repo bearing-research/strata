@@ -67,8 +67,8 @@ class InfisicalProvider:
             host != operator_host
             and getattr(running_server_config(), "deployment_mode", None) == "service"
         ):
-            # The login below sends the server's machine identity to *host*,
-            # and on a shared server the notebook's author is not the operator.
+            # The login sends the server's machine identity to *host*; on a shared
+            # server the notebook's author is not the operator.
             return SecretFetchResult.failure(
                 self.name,
                 f"[secret_manager] base_url {notebook_host!r} is refused on this server: "

@@ -42,10 +42,9 @@ class MessageType(StrEnum):
     DEPENDENCY_REMOVE = "dependency_remove"
     VARIANT_SET_ACTIVE = "variant_set_active"
     VARIANT_ADD = "variant_add"
-    # A widget cell's control value(s) changed. Payload: ``{cell_id, values:
-    # {name: value}}`` (partial updates allowed). The server persists the value
-    # to runtime.json, re-materializes the widget's value artifacts, and marks
-    # downstream cells stale (Tier 0 — the user then runs them).
+    # Widget control value(s) changed. Payload: ``{cell_id, values: {name: value}}``
+    # (partial allowed). Server persists the value, re-materializes the widget's
+    # artifacts and marks downstream stale (the user then runs them).
     WIDGET_UPDATE = "widget_update"
     # The cell this client is on, or null. Payload: ``{cell_id, author?}``.
     CELL_FOCUS = "cell_focus"
@@ -54,25 +53,19 @@ class MessageType(StrEnum):
     ERROR = "error"
     CELL_STATUS = "cell_status"
     CELL_OUTPUT = "cell_output"
-    # Incremental output while a cell is still running. Today only
-    # prompt cells emit it (LLM response streaming, issue #110); the
-    # name is deliberately generic so SQL / long-running rich output
-    # can adopt the same frame. Payload: ``{cell_id, attempt, kind,
-    # text}`` where ``kind`` is ``"delta"`` (append) or ``"retry"``
-    # (schema validation failed — clear the buffer, new attempt).
-    # Deltas are ephemeral display state: never persisted, never
-    # replayed on reconnect; the final CELL_OUTPUT is canonical.
+    # Incremental output while a cell runs (today only prompt-cell LLM streaming).
+    # Payload: ``{cell_id, attempt, kind, text}``; ``kind`` is ``"delta"`` (append) or
+    # ``"retry"`` (validation failed: clear the buffer). Ephemeral: never persisted or
+    # replayed; the final CELL_OUTPUT is canonical.
     CELL_OUTPUT_DELTA = "cell_output_delta"
     CELL_CONSOLE = "cell_console"
     CELL_ERROR = "cell_error"
     CELL_ITERATION_PROGRESS = "cell_iteration_progress"
     # One completed variant of a ``# @per_variant`` fan-out cell. Payload:
-    # ``{cell_id, variant, index, total, success, duration_ms, error?}`` —
-    # lets the frontend show per-variant progress as the fan-out runs.
+    # ``{cell_id, variant, index, total, success, duration_ms, error?}``.
     CELL_VARIANT_PROGRESS = "cell_variant_progress"
-    # Cell unit-test lifecycle. CELL_TEST_STATUS mirrors CELL_STATUS for the
-    # running spinner ({cell_id, status: running|ready|error}); CELL_TEST_RESULTS
-    # carries the per-test outcomes + totals + staleness flag.
+    # Cell unit-test lifecycle. CELL_TEST_STATUS mirrors CELL_STATUS ({cell_id, status});
+    # CELL_TEST_RESULTS carries per-test outcomes, totals and a staleness flag.
     CELL_TEST_STATUS = "cell_test_status"
     CELL_TEST_RESULTS = "cell_test_results"
     DAG_UPDATE = "dag_update"
@@ -82,24 +75,21 @@ class MessageType(StrEnum):
     IMPACT_PREVIEW = "impact_preview"
     INSPECT_RESULT = "inspect_result"
     PROFILING_SUMMARY = "profiling_summary"
-    # Who is on the session and which cell each is on, sent on join, leave and
-    # focus change. Payload: ``{principals: [{principal, focused_cell_id,
-    # since}], you}``, ``you`` naming the receiving connection's own identity.
+    # Who is on the session and which cell each is on; sent on join, leave and focus
+    # change. Payload: ``{principals: [{principal, focused_cell_id, since}], you}``.
     PRESENCE = "presence"
 
     # Server → Client (environment job lifecycle)
     ENVIRONMENT_JOB_STARTED = "environment_job_started"
     ENVIRONMENT_JOB_PROGRESS = "environment_job_progress"
     ENVIRONMENT_JOB_FINISHED = "environment_job_finished"
-    # Legacy alias emitted alongside ENVIRONMENT_JOB_FINISHED for add/remove
-    # actions so existing dependency_changed listeners keep working.
+    # Legacy alias sent alongside ENVIRONMENT_JOB_FINISHED for add/remove so existing
+    # dependency_changed listeners keep working.
     DEPENDENCY_CHANGED = "dependency_changed"
 
     # Server → Client (external agent)
-    # An external agent driving via MCP (or the CLI) narrating an action or a
-    # note into the terminal viewer's Agent tab. Its reasoning lives in its own client, so we
-    # surface its tool actions (source="mcp") and any explicit narration
-    # (source="agent") as discrete notes.
+    # An MCP/CLI agent's tool actions (source="mcp") or explicit narration
+    # (source="agent"), shown as notes in the terminal viewer's Agent tab.
     AGENT_NOTE = "agent_note"
 
 

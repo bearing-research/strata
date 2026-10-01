@@ -31,10 +31,8 @@ from typing import TYPE_CHECKING, Protocol
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-# ssh hardening applied to every invocation: key-only auth (``BatchMode`` — never
-# prompt for a password), a bounded connect, and a keepalive. We intentionally do
-# NOT pass ``StrictHostKeyChecking=no`` — establishing first-connect host-key
-# trust is the user's to do; we surface the failure instead.
+# Key-only auth (``BatchMode``: never prompt), bounded connect, keepalive. No
+# ``StrictHostKeyChecking=no``: first-connect host-key trust is the user's call.
 DEFAULT_CONNECT_TIMEOUT = 10
 _SSH_HARDENING: tuple[str, ...] = (
     "-o",
@@ -126,9 +124,8 @@ class SubprocessSshRunner:
                 input=stdin_data,
             )
         except subprocess.TimeoutExpired as exc:
-            # ``command`` is safe to echo — secrets travel via ``stdin_data``,
-            # which must never be included here (this message reaches HTTP
-            # error bodies and logs).
+            # Never include ``stdin_data`` (secrets): this message reaches HTTP error bodies
+            # and logs.
             raise SshWorkerError(f"ssh command timed out after {timeout}s: {command!r}") from exc
         except OSError as exc:
             raise SshWorkerError(f"could not run ssh: {exc}") from exc
@@ -191,8 +188,7 @@ class RemoteWorker:
 
     def detect(self) -> RemoteEnvInfo:
         """Probe the box for ``strata-worker`` / ``uv`` / platform in one round-trip."""
-        # ``|| true`` so a missing tool yields an empty value instead of a
-        # nonzero exit that would abort the whole probe.
+        # ``|| true`` so a missing tool yields an empty value, not an aborted probe.
         script = (
             'printf "worker=%s\\n" "$(command -v strata-worker || true)"; '
             'printf "uv=%s\\n" "$(command -v uv || true)"; '
@@ -282,11 +278,8 @@ class RemoteWorker:
                 self.stop()
         pidfile = self._pidfile()
         logfile = f"{_REMOTE_STATE_DIR}/worker-{shlex.quote(self.name)}.log"
-        # The token goes over stdin, not into the command: a token in the
-        # command string would sit in the local ``ssh`` argv (visible in
-        # ``ps``) and be echoed back in timeout error messages that reach
-        # HTTP responses and logs. The remote shell reads it into the
-        # worker's env before launching.
+        # The token goes over stdin: in the command it would be visible in ``ps`` and
+        # echoed in timeout errors that reach HTTP responses and logs.
         if token and "\n" in token:
             raise SshWorkerError("worker token must not contain newlines")
         read_token = "IFS= read -r STRATA_WORKER_TOKEN && export STRATA_WORKER_TOKEN && "

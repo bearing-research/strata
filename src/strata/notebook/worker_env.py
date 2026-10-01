@@ -178,9 +178,8 @@ def _prepare(spec: dict[str, str]) -> PreparedEnvironment:
             else:
                 _install(spec, interpreter, env_dir)
             if not python.exists():
-                # Marked complete first, an archive with no interpreter where
-                # the worker looks for one would fail every cell with this lock
-                # and never be fetched again.
+                # If marked complete first, an archive with no interpreter would fail every
+                # cell and never be fetched again.
                 raise WorkerEnvironmentError(
                     f"environment {directory_key} has no interpreter at {python}"
                 )

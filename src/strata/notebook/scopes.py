@@ -18,10 +18,9 @@ NOTEBOOK_SCOPE_READ = "notebook:read"
 NOTEBOOK_SCOPE_WRITE = "notebook:write"
 NOTEBOOK_SCOPE_EXECUTE = "notebook:execute"
 
-# --- WebSocket frames --------------------------------------------------------
-#
-# Each C→S frame is mapped to the least scope that covers what it can actually
-# do; anything unlisted defaults to ``notebook:execute``.
+# --- WebSocket frames ---
+# Each frame maps to the least scope covering what it can do; anything unlisted
+# defaults to ``notebook:execute``.
 
 # Read-only: observe state, compute previews. No mutation, no code runs.
 _READ_FRAMES = frozenset(
@@ -42,11 +41,9 @@ _WRITE_FRAMES = frozenset(
     }
 )
 
-# Everything else runs code or mutates the environment — cell execution, the
-# inspect REPL (evals arbitrary expressions), widget updates (re-run the
-# widget cell and cascade), dependency changes (invoke uv), and the agent
-# confirm/cancel controls. Listed explicitly for documentation value even
-# though the default is already ``notebook:execute``.
+# Runs code or mutates the environment (the inspect REPL evals expressions,
+# widget updates cascade, dependency changes invoke uv). Listed for
+# documentation; the default is already ``notebook:execute``.
 _EXECUTE_FRAMES = frozenset(
     {
         MessageType.CELL_EXECUTE,
@@ -76,15 +73,11 @@ def required_scope_for_frame(msg_type: str) -> str:
     return NOTEBOOK_SCOPE_EXECUTE
 
 
-# --- REST routes -------------------------------------------------------------
-#
-# A GET only reads, and so do the two previews below. The mutations listed as
-# write change the notebook's committed content or configuration without
-# running anything. Every other route defaults to ``notebook:execute``, the same
-# fail-closed default as the frames: running a cell or its tests, syncing or
-# changing dependencies (uv runs build scripts), importing a requirements file,
-# changing the Python version, provisioning an SSH worker, and any route added
-# later until someone classifies it. Keys are (method, route path template).
+# --- REST routes ---
+# GETs and the two previews below only read. Write routes change committed
+# content or config without running anything. Every other route defaults to
+# ``notebook:execute`` (fail closed), including routes nobody has classified yet.
+# Keys are (method, route path template).
 _READ_POST_ROUTES = frozenset(
     {
         ("POST", "/v1/notebooks/{notebook_id}/environment/requirements.txt/preview"),
@@ -141,22 +134,16 @@ def required_scope_for_route(method: str, path: str) -> str:
     return NOTEBOOK_SCOPE_EXECUTE
 
 
-# --- MCP tools ---------------------------------------------------------------
-#
-# The same three scopes, per tool. Reading a notebook, its lineage or what a
-# publish would expose is read; authoring cells, notes, worker registrations and
-# promotion is write; running cells or tests, changing dependencies and
-# connecting an SSH worker is execute, as is any tool nobody classified.
-# Publishing mints a public link, the ``artifacts:publish`` scope the REST
-# publish route requires.
+# --- MCP tools ---
+# Same three scopes per tool; unclassified tools are execute. Publishing mints a
+# public link, so it needs ``artifacts:publish`` like the REST publish route.
 _READ_TOOLS = frozenset(
     {
         "list_notebooks",
         "get_notebook",
         "get_cell",
-        # Writes a file, but only into the notebook's own ``.strata/outputs/``,
-        # and changes nothing about the notebook. It hands back bytes a reader
-        # can already see the metadata for, so it is the read it looks like.
+        # Writes only into ``.strata/outputs/`` and returns bytes a reader can already
+        # see the metadata for, so it is a read.
         "save_cell_output",
         "get_variable",
         "dag",
@@ -188,8 +175,7 @@ _EXECUTE_TOOLS = frozenset(
         "run_cell",
         "run_tests",
         "run_snippet",
-        # Changes a control and re-materializes the widget cell, so it is a run
-        # rather than an edit — the same gate ``run_cell`` sits behind.
+        # Re-materializes the widget cell, so it is a run, gated like ``run_cell``.
         "set_widget_value",
         "add_dependency",
         "remove_dependency",

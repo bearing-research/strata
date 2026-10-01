@@ -14,9 +14,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-# Runtime state, build output, and installed environments. Everything here is
-# reproducible from the committed set, and none of it is portable between
-# machines — a .venv committed on a Mac is worse than useless on Linux.
+# All reproducible from the committed set, and none of it portable between
+# machines (a .venv built on a Mac is broken on Linux).
 IGNORED_PATTERNS: tuple[str, ...] = (
     ".strata/",
     ".venv/",

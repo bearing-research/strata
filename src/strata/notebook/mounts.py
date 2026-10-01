@@ -42,25 +42,18 @@ from strata.notebook.models import MountMode, MountSpec
 logger = logging.getLogger(__name__)
 
 
-# ---------------------------------------------------------------------------
-# Resolved mount — the result of preparing a mount for execution
-# ---------------------------------------------------------------------------
-
-
 @dataclass
 class ResolvedMount:
     """A mount that has been resolved to a local path."""
 
     spec: MountSpec
     local_path: Path
-    fingerprint: str | None  # None for RW mounts → signals non-cacheable cell
-    # For remote RW mounts: the staging dir that needs sync-back
+    fingerprint: str | None  # None for RW mounts: the cell is not cacheable.
+    # Remote RW only: synced back after execution.
     staging_dir: Path | None = None
 
 
-# ---------------------------------------------------------------------------
-# URI parsing helpers
-# ---------------------------------------------------------------------------
+# --- URI parsing ---
 
 
 def parse_mount_uri(uri: str) -> tuple[str, str]:
@@ -85,7 +78,6 @@ def parse_mount_uri(uri: str) -> tuple[str, str]:
     scheme = parsed.scheme.lower()
 
     if not scheme:
-        # Bare path — treat as local file
         return "file", uri
 
     if scheme not in supported:
@@ -94,17 +86,14 @@ def parse_mount_uri(uri: str) -> tuple[str, str]:
             f"Supported: {', '.join(sorted(supported))}"
         )
 
-    # Normalise aliases
     if scheme == "gcs":
         scheme = "gs"
     elif scheme == "azure":
         scheme = "az"
 
     if scheme == "file":
-        # file:///path → /path
         return "file", parsed.path
     else:
-        # s3://bucket/prefix → bucket/prefix
         path = parsed.netloc
         if parsed.path and parsed.path != "/":
             path += parsed.path
@@ -113,11 +102,6 @@ def parse_mount_uri(uri: str) -> tuple[str, str]:
 
 def _is_remote(scheme: str) -> bool:
     return scheme != "file"
-
-
-# ---------------------------------------------------------------------------
-# MountResolver
-# ---------------------------------------------------------------------------
 
 
 type MountCredentials = dict[str, dict[str, Any]]
@@ -149,17 +133,12 @@ class MountResolver:
         credentials: MountCredentials | None = None,
         credential_resolver: CredentialResolver | None = None,
     ):
-        # Default to a user-scoped dir (matches ~/.strata/artifacts) instead
-        # of the world-writable /tmp/strata_mounts that earlier versions
-        # used — that path was shared across all users on the host and
-        # invited cross-user cache poisoning. Real callers (executor,
-        # remote_executor, tests) always pass an explicit cache_dir; the
-        # default just keeps ad-hoc REPL use from blowing up.
+        # User-scoped, not a shared /tmp dir that invites cross-user cache poisoning.
+        # Real callers always pass cache_dir.
         self.cache_dir = cache_dir or Path.home() / ".strata" / "mount_cache"
         self.credentials = credentials or {}
-        # Resolves a mount's ``credential`` name. Empty by default, so a mount
-        # naming a credential nothing defines fails naming it rather than
-        # reaching the store anonymously.
+        # Empty by default, so a mount naming an undefined credential fails by name
+        # instead of reaching the store anonymously.
         self.credential_resolver = credential_resolver or CredentialResolver()
         self._fsspec_available: bool | None = None
 
@@ -223,7 +202,7 @@ class MountResolver:
         p = Path(local_path)
 
         if mount.mode == MountMode.READ_WRITE:
-            # RW local: ensure directory exists, no fingerprint (side effect)
+            # RW: no fingerprint (side effect).
             p.mkdir(parents=True, exist_ok=True)
             return ResolvedMount(spec=mount, local_path=p, fingerprint=None)
 
@@ -247,12 +226,10 @@ class MountResolver:
                 f"Install it with: pip install fsspec s3fs gcsfs adlfs"
             )
 
-        # Build the cache directory for this mount
         mount_hash = hashlib.sha256(mount.uri.encode()).hexdigest()[:12]
         local_dir = self.cache_dir / f"{mount.name}_{mount_hash}"
 
         if mount.mode == MountMode.READ_ONLY:
-            # Use fsspec's filecache for read-only mounts
             return await self._resolve_remote_ro(
                 mount,
                 scheme,
@@ -260,7 +237,7 @@ class MountResolver:
                 local_dir,
             )
         else:
-            # RW: stage locally, sync back after execution
+            # RW: stage locally, sync back after execution.
             return await self._resolve_remote_rw(
                 mount,
                 scheme,
@@ -297,13 +274,8 @@ class MountResolver:
                 for remote_name in _list_remote_files(fs, protocol, remote_path):
                     rel = _relative_remote_path(remote_name, protocol, remote_path)
                     local_file = local_mirror / rel
-                    # Path-traversal guard: a remote backend (or
-                    # attacker-controlled bucket) can return a name
-                    # containing ``..`` segments or an absolute path,
-                    # which would escape local_mirror once joined. The
-                    # harness only sees pathlib.Path objects rooted
-                    # under local_mirror, so an escape silently widens
-                    # what the cell can read.
+                    # Path-traversal guard: a remote name with ``..`` or an absolute path would
+                    # escape local_mirror and silently widen what the cell can read.
                     _assert_within(local_file, mirror_root, mount.name, remote_name)
                     local_file.parent.mkdir(parents=True, exist_ok=True)
                     fs.get(f"{protocol}://{remote_name}", str(local_file))
@@ -328,7 +300,6 @@ class MountResolver:
         local_dir: Path,
     ) -> ResolvedMount:
         """Resolve a read-write remote mount with staging directory."""
-        # Stage: download current contents to local staging dir
         staging = local_dir / "staging"
         if staging.exists():
             shutil.rmtree(staging)
@@ -342,12 +313,8 @@ class MountResolver:
             staging_root = staging.resolve()
             remote_uri = f"{protocol}://{remote_path}"
             if fs.exists(remote_uri):
-                # Validate-then-fetch per file, same pattern as the RO
-                # path: fsspec's ``recursive=True`` is opaque about the
-                # local paths it writes, so a post-hoc scan of the
-                # staging dir cannot see a file a traversal name already
-                # placed OUTSIDE it. Checking each relative name before
-                # any bytes land is the only ordering that guards.
+                # Validate each name before fetching: ``recursive=True`` hides the local paths
+                # it writes, so a post-hoc scan can't see a file already placed outside staging.
                 for remote_name in _list_remote_files(fs, protocol, remote_path):
                     rel = _relative_remote_path(remote_name, protocol, remote_path)
                     local_file = staging / rel
@@ -359,16 +326,14 @@ class MountResolver:
                 f"Failed to stage RW mount '{mount.name}' from {mount.uri}: {e}"
             ) from e
 
-        # Defence-in-depth for what per-file validation can't cover:
-        # a fetched entry that is itself a symlink pointing outside the
-        # staging dir resolves outside and is rejected here.
+        # Catches a fetched symlink that points outside the staging dir.
         for entry in staging.rglob("*"):
             _assert_within(entry, staging_root, mount.name, str(entry))
 
         return ResolvedMount(
             spec=mount,
             local_path=staging,
-            fingerprint=None,  # RW mounts → cell is non-cacheable
+            fingerprint=None,
             staging_dir=staging,
         )
 
@@ -388,7 +353,7 @@ class MountResolver:
 
             scheme, remote_path = parse_mount_uri(rm.spec.uri)
             if scheme == "file":
-                # Local RW — nothing to sync (writes go directly)
+                # Local RW writes go directly.
                 continue
 
             if not self._check_fsspec():
@@ -410,11 +375,6 @@ class MountResolver:
                 raise RuntimeError(
                     f"Failed to sync-back RW mount '{name}' to {rm.spec.uri}: {e}"
                 ) from e
-
-
-# ---------------------------------------------------------------------------
-# MountFingerprinter
-# ---------------------------------------------------------------------------
 
 
 class MountFingerprinter:
@@ -439,7 +399,6 @@ class MountFingerprinter:
             content = f"{path}:{stat.st_size}:{stat.st_mtime_ns}"
             return hashlib.sha256(content.encode()).hexdigest()
 
-        # Directory: hash the tree structure
         parts: list[str] = []
         try:
             for root, _dirs, files in os.walk(path):
@@ -488,14 +447,8 @@ class MountFingerprinter:
             return hashlib.sha256(content.encode()).hexdigest()
 
         except ImportError as exc:
-            # fsspec or the backend-specific driver is missing. The
-            # earlier code returned a *deterministic* hash here, which
-            # silently produced cache HITs across environments — one
-            # machine without fsspec would see the same fingerprint
-            # forever even when the remote content changed. Match the
-            # generic Exception branch and return a unique-per-call
-            # hash so the cell is treated as uncacheable rather than
-            # cached on stale content.
+            # fsspec or the backend driver is missing. A deterministic hash here would
+            # cache-hit across environments on stale content; return a unique one instead.
             logger.warning(
                 "fsspec missing while fingerprinting %s://%s (%s); "
                 "treating mount as non-cacheable for this run",
@@ -511,7 +464,7 @@ class MountFingerprinter:
                 remote_path,
                 e,
             )
-            # Return a unique-per-call hash to force re-execution
+            # Unique per call: forces re-execution.
             return hashlib.sha256(os.urandom(32)).hexdigest()
 
     @staticmethod
@@ -569,9 +522,7 @@ class MountFingerprinter:
         return MountFingerprinter.fingerprint_mount_sync(mount, storage_options)
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
+# --- Helpers ---
 
 
 def _scheme_to_fsspec_protocol(scheme: str) -> str:

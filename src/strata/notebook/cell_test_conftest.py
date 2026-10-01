@@ -63,11 +63,8 @@ _phase_reports: dict[str, dict[str, tuple[str, str]]] = {}
 
 def pytest_runtest_logreport(report) -> None:  # noqa: ANN001 - pytest Report
     text = str(report.longrepr) if report.longrepr is not None else ""
-    # On failure, append the test's own captured output. ``report.longrepr`` is
-    # only the traceback + assertion diff — pytest's "Captured stdout/stderr call"
-    # sections are added by the terminal reporter from ``report.capstdout`` /
-    # ``capstderr``, not the repr — so a ``print()``/log a test emitted before it
-    # failed would otherwise be lost from the message the UI shows.
+    # ``report.longrepr`` is only the traceback; captured stdout/stderr live in
+    # ``capstdout``/``capstderr``, so append them or a failing test's prints are lost.
     if report.failed:
         if report.capstdout:
             text = f"{text}\n\n--- Captured stdout ---\n{report.capstdout.rstrip()}"

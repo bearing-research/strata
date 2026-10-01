@@ -45,8 +45,7 @@ from strata.notebook.tui.client import TuiClient, TuiClientError
 from strata.notebook.tui.dag_render import render_dag
 from strata.notebook.tui.viewmodel import CellView, NotebookViewModel
 
-# Status glyphs for ``CellStatus`` values. ``?`` is the placeholder before the
-# first status is known (or for cells a snapshot carries no status for).
+# ``?`` is for a cell whose status is not yet known.
 _STATUS_GLYPHS: dict[str, str] = {
     "idle": "○",
     "running": "▶",
@@ -143,8 +142,7 @@ class DagScreen(ModalScreen[None]):
     def compose(self) -> ComposeResult:
         yield Static("DAG  (Esc/d/q to close · arrows to scroll)", classes="panel-title")
         with VerticalScroll(id="dag-box"):
-            # The art embeds cell names, so it is user content like any other
-            # panel — see _literal.
+            # The art embeds cell names: user content, see _literal.
             yield Static(_literal(self._dag_text), id="dag-art")
 
 
@@ -211,9 +209,8 @@ class HelpScreen(ModalScreen[None]):
             yield Static(table, id="help-art")
 
 
-# Panel split defaults + bounds (percent of the column width / detail height).
-# Textual ships no splitter widget (verified on 8.2.x), so the boundaries are
-# driven from these and nudged with ctrl+arrows.
+# Percent of column width / detail height. Textual has no splitter widget, so
+# ctrl+arrows nudge these.
 _DEFAULT_CELLS_PCT = 38
 _DEFAULT_TOP_PCT = 50
 _MIN_PCT = 20
@@ -230,10 +227,8 @@ def _nudge(pct: int, delta: int) -> int:
 class NotebookTUI(App[None]):
     """Top-level spectator app."""
 
-    # The detail area is split into two stacked tab-groups: the CODE the user
-    # reads (Source + Tests source) on top, the RUNTIME (Output / Console / Agent /
-    # test Results) on the bottom. Within each group the panes are tabs (one at a
-    # time) so the active pane gets the group's full height.
+    # Detail area: code tabs on top, runtime tabs below. Tabs, so the active
+    # pane gets the group's full height.
     CSS = """
     #cells { width: 38%; border: solid $primary; }
     #detail { width: 62%; }
@@ -263,12 +258,12 @@ class NotebookTUI(App[None]):
         Binding("5", "show_tab('tab-console')", "Console"),
         Binding("6", "show_tab('tab-agent')", "Agent"),
         Binding("7", "show_tab('tab-results')", "Results"),
-        # Data viewer (active only when a pageable table output is shown).
+        # Data viewer (only while a pageable table output is shown).
         Binding("n", "table_next", "Next page", show=False),
         Binding("p", "table_prev", "Prev page", show=False),
         Binding("s", "table_sort", "Sort column", show=False),
         Binding("e", "table_export", "Export CSV", show=False),
-        # Resize the panel boundaries (no Textual splitter widget exists).
+        # Resize panel boundaries.
         Binding("ctrl+right", "resize_cells(1)", "Wider list", show=False),
         Binding("ctrl+left", "resize_cells(-1)", "Narrower list", show=False),
         Binding("ctrl+down", "resize_top(1)", "Taller top", show=False),
@@ -276,8 +271,7 @@ class NotebookTUI(App[None]):
         Binding("ctrl+x", "reset_layout", "Reset layout", show=False),
     ]
 
-    # Tab id → (its TabbedContent group, the scroll region to focus). The top
-    # group holds the code tabs, the bottom group the runtime tabs.
+    # Tab id -> (its TabbedContent group, the scroll region to focus).
     _TAB_INFO = {
         "tab-source": ("#detail-top", "#source-scroll"),
         "tab-testsrc": ("#detail-top", "#testsrc-scroll"),
@@ -302,24 +296,17 @@ class NotebookTUI(App[None]):
         self.vm = NotebookViewModel()
         self._selected: str | None = None
         self._conn_state = "connecting…"
-        # State for the interactive data viewer (the #output-table DataTable):
-        # None when the current output isn't a server-backed table.
+        # None unless the current output is a server-backed table.
         self._table_view: _TableView | None = None
-        # The DataTable column keys (status / cell / time), captured from
-        # add_columns so update_cell can target them — labels aren't keys.
+        # From add_columns: update_cell needs keys, and labels aren't keys.
         self._col_keys: list[Any] = []
-        # The selected cell's image renderable (if any) — enlarged by `i`.
+        # Enlarged by `i`.
         self._current_image: Any = None
-        # Signature of the last-rendered cell list, so a periodic resync that
-        # changed nothing is a no-op (no flicker, no selection jump).
+        # So a no-change resync is a no-op (no flicker, no selection jump).
         self._render_sig: tuple[Any, ...] = ()
-        # Follow mode: auto-select the cell that goes running so the detail
-        # panels track the action (an agent / run-all moving through the notebook).
+        # Follow mode: auto-select the cell that starts running.
         self._follow = True
 
-        # Adjustable split ratios (percent). The cell-list ↔ detail boundary and
-        # the top ↔ bottom detail boundary; nudged with ctrl+arrows. Textual has
-        # no splitter widget, so we drive the panels' styles from these.
         self._cells_pct = _DEFAULT_CELLS_PCT
         self._top_pct = _DEFAULT_TOP_PCT
 
@@ -330,7 +317,7 @@ class NotebookTUI(App[None]):
         with Horizontal():
             yield DataTable(id="cells", cursor_type="row", zebra_stripes=True)
             with Vertical(id="detail"):
-                # Top group — the code: cell source + test source.
+                # Top group: cell source + test source.
                 with TabbedContent(id="detail-top", initial="tab-source"):
                     with TabPane("Source", id="tab-source"):
                         with VerticalScroll(id="source-scroll", classes="scroll-panel"):
@@ -338,13 +325,12 @@ class NotebookTUI(App[None]):
                     with TabPane("Tests", id="tab-testsrc"):
                         with VerticalScroll(id="testsrc-scroll", classes="scroll-panel"):
                             yield Static("(no tests for this cell)", id="testsrc-body")
-                # Bottom group — the runtime: output, console, agent, test results.
+                # Bottom group: output, console, agent, test results.
                 with TabbedContent(id="detail-bottom", initial="tab-output"):
                     with TabPane("Output", id="tab-output"):
                         with VerticalScroll(id="output-scroll", classes="scroll-panel"):
                             yield Static("", id="output")
-                        # Interactive viewer for large tabular outputs; shown in
-                        # place of the static preview when a backing artifact exists.
+                        # Replaces the static preview when a backing artifact exists.
                         yield DataTable(id="output-table", cursor_type="cell", zebra_stripes=True)
                     with TabPane("Console", id="tab-console"):
                         with VerticalScroll(id="console-scroll", classes="scroll-panel"):
@@ -361,16 +347,12 @@ class NotebookTUI(App[None]):
 
     async def on_mount(self) -> None:
         table = self.query_one("#cells", DataTable)
-        # Keep the returned ColumnKeys — add_columns labels are NOT usable as keys.
         self._col_keys = list(table.add_columns(" ", "cell", "time"))
-        # The data viewer's table stays hidden until a pageable output selects it.
         self.query_one("#output-table", DataTable).display = False
         self._set_connection("connecting…")
         self.run_worker(self._bootstrap(), name="bootstrap", exclusive=True)
-        # Live frames stream status/output/console instantly, but source edits and
-        # cell add/remove/reorder only arrive in a full snapshot — so poll one
-        # periodically. The rebuild is a no-op when nothing changed (see
-        # _rebuild_cells), so this stays cheap and never disturbs the selection.
+        # Source edits and add/remove/reorder only arrive in a full snapshot, so
+        # poll one. A no-change rebuild is a no-op (see _rebuild_cells).
         self.set_interval(2.5, self._send_sync)
 
     # -- layout resize -------------------------------------------------------
@@ -405,7 +387,7 @@ class NotebookTUI(App[None]):
             self.exit(message=str(exc))
             return
         if session_id is None:
-            return  # picker cancelled → app already exiting
+            return  # picker cancelled: app already exiting
         self._session_id = session_id
         await self._ws_loop(session_id)
 
@@ -473,13 +455,9 @@ class NotebookTUI(App[None]):
         backoff = 1.0
         while True:
             try:
-                # max_size=None: notebook_state / cell_output frames carry
-                # display outputs (base64 PNG plots, large tables) that routinely
-                # exceed the websockets client default of 1 MiB. Without this the
-                # client rejects the first oversized frame and closes with 1009,
-                # the reconnect loop re-opens, the server re-sends the same frame,
-                # and the TUI wedges in a reconnect storm. The browser client has
-                # no such cap; match it.
+                # max_size=None: display outputs routinely exceed the 1 MiB
+                # default, and a 1009 close becomes a reconnect storm as the
+                # server resends the same frame. The browser has no cap either.
                 async with websockets.connect(
                     url,
                     additional_headers=self._client.auth_headers or None,
@@ -526,16 +504,13 @@ class NotebookTUI(App[None]):
         changed = self.vm.apply_frame(msg_type, payload)
         for cid in changed:
             self._refresh_cell(cid)
-        # Follow mode: jump to a cell as it starts running so the detail panels
-        # track the action.
         if self._follow and msg_type == "cell_status":
             cid = payload.get("cell_id")
             if isinstance(cid, str):
                 cell = self.vm.cells.get(cid)
                 if cell is not None and cell.status == "running":
                     self._select_cell(cid)
-        # Notebook-level activity (cascade / env job / agent) updates the header
-        # banner + agent panel even when no specific cell changed.
+        # Notebook-level activity updates the header even when no cell changed.
         self._render_status()
         if msg_type.startswith("agent_"):
             self._render_agent()
@@ -572,19 +547,15 @@ class NotebookTUI(App[None]):
     def _render_agent(self) -> None:
         body = "\n".join(self.vm.agent_feed) if self.vm.agent_feed else "(no agent activity)"
         self.query_one("#agent", Static).update(_literal(body))
-        # Reflect agent status on the tab label; the header banner has it too.
         label = f"Agent · {self.vm.agent_status}" if self.vm.agent_status else "Agent"
         try:
             self.query_one("#detail", TabbedContent).get_tab("tab-agent").label = label
         except Exception:  # noqa: BLE001 — tab not mounted yet
             pass
-        # Follow the stream: keep the latest reasoning/events in view.
         self.query_one("#agent-scroll", VerticalScroll).scroll_end(animate=False)
 
     def _rebuild_cells(self) -> None:
         self._set_connection("connected")
-        # Skip the rebuild when nothing the list shows has changed — so the
-        # periodic resync doesn't flicker the table or move the cursor.
         sig = tuple(
             (
                 cid,
@@ -613,7 +584,7 @@ class NotebookTUI(App[None]):
         if self.vm.cell_order:
             if self._selected not in self.vm.cells:
                 self._selected = self.vm.cell_order[0]
-            # Restore the cursor to the selected cell (clear() reset it to row 0).
+            # clear() reset the cursor to row 0.
             try:
                 table.move_cursor(row=self.vm.cell_order.index(self._selected), animate=False)
             except Exception:  # noqa: BLE001 — row not materialized yet
@@ -638,11 +609,8 @@ class NotebookTUI(App[None]):
             return
         table = self.query_one("#cells", DataTable)
         status_col, cell_col, time_col = self._col_keys
-        # update_width=True or the column never re-measures: the columns were
-        # sized when the row was added, before the cell had run, so "time" was
-        # as wide as its 4-char header and every later value was clipped
-        # ("cached" -> "cach", "412ms" -> "412m"). Same for the label column
-        # when a test badge or loop-iteration counter appears.
+        # update_width=True, or columns keep their pre-run width and clip later
+        # values ("cached" -> "cach").
         try:
             table.update_cell(cid, status_col, _glyph(cell.status), update_width=True)
             table.update_cell(cid, cell_col, _literal(self._cell_label(cell)), update_width=True)
@@ -664,9 +632,6 @@ class NotebookTUI(App[None]):
             return
         self.query_one("#source", Static).update(_literal(_source_renderable(cell)))
         self.query_one("#testsrc-body", Static).update(_literal(_test_source_renderable(cell)))
-        # Render a pure-markdown output with Rich, a single tabular output as an
-        # interactive (paged/sortable) DataTable when it has a backing artifact,
-        # a single image inline; otherwise the static preview / plain-text summary.
         output = self.query_one("#output", Static)
         output_scroll = self.query_one("#output-scroll")
         output_table = self.query_one("#output-table", DataTable)
@@ -674,10 +639,9 @@ class NotebookTUI(App[None]):
         table = None if markdown is not None else _single_table(cell)
         uri = _single_table_uri(cell) if table is not None else None
         image = None if (markdown is not None or table is not None) else _image_renderable(cell)
-        self._current_image = image  # enable `i` to enlarge when there's an image
+        self._current_image = image  # for `i` to enlarge
 
         if table is not None and uri is not None and self._session_id:
-            # Interactive viewer over the full cached artifact (paging + sort).
             output_scroll.display = False
             output_table.display = True
             self._start_table_view(cid, uri, [str(c) for c in table[0]])
@@ -731,7 +695,7 @@ class NotebookTUI(App[None]):
         except TuiClientError as exc:
             self.notify(str(exc), severity="error", title="Data viewer")
             return
-        # A cell switch may have replaced the view while the fetch was in flight.
+        # A cell switch may have replaced the view mid-fetch.
         if self._table_view is not view or not page.get("pageable"):
             return
         self._render_table_page(page)
@@ -828,7 +792,6 @@ def _test_source_renderable(cell: CellView):
         return cell.test_source
 
 
-# Per-test outcome → glyph + Rich style for the Tests tab.
 _TEST_GLYPH = {"passed": "✓", "failed": "✗", "error": "⚠", "skipped": "○"}
 _TEST_STYLE = {"passed": "green", "failed": "red", "error": "yellow", "skipped": "dim"}
 
@@ -838,7 +801,7 @@ def _render_tests(cell: CellView):
     if cell.test_unavailable:
         return "pytest is not available in this notebook's environment."
     if not cell.test_cases:
-        # A summary with no cases means a run with 0 collected tests; else nothing ran.
+        # A summary with no cases means 0 tests collected; no summary, nothing ran.
         return cell.test_summary or "(no tests run)"
     text = Text()
     if cell.test_summary:
@@ -876,7 +839,6 @@ def _single_markdown(cell: CellView) -> str | None:
     return None
 
 
-# Cell language → Pygments lexer for source highlighting.
 _SOURCE_LEXERS = {
     "python": "python",
     "sql": "sql",
@@ -892,9 +854,7 @@ def _source_renderable(cell: CellView):
         return "(empty)"
     lexer = _SOURCE_LEXERS.get(cell.language, "python")
     try:
-        # ``one-dark`` is the same theme the web UI uses (@codemirror/theme-one-dark),
-        # so the terminal source view matches the browser. It's truecolor; Textual
-        # downsamples for terminals without 24-bit support.
+        # Matches the web UI's theme; Textual downsamples on non-truecolor terminals.
         return Syntax(cell.source, lexer, theme="one-dark", word_wrap=True)
     except Exception:  # noqa: BLE001 — unknown lexer / pygments hiccup → raw source
         return cell.source
@@ -974,8 +934,7 @@ def _single_table_uri(cell: CellView) -> str | None:
     return uri if isinstance(uri, str) and uri else None
 
 
-# A terminal can't show a wide DataFrame's every column legibly — cap the count
-# and signal the rest in the caption (the web UI is where you see them all).
+# More columns than this are illegible in a terminal; the caption notes the rest.
 _MAX_TABLE_COLS = 8
 
 
@@ -1056,9 +1015,7 @@ def _image_renderable(cell: CellView) -> Any | None:
     if raw is None:
         return None
     try:
-        # auto/auto preserves aspect ratio and uses as much of the container as
-        # possible — so the same renderable fits the panel inline and scales up
-        # in the full-screen image view.
+        # auto/auto keeps the aspect ratio and fills the container, inline or full-screen.
         return TerminalImage(PILImage.open(io.BytesIO(raw)), width="auto", height="auto")
     except (OSError, ValueError):  # not a decodable image
         return None

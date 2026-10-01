@@ -104,16 +104,14 @@ class CellAnalysisWithId:
     id: str
     defines: list[str]
     references: list[str]
-    # Free names shadowing a Python builtin, kept out of ``references``
-    # for display but resolved against the producer map the same way —
-    # a name no cell shadows has no producer and wires nothing.
+    # Free names shadowing a builtin: hidden from ``references`` but resolved
+    # against the producer map the same way.
     builtin_references: list[str] = field(default_factory=list)
     after: list[str] = field(default_factory=list)
     variant_group: str | None = None
     variant_name: str | None = None
-    # ``# @per_variant [group]`` fan-out (sweep v2). When ``per_variant`` is set,
-    # this cell's outputs become a fan-out ``SweepProducer`` over ``per_variant_group``
-    # (or the single sweep group it reads, when the group is None/inferred).
+    # ``# @per_variant [group]``: outputs become a fan-out ``SweepProducer`` over
+    # ``per_variant_group`` (or the single sweep group it reads when None).
     per_variant: bool = False
     per_variant_group: str | None = None
 
@@ -204,9 +202,7 @@ class NotebookDag:
         dag = cls()
         cell_ids = [c.id for c in cells]
 
-        # Resolve variant groups and figure out which cells to skip in the
-        # variable-producer pass. Groups are derived from source annotations;
-        # the active selection comes from notebook.toml.
+        # Groups come from source annotations; the active selection from notebook.toml.
         selections = dict(variant_active_selections or {})
         modes = dict(variant_modes or {})
         sweep_groups = {g for g, m in modes.items() if m == "sweep"}
@@ -215,11 +211,9 @@ class NotebookDag:
         )
         inactive = dag.inactive_cells
 
-        # Sweep groups: one SweepProducer *per produced variable*, containing
-        # only the members that actually define it — variant define-sets can
-        # diverge (``variant_contract_mismatch`` is a warning, not a block), and
-        # fanning a downstream onto a member that doesn't produce the var would
-        # wire a phantom consumed-variable and fail _store_outputs.
+        # One SweepProducer per produced variable, holding only members that define it:
+        # define-sets can diverge, and fanning onto a member without the var would wire
+        # a phantom consumed variable and fail _store_outputs.
         cell_by_id = {c.id: c for c in cells}
         sweep_producer_for_var: dict[str, SweepProducer] = {}
         sweep_member_group: dict[str, str] = {}
@@ -240,15 +234,10 @@ class NotebookDag:
                     group=res.group, variants=tuple(sorted(members))
                 )
 
-        # @per_variant fan-out (sweep v2). A ``# @per_variant`` cell runs once per
-        # variant of one upstream sweep group; its outputs become a fan-out
-        # SweepProducer over that group's variant names. ``var_to_sweep_group``
-        # maps a sweep-sourced variable to its group — seeded from sweep members
-        # and *extended in the main loop* with fan-out outputs, so a chained
-        # ``@per_variant`` reading a prior fan-out cell resolves too. Group choice
-        # mirrors annotation-validation: named group, else the single sweep group
-        # the cell reads; unresolvable (zero/ambiguous) keeps ordinary producer
-        # semantics (validation warns).
+        # ``var_to_sweep_group`` is seeded from sweep members and extended in the main
+        # loop with fan-out outputs, so a chained ``@per_variant`` resolves. Group choice
+        # mirrors annotation validation: named group, else the single sweep group read;
+        # zero or ambiguous keeps ordinary producer semantics.
         var_to_sweep_group = {var: sp.group for var, sp in sweep_producer_for_var.items()}
         sweep_group_variant_names: dict[str, tuple[str, ...]] = {
             res.group: tuple(sorted(name for _, name in res.members))
@@ -256,70 +245,49 @@ class NotebookDag:
             if res.mode == "sweep"
         }
 
-        # Initialize structures (every cell gets entries — even inactive ones,
-        # so the frontend can index into the maps without special-casing).
+        # Every cell gets entries, even inactive ones, so the frontend can index freely.
         for cell_id in cell_ids:
             dag.cell_upstream[cell_id] = []
             dag.cell_downstream[cell_id] = []
             dag.consumed_variables[cell_id] = set()
 
-        # Single pass: walk cells in order, wiring each cell's references
-        # to whoever produced that variable *before* this cell, then record
-        # this cell's own defines as the new producer for cells that come
-        # after. This lets a mutating cell (``sales["col"] = ...``) both
-        # reference the prior ``sales`` and become the producer for
-        # downstream cells, without a spurious self-cycle error.
-        #
-        # Inactive variants are skipped entirely: they don't resolve
-        # references against the producer map and they don't update it.
-        # This keeps them out of the executable graph while leaving them
-        # visible to the frontend through ``variant_groups``.
+        # Single pass: wire each reference to the producer *before* this cell, then
+        # register this cell's defines. A mutating cell (``sales["col"] = ...``) thus
+        # reads the prior ``sales`` and produces the new one without a self-cycle.
+        # Inactive variants neither resolve nor update the map; the frontend still
+        # sees them via ``variant_groups``.
         cell_id_set = set(cell_ids)
         for cell in cells:
             if cell.id in inactive:
                 continue
-            # Resolve references against the producer map as it stands before
-            # this cell's defines are applied. Builtin-shadowing names ride
-            # along: ``input = load_data()`` upstream makes ``input`` a real
-            # producer, and the consumer's ``builtin_references`` carries the
-            # read that plain ``references`` filters out for display.
+            # Builtin-shadowing names ride along: ``input = load_data()`` upstream is a real
+            # producer for a consumer's ``builtin_references``.
             for var in (*cell.references, *cell.builtin_references):
                 producer = dag.variable_producer.get(var)
                 if producer is None or producer == cell.id:
-                    # Either the variable is external (no prior producer) or
-                    # a producer for this cell hasn't been set yet — nothing
-                    # to wire up. A mutating cell whose reference has no
-                    # upstream producer simply has no edge; the runtime will
-                    # raise NameError which is the right signal.
+                    # External variable or no prior producer: no edge. A mutating cell with no
+                    # upstream producer raises NameError at runtime, which is the right signal.
                     continue
                 if isinstance(producer, SweepProducer):
                     member_ids = {cid for _, cid in producer.variants}
                     if cell.id in member_ids:
-                        # A member referencing its own group's sweep var (a
-                        # refinement like ``preds = f(preds)``) must not depend on
-                        # its siblings — same self-reference skip as switch mode.
+                        # A member refining its own group's var (``preds = f(preds)``) must
+                        # not depend on its siblings.
                         continue
-                    # Sweep group: fan out to one edge per variant member, all
-                    # flowing into this cell. Each member's output is consumed
-                    # (stored) so the harness can assemble the {variant: value}
-                    # dict; topological order then requires all members first.
+                    # One edge per member; each member's output is stored so the harness can
+                    # assemble the {variant: value} dict.
                     for _name, member_id in producer.variants:
                         _wire_variable_edge(dag, member_id, cell.id, var)
                 else:
                     _wire_variable_edge(dag, producer, cell.id, var)
 
-            # ``# @after <cell-id>`` adds an ordering-only edge (no
-            # variable flows along it). Used by SQL cells whose dependency
-            # is on an upstream side-effect, like a setup cell that seeds
-            # a SQLite file the connection points at. The edge participates
-            # in upstream/downstream wiring and topological order, but does
-            # not appear in consumed_variables (there's no variable to
-            # consume), so per-variable provenance is unaffected.
+            # ``# @after <cell-id>``: ordering-only edge (e.g. a setup cell seeding a SQLite
+            # file). It affects wiring and topological order but not consumed_variables, so
+            # per-variable provenance is unaffected.
             for upstream_id in cell.after:
                 if upstream_id == cell.id or upstream_id not in cell_id_set:
-                    # Self-references and dangling IDs are silently dropped
-                    # here, so a typo'd id cannot crash the DAG build. No
-                    # diagnostic reports them yet.
+                    # Self-references and dangling ids are dropped so a typo can't crash the build.
+                    # No diagnostic reports them yet.
                     continue
                 dag.edges.append(DagEdge(from_cell_id=upstream_id, to_cell_id=cell.id, variable=""))
                 if upstream_id not in dag.cell_upstream[cell.id]:
@@ -327,14 +295,10 @@ class NotebookDag:
                 if cell.id not in dag.cell_downstream[upstream_id]:
                     dag.cell_downstream[upstream_id].append(cell.id)
 
-            # Now apply this cell's defines so later cells see it as the
-            # producer. A sweep variant member produces, for each var it defines,
-            # that var's SweepProducer (the members that define it) — so every
-            # sibling sets the same value and downstream sees the whole group.
-            # Setting the same value per sibling is idempotent (no shadow).
+            # A sweep member registers, for each var it defines, that var's SweepProducer;
+            # every sibling sets the same value, so downstream sees the whole group.
             is_sweep_member = cell.id in sweep_member_group
-            # Resolve this cell's fan-out group from sweep vars known so far
-            # (includes upstream fan-out outputs → chained @per_variant works).
+            # Includes upstream fan-out outputs, so chained @per_variant works.
             fanout_group: str | None = None
             if cell.per_variant:
                 read_groups = {
@@ -351,9 +315,7 @@ class NotebookDag:
                 if is_sweep_member and var in sweep_producer_for_var:
                     new_producer: str | SweepProducer = sweep_producer_for_var[var]
                 elif fanout_group is not None:
-                    # Fan-out cell: its outputs are per-variant instances of this
-                    # one cell, keyed by the upstream group's variant names. Register
-                    # the output as sweep-sourced so a chained @per_variant resolves.
+                    # Register the output as sweep-sourced so a chained @per_variant resolves.
                     new_producer = SweepProducer(
                         group=fanout_group,
                         variants=tuple(
@@ -377,9 +339,7 @@ class NotebookDag:
                     dag.shadow_warnings.setdefault(cell.id, []).append(warning)
                 dag.variable_producer[var] = new_producer
 
-        # Inactive variants are excluded from leaves / roots / topological
-        # order — they're shadow cells, not real graph members. Frontend
-        # discovers them via ``variant_groups`` instead.
+        # Inactive variants are shadow cells; the frontend finds them via ``variant_groups``.
         active_cell_ids = [cid for cid in cell_ids if cid not in inactive]
 
         for cell_id in active_cell_ids:
@@ -414,9 +374,7 @@ class NotebookDag:
         """
         in_degree = {cell_id: len(self.cell_upstream[cell_id]) for cell_id in cell_ids}
 
-        # deque (not list) so popleft is O(1) — this path runs on every
-        # keystroke-driven DAG rebuild, and list.pop(0) is O(n) per call,
-        # giving O(n²) on the hot interactive path.
+        # deque: this runs on every keystroke-driven DAG rebuild, and list.pop(0) is O(n).
         queue: deque[str] = deque(cell_id for cell_id in cell_ids if in_degree[cell_id] == 0)
         result: list[str] = []
 
@@ -457,7 +415,6 @@ class NotebookDag:
             path.append(node)
             for downstream in self.cell_downstream[node]:
                 if color[downstream] == 1:
-                    # Back edge — found a cycle
                     cycle_start = path.index(downstream)
                     cycles.append(path[cycle_start:] + [downstream])
                 elif color[downstream] == 0:
@@ -625,11 +582,9 @@ def _resolve_variant_groups(
         members = grouped[group_id]
         is_sweep = group_id in sweep
         wanted_name = selections.get(group_id)
-        # Pick the active member: toml selection if it points at a real
-        # variant, otherwise the first variant in source order. The
-        # ``variant_active_unknown`` diagnostic surfaces toml drift. In sweep
-        # mode the active pointer is ignored (every member runs); the first
-        # member is kept only as a default display cell for the frontend.
+        # Active member: the toml selection if it names a real variant, else the first
+        # in source order. In sweep mode every member runs; the first is only the
+        # default display cell.
         active_cell_id, active_name = members[0]
         if wanted_name is not None and not is_sweep:
             for cid, name in members:

@@ -18,12 +18,10 @@ already its owner.
 
 from __future__ import annotations
 
-# What the browser says when it says nothing. A personal server is one person,
-# so the useful distinction there is not *which* human but human-versus-agent.
+# A personal server is one person, so what matters is human versus agent, not which human.
 LOCAL_AUTHOR = "local"
 
-# Bounded because it is written into committed config from an unauthenticated
-# claim. Long enough for `agent:<id>/<sub>`, short enough not to be a payload.
+# Bounded: written into committed config from an unauthenticated claim.
 MAX_AUTHOR_LENGTH = 128
 
 

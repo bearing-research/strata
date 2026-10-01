@@ -39,10 +39,8 @@ class AnalyzedCell:
     defines: list[str] = field(default_factory=list)
     references: list[str] = field(default_factory=list)
     mutation_defines: list[str] = field(default_factory=list)
-    # Python only: free names that shadow a builtin (``input``, ``type``).
-    # Kept out of ``references`` for display, but the DAG resolves them
-    # against the producer map so a cell that shadows a builtin still
-    # wires its edge. Other languages leave this empty.
+    # Python only: free names that shadow a builtin (``input``, ``type``). Hidden
+    # from ``references`` but resolved by the DAG so the edge still wires.
     builtin_references: list[str] = field(default_factory=list)
 
 
@@ -104,9 +102,7 @@ def analyze_cell_by_language(cell: CellState, session: NotebookSession) -> Analy
     return get_language_analyzer(cell.language).analyze(cell, session)
 
 
-# ---------------------------------------------------------------------------
-# Built-in adapters
-# ---------------------------------------------------------------------------
+# --- Built-in adapters ---
 
 
 class _PythonAnalyzer:
@@ -190,9 +186,7 @@ class _WidgetAnalyzer:
         return AnalyzedCell(defines=list(result.defines), references=[])
 
 
-# Built-in registrations. Performed at import time so the registry is
-# populated by the time any ``session.py`` dispatch runs. New languages
-# (R, Lean) register similarly from their own modules.
+# Registered at import time so the registry is populated before any dispatch.
 register_language_analyzer(CellLanguage.PYTHON, _PythonAnalyzer())
 register_language_analyzer(CellLanguage.PROMPT, _PromptAnalyzer())
 register_language_analyzer(CellLanguage.SQL, _SqlAnalyzer())

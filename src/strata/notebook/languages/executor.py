@@ -133,9 +133,7 @@ def get_language_executor(language: CellLanguage) -> LanguageExecutor:
         raise UnknownLanguageError(f"No language executor registered for {language!r}") from exc
 
 
-# ---------------------------------------------------------------------------
-# Built-in adapters
-# ---------------------------------------------------------------------------
+# --- Built-in adapters ---
 
 
 class _PythonExecutor:
@@ -178,10 +176,8 @@ class _PythonExecutor:
         return ""
 
     def is_batchable(self, cell: CellState, executor: CellExecutor) -> bool:
-        # The full PYTHON-only batching gate from executor.py:is_cell_batchable.
-        # Per issue #26: PYTHON cell, resolved worker is "local", no
-        # ``# @loop`` annotation, no explicit timeout at any level, no
-        # rw mount at any level.
+        # Mirrors executor.py:is_cell_batchable: local worker, no ``# @loop``,
+        # no explicit timeout and no rw mount at any level.
         from strata.notebook.annotations import parse_annotations
 
         annotations = parse_annotations(cell.source)
@@ -224,9 +220,7 @@ class _PromptExecutor:
         materialize_upstreams: bool,
         use_cache: bool,
     ) -> CellExecutionResult:
-        # PROMPT path doesn't need ``timeout_seconds`` — the LLM provider
-        # call has its own timeout. Drop the unused arg rather than
-        # threading it through.
+        # The LLM provider call has its own timeout.
         del timeout_seconds
         return await executor._execute_prompt_cell(
             cell_id,
@@ -314,15 +308,11 @@ class _MarkdownExecutor:
         materialize_upstreams: bool,
         use_cache: bool,
     ) -> CellExecutionResult:
-        # Unused — markdown returns success immediately without inspecting
-        # source / upstreams / cache.
+        # Markdown returns success without inspecting anything.
         del source, timeout_seconds, materialize_upstreams, use_cache
-        # ``start_time`` is wall-clock (``time.time()``), so subtract in the
-        # same clock — mixing ``monotonic()`` here produces a ~1.7e12 ms
-        # negative because the two clocks have different epochs.
+        # ``start_time`` is ``time.time()``; ``monotonic()`` has a different epoch.
         duration_ms = (time.time() - start_time) * 1000
-        # Import here to avoid a circular at module-import time
-        # (executor imports languages, languages imports executor).
+        # Avoids a circular import (executor imports languages).
         from strata.notebook.executor import CellExecutionResult
 
         return CellExecutionResult(
@@ -380,8 +370,7 @@ class _WidgetExecutor:
         return False
 
 
-# Built-in registrations — performed at import time so the registry is
-# populated by the time any dispatch site runs.
+# Registered at import time so the registry is populated before any dispatch.
 register_language_executor(CellLanguage.PYTHON, _PythonExecutor())
 register_language_executor(CellLanguage.PROMPT, _PromptExecutor())
 register_language_executor(CellLanguage.SQL, _SqlExecutor())
@@ -389,6 +378,5 @@ register_language_executor(CellLanguage.MARKDOWN, _MarkdownExecutor())
 register_language_executor(CellLanguage.WIDGET, _WidgetExecutor())
 
 
-# Re-export ``Any`` so the package-level ``__init__`` doesn't need a
-# separate annotation for the optional ``CellExecutor`` reference.
+# Re-exports ``Any`` for the package-level ``__init__``.
 _: Any = None

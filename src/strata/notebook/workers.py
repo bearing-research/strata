@@ -120,12 +120,8 @@ def _load_worker_policy(notebook_state: NotebookState) -> WorkerPolicy:
         state = get_state()
         config = state.config
         service_mode = config.deployment_mode == "service"
-        # Through the same accessor the admin routes use, so the catalogue and
-        # what a cell dispatches to cannot disagree. Reading transforms_config
-        # here instead would agree only until a restart, after which the admin
-        # routes would show the persisted registry while dispatch used the
-        # configured table — a server saying one thing and doing another,
-        # which is worse than not persisting at all.
+        # Same accessor the admin routes use, so the catalogue and dispatch cannot disagree
+        # (transforms_config would diverge from the persisted registry after a restart).
         server_workers = {
             record.worker.name: record for record in get_server_managed_worker_records()
         }
@@ -140,15 +136,9 @@ def _load_worker_policy(notebook_state: NotebookState) -> WorkerPolicy:
             **{name: record.worker for name, record in server_workers.items() if record.enabled},
         }
     else:
-        # Personal mode gets the server registry too, beneath the notebook's
-        # own entries. A platform that manages a catalogue of machine types
-        # otherwise has to write the same [[workers]] block into every
-        # notebook.toml, where it shows up in git diffs and drifts the moment
-        # the catalogue changes.
-        #
-        # Notebook entries last, so a name defined in the notebook wins: the
-        # file in front of you beats a server default, which is the same
-        # precedence annotations have over persisted config.
+        # Personal mode gets the server registry too, so a platform's machine-type catalogue
+        # need not be copied into every notebook.toml. Notebook entries last so a name the
+        # notebook defines wins, matching annotations over persisted config.
         effective_workers = {
             "local": builtin,
             **{name: record.worker for name, record in server_workers.items() if record.enabled},
@@ -312,9 +302,8 @@ def _persist_managed_worker_records(records: list[ManagedWorkerRecord]) -> None:
             json.dump(_serialize_managed_worker_records(records), handle, indent=2)
         os.replace(tmp_name, path)
     except OSError as exc:
-        # The mutation already applied in memory and the caller is mid-request;
-        # failing it now would leave the server and its answer disagreeing.
-        # Loud in the log, because the change is live and will not survive.
+        # The mutation is already live in memory mid-request; failing now would make the
+        # server and its answer disagree. Log loudly: the change will not survive a restart.
         logger.error(
             "Could not persist the notebook worker registry to %s (%s). "
             "The change is live but will be lost on restart.",
@@ -336,10 +325,8 @@ def load_persisted_managed_worker_records() -> list[ManagedWorkerRecord] | None:
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
-        # Deliberately not silent, and deliberately not fatal: a corrupt file
-        # must not stop a server from booting, but falling back to the config
-        # table without saying so would look like the admin changes were never
-        # made.
+        # Not fatal (a corrupt file must not stop boot) but not silent, or the admin changes
+        # would look like they were never made.
         logger.error(
             "Could not read the notebook worker registry at %s (%s); "
             "falling back to the configured table.",
@@ -469,8 +456,7 @@ def worker_runtime_identity(
     if worker.runtime_id:
         return f"{worker.backend.value}:{worker.runtime_id}"
 
-    # exclude_none reproduces the old raw-dict shape (only set keys + extras), so
-    # the provenance hash is unchanged for existing configs.
+    # exclude_none keeps only set keys + extras, so the provenance hash stays stable.
     config_dict = worker.config.model_dump(mode="json", exclude_none=True)
     if config_dict:
         config_json = json.dumps(config_dict, sort_keys=True, separators=(",", ":"))
@@ -609,10 +595,8 @@ def build_worker_catalog(notebook_state: NotebookState) -> list[dict[str, Any]]:
                 enabled=True,
             )
 
-        # After the notebook's own, because add_worker is first-writer-wins:
-        # a name the notebook defines must win here exactly as it wins in
-        # effective_workers, or the panel would show a server entry while the
-        # cell dispatched to the notebook's.
+        # After the notebook's own: add_worker is first-writer-wins, so a notebook-defined
+        # name wins here as it does in effective_workers.
         for record in policy.server_workers.values():
             worker = record.worker
             health = (
@@ -649,14 +633,11 @@ def build_worker_catalog(notebook_state: NotebookState) -> list[dict[str, Any]]:
     return catalog
 
 
-# Features a worker's /health advertises, by health URL, with when they were
-# read. Dispatch asks on every cell, so the answer is kept for a minute.
+# Features a worker's /health advertises, by health URL, with read time. Dispatch
+# asks on every cell, so the answer is cached for a minute.
 _FEATURES_TTL_SECONDS = 60.0
-# Longer than the worker's own ``/health`` takes to answer the first time. It
-# reports the machine's hardware, and on a GPU box that shells out to
-# ``nvidia-smi`` with a ten-second timeout of its own -- so a five-second probe
-# timed out on exactly the machine a pool had just started, and a notebook with
-# a lock had its first cell there refused.
+# Longer than the worker's first ``/health``: on a GPU box it shells out to
+# ``nvidia-smi`` with its own 10 s timeout, so a shorter probe refuses a fresh machine.
 _PROBE_TIMEOUT_SECONDS = 20.0
 _advertised_features: dict[str, tuple[float, dict[str, Any]]] = {}
 
@@ -687,12 +668,10 @@ async def worker_advertises(worker: WorkerSpec, feature: str) -> bool | None:
             # Nothing came back. Ask again next time rather than deciding.
             return None
         if response.status_code in (404, 405, 501):
-            # A worker that answers, and has no such route: older than the
-            # health document, and older than every feature it would list.
+            # Answers, but has no such route: older than every feature it would list.
             return False
         if response.status_code != 200:
-            # It is up and unwell -- a gateway error, a 503 while starting.
-            # That is not an answer about its features either.
+            # Up and unwell (gateway error, 503 while starting): not an answer about features.
             return None
         try:
             features: dict[str, Any] = (
@@ -920,10 +899,8 @@ async def probe_worker_health(
                     duration_ms=duration_ms,
                 )
     except httpx.TimeoutException:
-        # A timed-out probe usually means a serverless worker is
-        # cold-starting. Surface it as "warming" so the UI can render
-        # a distinct state (rather than lumping cold-start with real
-        # failures like DNS errors or 5xx responses).
+        # A timed-out probe usually means a serverless worker is cold-starting; surface it as
+        # "warming" rather than lumping it with real failures (DNS, 5xx).
         snapshot = WorkerHealthSnapshot(
             checked_at=now,
             health="warming",
@@ -955,12 +932,8 @@ async def build_worker_catalog_with_health(
         else {worker.name: worker for worker in policy.effective_workers.values()}
     )
 
-    # First pass: resolve static status (local, disabled) and collect
-    # the set of entries whose health needs a live probe. Gathering
-    # the probes in parallel keeps the catalog response fast even
-    # when one worker is cold-starting and the other is healthy —
-    # sequentially, the healthy one would have to wait for the cold
-    # one's 8 s timeout.
+    # First pass: resolve static status (local, disabled) and collect entries needing a
+    # live probe. Probes run in parallel so a cold-starting worker doesn't delay the rest.
     probe_targets: list[tuple[dict[str, Any], WorkerSpec, str | None]] = []
     for entry in catalog:
         name = str(entry.get("name", ""))

@@ -105,11 +105,8 @@ async def execute_sql_cell(
     except KeyError as exc:
         return _error_result(str(exc), start_time)
 
-    # Write cells take a separate path: open the connection
-    # writable, split the body into individual statements, run each
-    # one, return a synthetic status table. No freshness probe (the
-    # cache key is purely source-derived for writes), no read-only
-    # enforcement.
+    # Write cells: no freshness probe (the key is source-derived) and no
+    # read-only enforcement.
     if annotations.sql.write:
         return await _execute_write_cell(
             session=session,
@@ -128,8 +125,7 @@ async def execute_sql_cell(
         return _error_result(f"SQL parse error: {analysis.parse_error}", start_time)
     if not analysis.sql_body:
         return _error_result("SQL cell body is empty.", start_time)
-    # The driver opens read-only, but a body can leave that transaction and go
-    # on: what a read cell may run is decided here, before anything is sent.
+    # A body can end the driver's read-only transaction, so check before sending.
     violation = read_only_violation(analysis.sql_body, adapter.sqlglot_dialect)
     if violation is not None:
         return _error_result(violation, start_time)
@@ -153,19 +149,15 @@ async def execute_sql_cell(
     except CachePolicyError as exc:
         return _error_result(str(exc), start_time)
 
-    # The fingerprint is the freshness of the tables the analyzer could name.
-    # A table named only at run time (Snowflake's IDENTIFIER($var), a table
-    # function, a file path) is missing from it, so a cached result could
-    # outlive a change to that table: run the query instead. A cell that
-    # declares session, ttl or forever has said what its rows depend on.
+    # The fingerprint covers only tables the analyzer could name; one named at
+    # run time could change unseen, so run the query. Explicit session, ttl or
+    # forever policies are taken at their word.
     runs_every_time = policy.kind == "fingerprint" and bool(analysis.unresolved_tables)
     if runs_every_time:
         use_cache = False
 
-    # The on-disk spec keeps relative paths verbatim (so notebook.toml
-    # round-trips byte-for-byte); resolve them just before the
-    # adapter sees them so the in-process call site stays
-    # notebook-unaware.
+    # The on-disk spec keeps relative paths so notebook.toml round-trips;
+    # resolve them only for the adapter.
     try:
         runtime_spec = _resolve_runtime_spec(spec, session.path, _credentials(session))
     except CredentialError as exc:
@@ -196,9 +188,8 @@ async def execute_sql_cell(
     output_name = analysis.name
     canonical_id = f"nb_{notebook_id}_cell_{cell_id}_var_{output_name}"
     if policy.snapshot_required and supports_time_travel(adapter):
-        # Everything that identifies the query except the moment it reads. A
-        # previous run of the same query left its timestamp on the artifact;
-        # reusing it is what makes a snapshot a snapshot.
+        # The query's identity minus its read time, to reuse a prior run's
+        # timestamp: that reuse is what makes it a snapshot.
         basis = compute_sql_provenance_hash(
             query_normalized=query_normalized,
             bind_params=params,
@@ -230,11 +221,7 @@ async def execute_sql_cell(
             )
 
     # ---- provenance hash -------------------------------------------
-    # The runtime spec is what gets handed to ``open()``, with
-    # relative paths rebased against the notebook directory. Use
-    # it for canonicalize too so credential-file principal
-    # extraction can read the file when the path is relative on
-    # disk.
+    # Runtime spec, so a relative credential-file path can be read.
     provenance_hash = compute_sql_provenance_hash(
         query_normalized=query_normalized,
         bind_params=params,
@@ -283,11 +270,8 @@ async def execute_sql_cell(
 
     blob = _serialize_arrow_ipc(table)
     if runs_every_time:
-        # Nothing the hash above folds moves when the unnamed table changes, so
-        # every run carried the same provenance, and a downstream cell keyed on
-        # it kept its cached result from the old rows. The rows themselves are
-        # what this run knows: fold them in, and a consumer re-runs exactly
-        # when the data changed.
+        # The hash can't see the unnamed table change, so fold in the rows:
+        # consumers re-run exactly when the data changed.
         provenance_hash = derive_subkey(
             provenance_hash, f"content={hashlib.sha256(blob).hexdigest()}"
         )
@@ -300,9 +284,7 @@ async def execute_sql_cell(
         provenance_hash=var_provenance,
         source_hash=provenance_hash,  # cell-level provenance for staleness
         source=source,
-        # The notebook variables this query bound, so the chain behind the
-        # result names them. A hash is not an artifact reference: without
-        # these the lineage walk stopped at the query itself.
+        # Bound variables, so lineage continues past the query.
         input_versions=input_refs,
         extra_params=(
             {
@@ -316,12 +298,8 @@ async def execute_sql_cell(
     )
     uri = f"strata://artifact/{artifact.id}@v={artifact.version}"
 
-    # Make the artifact discoverable from downstream cells via the
-    # cell-state ``artifact_uris`` map. ``_collect_input_hashes`` and
-    # ``_load_input_blobs`` both walk these on the upstream cell, so
-    # without this, a downstream Python cell that consumes a SQL
-    # cell's output would compute its provenance without the SQL
-    # input hash — a silent staleness leak.
+    # Downstream provenance and input loading read ``artifact_uris``; without
+    # this a consumer's hash would silently omit the SQL input.
     cell_state = next(
         (c for c in session.notebook_state.cells if c.id == cell_id),
         None,
@@ -331,8 +309,7 @@ async def execute_sql_cell(
         cell_state.artifact_uri = uri
 
     duration_ms = (time.time() - start_time) * 1000
-    # Read path: query results can be huge, keep the default cap.
-    # Write-path display passes its own larger cap below.
+    # Query results can be huge: keep the default cap.
     display_output = _table_display(table)
     return _report_pin(
         {
@@ -404,22 +381,14 @@ async def _execute_write_cell(
     """
     from strata.notebook.annotations import CachePolicy
 
-    # Run the analyzer so the write path participates in the same
-    # bind / placeholder / # @name surface as the read path. The
-    # only divergence below is execution: read calls
-    # adapter.probe_freshness then runs the (single) statement
-    # read-only; write opens writable, splits the body via
-    # sqlglot, and runs each statement with its own slice of the
-    # cell-level bind tuple.
+    # Same bind/placeholder surface as reads; only execution differs.
     analysis = analyze_sql_cell(source, dialect=adapter.sqlglot_dialect)
     if analysis.parse_error:
         return _error_result(f"SQL parse error: {analysis.parse_error}", start_time)
     if not analysis.sql_body:
         return _error_result("Write SQL cell body is empty.", start_time)
 
-    # Resolve cache policy — default to session when not specified.
-    # Probe-based policies (fingerprint / snapshot) don't make
-    # sense for writes; surface a diagnostic so the user knows.
+    # Probe-based policies make no sense for writes; say so.
     cache_annotation = annotations.cache or CachePolicy(kind="session")
     if cache_annotation.kind in {"fingerprint", "snapshot"}:
         return _error_result(
@@ -439,10 +408,7 @@ async def _execute_write_cell(
     except CachePolicyError as exc:
         return _error_result(str(exc), start_time)
 
-    # Bind resolution + upstream-input hashes — same as read path.
-    # Without these in provenance, an upstream variable change
-    # wouldn't invalidate the write cell's cache and the seed would
-    # silently use stale values.
+    # Upstream hashes in provenance, so a changed input invalidates the cache.
     namespace, upstream_input_hashes, input_refs = _load_upstream_variables(
         session, cell_id, analysis.references
     )
@@ -451,12 +417,8 @@ async def _execute_write_cell(
     except BindError as exc:
         return _error_result(str(exc), start_time)
 
-    # Provenance via the same hash function read cells use, with
-    # the freshness/schema slots set to None (no probe). Run on
-    # the runtime spec (paths rebased against the notebook dir)
-    # so credential-file principal extraction works for relative
-    # paths. ``read_only=False`` so the write-side principal
-    # joins the cache identity for write cells.
+    # No probe slots. Runtime spec for relative credential paths;
+    # ``read_only=False`` puts the write principal in the identity.
     try:
         runtime_spec = _resolve_runtime_spec(spec, session.path, _credentials(session))
     except CredentialError as exc:
@@ -509,10 +471,7 @@ async def _execute_write_cell(
 
     table = _synthesize_write_result_table(stats)
     blob = _serialize_arrow_ipc(table)
-    # Use a higher row cap for write-cell status tables — the rows
-    # are status entries (one per statement), not query results, so
-    # truncating "5 of 6 statements" is unhelpful. Read cells keep
-    # the default cap of 5.
+    # One status row per statement: truncating them is unhelpful.
     write_display_cap = max(20, table.num_rows)
     artifact = artifact_mgr.store_cell_output(
         cell_id=cell_id,
@@ -592,18 +551,12 @@ def _split_statements(body: str, dialect: str) -> list[str] | None:
     except Exception:  # noqa: BLE001 - any tokenizer failure means "run it whole"
         return None
 
-    # A fragment is a statement only when it holds a token. The tokenizer emits
-    # nothing for comments or whitespace, so the text after the last semicolon
-    # of `CREATE TABLE ...;\n-- done` has none and is not something to run.
-    # Testing the text for non-whitespace instead handed the driver a bare
-    # comment as though it were a statement, and it answered "INTERNAL:
-    # (unknown error)" for a script that had already done its work.
+    # A fragment is a statement only if it holds a token: a trailing comment
+    # sent as a statement makes the driver fail with "INTERNAL: (unknown error)".
     cuts = [token.start for token in tokens if token.token_type is TokenType.SEMICOLON]
     code = [token.start for token in tokens if token.token_type is not TokenType.SEMICOLON]
 
-    # Both lists are in source order, so one forward walk answers every
-    # fragment. Scanning all of `code` per fragment is quadratic, and a seed
-    # script with a few thousand statements spends seconds in it.
+    # Both lists are in source order: one forward walk, not quadratic.
     statements: list[str] = []
     start = 0
     index = 0
@@ -655,12 +608,9 @@ def _execute_write_statements(
 
     from strata.notebook.sql.analyzer import _extract_placeholder_positions
 
-    # A trailing comment parses to a bare ``Semicolon`` node carrying it, and
-    # the split below drops that fragment. Dropping it here too keeps the two
-    # lists the same length, which is what lets each statement's kind come
-    # from its parse rather than from a guess at its text: read off the text,
-    # a ``WITH ... INSERT`` reads as "WITH", not as DML, and the run reports no
-    # row count for a statement that has one.
+    # Drop bare ``Semicolon`` nodes (trailing comments) as the split does, so
+    # the lists align and each kind comes from the parse (text alone reads
+    # ``WITH ... INSERT`` as "WITH", not DML).
     parsed = [
         statement
         for statement in sqlglot.parse(body, dialect=adapter.sqlglot_dialect)
@@ -668,22 +618,17 @@ def _execute_write_statements(
     ]
     texts = _split_statements(body, adapter.sqlglot_dialect)
     if texts is None:
-        # Nothing tokenized: treat the whole body as a single opaque statement
-        # (covers vendor-specific syntax we cannot parse). Placeholders still
-        # get extracted via the regex path so :name bindings keep working.
+        # Untokenizable vendor syntax: run the body whole. Placeholders still
+        # come from the regex path.
         prepared = [(body, _statement_kind_from_text(body))]
     elif len(texts) == len(parsed):
-        # The statement as written, with the parse used only to say what kind
-        # of statement it is.
+        # Run the text as written; the parse only gives the kind.
         prepared = list(zip(texts, (_statement_kind_from_expr(stmt) for stmt in parsed)))
     elif texts:
-        # Split but not parsed one-to-one: still run what the cell says, and
-        # fall back to reading the kind off the text.
+        # Not parsed one-to-one: infer the kind from the text.
         prepared = [(text, _statement_kind_from_text(text)) for text in texts]
     else:
-        # It tokenized and holds no statement, which a body of nothing but
-        # comments does. There is nothing to send, and sending the comment is
-        # what the driver answered "INTERNAL: (unknown error)" to.
+        # Only comments: send nothing (the driver errors on a bare comment).
         prepared = []
 
     statements: list[dict[str, Any]] = []
@@ -703,23 +648,15 @@ def _execute_write_statements(
                     cursor.execute(stmt_to_execute, parameters=stmt_params)
                 else:
                     cursor.execute(stmt_to_execute)
-                # PEP 249 sentinel: -1 means "not available"; preserve
-                # 0 as a real count (UPDATE matched zero rows). Only
-                # ask for a count on DML — for DDL the concept doesn't
-                # apply, and SQLite's ``changes()`` would inherit from
-                # the prior DML statement, producing a misleading
-                # number on a CREATE TABLE that happens to follow an
-                # INSERT.
+                # PEP 249: -1 means unavailable, 0 is a real count. DML only:
+                # SQLite's ``changes()`` after DDL reports the prior DML's count.
                 rows_affected: int | None
                 if _is_dml_kind(stmt_kind):
                     rc = getattr(cursor, "rowcount", -1)
                     if isinstance(rc, int) and rc >= 0:
                         rows_affected = rc
                     elif getattr(adapter, "name", None) == "sqlite":
-                        # ADBC SQLite never populates cursor.rowcount;
-                        # fall back to ``SELECT changes()`` which is
-                        # SQLite's "rows modified by the last DML on
-                        # this connection".
+                        # ADBC SQLite never populates cursor.rowcount.
                         rows_affected = _sqlite_last_changes(conn)
                     else:
                         rows_affected = None
@@ -729,10 +666,7 @@ def _execute_write_statements(
                 _safely_close(cursor)
             statements.append({"kind": stmt_kind, "rows_affected": rows_affected})
 
-        # Commit explicitly. ADBC's DBAPI defaults autocommit=False
-        # so user writes are buffered until commit. Surfaces any
-        # commit-time error as the cell's failure — silencing was
-        # the previous bug.
+        # ADBC defaults to autocommit=False; a commit error fails the cell.
         commit = getattr(conn, "commit", None)
         if callable(commit):
             commit()
@@ -770,9 +704,7 @@ def _sqlite_last_changes(conn: Any) -> int | None:
             tbl = _fetch_arrow_table(cur)
             rows = tbl.to_pylist()
             if rows:
-                # ADBC returns the column under the literal expression
-                # text "changes()"; iterate values defensively in case
-                # a future ADBC release renames it.
+                # Column is named "changes()"; read by value in case that changes.
                 for v in rows[0].values():
                     if isinstance(v, int) and v >= 0:
                         return v
@@ -897,8 +829,8 @@ def sql_reopen_identity(cell: Any, session: Any) -> str | None:
     if policy.freshness_required:
         return None
     try:
-        # Without credentials: resolving one can go out to a secret manager,
-        # and the identity only ever carries the credential's name anyway.
+        # No credentials: resolving may hit a secret manager, and the identity
+        # carries only the credential's name.
         runtime_spec = _resolve_runtime_spec(spec, session.path)
         connection_id = _with_credential(
             adapter.canonicalize_connection_id(runtime_spec, read_only=True), spec
@@ -982,14 +914,8 @@ def _resolve_runtime_spec(
     if new_path != raw_path:
         update["path"] = new_path
 
-    # Driver-specific path fields. ``model_extra`` is where
-    # extras live (BigQuery's credentials_path is an extra), so
-    # the rebase has to update that dict too — Pydantic surfaces
-    # extras both as attributes and through ``model_extra``, but
-    # ``model_copy(update=...)`` only updates declared fields
-    # by default. We pass them through anyway because Pydantic v2
-    # also accepts unknown keys when ``extra='allow'`` is set on
-    # the model (which ConnectionSpec uses).
+    # Driver-specific paths may be Pydantic extras (BigQuery's credentials_path);
+    # ConnectionSpec has ``extra='allow'``, so ``model_copy`` accepts them.
     extras = getattr(spec, "model_extra", None) or {}
     for key in ("credentials_path", "write_credentials_path"):
         raw_value = extras.get(key) if key in extras else getattr(spec, key, None)
@@ -1082,10 +1008,7 @@ def _deserialize_blob(blob: bytes, content_type: str) -> Any:
         except (ValueError, TypeError):
             return None
     if content_type == "arrow/ipc":
-        # An upstream Arrow table can't be a SQL bind value; the
-        # bind layer rejects it with a clear type error. We still
-        # return a useful representation so the namespace is
-        # populated and the user gets the right BindError.
+        # Not bindable, but loaded so the bind layer raises the right BindError.
         try:
             import pyarrow as pa
 
@@ -1230,21 +1153,10 @@ def _safely_close(handle: Any) -> None:
         handle.close()
     except Exception:  # noqa: BLE001
         logger.exception("error closing handle")
-        # And mark it closed, or it will be closed again at collection.
-        #
-        # adbc's Cursor.close() sets ``_closed = True`` only *after*
-        # ``_stmt.close()`` returns, so a statement whose close raises stays
-        # marked open. That is not a rare path: ADBC reports a write to a
-        # read-only connection at statement close, which is exactly what a
-        # user's SQL cell hits when it tries to write to a read-only
-        # connection. Its ``__del__`` then closes it a second time,
-        # underflowing the driver's child count and surfacing as an
-        # unraisable exception at whatever unrelated moment the collector
-        # runs — an error attached to the wrong cell, or to no cell at all.
-        #
-        # Only corrects a flag the object itself failed to update: an object
-        # with no such attribute, or one that already says it is closed, is
-        # left alone.
+        # Mark it closed anyway. adbc sets ``_closed`` only after
+        # ``_stmt.close()`` returns, and a write on a read-only connection
+        # raises there; ``__del__`` would then close it again, underflowing the
+        # driver's child count as an unraisable error on some unrelated cell.
         if getattr(handle, "_closed", None) is False:
             handle._closed = True
 
@@ -1331,10 +1243,8 @@ def _cache_hit_result(
     display_output = _table_display(table)
     uri = f"strata://artifact/{canonical.id}@v={canonical.version}"
 
-    # Cache hits update the cell's artifact map for the same
-    # downstream-discovery reason as the miss path. Without this, a
-    # cell-cache hit on a SQL cell after a notebook reopen would
-    # leave artifact_uris empty and stale downstream caches.
+    # As on a miss: a hit after reopen would otherwise leave artifact_uris
+    # empty and downstream caches stale.
     if session is not None and cell_id is not None:
         cell_state = next(
             (c for c in session.notebook_state.cells if c.id == cell_id),

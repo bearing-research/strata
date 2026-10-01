@@ -11,11 +11,9 @@ from typing import Any
 
 SCHEMA_VERSION = "notebook-output-bundle@v1"
 
-# Per-member size cap. The bundle format expands a member fully into
-# memory when read (tar.extractfile + .read()), so an unbounded member
-# can OOM the unpacker. Override via STRATA_NOTEBOOK_MAX_BUNDLE_MEMBER_BYTES
-# when legitimate outputs exceed this default.
-_DEFAULT_MAX_BUNDLE_MEMBER_BYTES = 2 * 1024 * 1024 * 1024  # 2 GiB
+# Per-member cap: a member is read fully into memory on unpack, so an
+# unbounded one can OOM. Override via STRATA_NOTEBOOK_MAX_BUNDLE_MEMBER_BYTES.
+_DEFAULT_MAX_BUNDLE_MEMBER_BYTES = 2 * 1024 * 1024 * 1024
 
 
 def _max_bundle_member_bytes() -> int:
@@ -68,14 +66,11 @@ def pack_notebook_output_bundle(
         "mutation_warnings": result_manifest.get("mutation_warnings", []),
         "error": result_manifest.get("error"),
         "traceback": result_manifest.get("traceback"),
-        # The worker's interpreter and hardware, not ours. A remote cell is
-        # exactly the case where the two differ, so carrying this across the
-        # bundle is the difference between recording where a result came from
-        # and recording where we happened to be standing.
+        # The worker's interpreter and hardware, not ours: a remote cell is
+        # exactly where the two differ.
         "build_env": result_manifest.get("build_env", ""),
     }
-    # Only a worker reports it (``strata.notebook.hardware``); a local run's
-    # bundle leaves it out rather than claiming an empty machine.
+    # Only a worker reports it; a local bundle omits it rather than claim an empty machine.
     if result_manifest.get("hardware"):
         bundle_manifest["hardware"] = result_manifest["hardware"]
 
@@ -104,9 +99,7 @@ def pack_notebook_output_bundle(
         bundle_meta["file"] = bundle_file
         bundle_manifest["variables"][var_name] = bundle_meta
 
-    # Every display the cell produced, not only the last: the last is also the
-    # variable ``_`` and so travelled anyway, which is why a remote cell drawing
-    # three figures came back showing one.
+    # Every display, not only the last (which also travels as ``_``).
     raw_displays = result_manifest.get("displays", [])
     if not isinstance(raw_displays, list):
         raise ValueError("Bundle manifest displays must be a list")
@@ -233,12 +226,8 @@ def unpack_notebook_output_bundle(
                 unpacked["file"] = file_name
             result["displays"].append(unpacked)
 
-    # Match the local harness contract: write to harness-result.json
-    # so downstream code that reads the executor output from disk
-    # finds it under the same name regardless of whether the cell
-    # ran via local harness or remote bundle. Hyphenated name
-    # avoids collision with variable files written by the harness
-    # (any user variable named ``result`` ends up at result.json).
+    # Same name as the local harness, so readers find the output either way.
+    # Hyphenated so it can't collide with a user variable named ``result``.
     with open(output_dir / "harness-result.json", "w", encoding="utf-8") as f:
         json.dump(result, f, indent=2)
 

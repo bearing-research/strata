@@ -20,11 +20,8 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
-# orjson writes ~3-10× faster than stdlib and serializes datetime,
-# numpy scalars, Decimal, and UUID natively — exactly the types that
-# previously truncated manifest.json mid-write under stdlib json. We
-# bake it into every generated notebook pyproject.toml, so it's
-# guaranteed to be importable in the venv this harness runs in.
+# orjson serializes datetime, numpy scalars, Decimal and UUID natively (stdlib
+# json truncated manifest.json on them). Every generated pyproject includes it.
 import orjson
 
 
@@ -45,15 +42,11 @@ _immut = _load_local_module("immutability.py", "_nb_immutability")
 _display = _load_local_module("display/runtime.py", "_nb_display_runtime")
 _client_mod = _load_local_module("notebook_client.py", "_nb_client")
 
-# Harness-injected names that are NOT user inputs — excluded from mutation
-# fingerprinting. The ``display`` helper accumulates captured values, so it
-# "changes" every run and would otherwise be reported as an in-place mutation.
+# Harness-injected, not user inputs: excluded from mutation fingerprinting.
 _AMBIENT_NAMES = frozenset({"strata", *_display.DISPLAY_HELPER_NAMES})
 
 
-# ---------------------------------------------------------------------------
-# Manifest I/O
-# ---------------------------------------------------------------------------
+# --- Manifest I/O ---
 
 
 def load_manifest(manifest_path: str) -> dict:
@@ -61,9 +54,7 @@ def load_manifest(manifest_path: str) -> dict:
         return orjson.loads(f.read())
 
 
-# ---------------------------------------------------------------------------
-# Input deserialization
-# ---------------------------------------------------------------------------
+# --- Input deserialization ---
 
 
 def _deserialize_one(var_name: str, spec: dict, output_dir: Path) -> Any:
@@ -93,16 +84,13 @@ def _deserialize_one(var_name: str, spec: dict, output_dir: Path) -> Any:
             return _ser.deserialize_cell_module_with_injection(full_path, injected)
         return _ser.deserialize_value(spec.get("content_type", ""), full_path)
     except _ser.StrataPrecisionError as e:
-        # Same reasoning as the R-only case below: without the variable name
-        # attached this fails as a bare NameError in the cell body, which says
-        # nothing about precision.
+        # Attach the variable name; otherwise this surfaces as a bare NameError.
         raise _ser.StrataPrecisionError(
             e.stored_dtype, e.reconstructed_dtype, variable_name=var_name
         ) from e
     except _ser.StrataRArtifactError as e:
-        # R-only payload from an upstream R cell. Re-raise with the variable
-        # name attached so the cell fails loudly instead of leaving the name
-        # undefined and triggering an unhelpful NameError further down.
+        # R-only payload: attach the variable name so the cell fails loudly instead
+        # of hitting an unhelpful NameError later.
         raise _ser.StrataRArtifactError(e.file_path, variable_name=var_name) from e
     except Exception as e:
         print(f"Error deserializing {var_name}: {e}", file=sys.stderr)
@@ -215,13 +203,11 @@ def inject_client(manifest: dict, namespace: dict) -> Any:
     url = manifest.get("strata_url")
     if not url:
         return None
-    # Path-loaded, not ``import strata`` — the notebook venv has only
-    # pyarrow + stdlib (see module docstring / notebook_client.py).
+    # Path-loaded, not ``import strata``: the notebook venv has only pyarrow + stdlib.
     cell_id = manifest.get("strata_cell_id") or manifest.get("cell_id")
     # Auth headers when the client targets a remote shared store (empty locally).
     headers = manifest.get("strata_headers") or None
-    # Variable -> artifact URI, so ``strata.promote("rows")`` names an input
-    # the way the cell reads it rather than by an id the cell never sees.
+    # Lets ``strata.promote("rows")`` name an input the way the cell reads it.
     input_uris = {
         name: spec.get("uri", "")
         for name, spec in (manifest.get("inputs") or {}).items()
@@ -331,13 +317,13 @@ def execute_cell(
 
         display_values = display_capture.resolve(_display_value)
 
-        # Only warn for inputs mutated in place AND not exported — an exported
-        # (re-captured) mutation reaches downstream correctly.
+        # Only inputs mutated in place AND not exported: an exported mutation reaches
+        # downstream correctly.
         mutation_warnings = list(
             _immut.detect_mutations(namespace, input_snapshots, exported_names=set(new_vars))
         )
-        # Warn when two outputs share a mutable object (they decouple once stored
-        # as separate artifacts — e.g. an optimizer over a model's parameters).
+        # Outputs sharing a mutable object decouple once stored as separate artifacts
+        # (e.g. an optimizer over a model's parameters).
         mutation_warnings.extend(_immut.detect_shared_mutable_outputs(new_vars))
         return (
             new_vars,
@@ -380,18 +366,13 @@ def _eval_loop_until(expr: str, namespace: dict[str, Any]) -> dict[str, Any]:
     return {"until_reached": bool(result)}
 
 
-# ---------------------------------------------------------------------------
-# Batch execution (run-all single-process mode)
-# ---------------------------------------------------------------------------
+# --- Batch execution (run-all single-process mode) ---
 #
-# Batched run-all exec's many cells in one Python process with a shared
-# namespace. Parent owns all strata-side bookkeeping (provenance, cache,
-# persist) and asks this harness to run cell bodies + serialize outputs.
-# Communication uses two pipes:
-#   - frame_out  — harness → parent (events + requests, line-delimited JSON)
-#   - resp_in    — parent → harness (responses to cache_check / persist)
-# Blob bytes travel as files in ``output_dir/<cell_id>/{var_name}{ext}``,
-# never inline in the JSON. See issue #26 for full design.
+# Many cells exec in one process with a shared namespace. The parent owns
+# provenance, cache and persist; this harness runs bodies and serializes.
+# Pipes: frame_out (harness -> parent, line-delimited JSON) and resp_in
+# (parent -> harness, cache_check / persist responses). Blobs travel as files
+# in ``output_dir/<cell_id>/{var_name}{ext}``, never inline.
 
 
 _MISSING = object()
@@ -463,9 +444,7 @@ def _run_one_batched_cell(
 
     _send_frame(frame_out, "cell_start", {"cell_id": cell_id})
 
-    # Save existing namespace bindings under each mount name so we can
-    # restore on exit — protects any pre-existing user variable with the
-    # same name as a mount.
+    # Saved so a user variable named like a mount is restored on exit.
     mount_names = list(mount_manifest.keys())
     table_names = [injected for name in table_manifest for injected in (name, f"{name}_snapshot")]
     ambient_names = ["strata"] if cell.get("strata_url") else []
@@ -478,23 +457,19 @@ def _run_one_batched_cell(
 
     try:
         with apply_env_overrides({"env": cell_env}):
-            # Cache check — parent decides hit/miss.
+            # Parent decides hit/miss.
             _send_frame(frame_out, "cache_check", {"cell_id": cell_id})
             response = _recv_response(resp_in)
 
-            # After the response, because the parent answers it with the
-            # artifact uri of every input this cell reads -- a single-cell
-            # run reads the same map out of its manifest, and without it
-            # ``strata.promote("rows")`` cannot say which input it means.
-            # Still before the namespace is snapshotted below, so ``strata``
-            # is an injected input rather than something the cell produced.
+            # After the response, which carries every input's artifact uri (needed by
+            # ``strata.promote("rows")``). Before the namespace snapshot below, so
+            # ``strata`` counts as an injected input, not a cell output.
             ambient_client = inject_client(
                 {**cell, "inputs": response.get("input_uris") or {}}, namespace
             )
 
             if response.get("cache_hit"):
-                # Load cached outputs into namespace. Parent has already
-                # materialized blobs into cell_output_dir before responding.
+                # Parent has already materialized blobs into cell_output_dir.
                 cached_outputs: dict = response.get("cached_outputs") or {}
                 for var_name, spec in cached_outputs.items():
                     content_type = spec.get("content_type", "")
@@ -523,14 +498,10 @@ def _run_one_batched_cell(
                 )
                 return ("ok", None)
 
-            # Cache miss — execute the cell body.
+            # Cache miss: execute the body.
             #
-            # ``DisplayCapture.install`` uses ``setdefault`` (display/runtime.py
-            # L56) so once a key exists in the namespace it sticks. Single-cell
-            # mode gets away with this because each cell runs in a fresh
-            # process. In batch mode, namespace persists across cells; clear
-            # the per-cell display keys so the new capture's handlers actually
-            # install.
+            # ``DisplayCapture.install`` uses ``setdefault``, and the namespace persists
+            # across batch cells, so clear the display keys or the new handlers never install.
             for _display_key in _display.DISPLAY_HELPER_NAMES:
                 namespace.pop(_display_key, None)
             display_capture = _display.DisplayCapture()
@@ -540,10 +511,8 @@ def _run_one_batched_cell(
             old_stdout, old_stderr = sys.stdout, sys.stderr
             sys.stdout = stdout_capture
             sys.stderr = stderr_capture
-            # Snapshot this cell's read-set so we can warn if it mutates an
-            # upstream input in place. Unlike single-cell, batch can't recapture
-            # such mutations (the DAG is static), so this is warn-only — it
-            # closes the asymmetry where batch was the one path with no guard.
+            # Batch can't recapture in-place input mutations (the DAG is static), so
+            # this is warn-only.
             input_snapshots = _immut.snapshot_inputs(namespace, references)
             try:
                 try:
@@ -563,28 +532,19 @@ def _run_one_batched_cell(
                     )
                     return ("cell_error", "cell_error")
 
-                # Warn (don't recapture) on in-place mutation of an input the
-                # static analyzer couldn't see (aliases, helper-fn mutation,
-                # bare mutators). Parity with single-cell / pool detection.
+                # Catches mutations the static analyzer can't see (aliases, helper-fn
+                # mutation, bare mutators).
                 mutation_warnings = list(_immut.detect_mutations(namespace, input_snapshots))
-                # Shared-mutable-object detection across this cell's outputs
-                # (parity with single-cell) — see detect_shared_mutable_outputs.
                 mutation_warnings.extend(
                     _immut.detect_shared_mutable_outputs(
                         {vn: namespace[vn] for vn in consumed_vars if vn in namespace}
                     )
                 )
 
-                # Success: serialize consumed vars + displays.
-                #
-                # Known gap (see issue #26 round-7): instances of in-batch-
-                # defined classes serialize as ``pickle/object`` rather than
-                # ``module/cell-instance``. The single-cell flow tags the
-                # class via the parent's ``_write_module_export_outputs``
-                # *before* harness serialization. In batch we'd need to
-                # either pre-classify here or post-rewrite parent-side.
-                # Deferred to PR-b3 — affects content-type only; the
-                # pickled value still round-trips correctly.
+                # Known gap: instances of in-batch-defined classes serialize as
+                # ``pickle/object``, not ``module/cell-instance`` (single-cell tags the class
+                # in the parent before serialization). Content type only; the value
+                # round-trips.
                 outputs: dict[str, Any] = {}
                 for var_name in consumed_vars:
                     if var_name not in namespace:
@@ -608,24 +568,18 @@ def _run_one_batched_cell(
                 serialized_displays: list[dict[str, Any]] = []
                 for idx, display in enumerate(display_values):
                     try:
-                        # serialize_display_value applies the ``__display__N``
-                        # variable-name convention the serializer recognizes for
-                        # content-type detection (serializer.py
-                        # ``_is_display_variable_name``); ``display_N`` would be
-                        # classified as a regular pickle. It also reuses the
-                        # payload when this display *is* one of the variables
-                        # just written above.
+                        # Applies the ``__display__N`` naming the serializer detects (``display_N``
+                        # would be a plain pickle) and reuses the payload when the display is one of
+                        # the variables just written.
                         meta = _ser.serialize_display_value(display, cell_output_dir, idx, written)
                         serialized_displays.append(meta)
                     except Exception:
-                        # Display serialization errors don't abort the cell;
-                        # matches single-cell behavior.
+                        # Display serialization errors don't abort the cell, as in single-cell.
                         pass
             finally:
                 sys.stdout = old_stdout
                 sys.stderr = old_stderr
 
-            # Persist request — parent writes to artifact store.
             _send_frame(
                 frame_out,
                 "persist",
@@ -646,10 +600,8 @@ def _run_one_batched_cell(
                 return ("persist_failed", "persist_failed")
             return ("ok", None)
     finally:
-        # Close the ambient client (the batch process is reused across
-        # cells, so it must not leak sockets), then restore mount/table/
-        # client name bindings — discard any cell-introduced ones, rebind
-        # whatever was there before.
+        # The batch process is reused across cells, so close the client (no leaked
+        # sockets) and restore pre-cell name bindings.
         close_client(ambient_client)
         for name, previous in previous_bindings.items():
             if previous is _MISSING:
@@ -721,15 +673,10 @@ def execute_batch(
     namespace: dict[str, Any] = {}
     tainted_inputs: dict[str, Exception] = {}
 
-    # Seeding happens under the env every cell in this batch agrees on.
-    # Deserializing imports whatever library produced a value, and a library
-    # that reads its configuration once at import — jax and JAX_ENABLE_X64
-    # above all — is then configured for the whole batch, since a batch is one
-    # process. Only the entries common to every cell can be applied here: a
-    # value one cell sets and another does not is genuinely ambiguous for a
-    # shared namespace, and guessing would configure the batch for whichever
-    # cell happened to be first. The notebook-level ``[env]`` is common to all
-    # of them, which is the case that matters.
+    # Deserializing imports value libraries, and some read config once at import
+    # (jax and JAX_ENABLE_X64), configuring them for the whole one-process batch.
+    # Apply only entries common to every cell: a value one cell sets and another
+    # doesn't is ambiguous. The notebook-level ``[env]`` is the case that matters.
     batch_envs = [dict(cell.get("env") or {}) for cell in cells]
     shared_env = {
         key: value
@@ -813,9 +760,7 @@ def _emit_tainted_cell_error(
     )
 
 
-# ---------------------------------------------------------------------------
-# Entry point
-# ---------------------------------------------------------------------------
+# --- Entry point ---
 
 
 def batch_main() -> None:
@@ -837,8 +782,6 @@ def batch_main() -> None:
     resp_fd = int(os.environ["STRATA_BATCH_RESP_FD"])
     output_dir = Path(os.environ["STRATA_BATCH_OUTPUT_DIR"])
 
-    # Open the inherited fds as buffered file objects. closefd=True so they
-    # close when this process exits.
     frame_out = os.fdopen(frame_fd, "wb")
     resp_in = os.fdopen(resp_fd, "rb")
 
@@ -850,8 +793,7 @@ def batch_main() -> None:
         resp_in=resp_in,
     )
 
-    # execute_batch returns after emitting batch_end; flush + close the
-    # frame pipe so the parent's reader sees EOF promptly.
+    # Flush + close so the parent's reader sees EOF promptly.
     frame_out.flush()
     frame_out.close()
 
@@ -876,8 +818,7 @@ class _Tee(io.StringIO):
         self._stream = stream
 
     def write(self, text: str) -> int:
-        # The capture is what the result is built from, so it must not be lost
-        # to a closed or broken pipe on the way out.
+        # The capture is the result's source, so a broken pipe must not lose it.
         try:
             self._stream.write(text)
             self._stream.flush()
@@ -899,15 +840,10 @@ def main():
     manifest: dict = {}
     stdout_text = ""
     stderr_text = ""
-    # Owned here, not inside execute_cell: a cell that raises never returns its
-    # captured streams, and the print trail is exactly what's wanted when the
-    # cell failed. The batch and pool paths already keep theirs this way.
-    # Plain until the manifest asks for more. The capture is what the result
-    # is built from either way; writing through to this process's stdout costs
-    # a second copy of everything the cell prints, held in the reader's memory
-    # for the length of the run, and only buys something when a reader is
-    # forwarding it somewhere. A local run's reader takes the pipe and throws
-    # it away -- the console it shows comes from the result.
+    # Owned here, not in execute_cell: a raising cell never returns its captured
+    # streams, and the print trail matters most on failure.
+    # Plain unless the manifest asks to write through: that doubles memory in
+    # the reader and only helps when the reader forwards output somewhere.
     stdout_buffer: io.StringIO = io.StringIO()
     stderr_buffer: io.StringIO = io.StringIO()
     ambient_client: Any = None
@@ -920,12 +856,9 @@ def main():
         source = manifest.get("source", "")
         output_dir = Path(manifest.get("output_dir", "/tmp/strata_output"))
 
-        # The env goes on before anything is deserialized, not just around the
-        # cell body. Deserializing imports whatever library produced a value,
-        # and a library that reads its configuration once at import — jax and
-        # JAX_ENABLE_X64 above all — would otherwise be configured from the
-        # *server's* environment and then handed the notebook's too late to
-        # matter. That silently downcast float64 inputs to float32.
+        # Before deserializing, not just around the body: a library that reads
+        # config once at import (jax and JAX_ENABLE_X64) would otherwise take the
+        # server's env and silently downcast float64 inputs to float32.
         with apply_env_overrides(manifest):
             inputs = deserialize_inputs(manifest)
             inject_mounts(manifest, inputs)
@@ -950,9 +883,7 @@ def main():
                 stdout_capture=stdout_buffer,
                 stderr_capture=stderr_buffer,
             )
-            # Said here rather than where it happens: inputs are deserialized
-            # before the cell's console is being captured, so a message written
-            # there goes to a pipe the local caller discards.
+            # Reported here: inputs deserialize before console capture starts.
             if _ser.x64_was_enabled_here():
                 stderr_text += _ser.X64_NOTE
 
@@ -963,8 +894,7 @@ def main():
             except Exception as e:
                 serialized[var_name] = {"error": str(e), "type": type(value).__name__}
 
-        # Pairs the display loop can reuse: a cell whose last expression is one
-        # of its own variables would otherwise serialize that object twice.
+        # Lets the display loop reuse a payload when the last expression is a variable.
         written = [
             (value, serialized[name]) for name, value in outputs.items() if name in serialized
         ]
@@ -997,10 +927,7 @@ def main():
             result["loop"] = loop_state
 
     except Exception as e:
-        # sys.exit(1) raises SystemExit, which triggers the finally
-        # block — the parent gets exit=1 plus a result.json with
-        # success=False. The exit code is informational; the parent
-        # only checks for the presence + contents of result.json.
+        # SystemExit still runs the finally block; the parent checks result.json, not the exit code.
         result = {
             "success": False,
             "error": str(e),
@@ -1014,26 +941,12 @@ def main():
 
     finally:
         close_client(ambient_client)
-        # Write the harness output to a *separate* filename so it
-        # can't be confused with the input manifest the parent wrote.
-        # The previous "manifest.json" overlap forced a fragile
-        # ``"success" not in result`` heuristic on the parent side to
-        # tell "harness crashed before finally" from "this is still
-        # the input we wrote" — fragile because adding any field
-        # named ``success`` to the input manifest would silently
-        # mask real crashes.
-        #
-        # Hyphen in the filename guarantees no collision with the
-        # variable files: variables get the JSON-serialized output
-        # written at ``output_dir / <var_name>.json``, and "harness-
-        # result" can't be a Python identifier (so it can't be a
-        # variable name).
+        # A separate name from the input manifest, so the parent can tell a crash
+        # from unread input. The hyphen can't be a Python identifier, so it can't
+        # collide with a variable's ``<var_name>.json``.
         result_path = Path(manifest.get("output_dir", "/tmp/strata_output")) / "harness-result.json"
         result_path.parent.mkdir(parents=True, exist_ok=True)
-        # orjson handles datetime, Decimal, numpy, UUID natively;
-        # OPT_NON_STR_KEYS covers the rare case of non-string dict
-        # keys in previews. default=str catches anything orjson can't
-        # encode so previews never truncate the manifest mid-write.
+        # default=str catches what orjson can't encode, so the write never truncates.
         with open(result_path, "wb") as f:
             f.write(
                 orjson.dumps(

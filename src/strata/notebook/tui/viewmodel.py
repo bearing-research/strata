@@ -27,31 +27,26 @@ class CellView:
     language: str = "python"
     source: str = ""
     status: str = "idle"
-    # Hydrated display outputs from the snapshot (markdown_text / inline_data_url
-    # / preview), rendered in the output panel.
+    # Hydrated snapshot outputs (markdown_text / inline_data_url / preview).
     display_outputs: list[dict[str, Any]] = field(default_factory=list)
-    # Variable outputs from a live ``cell_output`` frame (name + preview).
+    # From a live ``cell_output`` frame (name + preview).
     outputs: list[dict[str, Any]] = field(default_factory=list)
-    # Streamed prompt-cell text (``cell_output_delta``).
+    # ``cell_output_delta``
     stream_text: str = ""
-    # Accumulated stdout/stderr (``cell_console``).
+    # ``cell_console``
     console: str = ""
     error: str | None = None
-    # Loop-cell progress, e.g. "iter 3/10" (``cell_iteration_progress``).
+    # e.g. "iter 3/10" (``cell_iteration_progress``)
     iteration: str = ""
-    # Last run timing from a ``cell_output`` frame.
+    # From a ``cell_output`` frame.
     duration_ms: int | None = None
     cache_hit: bool = False
-    # Cell-unit-test outcome badge from ``cell_test_*`` frames, e.g. "✓ 4/4",
-    # "✗ 2/4", or "tests…" while running. The other 0.4.0 headline — surfaced so
-    # the spectator sees the driver run a cell's tests.
+    # From ``cell_test_*`` frames: "✓ 4/4", "✗ 2/4", or "tests…" while running.
     test_summary: str = ""
-    # Per-test outcomes (name / outcome / message) from the last cell_test_results
-    # frame, rendered in the Results tab (the "pytest window").
+    # Per-test outcomes from the last cell_test_results frame (the Results tab).
     test_cases: list[dict[str, Any]] = field(default_factory=list)
     test_unavailable: bool = False
-    # The cell's test source (``cells/{id}.test.py``), shown in the top Tests tab.
-    # Carried in every notebook_state snapshot, so read fresh (not frame-only).
+    # ``cells/{id}.test.py``. Carried in every notebook_state snapshot, so read fresh.
     test_source: str = ""
 
 
@@ -62,19 +57,15 @@ class NotebookViewModel:
         self.notebook_name: str = ""
         self.cell_order: list[str] = []
         self.cells: dict[str, CellView] = {}
-        # DAG edges as (from_cell_id, to_cell_id), from the notebook_state `dag`
-        # block (notebook_sync includes it) and refreshed by dag_update frames.
+        # (from_cell_id, to_cell_id), from the snapshot ``dag`` block and dag_update frames.
         self.edges: list[tuple[str, str]] = []
-        # Notebook-level activity line (cascade / environment job / agent), shown
-        # in the header. Updated by cascade_* / environment_job_* / agent_note frames.
+        # Notebook-level activity line in the header (cascade / environment job / agent).
         self.banner: str = ""
-        # Agent activity feed (chronological): an external agent's narrated tool
-        # actions and explicit notes. The headline of the spectator: watch an
-        # agent drive the notebook.
+        # External agent's narrated tool actions and explicit notes, chronological.
         self.agent_feed: list[str] = []
         self.agent_status: str = ""
 
-    # -- snapshot ------------------------------------------------------------
+    # --- snapshot ---
 
     def apply_notebook_state(self, payload: dict[str, Any]) -> None:
         """Seed (or re-seed) all cells from a ``notebook_state`` snapshot.
@@ -100,10 +91,7 @@ class NotebookViewModel:
             source = str(raw.get("source") or "")
             new_cells[cid] = CellView(
                 id=cid,
-                # The display name is the ``# @name`` annotation (which always
-                # wins), falling back to the persisted name — same precedence the
-                # web UI and export use. The serialized ``name`` field is the
-                # persisted notebook.toml name, which the annotation overrides.
+                # ``# @name`` wins over the persisted notebook.toml name, as in the web UI.
                 name=parse_annotations(source).name or str(raw.get("name") or ""),
                 language=str(raw.get("language") or "python"),
                 source=source,
@@ -116,9 +104,8 @@ class NotebookViewModel:
                 error=prior.error if prior else None,
                 duration_ms=prior.duration_ms if prior else None,
                 cache_hit=prior.cache_hit if prior else False,
-                # Test results arrive only via cell_test_* frames (a snapshot
-                # never carries them), so preserve them across a resync — else the
-                # 2.5s auto-resync blanks the badge + Tests tab.
+                # Test results arrive only via cell_test_* frames, so keep them across a
+                # resync or the 2.5s auto-resync blanks the badge and Tests tab.
                 test_summary=prior.test_summary if prior else "",
                 test_cases=prior.test_cases if prior else [],
                 test_unavailable=prior.test_unavailable if prior else False,
@@ -128,7 +115,7 @@ class NotebookViewModel:
         self.cells = new_cells
         self.edges = _parse_edges(payload.get("dag"))
 
-    # -- incremental frames --------------------------------------------------
+    # --- incremental frames ---
 
     def apply_frame(self, msg_type: str, payload: dict[str, Any]) -> set[str]:
         """Fold one live frame in; return the set of affected cell ids.
@@ -145,7 +132,6 @@ class NotebookViewModel:
             self.edges = _parse_edges(payload)
             return set(self.cell_order)  # whole-graph change
 
-        # Notebook-level activity (not tied to one cell) → header banner.
         if msg_type in ("cascade_prompt", "cascade_progress"):
             self.banner = _cascade_banner(msg_type, payload)
             return set()
@@ -189,8 +175,7 @@ class NotebookViewModel:
             max_iter = payload.get("max_iter")
             cell.iteration = f"iter {iteration}/{max_iter}" if iteration and max_iter else ""
         elif msg_type == "cell_test_status":
-            # "running" sets a pending badge; the final ready/error state's real
-            # counts arrive in the cell_test_results frame, so keep that badge.
+            # The real counts for ready/error arrive in cell_test_results, so keep that badge.
             if str(payload.get("status") or "") == "running":
                 cell.test_summary = "tests…"
                 self.banner = f"🧪 {cell.name or cid}: running tests"
@@ -208,9 +193,7 @@ class NotebookViewModel:
 
     def _apply_agent_note(self, payload: dict[str, Any]) -> None:
         """Fold an ``agent_note`` frame into the chronological agent feed + status."""
-        # An external agent (driving via MCP/CLI) narrating an action
-        # (source="mcp") or an explicit note (source="agent"). "↹" marks an
-        # auto-narrated tool action; "✎" an explicit note (#393).
+        # "↹" marks an auto-narrated tool action (source="mcp"); "✎" an explicit note.
         source = str(payload.get("source") or "agent")
         text = str(payload.get("text") or "")
         glyph = "✎" if source == "agent" else "↹"

@@ -22,9 +22,8 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# The inspect subprocess runs this sibling script. It loads serializer.py from
-# its own directory (this package), so — unlike a temp-file harness — neither
-# the script nor serializer.py needs copying into the per-session temp dir.
+# The script loads serializer.py from this package, so nothing needs copying
+# into the per-session temp dir.
 _HARNESS_PATH = Path(__file__).parent / "inspect_harness.py"
 
 
@@ -82,27 +81,23 @@ class InspectSession:
             spawn_kwargs,
         )
 
-        # An inspect process evaluates whatever is typed into it, so it is cell
-        # code in every sense that matters, and gets the same treatment.
+        # An inspect process evaluates whatever is typed into it, so it runs as cell code.
         try:
             harness_user = resolve_harness_user()
         except LocalExecutionRefused as exc:
             return str(exc)
-        # Only in the notebook's interpreter, as a cell runs: never with
-        # whatever ``python`` is on PATH.
+        # The notebook's interpreter only, never whatever ``python`` is on PATH.
         python_executable = session.venv_python
         if python_executable is None:
             return _no_interpreter_message(session)
 
-        # Create temp dir for input files (persists for the session lifetime).
+        # Persists for the session lifetime.
         self._manifest_dir = Path(tempfile.mkdtemp(prefix="strata_inspect_"))
 
-        # Materialise upstreams then load input blobs for this cell.
         executor = CellExecutor(session, session.warm_pool)
         await executor._materialize_upstreams(self.cell_id)
         input_specs = executor._load_input_blobs(self.cell_id, self._manifest_dir)
 
-        # Write manifest.
         manifest = {
             "inputs": input_specs,
             "output_dir": str(self._manifest_dir),
@@ -111,7 +106,6 @@ class InspectSession:
         with open(manifest_path, "w") as f:
             json.dump(manifest, f)
 
-        # Spawn subprocess with the notebook interpreter used for normal runs.
         cmd = [
             str(python_executable),
             str(_HARNESS_PATH),
@@ -130,7 +124,6 @@ class InspectSession:
             **spawn_kwargs(harness_user),
         )
 
-        # Wait for the "ready" signal.
         try:
             assert self.process.stdout is not None
             line = await asyncio.wait_for(
@@ -210,14 +203,13 @@ class InspectSession:
                         self.process.kill()
                         await self.process.wait()
             except (OSError, ValueError):
-                # stdin already closed / process gone — force termination.
+                # stdin already closed or process gone.
                 self.process.kill()
                 await self.process.wait()
 
         self.ready = False
         self.process = None
 
-        # Clean up temp dir.
         if self._manifest_dir and self._manifest_dir.exists():
             shutil.rmtree(self._manifest_dir, ignore_errors=True)
             self._manifest_dir = None
@@ -253,7 +245,6 @@ class InspectManager:
         tuple of (InspectSession, str)
             The session and a status message.
         """
-        # Close existing session for this cell.
         if cell_id in self._sessions:
             await self._sessions[cell_id].close()
             del self._sessions[cell_id]
@@ -281,7 +272,6 @@ class InspectManager:
         """
         session = self._sessions.get(cell_id)
         if session and not session.ready:
-            # Session died — clean up.
             await session.close()
             del self._sessions[cell_id]
             return None

@@ -273,10 +273,10 @@ class CellStatus(StrEnum):
 class StalenessReason(StrEnum):
     """Reason a cell is stale (has invalidated cache)."""
 
-    SELF = "self"  # Cell source code changed
-    UPSTREAM = "upstream"  # Upstream artifact changed
-    ENV = "env"  # Environment/lockfile changed
-    FORCED = "forced"  # Forced re-run despite cache hit
+    SELF = "self"
+    UPSTREAM = "upstream"
+    ENV = "env"
+    FORCED = "forced"  # Re-run despite a cache hit
 
 
 class CellLanguage(StrEnum):
@@ -286,17 +286,8 @@ class CellLanguage(StrEnum):
     PROMPT = "prompt"
     SQL = "sql"
     MARKDOWN = "markdown"
-    # R is in flight via #53 — analyzer landed via #56, executor lands
-    # via #57. The enum value exists so notebooks can declare R cells
-    # before #57 ships; trying to execute one before #57 lands will
-    # raise ``UnknownLanguageError`` from the executor registry, which
-    # is the right shape (loud failure, not silent fallthrough to
-    # Python).
     R = "r"
-    # Interactive widget cells (P1: analyzer + DAG participation only). A
-    # widget cell is declarative — it produces value artifacts from
-    # user-set controls with no subprocess. The executor lands in P2; until
-    # then, executing one raises ``UnknownLanguageError`` (loud, not silent).
+    # Declarative: produces value artifacts from user-set controls, no subprocess.
     WIDGET = "widget"
 
 
@@ -373,9 +364,8 @@ class VariantGroupConfig(BaseModel):
         ),
         pattern=r"^([a-zA-Z_][a-zA-Z0-9_]*)?$",
     )
-    # No strict pattern: an unknown value must not crash notebook parsing.
-    # Execution treats anything other than ``"sweep"`` as switch mode, and
-    # ``annotation_validation`` surfaces a ``variant_mode_invalid`` diagnostic.
+    # No strict pattern: an unknown value must not crash parsing. Anything but
+    # ``"sweep"`` runs as switch mode; validation reports ``variant_mode_invalid``.
     mode: str = Field(
         "switch",
         description=(
@@ -543,7 +533,7 @@ class NotebookToml(BaseModel):
             "a successful ``renv::restore()``."
         ),
     )
-    # Preserved in TOML round-trip but not used at runtime
+    # Round-tripped in TOML but unused at runtime
     artifacts: dict = Field(default_factory=dict)
     environment: dict = Field(default_factory=dict)
     cache: dict = Field(default_factory=dict)
@@ -586,10 +576,7 @@ class CellTestCase(BaseModel):
 
     name: str = Field(..., description="Test function name (pytest nodeid tail)")
     nodeid: str = Field(default="", description="Full pytest nodeid")
-    # Literal, not str-with-a-prose-description: the frontend hand-wrote this
-    # union years ago, so the constraint was real and only the model was vague.
-    # Generated TypeScript now matches that declaration instead of colliding
-    # with it.
+    # Literal so the generated TypeScript matches the frontend's union.
     outcome: Literal["passed", "failed", "error", "skipped"] = Field(
         ..., description="passed | failed | error | skipped"
     )
@@ -859,8 +846,7 @@ class CellState(BaseModel):
         overlays (display-output hydration, causality, shadow warnings)
         are added separately by ``NotebookSession.serialize_cell``.
         """
-        # Local imports to avoid a cycle: annotations.py and
-        # module_export.py both import from this module.
+        # Local imports: annotations.py and module_export.py import this module.
         from strata.notebook.annotations import parse_annotations
         from strata.notebook.module_export import build_module_export_plan
 
@@ -872,11 +858,8 @@ class CellState(BaseModel):
         )
         data["annotations"] = parse_annotations(self.source).to_wire_payload()
 
-        # A widget cell's controls (parsed from its own source) and what each
-        # is currently set to. It lives here rather than on the session overlay
-        # because it needs nothing the session holds, and every reader of a
-        # cell needs it: a widget's value is runtime state, so source and
-        # outputs alone do not say what the notebook is computing.
+        # A widget's value is runtime state that every reader of the cell needs, and
+        # needs nothing from the session, so it lives here rather than on the overlay.
         if self.language == CellLanguage.WIDGET:
             from strata.notebook.widget_analyzer import analyze_widget_cell
 
@@ -887,24 +870,19 @@ class CellState(BaseModel):
                 ],
                 "values": dict(self.widget_values),
             }
-        # The stored error outlives the source that produced it; the reported
-        # one must not. Only pay for the hash when there is an error to gate.
+        # The stored error outlives its source; the reported one must not.
+        # Hash only when there is an error to gate.
         if data.get("error") is not None:
             data["error"] = self.current_error()
 
-        # Module-cell classification — drives the "module" pill in the
-        # UI and the richer tooltip on the module_export_blocked
-        # diagnostic. Only meaningful for Python cells; prompt and
-        # markdown cells have no Python identifiers to export.
+        # Drives the "module" pill and the module_export_blocked tooltip.
         if self.language == CellLanguage.PYTHON:
             export_plan = build_module_export_plan(self.source)
             has_code_export = any(
                 symbol.kind in ("function", "async function", "class")
                 for symbol in export_plan.exported_symbols.values()
             )
-            # "Module cell" = pure source *and* actually exports code.
-            # A lone ``x = 1`` is pure but it's not a module cell in
-            # any useful sense — routing still takes the data path.
+            # Pure source that also exports code; a lone ``x = 1`` takes the data path.
             data["is_module_cell"] = export_plan.is_exportable and has_code_export
             if data["is_module_cell"]:
                 data["module_exports"] = [

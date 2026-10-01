@@ -56,25 +56,17 @@ from strata.notebook.sql.adapter import (
 from strata.notebook.sql.registry import register_adapter
 
 _CAPABILITIES = AdapterCapabilities(
-    # DuckDB exposes ``estimated_size`` per table, but it's a
-    # coarse approximation that doesn't change reliably for small
-    # writes. Treat freshness as DB-wide (same as SQLite) rather
-    # than promise per-table semantics we can't keep.
+    # DuckDB's per-table ``estimated_size`` doesn't change reliably for small
+    # writes, so freshness is DB-wide (as in SQLite).
     per_table_freshness=False,
     supports_snapshot=False,
-    # ``PRAGMA database_size`` and ``duckdb_columns()`` are
-    # statement-level reads — they don't get frozen inside an
-    # active transaction the way ``pg_stat_*`` does. Same
-    # connection can probe and query.
+    # ``PRAGMA database_size`` and ``duckdb_columns()`` aren't frozen inside a
+    # transaction (unlike ``pg_stat_*``), so one connection can probe and query.
     needs_separate_probe_conn=False,
 )
 
-# DuckDB unquoted identifier — same shape as Postgres. Used to
-# splice the schema/database name into ``duckdb_columns()`` filter
-# predicates. Identifier validation is what keeps the splice
-# injection-safe; bind parameters work for the values, but DuckDB's
-# system functions complain less when the schema name is an
-# identifier literal.
+# Spliced into ``duckdb_columns()`` predicates; this validation is what keeps
+# the splice injection-safe.
 _DUCKDB_IDENT_RE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
 
 
@@ -90,20 +82,13 @@ class DuckDBAdapter:
         *,
         connect_fn: Callable[..., Any] | None = None,
     ) -> None:
-        # Test seam: pass a fake connect callable to bypass the real
-        # duckdb import in unit tests. Signature matches
-        # ``duckdb.connect(database, read_only=...)``.
+        # Test seam; matches ``duckdb.connect(database, read_only=...)``.
         self._connect_fn = connect_fn
 
-    # --- identity ---------------------------------------------------------
+    # --- identity ---
 
     def canonicalize_connection_id(self, spec: Any, *, read_only: bool = True) -> str:
-        # ``read_only`` is part of the Protocol so adapters that
-        # route reads vs writes through different principals
-        # (Snowflake's ``write_role``, BigQuery's
-        # ``write_credentials_path``) can include only the
-        # relevant fields. DuckDB embedded has no read/write
-        # principal split, so the flag is a no-op here.
+        # DuckDB embedded has no read/write principal split, so ``read_only`` is a no-op.
         del read_only
         return hash_connection_identity(self.name, self._extract_identity(spec))
 
@@ -132,7 +117,7 @@ class DuckDBAdapter:
             identity["mounts"] = sorted(mounts)
         return identity
 
-    # --- connection lifecycle --------------------------------------------
+    # --- connection lifecycle ---
 
     def open(self, spec: Any, *, read_only: bool) -> Any:
         """Open a DuckDB connection in the requested mode.
@@ -169,24 +154,17 @@ class DuckDBAdapter:
                 path, getattr(spec, "catalog", None), catalog, mounts or [], confine
             )
         is_memory = path == ":memory:"
-        # ``duckdb.connect`` with ``read_only=True`` requires the
-        # file to exist; a brand-new path can't be opened RO. For
-        # memory connections, the flag would also fail. Fall back
-        # to a writable handle and let the RO transaction enforce.
+        # ``read_only=True`` needs an existing file and fails for memory connections;
+        # fall back to a writable handle and let the RO transaction enforce.
         connect_ro = read_only and not is_memory and os.path.exists(path)
         conn = self._invoke_connect(path, read_only=connect_ro)
         if confine is not None:
             _confine(conn, confine)
         if not read_only:
             return conn
-        # DuckDB's ``conn.cursor()`` returns a *separate* child
-        # connection — one that doesn't share transaction state
-        # with the parent. So issuing ``BEGIN TRANSACTION READ
-        # ONLY`` on ``conn`` wouldn't apply to cursor-side
-        # statements. Wrap so every spawned cursor enters its own
-        # RO transaction. For file-backed RO opens this is
-        # belt-and-suspenders; for ``:memory:`` it's the only thing
-        # blocking writes.
+        # ``conn.cursor()`` is a separate child connection without the parent's
+        # transaction, so each cursor opens its own RO transaction. For ``:memory:``
+        # this is the only thing blocking writes.
         conn.execute("BEGIN TRANSACTION READ ONLY")
         return _ReadOnlyDuckDB(conn)
 
@@ -253,7 +231,7 @@ class DuckDBAdapter:
             ) from exc
         return duckdb.connect(path, read_only=read_only)
 
-    # --- probes -----------------------------------------------------------
+    # --- probes ---
 
     def probe_freshness(
         self,
@@ -282,9 +260,7 @@ class DuckDBAdapter:
                 cursor.execute("PRAGMA database_size")
                 rows = cursor.fetchall() or []
             except Exception:  # noqa: BLE001
-                # In-memory connections may not have a database_size
-                # row in some DuckDB versions. Fall back to a
-                # session-only token rather than crash.
+                # Some DuckDB versions have no database_size row for in-memory connections.
                 return FreshnessToken(
                     value=b"duckdb-no-database-size",
                     is_session_only=True,
@@ -296,10 +272,7 @@ class DuckDBAdapter:
                 is_session_only=True,
             )
 
-        # ``PRAGMA database_size`` columns vary slightly across DuckDB
-        # versions but the row identity (db_name, total bytes,
-        # used_blocks, free_blocks) is stable. Hash the whole row
-        # rather than indexing — robust to additive schema changes.
+        # Columns vary across DuckDB versions; hash the whole row, robust to additive changes.
         h.update(b"database_size:")
         for row in sorted(rows, key=lambda r: str(r[0]) if r else ""):
             for cell in row:
@@ -334,12 +307,8 @@ class DuckDBAdapter:
                 rows = self._fetch_columns_for_table(cursor, table)
                 h.update(table.render().encode())
                 h.update(b"\x00")
-                # Sort columns by name for deterministic ordering;
-                # ``duckdb_columns()`` returns them in declaration
-                # order which is what we want for *display*, but
-                # for fingerprinting we need a canonical order so
-                # ``ALTER TABLE ... REORDER`` (if it lands) doesn't
-                # flip the token without a real schema change.
+                # Canonical name order so a column reorder doesn't flip the token without a
+                # real schema change.
                 for col_name, data_type, nullable in sorted(rows, key=lambda r: r[0]):
                     h.update(str(col_name).encode())
                     h.update(b":")
@@ -393,9 +362,7 @@ class DuckDBAdapter:
                 continue
             name = str(row[0])
             data_type = str(row[1])
-            # ``is_nullable`` is BOOLEAN in duckdb_columns() (unlike
-            # information_schema which uses 'YES'/'NO'). Coerce
-            # defensively so either shape works.
+            # BOOLEAN here, 'YES'/'NO' in information_schema; coerce either.
             nullable = self._coerce_nullable(row[2])
             out.append((name, data_type, nullable))
         return out
@@ -497,10 +464,7 @@ class _ReadOnlyDuckDB:
         return self._conn.__exit__(exc_type, exc, tb)
 
     def __getattr__(self, name: str) -> Any:
-        # Forward anything we don't override directly to the
-        # underlying handle. ``__getattr__`` is only consulted on
-        # AttributeError lookups, so the explicit overrides above
-        # take precedence.
+        # ``__getattr__`` only runs on failed lookups, so the overrides above win.
         return getattr(self._conn, name)
 
 
@@ -658,5 +622,4 @@ def register() -> None:
     register_adapter(_ADAPTER)
 
 
-# Auto-register on first import.
 register()

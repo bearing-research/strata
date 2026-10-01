@@ -26,13 +26,9 @@ logger = logging.getLogger(__name__)
 # build_id -> (notebook_id, cell_id)
 _routes: dict[str, tuple[str, str]] = {}
 
-# (notebook_id, cell_id) that streamed at least one chunk during this run.
-# The finished-execution broadcast sends the complete stdout and stderr, which
-# would show everything a second time under what was already streamed; it
-# consults this and skips what it has already shown.
-# How much of each stream a cell has already shown while it ran, so the
-# report at the end can send what did not make it rather than all of it again
-# (the frontend appends) or nothing (a dropped chunk would be lost for good).
+# (notebook_id, cell_id) -> chars of each stream already shown while running.
+# The final report sends only the rest: the frontend appends, so resending all
+# would duplicate, and sending none would lose a dropped chunk.
 _streamed: dict[tuple[str, str], dict[str, int]] = {}
 
 

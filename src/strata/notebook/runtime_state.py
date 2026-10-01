@@ -26,10 +26,8 @@ from strata.notebook.quiesce import refuses_while_held
 SCHEMA_VERSION = 1
 _RUNTIME_FILENAME = "runtime.json"
 
-# Most recent execution timings kept per cell. The profiling summary walks the
-# sequence in order (a cache hit credits the last uncached duration before it),
-# so it needs samples rather than a scalar — but this file is rewritten on
-# every execution, so the list has to stay short.
+# Profiling needs the sequence (a cache hit credits the last uncached duration
+# before it), but this file is rewritten on every execution, so keep it short.
 MAX_EXECUTION_SAMPLES = 50
 
 
@@ -40,26 +38,22 @@ class CellRuntime:
     last_provenance_hash: str | None = None
     last_source_hash: str | None = None
     last_env_hash: str | None = None
-    # What the cell's own cache scheme rests on, for a language that has one
-    # (the connection a SQL cell read, the model a prompt cell asked). The
-    # generic triplet above does not cover it, so a reopen comparing only that
-    # would call a cell ready without having established anything of the sort.
+    # A language's own cache identity (a SQL cell's connection, a prompt
+    # cell's model). The generic triplet above misses it, so a reopen comparing
+    # only that would wrongly call the cell ready.
     last_reopen_identity: str | None = None
-    # What the last run said went wrong, and the source hash it said it about.
-    # Kept next to the console file so a later process -- an offline CLI call,
-    # a reopen -- can read a failure instead of having to re-run it.
+    # Last failure and the source hash it applies to, so a later process
+    # (offline CLI, reopen) can read it without re-running.
     last_error: str | None = None
     last_error_source_hash: str | None = None
     display_outputs: list[dict[str, Any]] = field(default_factory=list)
     display: dict[str, Any] | None = None
     test_result: dict[str, Any] | None = None
-    # Current values of a widget cell's controls, keyed by variable name. The
-    # committed source declares the controls + defaults; the user-set value is
-    # runtime state (a slider drag must not churn ``notebook.toml``).
+    # Widget control values by variable name: runtime state, so a slider drag
+    # does not churn ``notebook.toml``.
     widget_values: dict[str, Any] = field(default_factory=dict)
     # Recent ``{duration_ms, cache_hit}`` timings, oldest first, capped at
-    # ``MAX_EXECUTION_SAMPLES``. Feeds the profiling summary's cache-savings
-    # figure, which otherwise restarted from zero every time the server did.
+    # ``MAX_EXECUTION_SAMPLES``; persisted so cache savings survive a restart.
     execution_samples: list[dict[str, Any]] = field(default_factory=list)
 
     def is_empty(self) -> bool:
@@ -99,11 +93,10 @@ class EnvironmentRuntime:
     resolved_package_count: int = 0
     has_lockfile: bool = False
     last_synced_at: int = 0
-    # The lockfile hash a ``uv sync`` actually *realized*, as opposed to
-    # ``lockfile_hash``, which is whatever was on disk when metadata was last
-    # written. The two differ exactly when a sync failed and the previous venv
-    # was kept — the case where a cell then runs in one environment while its
-    # provenance claims another. Empty until a successful sync records one.
+    # The lockfile hash a ``uv sync`` actually realized. It differs from
+    # ``lockfile_hash`` (what was on disk) when a sync failed and the old venv
+    # was kept, so a cell would run in one env while provenance claims another.
+    # Empty until a sync succeeds.
     synced_lockfile_hash: str = ""
 
 
@@ -263,10 +256,8 @@ def persist_environment_synced_lockfile_hash(notebook_dir: Path, lockfile_hash: 
     """
     state = load_runtime_state(notebook_dir)
     if state.environment.synced_lockfile_hash == lockfile_hash:
-        # Reopening an unchanged notebook is the common case, and this file
-        # holds every cell's display outputs and timings. Rewriting it to store
-        # a value it already has costs a full serialize and widens the window
-        # in which a concurrent execution's write is clobbered.
+        # The common reopen case. A rewrite costs a full serialize and widens
+        # the window for clobbering a concurrent execution's write.
         return
     state.environment.synced_lockfile_hash = lockfile_hash
     save_runtime_state(notebook_dir, state)
@@ -304,8 +295,7 @@ def persist_cell_execution_sample(
     state = load_runtime_state(notebook_dir)
     entry = state.get_or_create_cell(cell_id)
     sample: dict[str, Any] = {"duration_ms": float(duration_ms), "cache_hit": bool(cache_hit)}
-    # Written only for a team hit, so an ordinary notebook's runtime file does
-    # not grow two dead keys on every execution.
+    # Only for a team hit, so ordinary runs do not grow dead keys.
     if from_team:
         sample["from_team"] = True
     if team_principal:

@@ -34,7 +34,7 @@ from strata.notebook.parser import parse_notebook
 if TYPE_CHECKING:
     import re
 
-_DEFAULT_MAX_OUTPUT_BYTES = 1_048_576  # 1 MB per individual rendered output
+_DEFAULT_MAX_OUTPUT_BYTES = 1_048_576  # per rendered output
 
 
 class ExportFormat(StrEnum):
@@ -51,15 +51,11 @@ class ExportOptions:
     output_format: ExportFormat = ExportFormat.MARKDOWN
     include_inactive_variants: bool = False
     include_console: bool = True
-    # App-view snapshot: render only what the read-only app view shows —
-    # widgets (as their current control values), markdown, and display outputs
-    # — with no cell sources, chips, or console. A frozen, self-contained
-    # picture of the dashboard, portable to anywhere the server can't reach.
+    # Render only what the read-only app view shows (widgets, markdown, display
+    # outputs), with no sources, chips or console.
     app_view: bool = False
-    # Per-output byte cap. Affects console snapshots, JSON previews,
-    # and inline image data URLs. DataFrame previews are row-capped
-    # separately (20 rows) so the byte cap rarely binds on them.
-    # Zero disables the cap.
+    # Per-output byte cap for console, JSON previews and inline images. DataFrame
+    # previews are row-capped separately. Zero disables it.
     max_output_bytes: int = _DEFAULT_MAX_OUTPUT_BYTES
 
 
@@ -89,9 +85,7 @@ def export_notebook(
     blocks: list[Block] = []
 
     if options.app_view:
-        # App-view snapshot: the notebook name as the page title, then only
-        # the cells the app view surfaces — rendered as presentation, not
-        # source. No README banner (the app view has none).
+        # No README banner: the app view has none.
         blocks.append(HeadingBlock(state.name, level=1))
         for cell in state.cells:
             if not options.include_inactive_variants and cell.variant_active is False:
@@ -105,8 +99,7 @@ def export_notebook(
 
     readme = _load_readme(notebook_dir)
     if readme is not None:
-        # README already opens with its own h1; adding a "Notebook: <name>"
-        # header on top would create two competing page titles in mkdocs.
+        # README opens with its own h1; a second header would compete in mkdocs.
         blocks.append(MarkdownBlock(readme))
     else:
         blocks.append(HeadingBlock(f"Notebook: {state.name}", level=1))
@@ -121,8 +114,7 @@ def export_notebook(
     return _emit_markdown(blocks)
 
 
-# ---------------------------------------------------------------------------
-# Block tree
+# --- Block tree ---
 
 
 @dataclass
@@ -188,8 +180,7 @@ class TableBlock(Block):
     total_rows: int | None = None  # rows reported by the upstream cell
 
 
-# ---------------------------------------------------------------------------
-# Cell rendering
+# --- Cell rendering ---
 
 
 def _is_app_hidden(source: str) -> bool:
@@ -276,16 +267,11 @@ def _render_cell(
     annotations = parse_annotations(cell.source)
 
     if cell.language == CellLanguage.MARKDOWN:
-        # Markdown cells are *content*, not annotated source. Their
-        # body usually opens with a heading already; adding our own
-        # banner above it would compete for the section title (we hit
-        # the same trade-off with the notebook README at the top of
-        # the export). Skip the banner + chips and emit the body
-        # verbatim — the markdown content IS the section divider.
+        # Markdown cells usually open with their own heading, so no banner or chips:
+        # the body is the section divider.
         blocks.append(MarkdownBlock(cell.source))
         return blocks
 
-    # Code cells: cell-banner heading + chip metadata above the source.
     label = annotations.name or cell.id
     blocks.append(HeadingBlock(label, level=2))
 
@@ -293,13 +279,12 @@ def _render_cell(
     if chips:
         blocks.append(ChipsBlock(chips))
 
-    # Prompt cells: source template only — never the response.
+    # Prompt cells: source template only, never the response.
     if cell.language == CellLanguage.PROMPT:
         blocks.append(NoteBlock("Prompt cell: response intentionally excluded from export."))
         blocks.append(CodeBlock(language="text", body=cell.source))
         return blocks
 
-    # Python / SQL / loop: source + outputs + console.
     fence_lang = _source_fence_language(cell.language)
     blocks.append(CodeBlock(language=fence_lang, body=cell.source))
 
@@ -320,8 +305,8 @@ def _render_cell(
     return blocks
 
 
-_ANSI_ESCAPE_RE = None  # lazy-compiled in _strip_ansi
-# lazy-compiled in _sanitize_markdown_body: block, void, on*=, link
+_ANSI_ESCAPE_RE = None
+# Lazy-compiled: block, void, on*=, link
 _SANITIZE_RES: tuple[re.Pattern[str], re.Pattern[str], re.Pattern[str], re.Pattern[str]] | None = (
     None
 )
@@ -656,16 +641,11 @@ def _source_fence_language(language: str) -> str:
     return "text"
 
 
-# ---------------------------------------------------------------------------
-# Variant resolution
+# --- Variant resolution ---
 #
-# parse_notebook() loads cells from disk but doesn't populate
-# variant_group / variant_name / variant_active — those are produced
-# by NotebookSession._analyze_and_build_dag at session boot. Export
-# runs without a session, so we replicate just the variant-resolution
-# slice here: parse each cell's @variant annotation and decide which
-# member is active per group using the same first-in-source-order
-# fallback the DAG layer applies.
+# parse_notebook() doesn't set variant_* fields (the session's DAG build does),
+# and export runs without a session, so replicate that slice here using the
+# DAG layer's first-in-source-order fallback.
 
 
 def _resolve_variant_flags(state: NotebookState) -> None:
@@ -703,8 +683,7 @@ def _resolve_variant_flags(state: NotebookState) -> None:
             cell.variant_active = cell.id == active_cell.id
 
 
-# ---------------------------------------------------------------------------
-# README discovery
+# --- README discovery ---
 
 
 def _load_readme(notebook_dir: Path) -> str | None:
@@ -717,8 +696,7 @@ def _load_readme(notebook_dir: Path) -> str | None:
         return None
 
 
-# ---------------------------------------------------------------------------
-# Emitters
+# --- Emitters ---
 
 
 def _emit_markdown(blocks: list[Block]) -> str:
@@ -793,8 +771,7 @@ def _format_table_cell(value: object) -> str:
     if isinstance(value, str):
         return value.replace("|", "\\|").replace("\n", " ")
     if isinstance(value, float):
-        # Trim trailing zeros so 5.000000 → 5.0; keep enough precision
-        # for stats tables (mean / std / etc.) without becoming noisy.
+        # 5.000000 -> 5.0, with enough precision for stats tables.
         return f"{value:.4g}"
     return str(value)
 
@@ -840,8 +817,7 @@ def _render_block_html(block: Block) -> str:
         level = max(1, min(6, block.level))
         return f"<h{level}>{escape(block.text)}</h{level}>"
     if isinstance(block, MarkdownBlock):
-        # See _emit_html docstring on why we wrap in <pre> rather
-        # than rendering markdown to HTML.
+        # See _emit_html for why this is <pre> rather than rendered HTML.
         return f'<pre class="markdown-source">{escape(block.body.rstrip())}</pre>'
     if isinstance(block, CodeBlock):
         return _render_code_html(block)
