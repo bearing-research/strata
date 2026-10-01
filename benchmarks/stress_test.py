@@ -1,29 +1,16 @@
 #!/usr/bin/env python3
-"""Stress test benchmark for Strata.
+"""Stress test for Strata.
 
-This benchmark pushes the system to production-like stress levels:
-- High concurrency: 50-200 users
-- Mixed response sizes: 1MB, 20MB, 200MB tables
-- Cache pressure: cache set to ~2x hotset to force eviction
-- Noisy neighbor: 1 user running huge scans while dashboards run
+Drives 50-200 users over mixed table sizes, with the cache sized near the
+hotset to force eviction and bulk users scanning large tables beside dashboards.
 
-Success criteria:
-- Dashboards keep p95 < 500ms while bulk scans run
-- No semaphore starvation (all users get fair access)
-- No growth in active futures / memory over time
-- No resource leaks (active_scans returns to 0)
+Passes when dashboard p95 stays under 500ms, every user type gets requests
+through, and active_scans returns to 0.
 
 Usage:
-    # Quick validation
     python benchmarks/stress_test.py --dry-run
-
-    # Full stress test
     python benchmarks/stress_test.py
-
-    # High concurrency test
     python benchmarks/stress_test.py --users 100 --duration 120
-
-    # Noisy neighbor focus
     python benchmarks/stress_test.py --scenario noisy-neighbor
 """
 
@@ -50,15 +37,13 @@ from typing import Any
 import httpx
 import pyarrow as pa
 
-# =============================================================================
-# Configuration
-# =============================================================================
+# === Configuration ===
 
 
 class Scenario(Enum):
     """Stress test scenarios."""
 
-    FULL = "full"  # All scenarios combined
+    FULL = "full"
     HIGH_CONCURRENCY = "high-concurrency"  # 100+ users, mixed sizes
     CACHE_PRESSURE = "cache-pressure"  # Cache < working set
     NOISY_NEIGHBOR = "noisy-neighbor"  # 1 bulk user + dashboard users
@@ -101,7 +86,7 @@ class StressConfig:
     base_url: str = "http://127.0.0.1:8765"
     start_server: bool = True
     server_host: str = "127.0.0.1"
-    server_port: int = 0  # Auto-find
+    server_port: int = 0  # 0 picks a free port
 
     # Directories
     warehouse_dir: Path | None = None
@@ -112,25 +97,25 @@ class StressConfig:
     scenario: Scenario = Scenario.FULL
 
     # Concurrency settings
-    total_users: int = 50  # Total concurrent users
-    dashboard_users: int = 40  # Fast dashboard users
-    analyst_users: int = 8  # Medium analyst users
-    bulk_users: int = 2  # Slow bulk/noisy neighbor users
+    total_users: int = 50
+    dashboard_users: int = 40
+    analyst_users: int = 8
+    bulk_users: int = 2  # Noisy neighbors
 
     # Duration
-    duration_s: float = 120.0  # 2 minutes per phase
-    warmup_s: float = 10.0  # Initial warmup phase
+    duration_s: float = 120.0  # Per phase
+    warmup_s: float = 10.0
 
-    # Table sizes (to create mixed response sizes)
-    # Small table: ~500KB response (dashboard)
+    # Table sizes, for mixed response sizes
+    # Small: ~500KB response (dashboard)
     small_table_rows: int = 5_000
-    small_table_payload: int = 50  # 50 bytes per row
+    small_table_payload: int = 50  # Bytes per row
 
-    # Medium table: ~5MB response (analyst)
+    # Medium: ~5MB response (analyst)
     medium_table_rows: int = 25_000
     medium_table_payload: int = 100
 
-    # Large table: ~25MB response (bulk)
+    # Large: ~25MB response (bulk)
     large_table_rows: int = 100_000
     large_table_payload: int = 150
 
@@ -139,23 +124,22 @@ class StressConfig:
     num_medium_tables: int = 3
     num_large_tables: int = 2
 
-    # Cache pressure: set cache to ~2x hotset
-    # Hotset = dashboard tables (~5MB) + some medium (~40MB) = ~50MB
-    # Set cache to 100MB to force eviction when large tables accessed
-    cache_size_bytes: int = 100 * 1024 * 1024  # 100MB
+    # About 2x the hotset (~5MB dashboard + ~40MB medium), so large-table
+    # access forces eviction.
+    cache_size_bytes: int = 100 * 1024 * 1024
 
     # Metrics collection
-    metrics_interval_s: float = 2.0  # Sample every 2s for stress monitoring
+    metrics_interval_s: float = 2.0
     results_dir: Path = field(default_factory=lambda: Path("benchmarks/results"))
 
     # Request settings
-    request_timeout_s: float = 30.0  # Timeout for all queries
+    request_timeout_s: float = 30.0
     connect_timeout_s: float = 5.0
-    max_connections: int = 250  # High connection limit
+    max_connections: int = 250
 
     # Success criteria thresholds
-    dashboard_p95_target_ms: float = 500.0  # Dashboard p95 < 500ms
-    max_active_scans_drift: int = 5  # Max active scans at end (should be 0)
+    dashboard_p95_target_ms: float = 500.0
+    max_active_scans_drift: int = 5  # Should be 0
 
     # Misc
     seed: int = 42
@@ -165,7 +149,6 @@ class StressConfig:
         self.results_dir = Path(self.results_dir)
         self.results_dir.mkdir(parents=True, exist_ok=True)
 
-        # Adjust user counts based on scenario
         if self.scenario == Scenario.HIGH_CONCURRENCY:
             self.total_users = 100
             self.dashboard_users = 80
@@ -175,16 +158,14 @@ class StressConfig:
             self.total_users = 50
             self.dashboard_users = 45
             self.analyst_users = 3
-            self.bulk_users = 2  # Noisy neighbors
+            self.bulk_users = 2
         elif self.scenario == Scenario.CACHE_PRESSURE:
-            self.cache_size_bytes = 50 * 1024 * 1024  # 50MB - aggressive eviction
+            self.cache_size_bytes = 50 * 1024 * 1024  # Aggressive eviction
         elif self.scenario == Scenario.SUSTAINED_LOAD:
-            self.duration_s = 300.0  # 5 minutes
+            self.duration_s = 300.0
 
 
-# =============================================================================
-# Data Structures for Metrics
-# =============================================================================
+# === Data Structures for Metrics ===
 
 
 @dataclass
@@ -244,7 +225,7 @@ class MetricsSnapshot:
     cache_hits: int
     cache_misses: int
     scan_count: int
-    # Fields with defaults must come after non-default fields
+    # Defaulted fields must follow the required ones.
     prefetch_skipped: int = 0
     # Resource tracking
     dashboard_requests: int = 0
@@ -304,11 +285,11 @@ class StressResults:
     cache_hit_rate: float
 
     # Success criteria
-    dashboard_p95_met: bool  # p95 < 500ms
-    no_semaphore_starvation: bool  # All user types got requests through
-    no_resource_leak: bool  # active_scans returned to 0
+    dashboard_p95_met: bool
+    no_semaphore_starvation: bool  # Every user type got a request through
+    no_resource_leak: bool
 
-    # QoS tier metrics (with defaults for backwards compatibility)
+    # QoS tier metrics
     max_interactive_active: int = 0
     max_bulk_active: int = 0
     interactive_slots: int = 8
@@ -316,26 +297,24 @@ class StressResults:
     qos_isolation: bool = True  # Interactive tier not saturated by bulk
 
     # Cache pressure metrics
-    max_cache_bytes: int = 0  # Peak cache usage
-    cache_bytes_max: int = 0  # Cache limit
-    total_evictions: int = 0  # Total entries evicted
-    total_evicted_bytes: int = 0  # Total bytes evicted
-    cache_thrash: bool = False  # True if evicted > written (thrashing)
+    max_cache_bytes: int = 0  # Peak usage
+    cache_bytes_max: int = 0  # Limit
+    total_evictions: int = 0
+    total_evicted_bytes: int = 0
+    cache_thrash: bool = False  # Evicted bytes > written bytes
 
     # Prefetch efficiency metrics
-    prefetch_started: int = 0  # Total prefetches started
-    prefetch_used: int = 0  # Prefetches that were consumed
-    prefetch_wasted: int = 0  # Prefetches that were wasted
-    prefetch_skipped: int = 0  # Prefetches skipped (server busy)
-    prefetch_efficiency: float = 0.0  # used / started (0-1)
+    prefetch_started: int = 0
+    prefetch_used: int = 0
+    prefetch_wasted: int = 0
+    prefetch_skipped: int = 0  # Server busy
+    prefetch_efficiency: float = 0.0  # used / started
 
     def to_dict(self) -> dict:
         return {k: v for k, v in self.__dict__.items()}
 
 
-# =============================================================================
-# Dataset Generator
-# =============================================================================
+# === Dataset Generator ===
 
 
 def generate_stress_warehouse(config: StressConfig) -> dict[str, Any]:
@@ -379,7 +358,6 @@ def generate_stress_warehouse(config: StressConfig) -> dict[str, Any]:
     categories = ["electronics", "clothing", "food", "books", "sports", "home", "auto"]
     random.seed(config.seed)
 
-    # Create small tables (dashboard queries)
     for i in range(config.num_small_tables):
         table_name = f"small_{i:02d}"
         tables_info.append(
@@ -395,7 +373,6 @@ def generate_stress_warehouse(config: StressConfig) -> dict[str, Any]:
             )
         )
 
-    # Create medium tables (analyst queries)
     for i in range(config.num_medium_tables):
         table_name = f"medium_{i:02d}"
         tables_info.append(
@@ -411,7 +388,6 @@ def generate_stress_warehouse(config: StressConfig) -> dict[str, Any]:
             )
         )
 
-    # Create large tables (bulk queries)
     for i in range(config.num_large_tables):
         table_name = f"large_{i:02d}"
         tables_info.append(
@@ -456,7 +432,7 @@ def _create_table(
     except Exception:
         table = catalog.create_table(table_id, schema)
 
-        # Write in chunks to create multiple row groups
+        # Chunked appends create multiple row groups.
         chunk_size = min(50_000, num_rows)
         base_ts = 1704067200000000
 
@@ -506,9 +482,7 @@ def _create_table(
     }
 
 
-# =============================================================================
-# Server Management
-# =============================================================================
+# === Server Management ===
 
 
 class ServerProcess:
@@ -538,9 +512,8 @@ class ServerProcess:
         if self.max_cache_size_bytes is not None:
             env["STRATA_MAX_CACHE_SIZE_BYTES"] = str(self.max_cache_size_bytes)
 
-        # Use DEVNULL for stdout/stderr to avoid pipe buffer deadlock
-        # The server writes metrics logs to stdout, and if nothing reads from
-        # the pipe, the buffer fills up and blocks the server
+        # DEVNULL, not PIPE: nothing drains the pipe, so the server's metric logs
+        # would fill the buffer and block it.
         self._process = subprocess.Popen(
             [sys.executable, "-m", "strata.server"],
             env=env,
@@ -585,9 +558,7 @@ def find_free_port() -> int:
         return s.getsockname()[1]
 
 
-# =============================================================================
-# Stress Test Driver
-# =============================================================================
+# === Stress Test Driver ===
 
 
 class StressDriver:
@@ -598,29 +569,24 @@ class StressDriver:
         self.tables_info = tables_info
         self.rng = random.Random(config.seed)
 
-        # Group tables by size
         self.small_tables = [t for t in tables_info if t["size"] == QuerySize.SMALL.value]
         self.medium_tables = [t for t in tables_info if t["size"] == QuerySize.MEDIUM.value]
         self.large_tables = [t for t in tables_info if t["size"] == QuerySize.LARGE.value]
 
-        # Column sets
         self.dashboard_columns = ["id", "ts", "value"]  # Narrow
         self.analyst_columns = ["id", "ts", "user_id", "category", "value"]
-        self.bulk_columns = ["id", "ts", "user_id", "category", "value", "payload"]  # Full
+        self.bulk_columns = ["id", "ts", "user_id", "category", "value", "payload"]
 
         self.categories = ["electronics", "clothing", "food", "books", "sports", "home", "auto"]
 
-        # Results collection
         self.results: list[RequestResult] = []
         self.metrics_snapshots: list[MetricsSnapshot] = []
         self._results_lock = asyncio.Lock()
         self._request_counter = 0
         self._counter_lock = asyncio.Lock()
 
-        # HTTP client
         self._client: httpx.AsyncClient | None = None
 
-        # Stop event
         self._stop_event = asyncio.Event()
 
     async def start(self):
@@ -655,13 +621,11 @@ class StressDriver:
         if user_type == UserType.DASHBOARD:
             table = self.rng.choice(self.small_tables)
             columns = self.dashboard_columns
-            # Selective filter
             filters = [{"column": "category", "op": "=", "value": self.rng.choice(self.categories)}]
             query_size = QuerySize.SMALL
         elif user_type == UserType.ANALYST:
             table = self.rng.choice(self.medium_tables)
             columns = self.analyst_columns
-            # Less selective
             min_val = self.rng.uniform(0, 500)
             filters = [
                 {"column": "value", "op": ">=", "value": min_val},
@@ -705,7 +669,6 @@ class StressDriver:
         estimated_bytes = 0
 
         try:
-            # POST /v1/materialize (scan@v1)
             request_body = {
                 "inputs": [query["table_uri"]],
                 "transform": {
@@ -728,10 +691,9 @@ class StressDriver:
             else:
                 response.raise_for_status()
                 stream_url = response.json()["stream_url"]
-                # num_tasks / estimated_bytes aren't in the materialize response;
-                # they stay at their 0 defaults.
+                # num_tasks and estimated_bytes are not in the materialize response,
+                # so they stay 0.
 
-                # GET the stream
                 async with self._client.stream("GET", stream_url) as stream:
                     stream.raise_for_status()
 
@@ -759,8 +721,7 @@ class StressDriver:
         except Exception as e:
             status = RequestStatus.CLIENT_ERROR
             error = str(e)[:200]
-        # No /v1/scan DELETE in the unified API — materialize streams self-clean
-        # via the stream-state TTL.
+        # No cleanup call: the server frees consumed streams by TTL.
         end_time = time.perf_counter()
 
         latency_total_ms = (end_time - start_time) * 1000
@@ -802,10 +763,8 @@ class StressDriver:
         """Run user loop for specified duration."""
         start_time = time.perf_counter()
 
-        # Add jitter to avoid thundering herd during startup.
-        # Scale jitter with user ID to spread the initial burst, but cap it
-        # to ensure all users start within 1 second.
-        max_jitter = min(1.0, user_id * 0.05)  # 0-1s based on user ID
+        # Jitter the start (up to 1s, scaled by user id) to avoid a thundering herd.
+        max_jitter = min(1.0, user_id * 0.05)
         await asyncio.sleep(random.uniform(0, max_jitter))
 
         while time.perf_counter() - start_time < duration_s and not self._stop_event.is_set():
@@ -813,29 +772,23 @@ class StressDriver:
                 query = self.generate_query(user_type)
                 result = await self.execute_scan(query, user_type, user_id)
 
-                # Store result immediately
                 async with self._results_lock:
                     self.results.append(result)
 
-                # Think time based on user type (realistic pacing)
+                # Think time
                 if user_type == UserType.DASHBOARD:
-                    await asyncio.sleep(random.uniform(0.5, 1.5))  # Dashboard: 0.5-1.5s
+                    await asyncio.sleep(random.uniform(0.5, 1.5))
                 elif user_type == UserType.ANALYST:
-                    await asyncio.sleep(random.uniform(2.0, 5.0))  # Analyst: 2-5s
+                    await asyncio.sleep(random.uniform(2.0, 5.0))
                 else:  # BULK
-                    await asyncio.sleep(random.uniform(5.0, 15.0))  # Bulk: 5-15s
+                    await asyncio.sleep(random.uniform(5.0, 15.0))
             except asyncio.CancelledError:
                 break
             except Exception as e:
-                # Log but continue
                 print(f"  User {user_id} error: {e}")
 
     async def get_metrics(self) -> dict[str, Any]:
-        """Get server metrics using a fresh async client.
-
-        We create a new client for each request to avoid connection pool
-        issues with the load-generating client.
-        """
+        """Fetch /metrics with a fresh client, so the load client's pool can't block it."""
         try:
             async with httpx.AsyncClient(
                 timeout=httpx.Timeout(connect=5.0, read=30.0, write=5.0, pool=5.0),
@@ -844,13 +797,11 @@ class StressDriver:
                 response.raise_for_status()
                 return response.json()
         except httpx.ReadTimeout:
-            # Read timeout - server is processing but too slow
             if not hasattr(self, "_metrics_error_printed"):
                 print("  Metrics read timeout (30s)")
                 self._metrics_error_printed = True
             return {}
         except httpx.ConnectTimeout:
-            # Connection timeout - can't even connect
             if not hasattr(self, "_connect_timeout_printed"):
                 print("  Metrics connect timeout")
                 self._connect_timeout_printed = True
@@ -870,15 +821,14 @@ class StressDriver:
             metrics = await self.get_metrics()
             if not metrics:
                 fetch_failures += 1
-                if fetch_failures == 1:  # Only print on first failure
+                if fetch_failures == 1:
                     print(f"  Warning: Metrics fetch failing (url={self.config.base_url})")
                 continue
             if metrics:
                 elapsed = time.perf_counter() - start_time
 
-                # Calculate live stats from collected results
                 async with self._results_lock:
-                    recent_results = self.results[-1000:]  # Last 1000 requests
+                    recent_results = self.results[-1000:]
 
                 dashboard_results = [
                     r for r in recent_results if r.user_type == UserType.DASHBOARD.value
@@ -887,14 +837,12 @@ class StressDriver:
                     r.latency_total_ms for r in dashboard_results if r.status == "success"
                 ]
 
-                # Extract QoS metrics
                 qos = metrics.get("qos", {})
                 interactive_active = qos.get("interactive_active", 0)
                 interactive_slots = qos.get("interactive_slots", 8)
                 bulk_active = qos.get("bulk_active", 0)
                 bulk_slots = qos.get("bulk_slots", 4)
 
-                # Extract disk cache metrics
                 disk_cache = metrics.get("disk_cache", {})
                 cache_bytes_current = disk_cache.get("bytes_current", 0)
                 cache_bytes_max = disk_cache.get("bytes_max", 0)
@@ -933,12 +881,10 @@ class StressDriver:
                 )
                 self.metrics_snapshots.append(snapshot)
 
-                # Calculate cache pressure for live status
                 cache_pct = (
                     (cache_bytes_current / cache_bytes_max * 100) if cache_bytes_max > 0 else 0
                 )
 
-                # Print live status with QoS tier info and cache pressure
                 print(
                     f"  [{elapsed:6.1f}s] int={interactive_active}/{interactive_slots} "
                     f"bulk={bulk_active}/{bulk_slots} "
@@ -948,18 +894,15 @@ class StressDriver:
                 )
 
     async def _warmup_metadata_cache(self):
-        """Pre-warm metadata cache by making one request to each table.
+        """Warm the metadata cache with one request per table.
 
-        This simulates a production scenario where metadata is already cached
-        from previous requests. Without warmup, the first requests would need
-        to load Parquet file metadata from disk, which serializes due to I/O
-        and causes timeouts under high concurrency.
+        Without it the first concurrent requests all load Parquet metadata from
+        disk at once, which serializes on I/O and times out.
         """
-        # Make one scan request to each table (sequentially to avoid contention)
+        # One request per table, sequentially to avoid contention.
         for table_info in self.tables_info:
             table_name = table_info["name"]
             try:
-                # Materialize (loads metadata)
                 start = time.perf_counter()
                 response = await self._client.post(
                     "/v1/materialize",
@@ -969,19 +912,19 @@ class StressDriver:
                             "executor": "scan@v1",
                             "params": {
                                 "snapshot_id": table_info["snapshot_id"],
-                                "columns": ["id"],  # Minimal projection
+                                "columns": ["id"],
                             },
                         },
                         "mode": "stream",
                     },
-                    timeout=60.0,  # Longer timeout for cold cache
+                    timeout=60.0,  # Cold cache
                 )
                 if response.status_code == 200:
                     stream_url = response.json()["stream_url"]
-                    # Consume a few bytes to trigger fetch
+                    # Read one chunk so the fetch actually runs.
                     async with self._client.stream("GET", stream_url, timeout=60.0) as stream:
                         async for chunk in stream.aiter_bytes(chunk_size=4096):
-                            break  # Just read first chunk
+                            break
                     elapsed = time.perf_counter() - start
                     print(f"    {table_name}: warmed in {elapsed:.2f}s")
                 else:
@@ -998,8 +941,6 @@ class StressDriver:
         )
         print(f"  Duration: {self.config.duration_s}s")
 
-        # Warmup phase: pre-warm metadata cache to avoid cold-start penalties
-        # This simulates a real production scenario where metadata is already cached
         print("  Warming up metadata cache...")
         warmup_start = time.perf_counter()
         await self._warmup_metadata_cache()
@@ -1009,11 +950,9 @@ class StressDriver:
         start_time = time.perf_counter()
         self._stop_event.clear()
 
-        # Create user tasks
         tasks = []
         user_id = 0
 
-        # Dashboard users
         for _ in range(self.config.dashboard_users):
             tasks.append(
                 asyncio.create_task(
@@ -1022,7 +961,6 @@ class StressDriver:
             )
             user_id += 1
 
-        # Analyst users
         for _ in range(self.config.analyst_users):
             tasks.append(
                 asyncio.create_task(
@@ -1031,33 +969,28 @@ class StressDriver:
             )
             user_id += 1
 
-        # Bulk users (noisy neighbors)
+        # Bulk users are the noisy neighbors.
         for _ in range(self.config.bulk_users):
             tasks.append(
                 asyncio.create_task(self.user_loop(user_id, UserType.BULK, self.config.duration_s))
             )
             user_id += 1
 
-        # Metrics collection task
         metrics_task = asyncio.create_task(self.metrics_loop(self.config.duration_s, start_time))
 
-        # Wait for test duration with timeout (add buffer for cleanup)
         all_results = []
         try:
             all_results = await asyncio.wait_for(
                 asyncio.gather(*tasks, return_exceptions=True),
-                timeout=self.config.duration_s + 30,  # 30s buffer for in-flight requests
+                timeout=self.config.duration_s + 30,  # Grace for in-flight requests
             )
         except TimeoutError:
             print("\n  Test duration reached, stopping...")
             self._stop_event.set()
-            # Cancel remaining tasks and collect what we have
             for task in tasks:
                 if not task.done():
                     task.cancel()
-            # Wait a bit for tasks to clean up
             await asyncio.sleep(1)
-            # Collect results from completed tasks
             for task in tasks:
                 if task.done() and not task.cancelled():
                     try:
@@ -1067,7 +1000,6 @@ class StressDriver:
                     except Exception:
                         pass
 
-        # Stop metrics collection
         self._stop_event.set()
         try:
             await asyncio.wait_for(metrics_task, timeout=5)
@@ -1076,13 +1008,12 @@ class StressDriver:
 
         actual_duration = min(time.perf_counter() - start_time, self.config.duration_s + 30)
 
-        # Results are already collected in self.results by user_loop
+        # user_loop already appended every result to self.results.
 
-        # Wait for server to drain all requests before fetching final metrics
         print("  Waiting for server to settle...")
         await asyncio.sleep(2.0)
 
-        # Get final metrics with retries since server needs to calm down
+        # Retry: the server can be slow to answer right after the load stops.
         final_metrics = {}
         for attempt in range(5):
             final_metrics = await self.get_metrics()
@@ -1093,50 +1024,40 @@ class StressDriver:
         if not final_metrics:
             print("  WARNING: Could not fetch final metrics")
 
-        # Compute results
         return self._compute_results(actual_duration, final_metrics)
 
     def _compute_results(self, duration_s: float, final_metrics: dict) -> StressResults:
         """Compute aggregated results."""
-        # Group by user type
         dashboard = [r for r in self.results if r.user_type == UserType.DASHBOARD.value]
         analyst = [r for r in self.results if r.user_type == UserType.ANALYST.value]
         bulk = [r for r in self.results if r.user_type == UserType.BULK.value]
 
-        # Success counts
         dashboard_success = [r for r in dashboard if r.status == "success"]
         analyst_success = [r for r in analyst if r.status == "success"]
         bulk_success = [r for r in bulk if r.status == "success"]
 
-        # Latencies (success only)
         dashboard_latencies = [r.latency_total_ms for r in dashboard_success]
         analyst_latencies = [r.latency_total_ms for r in analyst_success]
         bulk_latencies = [r.latency_total_ms for r in bulk_success]
 
-        # Resource metrics from snapshots
         max_active = max((s.active_scans for s in self.metrics_snapshots), default=0)
         max_prefetch = max((s.prefetch_in_flight for s in self.metrics_snapshots), default=0)
         final_active = final_metrics.get("resource_limits", {}).get("active_scans", 0)
 
-        # QoS tier metrics from snapshots
         max_interactive = max((s.interactive_active for s in self.metrics_snapshots), default=0)
         max_bulk_active = max((s.bulk_active for s in self.metrics_snapshots), default=0)
-        # Get slot limits from final metrics
         qos = final_metrics.get("qos", {})
         interactive_slots = qos.get("interactive_slots", 8)
         bulk_slots = qos.get("bulk_slots", 4)
 
-        # Cache stats
         cache_hits = final_metrics.get("cache_hits", 0)
         cache_misses = final_metrics.get("cache_misses", 0)
         cache_hit_rate = (
             cache_hits / (cache_hits + cache_misses) if (cache_hits + cache_misses) > 0 else 0
         )
 
-        # Total bytes
         total_bytes = sum(r.bytes_read for r in self.results)
 
-        # Success criteria
         dashboard_p95 = _percentile(dashboard_latencies, 0.95)
         dashboard_p95_met = dashboard_p95 < self.config.dashboard_p95_target_ms
         no_starvation = (
@@ -1144,11 +1065,9 @@ class StressDriver:
         )
         no_leak = final_active <= self.config.max_active_scans_drift
 
-        # QoS isolation: interactive tier never saturated by bulk
-        # (bulk queries shouldn't consume interactive slots)
+        # Bulk queries must not take interactive slots.
         qos_isolation = max_interactive <= interactive_slots
 
-        # Cache pressure metrics from snapshots
         max_cache_bytes = max((s.cache_bytes_current for s in self.metrics_snapshots), default=0)
         cache_bytes_max = (
             self.metrics_snapshots[-1].cache_bytes_max if self.metrics_snapshots else 0
@@ -1159,11 +1078,10 @@ class StressDriver:
         total_evicted_bytes = (
             self.metrics_snapshots[-1].cache_evicted_bytes if self.metrics_snapshots else 0
         )
-        # Cache thrash: evicted more bytes than written (indicates working set > cache size)
+        # Thrash: evicted more than written, so the working set exceeds the cache.
         bytes_written = final_metrics.get("bytes_written_to_cache", 0)
         cache_thrash = total_evicted_bytes > bytes_written if bytes_written > 0 else False
 
-        # Prefetch efficiency from final metrics
         prefetch = final_metrics.get("prefetch", {})
         prefetch_started = prefetch.get("started", 0)
         prefetch_used = prefetch.get("used", 0)
@@ -1228,9 +1146,7 @@ def _percentile(values: list[float], p: float) -> float:
     return sorted_values[idx]
 
 
-# =============================================================================
-# Reporting
-# =============================================================================
+# === Reporting ===
 
 
 def print_stress_results(results: StressResults):
@@ -1322,7 +1238,6 @@ def print_stress_results(results: StressResults):
     )
     print(f"Prefetches wasted: {results.prefetch_wasted}")
     print(f"Prefetches skipped (server busy): {results.prefetch_skipped}")
-    # Warn if wasted is high
     if results.prefetch_started > 0:
         wasted_pct = results.prefetch_wasted / results.prefetch_started
         if wasted_pct > 0.25:
@@ -1365,21 +1280,16 @@ def write_stress_results(
 ):
     """Write results to JSONL file."""
     with open(output_path, "w") as f:
-        # Write all request results
         for r in driver.results:
             f.write(json.dumps(r.to_dict()) + "\n")
 
-        # Write metrics snapshots
         for m in driver.metrics_snapshots:
             f.write(json.dumps(m.to_dict()) + "\n")
 
-        # Write summary
         f.write(json.dumps({"type": "summary", **results.to_dict()}) + "\n")
 
 
-# =============================================================================
-# Main Execution
-# =============================================================================
+# === Main Execution ===
 
 
 async def run_stress_test(config: StressConfig) -> StressResults:
@@ -1405,13 +1315,11 @@ async def run_stress_test(config: StressConfig) -> StressResults:
         config.cache_dir.mkdir(parents=True, exist_ok=True)
 
     try:
-        # Generate warehouse
         print(f"\n[1/3] Generating warehouse at {config.warehouse_dir}...")
         warehouse_info = generate_stress_warehouse(config)
         tables_info = warehouse_info["tables"]
         print(f"  Created {len(tables_info)} tables")
 
-        # Start server
         server = None
         if config.start_server:
             print("\n[2/3] Starting Strata server...")
@@ -1431,14 +1339,13 @@ async def run_stress_test(config: StressConfig) -> StressResults:
         else:
             print(f"\n[2/3] Using existing server at {config.base_url}")
 
-        # Run stress test
         print("\n[3/3] Running stress test...")
         driver = StressDriver(config, tables_info)
         await driver.start()
 
         if config.dry_run:
             config.duration_s = 15.0
-            config.request_timeout_s = 10.0  # Shorter timeout for dry run
+            config.request_timeout_s = 10.0
             print("  (dry run - 15s duration)")
 
         results = await driver.run_stress_test()
@@ -1449,10 +1356,8 @@ async def run_stress_test(config: StressConfig) -> StressResults:
             print("\nStopping server...")
             server.stop()
 
-        # Print results
         print_stress_results(results)
 
-        # Write results
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         output_path = config.results_dir / f"stress_test_{config.scenario.value}_{timestamp}.jsonl"
         write_stress_results(driver, results, output_path)
@@ -1523,7 +1428,6 @@ def parse_args() -> StressConfig:
 
     args = parser.parse_args()
 
-    # Determine user distribution based on total users
     total = args.users
     dashboard = int(total * 0.8)
     analyst = int(total * 0.16)

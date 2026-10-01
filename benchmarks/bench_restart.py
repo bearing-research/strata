@@ -1,22 +1,12 @@
 #!/usr/bin/env python3
-"""Benchmark: Cache persistence across server restarts.
+"""Benchmark cache persistence across server restarts.
 
-This benchmark proves Strata's core thesis:
-1. Cold start: Data read from Parquet (cache miss)
-2. Warm cache: Data served from cache (cache hit, faster)
-3. After restart: Cache persists on disk (cache hit, still fast)
-
-This is the slide you show everyone.
-
-Note: Each append creates a separate Parquet file with 1 row group.
-So --data-files 5 creates 5 files × 1 row group = 5 cache tasks.
+Times a cold scan (Parquet), a warm scan (cache) and a scan after a real process
+restart, which should still hit the on-disk cache. Each data file has one row
+group, so --data-files 5 means 5 cache tasks.
 
 Usage:
-    # Single scale run
-    python benchmarks/bench_restart.py --rows 100000
     python benchmarks/bench_restart.py --rows 1000000 --data-files 10
-
-    # Multi-scale comparison (the slide you show everyone)
     python benchmarks/bench_restart.py --scale
 """
 
@@ -38,9 +28,9 @@ class BenchmarkResult:
     """Result from a single benchmark run."""
 
     name: str
-    total_latency_ms: float  # End-to-end including planning + fetch + cleanup
-    planning_latency_ms: float  # POST /scan only
-    fetch_latency_ms: float  # GET /batches only (data plane)
+    total_latency_ms: float  # End to end: planning + fetch
+    planning_latency_ms: float  # POST /v1/materialize only
+    fetch_latency_ms: float  # Stream GET only (data plane)
     cache_hits: int
     cache_misses: int
     bytes_from_cache: int
@@ -54,10 +44,7 @@ class BenchmarkResult:
 
 
 def create_sample_table(warehouse_path: Path, num_rows: int, num_data_files: int) -> str:
-    """Create a sample Iceberg table with test data.
-
-    Each append creates a separate Parquet data file with 1 row group.
-    """
+    """Create the bench table; each append writes one Parquet file with one row group."""
     from pyiceberg.catalog.sql import SqlCatalog
     from pyiceberg.schema import Schema
     from pyiceberg.types import DoubleType, LongType, NestedField, StringType
@@ -88,7 +75,6 @@ def create_sample_table(warehouse_path: Path, num_rows: int, num_data_files: int
     except Exception:
         table = catalog.create_table(table_id, schema)
 
-        # Write data in chunks to create multiple data files
         rows_per_file = num_rows // num_data_files
         categories = ["A", "B", "C", "D", "E"]
 
@@ -118,11 +104,7 @@ def create_sample_table(warehouse_path: Path, num_rows: int, num_data_files: int
 
 
 class ServerProcess:
-    """Manages a Strata server as a subprocess.
-
-    Uses subprocess.Popen to truly restart the server process,
-    ensuring cache persistence is tested across genuine process boundaries.
-    """
+    """A Strata server subprocess, so a restart crosses a real process boundary."""
 
     def __init__(self, host: str, port: int, cache_dir: Path):
         self.host = host
@@ -145,7 +127,6 @@ class ServerProcess:
             stderr=subprocess.PIPE,
         )
 
-        # Wait for server to be ready
         self._wait_for_ready()
 
     def _wait_for_ready(self, timeout: float = 10.0):
@@ -162,7 +143,6 @@ class ServerProcess:
                 pass
             time.sleep(0.1)
 
-        # Print server stderr on timeout for debugging
         if self._process and self._process.stderr:
             import select
 
@@ -179,7 +159,6 @@ class ServerProcess:
             except subprocess.TimeoutExpired:
                 self._process.kill()
                 self._process.wait()
-            # Print any server errors for debugging
             if self._process.stderr:
                 stderr = self._process.stderr.read()
                 if stderr and b"Error" in stderr:
@@ -188,20 +167,15 @@ class ServerProcess:
 
 
 def run_scan(client, table_uri: str, metrics_before: dict | None = None) -> BenchmarkResult:
-    """Run a scan and collect metrics with phase-level timing.
+    """Run one scan and time planning and fetch separately.
 
-    Measures:
-    - planning_latency_ms: POST /scan (planning phase)
-    - fetch_latency_ms: GET /batches (data plane)
-    - total_latency_ms: End-to-end including cleanup
-
-    If metrics_before is provided, calculates deltas.
+    Cache counters are deltas against ``metrics_before`` when it is given.
     """
     import pyarrow.ipc as ipc
 
     total_start = time.perf_counter()
 
-    # Phase 1: Planning (POST /v1/materialize, scan@v1)
+    # Planning: POST /v1/materialize with scan@v1.
     plan_start = time.perf_counter()
     request_body = {
         "inputs": [table_uri],
@@ -213,7 +187,7 @@ def run_scan(client, table_uri: str, metrics_before: dict | None = None) -> Benc
     stream_url = response.json()["stream_url"]
     planning_latency_ms = (time.perf_counter() - plan_start) * 1000
 
-    # Phase 2: Data fetch (GET the stream)
+    # Fetch: GET the stream.
     fetch_start = time.perf_counter()
     response = client._client.get(stream_url)
     response.raise_for_status()
@@ -223,8 +197,7 @@ def run_scan(client, table_uri: str, metrics_before: dict | None = None) -> Benc
         batches = list(reader)
     fetch_latency_ms = (time.perf_counter() - fetch_start) * 1000
 
-    # No cleanup: materialize streams are freed server-side by the stream-state
-    # TTL once consumed (the old /v1/scan DELETE is gone).
+    # No cleanup call: the server frees consumed streams by TTL.
     total_latency_ms = (time.perf_counter() - total_start) * 1000
     total_rows = sum(b.num_rows for b in batches)
     metrics_after = client.metrics()
@@ -272,11 +245,9 @@ def print_results_table(results: list[BenchmarkResult]):
     print("BENCHMARK RESULTS: Cache Persistence Across Server Restarts")
     print("=" * 80)
 
-    # Header with phase breakdown
     print(f"\n{'Phase':<18} {'Total':>10} {'Plan':>10} {'Fetch':>10} {'Hits':>8} {'Miss':>8}")
     print("-" * 80)
 
-    # Data rows
     for r in results:
         print(
             f"{r.name:<18} {r.total_latency_ms:>8.1f}ms "
@@ -286,7 +257,6 @@ def print_results_table(results: list[BenchmarkResult]):
 
     print("-" * 80)
 
-    # Summary
     if len(results) >= 3:
         cold = results[0]
         warm = results[1]
@@ -319,7 +289,6 @@ def print_results_table(results: list[BenchmarkResult]):
         print(f"{'Bytes from Cache':<24} {cold_cache:>15} {warm_cache:>15} {restart_cache:>15}")
         print(f"{'Rows':<24} {cold.rows:>15,} {warm.rows:>15,} {restart.rows:>15,}")
 
-        # Speedups - show both total and fetch-only
         print("\n" + "-" * 72)
         warm_total = (
             cold.total_latency_ms / warm.total_latency_ms if warm.total_latency_ms > 0 else 0
@@ -338,7 +307,6 @@ def print_results_table(results: list[BenchmarkResult]):
         print(f"{'  Total (end-to-end)':<30} {warm_total:>14.1f}x {restart_total:>14.1f}x")
         print(f"{'  Fetch (data plane)':<30} {warm_fetch:>14.1f}x {restart_fetch:>14.1f}x")
 
-        # Thesis validation
         print("\n" + "=" * 80)
         if restart.cache_misses == 0 and restart.cache_hits > 0:
             print("THESIS VALIDATED: Cache persisted across server restart!")
@@ -383,15 +351,11 @@ def run_single_benchmark(
     port: int | None = None,
     verbose: bool = True,
 ) -> list[BenchmarkResult]:
-    """Run a single benchmark with the given configuration.
-
-    Returns list of [cold, warm, restart] BenchmarkResult.
-    """
+    """Run cold, warm and post-restart scans; return the three results in that order."""
     from strata_client import StrataClient
 
     from strata.cache import CACHE_FILE_EXTENSION
 
-    # Find a free port if not specified
     if port is None:
         port = find_free_port()
 
@@ -401,7 +365,6 @@ def run_single_benchmark(
         cache_dir = Path(tmpdir) / "cache"
         cache_dir.mkdir()
 
-        # Create sample table
         if verbose:
             print("\n[1/6] Creating sample Iceberg table...")
         table_uri = create_sample_table(warehouse_path, num_rows, num_data_files)
@@ -409,7 +372,6 @@ def run_single_benchmark(
         base_url = f"http://{host}:{port}"
         results = []
 
-        # === Phase 1: Cold start ===
         if verbose:
             print("\n[2/6] Starting server (first instance)...")
         server = ServerProcess(host, port, cache_dir)
@@ -417,7 +379,6 @@ def run_single_benchmark(
 
         client = StrataClient(base_url=base_url)
 
-        # Clear cache to ensure cold start
         client.clear_cache()
 
         if verbose:
@@ -434,7 +395,6 @@ def run_single_benchmark(
             )
             print(f"       Cache misses: {result1.cache_misses}")
 
-        # === Phase 2: Warm cache ===
         if verbose:
             print("\n[4/6] Running warm cache scan (cache hit expected)...")
         metrics_before = client.metrics()
@@ -451,18 +411,15 @@ def run_single_benchmark(
 
         client.close()
 
-        # === Phase 3: Restart ===
         if verbose:
             print("\n[5/6] Stopping and restarting server...")
         server.stop()
         time.sleep(1)
 
-        # Verify cache files exist
         cache_files = list(cache_dir.rglob(f"*{CACHE_FILE_EXTENSION}"))
         if verbose:
             print(f"       Cache files on disk: {len(cache_files)}")
 
-        # Start new server instance
         server = ServerProcess(host, port, cache_dir)
         server.start()
 
@@ -494,7 +451,6 @@ def print_scale_comparison(scale_results: list[ScaleResult]):
     print("SCALE COMPARISON: Cache Performance Across Data Sizes")
     print("=" * 100)
 
-    # Header
     print(
         f"\n{'Scale':<12} {'Data Size':>10} {'Cold':>12} {'Warm':>12} "
         f"{'Restart':>12} {'Warm':>10} {'Restart':>10}"
@@ -514,7 +470,6 @@ def print_scale_comparison(scale_results: list[ScaleResult]):
 
     print("-" * 100)
 
-    # Observations
     print("\nObservations:")
     if len(scale_results) >= 2:
         first = scale_results[0]
@@ -528,7 +483,6 @@ def print_scale_comparison(scale_results: list[ScaleResult]):
         print(f"  - Warm fetch time grew {warm_growth:.1f}x (cache serving is efficient)")
         print(f"  - Post-restart time grew {restart_growth:.1f}x (cache persists across restart)")
 
-    # Thesis validation
     all_valid = all(r.restart_speedup > 1.0 for r in scale_results)
     print("\n" + "=" * 100)
     if all_valid:
@@ -542,7 +496,7 @@ def print_scale_comparison(scale_results: list[ScaleResult]):
 
 def run_scale_benchmark():
     """Run benchmark at multiple scale points."""
-    # Scale points: rows, data_files, label
+    # (rows, data_files, label)
     scale_points = [
         (50_000, 5, "50K rows"),
         (500_000, 10, "500K rows"),
@@ -569,10 +523,9 @@ def run_scale_benchmark():
         results = run_single_benchmark(num_rows, num_files, verbose=True)
         cold, warm, restart = results
 
-        # Calculate data size from cold bytes
         data_size = format_bytes(cold.bytes_from_storage)
 
-        # Calculate speedups (fetch-only for accuracy)
+        # Fetch-only: the data plane is what the cache speeds up.
         warm_speedup = cold.fetch_latency_ms / warm.fetch_latency_ms if warm.fetch_latency_ms else 0
         restart_speedup = (
             cold.fetch_latency_ms / restart.fetch_latency_ms if restart.fetch_latency_ms else 0
@@ -594,10 +547,8 @@ def run_scale_benchmark():
             )
         )
 
-        # Print single-run results
         print_results_table(results)
 
-    # Print comparison table
     print_scale_comparison(scale_results)
 
 

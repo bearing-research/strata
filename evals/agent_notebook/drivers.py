@@ -1,16 +1,9 @@
-"""Agent drivers — what plays the role of the coding agent for a task.
+"""Agent drivers: what plays the coding agent for a task.
 
-Two backends produce the same normalized :class:`Trajectory`:
-
-* :class:`ReplayDriver` — reads recorded transcripts. Deterministic, no LLM;
-  this is what CI runs to exercise the harness + graders.
-* :class:`ClaudeCodeDriver` — invokes ``claude -p`` headless in the notebook
-  directory against the live ``/mcp`` server. This is the real, on-demand
-  local eval.
-
-Both share :func:`parse_stream_json`, the parser for Claude Code's
-``--output-format stream-json`` — so a real run can be captured once and
-replayed forever after.
+:class:`ReplayDriver` reads recorded transcripts (deterministic; what CI runs).
+:class:`ClaudeCodeDriver` runs ``claude -p`` headless against the live ``/mcp``
+server. Both parse stream-json with :func:`parse_stream_json`, so a real run can
+be captured once and replayed.
 """
 
 from __future__ import annotations
@@ -40,10 +33,9 @@ def _tool_use_from_block(block: dict) -> ToolEvent | None:
 def parse_stream_json(text: str) -> Trajectory:
     """Parse Claude Code ``--output-format stream-json`` output into a Trajectory.
 
-    Tolerant of the two shapes tool calls arrive in — a top-level
-    ``stream_event`` whose ``event`` is a ``tool_use``, and an ``assistant``
-    message whose ``content`` array holds ``tool_use`` blocks — and reads the
-    final ``result`` object for the closing text and error flag.
+    Accepts tool calls as a ``stream_event`` whose ``event`` is a ``tool_use``
+    or as ``tool_use`` blocks in an ``assistant`` message. The final ``result``
+    object supplies the closing text and error flag.
     """
     events: list[ToolEvent] = []
     final_text = ""
@@ -77,7 +69,7 @@ def parse_normalized(obj: dict) -> Trajectory:
     """Parse the hand-authored transcript format used by CI fixtures.
 
     ``{"events": [{"name": ..., "arguments": {...}}, ...], "final_text": ...,
-    "ok": true}`` — the minimal shape needed to drive the graders.
+    "ok": true}``.
     """
     events = [
         ToolEvent(name=e["name"], arguments=e.get("arguments") or {}) for e in obj.get("events", [])
@@ -93,8 +85,8 @@ def parse_normalized(obj: dict) -> Trajectory:
 class ReplayDriver:
     """Return a recorded trajectory for each task, keyed by task id.
 
-    Looks in ``transcript_dir`` for ``<task_id>.jsonl`` (real Claude Code
-    stream-json) or ``<task_id>.json`` (normalized fixture), in that order.
+    Looks for ``<task_id>.jsonl`` (stream-json) then ``<task_id>.json``
+    (normalized fixture) in ``transcript_dir``.
     """
 
     name = "replay"
@@ -115,11 +107,10 @@ class ReplayDriver:
 class ClaudeCodeDriver:
     """Drive a real Claude Code headless session against the live MCP server.
 
-    Runs ``claude -p`` in the notebook directory so it auto-discovers the
-    ``CLAUDE.md`` working agreement and the ``.mcp.json`` the on-ramp wrote.
-    Permissions are bypassed **on purpose**: the agent must be free to reach for
-    Bash/Python, because whether it does is exactly what the in-tool rate
-    measures — allowlisting only the notebook tools would fake a perfect score.
+    Runs in the notebook directory so it picks up ``CLAUDE.md`` and
+    ``.mcp.json``. Permissions are bypassed **on purpose**: the in-tool rate
+    measures whether the agent reaches for Bash/Python, so allowlisting only
+    the notebook tools would fake a perfect score.
     """
 
     name = "claude_code"
@@ -138,9 +129,8 @@ class ClaudeCodeDriver:
     def _command(self, prompt: str, *, use_mcp: bool) -> list[str]:
         cmd = [self.binary, "-p", prompt]
         if use_mcp:
-            # Primed on-ramp: the notebook has a .mcp.json wiring the strata
-            # tools. The un-primed scratchpad flow has none — the agent drives
-            # the notebook through the `strata` CLI + the installed skill instead.
+            # The un-primed scratchpad flow has no .mcp.json; the agent uses
+            # the `strata` CLI and the installed skill instead.
             cmd += ["--mcp-config", ".mcp.json", "--strict-mcp-config"]
         cmd += [
             "--permission-mode",
@@ -154,7 +144,6 @@ class ClaudeCodeDriver:
         return cmd
 
     def run(self, task: Task, notebook_dir: Path) -> Trajectory:
-        # Adapt to the setup: MCP flags only when the on-ramp wrote a .mcp.json.
         use_mcp = (notebook_dir / ".mcp.json").is_file()
         proc = subprocess.run(
             self._command(task.prompt, use_mcp=use_mcp),
@@ -166,9 +155,8 @@ class ClaudeCodeDriver:
         )
         traj = parse_stream_json(proc.stdout)
         if proc.returncode != 0 and not traj.events:
-            # No tool calls and a non-zero exit means the agent never got going
-            # (auth, missing binary, MCP handshake) — surface stderr, don't
-            # silently score an empty run as a perfect in-tool rate.
+            # The agent never started (auth, binary, MCP handshake). Surface
+            # stderr rather than score an empty run as a perfect in-tool rate.
             traj.ok = False
             traj.final_text = traj.final_text or proc.stderr.strip()
         return traj

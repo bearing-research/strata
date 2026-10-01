@@ -29,16 +29,12 @@ services:
       - STRATA_HOST=0.0.0.0
       - STRATA_PORT=8765
       - STRATA_CACHE_DIR=/home/strata/.strata/cache
-      # Enable OpenTelemetry tracing
       - STRATA_TRACING_ENABLED=true
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
       - OTEL_SERVICE_NAME=strata
-      # Structured JSON logging for better observability
       - STRATA_LOG_FORMAT=json
       - STRATA_LOG_LEVEL=INFO
-    # Use stdlib urllib.request (matches every other compose / Dockerfile
-    # healthcheck in the repo). No extra httpx dependency in the
-    # healthcheck path.
+    # Stdlib only, like every other healthcheck in the repo.
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8765/health').read()"]
       interval: 10s

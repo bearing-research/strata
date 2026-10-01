@@ -1,10 +1,9 @@
 """Eval task scenarios.
 
-Each :class:`Task` is a prompt handed to the agent plus the criteria its final
-notebook must meet. Prompts deliberately name the variables they ask for, so
-completion is checkable without an LLM judge. Data is inline so runs are
-hermetic. ``seed`` (optional) populates the notebook *before* the agent starts —
-used for the debug and DAG-extension scenarios.
+Each :class:`Task` is a prompt plus the criteria the final notebook must meet.
+Prompts name the variables they ask for, so completion needs no LLM judge. Data
+is inline so runs are hermetic; ``seed`` populates the notebook before the agent
+starts.
 """
 
 from __future__ import annotations
@@ -21,30 +20,20 @@ class Task:
     expect_variables: list[str] = field(default_factory=list)
     expect_run_clean: bool = True
     seed: Callable[[Path], None] | None = None
-    # Packages the runner provisions (`uv add`) before the agent starts, so
-    # completion measures notebook-driving, not whether the agent guessed a
-    # package name. Tasks that deliberately test dependency management say so
-    # in the prompt and can leave this empty.
+    # Provisioned (`uv add`) before the agent starts, so completion does not
+    # hinge on guessing a package name.
     deps: list[str] = field(default_factory=list)
-    # "hard" tasks are longer / messier / more ambiguous — the ones most likely
-    # to tempt an agent into a scratch-Python escape. They're live-only stress
-    # tests (no committed transcript); filter with `--select hard`.
+    # Longer, messier tasks most likely to tempt a scratch-Python escape.
+    # Live-only (no committed transcript); `--select hard`.
     hard: bool = False
-    # "scratchpad" tasks are the un-primed trigger-rate probes: the prompt never
-    # mentions the notebook, so the agent only reaches for it if the
-    # `strata-scratchpad` skill fired. The headline is the in-tool rate — did it
-    # use `strata cell add --run` / `run_snippet` vs a Bash `python -c`. These
-    # are run un-primed (skill installed, no `strata agent` on-ramp) and live-only;
-    # filter with `--select scratchpad`. See README "Un-primed trigger rate".
+    # Un-primed trigger-rate probes: the prompt never mentions the notebook, so
+    # the agent uses it only if the `strata-scratchpad` skill fired. Live-only;
+    # `--select scratchpad`. See README "Un-primed trigger rate".
     scratchpad: bool = False
 
 
 def _seed_file(notebook_dir: Path, relpath: str, content: str) -> None:
-    """Write a data file the agent (and its cells) can read at ``relpath``.
-
-    Cells run with the notebook directory as their working directory, so a cell
-    can open ``relpath`` directly.
-    """
+    """Write a data file cells can open at ``relpath`` (they run in the notebook dir)."""
     target = notebook_dir / relpath
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(content, encoding="utf-8")
@@ -75,8 +64,7 @@ def _seed_upstream(notebook_dir: Path) -> None:
 
 
 def _seed_missing_dep(notebook_dir: Path) -> None:
-    # `requests` is not in the notebook's deps, so this cell fails on import
-    # until the agent adds the dependency — through the notebook, not Bash.
+    # Fails on import until the agent adds `requests` through the notebook.
     _seed_cells(
         notebook_dir,
         ["import requests\n\nresp_ok = isinstance(requests.__version__, str)\n"],
@@ -111,8 +99,8 @@ def _seed_events_csv(notebook_dir: Path) -> None:
 
 
 def _seed_bad_record(notebook_dir: Path) -> None:
-    # `carol` has no amount → the dict comprehension raises ValueError at runtime.
-    # Not a typo — the agent has to look at the data to see what's wrong.
+    # `carol` has no amount, so unpacking raises ValueError. Not a typo: the
+    # agent has to look at the data.
     _seed_cells(
         notebook_dir,
         [
@@ -227,8 +215,7 @@ TASKS: list[Task] = [
         ),
         expect_variables=["sales", "top_city"],
     ),
-    # Deliberate escape-tempters: each has a tempting bypass the working
-    # agreement asks the agent to resist. The graders flag the bypass if taken.
+    # Escape-tempters: each offers a bypass the graders flag if taken.
     Task(
         id="add_missing_dep",
         prompt=(
@@ -315,12 +302,8 @@ TASKS: list[Task] = [
         seed=_seed_buggy_function,
         hard=True,
     ),
-    # --- scratchpad: un-primed trigger-rate probes. The prompt asks only for a
-    # result and never mentions the notebook; the agent reaches for it only if
-    # the `strata-scratchpad` skill fired. Headline = in-tool rate (did it use
-    # `strata cell add --run` / `run_snippet` vs a Bash `python -c`). Data files
-    # seed into the project; expect_variables is empty because the answer is the
-    # printed result, not a named variable. Run un-primed and live-only.
+    # --- scratchpad: un-primed trigger-rate probes. expect_variables is empty
+    # because the answer is printed, not a named variable.
     Task(
         id="scratch_distinct_cities",
         prompt=(

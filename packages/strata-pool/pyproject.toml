@@ -15,17 +15,14 @@ classifiers = [
     "Programming Language :: Python :: 3.13",
     "Programming Language :: Python :: 3.14",
 ]
-# httpx forwards job payloads to workers; persistence is stdlib sqlite3, or
-# Postgres through the optional extra below.
-# Cloud SDKs arrive with the backends that need them, as optional extras —
-# they must never become a base dependency.
+# Persistence is stdlib sqlite3, or Postgres via the extra below. Cloud SDKs
+# stay optional extras of the backends that need them, never base dependencies.
 dependencies = [
     "httpx>=0.28.0",
 ]
 
-# Running the pool as a service, rather than embedding it as a library.
-# Kept out of the base install so importing the pool never drags in a web
-# framework — the proxy that composes it may well have its own.
+# Running the pool as a service. Optional so embedding the pool as a library
+# never pulls in a web framework.
 [project.optional-dependencies]
 server = [
     "fastapi>=0.115.0",
@@ -52,9 +49,8 @@ packages = ["src/strata_pool"]
 [tool.hatch.build.targets.sdist]
 include = ["src/strata_pool", "README.md"]
 
-# Self-contained so `pytest packages/strata-pool/tests` picks up asyncio mode
-# from this file (pytest stops at the first pyproject.toml with a pytest
-# section, which is this one, not the repo root's).
+# pytest stops at the first pyproject.toml with a pytest section, so
+# `pytest packages/strata-pool/tests` reads asyncio mode from here.
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]

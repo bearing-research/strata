@@ -1,17 +1,9 @@
-"""Head-to-head benchmark for the existing Rust extension (`_strata_core`).
+"""A/B benchmark of the Rust extension (`_strata_core`) against its Python fallbacks.
 
-Two functions live in Rust today (see ``rust/src/lib.rs``):
-
-1. ``read_file_bytes`` — mmap-based cache read, vs Python ``Path.read_bytes()``.
-2. ``concat_ipc_streams`` — byte-splice Arrow IPC concat, vs the PyArrow
-   parse/reserialize path.
-
-Unlike ``bench_hot_path.py`` (which times whatever the default path happens to
-be), this benchmark *forces* each implementation so we get a real A/B and can
-answer: how much is the Rust actually buying, and is it still worth carrying?
-
-Each pairing also asserts the two implementations produce equivalent output, so
-a speed number is never reported for a wrong result.
+Covers ``read_file_bytes`` (mmap read vs ``Path.read_bytes()``) and
+``concat_ipc_streams`` (byte-splice concat vs PyArrow parse/reserialize). Unlike
+``bench_hot_path.py``, each implementation is forced, and each pair is checked
+for equivalent output before it is timed.
 
 Run with: uv run python benchmarks/bench_rust_ext.py
 """
@@ -34,11 +26,6 @@ try:
     RUST = _strata_core
 except ImportError:
     RUST = None
-
-
-# --------------------------------------------------------------------------
-# helpers
-# --------------------------------------------------------------------------
 
 
 def _timeit(fn, iterations: int) -> dict:
@@ -100,13 +87,12 @@ def bench_read(tmpdir: Path) -> None:
         path.write_bytes(data)
         size_mb = path.stat().st_size / (1024 * 1024)
 
-        # correctness: identical bytes
         py = path.read_bytes()
         if RUST is not None:
             rs = bytes(RUST.read_file_bytes(str(path)))
             assert rs == py, "mmap read produced different bytes"
 
-        # warm the OS page cache (both paths benefit equally)
+        # Warm the OS page cache; both paths benefit equally.
         for _ in range(5):
             path.read_bytes()
 
@@ -141,7 +127,6 @@ def bench_concat(tmpdir: Path) -> None:
         segments = [_make_stream(rows_each) for _ in range(num_seg)]
         total_mb = sum(len(s) for s in segments) / (1024 * 1024)
 
-        # correctness: both paths preserve total row count and agree with each other
         expected_rows = num_seg * rows_each
         pyarrow_out = fast_io._concat_stream_bytes_pyarrow(segments)
         assert _stream_rows(pyarrow_out) == expected_rows, "pyarrow concat lost rows"

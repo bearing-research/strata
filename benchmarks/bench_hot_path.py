@@ -1,10 +1,7 @@
-"""Benchmark for hot path optimization.
+"""Benchmark the cache-hit hot path: file read, mmap read and IPC concat.
 
-This benchmark measures the performance of the cache read/concat operations.
-
-Key optimization: Cache now stores data in Arrow IPC Stream format, so
-cache hits are pure file reads with zero Arrow parsing:
-    disk -> file_read -> bytes -> network
+The cache stores Arrow IPC stream bytes, so a hit is a plain file read with no
+Arrow parsing.
 
 Run with: uv run python benchmarks/bench_hot_path.py
 """
@@ -79,18 +76,16 @@ def benchmark_mmap_file_read(file_path: Path, num_iterations: int = 100) -> dict
 
 
 def benchmark_parse_and_serve(file_path: Path, num_iterations: int = 100) -> dict:
-    """Benchmark read + parse + serialize (old path)."""
+    """Benchmark read + parse + reserialize, the baseline the raw read avoids."""
     times = []
 
     for _ in range(num_iterations):
         start = time.perf_counter()
 
-        # Read and parse stream
         stream_bytes = file_path.read_bytes()
         reader = ipc.open_stream(pa.BufferReader(stream_bytes))
         batches = list(reader)
 
-        # Re-serialize (simulating what old path did)
         if batches:
             sink = pa.BufferOutputStream()
             writer = ipc.new_stream(sink, batches[0].schema)
@@ -150,7 +145,6 @@ def main():
     print("Hot path: raw file read (zero Arrow parsing)")
     print()
 
-    # Test configurations
     configs = [
         {"num_rows": 1_000, "num_columns": 10, "label": "Small (1K rows, 10 cols)"},
         {"num_rows": 10_000, "num_columns": 10, "label": "Medium (10K rows, 10 cols)"},
@@ -166,11 +160,10 @@ def main():
             print(f"Benchmarking: {config['label']}")
             print("-" * 60)
 
-            # Create test data
             batch = create_test_data(config["num_rows"], config["num_columns"])
             file_path = tmpdir / f"test_{config['num_rows']}_{config['num_columns']}.arrowstream"
 
-            # Write as stream format (like our cache does)
+            # Same format the cache writes.
             create_stream_file(file_path, batch)
 
             file_size_mb = file_path.stat().st_size / (1024 * 1024)
@@ -203,12 +196,10 @@ def main():
             print(f"  Mmap vs parse+serialize: {speedup:.1f}x faster")
             print()
 
-        # Benchmark concat with multiple segments
         print("-" * 60)
         print("Benchmarking: Concat Multiple Segments")
         print("-" * 60)
 
-        # Create multiple segments
         num_segments = 10
         segments = []
         for i in range(num_segments):

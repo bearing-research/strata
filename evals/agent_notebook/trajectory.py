@@ -1,10 +1,7 @@
 """Driver-agnostic representation of an agent run.
 
-A :class:`Trajectory` is the normalized form both drivers produce and every
-grader consumes: an ordered list of :class:`ToolEvent`, plus the final text and
-whether the run terminated cleanly. Keeping this independent of Claude Code's
-wire format is what lets the deterministic replay driver (CI) and the real
-Claude Code driver (local) share one set of graders.
+Both drivers produce a :class:`Trajectory` and every grader consumes one, so it
+stays independent of Claude Code's wire format.
 """
 
 from __future__ import annotations
@@ -31,30 +28,22 @@ READ_TOOLS = frozenset(
     {"list_notebooks", "get_notebook", "get_cell", "get_variable", "dag", "status", "note"}
 )
 
-# The ways an agent routes *around* the notebook — the escape hatches the
-# working agreement tells it not to use. Each is a distinct bypass:
-#
-# * bash-python — running Python/tests via Bash instead of run_cell. Matched at
-#   a word boundary so `pythonpath=...` or a filename containing "python" don't
-#   trip it; `uv run python` / `uv run pytest` count.
-# * bash-install — managing dependencies via Bash (pip/uv/conda) instead of
-#   add_dependency, so the change never lands in the notebook's committed env.
-# * cell-file-edit — editing a cell's source file directly (Write/Edit) instead
-#   of edit_cell/add_cell, so the DAG and the watcher never see it.
+# Ways an agent routes *around* the notebook:
+# * bash-python: Python/tests via Bash instead of run_cell. Word-bounded so
+#   `pythonpath=...` does not trip it; `uv run python` counts.
+# * bash-install: pip/uv/conda via Bash instead of add_dependency, so the
+#   notebook's committed env never changes.
+# * cell-file-edit: Write/Edit on a cell file, which the DAG never sees.
 _PY_ESCAPE = re.compile(r"(?:^|[\s;&|()`])(?:uv\s+run\s+)?(?:python3?|ipython|pytest)(?:\s|$)")
 _INSTALL_ESCAPE = re.compile(
     r"(?:^|[\s;&|()`])(?:pip\s+install|uv\s+pip\s+install|uv\s+add|conda\s+install)\b"
 )
 _CELL_FILE = re.compile(r"[\\/]cells[\\/][^\\/]+\.py$")
 
-# The `strata` CLI is the *other* way to drive the notebook — the scratchpad
-# path an agent takes when it isn't on the MCP on-ramp (skill + `strata cell add
-# --run`, not `mcp__…__run_cell`). These Bash calls are notebook work / reads,
-# NOT escapes: a `strata` segment's own arguments (a package name, a `-c`
-# payload) must not trip the bash-python / install detectors. The work set
-# mirrors WORK_TOOLS (add/edit/run/tests/remove/move ↔ add|edit|run|test|rm|mv,
-# plus annotate and dep add/rm). Matched at a boundary so `uv run strata cell
-# add` and plain `strata cell add` both count.
+# The `strata` CLI is the other way to drive the notebook (the scratchpad path,
+# off the MCP on-ramp). Its calls are notebook work or reads, NOT escapes, so a
+# `strata` segment's own arguments must not trip the escape detectors. The work
+# set mirrors WORK_TOOLS.
 _CLI_WORK = re.compile(
     r"(?:^|[\s;&|()`])strata\s+"
     r"(?:cell\s+(?:add|edit|run|test|rm|mv|annotate)|dep\s+(?:add|rm|remove))\b"
@@ -62,13 +51,10 @@ _CLI_WORK = re.compile(
 _CLI_READ = re.compile(r"(?:^|[\s;&|()`])strata\s+(?:cell\s+(?:list|show)|dag|status)\b")
 _EDIT_TOOLS = frozenset({"Write", "Edit", "MultiEdit", "NotebookEdit"})
 
-# A compound Bash command is classified per shell segment so a real escape in one
-# segment isn't masked by a `strata` call in another (`strata status && python -c
-# …` is still a bash-python escape). We split on the top-level separators `&&`,
-# `||`, `;` — deliberately not a bare `|`, which appears far more often inside a
-# cell's `-c` payload than as a command separator. (Heuristic: a rare `-c`
-# payload that itself contains `;` followed by a python token can still be
-# misread — acceptable for an eval-scoring approximation.)
+# Classify Bash per segment so a `strata` call cannot mask an escape in another
+# segment. Not split on bare `|`, which shows up far more often inside a `-c`
+# payload than as a pipe. A `-c` payload with `;` then a python token can still
+# be misread; acceptable for eval scoring.
 _CMD_SEP = re.compile(r"&&|\|\||;")
 
 
@@ -87,10 +73,8 @@ class ToolEvent:
     def notebook_tool(self) -> str | None:
         """The bare notebook tool name if this is an MCP strata call, else None.
 
-        Claude Code namespaces MCP tools as ``mcp__<server>__<tool>`` and
-        sanitizes the server name (``strata-notebook`` → ``strata_notebook``),
-        so we split on ``__`` and key off the trailing tool segment rather than
-        matching an exact prefix.
+        Keys off the last ``__`` segment because Claude Code sanitizes the
+        server name in ``mcp__<server>__<tool>``.
         """
         parts = self.name.split("__")
         if len(parts) >= 3 and parts[0] == "mcp":
@@ -117,10 +101,6 @@ class ToolEvent:
     def escape_reason(self) -> str | None:
         """Why this call routes around the notebook, or None if it doesn't."""
         if self.name == "Bash":
-            # Classify per shell segment: a `strata` CLI segment is
-            # notebook-driving (skip it), but a python/install bypass in a
-            # *separate* segment is still an escape — a `strata` call elsewhere
-            # in the same command must not mask it.
             for seg in _bash_segments(self._bash_command):
                 if _CLI_WORK.search(seg) or _CLI_READ.search(seg):
                     continue

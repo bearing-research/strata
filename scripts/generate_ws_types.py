@@ -1,21 +1,13 @@
 """Generate TypeScript payload types for the notebook WS protocol.
 
-``frontend/src/types/notebook.ts`` types ``WsMessage.payload`` as ``unknown``,
-so every consumer casts and the shapes live only at the Python emit sites. The
-payload models exist now (``strata.notebook.ws_payloads``); this turns them into
-declarations the frontend can narrow on, from the one source.
-
-Run it after changing a payload model::
+Renders the ``strata.notebook.ws_payloads`` models as declarations the frontend
+can narrow on. Run it after changing a payload model::
 
     uv run python scripts/generate_ws_types.py
 
-``--check`` re-renders and diffs instead of writing, which is what CI does: the
-generated file is committed, so a model change that skips regeneration fails
-rather than letting the two definitions drift apart quietly.
-
-The emitter handles exactly the JSON Schema constructs these models produce and
-raises on anything else. Emitting ``any`` for an unrecognised shape would defeat
-the point -- the frontend would compile against a type that promises nothing.
+``--check`` diffs instead of writing; CI runs it so the committed file cannot
+drift from the models. Unknown JSON Schema constructs raise rather than emit
+``any``, a type that would promise nothing.
 """
 
 from __future__ import annotations
@@ -42,13 +34,9 @@ class UnsupportedSchema(RuntimeError):
 def _ts_literal(value: object) -> str:
     """Render one enum / const member as a TypeScript literal.
 
-    Typed by the member, not stringified: an ``IntEnum`` carries ``1`` on the
-    wire, so quoting it produces ``'1'`` -- a union that compiles and can never
-    match, since ``=== 1`` is then a type error and ``=== '1'`` is always
-    false. That is the same dead type this emitter exists to refuse.
-
-    Strings are escaped, because an unescaped quote or backslash produces a
-    file that is not TypeScript at all, reported as a success.
+    Typed by the member, not stringified: an ``IntEnum`` sends ``1``, and
+    ``'1'`` would be a union that can never match. Strings are escaped so a
+    quote or backslash cannot produce invalid TypeScript.
     """
     if isinstance(value, bool):
         # Before int: bool is a subclass of it.
@@ -69,18 +57,16 @@ def _ts_type(schema: dict[str, Any]) -> str:
 
     if "anyOf" in schema:
         parts = [_ts_type(s) for s in schema["anyOf"]]
-        # Optionals arrive as anyOf[T, null]; "| null" is kept rather than
-        # folded into "?" because the wire really can carry an explicit null,
-        # and a consumer that only checks for absence would miss it.
+        # Keep "| null" rather than folding it into "?": the wire can carry an
+        # explicit null.
         return " | ".join(dict.fromkeys(parts))
 
     if "enum" in schema:
         return " | ".join(_ts_literal(v) for v in schema["enum"])
 
     if "const" in schema:
-        # A single-member Literal arrives as ``const`` with no ``enum`` key, so
-        # it would otherwise fall through to its base type and lose exactly the
-        # constraint it was written to express.
+        # A single-member Literal has ``const`` but no ``enum``; without this it
+        # would fall through to its base type.
         return _ts_literal(schema["const"])
 
     kind = schema.get("type")
@@ -93,9 +79,8 @@ def _ts_type(schema: dict[str, Any]) -> str:
     if kind == "null":
         return "null"
     if kind == "array":
-        # An array with no ``items`` is a tuple (pydantic emits ``prefixItems``)
-        # or something else this does not model. Rendering it ``unknown[]``
-        # would type-check and describe nothing, so refuse it.
+        # No ``items`` means a tuple (``prefixItems``) or something unmodelled;
+        # ``unknown[]`` would describe nothing, so refuse.
         if "items" not in schema:
             raise UnsupportedSchema(f"array without items: {schema!r}")
         return f"{_ts_type(schema['items'])}[]"
@@ -103,8 +88,7 @@ def _ts_type(schema: dict[str, Any]) -> str:
         # A free-form mapping (dict[str, Any] passthrough fields).
         return "Record<string, unknown>"
     if schema == {}:
-        # A genuinely unconstrained field (bare ``Any``). Distinct from a node
-        # this emitter failed to understand, which raises below.
+        # Bare ``Any``; a node the emitter does not understand raises below.
         return "unknown"
     raise UnsupportedSchema(f"cannot render {schema!r}")
 
@@ -112,32 +96,25 @@ def _ts_type(schema: dict[str, Any]) -> str:
 def _is_optional(spec: dict[str, Any]) -> bool:
     """Whether a field can actually be absent from the wire dict.
 
-    Not JSON Schema's ``required``: a field with a default is "not required" to
-    *construct*, but ``model_dump`` still emits it, so the client always sees
-    it. What removes a key is ``exclude_none``, which drops exactly the fields
-    holding ``None``. So nullability is the question, not defaultedness --
-    otherwise every defaulted field is typed ``?`` and consumers write
-    existence checks for keys that are always there.
+    Nullability, not JSON Schema's ``required``: ``model_dump`` still emits
+    defaulted fields, and only ``exclude_none`` drops keys (those holding
+    ``None``).
     """
     return any(part.get("type") == "null" for part in spec.get("anyOf", []))
 
 
 def _doc_comment(text: str) -> str:
-    # ``*/`` inside a description would close the comment early and break the
-    # file; the generator would still report success.
+    # An unescaped ``*/`` would close the comment early and break the file.
     return f"  /** {' '.join(text.split()).replace('*/', '*\\/')} */"
 
 
-# The frontend's prettier ``printWidth``. The generated file is committed and
-# formatted by the same hook as the rest of the frontend, so a line the emitter
-# leaves too long is one prettier rewrites and ``--check`` then reports as drift.
+# The frontend's prettier ``printWidth``; a longer line would be rewritten by
+# prettier and then flagged as drift by ``--check``.
 _PRINT_WIDTH = 100
 
 
 def _field_line(field: str, optional: str, ts: str) -> str:
-    """One interface member, broken the way prettier breaks it when too long:
-    the type on its own line, and one union member per line if even that is
-    too long."""
+    """One interface member, wrapped the way prettier wraps it when too long."""
     line = f"  {field}{optional}: {ts}"
     if len(line) <= _PRINT_WIDTH:
         return line
@@ -149,10 +126,8 @@ def _field_line(field: str, optional: str, ts: str) -> str:
 
 def _interface(name: str, schema: dict[str, Any]) -> str:
     if "enum" in schema:
-        # A Python Enum reaches $defs as a bare enum node with no properties.
-        # Rendering it as an interface yields ``{}``, which accepts almost
-        # anything -- the "type that promises nothing" this emitter exists to
-        # refuse.
+        # A Python Enum is a bare enum node; as an interface it would be ``{}``,
+        # which accepts almost anything.
         return f"export type {name} = {_ts_type(schema)}"
     if "properties" not in schema:
         raise UnsupportedSchema(f"{name}: not an object or enum: {schema!r}")

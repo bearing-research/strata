@@ -1,19 +1,11 @@
 name: Examples
 
-# Runs the key-free notebook examples end-to-end via `strata run`.
-# Catches regressions where a cell-executor / DAG / runtime change
-# breaks a real notebook even though the unit tests stay green.
-#
-# Examples that need API keys or remote workers are intentionally
-# excluded:
-#   - review_triage          → ANTHROPIC_API_KEY or OPENAI_API_KEY
-#   - news_alpha_trader      → ALPACA_API_KEY + LLM key
-#   - arxiv_classifier       → custom remote workers (Modal, Fly)
-#   - library_cells          → demonstrates a deliberate failure
-#                              (the `blocked` cell is the teaching
-#                              moment); the headless runner can't
-#                              tell that's expected, so this stays
-#                              interactive-only
+# Runs the key-free notebook examples end-to-end via `strata run`, catching a
+# real notebook broken by a change the unit tests miss. Excluded:
+#   - review_triage, news_alpha_trader: need API keys
+#   - arxiv_classifier: needs remote workers (Modal, Fly)
+#   - library_cells: fails on purpose (the `blocked` cell), which the
+#     headless runner cannot tell from a real failure
 
 on:
   push:
@@ -48,9 +40,7 @@ jobs:
     name: example · ${{ matrix.example }}
     runs-on: ubuntu-latest
     strategy:
-      # Don't cancel the others on a single failure — a flaky
-      # public S3 read shouldn't hide a real failure in a different
-      # example.
+      # A flaky public S3 read must not hide a real failure elsewhere.
       fail-fast: false
       matrix:
         example:
@@ -91,28 +81,19 @@ jobs:
         run: uv sync --python 3.13 --all-extras
 
       - name: Sync the example's per-notebook venv
-        # Each example declares its own ``requires-python`` (==X.Y.*)
-        # in its pyproject.toml. ``uv sync`` reads from that and
-        # auto-installs the matching interpreter if missing — the
-        # workflow shouldn't second-guess the notebook's pinned
-        # version, otherwise bumping one example to a different
-        # minor would require a coordinated workflow edit too.
+        # uv sync installs the interpreter that each example's
+        # requires-python names, so bumping one needs no workflow edit.
         working-directory: examples/${{ matrix.example }}
         run: uv sync
 
-      # ``strata run`` with --no-sync because the env was already
-      # synced above. Ignoring cache (--force) so cached artifacts
-      # from a previous run don't mask cell-execution regressions.
+      # --force ignores the cache so a previous run's artifacts cannot mask
+      # a cell-execution regression.
       - name: Run notebook
         run: uv run strata run examples/${{ matrix.example }} --no-sync --force
 
-  # R-cell examples — a separate job because they need the R toolchain
-  # (Rscript + packages) on top of the Python build. Headless ``strata
-  # run`` executes R cells (#98) and restores each notebook's renv.lock
-  # into a project-scoped library on the way in, so no manual
-  # renv::restore step is needed — only the harness baseline (jsonlite +
-  # arrow) and renv itself are pre-installed; everything else (e.g.
-  # ggplot2 for r_mtcars_analysis) comes from the notebook's renv.lock.
+  # R-cell examples need Rscript on top of the Python build. `strata run`
+  # restores each notebook's renv.lock itself, so only the harness baseline
+  # (jsonlite + arrow) and renv are pre-installed.
   r-examples:
     name: example · ${{ matrix.example }} (R)
     runs-on: ubuntu-latest
@@ -174,8 +155,6 @@ jobs:
         working-directory: examples/${{ matrix.example }}
         run: uv sync
 
-      # --no-sync because the Python venv is already synced above;
-      # ``strata run`` still restores the notebook's renv.lock into its
-      # project library before executing the R cells.
+      # `strata run` still restores the notebook's renv.lock before the R cells.
       - name: Run notebook
         run: uv run strata run examples/${{ matrix.example }} --no-sync --force

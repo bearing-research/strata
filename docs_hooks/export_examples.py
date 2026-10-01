@@ -1,12 +1,6 @@
-"""Mkdocs hook: render every notebook in ``examples/`` to docs.
+"""Mkdocs hook: render each ``examples/*/notebook.toml`` to ``docs/examples/<name>.md``.
 
-Runs ``strata.notebook.export.export_notebook`` against each
-``examples/*/notebook.toml`` and writes the resulting markdown to
-``docs/examples/<name>.md`` so mkdocs picks it up at build time.
-The generated files are gitignored — they live in the build tree
-only, never in commits.
-
-Registered in ``mkdocs.yml``:
+The generated files are gitignored. Registered in ``mkdocs.yml``:
 
     hooks:
       - docs_hooks/export_examples.py
@@ -44,9 +38,7 @@ def on_pre_build(config):
     for notebook_dir in sorted(examples_dir.iterdir()):
         if not (notebook_dir / "notebook.toml").is_file():
             continue
-        # Skip scratch directories. ``test_notebook`` is the conventional
-        # local-only example directory contributors create when poking at
-        # the server; not part of the shipped catalog.
+        # Skip scratch dirs; ``test_notebook`` is a conventional local-only one.
         if notebook_dir.name.startswith(("_", ".")) or notebook_dir.name == "test_notebook":
             continue
         try:

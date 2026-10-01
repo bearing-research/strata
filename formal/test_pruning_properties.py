@@ -1,11 +1,9 @@
 """Property test: row-group pruning never drops a matching row.
 
-Invariant 2 (conservative pruning) says a row group may be skipped only
-when no row in it can match. This checks that directly, for random
-columns written through pyarrow's real Parquet writer. It compares
-ReadPlanner._should_prune_row_group, fed the file's real statistics,
-with an exact evaluation of the filter on the rows. A null never
-matches; NaN compares as IEEE says (NaN != x is true).
+Checks invariant 2 (conservative pruning) on random columns written by
+pyarrow's Parquet writer: ReadPlanner._should_prune_row_group, fed the real
+statistics, against an exact evaluation of the filter on the rows. A null
+never matches; NaN compares as IEEE says (NaN != x is true).
 
 Needs Hypothesis, which is not a project dependency:
 

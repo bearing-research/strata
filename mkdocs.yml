@@ -53,7 +53,6 @@ markdown_extensions:
       emoji_index: !!python/name:material.extensions.emoji.twemoji
       emoji_generator: !!python/name:material.extensions.emoji.to_svg
   # Renders `++shift+enter++` as styled keyboard keys.
-  # Used in the notebook quickstart and keyboard-shortcuts pages.
   - pymdownx.keys
 
 plugins:
@@ -114,18 +113,11 @@ nav:
 exclude_docs: |
   internal/
 
-# Versioned docs via `mike`. Material's `extra.version` block renders
-# the version-picker dropdown in the header; `mike` populates the
-# ``versions.json`` mike maintains under the ``gh-pages`` root.
-#
-# Aliases used:
-#   * ``latest`` — points to the most recent release tag. Default
-#     entrypoint, so a bare visit to the site lands here.
-#   * ``dev``   — tracks ``main``. Updated by the docs.yml workflow on
-#     every push to main; deployable read-only preview of the
-#     next-release content.
-#   * ``<version>`` — pinned snapshot per release tag (``0.1``, ``0.2``,
-#     ...). Pushed by the release-driven workflow.
+# Versioned docs via `mike`, which maintains ``versions.json`` on ``gh-pages``
+# for Material's version picker. Aliases:
+#   * ``latest``: the most recent release; the default landing page.
+#   * ``dev``: tracks ``main``, updated by docs.yml on every push.
+#   * ``<version>``: one snapshot per release tag, pushed by the release workflow.
 extra:
   version:
     provider: mike

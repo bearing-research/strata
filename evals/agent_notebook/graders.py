@@ -1,9 +1,7 @@
 """Graders over a normalized :class:`Trajectory` and the final notebook.
 
-All graders are **pure**: they take a trajectory (and, for completion, a
-notebook directory + a precomputed ``run_ok`` flag) and return a dataclass.
-Nothing here spawns a server, an LLM, or a subprocess — so the CI replay test
-scores recorded runs with neither a venv nor network.
+Graders are **pure**: no server, LLM or subprocess, so CI scores recorded runs
+with neither a venv nor network.
 """
 
 from __future__ import annotations
@@ -28,11 +26,10 @@ class InToolGrade:
 def grade_in_tool(traj: Trajectory) -> InToolGrade:
     """Fraction of work actions taken through the notebook's MCP tools.
 
-    ``in_tool_rate = notebook_work / (notebook_work + escapes)``, where an escape
-    is any bypass of the notebook — running Python via Bash, installing packages
-    via Bash, or editing a cell file directly (see ``ToolEvent.escape_reason``).
-    A run that did neither is ``no_activity`` (rate reported as 1.0 but excluded
-    from suite aggregates — it's a completion failure, not an adoption signal).
+    ``in_tool_rate = notebook_work / (notebook_work + escapes)``; escapes are
+    defined by ``ToolEvent.escape_reason``. A run with neither is
+    ``no_activity``: rate 1.0 but excluded from suite aggregates, since it is a
+    completion failure, not an adoption signal.
     """
     work = traj.work_events()
     escapes = traj.escape_events()
@@ -60,15 +57,13 @@ class CompletionGrade:
 def notebook_defines(notebook_dir: Path) -> set[str]:
     """Every top-level variable defined across the notebook's cells.
 
-    Runs the same static analysis the DAG uses (``analyze_cell``) over each
-    cell's source — ``parse_notebook`` alone doesn't populate ``cell.defines``,
-    that happens during variable analysis.
+    Uses ``analyze_cell`` because ``parse_notebook`` alone leaves
+    ``cell.defines`` empty.
     """
     from strata.notebook.analyzer import analyze_cell
     from strata.notebook.parser import parse_notebook
 
-    # A notebook-less dir (an un-primed scratchpad project, where the agent makes
-    # its own `scratch/` subdir) defines nothing at the top level.
+    # An un-primed scratchpad project has no notebook at the top level.
     if not (notebook_dir / "notebook.toml").is_file():
         return set()
     state = parse_notebook(notebook_dir)
@@ -83,9 +78,8 @@ def grade_completion(
 ) -> CompletionGrade:
     """Score the final notebook against a task's expectations.
 
-    ``run_ok`` is supplied by the caller (the runner shells out to ``strata
-    run``); pass ``None`` when a runnable check was not performed. The grader
-    itself stays pure so CI can score a fixture notebook without a venv.
+    ``run_ok`` comes from the caller's ``strata run``; ``None`` means no run
+    check was done.
     """
     defined = notebook_defines(notebook_dir)
     missing = [v for v in expect_variables if v not in defined]

@@ -48,15 +48,11 @@ jobs:
 
       - name: Health check
         run: |
-          # Poll /health for up to 30s instead of a fixed sleep. Cold
-          # container startup on GH runners has been flaky at the prior
-          # 10s window. ``--retry-connrefused`` keeps curl trying while
-          # the listener is still binding.
+          # Poll /health for up to 30s: a fixed 10s sleep was flaky on cold
+          # runners. --retry-connrefused retries while the listener binds.
           curl -fsS --retry 30 --retry-delay 1 --retry-connrefused \
             --retry-all-errors http://localhost:8765/health
-          # On failure, surface the container logs so the next failure
-          # is debuggable from CI alone.
-        # The "if failure" step below dumps logs.
+        # The "if failure" step below dumps the container logs.
 
       - name: Container logs on failure
         if: failure()
@@ -82,11 +78,9 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069  # v4.4.1
 
-      # Built as written, from PyPI, because that is what a pool actually
-      # runs -- the file says so and uses nothing from the build context.
-      # The consequence is that this proves the published worker builds and
-      # behaves, not the worker on this branch; unreleased worker code is
-      # tested by the Python suite, not here.
+      # Built from PyPI, as a pool runs it (the file uses nothing from the
+      # build context). So this proves the published worker, not this branch's;
+      # unreleased worker code is covered by the Python suite.
       - name: Build worker image
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc  # v7.4.0
         with:
@@ -102,10 +96,8 @@ jobs:
 
       - name: It refuses to start without a token
         run: |
-          # "an unauthenticated /execute is remote code execution" -- the
-          # image binds 0.0.0.0, so inheriting the library's auth-disabled
-          # default would stand one up. This is the assertion that matters
-          # most, and the one nothing else covers.
+          # The image binds 0.0.0.0, so inheriting the library's auth-disabled
+          # default would expose remote code execution. Nothing else covers this.
           if docker run --rm strata-worker:test 2>stderr.txt; then
             echo "FAIL: the worker started with no STRATA_WORKER_TOKEN"
             exit 1
@@ -142,9 +134,8 @@ jobs:
             echo "FAIL: /execute answered $code without a token, expected 401"
             exit 1
           }
-          # And with the token it gets past auth -- 400 on a junk manifest.
-          # Without this the check above would pass on an endpoint that
-          # answered 401 for some other reason, or one that did not exist.
+          # With the token it gets past auth (400 on a junk manifest), so the
+          # 401 above came from auth and not a missing endpoint.
           code=$(curl -s -o /dev/null -w '%{http_code}' -X POST \
             -H 'Authorization: Bearer ci-test-token' \
             http://localhost:8080/execute -d '{}')

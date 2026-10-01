@@ -1,22 +1,14 @@
 """Capture a real agent-drives / TUI-observes session.
 
-Everything else in `capture_docs_shots.py` feeds the TUI *canned* frames: no
-server, no network, deterministic by construction. That is right for a layout
-diagram and wrong for this one, because the claim being illustrated is that a
-notebook driven from one terminal shows up live in a viewer in another. Canned
-frames cannot demonstrate that; they would show it whether or not it worked.
-
-So this drives the real thing. A real server, a real notebook, the real
-`strata` CLI issuing the commands a coding agent issues, and a real TUI client
-on a real WebSocket rendering whatever arrives. The frames are screenshots of
-that session.
+Unlike the canned frames in `capture_docs_shots.py`, this drives a real server
+and notebook with the `strata` CLI and screenshots a real TUI client, because
+the claim shown (a notebook driven from one terminal appears live in another)
+is one canned frames would show whether or not it worked.
 
     uv run python scripts/capture_agent_drive.py
 
-Doubles as an end-to-end check of the live-mirror path (#357): every beat
-asserts the TUI actually received the change, so a regression that stopped the
-broadcast would fail the capture rather than quietly produce a still-looking
-animation.
+Doubles as an end-to-end check of the live mirror: every beat asserts the TUI
+received the change, so a broken broadcast fails the capture.
 """
 
 from __future__ import annotations
@@ -31,9 +23,7 @@ sys.path.insert(0, str(REPO_ROOT / "scripts"))
 
 from capture_docs_shots import ASSETS, TUI_SIZE, _free_port, _strata, serve  # noqa: E402
 
-# What the "agent" types. Deliberately the CLI a coding agent actually uses -
-# not REST calls dressed up - so the capture exercises the same path the
-# scratchpad skill and the MCP server take.
+# What the "agent" types, through the same CLI a coding agent uses.
 LOADER = "import time\ntime.sleep(1)\nrows = [1, 2, 3, 4, 5]\nsum(rows)\n"
 DERIVED = "doubled = [r * 2 for r in rows]\ndoubled\n"
 
@@ -41,10 +31,8 @@ DERIVED = "doubled = [r * 2 for r in rows]\ndoubled\n"
 def _drive(server: str, session: str, *args: str) -> None:
     """Run one `strata` command against the *live session*, as a subprocess.
 
-    ``--server``/``--session``, not a notebook path. The local backend edits
-    files on disk and the server never learns of it, so a watcher sees nothing
-    until its next resync — the first version of this capture drove that way
-    and the TUI stayed empty, which is the whole distinction being illustrated.
+    Not a notebook path: the local backend edits files the server never hears
+    about, so the TUI would see nothing until its next resync.
     """
     _strata(*args, "--server", server, "--session", session)
 
@@ -53,10 +41,7 @@ async def _run(work_dir: Path) -> list[Path]:
     from strata.notebook.tui.app import NotebookTUI
     from strata.notebook.tui.client import TuiClient
 
-    # A clean slate, every run. The beats assert on exact cell counts, so a
-    # notebook left behind by an earlier run makes the first assertion fail
-    # against a graph that was never empty — which is exactly how this capture
-    # first misread a working live mirror as a broken one.
+    # The beats assert exact cell counts, so a leftover notebook would fail them.
     shutil.rmtree(work_dir, ignore_errors=True)
     work_dir.mkdir(parents=True)
     port = _free_port()
@@ -87,24 +72,16 @@ async def _run(work_dir: Path) -> list[Path]:
             async def settle(what: str, ready, tries: int = 60) -> None:
                 """Wait until the TUI's own model satisfies *ready*, then snapshot.
 
-                The assertion is on the viewer's state, never on the CLI's exit
-                code: a command that succeeded while the broadcast was lost is
-                exactly the failure worth catching, and it is what the first
-                version of this capture hit by driving the local backend.
-
-                Against ``app.vm`` rather than the rendered text, because the
-                cell list shows a *source preview* — asserting on a fragment
-                that happens to fall outside it fails while the mirror is
-                working perfectly, which is a worse outcome than no check.
+                Checks the viewer's state, not the CLI's exit code, since a
+                lost broadcast is the failure worth catching. Uses ``app.vm``
+                rather than rendered text, which shows only a source preview.
                 """
                 for _ in range(tries):
                     await pilot.pause()
                     await asyncio.sleep(0.25)
                     if not ready():
                         continue
-                    # Let the trailing frames land. Status flips a beat before
-                    # the output arrives, and snapshotting on the flip
-                    # photographs a finished cell reporting "(no output)".
+                    # Status flips a beat before the output arrives; wait for it.
                     for _ in range(4):
                         await pilot.pause()
                         await asyncio.sleep(0.25)
@@ -125,9 +102,7 @@ async def _run(work_dir: Path) -> list[Path]:
             await asyncio.to_thread(_drive, base_url, sid, "cell", "add", "-c", LOADER)
             await settle("the first cell appearing", lambda: len(cells_seen()) == 1)
 
-            # Cell ids from the viewer's own model: it is the state this
-            # capture already trusts, and it needs neither a disk read nor
-            # another subprocess to agree with what is on screen.
+            # Cell ids from the viewer's model, which matches what is on screen.
             await asyncio.to_thread(_drive, base_url, sid, "cell", "run", app.vm.cell_order[0])
             await settle(
                 "the first cell finishing",

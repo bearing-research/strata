@@ -1,12 +1,9 @@
 """Run the agent-notebook eval suite and report results.
 
-Per task the runner drives the **real on-ramp** — it reuses the same
-``agent_launch`` helpers ``strata agent`` uses (create-or-open, spawn a server
-with MCP, open a session, write ``.mcp.json`` + ``CLAUDE.md``) — then hands the
-prepared notebook to a driver, scores the run, and tears the server down.
-``scratchpad`` tasks are the exception: they run **un-primed** (a plain project
-with the skill installed and no on-ramp) via :func:`_run_scratchpad_task`, so
-their in-tool rate is the spontaneous trigger rate, not compliance.
+Each task goes through the real ``strata agent`` on-ramp (``agent_launch``),
+then a driver, then the graders. ``scratchpad`` tasks run **un-primed** instead
+(skill installed, no on-ramp), so their in-tool rate is the spontaneous trigger
+rate, not compliance.
 
 Local (real Claude Code):
 
@@ -43,12 +40,7 @@ def _free_port() -> int:
 
 
 def _provision_deps(notebook_dir: Path, deps: list[str]) -> None:
-    """`uv add` the task's dependencies so the notebook's env is ready.
-
-    Keeps completion about notebook-driving behavior rather than whether the
-    agent guessed the right package name (the tasks that *test* dependency
-    management say so in the prompt regardless).
-    """
+    """`uv add` the task's dependencies so completion does not hinge on package names."""
     if not deps:
         return
     subprocess.run(
@@ -85,9 +77,10 @@ def _strata_run_ok(notebook_dir: Path) -> bool:
 
 
 def _install_scratchpad_skill(project_dir: Path) -> None:
-    """Copy the packaged ``strata-scratchpad`` skill into a project-scoped
-    ``.claude/skills/`` so Claude Code discovers it — the un-primed equivalent of
-    the on-ramp's CLAUDE.md, without telling the agent to use the notebook.
+    """Install the packaged ``strata-scratchpad`` skill into ``.claude/skills/``.
+
+    The un-primed counterpart of the on-ramp's CLAUDE.md: discoverable, but the
+    agent is never told to use the notebook.
     """
     import shutil
 
@@ -102,10 +95,10 @@ def _install_scratchpad_skill(project_dir: Path) -> None:
 def _run_scratchpad_task(
     task: Task, driver: Driver, workdir: Path, *, live: bool, label: str | None
 ) -> RunResult:
-    """Un-primed trigger-rate run: a plain project dir with the skill installed but
-    **no** on-ramp (no .mcp.json, no priming CLAUDE.md). The prompt never mentions
-    the notebook, so the in-tool rate measures whether the skill fired on its own.
-    Ground truth is the trajectory (CLI-aware classifier), so completion is N/A.
+    """Un-primed trigger-rate run: skill installed, **no** on-ramp.
+
+    The prompt never mentions the notebook, so the in-tool rate measures whether
+    the skill fired on its own. Completion is not scored.
     """
     project_dir = Path(workdir) / (label or task.id)
     project_dir.mkdir(parents=True, exist_ok=True)
@@ -125,17 +118,10 @@ def run_task(
 ) -> RunResult:
     """Prepare the notebook, drive the agent, and score it.
 
-    ``live=True`` (Claude Code) runs the real on-ramp: provision deps, spawn a
-    server with MCP, open a session, write the agent config, drive, then
-    ``strata run`` for the completion check. ``live=False`` (replay) skips all
-    of that — no server, no venv, no LLM — so recorded runs re-score
-    deterministically in CI; completion reflects only the seeded notebook.
-
-    ``label`` names the notebook subdir (defaults to the task id); repeats pass a
-    distinct label per run so each gets its own fresh notebook.
-
-    Scratchpad tasks take the un-primed path (:func:`_run_scratchpad_task`): a
-    plain project with the skill installed and no on-ramp.
+    ``live=True`` runs the real on-ramp and a ``strata run`` completion check.
+    ``live=False`` (replay) uses no server, venv or LLM, so CI re-scores
+    deterministically; completion then reflects only the seeded notebook.
+    ``label`` names the notebook subdir (default: the task id).
     """
     if task.scratchpad:
         return _run_scratchpad_task(task, driver, workdir, live=live, label=label)
@@ -286,9 +272,8 @@ def main(argv: list[str] | None = None) -> int:
     driver = _build_driver(args)
     live = args.driver != "replay"
 
-    # Replay can only score tasks it has a transcript for (hard tasks are
-    # live-only). Skip the rest with a note instead of erroring, so the
-    # documented `--driver replay` command works whatever the selection.
+    # Replay can only score tasks with a transcript (hard tasks are live-only);
+    # skip the rest so `--driver replay` works for any selection.
     if not live:
         transcript_dir = Path(args.transcripts)
         have = {p.stem for p in transcript_dir.glob("*.json")}
@@ -323,7 +308,7 @@ def main(argv: list[str] | None = None) -> int:
         report = {"summary": summary, "runs": [r.to_dict() for r in results]}
         Path(args.out).write_text(json.dumps(report, indent=2), encoding="utf-8")
 
-    # Non-zero exit if any run errored, so a broken harness fails CI.
+    # A broken harness fails CI.
     return 1 if summary["errored"] else 0
 
 

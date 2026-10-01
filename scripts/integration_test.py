@@ -28,7 +28,6 @@ import httpx
 import pyarrow as pa
 from pyiceberg.catalog.sql import SqlCatalog
 
-# Test configuration
 SERVER_HOST = "127.0.0.1"
 SERVER_PORT = 8765
 SERVER_URL = f"http://{SERVER_HOST}:{SERVER_PORT}"
@@ -40,7 +39,6 @@ def wait_for_postgres(uri: str, timeout: float = 30.0) -> bool:
     try:
         import psycopg2
     except ImportError:
-        # Fall back to simple socket check if psycopg2 not available
         import socket
         from urllib.parse import urlparse
 
@@ -86,18 +84,14 @@ def wait_for_server(url: str, timeout: float = 30.0) -> bool:
 
 
 def create_test_tables(warehouse_path: str, catalog_uri: str) -> dict[str, str]:
-    """Create test tables in the catalog.
-
-    Returns dict mapping table name to table URI.
-    """
-    # Use "strata" as catalog name to match server's PyIcebergCatalog
+    """Create the test tables and return a map of table name to URI."""
+    # "strata" matches the server's PyIcebergCatalog name.
     catalog = SqlCatalog(
         "strata",
         uri=catalog_uri,
         warehouse=warehouse_path,
     )
 
-    # Create namespace
     try:
         catalog.create_namespace("integration")
     except Exception:
@@ -105,7 +99,6 @@ def create_test_tables(warehouse_path: str, catalog_uri: str) -> dict[str, str]:
 
     tables = {}
 
-    # Table 1: Simple events table
     schema1 = pa.schema(
         [
             ("id", pa.int64()),
@@ -121,7 +114,6 @@ def create_test_tables(warehouse_path: str, catalog_uri: str) -> dict[str, str]:
 
     table1 = catalog.create_table("integration.events", schema1)
 
-    # Insert test data
     data1 = pa.table(
         {
             "id": [1, 2, 3, 4, 5],
@@ -130,10 +122,9 @@ def create_test_tables(warehouse_path: str, catalog_uri: str) -> dict[str, str]:
         }
     )
     table1.append(data1)
-    # Use file:// prefix for table URIs
     tables["events"] = f"file://{warehouse_path}#integration.events"
 
-    # Table 2: Larger table for QoS testing
+    # Larger table for QoS testing.
     schema2 = pa.schema(
         [
             ("id", pa.int64()),
@@ -148,7 +139,7 @@ def create_test_tables(warehouse_path: str, catalog_uri: str) -> dict[str, str]:
 
     table2 = catalog.create_table("integration.large", schema2)
 
-    # Insert more data (multiple row groups)
+    # Several appends, so several row groups.
     for batch in range(5):
         data2 = pa.table(
             {
@@ -198,7 +189,7 @@ def _materialize_and_stream(
     data = resp.json()
     stream_url = data.get("stream_url")
     if not stream_url:
-        # Artifact mode or cache hit without stream
+        # Artifact mode, or a cache hit with no stream.
         return True, f"hit={data.get('hit')}", 0
 
     resp = client.get(stream_url, headers=headers or {})
@@ -277,10 +268,8 @@ def test_concurrent_scans(client: httpx.Client, table_uri: str) -> bool:
     successes = sum(1 for _, success, _ in results if success)
     if successes != num_scans:
         print(f"  FAIL: {successes}/{num_scans} scans succeeded")
-        # The helper already says whether it was the materialize or the stream
-        # that failed, and with what status. Discarding it left a CI log that
-        # reported the count and nothing else, which is not enough to tell a
-        # QoS rejection from an expired stream from a real regression.
+        # Keep the helper's message: it tells a QoS rejection from an expired
+        # stream from a real regression.
         for scan_num, ok, message in sorted(results):
             if not ok:
                 print(f"    scan {scan_num}: {message}")
@@ -331,7 +320,6 @@ def main():
     )
     args = parser.parse_args()
 
-    # Check for PostgreSQL URI
     catalog_uri = os.environ.get("STRATA_CATALOG_URI")
     if not catalog_uri:
         print("ERROR: STRATA_CATALOG_URI environment variable required")
@@ -340,7 +328,6 @@ def main():
 
     print(f"Using catalog: {catalog_uri}")
 
-    # Wait for PostgreSQL
     print("Waiting for PostgreSQL...")
     try:
         if not wait_for_postgres(catalog_uri):
@@ -351,26 +338,23 @@ def main():
 
     print("PostgreSQL ready")
 
-    # Setup warehouse
     if args.warehouse:
         warehouse_path = args.warehouse
     else:
         warehouse_path = tempfile.mkdtemp(prefix="strata_test_")
     print(f"Using warehouse: {warehouse_path}")
 
-    # Create test tables BEFORE starting server
+    # Tables must exist before the server starts.
     print("\nCreating test tables...")
     tables = create_test_tables(warehouse_path, catalog_uri)
     print(f"Created tables: {list(tables.keys())}")
 
-    # Start server if requested
     server_proc = None
     if args.start_server:
         print("\nStarting Strata server...")
         env = os.environ.copy()
         env["STRATA_HOST"] = SERVER_HOST
         env["STRATA_PORT"] = str(SERVER_PORT)
-        # Ensure catalog URI is passed to server
         env["STRATA_CATALOG_URI"] = catalog_uri
         print(f"  STRATA_CATALOG_URI={catalog_uri}")
 
@@ -392,7 +376,6 @@ def main():
             print("ERROR: Server not available. Start it or use --start-server")
             sys.exit(1)
 
-    # Run tests
     print("\n" + "=" * 50)
     print("Running integration tests")
     print("=" * 50 + "\n")
@@ -405,7 +388,6 @@ def main():
             server_proc.terminate()
             server_proc.wait(timeout=5)
 
-    # Summary
     print("\n" + "=" * 50)
     print(f"Results: {passed} passed, {failed} failed")
     print("=" * 50)

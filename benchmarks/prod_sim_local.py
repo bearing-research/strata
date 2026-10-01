@@ -1,27 +1,15 @@
 #!/usr/bin/env python3
 """Production workload simulator for Strata.
 
-This benchmark simulates a realistic multi-user workload against a local Strata server:
-- Multiple concurrent users with async httpx
-- Zipf-ish table access distribution (hot/warm/cold)
-- Dashboard (80%) vs analyst (20%) query types
-- Phases: cold → warm → churn → restart → disconnect
+Concurrent async users against a local server, with Zipf-ish hot/warm/cold table
+access, 80% dashboard and 20% analyst queries, run through the phases
+cold -> warm -> churn -> restart -> disconnect.
 
 Usage:
-    # Quick test (5 requests)
     python benchmarks/prod_sim_local.py --dry-run
-
-    # Full benchmark with default settings
     python benchmarks/prod_sim_local.py
-
-    # Custom configuration
     python benchmarks/prod_sim_local.py --users 20 --duration 30 --start-server
-
-    # Specific phases only
     python benchmarks/prod_sim_local.py --phases cold,warm
-
-    # Help
-    python benchmarks/prod_sim_local.py --help
 """
 
 from __future__ import annotations
@@ -47,9 +35,7 @@ from typing import Any
 import httpx
 import pyarrow as pa
 
-# =============================================================================
-# Configuration
-# =============================================================================
+# === Configuration ===
 
 
 class Phase(Enum):
@@ -86,27 +72,27 @@ class BenchmarkConfig:
 
     # Server settings
     base_url: str = "http://127.0.0.1:8765"
-    start_server: bool = True  # Start server as subprocess
+    start_server: bool = True
     server_host: str = "127.0.0.1"
     server_port: int = 8765
 
     # Warehouse settings
-    warehouse_dir: Path | None = None  # Auto-create if None
-    cache_dir: Path | None = None  # Auto-create if None
-    keep_dirs: bool = False  # Keep tmp dirs after run
+    warehouse_dir: Path | None = None  # Temp dir if None
+    cache_dir: Path | None = None  # Temp dir if None
+    keep_dirs: bool = False
 
     # Data generation settings
-    num_tables: int = 10  # Total tables to create
-    rows_hot: int = 1_000_000  # Rows per hot table (1)
-    rows_warm: int = 500_000  # Rows per warm table (2)
-    rows_cold: int = 100_000  # Rows per cold table (7)
-    row_groups_per_file: int = 10  # Row groups per data file
-    files_per_table: int = 5  # Data files per table
-    payload_bytes: int = 100  # Size of payload string per row
+    num_tables: int = 10
+    rows_hot: int = 1_000_000  # 1 hot table
+    rows_warm: int = 500_000  # 2 warm tables
+    rows_cold: int = 100_000  # 7 cold tables
+    row_groups_per_file: int = 10
+    files_per_table: int = 5
+    payload_bytes: int = 100
 
     # Workload settings
-    users: int = 10  # Concurrent users
-    duration_s: float = 60.0  # Duration per phase
+    users: int = 10
+    duration_s: float = 60.0  # Per phase
     phases: list[Phase] = field(
         default_factory=lambda: [
             Phase.COLD,
@@ -119,54 +105,43 @@ class BenchmarkConfig:
 
     # Table access distribution (Zipf-ish)
     hot_table_weight: float = 0.6  # 1 table gets 60%
-    warm_tables_weight: float = 0.3  # 2 tables get 30% total
-    cold_tables_weight: float = 0.1  # 7 tables get 10% total
+    warm_tables_weight: float = 0.3  # Split across 2 tables
+    cold_tables_weight: float = 0.1  # Split across 7 tables
 
     # Query type distribution
-    dashboard_ratio: float = 0.8  # 80% dashboard queries
-    latest_snapshot_ratio: float = 0.1  # 10% use latest snapshot
+    dashboard_ratio: float = 0.8
+    latest_snapshot_ratio: float = 0.1
 
     # Phase-specific settings
-    churn_cache_size_bytes: int = 50 * 1024 * 1024  # 50MB (force eviction)
-    disconnect_ratio: float = 0.1  # 10% disconnect mid-stream
+    churn_cache_size_bytes: int = 50 * 1024 * 1024  # Small enough to force eviction
+    disconnect_ratio: float = 0.1
 
     # Metrics collection
-    metrics_interval_s: float = 5.0  # Sample /metrics every 5s
+    metrics_interval_s: float = 5.0
     results_dir: Path = field(default_factory=lambda: Path("benchmarks/results"))
 
     # Misc
     seed: int = 42
-    request_timeout_s: float = 10.0  # Overall request timeout (shorter to avoid blocking)
-    connect_timeout_s: float = 2.0  # Connection timeout
+    request_timeout_s: float = 10.0  # Short, so a stuck request does not block a user
+    connect_timeout_s: float = 2.0
     max_connections: int = 100
 
-    # Dry run mode
-    dry_run: bool = False  # Run only 5 requests
+    dry_run: bool = False  # Run each phase for 2s
 
     def __post_init__(self):
         self.results_dir = Path(self.results_dir)
         self.results_dir.mkdir(parents=True, exist_ok=True)
 
 
-# =============================================================================
-# Data Structures for Metrics
-# =============================================================================
+# === Data Structures ===
 
 
 @dataclass
 class RequestResult:
-    """Result from a single request with detailed timing breakdown.
+    """One request's outcome and timing.
 
-    Timing breakdown:
-    - latency_planning_ms: Time for POST /scan (planning phase)
-    - latency_ttfb_ms: Time from stream start to first byte received
-    - latency_streaming_ms: Time to read all remaining bytes after first byte
-    - latency_total_ms: Total end-to-end time
-
-    This breakdown helps identify bottlenecks:
-    - High planning = catalog/manifest overhead
-    - High TTFB = cache miss / first row group fetch
-    - High streaming = large response / slow throughput
+    High planning latency points at catalog/manifest overhead, high TTFB at cache
+    misses, high streaming at response size or throughput.
     """
 
     request_id: str
@@ -179,14 +154,13 @@ class RequestResult:
     bytes_read: int
     latency_total_ms: float
     timestamp: float
-    # Detailed timing breakdown
-    latency_planning_ms: float = 0.0  # POST /scan time
-    latency_ttfb_ms: float = 0.0  # Time to first byte of stream
-    latency_streaming_ms: float = 0.0  # Time to read all bytes after first
-    # Additional metadata from planning
-    num_tasks: int = 0  # Row groups to read
-    estimated_bytes: int = 0  # Estimated response size
-    planning_time_server_ms: float = 0.0  # Server-reported planning time
+    latency_planning_ms: float = 0.0  # POST /v1/materialize
+    latency_ttfb_ms: float = 0.0  # Stream GET to first byte
+    latency_streaming_ms: float = 0.0  # First byte to last
+    # Not in the materialize response; stay 0
+    num_tasks: int = 0
+    estimated_bytes: int = 0
+    planning_time_server_ms: float = 0.0
     error: str | None = None
 
     def to_dict(self) -> dict:
@@ -252,7 +226,6 @@ class PhaseStats:
     client_errors: int = 0
     total_bytes: int = 0
     latencies_ms: list[float] = field(default_factory=list)
-    # Detailed latency breakdown
     latencies_planning_ms: list[float] = field(default_factory=list)
     latencies_ttfb_ms: list[float] = field(default_factory=list)
     latencies_streaming_ms: list[float] = field(default_factory=list)
@@ -261,21 +234,14 @@ class PhaseStats:
     cache_misses: int = 0
 
 
-# =============================================================================
-# Dataset Generator
-# =============================================================================
+# === Dataset Generator ===
 
 
 def generate_warehouse(config: BenchmarkConfig) -> dict[str, Any]:
-    """Generate a local Iceberg warehouse with multiple tables.
+    """Create a local Iceberg warehouse: 1 hot, 2 warm and the rest cold tables.
 
-    Creates tables with different "temperatures":
-    - 1 hot table (60% of traffic)
-    - 2 warm tables (30% of traffic)
-    - 7 cold tables (10% of traffic)
-
-    Returns:
-        Dict with table metadata and URIs.
+    Returns the catalog, warehouse path and per-table info (URI, temperature,
+    snapshot id).
     """
     from pyiceberg.catalog.sql import SqlCatalog
     from pyiceberg.schema import Schema
@@ -290,7 +256,6 @@ def generate_warehouse(config: BenchmarkConfig) -> dict[str, Any]:
     warehouse_path = config.warehouse_dir
     warehouse_path.mkdir(parents=True, exist_ok=True)
 
-    # Create SQL catalog
     catalog = SqlCatalog(
         "strata",
         **{
@@ -299,13 +264,11 @@ def generate_warehouse(config: BenchmarkConfig) -> dict[str, Any]:
         },
     )
 
-    # Create namespace
     try:
         catalog.create_namespace("benchmark")
     except Exception:
         pass
 
-    # Schema for all tables
     schema = Schema(
         NestedField(1, "id", LongType(), required=False),
         NestedField(2, "ts", LongType(), required=False),  # Epoch micros
@@ -324,7 +287,6 @@ def generate_warehouse(config: BenchmarkConfig) -> dict[str, Any]:
         table_name = f"table_{i:02d}"
         table_id = f"benchmark.{table_name}"
 
-        # Determine table temperature
         if i == 0:
             temperature = "hot"
             num_rows = config.rows_hot
@@ -342,18 +304,16 @@ def generate_warehouse(config: BenchmarkConfig) -> dict[str, Any]:
         except Exception:
             table = catalog.create_table(table_id, schema)
 
-            # Write data in chunks to create multiple files and row groups
             rows_per_file = num_rows // config.files_per_table
             rows_per_chunk = rows_per_file // config.row_groups_per_file
 
-            # Use minimum chunk size to avoid too many tiny files
+            # Floor the chunk size so tiny tables don't produce many tiny files.
             rows_per_chunk = max(rows_per_chunk, 1000)
 
-            base_ts = 1704067200000000  # 2024-01-01 00:00:00 UTC in micros
+            base_ts = 1704067200000000  # 2024-01-01 00:00:00 UTC
             row_offset = 0
 
             for file_idx in range(config.files_per_table):
-                # Create chunks for this file
                 file_rows = (
                     rows_per_file
                     if file_idx < config.files_per_table - 1
@@ -367,7 +327,6 @@ def generate_warehouse(config: BenchmarkConfig) -> dict[str, Any]:
 
                     start_id = row_offset + chunk_start
 
-                    # Generate data
                     data = pa.table(
                         {
                             "id": pa.array(range(start_id, start_id + chunk_size), type=pa.int64()),
@@ -403,7 +362,6 @@ def generate_warehouse(config: BenchmarkConfig) -> dict[str, Any]:
 
                 row_offset += file_rows
 
-        # Get snapshot ID
         snapshot_id = table.current_snapshot().snapshot_id
 
         tables_info.append(
@@ -424,9 +382,7 @@ def generate_warehouse(config: BenchmarkConfig) -> dict[str, Any]:
     }
 
 
-# =============================================================================
-# Server Management
-# =============================================================================
+# === Server Management ===
 
 
 class ServerProcess:
@@ -493,17 +449,10 @@ class ServerProcess:
             self._process = None
 
     def clear_cache(self):
-        """Clear the data cache directory, preserving metadata store.
-
-        NOTE: We only clear the versioned cache subdirectories (v1/, v2/, etc.),
-        not the metadata.sqlite file. This preserves manifest and parquet
-        metadata while forcing data cache misses.
-        """
+        """Delete cached data but keep metadata.sqlite, forcing data misses only."""
         if not self.cache_dir.exists():
             return
 
-        # Only remove versioned cache subdirectories (v1, v2, etc.)
-        # This preserves the metadata.sqlite file
         for entry in self.cache_dir.iterdir():
             if entry.is_dir() and entry.name.startswith("v"):
                 shutil.rmtree(entry)
@@ -518,9 +467,7 @@ def find_free_port() -> int:
         return s.getsockname()[1]
 
 
-# =============================================================================
-# Workload Generator
-# =============================================================================
+# === Workload Generator ===
 
 
 class WorkloadGenerator:
@@ -531,14 +478,11 @@ class WorkloadGenerator:
         self.tables_info = tables_info
         self.rng = random.Random(config.seed)
 
-        # Build weighted table selection
         self._build_table_weights()
 
-        # Column groups for different query types
         self.dashboard_columns = ["id", "ts", "value"]  # Narrow
         self.analyst_columns = ["id", "ts", "user_id", "category", "value", "payload"]  # Wide
 
-        # Categories for filters
         self.categories = ["electronics", "clothing", "food", "books", "sports", "home", "auto"]
 
     def _build_table_weights(self):
@@ -549,12 +493,11 @@ class WorkloadGenerator:
             if t["temperature"] == "hot":
                 weight = self.config.hot_table_weight
             elif t["temperature"] == "warm":
-                weight = self.config.warm_tables_weight / 2  # Split among 2 warm
+                weight = self.config.warm_tables_weight / 2
             else:
-                weight = self.config.cold_tables_weight / 7  # Split among 7 cold
+                weight = self.config.cold_tables_weight / 7
             self.table_weights.append(weight)
 
-        # Normalize
         total = sum(self.table_weights)
         self.table_weights = [w / total for w in self.table_weights]
 
@@ -573,7 +516,7 @@ class WorkloadGenerator:
     def choose_snapshot(self, table_info: dict) -> int | None:
         """Choose snapshot ID (90% pinned, 10% latest)."""
         if self.rng.random() < self.config.latest_snapshot_ratio:
-            return None  # Latest
+            return None
         return table_info["snapshot_id"]
 
     def generate_query(self) -> dict[str, Any]:
@@ -584,13 +527,10 @@ class WorkloadGenerator:
 
         if query_type == QueryType.DASHBOARD:
             columns = self.dashboard_columns
-            # Selective filter: specific category
-            # Use FilterOp enum values: "=" not "=="
+            # FilterOp values: "=" not "=="
             filters = [{"column": "category", "op": "=", "value": self.rng.choice(self.categories)}]
         else:
             columns = self.analyst_columns
-            # Less selective: value range
-            # Use FilterOp enum values: ">=" and "<="
             min_val = self.rng.uniform(0, 500)
             max_val = min_val + self.rng.uniform(100, 500)
             filters = [
@@ -608,9 +548,7 @@ class WorkloadGenerator:
         }
 
 
-# =============================================================================
-# Async Load Driver
-# =============================================================================
+# === Async Load Driver ===
 
 
 class AsyncLoadDriver:
@@ -656,13 +594,7 @@ class AsyncLoadDriver:
         user_id: int,
         disconnect_early: bool = False,
     ) -> RequestResult:
-        """Execute a single scan request with detailed timing breakdown.
-
-        Captures three timing phases:
-        1. Planning: POST /scan - catalog lookup, manifest parsing, metadata fetch
-        2. TTFB: Time from GET /batches to first byte - first row group fetch
-        3. Streaming: Time to read remaining bytes - sustained throughput
-        """
+        """Run one scan, timing planning, time to first byte and streaming separately."""
         request_id = await self._get_request_id()
         start_time = time.perf_counter()
         timestamp = time.time()
@@ -671,7 +603,6 @@ class AsyncLoadDriver:
         status = RequestStatus.SUCCESS
         error = None
 
-        # Detailed timing
         planning_end_time = None
         ttfb_time = None
         streaming_start_time = None
@@ -680,7 +611,7 @@ class AsyncLoadDriver:
         planning_time_server_ms = 0.0
 
         try:
-            # Phase 1: POST /v1/materialize (scan@v1 planning)
+            # Planning: POST /v1/materialize with scan@v1
             request_body = {
                 "inputs": [query["table_uri"]],
                 "transform": {
@@ -699,27 +630,27 @@ class AsyncLoadDriver:
             response.raise_for_status()
             scan_info = response.json()
             stream_url = scan_info["stream_url"]
-            # num_tasks / estimated_bytes / server planning time aren't in the
-            # materialize response; they stay at their 0 defaults.
+            # num_tasks, estimated_bytes and server planning time are not in the
+            # materialize response, so they stay 0.
 
-            # Phase 2 & 3: GET the stream (TTFB + streaming)
+            # TTFB + streaming
             async with self._client.stream("GET", stream_url) as stream:
                 stream.raise_for_status()
 
                 first_chunk = True
                 if disconnect_early:
-                    # Read a small portion then disconnect (64KB chunks)
+                    # Read about 10KB, then disconnect
                     async for chunk in stream.aiter_bytes(chunk_size=65536):
                         if first_chunk:
                             ttfb_time = time.perf_counter()
                             streaming_start_time = ttfb_time
                             first_chunk = False
                         bytes_read += len(chunk)
-                        if bytes_read > 10000:  # Disconnect after 10KB
+                        if bytes_read > 10000:
                             status = RequestStatus.DISCONNECT
                             break
                 else:
-                    # Read all data (1MB chunks to measure server throughput, not client)
+                    # 1MB chunks so the client is not the bottleneck
                     async for chunk in stream.aiter_bytes(chunk_size=1024 * 1024):
                         if first_chunk:
                             ttfb_time = time.perf_counter()
@@ -736,7 +667,6 @@ class AsyncLoadDriver:
                 error = "Response too large"
             else:
                 status = RequestStatus.HTTP_ERROR
-                # Include response body for debugging
                 try:
                     detail = e.response.json().get("detail", "")[:200]
                     error = f"HTTP {e.response.status_code}: {detail}"
@@ -745,11 +675,9 @@ class AsyncLoadDriver:
         except Exception as e:
             status = RequestStatus.CLIENT_ERROR
             error = str(e)
-        # No explicit cleanup: materialize streams are freed server-side by the
-        # stream-state TTL once consumed (the old /v1/scan DELETE is gone).
+        # No cleanup call: the server frees consumed streams by TTL.
         end_time = time.perf_counter()
 
-        # Calculate detailed latencies
         latency_total_ms = (end_time - start_time) * 1000
         latency_planning_ms = (
             (planning_end_time - start_time) * 1000 if planning_end_time else latency_total_ms
@@ -807,9 +735,7 @@ class AsyncLoadDriver:
             return False
 
 
-# =============================================================================
-# Phase Execution
-# =============================================================================
+# === Phase Execution ===
 
 
 class PhaseExecutor:
@@ -844,7 +770,6 @@ class PhaseExecutor:
         while time.perf_counter() - start_time < duration_s and not self._stop_event.is_set():
             query = self.workload.generate_query()
 
-            # In disconnect phase, randomly disconnect early
             do_disconnect = disconnect_early and random.random() < self.config.disconnect_ratio
 
             result = await self.driver.execute_scan(
@@ -855,7 +780,6 @@ class PhaseExecutor:
             )
             results.append(result)
 
-            # Small delay to avoid hammering
             await asyncio.sleep(0.001)
 
         return results
@@ -891,42 +815,36 @@ class PhaseExecutor:
         duration = duration_s or self.config.duration_s
         disconnect_early = phase == Phase.DISCONNECT
 
-        # Special handling for different phases
         if phase == Phase.COLD:
-            # Clear cache via HTTP API - this only clears data cache, not metadata
+            # The HTTP clear drops the data cache only, not the metadata cache.
             print("    Clearing cache for cold start...")
             cleared = await self.driver.clear_cache()
             if not cleared:
                 print("    WARNING: Cache clear failed")
 
         elif phase == Phase.WARM:
-            # Restart server to ensure clean state (workaround for server bug with timeouts)
+            # Restart for a clean state (works around a server bug with timeouts).
             if self.server:
                 print("    Restarting server for clean warm phase...")
                 self.server.stop()
                 time.sleep(1)
                 self.server.start()
-                # Recreate client connection
                 await self.driver.stop()
                 await self.driver.start()
             else:
-                # No server control, just reset client
                 print("    Resetting HTTP client...")
                 await self.driver.stop()
                 await self.driver.start()
-            # Verify server is healthy
             if not await self.driver.health_check():
                 print("    WARNING: Server health check failed!")
             else:
                 print("    Server health check passed")
 
         elif phase == Phase.CHURN:
-            # Restart server with reduced cache size to force eviction
             if self.server:
                 print("    Restarting server with reduced cache size...")
                 self.server.stop()
                 time.sleep(1)
-                # Use reduced cache size
                 self.server.max_cache_size_bytes = self.config.churn_cache_size_bytes
                 self.server.start()
                 await self.driver.stop()
@@ -944,7 +862,7 @@ class PhaseExecutor:
                 await self.driver.start()
 
         elif phase == Phase.DISCONNECT:
-            # Restart server first (workaround for server bug with timeouts)
+            # Restart first (same timeout workaround as WARM).
             if self.server:
                 print("    Restarting server for disconnect test...")
                 self.server.stop()
@@ -953,7 +871,6 @@ class PhaseExecutor:
                 await self.driver.stop()
                 await self.driver.start()
 
-        # Get initial metrics
         initial_metrics = await self.driver.get_metrics()
 
         print(f"    Running {self.config.users} users for {duration:.1f}s...")
@@ -961,30 +878,24 @@ class PhaseExecutor:
         start_time = time.perf_counter()
         self._stop_event.clear()
 
-        # Launch user tasks and metrics task
         user_tasks = [
             asyncio.create_task(self._user_loop(user_id, phase_name, duration, disconnect_early))
             for user_id in range(self.config.users)
         ]
         metrics_task = asyncio.create_task(self._metrics_loop(phase_name, duration))
 
-        # Wait for all users to complete
         all_results = await asyncio.gather(*user_tasks)
 
-        # Stop metrics collection
         self._stop_event.set()
         await metrics_task
 
         actual_duration = time.perf_counter() - start_time
 
-        # Flatten results
         phase_results = [r for user_results in all_results for r in user_results]
         self.results.extend(phase_results)
 
-        # Get final metrics
         final_metrics = await self.driver.get_metrics()
 
-        # Compute stats
         stats = PhaseStats(phase=phase_name, duration_s=actual_duration)
         stats.requests = len(phase_results)
 
@@ -1008,7 +919,6 @@ class PhaseExecutor:
             else:
                 stats.client_errors += 1
 
-        # Cache stats delta
         if initial_metrics and final_metrics:
             stats.cache_hits = final_metrics.get("cache_hits", 0) - initial_metrics.get(
                 "cache_hits", 0
@@ -1020,9 +930,7 @@ class PhaseExecutor:
         return stats
 
 
-# =============================================================================
-# Reporting
-# =============================================================================
+# === Reporting ===
 
 
 def compute_percentiles(values: list[float], percentiles: list[float]) -> dict[str, float]:
@@ -1059,7 +967,6 @@ def print_phase_summary(phase_stats: list[PhaseStats]):
     print("PHASE SUMMARY")
     print("=" * 120)
 
-    # Header - overall latency
     print(
         f"\n{'Phase':<12} {'Requests':>10} {'Success':>10} {'Errors':>10} "
         f"{'p50(ms)':>10} {'p95(ms)':>10} {'p99(ms)':>10} {'MB/s':>10} {'Hit Rate':>10}"
@@ -1069,16 +976,13 @@ def print_phase_summary(phase_stats: list[PhaseStats]):
     for stats in phase_stats:
         pcts = compute_percentiles(stats.latencies_ms, [0.5, 0.95, 0.99])
 
-        # Throughput
         mb_per_s = (
             (stats.total_bytes / (1024 * 1024)) / stats.duration_s if stats.duration_s > 0 else 0
         )
 
-        # Cache hit rate
         total_cache_ops = stats.cache_hits + stats.cache_misses
         hit_rate = stats.cache_hits / total_cache_ops if total_cache_ops > 0 else 0
 
-        # Error count
         errors = stats.aborts_timeout + stats.aborts_size + stats.http_errors + stats.client_errors
 
         print(
@@ -1089,7 +993,6 @@ def print_phase_summary(phase_stats: list[PhaseStats]):
 
     print("-" * 120)
 
-    # Latency breakdown by phase (planning vs TTFB vs streaming)
     print("\nLatency Breakdown (p50 in ms):")
     print(
         f"{'Phase':<12} {'Planning':>12} {'TTFB':>12} {'Streaming':>12} "
@@ -1121,7 +1024,6 @@ def print_phase_summary(phase_stats: list[PhaseStats]):
 
     print("-" * 90)
 
-    # Detailed error breakdown
     print("\nError Breakdown:")
     print(
         f"{'Phase':<12} {'Timeouts':>10} {'Size':>10} {'Disconnect':>10} "
@@ -1147,15 +1049,12 @@ def write_jsonl_results(
 ):
     """Write results to JSONL file."""
     with open(output_path, "w") as f:
-        # Write request results
         for r in results:
             f.write(json.dumps({"type": "request", **r.to_dict()}) + "\n")
 
-        # Write metrics samples
         for m in metrics_samples:
             f.write(json.dumps(m.to_dict()) + "\n")
 
-        # Write phase summaries
         for stats in phase_stats:
             pcts = compute_percentiles(stats.latencies_ms, [0.5, 0.95, 0.99])
             pcts_planning = compute_percentiles(stats.latencies_planning_ms, [0.5, 0.95, 0.99])
@@ -1176,11 +1075,9 @@ def write_jsonl_results(
                 "disconnects": stats.disconnects,
                 "total_bytes": stats.total_bytes,
                 "duration_s": stats.duration_s,
-                # Overall latency
                 "p50_ms": pcts["p50"],
                 "p95_ms": pcts["p95"],
                 "p99_ms": pcts["p99"],
-                # Detailed latency breakdown
                 "planning_p50_ms": pcts_planning["p50"],
                 "planning_p95_ms": pcts_planning["p95"],
                 "planning_p99_ms": pcts_planning["p99"],
@@ -1190,7 +1087,6 @@ def write_jsonl_results(
                 "streaming_p50_ms": pcts_streaming["p50"],
                 "streaming_p95_ms": pcts_streaming["p95"],
                 "streaming_p99_ms": pcts_streaming["p99"],
-                # Cache stats
                 "cache_hits": stats.cache_hits,
                 "cache_misses": stats.cache_misses,
                 "cache_hit_rate": hit_rate,
@@ -1198,9 +1094,7 @@ def write_jsonl_results(
             f.write(json.dumps(summary) + "\n")
 
 
-# =============================================================================
-# Main Execution
-# =============================================================================
+# === Main Execution ===
 
 
 async def run_benchmark(config: BenchmarkConfig) -> list[PhaseStats]:
@@ -1215,7 +1109,6 @@ async def run_benchmark(config: BenchmarkConfig) -> list[PhaseStats]:
     print(f"  Tables: {config.num_tables}")
     print(f"  Dry run: {config.dry_run}")
 
-    # Setup directories
     temp_dir = None
     if config.warehouse_dir is None or config.cache_dir is None:
         temp_dir = Path(tempfile.mkdtemp(prefix="strata_bench_"))
@@ -1226,13 +1119,11 @@ async def run_benchmark(config: BenchmarkConfig) -> list[PhaseStats]:
         config.cache_dir.mkdir(parents=True, exist_ok=True)
 
     try:
-        # Generate warehouse
         print(f"\n[1/4] Generating warehouse at {config.warehouse_dir}...")
         warehouse_info = generate_warehouse(config)
         tables_info = warehouse_info["tables"]
         print(f"  Created {len(tables_info)} tables")
 
-        # Start server if needed
         server = None
         if config.start_server:
             print("\n[2/4] Starting Strata server...")
@@ -1250,32 +1141,25 @@ async def run_benchmark(config: BenchmarkConfig) -> list[PhaseStats]:
         else:
             print(f"\n[2/4] Using existing server at {config.base_url}")
 
-        # Initialize load driver
         print("\n[3/4] Initializing load driver...")
         driver = AsyncLoadDriver(config)
         await driver.start()
 
-        # Health check
         if not await driver.health_check():
             raise RuntimeError(f"Server at {config.base_url} is not healthy")
         print("  Server health check passed")
 
-        # Initialize workload generator
         workload = WorkloadGenerator(config, tables_info)
 
-        # Initialize phase executor
         executor = PhaseExecutor(config, driver, workload, server)
 
-        # Run phases
         print("\n[4/4] Running benchmark phases...")
         phase_stats = []
 
         for phase in config.phases:
             print(f"\n  Phase: {phase.value.upper()}")
 
-            # In dry run mode, only run for 5 requests
             if config.dry_run:
-                # Override duration to be very short
                 stats = await executor.run_phase(phase, duration_s=2.0)
             else:
                 stats = await executor.run_phase(phase)
@@ -1283,18 +1167,14 @@ async def run_benchmark(config: BenchmarkConfig) -> list[PhaseStats]:
             phase_stats.append(stats)
             print(f"    Completed: {stats.requests} requests, {stats.success} success")
 
-        # Stop driver
         await driver.stop()
 
-        # Stop server if we started it
         if server:
             print("\nStopping server...")
             server.stop()
 
-        # Print summary
         print_phase_summary(phase_stats)
 
-        # Write results
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         output_path = config.results_dir / f"prod_sim_local_{timestamp}.jsonl"
         write_jsonl_results(
@@ -1308,7 +1188,6 @@ async def run_benchmark(config: BenchmarkConfig) -> list[PhaseStats]:
         return phase_stats
 
     finally:
-        # Cleanup
         if temp_dir and not config.keep_dirs:
             print(f"\nCleaning up temporary directory: {temp_dir}")
             shutil.rmtree(temp_dir, ignore_errors=True)
@@ -1431,7 +1310,6 @@ def parse_args() -> BenchmarkConfig:
 
     args = parser.parse_args()
 
-    # Parse phases
     phase_names = [p.strip() for p in args.phases.split(",")]
     phases = []
     for name in phase_names:
@@ -1468,7 +1346,6 @@ def main():
     """Main entry point."""
     config = parse_args()
 
-    # Handle signals for graceful shutdown
     def signal_handler(signum, frame):
         print("\nInterrupted, cleaning up...")
         sys.exit(1)
@@ -1476,7 +1353,6 @@ def main():
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
 
-    # Run benchmark
     asyncio.run(run_benchmark(config))
 
 
