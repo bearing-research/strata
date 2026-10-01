@@ -520,22 +520,13 @@ class CellExecutor:
         cell_id: str,
         source: str,
         timeout_seconds: float = DEFAULT_CELL_TIMEOUT_SECONDS,
-        *,
-        skip_upstream_materialization: bool = False,
     ) -> CellExecutionResult:
-        """Materialise a cell: ensure inputs, check cache, execute, store.
-
-        ``skip_upstream_materialization=True`` trusts already-persisted
-        artifacts instead of re-executing upstreams (batch continuation after a
-        failure), so a cell downstream of a failed one gets a clean
-        missing-artifact error. The target's own cache lookup still applies,
-        unlike ``execute_cell_force``.
-        """
+        """Materialise a cell: ensure inputs, check cache, execute, store."""
         return await self._execute_cell(
             cell_id,
             source,
             timeout_seconds,
-            materialize_upstreams=not skip_upstream_materialization,
+            materialize_upstreams=True,
             use_cache=True,
         )
 

@@ -2613,46 +2613,9 @@ class TestLoopCellExecution:
         assert final == {"n": 200, "history": []}
 
 
-class TestSkipUpstreamMaterialization:
-    """``skip_upstream_materialization`` keeps the target's cache check but skips upstreams.
-
-    ``_materialize_upstreams`` is not called, so an upstream that already failed is not
-    re-run.
-    """
-
+class TestExecuteCellMaterializesUpstreams:
     @pytest.mark.asyncio
-    async def test_skip_avoids_materialize_upstreams_call(self, sample_notebook, monkeypatch):
-        """With the kwarg, ``_materialize_upstreams`` is not invoked even
-        when the cell has unresolved upstream artifacts."""
-        from strata.notebook.writer import write_cell
-
-        # cell2 references `x` from cell1; never run cell1, so its
-        # artifact doesn't exist. Without the kwarg, _materialize_upstreams
-        # would recurse into cell1.
-        write_cell(sample_notebook.path, "cell1", "x = 41")
-        write_cell(sample_notebook.path, "cell2", "y = x + 1")
-        sample_notebook.reload()
-
-        executor = CellExecutor(sample_notebook)
-        materialize_calls: list[str] = []
-        original = executor._materialize_upstreams
-
-        async def spy(cell_id: str) -> None:
-            materialize_calls.append(cell_id)
-            await original(cell_id)
-
-        monkeypatch.setattr(executor, "_materialize_upstreams", spy)
-
-        await executor.execute_cell("cell2", "y = x + 1", skip_upstream_materialization=True)
-
-        assert materialize_calls == [], (
-            "skip_upstream_materialization=True should bypass _materialize_upstreams "
-            f"but it was called with {materialize_calls}"
-        )
-
-    @pytest.mark.asyncio
-    async def test_default_does_materialize_upstreams(self, sample_notebook, monkeypatch):
-        """Counter-test: without the kwarg, ``_materialize_upstreams`` runs."""
+    async def test_upstreams_are_materialized(self, sample_notebook, monkeypatch):
         from strata.notebook.writer import write_cell
 
         write_cell(sample_notebook.path, "cell1", "x = 41")
@@ -2681,29 +2644,6 @@ class TestSkipUpstreamMaterialization:
             "Default execute_cell should recurse into upstream materialization, "
             f"got {materialize_calls}"
         )
-
-    @pytest.mark.asyncio
-    async def test_kwarg_maps_to_internal_flags(self, sample_notebook, monkeypatch):
-        """The kwarg sets ``materialize_upstreams=False`` but keeps ``use_cache=True``, unlike
-        ``execute_cell_force``.
-        """
-        executor = CellExecutor(sample_notebook)
-        captured: dict[str, object] = {}
-
-        async def fake(*args, **kwargs):  # type: ignore[no-untyped-def]
-            captured.update(kwargs)
-            from strata.notebook.executor import CellExecutionResult
-
-            return CellExecutionResult(cell_id=args[0], success=True)
-
-        monkeypatch.setattr(executor, "_execute_cell", fake)
-
-        await executor.execute_cell("cell1", "x = 1 + 1", skip_upstream_materialization=True)
-        assert captured == {"materialize_upstreams": False, "use_cache": True}
-
-        captured.clear()
-        await executor.execute_cell("cell1", "x = 1 + 1")
-        assert captured == {"materialize_upstreams": True, "use_cache": True}
 
 
 class TestMountCredentialsPassthrough:
