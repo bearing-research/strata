@@ -153,6 +153,45 @@ async def test_the_tenant_header_decides_who_the_machine_belongs_to(api):
     assert [w.tenant_id for w in api.pool.store.list_workers()] == ["globex"]
 
 
+class TestJobReadsAreTenantScoped:
+    async def _finished_job(self, api) -> str:
+        accepted = await api.post("/v1/jobs?machine_type=cpu", content=b"work", headers=AUTH)
+        job_id = accepted.json()["id"]
+        await api.pool.wait(job_id)
+        return job_id
+
+    async def test_the_submitting_tenant_reads_status_and_result(self, api):
+        job_id = await self._finished_job(api)
+
+        status = await api.get(f"/v1/jobs/{job_id}", headers=AUTH)
+        result = await api.get(f"/v1/jobs/{job_id}/result", headers=AUTH)
+
+        assert status.status_code == 200
+        assert status.json()["tenant_id"] == "acme"
+        assert result.content == b"done:work"
+
+    async def test_another_tenant_gets_404_not_403(self, api):
+        """A 403 would confirm the id exists in someone else's tenant."""
+        job_id = await self._finished_job(api)
+        globex = {"Authorization": f"Bearer {TOKEN}", "X-Strata-Tenant": "globex"}
+
+        status = await api.get(f"/v1/jobs/{job_id}", headers=globex)
+        result = await api.get(f"/v1/jobs/{job_id}/result", headers=globex)
+
+        assert status.status_code == 404
+        assert result.status_code == 404
+        assert b"done:work" not in result.content
+
+    async def test_reading_without_the_tenant_header_is_refused(self, api):
+        job_id = await self._finished_job(api)
+        no_tenant = {"Authorization": f"Bearer {TOKEN}"}
+
+        for path in (f"/v1/jobs/{job_id}", f"/v1/jobs/{job_id}/result"):
+            response = await api.get(path, headers=no_tenant)
+            assert response.status_code == 400
+            assert "X-Strata-Tenant" in response.json()["detail"]
+
+
 class TestAuth:
     async def test_submitting_without_a_token_is_rejected(self, api):
         response = await api.post(

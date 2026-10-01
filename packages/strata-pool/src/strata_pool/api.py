@@ -149,19 +149,21 @@ def create_app(
             return JSONResponse(_job_json(latest), status_code=202)
         return _terminal_response(done)
 
-    @app.get("/v1/jobs/{job_id}", dependencies=guard)
-    async def get_job(job_id: str) -> dict:
+    def tenant_job(job_id: str, tenant_id: str) -> Job:
         job = pool.store.get_job(job_id)
-        if job is None:
+        # Another tenant's job is a 404, not a 403, so an id does not confirm it exists.
+        if job is None or job.tenant_id != tenant_id:
             raise HTTPException(status_code=404, detail=f"no such job: {job_id}")
-        return _job_json(job)
+        return job
+
+    @app.get("/v1/jobs/{job_id}", dependencies=guard)
+    async def get_job(job_id: str, tenant_id: Annotated[str, Depends(tenant)]) -> dict:
+        return _job_json(tenant_job(job_id, tenant_id))
 
     @app.get("/v1/jobs/{job_id}/result", dependencies=guard)
-    async def get_job_result(job_id: str) -> Response:
+    async def get_job_result(job_id: str, tenant_id: Annotated[str, Depends(tenant)]) -> Response:
         """The raw result bytes, once there are any."""
-        job = pool.store.get_job(job_id)
-        if job is None:
-            raise HTTPException(status_code=404, detail=f"no such job: {job_id}")
+        job = tenant_job(job_id, tenant_id)
         if job.state not in (JobState.COMPLETED, JobState.FAILED, JobState.TIMED_OUT):
             raise HTTPException(status_code=409, detail=f"job is {job.state.value}")
         return _terminal_response(job)
