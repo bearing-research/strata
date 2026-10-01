@@ -1,18 +1,8 @@
-"""Two-tier QoS admission for scan streaming (#302 phase 3).
+"""Two-tier (interactive/bulk) QoS admission for scan streaming.
 
-Extracted from ``server.py`` so the ``get_stream`` handler can express admission
-structurally (``admission = await state.qos.admit(...)`` / ``admission.release()``)
-and eventually move into ``api/routers/streams.py`` without a ``from strata.server
-import _private`` scatter.
-
-Admission spans the entire streaming response: acquire the per-client semaphore
-then the tenant limiter (with the #238 cancel-safety), then release exactly once
-in whichever exit path runs (429, build-cancel, or after the blob finishes). The
-:class:`Admission` token carries the acquired state; ``release()`` reverses it,
-cancel-safe.
-
-Leaf module: imports only ``strata.adaptive_concurrency`` / ``strata.tenant`` /
-``strata.tenant_registry`` / ``strata.config``, never ``strata.server``.
+Admission spans the whole streaming response: acquire the per-client semaphore,
+then the tenant limiter, and release exactly once on whichever exit path runs.
+Leaf module: never imports ``strata.server``.
 """
 
 from __future__ import annotations
@@ -33,11 +23,7 @@ if TYPE_CHECKING:
 
 
 class QoSRejected(Exception):
-    """Admission refused — the handler maps this to a 429 JSON response.
-
-    Carries the exact ``error`` code, ``tier``, and ``retry_after`` the inline
-    handler used to return, so the 429 body/headers are unchanged.
-    """
+    """Admission refused; the handler maps ``error``, ``tier`` and ``retry_after`` to a 429."""
 
     def __init__(self, error: str, tier: str, retry_after: int) -> None:
         super().__init__(error)
@@ -47,12 +33,7 @@ class QoSRejected(Exception):
 
 
 class Admission:
-    """A held QoS slot for one scan. ``release()`` runs the accounting once.
-
-    Returned by :meth:`QoSAdmission.admit`; the handler calls ``release()`` in
-    whichever exit path runs. Release is delegated back to the owning
-    :class:`QoSAdmission` so all the shared counters/tables mutate in one place.
-    """
+    """A held QoS slot for one scan; call ``release()`` on every exit path (idempotent)."""
 
     def __init__(
         self,
@@ -86,10 +67,8 @@ class Admission:
 class QoSAdmission:
     """Two-tier (interactive/bulk) admission control for scan streaming.
 
-    Owns the admission runtime that used to live on ``ServerState``: the
-    per-scan tier/client tables, the active/rejection/queue-wait counters, and
-    the per-client fairness semaphores. The tenant limiters themselves live in
-    the tenant registry (per-tenant, #185); this only acquires/releases them.
+    Owns the per-client fairness semaphores and the counters; the tenant limiters
+    live in the tenant registry and are only acquired and released here.
     """
 
     def __init__(self, config: StrataConfig) -> None:
@@ -122,30 +101,24 @@ class QoSAdmission:
     def attach_controller(self, controller: AdaptiveConcurrencyController | None) -> None:
         """Feed observed queue waits and slot-held durations to *controller*.
 
-        The controller cannot be constructed at ``ServerState`` time (it needs
-        the tenant registry's limiters), so the lifespan hands it over here.
-        Until it does, the control loop has no inputs at all — which is how it
-        ran as a no-op timer for eight months (#549).
+        Attached by the lifespan, since the controller needs the tenant registry's
+        limiters; until then the control loop has no inputs.
         """
         self._controller = controller
 
     @property
     def active_scans(self) -> int:
-        """Approximate in-flight scan count (observability only, not authoritative).
+        """Approximate in-flight scan count, for metrics only.
 
-        Bumped on admit / released on release; ``+=``/``-=`` are not atomic under
-        async, so it's for metrics/logging, not control flow — use
-        :meth:`active_scan_count` (limiter-derived) for the drain signal.
+        Use :meth:`active_scan_count` for control flow such as draining.
         """
         return self._active_scans
 
     def classify(self, plan: Any) -> str:
-        """Classify a query as 'interactive' or 'bulk' based on its plan.
+        """Classify a plan as 'interactive' or 'bulk'.
 
-        Interactive queries are small, fast dashboard-style queries: estimated
-        response size <= ``interactive_max_bytes`` and column count <=
-        ``interactive_max_columns``. Everything else is bulk (a ``None``
-        projection = all columns = likely bulk).
+        Interactive needs an explicit projection within ``interactive_max_columns``
+        and an estimate within ``interactive_max_bytes``.
         """
         config = self._config
         if plan.estimated_bytes > config.interactive_max_bytes:
@@ -157,10 +130,7 @@ class QoSAdmission:
         return "interactive"
 
     def _get_client_semaphore(self, client_id: str, tier: str) -> asyncio.Semaphore | None:
-        """Get or create a per-client semaphore for the tier (None = disabled).
-
-        Simple LRU: touch on hit, evict oldest past ``_client_semaphore_max_entries``.
-        """
+        """Get or create a per-client semaphore for the tier, LRU-bounded; None when disabled."""
         if tier == "interactive":
             max_concurrent = self._config.per_client_interactive
             client_semaphores = self._client_interactive_semaphores
@@ -187,12 +157,9 @@ class QoSAdmission:
     async def admit(self, plan: Any, request: Request, scan_id: str) -> Admission:
         """Acquire a tier slot for *scan_id*, or raise :class:`QoSRejected`.
 
-        Mirrors the previous inline acquire verbatim: classify the tier, acquire
-        the per-client semaphore (1s) then the tenant limiter (queue deadline).
-        The #238 property is preserved — if the limiter acquire is cancelled
-        (``CancelledError`` is a ``BaseException``), the per-client semaphore is
-        released before propagating. On success it records the tier/client and
-        bumps the active counters, returning an :class:`Admission` to release.
+        Waits 1s for the per-client semaphore, then up to the tier's queue timeout
+        for the tenant limiter. A cancelled acquire releases the per-client
+        semaphore before propagating.
         """
         tier = self.classify(plan)
         tenant_id = get_tenant_id()
@@ -271,29 +238,11 @@ class QoSAdmission:
         )
 
     async def _release(self, admission: Admission) -> None:
-        """Reverse an :meth:`admit`: release the limiter + client semaphore once.
+        """Reverse an :meth:`admit` once, releasing exactly the objects it acquired.
 
-        Runs on every exit path including cancellation — the #238 leak fix.
-
-        Releases exactly what this admission acquired. The previous version
-        re-derived both from ``scan_id`` / ``client_id`` at release time, which
-        leaked a per-client slot two ways:
-
-        - ``_scan_client`` is keyed by ``scan_id``, and nothing stops two
-          admissions sharing one (``GET /v1/streams/{id}`` has no
-          already-consumed guard, so a client retry or a proxy retry produces
-          two handlers for the same stream). The first release popped the
-          entry; the second found ``None`` and never released its semaphore.
-          That client permanently loses a slot, and after
-          ``per_client_interactive`` such events it is 429'd forever.
-        - ``_get_client_semaphore`` *creates* a semaphore when the entry is
-          missing, so if the LRU evicted it between acquire and release, the
-          release landed on a brand-new ``Semaphore(max_concurrent)`` and
-          ratcheted its value to ``max_concurrent + 1`` — repeatable, so the
-          per-client cap grew without bound.
-
-        Idempotent: a double release would otherwise drive the counters
-        negative and hand back a slot twice.
+        Never re-derive the semaphore from ``scan_id`` or ``client_id``: two
+        admissions can share a ``scan_id`` (a retried stream GET), and LRU eviction
+        would hand back a fresh semaphore, so either would leak or inflate a slot.
         """
         if admission._released:
             return
@@ -315,11 +264,9 @@ class QoSAdmission:
         self._active_scans -= 1
 
     def active_scan_count(self) -> int:
-        """Authoritative in-flight scan count from the admission limiters.
+        """Authoritative in-flight scan count, from the per-tenant limiters.
 
-        Derives from the per-tenant limiters (what admission actually acquires),
-        not the approximate ``_active_*`` counters — so graceful shutdown never
-        drains past a live stream (#185).
+        Graceful shutdown drains on this so it never cuts off a live stream.
         """
         i_in_use, _, b_in_use, _ = get_tenant_registry().aggregate_limiter_usage()
         return i_in_use + b_in_use

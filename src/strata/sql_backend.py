@@ -1,51 +1,16 @@
-"""SQL dialect seam for the artifact store.
+"""SQL dialect seam for the artifact store: SQLite (personal mode) or Postgres.
 
-The artifact store is the platform's system of record, and it is SQLite on a
-local file. That caps a deployment at one node. This module is the seam that
-lets a second backend exist without forking ``artifact_store.py``, whose ~50
-public methods issue 105 SQL statements between them.
+What differs between the two lives here, so ``artifact_store.py`` keeps one
+copy of its SQL: placeholder style (``?`` vs ``%s``), autoincrement, numeric
+widths (Postgres ``REAL`` is single precision and ``INTEGER`` 32-bit, which
+would truncate timestamps and overflow ``byte_size`` at 2 GiB), writer
+serialization (:meth:`SqlDialect.begin_write`), and the integrity-error type.
+The legacy-migration path (``PRAGMA``, ``sqlite_master``, ``rowid``) runs only on SQLite.
 
-The port is far smaller than that count suggests. Surveying the store turns up
-only a handful of genuinely dialect-specific constructs, and almost all of them
-sit in the *legacy-migration* path (``PRAGMA table_info``, ``sqlite_master``,
-``rowid``) that exists to upgrade databases written by older Strata versions. A
-Postgres deployment has no such history, so it never runs that path. What
-remains is:
-
-- **Placeholders.** The store writes ``?``; Postgres drivers want ``%s``.
-  Handled by :func:`translate_placeholders` inside the connection wrapper, so
-  none of the 103 ``conn.execute`` call sites change.
-- **Autoincrement.** One ``INTEGER PRIMARY KEY AUTOINCREMENT`` in the audit
-  table.
-- **Integer and float width.** Both of the store's numeric column types are
-  narrower in Postgres than in SQLite, and both lose data silently at the
-  boundary rather than failing early.
-
-  ``REAL`` is a 64-bit double in SQLite and *single* precision in Postgres,
-  which cannot hold a ``time.time()`` value without losing sub-second
-  resolution.
-
-  ``INTEGER`` is up to 64 bits in SQLite and exactly 32 in Postgres, so
-  ``byte_size`` overflows on any artifact at or above 2 GiB. That one is
-  worse than it first looks: Postgres raises ``NumericValueOutOfRange``,
-  which is a ``DataError`` and *not* an ``IntegrityError``, so the store's
-  finalize handler does not catch it -- the blob is already written and the
-  row is left in ``building`` forever.
-- **Writer serialization.** ``BEGIN IMMEDIATE`` guards two read-modify-writes.
-  Postgres has no such statement; see :meth:`SqlDialect.begin_write`.
-- **The integrity-error type**, which the store catches by name.
-
-One divergence is deliberately *not* papered over. SQLite's ``LIKE`` is
-case-insensitive for ASCII; Postgres's is case-sensitive. So a prefix search
-for ``"Model"`` matches a stored ``model_v1`` on SQLite and nothing on
-Postgres (``list_artifacts``, ``find_dependents``,
-``list_latest_by_id_prefix``). Postgres is the stricter and more predictable
-side, and forcing either engine to imitate the other would change behavior
-personal mode has today. Callers that need case-insensitive matching should
-normalize explicitly rather than rely on the backend.
-
-Personal mode keeps SQLite and is unaffected: :class:`SqliteDialect` reproduces
-today's behavior exactly, including the connection PRAGMAs.
+``LIKE`` is deliberately not unified: case-insensitive for ASCII on SQLite,
+case-sensitive on Postgres. Callers needing case-insensitive prefix matching
+should normalize explicitly. :class:`SqliteDialect` reproduces the store's
+original behavior exactly.
 """
 
 from __future__ import annotations
@@ -87,37 +52,11 @@ _DDL_TYPE_REWRITES = (
 
 
 def translate_placeholders(sql: str) -> str:
-    """Rewrite ``?`` placeholders to the ``%s`` style Postgres drivers expect.
+    """Rewrite qmark ``?`` placeholders to the pyformat ``%s`` style Postgres drivers expect.
 
-    A blind ``sql.replace("?", "%s")`` is wrong in two directions, and both
-    occur in real queries:
-
-    1. A ``?`` inside a string literal or a quoted identifier is data. The
-       store already ships ``LIKE ? ESCAPE '\\'``, where a naive replace would
-       not corrupt anything today but would the moment a literal contains a
-       question mark.
-    2. Drivers using pyformat treat ``%`` as the start of a substitution, so
-       any literal percent in the SQL has to be doubled. This is latent rather
-       than live -- every ``LIKE`` in the store binds its pattern as a
-       parameter -- but a future inline ``LIKE 'nb\\_%'`` would otherwise fail
-       at execute time with an opaque driver error.
-
-    So this walks the statement tracking whether it is inside a single-quoted
-    literal, a double-quoted identifier, a ``--`` line comment, or a ``/* */``
-    block comment. Placeholders convert only outside those regions; percent
-    signs are escaped everywhere, because the driver scans the whole string.
-    Doubled quotes (``''`` and ``""``) are SQL's own escape and stay inside
-    their region.
-
-    Parameters
-    ----------
-    sql : str
-        A statement written in qmark style.
-
-    Returns
-    -------
-    str
-        The statement in pyformat style.
+    Placeholders convert only outside single-quoted literals, double-quoted
+    identifiers and ``--``/``/* */`` comments, where a ``?`` is data. Every ``%`` is
+    doubled, because the driver scans the whole string for substitutions.
     """
     out: list[str] = []
     i = 0
@@ -156,10 +95,8 @@ def translate_placeholders(sql: str) -> str:
 def _scan_quoted(sql: str, start: int, quote: str) -> int:
     """Return the index just past the quoted region opening at ``start``.
 
-    SQL escapes a quote by doubling it, so ``'it''s'`` is one literal rather
-    than two. An unterminated region runs to the end of the statement: this is
-    a translator, not a validator, and letting the driver report the syntax
-    error keeps the failure legible.
+    A doubled quote is an escape, not a terminator. An unterminated region runs to
+    the end, leaving the syntax error for the driver to report.
     """
     i = start + 1
     n = len(sql)
@@ -176,22 +113,17 @@ def _scan_quoted(sql: str, start: int, quote: str) -> int:
 def advisory_lock_id(key: str) -> int:
     """Map a lock key to the signed 64-bit integer Postgres advisory locks use.
 
-    Deliberately computed here rather than with Postgres's ``hashtext()``: that
-    function is an internal whose output is not contracted across major
-    versions, and a lock id that changes under an upgrade would silently stop
-    serializing the writers it was added to serialize.
+    Computed here rather than with ``hashtext()``, whose output is not stable
+    across Postgres major versions; a changed id would silently stop serializing writers.
     """
     digest = hashlib.blake2b(key.encode("utf-8"), digest_size=8).digest()
     return int.from_bytes(digest, "big", signed=True)
 
 
 class StoreConnection(Protocol):
-    """The connection surface ``artifact_store`` actually uses.
+    """The connection surface ``artifact_store`` uses, shaped like ``sqlite3.Connection``.
 
-    Narrower than either driver's real API, and deliberately shaped like
-    ``sqlite3.Connection`` because that is what the store was written against.
-    :class:`_PostgresConnection` adapts psycopg to fit, which is what keeps the
-    103 ``conn.execute`` call sites unchanged.
+    :class:`_PostgresConnection` adapts psycopg to it, so the store's call sites stay unchanged.
     """
 
     # Positional-only so sqlite3.Connection matches the protocol.
@@ -209,9 +141,7 @@ class StoreConnection(Protocol):
 class SqlDialect(Protocol):
     """The parts of ``artifact_store`` that differ between databases.
 
-    Everything not named here is portable SQL and stays written once. The
-    protocol is deliberately small: each member earns its place by having a
-    concrete divergence behind it, not by anticipating one.
+    Each member has a concrete divergence behind it; everything else is portable SQL.
     """
 
     name: str
@@ -219,8 +149,7 @@ class SqlDialect(Protocol):
     def connect(self) -> StoreConnection:
         """Open a connection configured the way the store expects.
 
-        Returns rows indexable by both column name and position, since the
-        store uses ``row["tenant"]`` and ``fetchone()[0]`` interchangeably.
+        Rows must be indexable by both column name and position.
         """
         ...
 
@@ -235,29 +164,19 @@ class SqlDialect(Protocol):
 
     @property
     def float_type(self) -> str:
-        """Column type for a 64-bit float.
-
-        Named rather than hardcoded because ``REAL`` silently means different
-        widths in SQLite and Postgres, and the store stores epoch timestamps
-        in these columns.
-        """
+        """Column type for a 64-bit float (``REAL`` is single precision on Postgres)."""
         ...
 
     @property
     def integer_type(self) -> str:
-        """Column type for a 64-bit integer.
-
-        Same hazard as :attr:`float_type`. ``byte_size`` and ``row_count`` are
-        declared with it, and a 2 GiB artifact exceeds a 32-bit column.
-        """
+        """Column type for a 64-bit integer (a 2 GiB ``byte_size`` overflows 32 bits)."""
         ...
 
     @property
     def integrity_error(self) -> type[Exception]:
         """Exception raised when a constraint is violated.
 
-        The store catches this to make finalize idempotent, so it has to be a
-        driver-specific type rather than a bare ``Exception``.
+        The store catches it to make finalize idempotent, so it must be the driver's own type.
         """
         ...
 
@@ -265,97 +184,65 @@ class SqlDialect(Protocol):
     def operational_error(self) -> type[Exception]:
         """Exception raised when the database cannot take a write right now.
 
-        A locked SQLite file, a read-only filesystem, a Postgres connection
-        that dropped. The store catches it where a write is advisory (noting
-        that a version was used), so a read never fails for want of it.
+        Caught where a write is advisory (recording use), so a read never fails for want of it.
         """
         ...
 
     @property
     def rejectable_errors(self) -> tuple[type[Exception], ...]:
-        """Errors a bulk copy should attribute to one row, not the whole run.
+        """Errors a bulk copy attributes to one row rather than the whole run.
 
-        Constraint violations are the obvious case, but not the only one: a
-        value SQLite stores happily can be rejected outright by a stricter
-        engine -- a NUL byte inside TEXT is the reachable example, via
-        executor logs or user-supplied tag values. Both mean "this row cannot
-        come", and neither is a reason to abandon the rows around it.
+        Constraint violations, plus values a stricter engine rejects outright (e.g. a
+        NUL byte in TEXT, reachable via executor logs or tag values).
         """
         ...
 
     @property
     def supports_legacy_migration(self) -> bool:
-        """Whether pre-tenant-column databases can exist for this backend.
+        """Whether pre-tenant-column databases can exist for this backend (only SQLite).
 
-        Only SQLite has deployed history to migrate. Guarding the migration on
-        this keeps ``sqlite_master`` / ``PRAGMA`` / ``rowid`` out of the
-        Postgres path instead of forcing portable rewrites of code that runs
-        exactly once per legacy database.
+        Keeps ``sqlite_master``/``PRAGMA``/``rowid`` out of the Postgres path.
         """
         ...
 
     def column_exists(self, conn: StoreConnection, table: str, column: str) -> bool:
         """Whether ``table`` has ``column``.
 
-        The primitive schema migrations are built from. Neither dialect can
-        express ``ADD COLUMN IF NOT EXISTS`` portably — Postgres has it, SQLite
-        does not — so a migration asks first, and asking needs each backend's
-        own catalog.
+        Migrations ask first because ``ADD COLUMN IF NOT EXISTS`` is not portable to SQLite.
         """
         ...
 
     def schema_exists(self, conn: StoreConnection, table: str = "artifact_versions") -> bool:
         """Whether ``table`` is already present.
 
-        Lets ``_init_schema`` skip the global schema lock on every subsequent
-        construction; several call sites build a store per session, so taking
-        it unconditionally would funnel them all through one mutex.
+        Lets ``_init_schema`` skip the global schema lock once the schema exists.
         """
         ...
 
     def close(self) -> None:
-        """Release any resources the dialect holds. Idempotent.
-
-        On SQLite there are none; connections are per-operation file handles.
-        Declared here anyway so a caller can shut a store down without
-        knowing which backend is underneath.
-        """
+        """Release any resources the dialect holds. Idempotent; a no-op on SQLite."""
         ...
 
     def resync_autoincrement(self, conn: StoreConnection, table: str, column: str) -> None:
         """Point a synthetic key's generator past the largest existing value.
 
-        Only matters after rows are inserted with explicit ids -- migration.
-        Postgres keeps a sequence *beside* a ``BIGSERIAL`` column, and an
-        explicit insert does not advance it, so a migrated table hands out
-        ids starting at 1 again and every insert collides until it catches up.
-        SQLite derives the next rowid from the table itself and needs nothing.
+        Needed after inserts with explicit ids (migration): a Postgres ``BIGSERIAL``
+        sequence does not advance on them and would collide. SQLite needs nothing.
         """
         ...
 
     def begin_write(self, conn: StoreConnection, key: str) -> None:
         """Open a transaction that serializes writers contending on ``key``.
 
-        Two call sites need this. ``create_artifact`` reads ``MAX(version)+1``
-        and then inserts that version; two concurrent rebuilds of the same
-        artifact must not both read ``N`` and collide on the ``(id, version)``
-        primary key, a bug this store has already been bitten by once.
-        ``force_finalize_canonical`` promotes one row to canonical while
-        superseding others.
-
-        ``key`` names the contended resource so a backend can lock narrowly
-        rather than globally.
+        Used where a read-modify-write must not race: ``create_artifact`` computing
+        ``MAX(version)+1``, and ``force_finalize_canonical``. ``key`` lets a backend
+        lock narrowly rather than globally.
         """
         ...
 
 
 class SqliteDialect:
-    """Today's behavior, unchanged.
-
-    Personal mode runs on this and must not notice the seam exists: the
-    PRAGMAs, the row factory, the timeout, and ``BEGIN IMMEDIATE`` are all
-    reproduced exactly as ``ArtifactStore._get_connection`` set them.
-    """
+    """SQLite dialect: the store's PRAGMAs, row factory, timeout and ``BEGIN IMMEDIATE``."""
 
     name = "sqlite"
 
@@ -430,11 +317,7 @@ class SqliteDialect:
 class _Row(Mapping):
     """A psycopg row that behaves like ``sqlite3.Row``.
 
-    The store reads results both ways -- ``row["tenant"]`` in most places,
-    ``cursor.fetchone()[0]`` where the query selects a single computed value --
-    and converts two of them with ``dict(row)``. psycopg's stock factories give
-    one access style or the other, so this supplies both. Implementing
-    ``Mapping`` is what makes ``dict(row)`` work without a special case.
+    Supports both ``row["col"]`` and ``row[0]``; implementing ``Mapping`` makes ``dict(row)`` work.
     """
 
     __slots__ = ("_columns", "_values")
@@ -474,12 +357,8 @@ def _row_factory(cursor: Any) -> Any:
 class _PostgresConnection:
     """Adapts a psycopg connection to the surface the store expects.
 
-    Two adaptations, both mechanical:
-
-    - ``execute`` translates qmark to pyformat on the way through, which is why
-      the store's SQL does not have to be rewritten.
-    - ``executescript`` exists on ``sqlite3.Connection`` but not on psycopg.
-      The store uses it only for its own multi-statement schema DDL.
+    ``execute`` translates qmark to pyformat; ``executescript`` (absent in psycopg)
+    runs the store's own multi-statement DDL.
     """
 
     def __init__(self, inner: Any, release: Any) -> None:
@@ -501,11 +380,9 @@ class _PostgresConnection:
         self._inner.rollback()
 
     def close(self) -> None:
-        """Hand the connection back rather than closing it.
+        """Return the connection to the pool rather than closing it.
 
-        The store calls ``close`` 41 times and means "I am done with this";
-        under a pool that has to mean "return it". Guarded against a double
-        release, which would hand the same connection to two threads.
+        Guarded against a double release, which would hand one connection to two threads.
         """
         if self._closed:
             return
@@ -514,10 +391,7 @@ class _PostgresConnection:
 
 
 class PostgresDialect:
-    """Postgres backing for the artifact store.
-
-    Requires the ``postgres`` extra (``pip install strata-notebook[postgres]``).
-    """
+    """Postgres backing for the artifact store (requires the ``postgres`` extra)."""
 
     name = "postgres"
 
@@ -531,11 +405,7 @@ class PostgresDialect:
         self._local = threading.local()
 
     def _get_pool(self) -> Any:
-        """Build the pool on first use.
-
-        Lazy so that constructing a dialect -- which tests and the config
-        factory both do freely -- costs no sockets until something queries.
-        """
+        """Build the pool on first use, so constructing a dialect opens no sockets."""
         if self._closed:
             raise RuntimeError(
                 "PostgresDialect is closed. Reopening on demand would defeat "
@@ -566,28 +436,15 @@ class PostgresDialect:
         return self._pool
 
     def connect(self) -> StoreConnection:
-        """Take a pooled connection, re-entrantly.
+        """Take a pooled connection, re-entrantly per thread.
 
-        A thread that already holds one gets the same connection back with a
-        bumped depth, and the connection returns to the pool only when the
-        outermost holder closes it.
+        A thread already holding one gets it back, and it returns to the pool only
+        when the outermost holder closes it. The store acquires nested connections in
+        several places, so without this a bounded pool deadlocks.
 
-        This is not an optimization, it is what makes a bounded pool safe
-        here. ``ArtifactStore`` acquires two deep in six places -- most of
-        them ``return self.get_artifact(...)`` evaluated inside a ``try``
-        whose ``finally`` has not yet released the outer connection. Without
-        re-entrancy, ``max_size`` threads each holding one and waiting for a
-        second deadlock until the pool timeout fires, and the pool would have
-        to be sized at twice peak concurrency to be safe.
-
-        Sharing a connection means a nested call joins the outer transaction.
-        That is sound for every nesting that exists today: each one runs after
-        the outer work has been committed or rolled back, so there is no
-        pending state for a nested ``commit`` to publish early. The nested
-        ``set_name`` at ``artifact_store.py:1060`` is the only nested *write*,
-        and the line above it rolls the outer transaction back. Adding a
-        nested write while the outer holds uncommitted work would break that,
-        which is why it is written down here.
+        A nested call joins the outer transaction. That is sound only while every
+        nesting runs after the outer work was committed or rolled back; a nested write
+        inside uncommitted outer work would break it.
         """
         state = self._local
         conn = getattr(state, "conn", None)
@@ -627,11 +484,9 @@ class PostgresDialect:
         pool.putconn(raw)
 
     def close(self) -> None:
-        """Dispose the pool. Terminal -- a closed dialect will not reopen.
+        """Dispose the pool. Terminal: a closed dialect will not reopen.
 
-        Every ``ConnectionPool`` also runs worker threads, so a dialect left
-        unclosed leaks those for the process lifetime and its ``__del__``
-        raises ``PythonFinalizationError`` at interpreter shutdown.
+        An unclosed pool leaks its worker threads and raises at interpreter shutdown.
         """
         with self._pool_lock:
             self._closed = True
@@ -700,26 +555,12 @@ class PostgresDialect:
         )
 
     def begin_write(self, conn: StoreConnection, key: str) -> None:
-        """Serialize writers with a transaction-scoped advisory lock.
+        """Serialize writers with a transaction-scoped advisory lock keyed on ``key``.
 
-        Postgres has no ``BEGIN IMMEDIATE``. Of the two candidates, an advisory
-        lock beats ``SERIALIZABLE`` here: it needs no retry loop (the second
-        writer blocks rather than aborting), it releases automatically at
-        commit or rollback, and it is keyed, so writers touching different
-        artifacts do not queue behind each other the way SQLite's whole-file
-        lock makes them.
-
-        Scope, stated precisely: the lock serializes writers passing the *same*
-        key, and nothing else. ``force_finalize_canonical`` also touches rows
-        sharing a provenance hash across *other* artifact ids, which those
-        writers do not contend on. The ``idx_tenant_provenance_unique`` partial
-        index rejects that case, and the caller catches
-        :attr:`integrity_error` and returns the row that won.
-
-        Note this is genuinely weaker than SQLite, not merely different: under
-        ``BEGIN IMMEDIATE`` the whole file is locked, so a second writer is
-        never in flight and the index never fires. Narrower locking is the
-        price of not serializing every artifact-store write in the cluster
-        behind one mutex, and it is why that handler had to be added.
+        Preferred over ``SERIALIZABLE``: no retry loop, released at commit or rollback,
+        and keyed so unrelated artifacts do not queue. It is weaker than SQLite's
+        whole-file lock: ``force_finalize_canonical`` can still race writers on other
+        ids sharing a provenance hash, which ``idx_tenant_provenance_unique`` rejects and
+        the caller resolves by catching :attr:`integrity_error`.
         """
         conn.execute("SELECT pg_advisory_xact_lock(?)", (advisory_lock_id(key),))

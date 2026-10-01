@@ -1,20 +1,8 @@
-"""Which node is serving a given stream.
+"""Record which node serves each stream, so another node can point there instead of 404ing.
 
-A stream cannot be moved between nodes. ``StreamState`` holds a live
-``asyncio.Task``, a ``BuildSlot``, and an in-memory ``ReadPlan`` of row-group
-tasks, and ``GET /v1/streams/{id}`` streams directly out of that plan. None of
-it is serializable, so sharing stream *state* is not a design that exists --
-the process that planned a stream is the only one that can serve it.
-
-What can be shared is the *pointer*. This records ``stream_id -> node url`` in
-the artifact store's database so a node receiving a request for someone else's
-stream can say where it lives, instead of returning a bare 404 that is
-indistinguishable from "expired" and gives an operator nothing to act on.
-
-Entirely opt-in: without ``node_advertised_url`` configured, nothing is written
-and nothing is read, so single-node and personal deployments pay nothing. The
-setting is the operator asserting both "I am one of several nodes" and "this
-URL reaches me".
+Stream state (a live task, slot and in-memory plan) cannot move between nodes, so
+only the ``stream_id -> node url`` pointer is shared, via the artifact store's
+database. Opt-in: nothing is read or written without ``node_advertised_url``.
 """
 
 from __future__ import annotations
@@ -39,11 +27,7 @@ CREATE INDEX IF NOT EXISTS idx_stream_owners_expires ON stream_owners(expires_at
 
 
 class StreamOwnershipStore:
-    """Records and resolves the node serving each stream.
-
-    Shares the artifact store's dialect, so ownership rows land wherever its
-    metadata does and cost no additional connections.
-    """
+    """Records and resolves the node serving each stream, in the artifact store's database."""
 
     def __init__(self, db_path: Path, dialect: SqlDialect | None = None):
         self.db_path = db_path
@@ -70,12 +54,9 @@ class StreamOwnershipStore:
             conn.close()
 
     def claim(self, stream_id: str, node_url: str, ttl_seconds: float) -> None:
-        """Record this node as the one serving ``stream_id``.
+        """Record this node as the one serving ``stream_id``; the newest claim wins.
 
-        Upserts, because ``stream_id`` is usually the artifact id and a refresh
-        can legitimately re-stream the same artifact from a different node. The
-        newest claim wins, which matches the fact that the newest planner is
-        the one holding a live plan.
+        ``stream_id`` is often the artifact id, which a refresh may re-stream elsewhere.
         """
         now = time.time()
         conn = self._get_connection()
@@ -98,10 +79,8 @@ class StreamOwnershipStore:
     def resolve(self, stream_id: str, exclude_node_url: str) -> str | None:
         """Return the URL of another node serving ``stream_id``.
 
-        ``None`` covers every case where a redirect would be wrong: no claim,
-        an expired claim, or a claim held by this node -- the last meaning the
-        stream really is gone rather than elsewhere, so the caller should 404
-        as it always did.
+        ``None`` for no claim, an expired claim, or one held by ``exclude_node_url``;
+        the caller should then 404.
         """
         conn = self._get_connection()
         try:
@@ -128,12 +107,7 @@ class StreamOwnershipStore:
             conn.close()
 
     def sweep_expired(self) -> int:
-        """Delete claims past their expiry. Returns how many went.
-
-        A node that dies never releases its claims, so expiry is what keeps
-        the table from growing without bound -- and what stops a dead node
-        being advertised forever.
-        """
+        """Delete expired claims, including a dead node's, and return how many."""
         conn = self._get_connection()
         try:
             cursor = conn.execute("DELETE FROM stream_owners WHERE expires_at <= ?", (time.time(),))

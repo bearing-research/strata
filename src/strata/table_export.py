@@ -1,14 +1,9 @@
 """Writing artifacts into Iceberg tables.
 
-A promoted tabular dataset becomes a table in the organization's warehouse:
-each export writes the artifact as the table's new current snapshot, and the
-snapshot's summary names the artifact version it came from. The table then
-reads like any other, including through a notebook's ``@table``, which goes
-stale when the next version is written.
-
-The table an artifact was written to is recorded as a tag on the artifact,
-``strata.iceberg_table``, so that moving an alias onto that version later can
-move the table's tag of the same name (``move_alias_tag``).
+Each export writes the artifact as the table's new current snapshot, whose
+summary names the source artifact version. The target table is recorded on the
+artifact as the ``strata.iceberg_table`` tag, so moving an alias can move the
+table's tag of the same name (``move_alias_tag``).
 """
 
 from __future__ import annotations
@@ -95,13 +90,11 @@ def move_alias_tag(
     config: Any,
     tenant: str | None = None,
 ) -> int | None:
-    """After an alias moves onto ``artifact_id@v=version``, move the tag of the
-    same name in the table that version was written to.
+    """Move the table tag named after an alias that just moved onto ``artifact_id@v=version``.
 
-    Returns the tagged snapshot id, or None when the version was never written
-    to a table. A catalog that cannot be reached leaves the tag where it was
-    and is logged: the alias itself has already moved, and the registry is the
-    authority on it.
+    Returns the tagged snapshot id, or None when the version was never written to a
+    table. An unreachable catalog is logged and leaves the tag in place: the alias
+    has already moved and the registry is the authority.
     """
     table_uri = store.get_tags(artifact_id, version, tenant=tenant).get(EXPORT_TAG)
     if not table_uri:

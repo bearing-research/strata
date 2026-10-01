@@ -1,23 +1,8 @@
-"""GC pause duration tracking using gc.callbacks.
+"""GC pause duration tracking via ``gc.callbacks``.
 
-This module provides precise measurement of Python garbage collection pause times,
-which is critical for understanding latency stalls in the server.
-
-Usage:
-    from strata.gc_tracker import install_gc_tracker, get_gc_stats, reset_gc_stats
-
-    # At server startup
-    install_gc_tracker()
-
-    # In /metrics endpoint
-    stats = get_gc_stats()
-
-The tracker records:
-- Pause duration for each GC generation (0, 1, 2)
-- Timestamp of each GC event
-- Running statistics (min, max, p50, p95, p99)
-
-This differs from gc.get_stats() which only counts collections, not pause duration.
+Records each collection's pause per generation with running percentiles,
+which ``gc.get_stats()`` (counts only) cannot give. Install once at startup
+with ``install_gc_tracker()``; read with ``get_gc_stats()``.
 """
 
 import gc
@@ -59,7 +44,7 @@ class GCStats:
     max_pause_ms: float = 0.0
 
     def to_dict(self) -> dict:
-        """Convert to dictionary for JSON serialization."""
+        """Convert to a JSON-serializable dict."""
         result = {
             "total_pauses": self.total_pauses,
             "total_pause_ms": round(self.total_pause_ms, 3),
@@ -101,11 +86,7 @@ class GCTracker:
     """Tracks GC pause durations using gc.callbacks."""
 
     def __init__(self, max_recent: int = 1000):
-        """Initialize the tracker.
-
-        Args:
-            max_recent: Maximum number of recent pauses to keep for percentile calculation.
-        """
+        """Initialize the tracker, keeping ``max_recent`` pauses for percentiles."""
         self._lock = threading.Lock()
         self._gc_start_time: float = 0.0
         self._current_generation: int = 0
@@ -124,12 +105,7 @@ class GCTracker:
         self._installed = False
 
     def _gc_callback(self, phase: str, info: dict) -> None:
-        """Callback invoked by the GC on start/stop of collection.
-
-        Args:
-            phase: "start" or "stop"
-            info: Dict with "generation" key (0, 1, or 2)
-        """
+        """GC callback; ``phase`` is ``"start"`` or ``"stop"``, ``info["generation"]`` 0-2."""
         if phase == "start":
             self._gc_start_time = time.perf_counter()
             self._current_generation = info.get("generation", 0)
@@ -218,14 +194,7 @@ class GCTracker:
             self._max_pause_ms = 0.0
 
     def get_recent_pauses(self, limit: int = 100) -> list[dict]:
-        """Get recent GC pauses for detailed analysis.
-
-        Args:
-            limit: Maximum number of pauses to return (most recent first).
-
-        Returns:
-            List of pause dictionaries with timestamp, generation, duration_ms.
-        """
+        """Return up to ``limit`` recent pauses as dicts, newest first."""
         with self._lock:
             pauses = list(self._recent)[-limit:]
             return [
@@ -242,14 +211,7 @@ _tracker: GCTracker | None = None
 
 
 def install_gc_tracker(max_recent: int = 1000) -> GCTracker:
-    """Install the global GC tracker.
-
-    Args:
-        max_recent: Maximum recent pauses to keep for percentile calculation.
-
-    Returns:
-        The GCTracker instance.
-    """
+    """Install the global GC tracker and return it."""
     global _tracker
     if _tracker is None:
         _tracker = GCTracker(max_recent=max_recent)
@@ -263,20 +225,14 @@ def get_gc_tracker() -> GCTracker | None:
 
 
 def get_gc_stats() -> dict:
-    """Get GC statistics as a dictionary.
-
-    Returns empty dict if tracker not installed.
-    """
+    """Return GC statistics as a dict, or an empty dict if the tracker is not installed."""
     if _tracker is None:
         return {}
     return _tracker.get_stats().to_dict()
 
 
 def get_recent_gc_pauses(limit: int = 100) -> list[dict]:
-    """Get recent GC pauses for detailed analysis.
-
-    Returns empty list if tracker not installed.
-    """
+    """Return recent GC pauses, or an empty list if the tracker is not installed."""
     if _tracker is None:
         return []
     return _tracker.get_recent_pauses(limit)

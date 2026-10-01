@@ -1,15 +1,8 @@
-"""Artifact CRUD + personal-mode upload/finalize routes.
+"""Artifact CRUD plus the personal-mode upload/finalize routes.
 
-Moved verbatim from ``server.py`` (P3 / A1, router split; upload/finalize added
-in #295). These handlers are thin: they take an already-gated store + tenant
-filter via the typed dependencies and shape the response. The personal-mode
-upload/finalize pair takes ``PersonalModeStore`` (the bare write-mode gate); the
-signature-authed signed-transport upload/finalize live in ``builds.py``. The
-post-fetch ACL helpers (``_ensure_artifact_access``, ``_authorize_artifact_read``)
-stay in ``server.py`` — ``_authorize_artifact_read`` re-checks the shared table
-ACL and both are used by other (still-resident) routes — so the handlers
-lazy-import them in-body. Names / aliases / tags and the stateful
-materialize/streams routes are separate slices and stay put.
+Handlers take an already-gated store and tenant filter from the typed
+dependencies. The ACL helpers stay in ``server.py`` and are lazy-imported
+in-body; the signed-transport upload/finalize routes live in ``builds.py``.
 """
 
 from __future__ import annotations
@@ -65,22 +58,11 @@ router = APIRouter(tags=["artifacts"])
 
 @router.put("/v1/artifacts", response_model=PutArtifactResponse)
 async def put_artifact(request: Request, store: WriteStore, principal: CurrentPrincipal):
-    """Directly upload and persist an artifact with provenance tracking.
+    """Upload and persist a locally computed artifact with provenance tracking.
 
-    This is a simplified API for clients that execute transforms locally
-    and want to persist the result with full provenance tracking and deduplication.
-
-    Accepts two content types:
-    1. application/json: JSON body with inputs, transform, data, name
-    2. multipart/form-data: metadata (JSON) + data (Arrow IPC bytes)
-
-    The multipart format is more efficient for large data or pre-serialized Arrow.
-
-    Deduplication: If an artifact with the same provenance hash already exists,
-    returns the existing artifact (hit=True) without storing duplicate data.
-
-    Returns:
-        PutArtifactResponse with artifact URI and cache hit status
+    Accepts a JSON body (inputs, transform, data, name) or multipart (``metadata``
+    JSON plus ``data`` Arrow IPC bytes). An existing artifact with the same
+    provenance hash is returned with ``hit=True`` and nothing is stored.
     """
     import json as json_module
 
@@ -287,15 +269,7 @@ async def get_artifact_info(
 ):
     """Get artifact metadata.
 
-    Available in service mode (a client needs to poll state/schema of a result),
-    gated by tenant + the table ACL of the artifact's inputs.
-
-    Args:
-        artifact_id: Artifact ID
-        version: Version number
-
-    Returns:
-        ArtifactInfoResponse with artifact metadata
+    Available in service mode, gated by tenant and the table ACL of the artifact's inputs.
     """
     from strata.server import _authorize_artifact_read, _ensure_artifact_access
 
@@ -328,11 +302,8 @@ async def stage_import_blob_route(
 ):
     """Upload the bytes of an artifact about to be imported, ahead of its record.
 
-    The first of the import's two steps: the bytes here, then ``POST
-    /v1/artifacts/import`` with the record, whose ``content_sha256`` names
-    them. The body is streamed to disk and checked against the digest in the
-    path before anything is kept, so a 201 means these are exactly the bytes
-    that digest describes. Only the caller's tenant can import them.
+    The body is streamed to disk and checked against the digest in the path, so a
+    201 means these are exactly those bytes. Only the caller's tenant can import them.
     """
     tenant_id = principal.tenant if principal else None
     with tempfile.TemporaryDirectory(prefix="strata_import_") as workdir:
@@ -379,36 +350,16 @@ async def import_artifact_route(
 ):
     """Copy one artifact version into this store, keeping its id and version.
 
-    The route publishing needs. A chain lives in the store its cells wrote to;
-    a link resolves from the store the server serves. Those are different
-    machines, so the chain has to travel, and it has to arrive with its
-    versions intact — lineage edges are recorded as ``id@v=N``, so a copy that
-    let this store assign fresh versions would land ancestors under numbers the
-    descendants' edges do not name.
+    Versions must survive because lineage edges name ``id@v=N``. Importing
+    ancestors first is the caller's job, and the caller must rewrite later edges
+    from the returned ref: a record may resolve onto an existing row with the same
+    provenance hash, or, with ``remap``, land under a fresh id when another tenant
+    holds that version.
 
-    Ancestors first is the caller's job. This route answers where each record
-    landed, which is not always where the caller asked:
-
-    * the same computation may already be here under another id, in which case
-      it resolves onto that row (one ready row per tenant and provenance hash
-      is what the store's uniqueness index permits);
-    * with ``remap``, a version already taken by *another tenant* is minted
-      under a fresh id here.
-
-    Either way the caller rewrites the edges of everything it imports next from
-    the ref this returns, or the chain resolves to nothing.
-
-    Idempotency is by completeness rather than existence: a record that is
-    already here but missing its bytes, or missing the lineage this caller
-    knows, is completed rather than skipped.
-
-    The caller's tenant is stamped on the row whatever the record says, so an
-    import cannot place an artifact in someone else's namespace.
-
-    Two forms. A JSON body is the record alone, and its bytes are the ones the
-    caller uploaded with ``PUT /v1/artifacts/import/blobs/{content_sha256}``,
-    which is how a large artifact travels without being held in memory. A
-    multipart body carries a ``metadata`` file and the bytes as ``data``.
+    Idempotent by completeness: a record already here but missing bytes or lineage
+    is completed. The caller's tenant is always stamped on the row. A JSON body is
+    the record alone (bytes staged via ``PUT /v1/artifacts/import/blobs/{content_sha256}``);
+    a multipart body carries ``metadata`` and ``data``.
     """
     with tempfile.TemporaryDirectory(prefix="strata_import_") as workdir:
         return await _import_artifact(request, store, principal, remap, Path(workdir))
@@ -585,27 +536,11 @@ async def put_artifact_by_provenance(
 ):
     """Store a result under a provenance key the caller computed.
 
-    The write half of the team cache, and the one place the two materialize
-    pipelines have to meet above the artifact store. ``PUT /v1/artifacts``
-    derives the provenance hash itself from inputs + transform; a notebook cell
-    derives its own from ``sorted_input_hashes + source_hash + env_hash``, over
-    material — the cell's source, the environment lockfile — that the server
-    never sees. There is therefore no way for the store to *check* this key,
-    and no way for a notebook to publish under it without a route that accepts
-    one.
-
-    So this is a deliberate trust delegation, and it is bounded three ways: the
-    caller must be authenticated with ``artifacts:write``, the row is stamped
-    with their tenant so the reach is exactly their own team, and **an existing
-    hash is never overwritten** — a second write of the same key returns the
-    first one. That last part matters most: it turns "poison the shared cache"
-    into "race to be first", and a team already runs each other's code by
-    sharing a cache at all.
-
-    The body is opaque bytes, not Arrow. A cell variable can be Arrow, JSON, or
-    a pickle, and only the notebook's serializer knows which — parsing here
-    would reject two of the three. ``content_type`` travels in the metadata so
-    the puller can decode without a second round trip.
+    The server cannot verify the key (a notebook cell's hash covers source and
+    lockfile it never sees), so this is a bounded trust delegation: it requires
+    ``artifacts:write``, stamps the caller's tenant, and never overwrites an
+    existing hash, so a second write of the same key returns the first. The body is
+    opaque bytes (Arrow, JSON or pickle); ``content_type`` travels in the metadata.
     """
     import json as json_module
 
@@ -715,34 +650,12 @@ async def find_artifact_by_provenance(
     principal: CurrentPrincipal,
     provenance_hash: str = FastPath(pattern="^[0-9a-f]{64}$"),
 ):
-    """Has anyone already computed this?
+    """Look up a ready artifact by provenance hash, the team-cache read.
 
-    The primitive a *shared* store exists to answer. Every other artifact read
-    starts from an id someone already holds; this one starts from a provenance
-    hash, which is the only identifier two people arrive at independently —
-    notebook artifact ids embed the notebook, so a colleague's copy of the same
-    computation is never at an id you could have guessed.
-
-    Answering it over HTTP is what turns the local dedup that already happens
-    into a team cache hit: look up by hash, and on a match fetch the bytes from
-    the sibling ``/data`` route.
-
-    404 is the ordinary answer, not an error — it means "nobody has, go
-    compute it". A caller cannot tell that apart from the *other* 404s it might
-    get (an old server that lacks this route; a gateway with no artifact store
-    configured), and treating those as a miss means recomputing forever while
-    everything looks healthy. So a genuine miss carries
-    ``X-Strata-Provenance-Miss``, and clients key off the header rather than
-    the status alone.
-
-    The hash is constrained to a sha256 digest at the route, because every
-    hash the store issues is one (including the ``derive_subkey`` per-variable
-    hashes) and a lookup key that reaches the database should not be free-form.
-
-    Scoping: the lookup is filtered to the caller's own tenant in SQL, so a
-    team only ever hits its own results, and the ACL re-check below applies the
-    same table-level deny rules the by-id reads apply — a shared cache does not
-    become a way around a table someone is denied.
+    A genuine miss is a 404 carrying ``X-Strata-Provenance-Miss``; clients key off
+    the header, because other 404s (an old server, no artifact store) must not read
+    as a miss. The hash must be a sha256 digest. Results are filtered to the
+    caller's tenant and re-checked against table-level ACL deny rules.
     """
     from strata.server import _authorize_artifact_read, _ensure_artifact_access
 
@@ -786,14 +699,10 @@ async def find_artifact_by_provenance(
 
 
 def _spec_param(artifact, key: str) -> str:
-    """One value out of the stored transform spec's params.
+    """Return one value from the stored transform spec's params, or "" when unrecorded.
 
-    Carries ``content_type`` (how the blob was serialized) and ``build_env``
-    (which interpreter on which machine produced it). Both come back "" rather
-    than a guess when unrecorded: core transforms record neither, and every
-    artifact written before those fields existed has neither. A caller that has
-    to deserialize should see "unstated" and decide, not receive a
-    plausible-looking default that is wrong for pickled values.
+    Used for ``content_type`` and ``build_env``; "" rather than a guessed default,
+    since a wrong default would mis-decode pickled values.
     """
     if not artifact.transform_spec:
         return ""
@@ -810,12 +719,9 @@ def _spec_param(artifact, key: str) -> str:
 
 
 def _spec_int(artifact, key: str) -> int:
-    """The same, for a param that is a whole number of milliseconds.
+    """Return an integer millisecond param, or 0 when unrecorded or unparseable.
 
-    Params are stored as strings, and a stored value that will not parse means
-    a producer wrote something unexpected. Zero, matching "unrecorded", is the
-    honest reading — the alternative is a 500 on a read path over metadata
-    nothing depends on.
+    0 rather than a 500 on a read path over metadata nothing depends on.
     """
     raw = _spec_param(artifact, key)
     try:
@@ -840,12 +746,9 @@ def usage_scope(
 ) -> UsageScope:
     """Resolve the scope of a usage read.
 
-    Personal mode reports the whole store, as it always has. Service mode
-    reports one tenant's holdings and never another's: the caller's own, from
-    the trusted-proxy identity, or for ``admin:*`` a tenant named in the query
-    (the whole store when none is named). A tenant's figure there excludes
-    legacy tenantless rows, which belong to no one and would otherwise be
-    charged to every tenant at once.
+    Personal mode: the whole store. Service mode: the caller's tenant, or for
+    ``admin:*`` a tenant named in the query (whole store when none). A tenant's
+    figure excludes legacy tenantless rows, which would otherwise be charged to every tenant.
     """
     from strata.auth import get_principal
     from strata.server import _get_artifact_request_tenant, _get_artifact_store, get_state
@@ -879,31 +782,15 @@ UsageScopeDep = Annotated[UsageScope, Depends(usage_scope)]
 
 @router.get("/v1/artifacts/stats")
 async def get_artifact_stats(scope: UsageScopeDep):
-    """Get artifact store statistics.
-
-    Whole store in personal mode; one tenant's in service mode (see
-    :func:`usage_scope`).
-
-    Returns:
-        Artifact store statistics
-    """
+    """Get artifact store statistics: whole store in personal mode, one tenant's in service mode."""
     return scope.store.stats(tenant=scope.tenant, include_tenantless=scope.include_tenantless)
 
 
 @router.get("/v1/artifacts/usage")
 async def get_artifact_usage(scope: UsageScopeDep):
-    """Get artifact store usage metrics.
+    """Get artifact store usage: bytes, artifact and version counts, unreferenced count.
 
-    Returns comprehensive usage statistics including:
-    - Total bytes used
-    - Number of artifacts and versions
-    - Unreferenced artifact count (candidates for GC)
-
-    Whole store in personal mode; one tenant's in service mode, which is what
-    metering reads (see :func:`usage_scope`).
-
-    Returns:
-        Usage metrics dictionary
+    Whole store in personal mode; one tenant's in service mode, which is what metering reads.
     """
     return scope.store.get_usage(tenant=scope.tenant, include_tenantless=scope.include_tenantless)
 
@@ -921,19 +808,9 @@ async def list_artifacts(
     sort: str = "created_at",
     order: str = "desc",
 ):
-    """List artifacts with optional filtering (personal mode only).
+    """List artifact versions with optional filtering and sorting (personal mode only).
 
-    Args:
-        limit: Maximum number of artifacts to return (default 100)
-        offset: Number of artifacts to skip for pagination
-        state: Filter by state ("ready", "building", "failed")
-        name_prefix: Filter by artifacts with names starting with prefix
-        since: Only artifacts created at or after this epoch timestamp
-        sort: Sort column — "created_at", "byte_size", or "row_count"
-        order: "asc" or "desc" (default "desc")
-
-    Returns:
-        List of artifact versions with their metadata
+    ``since`` is an epoch timestamp; ``sort`` is ``created_at``, ``byte_size`` or ``row_count``.
     """
     if state is not None and state not in ("ready", "building", "failed"):
         raise HTTPException(
@@ -983,18 +860,7 @@ async def list_artifacts(
 async def delete_artifact(
     artifact_id: str, version: int, store: PersonalModeStore, tenant_filter: CurrentTenant
 ):
-    """Delete an artifact version (personal mode only).
-
-    Deletes the artifact blob and metadata. Also removes any name pointers
-    that reference this specific version.
-
-    Args:
-        artifact_id: Artifact ID
-        version: Version number
-
-    Returns:
-        Success status
-    """
+    """Delete an artifact version, its blob and its name pointers (personal mode only)."""
     from strata.server import _ensure_artifact_access
 
     _ensure_artifact_access(
@@ -1028,9 +894,7 @@ async def pin_artifact(
 ):
     """Hold a version and every ancestor against garbage collection.
 
-    For a chain the store has no other reason to keep — a snapshot that must
-    stay restorable, a review still open. One pin per reason; pinning again
-    under the same reason refreshes it.
+    One pin per reason; pinning again under the same reason refreshes it.
     """
     from strata.server import _ensure_artifact_access
 
@@ -1077,10 +941,8 @@ async def export_artifact_to_table(
 ):
     """Write a tabular artifact into an Iceberg table as its current snapshot.
 
-    For a platform that exports a dataset once it has been promoted. The
-    snapshot's summary names this version, and ``alias`` becomes a tag on it.
-    The catalog is this server's: ``table`` is a ``<warehouse>#ns.table`` URI or
-    a ``ns.table`` in the configured catalog, as ``@table`` reads it.
+    The snapshot summary names this version and ``alias`` becomes a tag on it.
+    ``table`` is a ``<warehouse>#ns.table`` URI or ``ns.table`` in the configured catalog.
     """
     from strata.api.dependencies import authorize_table_access
     from strata.iceberg import table_identity_for
@@ -1127,34 +989,23 @@ async def garbage_collect_artifacts(
     dry_run: bool = False,
     store: ArtifactStore = store_for_scope("admin:*"),
 ):
-    """Collect the artifact versions nothing needs, least recently used first.
+    """Collect unneeded artifact versions, least recently used first.
 
-    Personal mode, or service mode for a principal holding ``admin:*``, scoped
-    to the caller's tenant.
-
-    A version nothing holds is one with no name, alias, pin or publication,
-    that nothing pinned, published or still building depends on, and that is
-    not the current value of an id somebody chose: a notebook's cell outputs
-    are stored under their own ids, never named, and read back as the latest
-    version. An id the store minted for one ``materialize`` has no such value.
-    See ``ArtifactStore.garbage_collect``.
-
-    Each parameter left out takes the server's configured retention
-    (``STRATA_ARTIFACT_GC_*``), so a bare call does what the scheduled sweep
-    does.
+    Personal mode, or service mode with ``admin:*``, scoped to the caller's tenant.
+    A version is kept if it has a name, alias, pin or publication, if something
+    pinned, published or building depends on it, or if it is the latest value of a
+    caller-named id (see ``ArtifactStore.garbage_collect``). Omitted parameters take
+    the configured ``STRATA_ARTIFACT_GC_*`` retention.
 
     Args:
         max_idle_days: Collect what has not been used for this long.
-        max_bytes: Collect least recently used first until the store is at
-            80% of this.
+        max_bytes: Collect until the store is at 80% of this.
         min_idle_seconds: Never collect anything used more recently.
-        collect_latest: Also collect the current value of caller-named ids.
-            Off by default because it deletes live state.
-        dry_run: Report what would go, and delete nothing.
+        collect_latest: Also collect the latest value of caller-named ids (deletes live state).
+        dry_run: Report what would go; delete nothing.
 
     Returns:
-        ``deleted_count``, ``deleted_bytes``, ``store_bytes`` and, with
-        ``dry_run``, the chosen versions under ``collected``.
+        ``deleted_count``, ``deleted_bytes``, ``store_bytes`` and, with ``dry_run``, ``collected``.
     """
     for name, value in (
         ("max_idle_days", max_idle_days),
@@ -1184,18 +1035,9 @@ async def garbage_collect_artifacts(
 async def get_artifact_data(
     artifact_id: str, version: int, store: ReadStore, tenant_filter: CurrentTenant
 ):
-    """Stream artifact data as Arrow IPC.
+    """Stream an artifact's bytes as Arrow IPC.
 
-    Returns the raw Arrow IPC stream bytes for the artifact, so an identity-scan
-    cache hit (or any materialized result) can be read back. Available in service
-    mode, gated by tenant + the table ACL of the artifact's inputs.
-
-    Args:
-        artifact_id: Artifact ID
-        version: Version number
-
-    Returns:
-        StreamingResponse with Arrow IPC data
+    Available in service mode, gated by tenant and the table ACL of the artifact's inputs.
     """
     from strata.server import _authorize_artifact_read, _ensure_artifact_access
 
@@ -1248,24 +1090,7 @@ async def get_artifact_lineage(
     tenant_filter: CurrentTenant,
     max_depth: int = Query(default=10, ge=1, le=100),
 ):
-    """Get the lineage (input dependency graph) for an artifact.
-
-    Returns the full input dependency tree, showing all artifacts and tables
-    that this artifact depends on, including transitive dependencies.
-
-    This is useful for:
-    - Understanding data provenance (what data went into this artifact)
-    - Debugging computation graphs
-    - Auditing data lineage for compliance
-
-    Args:
-        artifact_id: Artifact ID to get lineage for
-        version: Version number
-        max_depth: Maximum depth to traverse (default: 10, max: 100)
-
-    Returns:
-        ArtifactLineageResponse with nodes and edges representing the lineage graph
-    """
+    """Get the transitive input graph (artifacts and tables) of an artifact, up to ``max_depth``."""
     # Answered by the team store when one is configured: the dashboard opens lineage from views that
     # list the team's registry, so the local store would 404 on exactly what the reader clicked.
     target = remote_registry()
@@ -1314,24 +1139,7 @@ async def get_artifact_dependents(
     tenant_filter: CurrentTenant,
     limit: int = Query(default=100, ge=1, le=1000),
 ):
-    """Get artifacts that depend on this artifact (reverse dependencies).
-
-    Returns all artifacts that use this artifact as an input. This is useful for:
-    - Impact analysis before modifying or deleting an artifact
-    - Understanding downstream consumers
-    - Planning cascading rebuilds
-
-    Note: Only searches for direct dependents, not transitive dependents.
-    Only returns ready artifacts.
-
-    Args:
-        artifact_id: Artifact ID to find dependents of
-        version: Version number
-        limit: Maximum number of dependents to return (default: 100, max: 1000)
-
-    Returns:
-        ArtifactDependentsResponse with list of dependent artifacts
-    """
+    """List ready artifacts that use this artifact as a direct input (not transitive)."""
     from strata.server import _authorize_artifact_read, _ensure_artifact_access
 
     artifact = _ensure_artifact_access(
@@ -1359,15 +1167,9 @@ async def get_artifact_dependents(
 async def upload_artifact_blob(
     artifact_id: str, version: int, request: Request, store: PersonalModeStore
 ):
-    """Upload artifact blob data (personal mode only).
+    """Upload an artifact's Arrow IPC bytes (personal mode only).
 
-    The client POSTs raw Arrow IPC stream bytes to this endpoint.
-    After upload, call /v1/artifacts/finalize to complete the artifact.
-
-    Args:
-        artifact_id: Artifact ID from materialize response
-        version: Version number from materialize response
-        request: Raw request body containing Arrow IPC bytes
+    Call ``/v1/artifacts/finalize`` afterwards to complete the artifact.
     """
     artifact = store.get_artifact(artifact_id, version)
     if artifact is None:
@@ -1399,14 +1201,7 @@ async def upload_artifact_blob(
 
 @router.post("/v1/artifacts/finalize", response_model=UploadFinalizeResponse)
 async def finalize_artifact(request: UploadFinalizeRequest, store: PersonalModeStore):
-    """Finalize an artifact after upload (personal mode only).
-
-    After uploading the blob, call this to transition the artifact to ready state.
-    Optionally sets a name pointer to the artifact.
-
-    Returns:
-        UploadFinalizeResponse with artifact URI and optional name URI
-    """
+    """Mark an uploaded artifact ready, optionally setting a name (personal mode only)."""
     if not store.blob_exists(request.artifact_id, request.version):
         raise HTTPException(
             status_code=400,

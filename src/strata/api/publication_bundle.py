@@ -1,15 +1,8 @@
 """Build the self-contained bundle a publication is archived as.
 
-A hosted link resolves for as long as the server does, and a URL printed in a
-paper outlives most servers. The bundle is the copy that needs neither: a page,
-the bytes, a machine-readable record, an RO-Crate a repository can ingest, and
-a README naming the digest.
-
-It is written once here because two callers want it — ``strata artifact
-archive``, which opens the store directly, and ``GET /p/{token}/archive.zip``,
-which is how a service holding only HTTP access to the store gets the same
-thing. Two implementations of a set of files that describe each other would
-drift, and the drift would be silent: both would keep producing a bundle.
+A page, the bytes, a machine-readable record, an RO-Crate and a README naming the
+digest, needing no server. ``strata artifact archive`` and
+``GET /p/{token}/archive.zip`` share this one implementation so they cannot drift.
 """
 
 from __future__ import annotations
@@ -46,17 +39,12 @@ def write_bundle(
 ) -> list[str]:
     """Write the bundle into *dest*, and return its filenames in reading order.
 
-    *dest* must already exist and is not emptied: whether writing into an
-    occupied directory is a mistake is the caller's question, and the CLI and
-    the route answer it differently — one is a person naming a path, the other
-    a temporary directory nobody else can see.
+    *dest* must already exist and is not emptied; the caller decides whether an
+    occupied directory is a mistake.
 
     Raises:
-        ValueError: If the artifact is not readable or has no stored bytes. A
-            half-written blob has a digest like any other, so without this an
-            artifact still ``building`` archives cleanly and the bundle
-            presents truncated bytes as a deposit-ready record, with a
-            sha256sum line vouching for the fragment.
+        ValueError: If the artifact is not ready/superseded or has no stored bytes
+            (a still-``building`` blob would otherwise archive truncated bytes).
     """
     from strata.api.provenance_ld import build_crate
     from strata.api.publication_page import build_record, content_type_of, render_publication
@@ -165,9 +153,7 @@ def bundle_zip(
 ) -> bytes:
     """The bundle as one zip, byte for byte the same each time it is built.
 
-    ``GET /p/{token}/archive.zip`` and ``strata artifact archive --token`` both
-    call this, so a depositor who fetched one and built the other holds two
-    copies of one file. Members are in :func:`write_bundle`'s reading order.
+    Members are in :func:`write_bundle`'s reading order.
 
     Raises:
         ValueError: As :func:`write_bundle`.
@@ -192,14 +178,8 @@ def _write_parquet_companion(
 ) -> str | None:
     """Write ``artifact.parquet`` beside the Arrow bytes, for tabular artifacts.
 
-    Arrow IPC is a transport format. It has a stability promise, but a data
-    repository indexes Parquet and a reader in a decade will reach for it with
-    whatever tool they have. The Arrow file stays: it is the archived bytes and
-    the digest in the manifest covers it. This is a second, more portable
-    rendering of the same rows.
-
-    Returns the filename, or ``None`` when the artifact is not tabular — an
-    image or a pickle has no rows to write and gets no companion.
+    Repositories index Parquet; the Arrow file stays as the archived, digested
+    bytes. Returns the filename, or ``None`` when the artifact is not tabular.
     """
     from strata.notebook.serializer import write_table_export
 
@@ -217,15 +197,9 @@ def _write_parquet_companion(
 
 
 def _name_bundle_files(dest: Path, filename: str, parquet_name: str | None) -> None:
-    """Say which file each digest covers.
+    """Name the payload file in ``manifest.json`` and give any companion its own digest.
 
-    ``content_sha256`` was unambiguous while a bundle held one payload: there
-    was only one thing it could describe. A second file makes it a claim about
-    an unnamed file, and a digest that does not say what it covers is worse
-    than none in a bundle meant to be read long after anyone is left to ask.
-
-    So the record names its payload, and any companion carries its own digest
-    beside it.
+    With more than one file, a digest that does not say what it covers is ambiguous.
     """
     manifest_path = dest / "manifest.json"
     record = json.loads(manifest_path.read_text(encoding="utf-8"))

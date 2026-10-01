@@ -1,21 +1,7 @@
-"""Build QoS (Quality of Service) admission control.
+"""Build admission control: per-tenant and global slots by tier, plus a daily byte quota.
 
-Provides quotas and backpressure for the build system:
-- Per-tenant build slots (concurrency limits)
-- Global build slots (overall system limit)
-- Per-tenant bytes/day quota (optional)
-- Priority queues: interactive vs bulk builds
-- Early rejection with clear 429/403 errors
-
-Unlike the build runner's semaphores (which control execution), this module
-controls admission at the API layer - rejecting builds before they're created
-if the system is at capacity.
-
-Design principles:
-- Fail fast with 429 rather than letting the queue explode
-- Return Retry-After headers for client backoff
-- Track queue wait time for observability
-- Support dynamic slot resizing (Netflix-style adaptive control)
+Unlike the build runner's semaphores, which bound execution, this rejects a build
+at the API layer with a 429 and a retry hint before it is created.
 """
 
 from __future__ import annotations
@@ -37,11 +23,7 @@ logger = logging.getLogger(__name__)
 
 
 class BuildPriority(Enum):
-    """Build priority classification.
-
-    Interactive builds (dashboards, ad-hoc queries) get priority.
-    Bulk builds (ETL, batch jobs) go to a separate queue.
-    """
+    """Build tier: interactive and bulk builds draw from separate slot pools."""
 
     INTERACTIVE = "interactive"
     BULK = "bulk"
@@ -57,7 +39,7 @@ class BuildQoSError(Exception):
         super().__init__(message)
 
     def to_dict(self) -> dict:
-        """Convert error to dictionary representation."""
+        """Return the JSON error body."""
         return {
             "error": "build_qos_error",
             "message": self.message,
@@ -162,20 +144,7 @@ class TenantQuotaExceededError(BuildQoSError):
 
 @dataclass
 class BuildQoSConfig:
-    """Configuration for build QoS.
-
-    Attributes:
-        interactive_slots: Max concurrent interactive builds (globally)
-        bulk_slots: Max concurrent bulk builds (globally)
-        per_tenant_interactive: Max concurrent interactive builds per tenant
-        per_tenant_bulk: Max concurrent bulk builds per tenant
-        interactive_queue_timeout: Max queue wait for interactive (seconds)
-        bulk_queue_timeout: Max queue wait for bulk (seconds)
-        per_tenant_timeout: Max wait for per-tenant slot (seconds)
-        bytes_per_day_limit: Per-tenant daily byte limit (None = unlimited)
-        classify_by_estimated_bytes: Threshold for bulk classification
-        classify_by_input_count: Threshold for bulk classification
-    """
+    """Configuration for build QoS; slot counts are concurrent builds, timeouts are seconds."""
 
     interactive_slots: int = 16
     bulk_slots: int = 8
@@ -191,11 +160,7 @@ class BuildQoSConfig:
 
 @dataclass
 class TenantQuota:
-    """Per-tenant daily quota tracking.
-
-    Tracks bytes produced by builds for quota enforcement.
-    Resets daily at midnight UTC.
-    """
+    """Bytes a tenant's builds produced today; resets at midnight UTC."""
 
     tenant_id: str
     bytes_today: int = 0
@@ -228,21 +193,11 @@ class TenantLimiters:
 
 
 class BuildQoS:
-    """Build QoS admission controller.
+    """Build admission controller.
 
-    Provides fair scheduling, backpressure, and quota enforcement.
-    Use `acquire()` before starting a build and `release()` when done.
-
-    Example:
-        qos = BuildQoS(config)
-        await qos.start()
-
-        try:
-            async with qos.acquire(tenant_id="acme", priority=BuildPriority.INTERACTIVE):
-                # Build runs here
-                ...
-        except BuildQoSError as e:
-            return JSONResponse(status_code=e.status_code, content=e.to_dict())
+    ``await acquire(...)`` returns a :class:`BuildSlot` to release when the build
+    ends (or use as ``async with``); map a :class:`BuildQoSError` to its
+    ``status_code`` and ``to_dict()``.
     """
 
     def __init__(self, config: BuildQoSConfig):
@@ -284,19 +239,8 @@ class BuildQoS:
     ) -> BuildPriority:
         """Classify a build as interactive or bulk.
 
-        Classification criteria (in order):
-        1. Explicit priority (if specified)
-        2. Large output estimate (> threshold bytes)
-        3. Many inputs (> threshold count)
-        4. Default to interactive
-
-        Args:
-            estimated_output_bytes: Estimated output size (from transform def)
-            input_count: Number of input artifacts/tables
-            explicit_priority: Client-specified priority (takes precedence)
-
-        Returns:
-            BuildPriority (INTERACTIVE or BULK)
+        An explicit priority wins; otherwise an output estimate or input count over
+        its threshold means bulk, else interactive.
         """
         if explicit_priority is not None:
             return explicit_priority
@@ -312,14 +256,10 @@ class BuildQoS:
         return BuildPriority.INTERACTIVE
 
     async def check_quota(self, tenant_id: str, estimated_bytes: int) -> None:
-        """Check if tenant has quota remaining.
-
-        Args:
-            tenant_id: Tenant identifier
-            estimated_bytes: Estimated output bytes for this build
+        """Check that ``estimated_bytes`` fits in the tenant's remaining daily quota.
 
         Raises:
-            TenantQuotaExceededError: If adding this build would exceed quota
+            TenantQuotaExceededError: If it would exceed the quota.
         """
         if self.config.bytes_per_day_limit is None:
             return
@@ -340,10 +280,7 @@ class BuildQoS:
             )
 
     async def record_bytes(self, tenant_id: str, bytes_produced: int) -> None:
-        """Record bytes produced by a build (for quota tracking).
-
-        Call this after a build completes with the actual output size.
-        """
+        """Charge a completed build's actual output bytes to the tenant's quota."""
         if self.config.bytes_per_day_limit is None:
             return
 
@@ -357,23 +294,13 @@ class BuildQoS:
         tenant_id: str,
         priority: BuildPriority,
     ) -> BuildSlot:
-        """Acquire a build slot.
+        """Acquire the tenant's tier slot, then queue for a global tier slot.
 
-        This is the main admission control entry point. It:
-        1. Checks per-tenant concurrency limit
-        2. Queues for global tier slot (interactive or bulk)
-        3. Fails fast with 429 if capacity is exhausted
-
-        Args:
-            tenant_id: Tenant identifier
-            priority: Build priority (interactive or bulk)
-
-        Returns:
-            BuildSlot context manager
+        The tenant slot is released on any failure, including cancellation.
 
         Raises:
-            TenantAtCapacityError: Tenant has too many concurrent builds
-            GlobalCapacityError: System is at capacity
+            TenantAtCapacityError: No tenant slot within ``per_tenant_timeout``.
+            GlobalCapacityError: No global slot within the tier's queue timeout.
         """
         limiters = await self._get_tenant_limiters(tenant_id)
 
@@ -492,7 +419,7 @@ class BuildQoS:
             }
 
     def get_tenant_metrics(self, tenant_id: str) -> dict | None:
-        """Get metrics for a specific tenant."""
+        """Get one tenant's slot and quota metrics, or None if the tenant is untracked."""
         if tenant_id not in self._tenant_limiters:
             return None
 
@@ -518,10 +445,7 @@ class BuildQoS:
 
 
 class BuildSlot:
-    """Context manager for a build slot.
-
-    Ensures proper release of both tenant and global slots.
-    """
+    """A held build slot; ``release()`` (or ``async with`` exit) frees both limiters once."""
 
     def __init__(
         self,
@@ -581,7 +505,7 @@ def normalized_build_qos_tenant_id(tenant_id: str | None) -> str:
 
 
 async def record_build_output_bytes(tenant_id: str | None, bytes_produced: int) -> None:
-    """Best-effort quota accounting for completed builds."""
+    """Charge a completed build's bytes to its tenant; no-op without a QoS singleton."""
     build_qos = get_build_qos()
     if build_qos is None:
         return

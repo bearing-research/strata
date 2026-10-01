@@ -1,7 +1,5 @@
-"""Service layer: orchestration/policy logic extracted from HTTP handlers.
+"""Service layer: orchestration and policy logic extracted from HTTP handlers.
 
-Services are stateless and receive already-resolved dependencies (artifact
-store, tenant filter, principal) per call from the route. They contain no
-FastAPI/HTTP coupling, so they are unit-testable without a TestClient. See
-``docs/internal/design-server-decomposition.md`` (phase 2).
+Services are stateless, take already-resolved dependencies (store, tenant filter,
+principal) per call, and have no FastAPI coupling, so they test without a TestClient.
 """

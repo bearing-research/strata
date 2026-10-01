@@ -1,10 +1,4 @@
-"""Transform registry and execution.
-
-This module provides:
-- Transform base class for defining transforms
-- Built-in transforms (scan@v1, duckdb_sql@v1)
-- Server-mode transform registry and build runner
-"""
+"""Transforms: base class, built-ins (scan@v1, duckdb_sql@v1), registry and build runner."""
 
 from strata.transforms.base import (
     Transform,

@@ -1,8 +1,4 @@
-"""Cache statistics with time-windowed histograms.
-
-Tracks cache hit/miss rates over configurable time windows,
-providing insight into cache effectiveness over time.
-"""
+"""Cache hit/miss statistics over rolling time windows."""
 
 import time
 from dataclasses import dataclass
@@ -57,10 +53,8 @@ class CacheSummaryDict(TypedDict):
 class WindowStats:
     """Statistics for a single time window.
 
-    ``covered_seconds`` is how much of ``window_seconds`` the counters
-    actually span. It equals ``window_seconds`` for every configured window;
-    it is smaller only when a caller asks ``get_window_stats`` for a window
-    deeper than the retained history.
+    ``covered_seconds`` is how much of ``window_seconds`` the counters span; it is smaller only
+    when ``get_window_stats`` is asked for a window deeper than the retained history.
     """
 
     window_seconds: int
@@ -101,32 +95,18 @@ class WindowStats:
 
 
 class CacheStatsHistogram:
-    """Tracks cache statistics over multiple time windows.
+    """Cache hit/miss statistics over rolling time windows (default 1m, 5m, 1h).
 
-    Maintains rolling statistics for configurable time windows
-    (e.g., 1 minute, 5 minutes, 1 hour) to show cache hit rate trends.
-
-    Counts are aggregated into one bucket per second, and a window sums the
-    buckets it spans. The previous implementation retained the last 10,000
-    individual events and answered every window by scanning whatever was still
-    in that buffer. One event is recorded per *row group* rather than per
-    request (``cache.py``), so the buffer drains in a handful of scans: at a
-    steady 33 row groups/sec the "1 hour" window reported 8% of the hour's
-    accesses, and the 5-minute and 1-hour windows returned byte-identical
-    numbers because both were simply "everything still buffered". The bucket
-    ring makes each window exact and its memory a function of the largest
-    window rather than of traffic.
+    Counts go into one bucket per second and a window sums its buckets, so every window is
+    exact and memory depends on the largest window, not on traffic. One access is recorded
+    per row group, not per request.
     """
 
     def __init__(
         self,
         windows: list[int] | None = None,
     ) -> None:
-        """Initialize the histogram.
-
-        Args:
-            windows: List of window sizes in seconds. Default: [60, 300, 3600]
-        """
+        """Create the histogram; ``windows`` are in seconds (default 60, 300, 3600)."""
         self.windows = windows or [60, 300, 3600]  # 1m, 5m, 1h
         self._lock = Lock()
 
@@ -198,10 +178,10 @@ class CacheStatsHistogram:
         self._record(is_hit=False, bytes_accessed=bytes_accessed, table_id=table_id)
 
     def get_window_stats(self, window_seconds: int) -> WindowStats:
-        """Get statistics for a specific time window.
+        """Get statistics for one time window.
 
-        A window deeper than the retained history is answered with what is
-        retained, and ``covered_seconds`` says how much that was.
+        A window deeper than the retained history is answered with what is retained;
+        ``covered_seconds`` says how much that was.
         """
         now_second = int(time.time())
         covered = min(window_seconds, self._depth)

@@ -1,27 +1,9 @@
-"""Move an existing SQLite artifact store onto Postgres.
+"""Copy an existing SQLite artifact store's metadata onto Postgres.
 
-Setting ``artifact_metadata_dsn`` starts an *empty* store: the schema is
-created on first connection and nothing is carried over. That is fine for a
-new deployment and useless for one that already has artifacts, so this copies
-the metadata across.
-
-Scope, stated up front:
-
-- **Metadata only.** Blobs live in the blob store, which is configured
-  separately, and a deployment moving to a shared database needs a shared blob
-  backend anyway (service mode refuses the combination). Copying bytes is a
-  different job with different failure modes -- see :func:`plan_migration`,
-  which reports what the blobs are so the operator can act on it.
-- **Ephemeral tables are skipped.** ``stream_owners`` records which node is
-  serving a live stream right now; carrying those rows to a new database would
-  advertise nodes for streams that no longer exist.
-
-The copy is ordered, idempotent, and refuses to guess. Ordered because
-``artifact_builds`` and ``artifact_names`` carry foreign keys into
-``artifact_versions``, which Postgres enforces and SQLite never did.
-Idempotent because a migration that dies halfway must be safe to re-run.
-Refuses to guess because silently merging into a populated target is how two
-deployments become one corrupted one.
+Metadata only: blobs stay in the separately configured blob store, and ephemeral
+tables (live stream owners, import staging) are skipped. The copy runs in
+foreign-key order, is idempotent so an interrupted run can be repeated, and
+refuses a populated target by default.
 """
 
 from __future__ import annotations
@@ -84,17 +66,10 @@ class MigrationPlan:
 
     @property
     def blocking_tables(self) -> list[str]:
-        """Missing target tables that actually have rows waiting for them.
+        """Missing target tables that the source has rows for.
 
-        Not every table in ``MIGRATED_TABLES`` exists in every deployment:
-        ``api_keys`` is created only under ``auth_mode='api_key'``, and
-        ``artifact_builds`` and ``build_attempts`` only when the build store is
-        constructed. A target booted the documented way legitimately lacks
-        them, and refusing on that made the documented flow exit non-zero every
-        time.
-
-        A table missing from the target only matters when the source has rows
-        that need somewhere to go.
+        Some tables (``api_keys``, the build tables) exist only when their feature
+        is on, so a missing table matters only when there are rows to put in it.
         """
         return [table for table in self.missing_in_target if self.source_counts.get(table, 0) > 0]
 
@@ -134,11 +109,7 @@ def _count(conn: StoreConnection, table: str) -> int:
 
 
 def plan_migration(source: SqlDialect, target: SqlDialect) -> MigrationPlan:
-    """Inspect both stores without writing anything.
-
-    Run before migrating so the operator sees the size of the job and whether
-    the target is already populated.
-    """
+    """Count rows in both stores, and note missing target tables, without writing."""
     plan = MigrationPlan()
 
     src_conn = source.connect()
@@ -175,21 +146,19 @@ def migrate(
 ) -> MigrationResult:
     """Copy metadata from ``source`` into ``target``.
 
+    Rows whose primary key is already in the target are skipped, never
+    overwritten, so an interrupted run can be repeated without clobbering newer work.
+
     Parameters
     ----------
     allow_nonempty_target
-        Permit writing into a target that already holds rows. Off by default:
-        merging two stores silently is how a mistake becomes unrecoverable,
-        and re-running an interrupted migration is the only legitimate reason
-        to want it -- which is why the copy is idempotent.
+        Permit a target that already holds rows; meant for resuming a run.
 
-    Notes
-    -----
-    Rows already present in the target are skipped rather than overwritten, so
-    a migration interrupted halfway can simply be run again. Skipping (rather
-    than upserting) is the safer default: if a row exists in both stores with
-    different contents, the target has been written to since the migration
-    began, and clobbering it would discard newer work.
+    Raises
+    ------
+    ValueError
+        If the target lacks a table the source has rows for, or is populated and
+        ``allow_nonempty_target`` is False.
     """
     plan = plan_migration(source, target)
 
@@ -258,21 +227,10 @@ def _copy_table(
     target: SqlDialect,
     result: MigrationResult,
 ) -> tuple[int, int]:
-    """Copy one table, skipping rows the target already has.
+    """Copy one table in batches, skipping keys the target already has.
 
-    Streams the source with ``fetchmany`` rather than reading it whole: a
-    multi-million-row ``artifact_versions`` would otherwise be materialized
-    entirely in memory before a single row moved.
-
-    The target's existing keys are read once into a set instead of being
-    probed per row. The probe version cost a network round trip for every row
-    on top of its insert, which on a fresh target is one wasted query per row
-    of the whole store. On a fresh target that set is empty and is not read at
-    all; on a resumed run it holds one tuple per already-copied row, which is
-    the honest cost of making the copy idempotent without a per-row probe.
-
-    Returns ``(copied, skipped)``; rows the target refuses are recorded on
-    ``result.rejected`` and do not abort the run.
+    Existing keys are read once into a set rather than probed per row. Returns
+    ``(copied, skipped)``; refused rows go to ``result.rejected`` without aborting.
     """
     # Only on a resume: a fresh target has nothing to skip against, and
     # reading an empty table's keys is a query for a set we know is empty.

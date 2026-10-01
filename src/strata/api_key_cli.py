@@ -1,8 +1,6 @@
-"""``strata apikey`` — mint, list, and revoke API keys.
+"""``strata apikey``: mint, list, and revoke API keys.
 
-Ships alongside the key store rather than after it, because a credential
-system with no way to issue a credential is not usable, only present. The
-commands talk to the store directly and need no running server, which is what
+Talks to the key store directly and needs no running server, which is what
 makes bootstrapping the first key possible.
 """
 
@@ -21,12 +19,10 @@ _SECONDS_PER_DAY = 86400.0
 
 
 def _open_store(args: argparse.Namespace) -> ApiKeyStore:
-    """Open the key store the same way the server would.
+    """Open the key store with the server's DSN precedence.
 
-    The DSN precedence matches ``StrataConfig``: an explicit ``--dsn`` first,
-    then the environment, then SQLite under the artifact directory. An operator
-    who has moved the metadata to Postgres must not have the CLI quietly mint
-    keys into a local file the server never reads.
+    ``--dsn``, then the environment, then SQLite under the artifact directory (as
+    ``StrataConfig`` does), so the CLI never mints keys into a file the server ignores.
     """
     artifact_dir = Path(args.artifact_dir or Path.home() / ".strata" / "artifacts")
     artifact_dir.mkdir(parents=True, exist_ok=True)

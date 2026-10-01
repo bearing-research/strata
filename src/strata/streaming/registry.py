@@ -1,17 +1,7 @@
-"""Stream registry — the live stream/cleanup tables for unified materialize.
+"""Stream registry: the live ``stream_id -> StreamState`` table and per-stream TTL cleanup.
 
-Owns the ``stream_id -> StreamState`` table and the per-stream TTL cleanup tasks
-that ``server.py`` used to hold as ``_streams`` / ``_stream_cleanup_tasks`` and
-mutate through the free ``_schedule_stream_cleanup`` / ``_cancel_stream_cleanup``
-helpers. Held on ``ServerState`` as ``state.streams`` and shared by the
-materialize/streams handlers and the builds router (its identity build-status
-fast-path reads the registry).
-
-Phase 1 of the stream-runtime extraction (#302). The scan table (``scans``) and
-the prefetch counters stay on ``ServerState`` for now; the scan-side cleanup
-(prefetch discard + scan pop) is injected as the ``on_expire`` callback so this
-module stays unaware of prefetch. See
-``docs/internal/design-stream-runtime-extraction.md``.
+Held on ``ServerState`` as ``state.streams``. Scan-side cleanup (prefetch discard, scan
+pop) is injected as the ``on_expire`` callback so this module stays unaware of prefetch.
 """
 
 from __future__ import annotations
@@ -28,11 +18,7 @@ if TYPE_CHECKING:
 
 @dataclass
 class StreamState:
-    """State for a streaming materialize operation.
-
-    Tracks the read plan, streaming progress, and artifact metadata
-    for a unified materialize request in stream mode.
-    """
+    """State of a stream-mode materialize: read plan, streaming progress and artifact metadata."""
 
     stream_id: str
     plan: ReadPlan
@@ -57,10 +43,8 @@ class StreamState:
 class StreamRegistry:
     """The live ``stream_id -> StreamState`` table plus TTL cleanup scheduling.
 
-    ``on_expire`` runs the scan-side cleanup (prefetch discard + scan-table pop)
-    for a stream whose TTL elapsed; it is injected by ``ServerState`` so the
-    registry stays unaware of the prefetch/scan state those concerns own until a
-    later extraction phase folds them in too.
+    ``on_expire``, injected by ``ServerState``, runs the scan-side cleanup for a stream whose
+    TTL elapsed.
     """
 
     def __init__(
@@ -110,12 +94,9 @@ class StreamRegistry:
     def schedule_cleanup(self, stream_id: str, scan_id: str | None = None) -> None:
         """Remove completed or abandoned stream state after the configured TTL.
 
-        Always pass ``scan_id`` when one exists. This first cancels any pending
-        cleanup for the stream, so a call that omits it *replaces* a
-        scan-aware cleanup with one that only pops ``_streams`` — and
-        ``expire_scan`` (the only caller of ``pop_scan`` / ``discard_prefetch``)
-        runs from ``on_expire``, which fires only when ``scan_id`` is not None.
-        The ReadPlan then leaks for the life of the process.
+        Always pass ``scan_id`` when one exists: this replaces any pending cleanup, and
+        ``on_expire`` (the only path that frees the scan and its prefetch) fires only with a
+        ``scan_id``, so omitting it leaks the ReadPlan for the life of the process.
         """
         if scan_id is None and stream_id in self._streams:
             existing = self._streams[stream_id]

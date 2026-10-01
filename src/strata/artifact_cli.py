@@ -1,16 +1,6 @@
 """Implementation of the ``strata artifact`` CLI subcommands.
 
-Direct-store maintenance and inspection — no server required. The data
-model already answers "what artifacts exist", "where did this come from",
-and "which snapshot trained this model"; these commands render it.
-
-Commands:
-    list     Artifacts in the store (id, version, state, rows, size, names)
-    show     One artifact's metadata, names, and direct inputs
-    lineage  Walk provenance upstream to tables/snapshots
-    pull     Write an artifact's blob to a local file
-    verify   Check every blob against its metadata (see #123)
-    gc       Collect versions nothing needs, least recently used first
+These work directly on the artifact store; no server is required.
 """
 
 from __future__ import annotations
@@ -38,16 +28,10 @@ from strata.artifact_transfer import (
 def _open_store(artifact_dir_arg: str | None) -> ArtifactStore | None:
     """Open the store a command reads.
 
-    ``--artifact-dir`` names one local store, the SQLite file and blobs in that
-    directory, and nothing else is consulted: a DSN or object-store backend in
-    the environment belongs to some other store, and pairing it with this
-    directory would read one store's rows against another's bytes.
-
-    Without it, the store is the one the server is configured with, from the
-    same settings (``[tool.strata]`` in pyproject.toml, then ``STRATA_*``):
-    its ``artifact_dir``, metadata DSN and blob backend. Opening only a SQLite
-    file there meant that, with a service store's settings, every command
-    looked at an empty store beside the real one.
+    ``--artifact-dir`` names one local store (SQLite file plus blobs) and nothing else is
+    consulted: a DSN or blob backend from the environment would pair this store's rows with
+    another store's bytes. Without it, open the store the server is configured with
+    (``[tool.strata]``, then ``STRATA_*``): its ``artifact_dir``, metadata DSN and blob backend.
     """
     if artifact_dir_arg:
         artifact_dir = Path(artifact_dir_arg)
@@ -75,7 +59,7 @@ def _open_store(artifact_dir_arg: str | None) -> ArtifactStore | None:
 
 
 class AmbiguousRefError(ValueError):
-    """A name/alias resolves in more than one tenant — ``--tenant`` is required."""
+    """A name/alias resolves in more than one tenant; ``--tenant`` is required."""
 
 
 def _tenant_matches(stored: str | None, requested: str) -> bool:
@@ -85,8 +69,8 @@ def _tenant_matches(stored: str | None, requested: str) -> bool:
 def _single_hit(ref: str, hits: list[Any]) -> Any | None:
     """Collapse name/alias hits to the single match, or ``None`` if none.
 
-    Raises ``AmbiguousRefError`` when the hits span more than one tenant — there
-    is at most one pointer per (tenant, name), so >1 hit means >1 tenant.
+    Raises ``AmbiguousRefError`` when hits span tenants (at most one pointer per tenant and
+    name, so more than one hit means more than one tenant).
     """
     if not hits:
         return None
@@ -104,15 +88,12 @@ def _resolve_ref(
 ) -> ArtifactVersion | None:
     """Resolve a CLI artifact reference.
 
-    Accepted forms, tried in order: ``<id>@v=<N>``, a name pointer, ``name@alias``,
-    and a bare artifact id (latest version). Name/alias lookups span tenants (a
-    store inspector must find names whatever tenant wrote them, legacy "_default"
-    included); pass ``tenant`` to scope to one.
+    Forms, tried in order: ``<id>@v=<N>``, a name pointer, ``name@alias``, and a bare artifact
+    id (latest version). Name/alias lookups span all tenants unless ``tenant`` is given.
 
     Raises:
-        AmbiguousRefError: a name/alias matches in more than one tenant and no
-            ``tenant`` was given — so the CLI can't silently inspect/pull the
-            wrong tenant's artifact.
+        AmbiguousRefError: a name/alias matches in several tenants and no ``tenant`` was
+            given, so the CLI never silently picks the wrong tenant's artifact.
     """
     # id@v=N is tenant-independent.
     if "@v=" in ref:
@@ -151,8 +132,10 @@ def _resolve_ref(
 
 
 def _resolve_for_cmd(store: ArtifactStore, args: argparse.Namespace) -> ArtifactVersion | None:
-    """Resolve ``args.ref`` honoring an optional ``--tenant``; print a message and
-    return ``None`` on not-found or cross-tenant ambiguity."""
+    """Resolve ``args.ref`` honoring ``--tenant``.
+
+    Prints a message and returns ``None`` on not-found or cross-tenant ambiguity.
+    """
     try:
         artifact = _resolve_ref(store, args.ref, tenant=getattr(args, "tenant", None))
     except AmbiguousRefError as e:
@@ -389,16 +372,9 @@ def _publication_target(
 ) -> tuple[PublicationTarget, str]:
     """Where the grant is minted, and how to describe that to the caller.
 
-    ``--artifact-dir`` says where to *read* from, consistently with every other
-    subcommand. Where a publication is *written* is a separate question,
-    because a link only resolves from the store the server serves — and that is
-    usually not the notebook's own.
-
-    It used to be implicit: resolved from configuration and never named, so
-    ``publish --artifact-dir X`` wrote somewhere the command line did not
-    mention. That is how a test run put fixtures in a developer's real
-    ``~/.strata/artifacts``. It is a named argument now, and the caller is told
-    the destination whether or not it differs from the source.
+    ``--artifact-dir`` says where to read from; a publication is written to the store the
+    server serves, since only there does the link resolve. The destination is always named
+    to the caller, whether or not it differs from the source.
     """
     to_url = getattr(args, "to_url", None)
     if to_url:
@@ -424,8 +400,7 @@ def _publication_target(
 def _remote_headers(args: argparse.Namespace) -> dict[str, str]:
     """Auth for the remote store, from ``--header`` or the environment.
 
-    Env by default so a token is not in shell history or a process list;
-    ``--header`` for anything else the deployment's proxy wants.
+    Env by default so a token stays out of shell history and process lists.
     """
     headers: dict[str, str] = {}
     token = os.environ.get("STRATA_STORE_TOKEN", "").strip()
@@ -440,7 +415,7 @@ def _remote_headers(args: argparse.Namespace) -> dict[str, str]:
 
 
 def _parse_tags(raw_tags: list[str] | None) -> dict[str, str]:
-    """``key=value`` strings into a dict, saying which ones were not."""
+    """Parse ``key=value`` strings into a dict, printing a warning for each malformed one."""
     tags: dict[str, str] = {}
     for raw in raw_tags or []:
         key, _, value = str(raw).partition("=")
@@ -454,8 +429,8 @@ def _parse_tags(raw_tags: list[str] | None) -> dict[str, str]:
 def cmd_promote(args: argparse.Namespace) -> int:
     """``strata artifact promote``: share a result with the team, on purpose.
 
-    The walk and the registry writes are :func:`promote_artifact`; this is the
-    argparse end of it — resolve the ref, render the outcome, pick an exit code.
+    The walk and registry writes live in :func:`promote_artifact`; this resolves the ref,
+    renders the outcome and picks an exit code.
     """
     store = _open_store(args.artifact_dir)
     if store is None:
@@ -631,13 +606,9 @@ def cmd_publish(args: argparse.Namespace) -> int:
 def _published_steps(store: ArtifactStore, artifact: ArtifactVersion, max_depth: int) -> list[str]:
     """One line per step whose code and environment the page will expose.
 
-    Deduplicated, and normalized to ``id@v=N``. ``_walk_lineage`` renders a
-    *tree*, so a step two cells depend on appears twice — once expanded, and
-    once as a bare ``strata://artifact/...`` leaf where the recursion stops on
-    an already-seen node. Printed raw, a diamond made the disclosure list the
-    same step under two different names and overstate how much was being
-    exposed. This is the text someone reads to decide whether to send a link,
-    so it has to be the actual set.
+    Deduplicated and normalized to ``id@v=N``: ``_walk_lineage`` renders a tree, so a step
+    shared by two cells appears twice. Someone reads this list to decide whether to send a
+    link, so it must be the actual set.
     """
     tree = _walk_lineage(store, artifact, max_depth=max_depth)
     steps: list[str] = []
@@ -679,14 +650,8 @@ def cmd_unpublish(args: argparse.Namespace) -> int:
 def cmd_archive(args: argparse.Namespace) -> int:
     """Write a self-contained bundle: page, bytes, manifest, README.
 
-    A hosted link resolves for as long as the server does, and a URL printed in
-    a paper outlives most servers. This is the copy that does not need one —
-    suitable for a Zenodo or OSF deposit, where it gets a DOI and an archive's
-    retention promise rather than yours.
-
-    The bundle itself is :func:`write_bundle`, shared with the HTTP route so a
-    service with only network access to the store gets the same files. What is
-    here is the parts a command line has and a route does not: which store to
+    The copy that outlives the server, suitable for a Zenodo or OSF deposit. The bundle is
+    :func:`write_bundle` (shared with the HTTP route); this adds the CLI parts: which store to
     open, and whether writing into an occupied directory is a mistake.
     """
     from strata.api.publication_bundle import bundle_zip, write_bundle
@@ -849,7 +814,7 @@ _SIZE_UNITS = {"": 1, "K": 1024, "M": 1024**2, "G": 1024**3, "T": 1024**4}
 
 
 def _parse_size(text: str) -> int:
-    """``20G``, ``500M`` or a plain byte count, as bytes.
+    """Parse ``20G``, ``500M`` or a plain byte count into bytes.
 
     Raises:
         ValueError: *text* is not a size.

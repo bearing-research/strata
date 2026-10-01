@@ -34,16 +34,10 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True)
 class Principal:
-    """Authenticated identity from trusted proxy.
+    """Authenticated caller identity, from trusted-proxy headers or an API key.
 
-    Represents the user or service making a request, as identified by
-    a trusted upstream proxy. Strata does not perform authentication
-    itself - it trusts identity headers injected by the proxy.
-
-    Attributes:
-        id: Stable user/service identifier (from X-Strata-Principal header)
-        tenant: Optional team/org identifier (from X-Strata-Tenant header)
-        scopes: Set of permission scopes (from X-Strata-Scopes header)
+    Under trusted-proxy auth Strata does not authenticate; it trusts
+    ``X-Strata-Principal``, the configured tenant header and ``X-Strata-Scopes``.
     """
 
     id: str
@@ -51,16 +45,7 @@ class Principal:
     scopes: frozenset[str] = field(default_factory=frozenset)
 
     def has_scope(self, scope: str) -> bool:
-        """Check if principal has a specific scope.
-
-        The special scope 'admin:*' grants all permissions.
-
-        Args:
-            scope: The scope to check (e.g., 'scan:create', 'admin:cache')
-
-        Returns:
-            True if the principal has the scope or admin:* wildcard
-        """
+        """Return True if the principal holds ``scope``; ``admin:*`` grants every scope."""
         if "admin:*" in self.scopes:
             return True
         return scope in self.scopes
@@ -68,19 +53,10 @@ class Principal:
 
 @dataclass(frozen=True)
 class TableRef:
-    """Canonical table reference for ACL matching.
+    """Canonical table reference for ACL matching, rendered ``{catalog}:{namespace}.{table}``.
 
-    Provides a normalized representation of a table for access control
-    pattern matching. Format: {catalog}:{namespace}.{table}
-
-    Examples:
-        - file:integration.events
-        - s3:analytics.clicks
-
-    Attributes:
-        catalog: Storage type ('file' or 's3')
-        namespace: Database/schema namespace
-        table: Table name
+    ``catalog`` is a configured catalog's name, or the warehouse store (``file``,
+    ``s3``, ``gs``, ``az``), e.g. ``s3:analytics.clicks``.
     """
 
     catalog: str  # "file" or "s3"
@@ -94,15 +70,11 @@ class TableRef:
         table_uri: str | None = None,
         named_catalog_name: str | None = None,
     ) -> "TableRef":
-        """Convert TableIdentity to canonical TableRef.
+        """Build the ACL reference for a planner identity.
 
-        Args:
-            identity: TableIdentity from the planner
-            table_uri: Original table URI (used to determine catalog type)
-            named_catalog_name: The configured catalog holding the table, if any
-
-        Returns:
-            TableRef with normalized catalog, namespace, and table
+        A configured catalog is named by ``named_catalog_name``; otherwise the
+        store comes from ``table_uri``'s scheme, so a local rule cannot grant a
+        same-named bucket table.
         """
         # A configured catalog is named as ACL rules name it ("lake:taxi.*"); a warehouse
         # URI by its store, so a rule for a local table cannot grant a same-named bucket table.
@@ -142,17 +114,9 @@ ACL_STORE_NAMES = ("file", *dict.fromkeys(store for _, store in _ACL_STORES))
 
 @dataclass(frozen=True)
 class TableIdentity:
-    """Canonical table identity for deterministic cache keys and metrics.
+    """Canonical ``<catalog>.<namespace>.<table>`` identity for cache keys and metrics.
 
-    Production systems hate ambiguity. This class provides a single,
-    canonical way to identify a table regardless of how the user
-    specified it (via URI, catalog reference, etc.).
-
-    Format: <catalog>.<namespace>.<table>
-
-    Examples:
-        - strata.test_db.events
-        - default.analytics.page_views
+    The same table yields the same identity however the URI was spelled.
     """
 
     catalog: str
@@ -165,15 +129,7 @@ class TableIdentity:
 
     @classmethod
     def from_table_id(cls, table_id: str, catalog: str = "strata") -> "TableIdentity":
-        """Create from a table_id like 'namespace.table'.
-
-        Args:
-            table_id: Table identifier in format 'namespace.table'
-            catalog: Catalog name (default: 'strata')
-
-        Returns:
-            TableIdentity with canonical representation
-        """
+        """Create from a ``'namespace.table'`` id; raises ValueError on any other shape."""
         parts = table_id.split(".")
         if len(parts) != 2:
             raise ValueError(f"Invalid table_id '{table_id}': expected 'namespace.table' format")
@@ -183,10 +139,8 @@ class TableIdentity:
 def _wrap_filter_value(value: FilterValue):
     """Wrap a ``FilterValue`` into a pyiceberg ``Literal``.
 
-    ``iceberg_literal`` is generic over a constrained TypeVar — a union
-    input doesn't typecheck because the constraint resolver can't pick
-    a single slot. Dispatching on isinstance narrows ``value`` to one
-    constraint at each call site.
+    The isinstance chain narrows the union per call, since ``iceberg_literal``'s
+    constrained TypeVar cannot accept a union.
     """
     from pyiceberg.expressions.literals import literal as iceberg_literal
 
@@ -212,16 +166,9 @@ def _wrap_filter_value(value: FilterValue):
 
 
 def filters_to_iceberg_expression(filters: list[Filter] | None):
-    """Convert Strata filters to a PyIceberg boolean expression.
+    """AND Strata filters into a PyIceberg expression, or None if none apply.
 
-    Only converts filters that PyIceberg can handle (flat columns, basic ops).
-    Uses AND semantics to combine multiple filters.
-
-    Args:
-        filters: List of Filter objects
-
-    Returns:
-        PyIceberg BooleanExpression, or None if no filters
+    Nested (dotted) columns are skipped, which only widens the scan.
     """
     if not filters:
         return None
@@ -272,19 +219,11 @@ def filters_to_iceberg_expression(filters: list[Filter] | None):
 
 
 class CacheGranularity(Enum):
-    """Cache granularity options.
+    """Whether the cache key includes the projection.
 
-    Controls what is included in the cache key:
-
-    - ROW_GROUP_PROJECTION (default): Cache key includes row_group_id + projection
-      Finest granularity. Different column selections get separate cache entries.
-      Best for: Workloads with consistent projections, memory-constrained systems.
-
-    - ROW_GROUP: Cache key includes row_group_id only (ignores projection)
-      Same row group = same cache entry regardless of columns requested.
-      The cache stores the full row group and projects on readback when needed.
-      Best for: Workloads that always request all columns, or when cache reuse
-      across different projections is more valuable than projection efficiency.
+    ``ROW_GROUP_PROJECTION`` (default) caches each column selection separately.
+    ``ROW_GROUP`` caches the full row group and projects on read, trading size
+    for reuse across projections.
     """
 
     ROW_GROUP_PROJECTION = "row_group_projection"
@@ -293,33 +232,11 @@ class CacheGranularity(Enum):
 
 @dataclass(frozen=True)
 class CacheKey:
-    """Immutable cache key for a row group.
+    """Immutable cache key for one row group.
 
-    v2 Cache Key Contract (multi-tenancy):
-    - Key format: {tenant_id}|{table_identity}|{snapshot_id}|{file_path}|
-      {row_group_id}[|{projection}]
-    - Hash: SHA-256 of the key string
-    - Storage: cache_dir/v{VERSION}/{tenant_prefix}/{hash[:2]}/{hash[2:4]}/{hash}.arrowstream
-    - Version is baked into path (see cache.CACHE_VERSION)
-
-    Tenant isolation:
-    - Each tenant's cache entries are stored under tenant-prefixed directories
-    - tenant_id is included in the hash to prevent cache key collisions
-    - Default tenant "_default" for backward compatibility
-
-    Uses TableIdentity (e.g., 'catalog.namespace.table') instead of the
-    user-supplied URI to ensure cache hits work regardless of URI format
-    variations like:
-    - file:///path#ns.table vs /path#ns.table
-    - Different hostnames pointing to same data
-
-    The canonical identity prevents subtle cache duplication bugs where
-    the same data is cached multiple times under different keys.
-
-    Cache granularity is controlled by whether projection_fingerprint
-    is included in the key hash:
-    - ROW_GROUP_PROJECTION: includes projection (default)
-    - ROW_GROUP: ignores projection (caches all columns)
+    SHA-256 over ``tenant|table_identity|snapshot|file|row_group[|projection]|schema=``;
+    the projection is included only under ``ROW_GROUP_PROJECTION``. Keyed by the
+    canonical ``TableIdentity``, not the URI, so URI spellings share entries.
     """
 
     tenant_id: str
@@ -334,17 +251,11 @@ class CacheKey:
 
     @property
     def table_id(self) -> str:
-        """Return canonical table identity string for compatibility."""
+        """Return the canonical table identity string."""
         return str(self.table_identity)
 
     def to_hex(self, granularity: CacheGranularity = CacheGranularity.ROW_GROUP_PROJECTION) -> str:
-        """Generate a hex digest for filesystem storage.
-
-        Args:
-            granularity: Controls what is included in the hash.
-                - ROW_GROUP_PROJECTION: includes projection fingerprint (default)
-                - ROW_GROUP: excludes projection, cache stores all columns
-        """
+        """Return the key's SHA-256 hex digest; ``granularity`` decides if projection counts."""
         if granularity == CacheGranularity.ROW_GROUP:
             key_str = (
                 f"{self.tenant_id}|{self.table_identity}|{self.snapshot_id}|"
@@ -360,12 +271,9 @@ class CacheKey:
 
     @staticmethod
     def compute_projection_fingerprint(columns: list[str] | None) -> str:
-        """Compute a fingerprint for the column projection.
+        """Fingerprint a column projection, order-sensitive; ``"*"`` for all columns.
 
-        Column order is preserved in the fingerprint because it matters for
-        consumers who expect columns in a specific order. The list is hashed
-        as JSON, not joined: a column name may contain a comma, and ``"a,b"``
-        must not share a fingerprint with ``["a", "b"]``.
+        Hashed as JSON, not joined, so ``["a,b"]`` and ``["a", "b"]`` differ.
         """
         if columns is None:
             return "*"
@@ -412,12 +320,7 @@ class Task:
 
 @dataclass
 class ReadPlan:
-    """A plan for reading data from an Iceberg snapshot.
-
-    Note: table_uri is kept for backwards compatibility and debugging,
-    but table_identity is the canonical identifier used for cache keys,
-    metrics, and logs.
-    """
+    """A plan for reading an Iceberg snapshot; caches key on ``table_identity``, not the URI."""
 
     table_uri: str  # Original user input (for debugging/display only)
     table_identity: TableIdentity  # Canonical identity for cache/metrics/logs
@@ -451,16 +354,10 @@ class ReadPlan:
 
 
 class ErrorResponse(BaseModel):
-    """Standard error response format.
+    """Standard error body.
 
-    v1 Error Codes:
-    - 400 Bad Request: Invalid table URI, malformed filters, too many row groups
-    - 404 Not Found: Scan ID not found
-    - 413 Payload Too Large: Response exceeds max_response_bytes
-    - 499 Client Closed Request: Client disconnected mid-scan (logged only)
-    - 500 Internal Server Error: Unexpected server error
-    - 503 Service Unavailable: Server draining or at capacity
-    - 504 Gateway Timeout: Planning or scan exceeded timeout
+    Statuses: 400 bad request, 404 unknown scan, 413 over ``max_response_bytes``,
+    499 client gone (logged only), 503 draining or at capacity, 504 timeout.
     """
 
     detail: str
@@ -468,14 +365,7 @@ class ErrorResponse(BaseModel):
 
 
 class WarmRequest(BaseModel):
-    """Request to warm the cache for specific tables.
-
-    Preloads row group data into the cache so subsequent queries are fast.
-    This is useful for:
-    - Warming cache after server restart
-    - Preloading data before a batch of dashboards query it
-    - Ensuring low latency for critical tables
-    """
+    """Request to preload tables' row groups into the cache."""
 
     tables: list[str]  # Table URIs to warm (e.g., "file:///warehouse#ns.table")
     columns: list[str] | None = None  # Columns to cache (None = all)
@@ -496,11 +386,7 @@ class WarmResponse(BaseModel):
 
 
 class WarmAsyncRequest(BaseModel):
-    """Request to start an async/background cache warming job.
-
-    Similar to WarmRequest but runs in the background and returns a job ID
-    for tracking progress.
-    """
+    """Request to warm the cache in a background job, tracked by job ID."""
 
     tables: list[str]
     columns: list[str] | None = None  # None = all
@@ -552,15 +438,7 @@ class WarmAsyncResponse(BaseModel):
 
 
 class TransformSpec(BaseModel):
-    """Transform specification for materialize requests.
-
-    Defines the executor and parameters for transforming inputs.
-    Built-in executors like scan@v1 are handled by Strata directly.
-
-    Attributes:
-        executor: Executor reference (e.g., "scan@v1", "duckdb_sql@v1")
-        params: Executor-specific parameters
-    """
+    """Executor reference (e.g. ``scan@v1``, ``duckdb_sql@v1``) and its parameters."""
 
     executor: str  # "scan@v1", "duckdb_sql@v1", etc.
     params: dict[str, object] = {}
@@ -569,19 +447,9 @@ class TransformSpec(BaseModel):
 class FilterSpec(BaseModel):
     """A pruning hint for a scan. It does NOT filter rows.
 
-    Strata is not a query engine. A filter skips whole data files (Iceberg
-    manifest stats) and whole row groups (Parquet min/max), which is what
-    makes a large scan cheap, but every row of a row group that survives
-    pruning is returned. The result is a **superset** of the matching rows;
-    callers apply the predicate themselves if they need only the matches.
-
-    Pruning is conservative by design: when safety cannot be proved the data
-    is read, so a filter never drops a row the caller asked for.
-
-    Attributes:
-        column: Column to prune on
-        op: Comparison operator
-        value: Value to compare against
+    It skips whole files and row groups by their stats, so the result is a
+    **superset** of the matching rows; apply the predicate yourself if needed.
+    Pruning is conservative and never drops a matching row.
     """
 
     column: str
@@ -595,17 +463,10 @@ class FilterSpec(BaseModel):
 
 
 class IdentityParams(BaseModel):
-    """Parameters for the scan@v1 built-in transform.
+    """Parameters for the built-in scan@v1 transform over exactly one Iceberg table.
 
-    The identity transform reads from exactly one Iceberg table input,
-    applies optional column projection and row filtering, and returns
-    the data unchanged. It's executed internally by Strata (no external
-    executor needed).
-
-    Attributes:
-        columns: Column projection (None = all columns)
-        filters: Row filters (all filters are AND'd together)
-        snapshot_id: Specific snapshot to read (None = current)
+    ``columns`` None reads all columns; ``filters`` are ANDed pruning hints;
+    ``snapshot_id`` None reads the current snapshot.
     """
 
     columns: list[str] | None = None
@@ -613,13 +474,7 @@ class IdentityParams(BaseModel):
     snapshot_id: int | None = None
 
     def to_strata_filters(self) -> list[Filter]:
-        """Convert FilterSpec list to internal Filter objects.
-
-        Filter values arrive over the wire as JSON-native scalars (the client
-        adapters encode richer types via ``serialize_filter_value``), so each is
-        decoded back to its Python type here before the planner compares it
-        against Parquet column stats. Primitive values pass through unchanged.
-        """
+        """Convert to Filters, decoding ``serialize_filter_value`` tags back to Python types."""
         if not self.filters:
             return []
         result = []
@@ -635,20 +490,10 @@ class IdentityParams(BaseModel):
 
 
 class MaterializeRequest(BaseModel):
-    """Unified request to materialize data.
+    """Request to materialize data; a table scan is a materialize with scan@v1.
 
-    This is the single entry point for all data access in Strata.
-    Scanning an Iceberg table is expressed as a materialize with
-    the scan@v1 transform.
-
-    Attributes:
-        inputs: List of input URIs (table URIs or artifact URIs)
-        transform: Transform specification (executor + params)
-        name: Optional name to assign to the result
-        mode: Delivery mode - "stream" for immediate consumption,
-              "artifact" for async build with later retrieval
-        refresh: Force a fresh build even if a cached artifact exists
-        stream_timeout_seconds: Timeout for streaming mode
+    ``mode`` is ``"stream"`` (consume now) or ``"artifact"`` (build, fetch later);
+    ``refresh`` forces a build despite a cached artifact.
     """
 
     inputs: list[str]  # Input URIs: "file:///warehouse#db.events" or "strata://artifact/..."
@@ -660,29 +505,10 @@ class MaterializeRequest(BaseModel):
 
 
 class MaterializeResponse(BaseModel):
-    """Response from materialize request.
+    """Result of a materialize: a ready hit, or a miss that is ``building``.
 
-    Returns either:
-    - Cache hit: artifact exists (state="ready"), can fetch immediately
-    - Cache miss: artifact being built (state="building")
-
-    For artifact mode:
-    - Client polls /v1/builds/{build_id} or fetches when ready
-
-    For stream mode:
-    - Client streams from stream_url while artifact builds in parallel
-
-    Both modes create and persist artifacts. The mode only affects
-    how the client receives data, not whether it's cached.
-
-    Attributes:
-        hit: True if artifact already existed (cache hit)
-        artifact_uri: URI of the artifact (always present)
-        state: Current state ("ready", "building")
-        build_spec: If miss in personal mode, spec for client to build locally
-        build_id: Build ID for polling status (artifact mode, cache miss)
-        stream_id: Stream ID for immediate consumption (stream mode)
-        stream_url: URL to stream data from (stream mode)
+    On a miss, artifact mode polls ``build_id`` and stream mode reads ``stream_url``
+    while the artifact persists; both modes cache the result.
     """
 
     hit: bool  # True = artifact exists, False = building
@@ -695,20 +521,7 @@ class MaterializeResponse(BaseModel):
 
 
 class BuildSpec(BaseModel):
-    """Specification for client-side artifact building.
-
-    Returned when materialize() has a cache miss. The client must:
-    1. Execute the transform locally using the specified executor
-    2. Upload the result via upload_finalize
-    3. Optionally set a name pointer
-
-    Attributes:
-        artifact_id: ID of the artifact being built
-        version: Version number of the artifact
-        executor: Executor URI (e.g., "local://duckdb_sql@v1")
-        params: Executor-specific parameters
-        input_uris: Resolved input URIs (tables or artifacts)
-    """
+    """What a client must build locally after a miss, then upload via upload_finalize."""
 
     artifact_id: str
     version: int
@@ -718,18 +531,7 @@ class BuildSpec(BaseModel):
 
 
 class UploadFinalizeRequest(BaseModel):
-    """Request to finalize an artifact upload.
-
-    After the client builds an artifact locally, it uploads the Arrow IPC
-    data and calls this endpoint to finalize the artifact.
-
-    Attributes:
-        artifact_id: ID of the artifact being finalized
-        version: Version number of the artifact
-        arrow_schema: Arrow schema as JSON string
-        row_count: Number of rows in the artifact
-        name: Optional name to assign after finalization
-    """
+    """Request to finalize a locally built artifact after its Arrow IPC upload."""
 
     artifact_id: str
     version: int
@@ -739,13 +541,7 @@ class UploadFinalizeRequest(BaseModel):
 
 
 class UploadFinalizeResponse(BaseModel):
-    """Response from upload finalization.
-
-    Attributes:
-        artifact_uri: Final artifact URI
-        byte_size: Size of the stored artifact in bytes
-        name_uri: Name URI if a name was assigned
-    """
+    """Response from upload finalization; ``name_uri`` is set only if a name was assigned."""
 
     artifact_uri: str  # "strata://artifact/{id}@v={version}"
     byte_size: int
@@ -753,19 +549,11 @@ class UploadFinalizeResponse(BaseModel):
 
 
 class PutArtifactRequest(BaseModel):
-    """Request to directly upload and persist an artifact.
+    """Request to persist a locally computed artifact with provenance.
 
-    This is a simplified API for clients that execute transforms locally
-    and want to persist the result with full provenance tracking.
-    Supports deduplication: if an artifact with the same provenance hash
-    already exists, returns the existing artifact (cache hit).
-
-    Attributes:
-        inputs: List of input URIs (artifact URIs or table URIs)
-        transform: Transform specification (executor + params)
-            The params are opaque to Strata and used only for provenance.
-        data: The artifact data as JSON (will be stored as Arrow)
-        name: Optional name to assign to the artifact
+    An existing artifact with the same provenance hash is returned instead.
+    ``transform.params`` are opaque, used only for provenance; ``data`` is JSON
+    stored as Arrow.
     """
 
     inputs: list[str]  # Input URIs: "strata://artifact/..." or "file:///..."
@@ -775,14 +563,7 @@ class PutArtifactRequest(BaseModel):
 
 
 class PutArtifactResponse(BaseModel):
-    """Response from put artifact request.
-
-    Attributes:
-        artifact_uri: The artifact URI
-        hit: True if this was a cache hit (existing artifact)
-        byte_size: Size of the stored artifact in bytes
-        name_uri: Name URI if a name was assigned
-    """
+    """Response from a put; ``hit`` means an existing artifact was returned."""
 
     artifact_uri: str  # "strata://artifact/{id}@v={version}"
     hit: bool  # True if deduplicated to existing artifact
@@ -791,23 +572,13 @@ class PutArtifactResponse(BaseModel):
 
 
 class NameResolveRequest(BaseModel):
-    """Request to resolve a name to an artifact.
-
-    Attributes:
-        name: Name to resolve (without strata://name/ prefix)
-    """
+    """Request to resolve a name (without the ``strata://name/`` prefix) to an artifact."""
 
     name: str
 
 
 class NameResolveResponse(BaseModel):
-    """Response from name resolution.
-
-    Attributes:
-        artifact_uri: Resolved artifact URI
-        version: Pinned version
-        updated_at: Timestamp of last name update
-    """
+    """Response from name resolution."""
 
     artifact_uri: str  # "strata://artifact/{id}@v={version}"
     version: int
@@ -815,13 +586,7 @@ class NameResolveResponse(BaseModel):
 
 
 class NameSetRequest(BaseModel):
-    """Request to set or update a name pointer.
-
-    Attributes:
-        name: Name to set
-        artifact_id: Target artifact ID
-        version: Target version
-    """
+    """Request to set or update a name pointer."""
 
     name: str
     artifact_id: str
@@ -829,35 +594,20 @@ class NameSetRequest(BaseModel):
 
 
 class NameSetResponse(BaseModel):
-    """Response from setting a name.
-
-    Attributes:
-        name_uri: URI of the name pointer
-        artifact_uri: URI of the target artifact
-    """
+    """Response from setting a name."""
 
     name_uri: str  # "strata://name/{name}"
     artifact_uri: str  # "strata://artifact/{id}@v={version}"
 
 
 class ArtifactInfoResponse(BaseModel):
-    """Response with artifact metadata.
+    """Artifact metadata; schema, row count and size are set once ready.
 
     Attributes:
-        artifact_id: Artifact ID
-        version: Version number
-        state: Lifecycle state ("building", "ready", "failed")
-        arrow_schema: Arrow schema as JSON (if ready)
-        row_count: Number of rows (if ready)
-        byte_size: Size in bytes (if ready)
-        created_at: Creation timestamp
-        content_sha256: SHA-256 of the stored bytes, so a caller can compare
-            two machines' outputs without downloading either. ``None`` on rows
-            written before the digest was recorded.
-        provenance_hash: What the artifact deduplicates by, which a store
-            copying it (a notebook's ``@dataset``) has to keep.
-        transform_spec: The stored transform specification, as JSON. Its
-            ``params.content_type`` says how a notebook reads the bytes.
+        content_sha256: Digest of the stored bytes, to compare outputs without
+            downloading; None when never recorded.
+        provenance_hash: The dedup key, which a store copying the artifact must keep.
+        transform_spec: Stored spec as JSON; ``params.content_type`` says how to read the bytes.
     """
 
     artifact_id: str
@@ -879,62 +629,24 @@ PROVENANCE_MISS_HEADER = "X-Strata-Provenance-Miss"
 
 
 class ArtifactProvenanceMatchResponse(BaseModel):
-    """An artifact that already exists for a provenance hash.
-
-    The lookup a shared store answers for a *team* cache hit: "someone has
-    already computed exactly this — here is what they got." Deliberately
-    richer than ``ArtifactInfoResponse``, because the caller starts from a
-    hash and nothing else:
-
-    * ``content_type`` so the caller can deserialize the blob it is about to
-      fetch without a second metadata round-trip.
-    * ``principal`` so a hit can be *attributed* on screen. A result that
-      silently appears is indistinguishable from a bug; "computed by alice"
-      is the whole difference between a cache and a team cache.
+    """An existing artifact for a provenance hash: a team-cache hit.
 
     Attributes:
-        artifact_id: Storage id of the match. Notebook artifact ids are
-            notebook-scoped, so this is usually *not* an id the caller
-            would have constructed — the provenance hash is the join key,
-            not the id.
-        version: Version number of the match.
-        provenance_hash: Echoed back, so a caller batching lookups can
-            correlate responses without tracking request order.
-        content_type: ``arrow/ipc`` / ``json/object`` / ``pickle/object`` …,
-            read from the stored transform spec. Empty when the spec does
-            not record one.
-        state: Always ``ready`` today — ``find_by_provenance`` only matches
-            ready rows — but carried explicitly so that staying true remains
-            the store's decision rather than this route's assumption.
-        principal: Who computed it, when the store recorded one.
-        build_env: Interpreter and platform that produced the bytes, e.g.
-            ``cpython-3.14-linux-x86_64``. Deliberately not part of the
-            provenance key — teams run Macs locally and Linux in CI, and
-            hashing the platform would drop cross-machine hit rate to nothing.
-            Recorded so a hit can say where it came from instead of sharing
-            across platforms silently. Empty for artifacts written before this
-            was captured, and for producers that do not report one.
-        build_duration_ms: How long the run that produced these bytes took.
-            The only way a shared cache can say what a hit *saved*: whoever
-            hits it never ran the cell, so their own history holds no
-            comparable duration. Zero when unrecorded.
-        env_hash: The environment the result was computed in, as a digest over
-            the lockfiles and the declared runtime env. Together with
-            ``build_env`` this is the artifact's environment identity: *which
-            package set*, and *on what*. It has always participated in the
-            provenance key and has never been readable, which is fine while a
-            cache is one person's and useless the moment it is a team's — "you
-            got a hit and I did not" is answered by comparing these two values
-            and by nothing else. Empty for artifacts that record no
-            environment.
-        content_sha256: SHA-256 of the stored bytes. What lets a rerun be
-            compared with a snapshot output by output — two machines can diff
-            digests without either downloading the other's bytes. ``None`` on
-            rows written before it was recorded.
-        promotion: The name of the promotion that brought this row to the
-            store, when one did. ``principal`` says who computed it; this says
-            why it is here to be hit — someone shared ``taxi/model`` and this
-            was part of its chain. ``None`` for rows a cache publish put here.
+        artifact_id: Storage id; usually not one the caller would construct, since
+            the provenance hash is the join key.
+        provenance_hash: Echoed so batched lookups can be correlated.
+        content_type: From the stored spec, so the blob can be decoded without another
+            round trip; empty when unrecorded.
+        principal: Who computed it, so the hit can be attributed.
+        build_env: Interpreter and platform, e.g. ``cpython-3.14-linux-x86_64``. Not
+            hashed into provenance, so hits cross platforms; empty when unrecorded.
+        build_duration_ms: How long the producing run took (what the hit saved);
+            0 when unrecorded.
+        env_hash: Digest of lockfiles and runtime env, part of the provenance key;
+            with ``build_env``, explains why one caller hits and another misses.
+        content_sha256: Digest of the stored bytes; None when unrecorded.
+        promotion: Name of the promotion that brought the row here; None for a
+            cache publish.
     """
 
     artifact_id: str
@@ -955,13 +667,7 @@ class ArtifactProvenanceMatchResponse(BaseModel):
 
 
 class InputChangeInfo(BaseModel):
-    """Information about a changed input dependency.
-
-    Attributes:
-        input_uri: The input URI that changed
-        old_version: The version used when artifact was built
-        new_version: The current version of the input
-    """
+    """An input whose version changed since the artifact was built."""
 
     input_uri: str
     old_version: str
@@ -969,22 +675,7 @@ class InputChangeInfo(BaseModel):
 
 
 class NameStatusResponse(BaseModel):
-    """Response with named artifact status including staleness info.
-
-    Use GET /v1/artifacts/names/{name}/status to get this information.
-
-    Attributes:
-        name: The artifact name
-        artifact_uri: URI of the pinned artifact version
-        artifact_id: Artifact ID
-        version: Pinned version number
-        state: Artifact state ("ready", "building", "failed")
-        updated_at: When the name was last updated
-        input_versions: Mapping of input URI -> version when built
-        is_stale: True if any input has changed since build
-        stale_reason: Human-readable explanation if stale
-        changed_inputs: List of inputs that have newer versions
-    """
+    """A named artifact's status; ``is_stale`` when any input changed since the build."""
 
     name: str
     artifact_uri: str
@@ -999,17 +690,7 @@ class NameStatusResponse(BaseModel):
 
 
 class BuildProgress(BaseModel):
-    """Progress information for an in-progress build.
-
-    Provides optional progress metrics for builds that support them.
-    For identity transforms, this tracks bytes processed from Parquet files.
-
-    Attributes:
-        bytes_processed: Bytes read/processed so far
-        estimated_total_bytes: Estimated total bytes to process
-        rows_processed: Rows processed so far (if known)
-        estimated_total_rows: Estimated total rows (if known)
-    """
+    """Optional progress of a running build (bytes read from Parquet, for scans)."""
 
     bytes_processed: int = 0
     estimated_total_bytes: int | None = None
@@ -1018,24 +699,9 @@ class BuildProgress(BaseModel):
 
 
 class BuildStatusResponse(BaseModel):
-    """Response with async build status for server-mode transforms.
+    """Status of a server-side build, polled at ``GET /v1/artifacts/builds/{build_id}``.
 
-    Use GET /v1/artifacts/builds/{build_id} to poll build status.
-    A compatibility alias also exists at GET /v1/builds/{build_id}.
-
-    Attributes:
-        build_id: Unique build identifier
-        artifact_id: Target artifact ID
-        version: Target artifact version
-        state: Current state (pending, building, ready, failed)
-        artifact_uri: URI of the artifact (available when state=ready)
-        executor_ref: Executor reference
-        progress: Optional progress information (while building)
-        created_at: When the build was created
-        started_at: When execution started (if started)
-        completed_at: When execution finished (if finished)
-        error_message: Error details (if failed)
-        error_code: Error code for programmatic handling (if failed)
+    ``state`` is pending, building, ready or failed; error fields are set only on failure.
     """
 
     build_id: str
@@ -1053,13 +719,7 @@ class BuildStatusResponse(BaseModel):
 
 
 class ExplainMaterializeRequest(BaseModel):
-    """Request to explain what materialize would do (dry run).
-
-    Attributes:
-        inputs: List of input URIs (table URIs or artifact URIs)
-        transform: Transform specification (executor + params)
-        name: Optional name to check against existing artifact
-    """
+    """Dry-run materialize; ``name`` is checked for staleness against its artifact."""
 
     inputs: list[str]
     transform: TransformSpec
@@ -1067,22 +727,7 @@ class ExplainMaterializeRequest(BaseModel):
 
 
 class ExplainMaterializeResponse(BaseModel):
-    """Response explaining what materialize would do.
-
-    This is a dry-run that doesn't modify anything but shows:
-    - Whether the result would be a cache hit or miss
-    - If checking a name, whether it's stale
-    - Which inputs have changed if stale
-
-    Attributes:
-        would_hit: True if materialize would return a cached artifact
-        artifact_uri: URI of existing artifact (if would_hit) or None
-        would_build: True if client would need to build locally
-        is_stale: True if named artifact exists but inputs have changed
-        stale_reason: Explanation of why rebuild is needed
-        changed_inputs: List of inputs that changed since last build
-        resolved_input_versions: Current versions of all inputs
-    """
+    """What materialize would do, without changing anything: hit or build, and staleness."""
 
     would_hit: bool
     artifact_uri: str | None = None
@@ -1097,47 +742,13 @@ class ExplainMaterializeResponse(BaseModel):
 
 
 class LineageNode(BaseModel):
-    """A node in the artifact lineage graph.
+    """A node in the artifact lineage graph: an artifact, a table, or a URL fetch.
 
-    Attributes:
-        uri: Artifact URI (strata://artifact/{id}@v={version}), table URI, or
-            the URL a notebook cell fetched
-        artifact_id: Artifact ID (if this is an artifact, not a table)
-        version: Artifact version (if this is an artifact)
-        type: "artifact", "table", or "fetch" (bytes read from a URL, with
-            ``content_sha256`` the digest of what was read)
-        transform_ref: Transform executor reference (if artifact)
-        created_at: When artifact was created (if artifact)
-        principal: Who computed it, when the store recorded an author.
-        build_env: The interpreter and hardware that produced it, e.g.
-            ``cpython-3.14-linux-x86_64``.
-        build_duration_ms: How long the producing run took.
-        env_hash: Digest of the environment it was computed in. With
-            ``build_env``, the step's environment identity — which package set,
-            on what.
-        source: The code that produced it. Empty for tables, for core
-            transforms, and for artifacts stored before it was recorded. A
-            reader outside the notebook has no ``cells/{id}.py`` to check a
-            hash against, so this is the only form in which a step's
-            computation can be shown to them at all.
-        content_sha256: SHA-256 of the step's stored bytes, so two graphs of
-            the same computation can be compared step by step rather than only
-            at the result.
-
-    These carried no information before results could be shared: every step in
-    a graph had the same author (you) and the same environment (this machine).
-    Once a graph can contain a step someone else ran elsewhere, they are the
-    questions it is being opened to answer.
-
-    All of them are best-effort, and empty for tables, for core transforms, and
-    for artifacts stored before the fields existed — which, these being recent,
-    is most of what an established store holds.
-
-    ``principal`` is additionally empty for anything a notebook computed
-    itself: a local run has no authenticated identity to attribute. It is
-    populated for a result *pulled* from a shared store, where the publisher's
-    identity is known and carried across, which is the case the column exists
-    for.
+    The descriptive fields (``principal``, ``build_env``, ``env_hash``, ``source``,
+    ``content_sha256``) are best-effort: empty for tables, core transforms and
+    older rows. ``principal`` is also empty for local notebook runs, which have
+    no authenticated identity. For a ``fetch``, ``content_sha256`` is the digest
+    of the bytes read.
     """
 
     uri: str
@@ -1155,13 +766,7 @@ class LineageNode(BaseModel):
 
 
 class LineageEdge(BaseModel):
-    """An edge in the artifact lineage graph (input dependency).
-
-    Attributes:
-        from_uri: Source URI (the input)
-        to_uri: Target URI (the artifact that uses this input)
-        input_version: Version string of the input when used
-    """
+    """A lineage edge from an input to the artifact that used it, at ``input_version``."""
 
     from_uri: str
     to_uri: str
@@ -1169,23 +774,7 @@ class LineageEdge(BaseModel):
 
 
 class ArtifactLineageResponse(BaseModel):
-    """Response with artifact lineage (input dependency graph).
-
-    Shows the full input dependency tree for an artifact, including:
-    - Direct inputs (tables and artifacts)
-    - Transitive inputs (inputs of input artifacts, recursively)
-
-    Use GET /v1/artifacts/{artifact_id}/v/{version}/lineage to get this.
-
-    Attributes:
-        artifact_uri: The artifact being queried
-        artifact_id: Artifact ID
-        version: Artifact version
-        nodes: All nodes in the lineage graph (artifacts and tables)
-        edges: All edges (input relationships) in the graph
-        depth: Maximum depth of the lineage tree
-        direct_inputs: URIs of direct inputs (first-level dependencies)
-    """
+    """An artifact's transitive input graph, with its direct inputs listed separately."""
 
     artifact_uri: str
     artifact_id: str
@@ -1197,17 +786,7 @@ class ArtifactLineageResponse(BaseModel):
 
 
 class DependentInfo(BaseModel):
-    """Information about an artifact that depends on another.
-
-    Attributes:
-        artifact_uri: URI of the dependent artifact
-        artifact_id: Artifact ID
-        version: Artifact version
-        name: Name pointing to this artifact (if any)
-        transform_ref: Transform executor reference
-        created_at: When the dependent artifact was created
-        input_version: Version string this artifact uses for the dependency
-    """
+    """An artifact that uses another as input, at ``input_version``."""
 
     artifact_uri: str
     artifact_id: str
@@ -1219,20 +798,7 @@ class DependentInfo(BaseModel):
 
 
 class ArtifactDependentsResponse(BaseModel):
-    """Response with artifacts that depend on a given artifact.
-
-    Shows reverse dependencies: which artifacts use this artifact as input.
-    Useful for impact analysis when considering artifact changes/deletion.
-
-    Use GET /v1/artifacts/{artifact_id}/v/{version}/dependents to get this.
-
-    Attributes:
-        artifact_uri: The artifact being queried
-        artifact_id: Artifact ID
-        version: Artifact version
-        dependents: List of artifacts that use this artifact as input
-        total_count: Total number of dependents found
-    """
+    """Artifacts that use a given artifact as input (reverse dependencies)."""
 
     artifact_uri: str
     artifact_id: str
@@ -1251,14 +817,7 @@ EXECUTOR_LOGS_HEADER = "X-Strata-Logs"
 
 
 class ExecutorInputDescriptor(BaseModel):
-    """Descriptor for a single input in an executor request.
-
-    Attributes:
-        name: Input name (e.g., "input0", "input1")
-        format: Data format (always "arrow_ipc_stream" in v1)
-        uri: Original input URI (for debugging/logging)
-        byte_size: Size of the input in bytes (if known)
-    """
+    """One input of an executor request; ``uri`` is informational only."""
 
     name: str
     format: str = "arrow_ipc_stream"
@@ -1267,13 +826,7 @@ class ExecutorInputDescriptor(BaseModel):
 
 
 class ExecutorTransformSpec(BaseModel):
-    """Transform specification sent to executor.
-
-    Attributes:
-        ref: Transform reference (e.g., "duckdb_sql@v1")
-        code_hash: Hash of the transform code (for reproducibility)
-        params: Executor-specific parameters (e.g., {"sql": "SELECT ..."})
-    """
+    """Transform sent to an executor: ref (e.g. ``duckdb_sql@v1``), code hash and params."""
 
     ref: str
     code_hash: str
@@ -1281,20 +834,7 @@ class ExecutorTransformSpec(BaseModel):
 
 
 class ExecutorRequestMetadata(BaseModel):
-    """Metadata sent to executor in push model requests.
-
-    This is the JSON payload in the "metadata" part of the multipart request.
-    It provides all context needed for the executor to run the transform.
-
-    Attributes:
-        protocol_version: Protocol version (always "v1" for this schema)
-        build_id: Unique build identifier for tracing/logging
-        tenant: Tenant ID (for multi-tenant deployments)
-        principal: Principal ID who initiated the build
-        provenance_hash: Hash of inputs + transform for deduplication
-        transform: Transform specification with ref, code_hash, params
-        inputs: List of input descriptors (name, format, uri)
-    """
+    """The ``metadata`` JSON part of a push-model (v1) executor request."""
 
     protocol_version: str = EXECUTOR_PROTOCOL_VERSION
     build_id: str
@@ -1306,20 +846,7 @@ class ExecutorRequestMetadata(BaseModel):
 
 
 class ExecutorResponse(BaseModel):
-    """Response from executor (for structured error responses).
-
-    Success responses return Arrow IPC stream directly with 200 status.
-    Error responses return JSON with this structure.
-
-    Attributes:
-        success: Whether the execution succeeded
-        error_code: Machine-readable error code
-        error_message: Human-readable error message
-        duration_ms: Execution time in milliseconds
-        output_rows: Number of rows in output (on success)
-        output_bytes: Size of output in bytes (on success)
-        logs: Executor logs (stderr/stdout)
-    """
+    """An executor's JSON error body; success returns an Arrow IPC stream instead."""
 
     success: bool
     error_code: str | None = None
@@ -1331,14 +858,7 @@ class ExecutorResponse(BaseModel):
 
 
 class ExecutorManifestInput(BaseModel):
-    """Input descriptor in pull model manifest.
-
-    Attributes:
-        name: Input name (e.g., "input0")
-        download_url: Signed URL to download the input
-        byte_size: Expected size in bytes
-        format: Data format (always "arrow_ipc_stream")
-    """
+    """One input of a pull-model manifest, fetched from a signed ``download_url``."""
 
     name: str
     download_url: str
@@ -1347,23 +867,10 @@ class ExecutorManifestInput(BaseModel):
 
 
 class ExecutorManifest(BaseModel):
-    """Manifest returned for pull model execution.
+    """Pull-model build manifest.
 
-    The executor uses this manifest to:
-    1. Download inputs from signed URLs
-    2. Execute the transform
-    3. Upload output to the signed URL
-    4. Call finalize_url to complete the build
-
-    Attributes:
-        protocol_version: Protocol version (always "v1")
-        build_id: Unique build identifier
-        metadata: Transform metadata (ref, params, etc.)
-        inputs: List of inputs with signed download URLs
-        upload_url: Signed URL to upload the output
-        finalize_url: URL to call after upload completes
-        max_output_bytes: Maximum allowed output size
-        timeout_seconds: Maximum execution time
+    The executor downloads the inputs, runs the transform, uploads to
+    ``upload_url`` within ``max_output_bytes``, then calls ``finalize_url``.
     """
 
     protocol_version: str = EXECUTOR_PROTOCOL_VERSION
@@ -1377,18 +884,7 @@ class ExecutorManifest(BaseModel):
 
 
 class ExecutorCapabilities(BaseModel):
-    """Executor capabilities reported in health check.
-
-    Executors should return this from GET /health to describe their capabilities.
-
-    Attributes:
-        protocol_versions: List of supported protocol versions
-        transform_refs: List of supported transform references
-        max_input_bytes: Maximum total input size supported
-        max_output_bytes: Maximum output size supported
-        max_concurrent_executions: Maximum concurrent executions
-        features: Optional feature flags (e.g., {"streaming": true})
-    """
+    """Capabilities an executor reports from ``GET /health``."""
 
     protocol_versions: list[str] = [EXECUTOR_PROTOCOL_VERSION]
     transform_refs: list[str] = []
@@ -1399,17 +895,7 @@ class ExecutorCapabilities(BaseModel):
 
 
 class ExecutorHealthResponse(BaseModel):
-    """Health check response from executor.
-
-    GET /health should return this structure.
-
-    Attributes:
-        status: "healthy", "degraded", or "unhealthy"
-        capabilities: Executor capabilities
-        version: Executor software version
-        uptime_seconds: Seconds since executor started
-        active_executions: Current number of active executions
-    """
+    """An executor's ``GET /health`` body; ``status`` is healthy, degraded or unhealthy."""
 
     status: str  # "healthy" | "degraded" | "unhealthy"
     capabilities: ExecutorCapabilities

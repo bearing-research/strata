@@ -1,15 +1,9 @@
-"""The little SVG pill a README can carry.
+"""Self-rendered SVG badge for a publication's README.
 
-A shields-style badge has a grammar — ``label | status``, green for good — and
-that grammar is an assertion. This feature has been careful not to claim a
-result was verified, so the badge has to resist its own shape: it reports the
-size of the recorded chain and nothing else, and it is not green, because in
-badge convention green means "passing" and borrowing it would smuggle back the
-reading everything else here refuses.
-
-Self-rendered rather than delegated to shields.io. A remote badge tells a third
-party which artifact each README view is looking at, and it fails entirely on
-the internal and air-gapped servers a lab is most likely to run.
+It reports only the size of the recorded chain and is deliberately not green:
+in badge convention green means "passing", and nothing here claims a result
+was verified. Rendered locally rather than via shields.io so README views do
+not leak to a third party and air-gapped servers still work.
 """
 
 from __future__ import annotations
@@ -85,11 +79,10 @@ def render_badge(*, label: str, value: str, title: str) -> str:
 
 
 def badge_for(*, publication, step_count: int) -> str:
-    """The badge for one publication.
+    """Return the badge for one publication.
 
-    A withdrawn publication still renders, and says so. The alternative is a
-    broken image in whatever README carries it, which tells a reader nothing
-    except that something is wrong with the server.
+    A withdrawn publication still renders and says so, rather than leaving a
+    broken image in the README.
     """
     if not publication.is_active:
         return render_badge(

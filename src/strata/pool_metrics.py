@@ -1,14 +1,4 @@
-"""Thread pool and connection metrics for Strata.
-
-This module provides utilities for tracking thread pool utilization and
-connection-related metrics to help diagnose performance bottlenecks.
-
-Key metrics:
-- Thread pool active workers vs max workers
-- Thread pool queue depth (pending tasks)
-- Thread pool utilization percentage
-- HTTP connection stats (from uvicorn if available)
-"""
+"""Thread pool utilization and HTTP connection metrics."""
 
 import threading
 import time
@@ -77,19 +67,7 @@ class ThreadPoolStats:
 
 @dataclass
 class PoolMetricsTracker:
-    """Tracks metrics for thread pools used by Strata.
-
-    This class provides instrumentation for ThreadPoolExecutor instances,
-    tracking utilization, queue depth, and throughput.
-
-    Usage:
-        tracker = PoolMetricsTracker()
-        tracker.register_pool("planning", planning_executor)
-        tracker.register_pool("fetch", fetch_executor)
-
-        # Later, get stats:
-        stats = tracker.get_all_stats()
-    """
+    """Tracks utilization, queue depth and throughput of registered ``ThreadPoolExecutor``s."""
 
     _pools: dict[str, ThreadPoolExecutor] = field(default_factory=dict)
     _lock: threading.Lock = field(default_factory=threading.Lock)
@@ -101,12 +79,7 @@ class PoolMetricsTracker:
     _in_flight: dict[str, int] = field(default_factory=dict)
 
     def register_pool(self, name: str, executor: ThreadPoolExecutor) -> None:
-        """Register a thread pool for metrics tracking.
-
-        Args:
-            name: Human-readable name for the pool (e.g., "planning", "fetch")
-            executor: The ThreadPoolExecutor to track
-        """
+        """Register a thread pool under a display name (e.g. ``"planning"``, ``"fetch"``)."""
         with self._lock:
             self._pools[name] = executor
             self._tasks_submitted[name] = 0
@@ -131,16 +104,9 @@ class PoolMetricsTracker:
     def track(self, pool_name: str) -> Iterator[None]:
         """Count one unit of work against ``pool_name`` for the block's life.
 
-        Wrap the ``await loop.run_in_executor(...)`` that hands work to the
-        pool. The pair of counters this maintains is what makes
-        ``active_workers`` mean "workers busy now"; without a caller it read
-        the pool's thread count instead, which only ever grows.
-
-        If the awaiting coroutine is cancelled while its callable is still
-        running in a worker, the block exits and stops counting slightly
-        early. That under-reports for the length of one task, which is the
-        right direction to be wrong in: the failure it replaces was a
-        utilization figure that latched high permanently.
+        Wrap the ``await loop.run_in_executor(...)`` that hands work to the pool; these counters
+        are what make ``active_workers`` mean "busy now". If the awaiting coroutine is cancelled
+        while its callable still runs, counting stops early, under-reporting for one task.
         """
         self.record_task_submitted(pool_name)
         try:
@@ -149,14 +115,7 @@ class PoolMetricsTracker:
             self.record_task_completed(pool_name)
 
     def get_pool_stats(self, name: str) -> ThreadPoolStats | None:
-        """Get statistics for a specific thread pool.
-
-        Args:
-            name: Name of the pool to query
-
-        Returns:
-            ThreadPoolStats or None if pool not found
-        """
+        """Get statistics for one pool, or ``None`` if it is not registered."""
         with self._lock:
             executor = self._pools.get(name)
             if executor is None:
@@ -188,11 +147,7 @@ class PoolMetricsTracker:
             )
 
     def get_all_stats(self) -> dict[str, ThreadPoolStats]:
-        """Get statistics for all registered thread pools.
-
-        Returns:
-            Dictionary mapping pool names to their stats
-        """
+        """Get statistics for all registered pools, keyed by name."""
         result = {}
         with self._lock:
             pool_names = list(self._pools.keys())
@@ -205,11 +160,7 @@ class PoolMetricsTracker:
         return result
 
     def get_summary(self) -> PoolMetricsSummaryDict:
-        """Get a summary of all pool metrics for the /metrics endpoint.
-
-        Returns:
-            Dictionary with pool metrics suitable for JSON serialization
-        """
+        """Get a JSON-serializable summary of all pools for ``/metrics``."""
         stats = self.get_all_stats()
         return {
             "thread_pools": {name: s.to_dict() for name, s in stats.items()},
@@ -219,14 +170,7 @@ class PoolMetricsTracker:
 
 @dataclass
 class ConnectionMetrics:
-    """Tracks HTTP connection-related metrics.
-
-    Since Strata uses FastAPI/Uvicorn, connection management is handled
-    by the ASGI server. This class tracks what we can observe:
-    - Active requests (from middleware)
-    - Request rate
-    - Connection reuse hints
-    """
+    """HTTP request metrics observable from middleware (uvicorn owns the connections)."""
 
     _lock: threading.Lock = field(default_factory=threading.Lock)
 

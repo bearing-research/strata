@@ -1,13 +1,6 @@
-"""Build metrics for observability.
+"""Build metrics: lifecycle counts, duration and queue-wait percentiles, bytes in/out.
 
-Tracks build execution metrics including:
-- Build lifecycle events (started, succeeded, failed)
-- Duration histograms and percentiles
-- Queue wait times
-- Bytes in/out
-- Per-tenant and per-transform breakdowns
-
-Exposes metrics in Prometheus format via the `/metrics/prometheus` endpoint.
+Broken down per tenant and per transform, and exported in Prometheus format.
 """
 
 from __future__ import annotations
@@ -101,20 +94,9 @@ class TenantBuildStats:
 
 
 class BuildMetricsCollector:
-    """Collects and aggregates build metrics.
+    """Thread-safe collector of build events, aggregated overall, per transform and per tenant.
 
-    Thread-safe collection of build events with aggregation by:
-    - Overall totals
-    - Per-transform breakdown
-    - Per-tenant breakdown
-
-    Usage:
-        collector = BuildMetricsCollector()
-        collector.record_started(build_id, tenant_id, transform_ref)
-        ...
-        collector.record_succeeded(
-            build_id, tenant_id, transform_ref, duration_ms, bytes_in, bytes_out
-        )
+    Per-transform and per-tenant tables are bounded; the oldest entry is evicted.
     """
 
     def __init__(self, max_events: int = 1000, max_transforms: int = 100, max_tenants: int = 100):

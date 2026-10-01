@@ -1,22 +1,15 @@
-"""Iceberg equality deletes: rows deleted by value, not by position.
+"""Iceberg equality deletes: rows deleted by key value, not by position.
 
-A streaming writer (Flink upserts, CDC sinks) deletes a row by its key rather
-than by where it sits: an equality delete file holds key values, and every
-older row with those values is deleted, in whichever data file it is.
+pyiceberg (0.12) refuses to plan a scan once a manifest lists an equality delete, so
+``plan_files`` plans it here, reusing pyiceberg's ``ManifestGroupPlanner`` (with pruning)
+and ``DeleteFileIndex`` for positional deletes.
 
-pyiceberg (0.12) refuses to plan a scan once a manifest lists one, so
-``plan_files`` plans it here. The manifest entries still come from pyiceberg's
-``ManifestGroupPlanner`` (partition and metrics pruning included), positional
-deletes still go through pyiceberg's ``DeleteFileIndex``, and equality deletes
-go through ``EqualityDeleteIndex``.
-
-Which equality deletes apply to a data file (Iceberg spec, "Scan Planning"):
-those with a larger data sequence number, in the data file's partition (spec
-id and value), or in an unpartitioned spec, where they apply to every data
-file. A row is deleted when its values for the delete's equality field ids all
-equal a delete row's, with null equal to null. Field ids, not names: a column
-dropped from the schema since still matches, and a column the data file
-predates reads as nulls.
+Per the Iceberg spec ("Scan Planning"), an equality delete applies to data files with a
+smaller data sequence number in the same partition (spec id and value), or to every data
+file when its spec is unpartitioned. A row is deleted when its values for all the
+delete's equality field ids equal a delete row's, null equal to null. Matching is by field
+id, not name: a since-dropped column still matches, and a column the data file predates
+reads as nulls.
 """
 
 import threading
@@ -288,12 +281,10 @@ def _any_value(*columns: pa.ChunkedArray) -> pa.Scalar | None:
 def _null_safe(data_keys: pa.Table, delete_keys: pa.Table) -> tuple[pa.Table, pa.Table]:
     """Both sides' keys split so an Arrow join treats null as equal to null.
 
-    A hash join never matches null to null; Iceberg equality does. Each key
-    becomes an is-null flag plus its values with nulls filled, and two rows
-    match on those exactly when they match under Iceberg's rule. The fill must
-    be the same value on both sides, and any value of the key's type will do,
-    so it is taken from the keys themselves: that works for every type. A key
-    that is null on every row of both sides is matched on its flag alone.
+    A hash join never matches null to null; Iceberg equality does. Each key becomes an
+    is-null flag plus its values with nulls filled by one value taken from the keys
+    themselves (same on both sides, valid for every type). A key null on every row of both
+    sides is matched on its flag alone.
     """
     data_columns: dict[str, pa.ChunkedArray] = {}
     delete_columns: dict[str, pa.ChunkedArray] = {}
@@ -335,12 +326,10 @@ def deleted_mask(
 ) -> pa.Array | None:
     """For each row of *table*, whether an equality delete in *deletes* removes it.
 
-    *key_columns* maps each equality field id to *table*'s column holding it,
-    or None when the data file lacks the column (its values are then its
-    *defaults* entry, the file's identity-partition value or the v3
-    initial-default, or null). *downcast_ns* compares
-    nanosecond timestamp keys at microseconds, a v1 or v2 table's only unit.
-    Deletes are grouped by their equality ids; a row goes if any group matches.
+    *key_columns* maps each equality field id to *table*'s column, or None when the data file
+    lacks it (its value is then the *defaults* entry: identity-partition value, v3
+    initial-default, or null). *downcast_ns* compares nanosecond timestamp keys at
+    microseconds, the only unit of a v1 or v2 table. A row goes if any delete group matches.
     """
     groups: dict[tuple[int, ...], list[EqualityDeleteEntry]] = defaultdict(list)
     for delete in deletes:

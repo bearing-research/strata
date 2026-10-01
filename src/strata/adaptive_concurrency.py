@@ -1,26 +1,9 @@
 """Adaptive concurrency control for Strata QoS.
 
-Implements Netflix-style adaptive concurrency limiting based on latency signals:
-- Starts at configured slot counts
-- Monitors p95 latency and queue wait time
-- Increases slots when latency is good and queue pressure is rising
-- Decreases slots when latency exceeds target
-- Uses hysteresis to prevent control loop flapping
-
-The controller adjusts both interactive and bulk tier semaphores independently.
-
-Signals come from stream admission (``strata.streaming.qos.QoSAdmission``):
-queue wait when a scan acquires its tier slot, and slot-held duration when it
-releases. Without those feeds the latency windows stay empty and the control
-loop is a timer that never adjusts anything, which is what it had silently
-become (#549). It steers the limiters for one tenant — the ``_default`` one —
-so ``adaptive_enabled`` is rejected at startup alongside multi-tenancy rather
-than adjusting a tier no request in a multi-tenant deployment acquires.
-
-Key component: ResizableLimiter
-    Unlike asyncio.Semaphore, ResizableLimiter tracks capacity vs in_use separately.
-    This allows correct dynamic resizing - decreasing capacity takes effect as
-    active requests complete, rather than fighting with normal release() calls.
+Resizes the interactive and bulk tier limiters from p95 latency and queue-wait
+signals fed by ``strata.streaming.qos.QoSAdmission``; without those feeds it never
+adjusts. It steers only the ``_default`` tenant's limiters, which is why
+``adaptive_enabled`` is rejected at startup alongside multi-tenancy.
 """
 
 import asyncio
@@ -37,17 +20,10 @@ logger = logging.getLogger("strata.adaptive")
 
 
 class ResizableLimiter:
-    """A resizable concurrency limiter for dynamic capacity adjustment.
+    """Concurrency limiter whose capacity can change while slots are held.
 
-    Unlike asyncio.Semaphore, this limiter tracks capacity and in_use count
-    separately, allowing correct dynamic resizing:
-    - Increasing capacity immediately allows more concurrent requests
-    - Decreasing capacity takes effect as active requests complete
-
-    This is essential for adaptive concurrency control where we need to
-    adjust slot counts without fighting normal request completion.
-
-    Thread-safety: All operations are protected by an asyncio.Lock.
+    Unlike asyncio.Semaphore it tracks capacity and in-use separately: a larger
+    capacity admits waiters at once, a smaller one takes effect as holders release.
     """
 
     def __init__(self, capacity: int):
@@ -78,17 +54,9 @@ class ResizableLimiter:
         return self._in_use == 0 and self._pending == 0
 
     async def acquire(self, timeout: float | None = None) -> bool:
-        """Acquire a slot, optionally bounded by a timeout.
+        """Acquire a slot, waiting up to ``timeout`` seconds (``None``: forever).
 
-        Parameters
-        ----------
-        timeout : float or None, optional
-            Maximum seconds to wait; ``None`` waits forever.
-
-        Returns
-        -------
-        bool
-            ``True`` if a slot was acquired, ``False`` if the timeout expired.
+        Return ``False`` if the timeout expired.
         """
         self._pending += 1
         try:
@@ -135,15 +103,7 @@ class ResizableLimiter:
             self._cv.notify(1)
 
     async def resize(self, new_capacity: int) -> None:
-        """Resize the limiter's capacity.
-
-        If capacity increases, waiting acquirers are woken to compete for slots.
-        If capacity decreases, the change takes effect as active requests complete.
-
-        Parameters
-        ----------
-        new_capacity : int
-            New maximum concurrent requests (must be >= 1).
+        """Set the capacity; a decrease takes effect as active requests complete.
 
         Raises
         ------
@@ -159,13 +119,7 @@ class ResizableLimiter:
                 self._cv.notify_all()
 
     def get_stats(self) -> dict[str, int]:
-        """Return capacity / in-use / available (non-async, for metrics).
-
-        Returns
-        -------
-        dict
-            ``{capacity, in_use, available}``.
-        """
+        """Return ``{capacity, in_use, available}`` without awaiting (for metrics)."""
         return {
             "capacity": self._capacity,
             "in_use": self._in_use,
@@ -175,34 +129,12 @@ class ResizableLimiter:
 
 @dataclass
 class AdaptiveConfig:
-    """Configuration for the adaptive concurrency controller.
+    """Configuration for the adaptive concurrency controller (opt-in).
 
-    Attributes
-    ----------
-    enabled : bool
-        Whether adaptive control is enabled (opt-in).
-    adjustment_interval_seconds : float
-        How often to check and adjust, in seconds.
-    latency_target_p95_ms : float
-        Target p95 latency, in milliseconds.
-    queue_wait_threshold_ms : float
-        Queue wait time that indicates pressure.
-    min_slots_interactive, max_slots_interactive : int
-        Interactive-tier slot floor and ceiling.
-    min_slots_bulk, max_slots_bulk : int
-        Bulk-tier slot floor and ceiling.
-    increase_step, decrease_step : int
-        Slots added/removed per adjustment.
-    hysteresis_count : int
-        Consecutive signals required before adjusting.
-    window_size : int
-        Samples kept for the rolling p95.
-    sample_max_age_seconds : float
-        How long a sample stays eligible for the percentile. Without this the
-        window is purely count-based, so a burst of slow requests followed by
-        an idle period keeps re-triggering decrease signals off samples that
-        describe load which is long over, walking the tier down to
-        ``min_slots`` while nothing is running.
+    Latencies are in milliseconds, intervals and ages in seconds. ``hysteresis_count``
+    is the number of consecutive signals required before adjusting.
+    ``sample_max_age_seconds`` expires old samples so an idle period after a slow
+    burst does not keep walking a tier down to ``min_slots``.
     """
 
     enabled: bool = False
@@ -221,12 +153,10 @@ class AdaptiveConfig:
 
 
 class RollingLatencyWindow:
-    """Thread-safe rolling window for latency percentile calculation.
+    """Thread-safe rolling latency window for percentiles.
 
-    Bounded two ways: by count (the most recent N observations) and, when
-    ``max_age_seconds`` is set, by age. Age matters because this feeds a
-    control loop — a count-only window has no notion of "that traffic is
-    over", so an idle tier keeps being adjusted off the last burst it saw.
+    Bounded by count and, when ``max_age_seconds`` is set, by age: a count-only
+    window would keep adjusting an idle tier off the last burst it saw.
     """
 
     def __init__(
@@ -235,15 +165,7 @@ class RollingLatencyWindow:
         max_age_seconds: float | None = None,
         clock: Callable[[], float] = time.monotonic,
     ):
-        """
-        Parameters
-        ----------
-        clock : callable, optional
-            Time source in seconds, monotonic by default. Injectable so a test
-            can age samples by stepping it rather than sleeping: expiry is a
-            pure function of "what time is it", and asserting it against a real
-            sleep tests the runner's timer resolution instead of this class.
-        """
+        """Create the window; ``clock`` is injectable so tests can age samples without sleeping."""
         self._size = size
         self._max_age_seconds = max_age_seconds
         self._clock = clock
@@ -271,13 +193,7 @@ class RollingLatencyWindow:
             return sorted(value for _, value in self._samples)
 
     def get_p95(self) -> float | None:
-        """Return the p95 latency over the current window.
-
-        Returns
-        -------
-        float or None
-            p95 latency in ms, or ``None`` with fewer than 10 live samples.
-        """
+        """Return the p95 latency in ms, or ``None`` with fewer than 10 live samples."""
         sorted_samples = self._live_values()
         if len(sorted_samples) < 10:
             return None
@@ -287,16 +203,9 @@ class RollingLatencyWindow:
         return sorted_samples[idx]
 
     def get_stats(self) -> dict[str, Any]:
-        """Return count, window size, percentiles, and min/max/avg latency.
+        """Return count, window size, p50/p95/p99 and min/max/avg in ms, unrounded.
 
-        Latency values are full precision; rounding for display is the
-        consumer's concern.
-
-        Returns
-        -------
-        dict
-            ``{count, window_size, p50_ms, p95_ms, p99_ms, min_ms, max_ms,
-            avg_ms}`` (latency values are ``None`` when the window is empty).
+        Latency values are ``None`` when the window is empty.
         """
         sorted_samples = self._live_values()
         if not sorted_samples:
@@ -336,10 +245,7 @@ class RollingLatencyWindow:
 
 @dataclass
 class TierState:
-    """Per-tier state for adaptive control.
-
-    Tracks the control loop state for a single tier (interactive or bulk).
-    """
+    """Control-loop state for one tier (interactive or bulk)."""
 
     name: str
     current_slots: int
@@ -363,19 +269,11 @@ class TierState:
 
 
 class AdaptiveConcurrencyController:
-    """Adaptive concurrency controller for QoS tiers.
+    """Adjusts tier slot counts from latency and queue-wait signals.
 
-    Monitors latency and queue wait time to dynamically adjust slot counts.
-    Uses hysteresis to prevent flapping (requires N consecutive signals).
-
-    Decision logic (per tier):
-    1. If p95 > target: signal decrease (system is overloaded)
-    2. Elif p95 < target AND queue_wait > threshold: signal increase (room for more)
-    3. Else: reset signals (stable state)
-
-    After hysteresis_count consecutive signals, adjust slots by step size.
-
-    Uses ResizableLimiter instead of asyncio.Semaphore for correct dynamic resizing.
+    Per tier: p95 over target signals a decrease; p95 under 80% of target with
+    queue-wait p95 over threshold signals an increase; anything else resets the
+    signals. Slots change only after ``hysteresis_count`` consecutive signals.
     """
 
     def __init__(
@@ -410,15 +308,7 @@ class AdaptiveConcurrencyController:
         self._stop_event = asyncio.Event()
 
     def record_latency(self, tier: str, latency_ms: float) -> None:
-        """Record a completed request's latency for adaptive control.
-
-        Parameters
-        ----------
-        tier : str
-            ``"interactive"`` or ``"bulk"``.
-        latency_ms : float
-            Request latency in milliseconds.
-        """
+        """Record a completed request's latency in ms for ``"interactive"`` or ``"bulk"``."""
         if tier == "interactive":
             self._interactive.latency_window.record(latency_ms)
         elif tier == "bulk":
@@ -427,18 +317,10 @@ class AdaptiveConcurrencyController:
             logger.warning("Unknown tier for latency recording", extra={"tier": tier})
 
     def record_queue_wait(self, tier: str, wait_ms: float) -> None:
-        """Record queue wait time for adaptive control.
+        """Record how long a request waited for a slot, in ms.
 
-        Queue wait is the time a request spent waiting for a slot before
-        being admitted. High queue wait indicates demand exceeds capacity,
-        which is the signal to increase slots (if latency is good).
-
-        Parameters
-        ----------
-        tier : str
-            ``"interactive"`` or ``"bulk"``.
-        wait_ms : float
-            Time spent waiting in the queue, in milliseconds.
+        High queue wait means demand exceeds capacity: the increase signal when
+        latency is good.
         """
         if tier == "interactive":
             self._interactive.queue_wait_window.record(wait_ms)
@@ -495,19 +377,10 @@ class AdaptiveConcurrencyController:
         tier: TierState,
         limiter: ResizableLimiter,
     ) -> None:
-        """Evaluate a tier and adjust slots if needed.
+        """Evaluate one tier and adjust its slots after enough consecutive signals.
 
-        Decision logic:
-        1. If p95 > target: signal decrease (system is overloaded)
-        2. Elif p95 < 80% of target AND queue_wait_p95 > threshold: signal increase
-           (latency is good AND there's queue pressure, so we have room for more)
-        3. Else: reset signals (stable state)
-
-        The queue pressure requirement for increases prevents over-opening during
-        "fast-but-memory-hungry" periods where latency is low but we shouldn't
-        add more concurrent work.
-
-        Apply change after hysteresis_count consecutive signals.
+        Increases also require queue pressure, so a fast but memory-hungry period with
+        low latency does not open more concurrent work.
         """
         p95 = tier.latency_window.get_p95()
         queue_wait_p95 = tier.queue_wait_window.get_p95()
@@ -548,21 +421,11 @@ class AdaptiveConcurrencyController:
         limiter: ResizableLimiter,
         delta: int,
     ) -> None:
-        """Adjust limiter capacity by delta slots.
+        """Change limiter capacity by ``delta``, bounded to [min_slots, max_slots].
 
-        Uses ResizableLimiter.resize() for correct dynamic adjustment:
-        - Increasing capacity immediately allows more concurrent requests
-        - Decreasing capacity takes effect as active requests complete
-
-        We bound the result to [min_slots, max_slots], but never past the
-        direction asked for. ``current_slots`` is seeded from the limiter's
-        configured capacity, which can start outside those bounds: with
-        ``interactive_slots=2`` and ``min_slots_interactive=4``, a latency
-        breach asks for -1, and a plain clamp would answer by *doubling*
-        concurrency on an already-overloaded tier (and logging it as an
-        "increase" the loop never requested). Startup validation rejects that
-        configuration, but this loop is also driven directly in tests and by
-        limiters it does not own, so it refuses the reversal here too.
+        The bound never reverses the requested direction: capacity seeded outside the
+        bounds (e.g. ``interactive_slots=2`` with ``min_slots_interactive=4``) must not
+        turn a decrease into a doubling of concurrency on an overloaded tier.
         """
         new_slots = tier.current_slots + delta
         new_slots = max(tier.min_slots, min(tier.max_slots, new_slots))
@@ -610,14 +473,7 @@ class AdaptiveConcurrencyController:
         )
 
     def get_metrics(self) -> dict[str, Any]:
-        """Return adaptive-control metrics for observability.
-
-        Returns
-        -------
-        dict
-            Controller config plus per-tier slot counts, signals, event
-            counts, and latency / queue-wait stats.
-        """
+        """Return controller config plus per-tier slots, signals, events and latency stats."""
         return {
             "enabled": self.config.enabled,
             "target_p95_ms": self.config.latency_target_p95_ms,

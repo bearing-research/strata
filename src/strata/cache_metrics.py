@@ -12,9 +12,8 @@ from typing import Any
 class EvictionPressure(StrEnum):
     """Cache-eviction load band derived from the per-minute eviction rate.
 
-    The rate behind these bands is the worse of the last minute and the mean
-    over the span observed so far, so a burst reaches its documented band as it
-    happens rather than being averaged away across an hour.
+    The rate is the worse of the last minute and the mean so far, so a burst
+    reaches its band as it happens rather than being averaged away.
     """
 
     LOW = "low"  # < 1 eviction per minute
@@ -25,22 +24,9 @@ class EvictionPressure(StrEnum):
 
 @dataclass
 class EvictionEvent:
-    """A single cache eviction.
+    """A single cache eviction; sizes in bytes, ``timestamp`` in Unix seconds.
 
-    Attributes
-    ----------
-    timestamp : float
-        Unix timestamp when the eviction happened.
-    files_evicted : int
-        Number of files removed.
-    bytes_evicted : int
-        Total bytes freed.
-    cache_size_before : int
-        Cache size in bytes immediately before the eviction.
-    cache_size_after : int
-        Cache size in bytes immediately after the eviction.
-    reason : str
-        Why the eviction ran: ``"size_limit"``, ``"manual"``, or ``"ttl"``.
+    ``reason`` is ``"size_limit"``, ``"manual"``, or ``"ttl"``.
     """
 
     timestamp: float
@@ -55,31 +41,9 @@ class EvictionEvent:
 class EvictionStats:
     """Aggregate eviction statistics over the tracked window.
 
-    Attributes
-    ----------
-    total_evictions : int
-        Lifetime eviction count.
-    total_files_evicted : int
-        Lifetime files removed.
-    total_bytes_evicted : int
-        Lifetime bytes freed.
-    evictions_last_minute : int
-        Evictions in the last 60 seconds.
-    evictions_last_hour : int
-        Evictions in the last hour.
-    bytes_evicted_last_minute : int
-        Bytes freed in the last 60 seconds.
-    bytes_evicted_last_hour : int
-        Bytes freed in the last hour.
-    eviction_rate_per_minute : float
-        Evictions per minute, taken as the worse of the last minute and the
-        mean over the span observed so far (capped at an hour). The mean alone
-        cannot distinguish a short thrash from a steady trickle.
-        Evictions per minute, averaged over the last hour.
-    last_eviction_at : float or None
-        Timestamp of the most recent eviction, or ``None`` if none recorded.
-    pressure_level : EvictionPressure
-        Derived load band (``low`` / ``medium`` / ``high`` / ``critical``).
+    ``eviction_rate_per_minute`` is the worse of the last minute and the mean over
+    the span observed so far (capped at an hour): the mean alone cannot tell a
+    short thrash from a steady trickle. ``last_eviction_at`` is ``None`` if none.
     """
 
     total_evictions: int
@@ -100,14 +64,8 @@ class CacheEvictionTracker:
     def __init__(self, max_events: int = 1000, clock: Callable[[], float] = time.time) -> None:
         """Initialize the tracker.
 
-        Parameters
-        ----------
-        max_events : int, optional
-            Maximum recent events retained for rate/window calculations
-            (default 1000). Older events are dropped.
-        clock : callable, optional
-            Source of the current time. Injected so a test can place events in
-            a window it controls rather than sleeping through one.
+        Keeps at most ``max_events`` recent events; ``clock`` is injectable so tests
+        can place events in a window without sleeping.
         """
         self._clock = clock
         self._lock = Lock()
@@ -127,21 +85,7 @@ class CacheEvictionTracker:
         cache_size_after: int,
         reason: str = "size_limit",
     ) -> None:
-        """Record one eviction event and update the lifetime totals.
-
-        Parameters
-        ----------
-        files_evicted : int
-            Number of files removed.
-        bytes_evicted : int
-            Total bytes freed.
-        cache_size_before : int
-            Cache size in bytes before the eviction.
-        cache_size_after : int
-            Cache size in bytes after the eviction.
-        reason : str, optional
-            Why the eviction ran (default ``"size_limit"``).
-        """
+        """Record one eviction event and update the lifetime totals."""
         event = EvictionEvent(
             timestamp=self._clock(),
             files_evicted=files_evicted,
@@ -157,14 +101,7 @@ class CacheEvictionTracker:
             self._total_bytes_evicted += bytes_evicted
 
     def get_stats(self) -> EvictionStats:
-        """Compute aggregate statistics over the retained events.
-
-        Returns
-        -------
-        EvictionStats
-            Lifetime totals, last-minute and last-hour counts, the
-            per-minute rate, and the derived pressure level.
-        """
+        """Compute lifetime totals, minute and hour windows, the rate and the pressure level."""
         now = self._clock()
         one_minute_ago = now - 60
         one_hour_ago = now - 3600
@@ -223,18 +160,7 @@ class CacheEvictionTracker:
         )
 
     def get_recent_events(self, limit: int = 10) -> list[dict[str, Any]]:
-        """Return the most recent eviction events, newest first.
-
-        Parameters
-        ----------
-        limit : int, optional
-            Maximum number of events to return (default 10).
-
-        Returns
-        -------
-        list of dict
-            One mapping per event (all ``EvictionEvent`` fields).
-        """
+        """Return up to ``limit`` recent eviction events as dicts, newest first."""
         with self._lock:
             events = list(self._events)
 
@@ -254,13 +180,7 @@ _eviction_tracker: CacheEvictionTracker | None = None
 
 
 def get_eviction_tracker() -> CacheEvictionTracker:
-    """Return the process-wide eviction tracker, creating it on first use.
-
-    Returns
-    -------
-    CacheEvictionTracker
-        The shared tracker instance.
-    """
+    """Return the process-wide eviction tracker, creating it on first use."""
     global _eviction_tracker
     if _eviction_tracker is None:
         _eviction_tracker = CacheEvictionTracker()

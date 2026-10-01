@@ -1,12 +1,8 @@
-"""In-memory ring buffer of recent structured log entries (observability, B1).
+"""In-memory ring buffer of recent structured log entries.
 
-A ``logging.Handler`` that keeps the most recent N structured entries in a
-bounded deque, each tagged with a monotonic ``cursor`` — so ``GET /v1/logs`` can
-page (``?since=<cursor>``) and ``GET /v1/logs/stream`` can tail (poll by cursor).
-Older entries live only in the stderr stream / disk. Thread-safe, since logging
-emits from executor threads too.
-
-Leaf module: imports only ``strata.logging`` (the JSON formatter) + stdlib.
+Each entry carries a monotonic ``cursor`` so ``GET /v1/logs`` can page (``?since=``) and
+``GET /v1/logs/stream`` can tail. Thread-safe: logging also emits from executor threads.
+Leaf module: imports only ``strata.logging`` and stdlib.
 """
 
 from __future__ import annotations
@@ -63,10 +59,9 @@ class RingBufferLogHandler(logging.Handler):
     ) -> dict[str, Any]:
         """Return entries with ``cursor > since`` matching the filters.
 
-        Returns ``{"entries": [...], "cursor": <latest>}``. ``entries`` is the
-        most recent ``limit`` matches, oldest-first. ``cursor`` is the latest
-        buffered cursor (pass it back as ``since`` to page / tail). ``regex`` is a
-        Python regex matched against the message; a bad pattern raises ``re.error``.
+        Returns ``{"entries": [...], "cursor": <latest>}``: the most recent ``limit`` matches,
+        oldest-first, and the latest buffered cursor to pass back as ``since``. ``regex`` is
+        matched against the message; a bad pattern raises ``re.error``.
         """
         min_level = _LEVELS.get((level or "").lower(), 0)
         pattern = re.compile(regex) if regex else None
@@ -99,10 +94,9 @@ def get_log_ring_buffer() -> RingBufferLogHandler | None:
 
 
 def install_ring_buffer(capacity: int = DEFAULT_CAPACITY) -> RingBufferLogHandler:
-    """Install the ring buffer on the strata + uvicorn loggers (idempotent).
+    """Install the ring buffer on the strata and uvicorn loggers (idempotent).
 
-    Called once at server startup — the buffer is a server-side observability
-    surface, so CLI / harness processes never pay for it.
+    Server startup only, so CLI and harness processes never pay for it.
     """
     global _ring_buffer
     if _ring_buffer is None:

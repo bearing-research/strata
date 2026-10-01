@@ -1,17 +1,6 @@
-"""Build state store for server-mode transforms.
+"""Build state store for server-orchestrated transforms, in the artifact store's database.
 
-The build store tracks async build lifecycle for server-orchestrated transforms:
-- Build creation (when materialize is called)
-- Build state transitions (building -> ready/failed)
-- Build polling (clients can check status)
-
-Build states:
-- pending: Build created but not yet started
-- building: Build is running on executor
-- ready: Build completed successfully, artifact is available
-- failed: Build failed (error message stored)
-
-Database schema stored in artifact_store's artifacts.sqlite for consistency.
+States: ``pending`` -> ``building`` (under a runner's lease) -> ``ready`` or ``failed``.
 """
 
 from __future__ import annotations
@@ -87,31 +76,7 @@ CREATE TABLE IF NOT EXISTS build_attempts (
 
 @dataclass
 class BuildState:
-    """Build state record.
-
-    Attributes:
-        build_id: Unique build identifier (UUID)
-        artifact_id: Target artifact ID
-        version: Target artifact version
-        state: Current state (pending, building, ready, failed)
-        executor_ref: Executor reference (e.g., "duckdb_sql@v1")
-        executor_url: Resolved executor URL from registry
-        tenant_id: Tenant who owns this build (for access control)
-        principal_id: Principal who initiated this build
-        created_at: Unix timestamp when build was created
-        started_at: Unix timestamp when execution started (or None)
-        completed_at: Unix timestamp when execution finished (or None)
-        error_message: Error details if state is "failed"
-        error_code: Error code for programmatic handling
-        input_byte_count: Total input size in bytes (or None)
-        output_byte_count: Total output size in bytes (or None)
-        lease_owner: Unique identifier of the runner node holding the lease
-        lease_expires_at: Unix timestamp when the lease expires
-        input_uris: List of input artifact URIs (for pull model)
-        params: Transform parameters (for pull model)
-        name: Optional name pointer to set after completion
-        logs: Executor stderr/stdout logs (text blob for debugging)
-    """
+    """One build row. Timestamps are Unix seconds; ``input_uris`` and ``params`` serve pull mode."""
 
     build_id: str
     artifact_id: str
@@ -142,7 +107,7 @@ class BuildState:
         return self.tenant_id
 
     def to_dict(self) -> dict:
-        """Convert to dictionary for API responses."""
+        """Return the API response shape."""
         return {
             "build_id": self.build_id,
             "artifact_id": self.artifact_id,
@@ -160,14 +125,7 @@ class BuildState:
 
 
 def _row_to_build_state(row: Any) -> BuildState:
-    """Convert a database row to BuildState.
-
-    Args:
-        row: SQLite row with build data
-
-    Returns:
-        BuildState instance
-    """
+    """Convert a database row to a BuildState."""
     # Columns may be absent on older rows or null.
     input_uris = None
     params = None
@@ -222,15 +180,10 @@ def _row_to_build_state(row: Any) -> BuildState:
 
 
 class BuildStore:
-    """Build state store, on whichever backend the artifact store uses.
+    """Build state store sharing the artifact store's dialect and database.
 
-    Thread-safe: a connection per operation, from the dialect.
-
-    Build rows live in the artifact store's database, so this shares its
-    dialect rather than owning one. That is not only tidiness: with metadata
-    on Postgres, a build claimed on one node has to be visible to
-    ``GET /v1/builds/{id}`` on another, which is the whole reason the
-    artifact store moved off a local file.
+    Thread-safe: a connection per operation. Sharing the database lets a build
+    claimed on one node be seen from another when metadata is on Postgres.
     """
 
     def __init__(
@@ -239,21 +192,13 @@ class BuildStore:
         dialect: SqlDialect | None = None,
         clock: Callable[[], float] = time.time,
     ):
-        """Initialize build store.
+        """Open the store and create its schema.
 
         Args:
-            db_path: Path to the SQLite database (shared with the artifact
-                store). Ignored when ``dialect`` is given, since the backend
-                then decides where state lives.
-            dialect: Optional metadata backend. Defaults to SQLite at
-                ``db_path``, which is what personal mode wants. Pass the
-                artifact store's dialect to share its database and pool.
-            clock: Wall-clock source in seconds. Injectable so a test can
-                expire a lease by stepping it instead of sleeping past it.
-                Lease expiry is a comparison between two stored timestamps;
-                sleeping on it measures the runner's timer resolution and the
-                cost of a SQLite round-trip, which is what made these tests
-                flake on Windows.
+            db_path: SQLite database; ignored when ``dialect`` is given.
+            dialect: Metadata backend; pass the artifact store's to share its database.
+            clock: Wall-clock source in seconds, injectable so tests can expire a
+                lease without sleeping.
         """
         self.db_path = db_path
         self._dialect: SqlDialect = dialect if dialect is not None else SqliteDialect(db_path)
@@ -265,7 +210,7 @@ class BuildStore:
         return self._dialect.connect()
 
     def _init_schema(self) -> None:
-        """Initialize build state schema with migrations for lease columns."""
+        """Create the build tables; on SQLite, add columns missing from older databases."""
         conn = self._get_connection()
         try:
             # Only SQLite has older databases to migrate. Other backends create the schema
@@ -332,22 +277,9 @@ class BuildStore:
         params: dict | None = None,
         name: str | None = None,
     ) -> BuildState:
-        """Create a new build record in pending state.
+        """Create a build record in ``pending`` state.
 
-        Args:
-            build_id: Unique build ID (UUID)
-            artifact_id: Target artifact ID
-            version: Target artifact version
-            executor_ref: Executor reference
-            executor_url: Resolved executor URL
-            tenant_id: Tenant who owns this build
-            principal_id: Principal who initiated this build
-            input_uris: List of input artifact URIs (for pull model)
-            params: Transform parameters (for pull model)
-            name: Optional name pointer to set after completion
-
-        Returns:
-            Created BuildState record
+        ``name`` is a name pointer to set once the build completes.
         """
         conn = self._get_connection()
         try:
@@ -397,14 +329,7 @@ class BuildStore:
             conn.close()
 
     def get_build(self, build_id: str) -> BuildState | None:
-        """Get build state by ID.
-
-        Args:
-            build_id: Build ID to look up
-
-        Returns:
-            BuildState or None if not found
-        """
+        """Get a build by ID, or None if not found."""
         conn = self._get_connection()
         try:
             cursor = conn.execute(
@@ -429,11 +354,7 @@ class BuildStore:
             conn.close()
 
     def update_build_output(self, build_id: str, artifact_id: str, version: int) -> bool:
-        """Repoint a build at the canonical artifact it produced.
-
-        This is used when finalization deduplicates to an existing artifact
-        with the same provenance.
-        """
+        """Repoint a build at the existing artifact finalization deduplicated it to."""
         conn = self._get_connection()
         try:
             cursor = conn.execute(
@@ -450,15 +371,9 @@ class BuildStore:
             conn.close()
 
     def start_build(self, build_id: str) -> bool:
-        """Mark build as started (pending -> building).
+        """Move a build from pending to building, without a lease; prefer ``claim_build()``.
 
-        DEPRECATED: Use claim_build() for lease-based claiming instead.
-
-        Args:
-            build_id: Build ID to update
-
-        Returns:
-            True if updated, False if not found or wrong state
+        Returns False if not found or not pending.
         """
         conn = self._get_connection()
         try:
@@ -481,19 +396,9 @@ class BuildStore:
         lease_owner: str,
         lease_duration_seconds: float = 60.0,
     ) -> bool:
-        """Claim a build with a lease (pending -> building).
+        """Claim a pending build under a lease, atomically; False if another runner won.
 
-        Uses optimistic locking to prevent multiple runners from claiming
-        the same build. The lease must be renewed periodically via
-        renew_lease() or the build can be reclaimed by another runner.
-
-        Args:
-            build_id: Build ID to claim
-            lease_owner: Unique identifier of the runner claiming the build
-            lease_duration_seconds: How long the lease is valid (default 60s)
-
-        Returns:
-            True if successfully claimed, False if already claimed or wrong state
+        Renew with ``renew_lease()`` or another runner may reclaim the build.
         """
         conn = self._get_connection()
         try:
@@ -521,17 +426,9 @@ class BuildStore:
         lease_owner: str,
         lease_duration_seconds: float = 60.0,
     ) -> bool:
-        """Renew the lease on a build.
+        """Extend the lease from now.
 
-        Only succeeds if the caller currently holds the lease.
-
-        Args:
-            build_id: Build ID to renew
-            lease_owner: Must match the current lease owner
-            lease_duration_seconds: New lease duration from now
-
-        Returns:
-            True if lease renewed, False if not owned by caller or not building
+        Returns False unless ``lease_owner`` holds it and the build is building.
         """
         conn = self._get_connection()
         try:
@@ -558,18 +455,9 @@ class BuildStore:
         new_lease_owner: str,
         lease_duration_seconds: float = 60.0,
     ) -> bool:
-        """Reclaim a build with an expired lease.
+        """Take over a building build whose lease has expired (a dead runner's orphan).
 
-        Used for orphan recovery when a runner dies without completing a build.
-        Only succeeds if the build is in 'building' state and the lease has expired.
-
-        Args:
-            build_id: Build ID to reclaim
-            new_lease_owner: New owner taking over the build
-            lease_duration_seconds: Lease duration for new owner
-
-        Returns:
-            True if reclaimed, False if lease not expired or wrong state
+        Returns False if the lease has not expired or the build is not building.
         """
         conn = self._get_connection()
         try:
@@ -593,17 +481,7 @@ class BuildStore:
             conn.close()
 
     def list_expired_leases(self, limit: int = 10) -> list[BuildState]:
-        """List builds with expired leases (orphans).
-
-        These are builds in 'building' state where the lease has expired,
-        indicating the runner may have crashed.
-
-        Args:
-            limit: Maximum number of builds to return
-
-        Returns:
-            List of BuildState records with expired leases
-        """
+        """List building builds whose lease has expired (likely orphans)."""
         conn = self._get_connection()
         try:
             now = self._clock()
@@ -636,24 +514,14 @@ class BuildStore:
         logs: str | None = None,
         lease_owner: str | None = None,
     ) -> bool:
-        """Mark build as completed (building -> ready).
+        """Mark a build ready (building -> ready).
 
         Args:
-            build_id: Build ID to update
-            output_byte_count: Output size in bytes
-            logs: Executor stdout/stderr logs (optional)
-            lease_owner: When given, the update only applies if this owner
-                still holds the lease. This is the counterpart to
-                ``claim_build``: claiming decides who starts a build,
-                completing decides who is allowed to publish its result. A
-                runner whose lease was stolen (a GC pause or a partition
-                longer than the lease) keeps executing by design, so without
-                this check it published over the runner that legitimately
-                took the build over.
+            lease_owner: When given, apply only if this owner still holds the lease,
+                so a runner whose lease was taken over cannot publish over the new owner.
 
         Returns:
-            True if updated, False if not found, wrong state, or the lease is
-            held by someone else
+            False if not found, not building, or the lease is held by someone else.
         """
         conn = self._get_connection()
         try:
@@ -686,18 +554,10 @@ class BuildStore:
     ) -> bool:
         """Complete a build on the caller's connection, without committing.
 
-        The fence ``ArtifactStore.finalize_artifact`` runs inside its own
-        transaction, so marking the artifact ready and completing the build
-        commit together or not at all: an attempt that lost its lease can no
-        longer make its result the ready artifact first and be told it lost
-        afterwards. Builds live in the artifact store's database, which is what
-        makes one transaction possible.
-
-        ``lease_expires_at`` pins the claim, not just the owner: every
-        executor holds the lease as ``external:manifest``, and only the
-        deadline tells one manifest's claim from the next. The build is
-        repointed at ``artifact_id``/``version``, which differ from its own
-        when finalize deduplicated to an existing artifact.
+        Lets ``ArtifactStore.finalize_artifact`` mark the artifact ready and complete
+        the build in one transaction. ``lease_expires_at`` pins the exact claim, since
+        every executor holds the lease as ``external:manifest``. The build is
+        repointed at ``artifact_id``/``version`` (they differ after dedup).
 
         Returns:
             True if this caller held the lease and the build is now complete.
@@ -731,11 +591,10 @@ class BuildStore:
         *,
         writable_until: float,
     ) -> None:
-        """Note a blob key a build attempt may write, before anything can write it.
+        """Record a blob key a build attempt may write, before anything can write it.
 
-        ``writable_until`` is when the last capability to write the key runs
-        out: a signed upload URL's expiry, or now for a runner, which writes
-        its own key itself. Recording an attempt again keeps the later time.
+        ``writable_until`` is when the last write capability expires (a signed URL's
+        expiry, or now for a runner). Re-recording keeps the later time.
         """
         conn = self._get_connection()
         try:
@@ -756,13 +615,10 @@ class BuildStore:
             conn.close()
 
     def settled_attempts(self, limit: int = 100) -> list[tuple[str, str, int, str, bool]]:
-        """Recorded attempts that nothing will write, publish or read as new again.
+        """List attempts whose build is over and whose key nothing can still write.
 
-        An attempt is settled once its build is over (ready, failed, or gone
-        with its artifact) and no capability to write its key is left. Each
-        comes back as ``(build_id, artifact_id, version, attempt, promoted)``:
-        a promoted attempt's bytes are the version's and stay, and every other
-        attempt's bytes can go.
+        Each is ``(build_id, artifact_id, version, attempt, promoted)``; only a
+        promoted attempt's bytes must be kept.
         """
         conn = self._get_connection()
         try:
@@ -806,23 +662,14 @@ class BuildStore:
         logs: str | None = None,
         lease_owner: str | None = None,
     ) -> bool:
-        """Mark build as failed (building -> failed).
+        """Mark a build failed (building -> failed).
 
         Args:
-            build_id: Build ID to update
-            error_message: Error details
-            error_code: Error code for programmatic handling
-            logs: Executor stdout/stderr logs (optional)
-            lease_owner: When given, the update only applies if this owner
-                still holds the lease, the same fence ``complete_build``
-                takes. A runner whose lease was taken over keeps executing,
-                and when its executor then timed out it failed the build the
-                new owner was running, which gave up on a build that would
-                have succeeded.
+            lease_owner: When given, apply only if this owner still holds the lease,
+                as in ``complete_build``.
 
         Returns:
-            True if updated, False if not found, wrong state, or the lease is
-            held by someone else
+            False if not found, not building, or the lease is held by someone else.
         """
         conn = self._get_connection()
         try:
@@ -842,14 +689,7 @@ class BuildStore:
             conn.close()
 
     def list_pending_builds(self, limit: int = 100) -> list[BuildState]:
-        """List builds in pending state (ready for execution).
-
-        Args:
-            limit: Maximum number of builds to return
-
-        Returns:
-            List of pending BuildState records, oldest first
-        """
+        """List pending builds, oldest first."""
         conn = self._get_connection()
         try:
             cursor = conn.execute(
@@ -878,16 +718,7 @@ class BuildStore:
         limit: int = 100,
         state: str | None = None,
     ) -> list[BuildState]:
-        """List builds for a specific tenant.
-
-        Args:
-            tenant_id: Tenant ID to filter by
-            limit: Maximum number of builds to return
-            state: Optional state filter
-
-        Returns:
-            List of BuildState records, newest first
-        """
+        """List a tenant's builds, newest first, optionally filtered by state."""
         conn = self._get_connection()
         try:
             if state:
@@ -928,14 +759,7 @@ class BuildStore:
             conn.close()
 
     def cleanup_old_builds(self, max_age_days: float = 7.0) -> int:
-        """Clean up old completed/failed builds.
-
-        Args:
-            max_age_days: Maximum age in days
-
-        Returns:
-            Number of builds deleted
-        """
+        """Delete ready/failed builds completed more than ``max_age_days`` ago; return the count."""
         conn = self._get_connection()
         try:
             cutoff = self._clock() - (max_age_days * 86400)
@@ -953,11 +777,7 @@ class BuildStore:
             conn.close()
 
     def get_stats(self) -> dict:
-        """Get build statistics.
-
-        Returns:
-            Dictionary with build counts by state
-        """
+        """Return build counts, total and by state."""
         conn = self._get_connection()
         try:
             cursor = conn.execute(
@@ -990,16 +810,9 @@ def get_build_store(
     db_path: Path | None = None,
     dialect: SqlDialect | None = None,
 ) -> BuildStore | None:
-    """Get the build store singleton.
+    """Get the build store singleton, or None if not yet created.
 
-    Args:
-        db_path: Path to the SQLite database (required on first call)
-        dialect: Optional metadata backend, normally the artifact store's so
-            both share one database and one pool. Like the artifact-store
-            factory, this only applies on the call that creates the singleton.
-
-    Returns:
-        BuildStore instance, or None if not initialized
+    ``db_path`` and ``dialect`` apply only on the call that creates it.
     """
     global _build_store
     if _build_store is None and db_path is not None:

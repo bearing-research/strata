@@ -1,15 +1,9 @@
-"""Signed-URL signing for the pull-model executor protocol.
+"""HMAC-signed capability URLs for the pull-model executor protocol.
 
-In the pull model an executor fetches its inputs and pushes its output directly
-to Strata's storage through short-lived, HMAC-signed capability URLs. This keeps
-the data plane off Strata (no bandwidth bottleneck), lets executors retry
-transfers natively, and lowers Strata's memory pressure.
-
-Each URL embeds its operation, the resource identifiers, an expiry, and — for
-uploads — a size limit, signed with HMAC-SHA256. The signature prevents
-tampering and the expiry prevents replay. The signing secret is held by a
-:class:`URLSigner` instance rather than process-global state, so it is explicit,
-injectable, and testable.
+Executors fetch inputs and upload output directly through short-lived URLs, keeping the
+data plane off Strata. Each URL signs (HMAC-SHA256) its operation, resource ids, expiry
+and, for uploads, a size limit: the signature prevents tampering and the expiry bounds
+replay.
 """
 
 from __future__ import annotations
@@ -28,21 +22,11 @@ from strata.artifact_store import attempt_blob_id
 
 
 def lease_token(lease_owner: str | None, lease_expires_at: float | None) -> str:
-    """Render a claim as the string a finalize signature covers.
+    """Render a claim as the string a finalize signature covers; empty without a lease.
 
-    Empty when there is no lease, which is what keeps the in-process notebook
-    path and legacy rows working unchanged.
-
-    The deadline is what makes this per-*claim* rather than per-owner: the
-    orphan sweep hands a reclaimed build to a runner with a new deadline, and
-    the route that re-issues a manifest renews the lease to cover the fresh
-    URLs. Either way the token moves, so capabilities minted against the
-    previous claim stop verifying -- including the earlier set from a re-fetch,
-    which until now stayed usable alongside the new one.
-
-    ``repr`` on the float, so the token a URL carries and the token rebuilt
-    from the stored row are the same string for the same value rather than two
-    roundings of it.
+    The deadline makes it per-claim, not per-owner: a reclaim or a re-issued manifest moves
+    the deadline, so capabilities minted for the previous claim stop verifying. ``repr`` on
+    the float so the URL's token and the one rebuilt from the stored row are the same string.
     """
     if not lease_owner or lease_expires_at is None:
         return ""
@@ -52,11 +36,9 @@ def lease_token(lease_owner: str | None, lease_expires_at: float | None) -> str:
 def lease_attempt(lease: str) -> str | None:
     """The blob attempt id an executor holding ``lease`` writes under.
 
-    Each manifest renews the lease, so each one gets its own attempt: an
-    executor still holding an earlier manifest can upload, but only to a key
-    finalize never reads. A digest because the token itself (``owner:deadline``)
-    is not a safe blob key. ``None`` without a lease, which keeps the shared
-    key for the notebook's in-process signed path and legacy rows.
+    Each manifest renews the lease and so gets its own attempt: a holder of an earlier
+    manifest can upload, but only to a key finalize never reads. A digest because
+    ``owner:deadline`` is not a safe blob key. ``None`` without a lease (the shared key).
     """
     if not lease:
         return None
@@ -65,19 +47,7 @@ def lease_attempt(lease: str) -> str | None:
 
 @dataclass(frozen=True)
 class SignedDownloadURL:
-    """Signed URL for downloading an input artifact.
-
-    Attributes
-    ----------
-    url : str
-        Full URL including the signature query parameters.
-    artifact_id : str
-        Artifact being downloaded.
-    version : int
-        Artifact version being downloaded.
-    expires_at : float
-        Unix timestamp after which the URL is rejected.
-    """
+    """Signed URL for downloading an input artifact; ``expires_at`` is epoch seconds."""
 
     url: str
     artifact_id: str
@@ -87,19 +57,7 @@ class SignedDownloadURL:
 
 @dataclass(frozen=True)
 class SignedUploadURL:
-    """Signed URL for uploading build output.
-
-    Attributes
-    ----------
-    url : str
-        Full URL including the signature query parameters.
-    build_id : str
-        Build the upload belongs to.
-    max_bytes : int
-        Maximum permitted upload size, in bytes.
-    expires_at : float
-        Unix timestamp after which the URL is rejected.
-    """
+    """Signed URL for uploading build output up to ``max_bytes``; ``expires_at`` is epoch secs."""
 
     url: str
     build_id: str
@@ -113,17 +71,7 @@ class SignedUploadURL:
 
 @dataclass(frozen=True)
 class SignedFinalizeURL:
-    """Signed URL for finalizing a build output.
-
-    Attributes
-    ----------
-    url : str
-        Full URL including the signature query parameters.
-    build_id : str
-        Build being finalized.
-    expires_at : float
-        Unix timestamp after which the URL is rejected.
-    """
+    """Signed URL for finalizing a build output; ``expires_at`` is epoch seconds."""
 
     url: str
     build_id: str
@@ -132,26 +80,9 @@ class SignedFinalizeURL:
 
 @dataclass(frozen=True)
 class BuildManifest:
-    """Bundle of signed URLs handed to an executor for one build.
+    """Signed URLs handed to an executor to pull each input, push the output, and finalize.
 
-    The executor uses it to pull each input, push the output, and finalize.
-
-    Attributes
-    ----------
-    build_id : str
-        Build the manifest is for.
-    metadata : dict
-        Build metadata (transform spec, params, and so on).
-    input_urls : list of SignedDownloadURL
-        One signed download URL per input artifact.
-    output_url : SignedUploadURL
-        Signed URL the executor uploads its output to.
-    finalize_url : str
-        URL the executor calls once the upload is complete.
-    log_url : str
-        URL the executor appends console output to while the build runs.
-        Optional for the executor to use; a worker that ignores it behaves
-        exactly as one that predates the field.
+    ``log_url`` is optional for the executor; ignoring it changes nothing else.
     """
 
     build_id: str
@@ -164,15 +95,8 @@ class BuildManifest:
     def to_dict(self) -> dict[str, Any]:
         """Serialize to the JSON wire shape sent to the executor.
 
-        The wire shape regroups the URLs under ``inputs`` / ``output``. Each
-        input is the full ``SignedDownloadURL``; the output drops the redundant
-        ``build_id`` (already carried at the top level) — the one place the wire
-        intentionally diverges from a plain field dump.
-
-        Returns
-        -------
-        dict
-            ``{build_id, metadata, inputs, output, finalize_url, log_url}``.
+        ``{build_id, metadata, inputs, output, finalize_url, log_url}``; ``output`` omits the
+        ``build_id`` already carried at the top level.
         """
         output = asdict(self.output_url)
         del output["build_id"]
@@ -191,60 +115,22 @@ class BuildManifest:
 class URLSigner:
     """Signs and verifies pull-model capability URLs with one HMAC secret.
 
-    A single instance is constructed at server startup from the configured
-    signing secret and shared by the request handlers and the build service.
-    Holding the secret on an instance — rather than module-global state — keeps
-    it explicit and injectable, and lets tests run with an isolated secret.
-
-    Parameters
-    ----------
-    secret : bytes
-        HMAC-SHA256 signing secret. Use a stable, high-entropy value in
-        production so signed URLs survive restarts and match across replicas.
-
-    Notes
-    -----
-    A signed payload records ``version`` as an ``int`` and ``expires_at`` as a
-    ``float``, while the URL carries every parameter as a string. A verifier
-    must therefore coerce the query parameters back to those exact types before
-    calling the matching ``verify_*`` method, or verification fails.
+    Use a stable, high-entropy ``secret`` in production so URLs survive restarts and match
+    across replicas. A verifier must coerce query parameters back to their signed types
+    (``version`` int, ``expires_at`` float) before calling ``verify_*``, or verification fails.
     """
 
     def __init__(self, secret: bytes) -> None:
         self._secret = secret
 
     def _sign(self, data: dict[str, Any]) -> str:
-        """Return the base64 HMAC-SHA256 signature of ``data``.
-
-        Parameters
-        ----------
-        data : dict
-            Payload to sign; serialized as canonical (key-sorted) JSON.
-
-        Returns
-        -------
-        str
-            URL-safe base64-encoded signature.
-        """
+        """Return the URL-safe base64 HMAC-SHA256 of ``data`` as key-sorted JSON."""
         message = json.dumps(data, sort_keys=True).encode()
         signature = hmac.new(self._secret, message, hashlib.sha256).digest()
         return base64.urlsafe_b64encode(signature).decode()
 
     def _verify(self, data: dict[str, Any], signature: str) -> bool:
-        """Check a signature against ``data`` in constant time.
-
-        Parameters
-        ----------
-        data : dict
-            Payload that was signed.
-        signature : str
-            Base64-encoded signature to check.
-
-        Returns
-        -------
-        bool
-            ``True`` if the signature matches.
-        """
+        """Check a signature against ``data`` in constant time."""
         expected = self._sign(data)
         # Bytes, not str: ``signature`` arrives from a query parameter, and
         # ``compare_digest`` raises TypeError comparing non-ASCII strings.
@@ -258,25 +144,9 @@ class URLSigner:
         build_id: str,
         expiry_seconds: float = 300.0,
     ) -> SignedDownloadURL:
-        """Sign a URL for downloading an artifact.
+        """Sign a URL for downloading an artifact (default validity 300 s).
 
-        Parameters
-        ----------
-        base_url : str
-            Base URL of the Strata server, e.g. ``"http://localhost:8765"``.
-        artifact_id : str
-            Artifact to download.
-        version : int
-            Artifact version to download.
-        build_id : str
-            Build the download is for (recorded for audit; not an access check).
-        expiry_seconds : float, optional
-            URL validity window in seconds (default 300, i.e. 5 minutes).
-
-        Returns
-        -------
-        SignedDownloadURL
-            The signed URL and its metadata.
+        ``build_id`` is recorded for audit, not checked for access.
         """
         expires_at = time.time() + expiry_seconds
         data = {
@@ -309,26 +179,7 @@ class URLSigner:
         expires_at: float,
         signature: str,
     ) -> bool:
-        """Verify a download URL's signature and expiry.
-
-        Parameters
-        ----------
-        artifact_id : str
-            Artifact ID from the URL.
-        version : int
-            Artifact version from the URL.
-        build_id : str
-            Build ID from the URL.
-        expires_at : float
-            Expiry timestamp from the URL.
-        signature : str
-            Signature from the URL.
-
-        Returns
-        -------
-        bool
-            ``True`` if the signature is valid and the URL has not expired.
-        """
+        """True when a download URL's signature is valid and it has not expired."""
         if time.time() > expires_at:
             return False
         data = {
@@ -348,27 +199,10 @@ class URLSigner:
         expiry_seconds: float = 600.0,
         attempt: str | None = None,
     ) -> SignedUploadURL:
-        """Sign a URL for uploading build output.
+        """Sign a URL for uploading build output (default validity 600 s).
 
-        Parameters
-        ----------
-        base_url : str
-            Base URL of the Strata server.
-        build_id : str
-            Build the upload is for.
-        max_bytes : int
-            Maximum permitted upload size, in bytes (signed, so it cannot be
-            raised by tampering with the URL).
-        expiry_seconds : float, optional
-            URL validity window in seconds (default 600, i.e. 10 minutes).
-        attempt : str, optional
-            The build attempt the bytes belong to (``lease_attempt``). Signed,
-            so an upload cannot be pointed at another attempt's key.
-
-        Returns
-        -------
-        SignedUploadURL
-            The signed URL and its metadata.
+        ``max_bytes`` and ``attempt`` (from ``lease_attempt``) are signed, so the size cap cannot
+        be raised and the upload cannot target another attempt's key.
         """
         expires_at = time.time() + expiry_seconds
         data: dict[str, Any] = {
@@ -402,24 +236,7 @@ class URLSigner:
         signature: str,
         attempt: str = "",
     ) -> bool:
-        """Verify an upload URL's signature and expiry.
-
-        Parameters
-        ----------
-        build_id : str
-            Build ID from the URL.
-        max_bytes : int
-            Maximum upload size from the URL.
-        expires_at : float
-            Expiry timestamp from the URL.
-        signature : str
-            Signature from the URL.
-
-        Returns
-        -------
-        bool
-            ``True`` if the signature is valid and the URL has not expired.
-        """
+        """True when an upload URL's signature (with any ``attempt``) is valid and unexpired."""
         if time.time() > expires_at:
             return False
         data: dict[str, Any] = {
@@ -440,13 +257,8 @@ class URLSigner:
     ) -> str:
         """Sign a URL an executor appends console output to while it runs.
 
-        Its own ``op``, so a capability handed out for one purpose cannot be
-        replayed as another: a leaked log URL appends text nobody will act on,
-        and must not become a way to finalize or upload.
-
-        No lease. Console is advisory — the bundle remains the record — and a
-        chunk arriving from a worker whose claim has since been reclaimed is
-        worth showing, not worth a 409 the worker cannot act on either.
+        Its own ``op``, so a leaked log URL cannot be replayed to upload or finalize. No lease:
+        console is advisory, and a chunk from a reclaimed worker is worth showing, not a 409.
         """
         expires_at = time.time() + expiry_seconds
         data = {"op": "log", "build_id": build_id, "expires_at": expires_at}
@@ -461,28 +273,11 @@ class URLSigner:
         lease_owner: str | None = None,
         lease_expires_at: float | None = None,
     ) -> SignedFinalizeURL:
-        """Sign a URL for finalizing a build.
+        """Sign a URL for finalizing a build (default validity 600 s).
 
-        Parameters
-        ----------
-        base_url : str
-            Base URL of the Strata server.
-        build_id : str
-            Build to finalize.
-        expiry_seconds : float, optional
-            URL validity window in seconds (default 600, i.e. 10 minutes).
-        lease_owner, lease_expires_at : optional
-            The claim this capability belongs to. Without them a finalize URL
-            names only its build, so two executors handed capabilities for the
-            same build at different times present indistinguishable requests
-            and the server cannot tell a current holder from a reclaimed one.
-            Signed, so a stale holder cannot edit itself into the current
-            claim. Omitted by the in-process notebook path, which has no lease.
-
-        Returns
-        -------
-        SignedFinalizeURL
-            The signed URL and its metadata.
+        ``lease_owner`` and ``lease_expires_at`` bind it to one claim, so the server can tell a
+        current holder from a reclaimed one; signed, so a stale holder cannot forge the current
+        claim. The in-process notebook path has no lease and omits them.
         """
         expires_at = time.time() + expiry_seconds
         lease = lease_token(lease_owner, lease_expires_at)
@@ -524,22 +319,7 @@ class URLSigner:
         signature: str,
         lease: str = "",
     ) -> bool:
-        """Verify a finalize URL's signature and expiry.
-
-        Parameters
-        ----------
-        build_id : str
-            Build ID from the URL.
-        expires_at : float
-            Expiry timestamp from the URL.
-        signature : str
-            Signature from the URL.
-
-        Returns
-        -------
-        bool
-            ``True`` if the signature is valid and the URL has not expired.
-        """
+        """True when a finalize URL's signature (including ``lease``) is valid and unexpired."""
         if time.time() > expires_at:
             return False
         data = {
@@ -563,38 +343,12 @@ class URLSigner:
         blob_store: Any = None,
         blob_id: Callable[[str, int], str] | None = None,
     ) -> BuildManifest:
-        """Assemble the full signed-URL manifest for a build.
+        """Assemble the signed-URL manifest for a build: inputs, output, finalize and log.
 
-        Bundles the download URL for each input, the output upload URL, and the
-        finalize URL the executor needs to run the build end to end.
-
-        Parameters
-        ----------
-        base_url : str
-            Base URL of the Strata server.
-        build_id : str
-            Build the manifest is for.
-        metadata : dict
-            Build metadata (transform spec, params, and so on).
-        input_artifacts : list of tuple of (str, int)
-            ``(artifact_id, version)`` for each input.
-        max_output_bytes : int
-            Maximum permitted output size, in bytes.
-        url_expiry_seconds : float, optional
-            Validity window applied to every URL in the manifest (default 600).
-        blob_store : BlobStore, optional
-            When given and able to presign, inputs are read and the output is
-            uploaded straight from the object store, and only finalize (and
-            the log) stay Strata routes. The output's key is the build's
-            artifact, named by ``metadata["artifact_id"]`` and ``["version"]``.
-        blob_id : callable, optional
-            ``(artifact_id, version) -> blob id`` for an input's presigned
-            read, which may be a build attempt's key rather than the id.
-
-        Returns
-        -------
-        BuildManifest
-            The assembled manifest.
+        ``input_artifacts`` are ``(artifact_id, version)`` pairs. With a ``blob_store`` that can
+        presign, inputs and output go straight to the object store and only finalize and log stay
+        Strata routes; the output key is ``metadata["artifact_id"]`` / ``["version"]``.
+        ``blob_id`` maps an input to its presigned blob id, which may be an attempt's key.
         """
         expires_at = time.time() + url_expiry_seconds
         # The executor writes under this claim's own attempt, so an earlier

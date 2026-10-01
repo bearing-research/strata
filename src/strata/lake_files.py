@@ -1,15 +1,9 @@
 """Opening the Parquet files a scan plan lists, wherever they are stored.
 
-The planner lists data files by the paths the catalog recorded: local paths,
-``s3://``, ``gs://``, or Azure's ``abfs://`` / ``abfss://`` / ``az://``. The
-fetcher and the metadata cache both open them through :func:`open_parquet`, so
-a warehouse on any of those stores scans the same way.
-
-S3 uses the filesystem built from Strata's S3 settings, unless the table's
-catalog vended credentials for that table's location
-(:func:`register_vended_credentials`, called by the planner when it loads a
-table from a named catalog), in which case files under that location are read
-with those. GCS and Azure use the same settings the artifact blob store does.
+Paths are as the catalog recorded them: local, ``s3://``, ``gs://``, or Azure
+(``abfs://``, ``abfss://``, ``az://``). S3 uses Strata's S3 settings unless the catalog
+vended credentials for the table's location (:func:`register_vended_credentials`); GCS and
+Azure use the artifact blob store's settings.
 """
 
 from __future__ import annotations
@@ -146,8 +140,7 @@ def open_parquet(
 ) -> pq.ParquetFile:
     """Open *file_path* for reading, on whichever store it names.
 
-    *metadata*, the file's footer already parsed, skips reading and parsing it
-    again.
+    Pass *metadata* (the already-parsed footer) to skip reading it again.
     """
     if file_path.startswith("s3://"):
         filesystem = _vended_for(file_path) or s3_filesystem or pafs.S3FileSystem()

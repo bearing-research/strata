@@ -1,14 +1,4 @@
-"""Memory profiling utilities for Strata.
-
-This module provides detailed memory profiling information for diagnosing
-memory-related performance issues, including:
-- PyArrow memory pool allocations
-- Python memory statistics
-- Process-level memory usage
-- Memory allocation patterns
-
-These are exposed via /v1/debug/memory for operational diagnostics.
-"""
+"""Memory profiling for ``/v1/debug/memory``: Arrow pools, Python GC and process RSS."""
 
 import gc
 from collections.abc import Mapping
@@ -164,13 +154,7 @@ class MemorySnapshot:
 
 
 def get_memory_snapshot() -> MemorySnapshot:
-    """Capture current memory state across Arrow, Python, and process levels.
-
-    This is a relatively cheap operation suitable for periodic sampling.
-
-    Returns:
-        MemorySnapshot with current memory statistics
-    """
+    """Capture current Arrow, Python and process memory; cheap enough for periodic sampling."""
     pool = pa.default_memory_pool()
     arrow_bytes = pool.bytes_allocated()
     arrow_max = pool.max_memory()
@@ -212,11 +196,7 @@ def get_memory_snapshot() -> MemorySnapshot:
 
 
 def get_arrow_allocations() -> ArrowAllocationsDict:
-    """Get detailed Arrow memory allocation information.
-
-    Returns information about all available Arrow memory pools
-    and their current allocation state.
-    """
+    """Report allocation state for every available Arrow memory pool."""
     result: ArrowAllocationsDict = {
         "default_pool": {
             "backend": pa.default_memory_pool().backend_name,
@@ -257,13 +237,7 @@ def get_arrow_allocations() -> ArrowAllocationsDict:
 
 
 def get_python_memory_stats() -> PythonMemoryStatsDict:
-    """Get detailed Python memory statistics.
-
-    Includes information about:
-    - Object counts by type (top types)
-    - GC thresholds and counts
-    - Reference cycle information
-    """
+    """Report top object types by count and GC thresholds and generation stats."""
     gc_stats = gc.get_stats()
     thresholds = gc.get_threshold()
 
@@ -302,13 +276,9 @@ def get_python_memory_stats() -> PythonMemoryStatsDict:
 
 
 def get_detailed_memory_report() -> DetailedMemoryReportDict:
-    """Get comprehensive memory report for debugging.
+    """Build the full Arrow, Python and process memory report.
 
-    This is more expensive than get_memory_snapshot() and should
-    only be called on-demand (not for periodic sampling).
-
-    Returns:
-        Dictionary with Arrow, Python, and process memory details
+    More expensive than :func:`get_memory_snapshot`; call on demand, not for sampling.
     """
     snapshot = get_memory_snapshot()
     arrow_details = get_arrow_allocations()

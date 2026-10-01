@@ -1,7 +1,6 @@
 """Parquet fetcher: reads row groups into Arrow RecordBatches.
 
-This module provides a clean seam for future Rust acceleration.
-The Fetcher protocol defines the interface that any implementation must satisfy.
+The Fetcher protocol is the seam for swapping in another implementation.
 """
 
 import threading
@@ -29,41 +28,19 @@ _MAX_FILE_CACHE_SIZE = 128
 
 
 class Fetcher(Protocol):
-    """Protocol for fetching row groups from Parquet files.
-
-    This abstraction allows swapping the Python implementation
-    with a Rust-based one without changing the public API.
-    """
+    """Protocol for fetching row groups from Parquet files."""
 
     def fetch(self, task: Task) -> pa.RecordBatch:
-        """Fetch a single row group as a RecordBatch.
-
-        Args:
-            task: The task describing which row group to fetch
-
-        Returns:
-            Arrow RecordBatch containing the row group data
-        """
+        """Fetch a single row group as a RecordBatch."""
         ...
 
     def fetch_to_table(self, tasks: list[Task]) -> pa.Table:
-        """Fetch multiple row groups and combine into a Table.
-
-        Args:
-            tasks: List of tasks to fetch
-
-        Returns:
-            Arrow Table containing all row group data
-        """
+        """Fetch multiple row groups and combine them into a Table."""
         ...
 
 
 class PyArrowFetcher:
-    """Python implementation of Parquet fetcher using PyArrow.
-
-    Supports both local filesystem and S3 storage backends.
-    S3 files are identified by the s3:// prefix.
-    """
+    """PyArrow Parquet fetcher for local files and ``s3://`` paths."""
 
     def __init__(
         self,
@@ -91,7 +68,7 @@ class PyArrowFetcher:
             close()
 
     def _open(self, file_path: str) -> pq.ParquetFile:
-        """A handle on *file_path* for one read, opened with its cached footer."""
+        """Return a handle on *file_path* for one read, opened with its cached footer."""
         from strata.lake_files import open_parquet
 
         with self._file_cache_lock:
@@ -191,20 +168,10 @@ def create_fetcher(
     s3_filesystem: "pafs.S3FileSystem | None" = None,
     max_equality_delete_rows: int = 10_000_000,
 ) -> Fetcher:
-    """Factory function to create a Fetcher.
+    """Create a Fetcher.
 
-    This provides a clean seam for future Rust integration.
-    When a Rust fetcher is available, this function can be
-    updated to return it based on configuration.
-
-    Args:
-        metrics: Optional metrics collector
-        s3_filesystem: Optional S3 filesystem for reading from S3
-        max_equality_delete_rows: Equality delete rows kept parsed in memory
-            (``StrataConfig.max_equality_delete_rows``)
-
-    Returns:
-        A Fetcher instance
+    ``max_equality_delete_rows`` bounds the equality-delete rows kept parsed in
+    memory (``StrataConfig.max_equality_delete_rows``).
     """
     return PyArrowFetcher(
         metrics, s3_filesystem=s3_filesystem, max_equality_delete_rows=max_equality_delete_rows

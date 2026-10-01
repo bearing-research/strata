@@ -1,24 +1,8 @@
-"""Structured logging with correlation IDs for Strata.
+"""Structured logging with request-scoped correlation IDs.
 
-This module provides structured JSON logging with automatic correlation ID
-propagation. Request IDs are generated per-request and included in all log
-entries within that request context. When OpenTelemetry tracing is enabled,
-trace_id and span_id are also included.
-
-Usage:
-    from strata.logging import get_logger, RequestContext
-
-    logger = get_logger(__name__)
-
-    # In a request handler:
-    with RequestContext(request_id="abc123"):
-        logger.info("Processing request", table="ns.events", rows=1000)
-
-    # Or use the FastAPI middleware which handles this automatically
-
-Environment variables:
-    STRATA_LOG_LEVEL - Log level (default: INFO)
-    STRATA_LOG_FORMAT - "json" or "text" (default: json)
+Log entries carry the request (or build) context and, when tracing is on, the
+OpenTelemetry ``trace_id``/``span_id``. ``STRATA_LOG_LEVEL`` (default INFO) and
+``STRATA_LOG_FORMAT`` (``json`` or ``text``, default json) configure output.
 """
 
 import contextvars
@@ -59,7 +43,7 @@ def get_request_context() -> JsonObject:
 
 
 def set_request_context(**kwargs: JsonValue) -> contextvars.Token[JsonObject]:
-    """Set request context values. Returns token for reset."""
+    """Merge values into the request context; returns the token for reset."""
     current = _request_context.get().copy()
     current.update(kwargs)
     return _request_context.set(current)
@@ -72,12 +56,7 @@ def clear_request_context() -> None:
 
 @contextmanager
 def RequestContext(**kwargs: JsonValue) -> Iterator[None]:
-    """Context manager for request-scoped logging context.
-
-    Usage:
-        with RequestContext(request_id="abc123", scan_id="scan-456"):
-            logger.info("Processing")  # includes request_id and scan_id
-    """
+    """Context manager that adds its keyword arguments to every log entry inside it."""
     token = set_request_context(**kwargs)
     try:
         yield
@@ -93,26 +72,10 @@ def BuildContext(
     provenance_hash: str | None = None,
     **kwargs: JsonValue,
 ) -> Iterator[None]:
-    """Context manager for build-scoped logging context.
+    """Context manager that adds build identity to every log entry inside it.
 
-    Adds build context to all log entries within the context manager.
-    This is useful for correlating logs from a specific build operation.
-
-    Usage:
-        with BuildContext(
-            build_id="build-123",
-            tenant_id="acme",
-            transform_ref="duckdb_sql@v1",
-            provenance_hash="abc123",
-        ):
-            logger.info("Starting transform")  # includes build context
-
-    Args:
-        build_id: Unique build identifier
-        tenant_id: Tenant who owns this build
-        transform_ref: Transform reference (e.g., "duckdb_sql@v1")
-        provenance_hash: Provenance hash for the build
-        **kwargs: Additional context to include
+    Takes ``build_id``, ``tenant_id``, ``transform_ref``, ``provenance_hash`` and
+    any extra keyword fields.
     """
     ctx: JsonObject = {"build_id": build_id}
     if tenant_id:
@@ -131,11 +94,7 @@ def BuildContext(
 
 
 def get_trace_context() -> dict[str, str]:
-    """Get OpenTelemetry trace context if available.
-
-    Returns trace_id and span_id if tracing is enabled and there's an
-    active span, otherwise returns empty dict.
-    """
+    """Return ``trace_id`` and ``span_id`` of the active span, or ``{}`` without tracing."""
     try:
         from strata.tracing import is_tracing_enabled
 
@@ -260,11 +219,7 @@ class TextFormatter(logging.Formatter):
 
 
 class StructuredLogger(logging.Logger):
-    """Logger that supports structured data as keyword arguments.
-
-    Usage:
-        logger.info("Request completed", rows=1000, elapsed_ms=42.5)
-    """
+    """Logger that takes structured fields as keyword arguments (``logger.info(msg, rows=n)``)."""
 
     def _log_with_data(
         self,
@@ -277,7 +232,7 @@ class StructuredLogger(logging.Logger):
         extra: Mapping[str, object] | None = None,
         **kwargs: JsonValue,
     ) -> None:
-        """Internal method to log with structured data."""
+        """Log with keyword fields attached as structured data."""
         if self.isEnabledFor(level):
             normalized_exc_info = _normalize_exc_info(exc_info)
             record = self.makeRecord(
@@ -437,12 +392,10 @@ def configure_logging(
     level: str | None = None,
     format: str | None = None,
 ) -> None:
-    """Configure structured logging for the application.
+    """Configure the ``strata`` and uvicorn loggers to write to stderr; idempotent.
 
-    Args:
-        level: Log level (DEBUG, INFO, WARNING, ERROR). Defaults to
-            STRATA_LOG_LEVEL env var or INFO.
-        format: "json" or "text". Defaults to STRATA_LOG_FORMAT env var or "json".
+    ``level`` and ``format`` default to ``STRATA_LOG_LEVEL`` (INFO) and
+    ``STRATA_LOG_FORMAT`` (json).
     """
     global _configured, _log_format
 
@@ -473,14 +426,7 @@ def configure_logging(
 
 
 def get_logger(name: str) -> StructuredLogger:
-    """Get a structured logger.
-
-    Args:
-        name: Logger name, typically __name__
-
-    Returns:
-        StructuredLogger instance
-    """
+    """Get a structured logger, configuring logging on first use."""
     if not _configured:
         configure_logging()
 
@@ -488,16 +434,10 @@ def get_logger(name: str) -> StructuredLogger:
 
 
 async def request_context_middleware(request, call_next):
-    """FastAPI middleware that sets up request context with correlation IDs.
+    """Bind ``request_id``, method, path and tenant to the log context for each request.
 
-    Adds:
-    - request_id: Generated unique ID for this request (or from X-Request-ID header)
-    - method: HTTP method
-    - path: Request path
-    - tenant_id: Tenant identifier (from tenant context, for multi-tenancy)
-
-    When OpenTelemetry tracing is enabled, trace_id and span_id are automatically
-    included in log entries via get_trace_context().
+    ``request_id`` comes from ``X-Request-ID`` or is generated, and is echoed in the
+    response header.
     """
     # Lazy import to avoid a circular dependency.
     from strata.tenant import get_tenant_id

@@ -1,22 +1,4 @@
-"""Background cache warming for Strata.
-
-This module provides asynchronous cache warming capabilities:
-- Background job execution with progress tracking
-- Job queue with priority support
-- Cancellation and cleanup
-
-Usage:
-    warmer = CacheWarmer(planner, fetcher, metrics)
-
-    # Start a warming job
-    job_id = await warmer.start_job(tables=["file:///warehouse#ns.table"])
-
-    # Check progress
-    progress = warmer.get_progress(job_id)
-
-    # Cancel if needed
-    warmer.cancel_job(job_id)
-"""
+"""Background cache warming jobs with progress tracking, priorities and cancellation."""
 
 import asyncio
 import time
@@ -88,14 +70,7 @@ class WarmingJob:
 
 
 class CacheWarmer:
-    """Manages background cache warming jobs.
-
-    Features:
-    - Async job execution with progress tracking
-    - Concurrent job support (with limits)
-    - Job cancellation
-    - Automatic cleanup of completed jobs
-    """
+    """Runs bounded concurrent cache-warming jobs in the background and expires finished ones."""
 
     def __init__(
         self,
@@ -105,20 +80,9 @@ class CacheWarmer:
         max_concurrent_jobs: int = 3,
         job_retention_seconds: float = 3600.0,  # Keep completed jobs for 1 hour
     ):
-        """Initialize the cache warmer.
+        """Initialize the warmer.
 
-        Parameters
-        ----------
-        planner : ReadPlanner
-            Planner for table scans.
-        fetcher : CachedFetcher
-            Fetcher for row groups.
-        metrics : MetricsCollector
-            Sink for warming event logs.
-        max_concurrent_jobs : int, optional
-            Maximum jobs running simultaneously (default 3).
-        job_retention_seconds : float, optional
-            How long to keep completed job info (default 3600).
+        ``job_retention_seconds`` is how long finished jobs stay queryable.
         """
         self._planner = planner
         self._fetcher = fetcher
@@ -153,18 +117,7 @@ class CacheWarmer:
                     job._task.cancel()
 
     async def start_job(self, request: WarmAsyncRequest) -> str:
-        """Start a new warming job and return its id.
-
-        Parameters
-        ----------
-        request : WarmAsyncRequest
-            Tables to warm and warming options.
-
-        Returns
-        -------
-        str
-            Job id for tracking progress.
-        """
+        """Start a new warming job and return its id."""
         job_id = str(uuid.uuid4())[:8]
 
         job = WarmingJob(
@@ -188,36 +141,14 @@ class CacheWarmer:
         return job_id
 
     def get_progress(self, job_id: str) -> WarmJobProgress | None:
-        """Return progress for a job, or ``None`` if unknown.
-
-        Parameters
-        ----------
-        job_id : str
-            Job id to query.
-
-        Returns
-        -------
-        WarmJobProgress or None
-            Progress snapshot, or ``None`` when the job is not found.
-        """
+        """Return a job's progress snapshot, or ``None`` if the job is unknown."""
         job = self._jobs.get(job_id)
         if job is None:
             return None
         return job.to_progress()
 
     def list_jobs(self, include_completed: bool = False) -> list[WarmJobProgress]:
-        """List jobs, sorted by priority then start time.
-
-        Parameters
-        ----------
-        include_completed : bool, optional
-            Include completed/failed jobs (default ``False``).
-
-        Returns
-        -------
-        list of WarmJobProgress
-            Progress for each matching job.
-        """
+        """List jobs by priority then start time; finished ones only with ``include_completed``."""
         result = []
         for job in self._jobs.values():
             if include_completed or job.status in (
@@ -230,18 +161,7 @@ class CacheWarmer:
         return result
 
     async def cancel_job(self, job_id: str) -> bool:
-        """Cancel a pending or running job.
-
-        Parameters
-        ----------
-        job_id : str
-            Job id to cancel.
-
-        Returns
-        -------
-        bool
-            ``True`` if cancelled; ``False`` if unknown or already finished.
-        """
+        """Cancel a pending or running job; ``False`` if unknown or already finished."""
         async with self._lock:
             job = self._jobs.get(job_id)
             if job is None:
@@ -313,10 +233,7 @@ class CacheWarmer:
         async def fetch_task(task: Task) -> tuple[str, int, str | None]:
             """Fetch one row group, returning ``(outcome, bytes_written, error)``.
 
-            Named outcomes because three different endings used to return the
-            same ``(False, 0)``: written, failed, and cancelled. Only the first
-            is a success, but the caller read all three as "cached", so a job
-            that failed or was cancelled still reported row groups cached.
+            The named outcome keeps failed and cancelled fetches from being counted as cached.
             """
             async with fetch_semaphore:
                 if job.cancelled:

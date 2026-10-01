@@ -1,10 +1,7 @@
-"""Read-side artifact introspection services (lineage, dependents, …).
+"""Read-side artifact introspection services (lineage, dependents).
 
-Extracted from ``server.py`` handlers so the graph-walking is unit-testable
-without spinning a server. ``ArtifactService`` is stateless; every method takes
-an already-resolved artifact store (and tenant filter) from the route's
-dependencies. No HTTP coupling — the handler does access/state checks and
-response shaping; the service walks the graph and returns plain response models.
+Stateless and HTTP-free: the handler resolves the store and tenant, checks
+access and shapes the response; the service walks the graph.
 """
 
 from __future__ import annotations
@@ -60,8 +57,8 @@ def _leaf_node(input_uri: str, input_version: str) -> LineageNode:
 def _transform_ref(transform_spec: str | None) -> str | None:
     """Executor ref from a stored transform_spec, or ``None`` if absent/malformed.
 
-    ``transform_spec`` is client-opaque (it may lack an executor or not be JSON),
-    so a parse failure means "no known transform", not an error.
+    ``transform_spec`` is client-opaque, so a parse failure means "no known
+    transform", not an error.
     """
     if not transform_spec:
         return None
@@ -74,9 +71,8 @@ def _transform_ref(transform_spec: str | None) -> str | None:
 class BuildMetadata(NamedTuple):
     """What the producing run recorded about itself.
 
-    Absent for tables, for core transforms, and for anything stored before the
-    fields existed. An unparseable spec means "not recorded" rather than an
-    error — the same reading ``_transform_ref`` takes of the same field.
+    Absent for tables, core transforms and older artifacts; an unparseable spec
+    reads as "not recorded".
     """
 
     build_env: str = ""
@@ -132,10 +128,8 @@ class ArtifactService:
     ) -> ArtifactLineageResponse:
         """Build the input-dependency graph for an already-validated artifact.
 
-        BFS over ``input_versions``, resolving artifact inputs to nodes/edges and
-        recording table inputs as leaf nodes, bounded by ``max_depth``. The
-        caller has already fetched ``artifact``, checked tenant access, and
-        verified it is ready; this is pure graph traversal.
+        BFS over ``input_versions`` bounded by ``max_depth``; table inputs become leaf
+        nodes. The caller has already checked tenant access and readiness.
         """
         artifact_uri = f"strata://artifact/{artifact_id}@v={version}"
         nodes: dict[str, LineageNode] = {}
@@ -268,11 +262,10 @@ class ArtifactService:
         tenant_filter: str | None,
         limit: int,
     ) -> ArtifactDependentsResponse:
-        """List direct (one-hop) dependents of an artifact, newest store order.
+        """List direct (one-hop) dependents of an artifact, in store order.
 
-        The caller has already verified the target artifact exists, is ready, and
-        is in-tenant. ``total_count`` reflects all dependents; the returned list is
-        capped at ``limit``.
+        The caller has already checked existence, readiness and tenant.
+        ``total_count`` counts all dependents; the list is capped at ``limit``.
         """
         dependent_results = store.find_dependents(artifact_id, version, tenant=tenant_filter)
 

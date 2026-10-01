@@ -1,26 +1,8 @@
-"""OpenTelemetry tracing for Strata.
+"""Optional OpenTelemetry tracing.
 
-This module provides distributed tracing integration using OpenTelemetry.
-Tracing is optional and only enabled when:
-1. The 'otel' extras are installed: pip install strata-notebook[otel]
-2. OTEL_EXPORTER_OTLP_ENDPOINT is set (or tracing is explicitly configured)
-
-Usage:
-    from strata.tracing import get_tracer, trace_span
-
-    tracer = get_tracer()
-    with trace_span("my_operation", table_id="ns.table") as span:
-        # ... do work ...
-        span.set_attribute("rows_returned", 1000)
-
-Environment variables (standard OpenTelemetry):
-    OTEL_EXPORTER_OTLP_ENDPOINT - OTLP endpoint (e.g., http://localhost:4317)
-    OTEL_SERVICE_NAME - Service name (default: strata)
-    OTEL_TRACES_SAMPLER - Sampler type (default: parentbased_always_on)
-    OTEL_TRACES_SAMPLER_ARG - Sampler argument (e.g., 0.1 for 10% sampling)
-
-Strata-specific:
-    STRATA_TRACING_ENABLED - Set to "false" to disable tracing even if OTel is installed
+Active when the ``[otel]`` extra is installed and ``STRATA_TRACING_ENABLED`` is not
+``false``; spans are exported only when an OTLP endpoint is set. The standard ``OTEL_*``
+variables apply.
 """
 
 import os
@@ -61,17 +43,10 @@ def init_tracing(
     service_name: str = "strata",
     otlp_endpoint: str | None = None,
 ) -> bool:
-    """Initialize OpenTelemetry tracing.
+    """Initialize OpenTelemetry tracing once at startup; return whether it is active.
 
-    This should be called once at server startup. If OpenTelemetry is not
-    installed or tracing is disabled, this is a no-op.
-
-    Args:
-        service_name: Name of the service (default: strata)
-        otlp_endpoint: OTLP endpoint URL. If None, uses OTEL_EXPORTER_OTLP_ENDPOINT
-
-    Returns:
-        True if tracing was initialized, False otherwise
+    No-op when OpenTelemetry is missing or tracing is disabled. ``otlp_endpoint`` defaults to
+    ``OTEL_EXPORTER_OTLP_ENDPOINT``; with neither, spans are recorded but not exported.
     """
     global _tracer, _initialized
 
@@ -151,22 +126,9 @@ def trace_span(
     name: str,
     **attributes: Any,
 ) -> Iterator["Span | NoOpSpan"]:
-    """Create a traced span with attributes.
+    """Yield a span with *attributes*, or a no-op span when tracing is off.
 
-    This is a convenience wrapper that handles the case where tracing
-    is not available. When tracing is disabled, yields a no-op span.
-
-    Args:
-        name: Span name (e.g., "plan_scan", "fetch_row_group")
-        **attributes: Initial span attributes
-
-    Yields:
-        The span (or a no-op span if tracing is disabled)
-
-    Example:
-        with trace_span("fetch_row_group", file_path=path, row_group_id=0) as span:
-            data = fetch(path, 0)
-            span.set_attribute("bytes_read", len(data))
+    An exception raised in the block is recorded on the span and re-raised.
     """
     tracer = get_tracer()
 
@@ -190,16 +152,7 @@ def trace_span(
 
 
 def instrument_fastapi(app: Any) -> None:
-    """Instrument a FastAPI app with OpenTelemetry.
-
-    This adds automatic tracing for all HTTP endpoints including:
-    - Request/response timing
-    - HTTP method, path, status code
-    - Request headers (configurable)
-
-    Args:
-        app: FastAPI application instance
-    """
+    """Instrument a FastAPI app with OpenTelemetry HTTP tracing."""
     if not is_tracing_enabled():
         return
 
@@ -218,9 +171,10 @@ TRACE_CONTEXT_KEYS = ("traceparent", "tracestate")
 
 
 def current_trace_context() -> dict[str, str]:
-    """The active span's W3C ``traceparent`` / ``tracestate``, for a request or
-    manifest leaving this process. Empty when tracing is off or no span is
-    active, so callers can merge it unconditionally."""
+    """The active span's W3C ``traceparent`` / ``tracestate`` for an outgoing request or manifest.
+
+    Empty when tracing is off or no span is active, so callers can merge it unconditionally.
+    """
     if get_tracer() is None:
         return {}
     from opentelemetry.propagate import inject

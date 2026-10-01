@@ -1,12 +1,7 @@
-"""Persistent metadata store using SQLite.
+"""SQLite store for planning metadata, so a restart skips manifest and footer reads.
 
-Persists planning metadata to survive server restarts:
-- Manifest resolution: (table_identity, snapshot_id) -> list of data files
-- Parquet metadata: file_path -> (schema, row_groups, stats)
-
-This makes post-restart planning fast by avoiding:
-- Re-resolving Iceberg manifests
-- Re-reading Parquet file footers
+Holds manifest resolutions (``(table_identity, snapshot_id) -> data files``)
+and Parquet metadata (``file_path -> schema, row groups, stats``).
 """
 
 import json
@@ -48,9 +43,8 @@ class PersistedParquetMeta:
 def _local_path_for_stat(file_path: str) -> Path | None:
     """Return a local path for stat-based validation, or None for remote URIs.
 
-    Windows paths like ``C:\\Users\\...`` parse with scheme ``"c"``
-    because ``urlparse`` treats single letters followed by ``:`` as a
-    scheme. Detect that pattern first and treat it as a local path.
+    Windows paths such as ``C:\\Users\\...`` parse with scheme ``"c"``, so that
+    pattern is treated as local first.
     """
     # A 1-char "scheme" can only be a Windows drive letter ("C:\..."); URI schemes are longer.
     if len(file_path) >= 2 and file_path[1] == ":" and file_path[0].isalpha():
@@ -79,18 +73,9 @@ METADATA_STORE_VERSION = 3
 
 
 class MetadataStore:
-    """SQLite-backed persistent metadata store.
+    """SQLite-backed persistent metadata store (WAL mode).
 
-    Stores:
-    - manifest_cache: (table_identity, snapshot_id) -> JSON list of file entries
-    - parquet_meta: file_path -> serialized ParquetMeta
-
-    Thread-safe via connection-per-thread pattern (WAL mode).
-
-    Future optimizations if JSON blobs become a bottleneck:
-    - Compress row_groups_json with zstd/gzip for large files
-    - Normalize to separate table: parquet_row_group(file_path, rg_idx, ...)
-      for partial updates and row-group-level queries
+    Thread-safe because every call opens its own connection.
     """
 
     def __init__(self, db_path: Path) -> None:
@@ -103,14 +88,9 @@ class MetadataStore:
         self._init_db()
 
     def _get_conn(self) -> sqlite3.Connection:
-        """Get a connection (creates new one per call for thread safety).
+        """Open a new connection with WAL and busy-timeout pragmas.
 
-        Uses connection-per-call pattern rather than connection pooling.
-        Each connection is used with a context manager and closed automatically.
-        No close() method needed on MetadataStore itself.
-
-        If switching to per-thread connection pooling for performance,
-        add a close() method to clean up thread-local connections.
+        One connection per call instead of a pool, so the store needs no ``close()``.
         """
         conn = sqlite3.connect(str(self.db_path))
         conn.row_factory = sqlite3.Row
@@ -160,11 +140,7 @@ class MetadataStore:
     def get_manifest(
         self, catalog_name: str, table_identity: str, snapshot_id: int
     ) -> list[dict[str, Any]] | None:
-        """Get cached manifest resolution.
-
-        Returns the data file entries as ``put_manifest`` stored them, or None
-        if not cached.
-        """
+        """Get the data file entries ``put_manifest`` stored, or None if not cached."""
         with self._get_conn() as conn:
             row = conn.execute(
                 """SELECT data_files_json FROM manifest_cache
@@ -186,14 +162,7 @@ class MetadataStore:
         snapshot_id: int,
         data_files: list[dict[str, Any]],
     ) -> None:
-        """Store manifest resolution.
-
-        Args:
-            catalog_name: Catalog name (e.g., 'default', 'prod')
-            table_identity: Canonical table identity string
-            snapshot_id: Iceberg snapshot ID
-            data_files: One JSON-serializable dict per data file
-        """
+        """Store a manifest resolution: one JSON-serializable dict per data file."""
         conn = self._get_conn()
         try:
             conn.execute(
@@ -207,14 +176,11 @@ class MetadataStore:
             conn.close()
 
     def get_parquet_meta(self, file_path: str) -> PersistedParquetMeta | None:
-        """Get cached Parquet metadata.
+        """Get cached Parquet metadata, or None if not cached or stale.
 
-        Returns PersistedParquetMeta or None if not cached or stale.
-        Validates file (mtime, size) to detect stale entries.
-
-        Note: Does not delete stale entries inline to avoid write locks
-        during reads. Stale entries are overwritten on next put() or
-        cleaned up via cleanup_stale_parquet_meta().
+        Staleness is a changed local (mtime, size). Stale rows are left in place to
+        keep reads free of write locks; the next put or
+        :meth:`cleanup_stale_parquet_meta` replaces them.
         """
         with self._get_conn() as conn:
             row = conn.execute(
@@ -308,11 +274,7 @@ class MetadataStore:
             conn.close()
 
     def get_parquet_meta_many(self, file_paths: list[str]) -> dict[str, PersistedParquetMeta]:
-        """Get cached Parquet metadata for multiple files in one query.
-
-        More efficient than calling get_parquet_meta() in a loop.
-        Returns dict mapping file_path -> metadata for found (non-stale) entries.
-        """
+        """Get cached, non-stale Parquet metadata for many files in one query, keyed by path."""
         if not file_paths:
             return {}
 
@@ -366,12 +328,7 @@ class MetadataStore:
         return result
 
     def put_parquet_meta_many(self, items: list[tuple[str, PersistedParquetMeta]]) -> None:
-        """Store multiple Parquet metadata entries in one transaction.
-
-        More efficient than calling put_parquet_meta() in a loop.
-        Args:
-            items: List of (file_path, metadata) tuples
-        """
+        """Store many ``(file_path, metadata)`` entries in one transaction."""
         if not items:
             return
 
@@ -447,11 +404,7 @@ class MetadataStore:
         }
 
     def cleanup_stale_parquet_meta(self) -> int:
-        """Remove stale parquet_meta entries where files no longer exist or changed.
-
-        Returns the number of entries removed. Call periodically (e.g., on startup
-        or via background task) to reclaim space from stale entries.
-        """
+        """Remove parquet_meta rows whose local file is gone or changed; return the count."""
         conn = self._get_conn()
         try:
             rows = conn.execute(
@@ -506,15 +459,7 @@ def deserialize_arrow_schema(schema_bytes: bytes) -> pa.Schema:
 def extract_parquet_meta(
     file_path: str, s3_filesystem: "pafs.S3FileSystem | None" = None
 ) -> PersistedParquetMeta:
-    """Extract metadata from a Parquet file for persistence.
-
-    Args:
-        file_path: Path to the Parquet file (local or s3://)
-        s3_filesystem: Optional S3 filesystem for reading S3 paths
-
-    Returns:
-        PersistedParquetMeta containing serializable metadata
-    """
+    """Read a Parquet footer (local or ``s3://``) into persistable metadata."""
     if file_path.startswith("s3://"):
         if s3_filesystem is None:
             import pyarrow.fs as pafs
@@ -590,10 +535,7 @@ def extract_parquet_meta(
 
 
 def reset_metadata_store() -> None:
-    """Reset global metadata store (for testing).
-
-    Note: This is a compatibility shim. Use reset_caches() from metadata_cache.py instead.
-    """
+    """Reset the global metadata store (for tests); delegates to ``metadata_cache.reset_caches``."""
     from strata.metadata_cache import reset_caches
 
     reset_caches()

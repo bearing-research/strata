@@ -1,16 +1,7 @@
-"""Metadata caches for planning optimization.
+"""Metadata caches for planning: Parquet footers per file path, manifest resolution per
+(table identity, snapshot).
 
-These caches reduce planning time by avoiding redundant metadata reads:
-- Parquet metadata: Cached per file path (schema, row group info, statistics)
-- Manifest resolution: Cached per (table_identity, snapshot_id)
-
-Architecture:
-- In-memory LRU cache for fast access during normal operation
-- SQLite backing store for persistence across restarts
-- On cache miss: check SQLite, then load from source
-- Parallel I/O for loading multiple files (configurable worker count)
-
-Both use simple LRU eviction with configurable sizes.
+Each is an in-memory LRU over an optional SQLite store that persists across restarts.
 """
 
 import json
@@ -31,11 +22,10 @@ if TYPE_CHECKING:
 
 
 class LRUCache[K: Hashable, V]:
-    """Thread-safe LRU cache with configurable max size (entry count).
+    """Thread-safe LRU cache bounded by entry count.
 
-    Suitable for metadata caches where entries are roughly similar size
-    (schemas, statistics, manifest entries). For variable-size data
-    (Arrow batches, row groups), use a byte-based cache instead.
+    Suits entries of roughly similar size (schemas, statistics); use a byte-bounded cache for
+    variable-size data.
     """
 
     def __init__(self, max_size: int = 1000) -> None:
@@ -81,16 +71,10 @@ class LRUCache[K: Hashable, V]:
                 self._cache[key] = value
 
     def get_or_put(self, key: K, factory: Callable[[], V]) -> V:
-        """Get value if cached, otherwise compute and cache it.
+        """Return the cached value, or compute it with *factory* and cache it.
 
-        This avoids thundering herd by:
-        1. Check cache under lock, return if hit
-        2. Release lock, compute value (I/O happens here)
-        3. Re-acquire lock, insert if still absent
-
-        Note: In high-concurrency scenarios, multiple threads may compute
-        the same value simultaneously, but only one will be cached.
-        This is acceptable for idempotent factories.
+        The factory runs outside the lock, so concurrent misses may compute the same value; only
+        one is cached. Factories must be idempotent.
         """
         cached = self.get(key)
         if cached is not None:
@@ -166,10 +150,8 @@ class ColumnStatistics:
 class ColumnChunkMeta:
     """Minimal column chunk metadata for pruning and size estimation.
 
-    ``total_uncompressed_size`` mirrors pyarrow's field of the same name so
-    the planner can read it off either this or a real
-    ``ColumnChunkMetaData``. 0 means "not recorded" (a cache entry written
-    before this field existed), which the planner treats as unknown.
+    ``total_uncompressed_size`` mirrors pyarrow's field so the planner reads either type;
+    0 means "not recorded", which the planner treats as unknown.
     """
 
     is_stats_set: bool
@@ -179,9 +161,8 @@ class ColumnChunkMeta:
 
 @dataclass
 class RowGroupMeta:
-    """Minimal row group metadata for pruning.
-
-    Compatible with PyArrow's RowGroupMetaData interface used in planner.
+    """Minimal row group metadata, compatible with the pyarrow ``RowGroupMetaData`` interface
+    the planner uses.
     """
 
     num_rows: int
@@ -205,8 +186,9 @@ class _ColumnPath(Protocol):
 
 
 class _SchemaColumns(Protocol):
-    """What callers read off a Parquet schema: pyarrow's ``ParquetSchema``, or
-    the ``ParquetSchema`` below that is rebuilt from the persisted cache."""
+    """What callers read off a Parquet schema: pyarrow's ``ParquetSchema`` or the one below,
+    rebuilt from the persisted cache.
+    """
 
     def __len__(self) -> int: ...
 
@@ -230,10 +212,9 @@ class ParquetSchema:
     def column(self, idx: int) -> _Column:
         """Get column info by index.
 
-        ``_column_names`` holds dotted **paths** (``user.id``); ``name`` is the
-        leaf segment, matching pyarrow's own ``ColumnSchema`` split. The
-        planner relies on ``path`` carrying the dot so it can skip nested
-        columns when building its column-index map.
+        ``_column_names`` holds dotted paths (``user.id``); ``name`` is the leaf, matching
+        pyarrow's ``ColumnSchema``. The planner relies on the dot in ``path`` to skip nested
+        columns.
         """
         path = self._column_names[idx]
         return _Column(name=path.rsplit(".", 1)[-1], path=path)
@@ -241,13 +222,7 @@ class ParquetSchema:
 
 @dataclass
 class ParquetMetadata:
-    """Cached Parquet file metadata.
-
-    Contains everything needed for planning without re-reading the file:
-    - Arrow schema for type information
-    - Number of row groups
-    - Per-row-group metadata (num_rows, statistics)
-    """
+    """Cached Parquet file metadata: everything planning needs without re-reading the file."""
 
     arrow_schema: pa.Schema
     num_row_groups: int
@@ -289,10 +264,7 @@ class EqualityDeleteEntry:
 
 @dataclass
 class ManifestEntry:
-    """A single file entry from manifest resolution.
-
-    Stores the resolved data file information from Iceberg manifest.
-    """
+    """A resolved data file from an Iceberg manifest, with the deletes that apply to it."""
 
     file_path: str  # As the manifest names it
     actual_path: str  # Resolved for reading
@@ -308,10 +280,7 @@ class ManifestEntry:
 
 @dataclass
 class ManifestResolution:
-    """Cached manifest resolution result for a snapshot.
-
-    Contains the list of data files from resolving Iceberg manifests.
-    """
+    """Cached manifest resolution for a snapshot: its data files."""
 
     data_files: list[ManifestEntry]
 
@@ -381,42 +350,21 @@ def _persisted_parquet_meta_from_loaded(metadata: ParquetMetadata) -> "Persisted
 
 
 def _persisted_meta_is_legacy_leaf_named(persisted: "PersistedParquetMeta") -> bool:
-    """True when a persisted row predates path-keyed column stats.
+    """True when a persisted row stored Parquet leaf names rather than paths in ``column_names``.
 
-    Older rows stored Parquet **leaf** names in ``column_names``. For a flat
-    schema leaf name == path, so those rows stay valid. But when a file has
-    nested columns the leaf names collide (a struct ``user.id`` and a
-    top-level ``id`` both stored as ``"id"``), which both dropped one
-    column's stats and defeated the planner's nested-column guard — pruning
-    then compared a filter against the wrong column's min/max and silently
-    dropped rows.
-
-    Duplicates in the list are exactly that signature: real paths are unique
-    per physical column, so a duplicate can only come from a legacy
-    leaf-named row. Such rows are treated as a miss and re-read (which
-    re-persists them correctly) rather than trusted.
+    With nested columns leaf names collide (``user.id`` and ``id`` both ``"id"``), which made
+    pruning compare a filter against the wrong column's stats and drop rows. Real paths are
+    unique, so a duplicate marks such a row; it is treated as a miss and re-read.
     """
     names = persisted.column_names
     return len(set(names)) != len(names)
 
 
 class ParquetMetadataCache:
-    """Cache for Parquet file metadata with optional SQLite persistence.
+    """Parquet footer cache keyed by file path, with optional SQLite persistence.
 
-    Avoids re-reading Parquet file footers on every scan.
-    Key: file path (string)
-    Value: ParquetMetadata
-
-    Architecture:
-    - In-memory LRU cache for fast access
-    - Optional SQLite store for persistence across restarts
-    - Parallel I/O when loading multiple files (get_or_load_many)
-
-    Typical size: 1000 files = ~10-50 MB depending on schema complexity.
-
-    S3 Support:
-    - Pass an S3FileSystem to read from S3 paths (s3://bucket/path)
-    - S3 filesystem is created lazily if not provided but S3 paths are accessed
+    Roughly 10-50 MB per 1000 files, depending on schema. ``s3_filesystem``, when given, is
+    used to open ``s3://`` paths.
     """
 
     def __init__(
@@ -436,11 +384,7 @@ class ParquetMetadataCache:
         return self._cache.get(file_path)
 
     def get_or_load(self, file_path: str) -> ParquetMetadata:
-        """Get cached metadata or load from file.
-
-        This is the primary API - it transparently handles cache misses.
-        Lookup order: in-memory cache -> SQLite store -> Parquet file
-        """
+        """Get metadata from memory, then the SQLite store, then the Parquet file."""
         cached = self._cache.get(file_path)
         if cached is not None:
             return cached
@@ -460,17 +404,10 @@ class ParquetMetadataCache:
         return metadata
 
     def get_or_load_many(self, file_paths: list[str]) -> dict[str, ParquetMetadata]:
-        """Get cached metadata for multiple files, loading missing ones in parallel.
+        """Get metadata for many files, keyed by path, loading misses in parallel.
 
-        More efficient than calling get_or_load() in a loop:
-        - Batches SQLite queries for persistence layer
-        - Uses ThreadPoolExecutor for parallel file I/O on cache misses
-
-        This is critical for cold table performance where we need to read
-        many Parquet file footers. Sequential reads of 50 files × 50ms = 2.5s,
-        but parallel reads can reduce this to ~500ms (5x speedup).
-
-        Returns dict mapping file_path -> ParquetMetadata for all requested files.
+        Batches the SQLite lookups and reads missing footers on a thread pool; this dominates
+        cold-table planning time.
         """
         if not file_paths:
             return {}
@@ -709,23 +646,10 @@ class ParquetMetadataCache:
 
 
 class ManifestCache:
-    """Cache for Iceberg manifest resolution results with optional persistence.
+    """Cache of Iceberg manifest resolutions, keyed by snapshot so entries never go stale.
 
-    Avoids re-resolving manifests on every scan for the same snapshot.
-
-    Two-level caching:
-    - Unfiltered: Key is (catalog, table, snapshot) -> all files
-    - Filtered: Key is (catalog, table, snapshot, filter_fingerprint) -> pruned files
-
-    The unfiltered cache is used for persistence and as a fallback.
-    The filtered cache stores results of Iceberg file-level pruning.
-
-    Architecture:
-    - In-memory LRU cache for fast access
-    - Optional SQLite store for persistence across restarts (unfiltered only)
-
-    Note: This cache is invalidated when a new snapshot is created,
-    since the key includes snapshot_id.
+    Unfiltered entries (all files) persist to SQLite; filtered entries (keyed also by filter
+    fingerprint) hold file-pruned results in memory only.
     """
 
     def __init__(self, max_size: int = 100, store: "MetadataStore | None" = None) -> None:
@@ -744,18 +668,11 @@ class ManifestCache:
         snapshot_id: int,
         filter_fingerprint: str = "nofilter",
     ) -> ManifestResolution | None:
-        """Get cached manifest resolution.
+        """Get a cached manifest resolution, or ``None``.
 
-        Args:
-            catalog_name: Catalog name
-            table_identity: Table identity string
-            snapshot_id: Snapshot ID
-            filter_fingerprint: Filter fingerprint for filtered queries (default: "nofilter")
-
-        Lookup order:
-        - If filter_fingerprint != "nofilter": check filtered cache
-        - Check unfiltered in-memory cache as a correctness-preserving fallback
-        - Check SQLite store for the persisted unfiltered resolution
+        Tries the filtered entry (when ``filter_fingerprint != "nofilter"``), then the unfiltered
+        in-memory entry, then the SQLite store. An unfiltered result is a correct superset for any
+        filter.
         """
         if filter_fingerprint != "nofilter":
             cached = self._filtered_cache.get(
@@ -804,15 +721,7 @@ class ManifestCache:
         resolution: ManifestResolution,
         filter_fingerprint: str = "nofilter",
     ) -> None:
-        """Cache manifest resolution.
-
-        Args:
-            catalog_name: Catalog name
-            table_identity: Table identity string
-            snapshot_id: Snapshot ID
-            resolution: Manifest resolution to cache
-            filter_fingerprint: Filter fingerprint (default: "nofilter" for unfiltered)
-        """
+        """Cache a manifest resolution; ``"nofilter"`` stores it as the unfiltered entry."""
         if filter_fingerprint != "nofilter":
             # In memory only, not persisted
             self._filtered_cache.put(
@@ -852,17 +761,11 @@ _cache_lock = Lock()  # Guards all the singletons
 
 
 def get_metadata_store(cache_dir: Path | None = None) -> "MetadataStore":
-    """Get the global metadata store (creates if needed).
+    """Get the global metadata store, creating it (or replacing it for a new ``cache_dir``).
 
-    If cache_dir is provided and differs from existing store's path,
-    a new store is created for the new path.
-
-    Thread-safe: the whole body runs under one acquisition of ``_cache_lock``.
-    Splitting it into two acquisitions leaves a window where a no-arg caller
-    that saw no store can be overtaken by a caller passing the configured
-    cache_dir, and then clobber it on the way out. ``get_parquet_cache`` and
-    ``get_manifest_cache`` deliberately call this before taking the lock
-    themselves, so holding it across the whole function cannot deadlock.
+    The whole body holds ``_cache_lock`` once: two acquisitions would let a no-arg caller
+    clobber a store another caller just created for the configured ``cache_dir``. The cache
+    getters call this before taking the lock, so this cannot deadlock.
     """
     global _metadata_store
     from strata.metadata_store import MetadataStore
@@ -891,18 +794,10 @@ def get_parquet_cache(
     s3_filesystem: "pa.fs.S3FileSystem | None" = None,
     max_workers: int = 8,
 ) -> ParquetMetadataCache:
-    """Get the global Parquet metadata cache (creates if needed).
+    """Get the global Parquet metadata cache, creating it if needed (thread-safe).
 
-    Args:
-        max_size: Maximum number of entries in LRU cache
-        cache_dir: Directory for SQLite persistence (None to disable persistence)
-        s3_filesystem: Optional S3 filesystem for reading from S3 paths
-        max_workers: Maximum threads for parallel file I/O (default 8)
-
-    Note: If cache_dir is provided and differs from existing cache's store path,
-    a new cache with the correct store will be created.
-
-    Thread-safe: uses a lock to prevent race conditions during creation.
+    ``cache_dir=None`` disables persistence; a ``cache_dir`` whose store differs from the
+    existing cache's replaces the cache.
     """
     global _parquet_cache
 
@@ -943,16 +838,10 @@ def get_parquet_cache(
 
 
 def get_manifest_cache(max_size: int = 100, cache_dir: Path | None = None) -> ManifestCache:
-    """Get the global manifest cache (creates if needed).
+    """Get the global manifest cache, creating it if needed (thread-safe).
 
-    Args:
-        max_size: Maximum number of entries in LRU cache
-        cache_dir: Directory for SQLite persistence (None to disable persistence)
-
-    Note: If cache_dir is provided and differs from existing cache's store path,
-    a new cache with the correct store will be created.
-
-    Thread-safe: uses a lock to prevent race conditions during creation.
+    ``cache_dir=None`` disables persistence; a ``cache_dir`` whose store differs from the
+    existing cache's replaces the cache.
     """
     global _manifest_cache
 

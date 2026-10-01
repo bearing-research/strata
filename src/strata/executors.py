@@ -1,23 +1,7 @@
-"""Local executors for embedded transform execution.
+"""Local transform execution for the server's embedded executor.
 
-This module provides internal functions for running transforms locally
-(within the server process or embedded executor). These functions are
-not part of the public API - users should call client.materialize() instead.
-
-Internal usage:
-    from strata.executors import _run_local
-
-    # Used by embedded executor in runner.py
-    result = _run_local(build_spec, input_tables)
-
-Supported executors:
-- scan@v1: Read from Iceberg tables (server-only, cannot run locally)
-- duckdb_sql@v1: Execute DuckDB SQL queries
-
-To add new executors, create a Transform subclass and register it:
-    @register_transform("my_transform@v1")
-    class MyTransform(Transform):
-        ...
+Internal: users call ``client.materialize()``. Transforms come from the registry
+(``@register_transform``); ``scan@v1`` is server-only and cannot run here.
 """
 
 from __future__ import annotations
@@ -35,29 +19,16 @@ def _run_local(
     build_spec: dict[str, Any],
     input_tables: dict[str, pa.Table],
 ) -> pa.Table:
-    """Execute a transform locally based on the build spec (internal use only).
+    """Execute a transform in-process from a build spec.
 
-    This is an internal function used by the server's embedded executor.
-    Users should call ``client.materialize()`` instead.
-
-    Parameters
-    ----------
-    build_spec : dict
-        Build spec with ``executor`` (URI, e.g. ``"duckdb_sql@v1"`` /
-        ``"local://duckdb_sql@v1"``), ``params`` (executor-specific), and
-        ``input_uris`` (list, used for input ordering).
-    input_tables : dict of str to pyarrow.Table
-        Mapping of input URI to its Arrow table.
-
-    Returns
-    -------
-    pyarrow.Table
-        The transform result.
+    ``build_spec`` carries ``executor`` (e.g. ``"duckdb_sql@v1"``, optional ``local://``
+    prefix), ``params``, and ``input_uris``, which fixes input order. ``input_tables`` maps
+    each input URI to its Arrow table.
 
     Raises
     ------
     ValueError
-        If the executor is unsupported or an input table is missing.
+        If the executor is unknown or an input table is missing.
     """
     executor = build_spec.get("executor", "")
     params = build_spec.get("params", {})

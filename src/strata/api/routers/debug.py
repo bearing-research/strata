@@ -1,11 +1,6 @@
-"""Debug / diagnostics routes: latency, GC, pools, connections, memory, rate
-limits, and low-level cache inspection.
+"""Read-only operator diagnostics: latency, GC, pools, connections, memory, rate limits, cache.
 
-Moved verbatim from ``server.py`` (P3, router split). All read-only operator
-diagnostics. ``inspect_cache_v1`` reaches server state through a lazy
-``from strata.server import get_state`` inside the body, keeping this module a
-leaf. ``/v1/config/timeouts`` and ``/v1/metadata/*`` are intentionally left in
-``server.py`` — they are config/metadata domains, not debug.
+Server state is imported lazily inside handlers so this module stays a leaf.
 """
 
 from __future__ import annotations
@@ -26,23 +21,9 @@ router = APIRouter(tags=["debug"])
 
 @router.get("/v1/debug/latency")
 async def get_latency_histograms_v1():
-    """Get latency histograms for each operation stage.
+    """Get latency histograms per stage (plan, ttfb, fetch, total_request).
 
-    Returns latency distribution data for:
-    - plan: Table planning (catalog + metadata)
-    - ttfb: Time to first byte
-    - fetch: Individual row group fetch
-    - total_request: End-to-end request time
-
-    Each stage includes:
-    - Histogram buckets with counts
-    - Estimated percentiles (p50, p95, p99)
-    - Count, sum, avg, max
-
-    This is useful for:
-    - Identifying which stage dominates tail latency
-    - Understanding latency distribution over time
-    - Detecting bimodal latency patterns
+    Each stage has bucket counts, estimated p50/p95/p99, and count/sum/avg/max.
     """
     stats = get_latency_stats()
 
@@ -61,20 +42,9 @@ async def get_latency_histograms_v1():
 async def get_gc_pauses_v1(
     limit: Annotated[int, Query(description="Maximum pauses to return", ge=1, le=1000)] = 100,
 ):
-    """Get recent GC pause events for debugging.
+    """Get recent GC pauses, most recent first, with aggregate pause statistics.
 
-    Returns detailed timing information about recent garbage collection pauses.
-    This is useful for:
-    - Correlating latency spikes with GC activity
-    - Understanding GC pause duration distribution
-    - Diagnosing periodic latency stalls
-
-    Returns:
-    - pauses: List of recent GC pauses (most recent first)
-      - timestamp: Unix timestamp when GC completed
-      - generation: GC generation (0, 1, or 2)
-      - duration_ms: Pause duration in milliseconds
-    - stats: Aggregate statistics (p50, p95, p99 if enough data)
+    Each pause has ``timestamp``, ``generation`` and ``duration_ms``.
     """
     pauses = get_recent_gc_pauses(limit=limit)
     stats = get_gc_stats()
@@ -87,19 +57,9 @@ async def get_gc_pauses_v1(
 
 @router.get("/v1/debug/pools")
 async def get_pool_metrics_v1():
-    """Get thread pool metrics for debugging.
+    """Get utilization and queue depth for the planning and fetch thread pools.
 
-    Returns utilization and queue depth for server thread pools:
-    - planning: Thread pool for Iceberg catalog/metadata operations
-    - fetch: Thread pool for Parquet row group I/O
-
-    Each pool includes:
-    - max_workers: Pool capacity
-    - active_workers: Currently executing workers
-    - queue_depth: Tasks waiting for a worker
-    - utilization_pct: (active_workers / max_workers) * 100
-
-    High queue_depth indicates pool saturation (bottleneck).
+    A high ``queue_depth`` means the pool is saturated.
     """
     pool_tracker = get_pool_tracker()
     return pool_tracker.get_summary()
@@ -107,17 +67,7 @@ async def get_pool_metrics_v1():
 
 @router.get("/v1/debug/connections")
 async def get_connection_metrics_v1():
-    """Get HTTP connection metrics for debugging.
-
-    Returns:
-    - active_requests: Currently in-flight requests
-    - total_requests: Total requests since server start
-    - max_concurrent_requests: Peak concurrency observed
-    - request_rate_per_sec: Average request rate
-    - keepalive_pct: Percentage of requests using keep-alive
-
-    High active_requests with low throughput may indicate connection issues.
-    """
+    """Get HTTP connection metrics: in-flight, total and peak requests, rate, keep-alive share."""
     connection_metrics = get_connection_metrics()
     return connection_metrics.get_stats()
 
@@ -129,19 +79,9 @@ async def get_memory_debug_v1(
         Query(description="Include detailed breakdown (slower, includes object type counts)"),
     ] = False,
 ):
-    """Get memory profiling information for debugging.
+    """Get Arrow pool, Python GC and process memory statistics.
 
-    Returns memory statistics across multiple levels:
-    - Arrow: Memory pool allocations (bytes_allocated, max_memory, pool_backend)
-    - Python: GC tracked objects, objects by generation
-    - Process: RSS and VMS memory (if available)
-
-    Use detailed=true for comprehensive analysis including:
-    - Top object types by count
-    - GC thresholds and collection stats
-    - Memory recommendations
-
-    Note: detailed=true is more expensive and enumerates all GC objects.
+    ``detailed=true`` adds top object types and GC stats, and enumerates every GC object.
     """
     if detailed:
         return get_detailed_memory_report()
@@ -152,18 +92,7 @@ async def get_memory_debug_v1(
 
 @router.get("/v1/debug/rate-limits")
 async def get_rate_limits_debug_v1():
-    """Get rate limiter statistics for debugging.
-
-    Returns:
-    - total_requests: Total requests processed
-    - allowed_requests: Requests that passed rate limiting
-    - rejected_global: Requests rejected by global limit
-    - rejected_client: Requests rejected by per-client limit
-    - rejected_endpoint: Requests rejected by per-endpoint limit
-    - active_clients: Number of tracked client buckets
-    - global_tokens_available: Current global bucket tokens
-    - enabled: Whether rate limiting is enabled
-    """
+    """Get rate limiter statistics: allowed and rejected counts (global, client, endpoint)."""
     rate_limiter = get_rate_limiter()
     if rate_limiter is None:
         return {"error": "Rate limiter not initialized", "enabled": False}
@@ -179,26 +108,10 @@ async def inspect_cache_v1(
     snapshot_id: Annotated[int | None, Query(description="Filter by snapshot ID")] = None,
     limit: Annotated[int, Query(description="Maximum entries to return", ge=1, le=1000)] = 100,
 ):
-    """Inspect cache entries with detailed diagnostics (admin endpoint).
+    """Inspect disk cache entries: key hash, file path, size and stored metadata.
 
-    This endpoint provides low-level cache inspection for debugging and
-    operational troubleshooting. Use it to:
-    - Verify specific entries are cached
-    - Debug cache key hashing issues
-    - Understand cache distribution by prefix
-    - Inspect metadata for specific tables/snapshots
-
-    Query parameters:
-    - prefix: Filter by cache key hash prefix (hex string)
-    - table_id: Filter by table identifier
-    - snapshot_id: Filter by snapshot ID
-    - limit: Max entries to return (default 100, max 1000)
-
-    Returns detailed information including:
-    - Cache key hash (for debugging key generation)
-    - File path on disk
-    - Metadata (table, snapshot, row group, columns)
-    - File size and creation time
+    Requires ``admin:cache``. ``total_matched`` keeps counting past ``limit``;
+    unreadable metadata files are listed with ``corrupted: true``.
     """
     import json as json_module
 

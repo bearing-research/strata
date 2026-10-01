@@ -1,9 +1,7 @@
 """Cache-plane routes: stats, eviction/histogram metrics, entries, clear, warm.
 
-Moved verbatim from ``server.py`` (P3, router split). The handlers reach server
-state through a lazy ``from strata.server import get_state`` inside the body, so
-this module stays a leaf. ``/v1/debug/cache/inspect`` is intentionally *not*
-here — it belongs to the future ``debug`` router.
+Handlers reach server state through a lazy ``from strata.server import get_state`` so
+this module stays a leaf.
 """
 
 from __future__ import annotations
@@ -36,11 +34,7 @@ router = APIRouter(tags=["cache"])
 
 @router.get("/v1/cache/stats")
 async def get_cache_stats_v1():
-    """Get cache statistics.
-
-    Returns information about what's in the cache and why.
-    Operators can use this to understand cache behavior and debug issues.
-    """
+    """Get disk cache statistics."""
     from strata.cache import DiskCache
     from strata.server import get_state
 
@@ -62,21 +56,10 @@ async def get_cache_evictions_v1(
         Query(description="Max number of recent events to include", ge=1, le=100),
     ] = 10,
 ):
-    """Get cache eviction metrics and monitoring data.
+    """Get cache eviction metrics and pressure level.
 
-    Returns eviction statistics including:
-    - Total evictions and bytes evicted (lifetime)
-    - Evictions in last minute/hour
-    - Eviction rate (per minute)
-    - Pressure level indicator (low/medium/high/critical)
-
-    Use include_events=true to get recent eviction events for debugging.
-
-    Pressure levels:
-    - low: < 1 eviction per minute (healthy)
-    - medium: 1-5 evictions per minute (monitor)
-    - high: 5-10 evictions per minute (consider increasing cache size)
-    - critical: 10+ evictions per minute (cache is thrashing)
+    Pressure bands by evictions per minute: low < 1, medium 1-5, high 5-10, critical 10+
+    (cache is thrashing). ``include_events=true`` adds recent eviction events.
     """
     tracker = get_eviction_tracker()
     result = asdict(tracker.get_stats())
@@ -89,29 +72,10 @@ async def get_cache_evictions_v1(
 
 @router.get("/v1/cache/histogram")
 async def get_cache_histogram_v1():
-    """Get cache hit/miss statistics over time windows.
+    """Get cache hit/miss statistics: lifetime, 1m/5m/1h windows, and top tables.
 
-    Returns hit rate trends for understanding cache effectiveness:
-    - lifetime: Total hits, misses, hit rate, bytes served
-    - windows: Statistics for 1 minute, 5 minutes, and 1 hour windows
-    - top_tables: Top 5 tables by cache access count
-
-    Each window includes:
-    - hits/misses: Access counts
-    - hit_rate: Hits / total (0.0 to 1.0)
-    - bytes_from_cache/bytes_from_storage: Data served from each source
-    - covered_seconds: How much of the window the counts actually span.
-      Equal to window_seconds for every window listed here; it differs only
-      if a caller asks for a window deeper than the retained history.
-
-    Counts are exact for the full window regardless of traffic volume. One
-    access is recorded per row group, not per request, so a busy scan can
-    contribute thousands of accesses in a second.
-
-    Use this to:
-    - Track cache warm-up progress (watch hit rate climb)
-    - Identify cache thrashing (sudden hit rate drops)
-    - Find hot tables that dominate cache usage
+    Counts are exact for each window and recorded per row group, not per request.
+    ``covered_seconds`` is how much of the window the counts span.
     """
     histogram = get_cache_histogram()
     return histogram.get_summary()
@@ -121,14 +85,8 @@ async def get_cache_histogram_v1():
 async def list_cache_entries_v1():
     """List all cache entries with metadata (requires ``admin:cache``).
 
-    Returns detailed information about each cached entry.
-
-    Scope-gated because the listing is deliberately cache-wide: entries are
-    written under a per-tenant hash prefix for isolation, but this walks all of
-    them and returns each entry's table identity, snapshot id, column
-    projection and on-disk path. Unauthenticated, that undid the directory
-    isolation at the read side; it is operator introspection, so it takes the
-    same scope as ``/v1/cache/clear``.
+    Cache-wide across tenants (table identity, snapshot, projection, on-disk path), so it is
+    operator introspection gated like ``/v1/cache/clear``.
     """
     from strata.cache import DiskCache
     from strata.server import get_state
@@ -143,10 +101,7 @@ async def list_cache_entries_v1():
 
 @router.post("/v1/cache/clear", dependencies=[require_scope("admin:cache")])
 async def clear_cache_v1():
-    """Clear the disk cache.
-
-    Requires admin:cache scope when auth_mode=trusted_proxy.
-    """
+    """Clear the disk cache (requires ``admin:cache`` under trusted-proxy auth)."""
     from strata.server import get_state
 
     state = get_state()
@@ -160,16 +115,10 @@ async def clear_cache_v1():
 
 
 def _authorize_warm_tables(table_uris: list[str]) -> None:
-    """Apply the table ACL to every table a warm request names.
+    """Apply the deny-first table ACL to every table a warm request names.
 
-    Warming plans and reads a table into the shared cache, so it is a read of
-    that table and must clear the same deny-first gate the scan path
-    (``_authorize_table_access``) applies — previously it had none, letting a
-    principal denied ``s3:pii.*`` pull that table into cache and learn its
-    row-group count, byte size, and existence from the response.
-
-    Runs *before* planning: planning a denied table and reporting the failure
-    in ``errors[]`` would itself confirm existence.
+    Warming is a read of the table, so it takes the same gate as a scan. Runs before planning:
+    reporting a planning failure for a denied table would confirm it exists.
     """
     from strata.iceberg import PyIcebergCatalog
     from strata.types import TableIdentity
@@ -188,30 +137,9 @@ def _authorize_warm_tables(table_uris: list[str]) -> None:
 
 @router.post("/v1/cache/warm", response_model=WarmResponse)
 async def warm_cache_v1(request: WarmRequest):
-    """Warm the cache for specified tables.
+    """Warm the cache for the given tables and block until every row group is fetched.
 
-    Preloads row group data into the cache so subsequent queries are fast.
-    This is useful for:
-    - Warming cache after server restart
-    - Preloading data before a batch of dashboards query it
-    - Ensuring low latency for critical tables
-
-    The operation runs synchronously and returns when all row groups
-    have been fetched and cached (or skipped if already cached).
-
-    Request body:
-    - tables: List of table URIs to warm (e.g., "file:///warehouse#ns.table")
-    - columns: Optional column projection (None = all columns)
-    - max_row_groups: Optional limit per table (None = all row groups)
-    - concurrent: Max concurrent fetches (default 4)
-
-    Returns:
-    - tables_warmed: Number of tables processed
-    - row_groups_cached: Total row groups written to cache
-    - row_groups_skipped: Already in cache (cache hits)
-    - bytes_written: Total bytes written to cache
-    - elapsed_ms: Total time taken
-    - errors: Any errors encountered (list of error messages)
+    Row groups already cached count as skipped; failures are reported in ``errors``.
     """
     from strata.server import get_state
 
@@ -231,12 +159,9 @@ async def warm_cache_v1(request: WarmRequest):
     warming_semaphore = asyncio.Semaphore(request.concurrent)
 
     async def fetch_task(task: Task) -> tuple[str, int, str | None]:
-        """Fetch one row group, returning ``(outcome, bytes_written, error)``.
+        """Fetch one row group; returns ``(outcome, bytes_written, error)``.
 
-        The outcome is named rather than boolean because a failure used to be
-        indistinguishable from a success: this returned ``(False, 0)`` when it
-        raised, and ``False`` is also what it returns for "fetched and
-        written", so the caller counted every failed row group as cached.
+        ``outcome`` is ``"cached"``, ``"skipped"`` or ``"failed"``.
         """
         async with warming_semaphore:
             try:
@@ -327,29 +252,10 @@ async def warm_cache_v1(request: WarmRequest):
 
 @router.post("/v1/cache/warm/async", response_model=WarmAsyncResponse)
 async def warm_cache_async_v1(request: WarmAsyncRequest):
-    """Start an async/background cache warming job.
+    """Start a background cache warming job and return its ID immediately.
 
-    Unlike POST /v1/cache/warm (which blocks until complete), this endpoint
-    starts a background job and returns immediately with a job ID for tracking.
-
-    This is useful for:
-    - Warming large tables without blocking the request
-    - Scheduling warmup before batch operations
-    - Warming specific snapshots (not just current)
-
-    Request body:
-    - tables: List of table URIs to warm
-    - columns: Optional column projection (None = all columns)
-    - snapshot_id: Optional specific snapshot (None = current)
-    - max_row_groups: Optional limit per table (None = all)
-    - concurrent: Max concurrent fetches within job (default 4)
-    - priority: Job priority (higher = more urgent, default 0)
-
-    Returns:
-    - job_id: Unique ID for tracking progress via GET /v1/cache/warm/jobs/{id}
-    - status: Initial job status (pending or running)
-    - tables_count: Number of tables in the job
-    - message: Human-readable status message
+    Unlike ``POST /v1/cache/warm``, this does not block and can target a specific snapshot.
+    Track progress via ``GET /v1/cache/warm/jobs/{id}``.
     """
     from strata.server import get_state
 
@@ -376,17 +282,7 @@ async def warm_cache_async_v1(request: WarmAsyncRequest):
 async def list_warm_jobs_v1(
     include_completed: Annotated[bool, Query(description="Include completed/failed jobs")] = False,
 ):
-    """List all cache warming jobs.
-
-    Returns a list of all warming jobs with their current status and progress.
-    By default only shows pending and running jobs.
-
-    Query params:
-    - include_completed: Include completed/failed/cancelled jobs (default false)
-
-    Returns:
-    - jobs: List of job progress objects
-    """
+    """List cache warming jobs; pending and running only unless ``include_completed``."""
     from strata.server import get_state
 
     state = get_state()
@@ -400,20 +296,7 @@ async def list_warm_jobs_v1(
 
 @router.get("/v1/cache/warm/jobs/{job_id}", response_model=WarmJobProgress)
 async def get_warm_job_v1(job_id: str):
-    """Get progress for a specific warming job.
-
-    Returns detailed progress information for a warming job including:
-    - Current status (pending, running, completed, failed, cancelled)
-    - Tables completed vs total
-    - Row groups cached vs skipped
-    - Bytes written
-    - Elapsed time
-    - Current table being warmed
-    - Any errors encountered
-
-    Path params:
-    - job_id: Job ID returned from POST /v1/cache/warm/async
-    """
+    """Get progress for a warming job."""
     from strata.server import get_state
 
     state = get_state()
@@ -430,18 +313,7 @@ async def get_warm_job_v1(job_id: str):
 
 @router.delete("/v1/cache/warm/jobs/{job_id}")
 async def cancel_warm_job_v1(job_id: str):
-    """Cancel a running warming job.
-
-    Cancels the job and stops any in-progress warming operations.
-    Already-cached data is not removed.
-
-    Path params:
-    - job_id: Job ID to cancel
-
-    Returns:
-    - cancelled: True if job was cancelled
-    - message: Human-readable result message
-    """
+    """Cancel a warming job; already-cached data is kept."""
     from strata.server import get_state
 
     state = get_state()
