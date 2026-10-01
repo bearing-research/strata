@@ -295,9 +295,9 @@ Return a JSON object mapping paper ID to topic.
 
 | Provider                             | Enforcement                                                                                                                                                                                                                               |
 | ------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **OpenAI**                           | Native `response_format: {type: "json_schema"}`. `additionalProperties: false` is auto-injected at every `object` node; strict mode is used when the user's `required` list covers every property (otherwise relaxed to `strict: false`). |
+| **OpenAI / Gemini**                  | Native `response_format: {type: "json_schema"}` for any base URL containing `openai`, which includes Gemini's OpenAI-compatible endpoint. `additionalProperties: false` is auto-injected at every `object` node; strict mode is used when the user's `required` list covers every property (otherwise relaxed to `strict: false`). |
 | **Anthropic**                        | Native `/v1/messages` with tool-use: the schema is sent as a tool's `input_schema` and `tool_choice` is forced to that tool. The returned `tool_use.input` is extracted verbatim.                                                         |
-| **Gemini / Mistral / Ollama / vLLM** | Fallback to `response_format: {type: "json_object"}`: valid JSON guaranteed, shape not enforced server-side. Client-side validation (see below) fills the gap.                                                                           |
+| **Mistral / Ollama / vLLM**          | Fallback to `response_format: {type: "json_object"}`: valid JSON guaranteed, shape not enforced server-side. Client-side validation (see below) fills the gap.                                                                           |
 | **Servers that reject the extensions** | Some OpenAI-compatible servers 400 on `response_format` or `stream_options` outright. Strata retries once without them, appending a schema-guidance system turn; the result is marked degraded and the validate-and-retry loop carries full enforcement. |
 
 Setting `@output_schema` implies `@output json`; you don't need both.
@@ -368,7 +368,7 @@ When `@output_schema` is set, Strata runs a **validate-and-retry loop** after ev
 
 The default is 3 total attempts (1 initial + 2 retries). Override with `# @validate_retries N`. Cumulative input/output tokens across all attempts are recorded on the artifact so cost accounting is accurate. The retry count is surfaced on the cell result (`validation_retries`), and the UI shows "validated after N retries" when non-zero.
 
-Retries are mostly invisible on OpenAI-strict and Anthropic-native paths because the provider enforces the schema at decode time. They earn their keep on the `json_object` fallback path (Gemini, Mistral, Ollama) where the provider only guarantees _syntactic_ JSON.
+Retries are mostly invisible on OpenAI-strict (OpenAI, Gemini) and Anthropic-native paths because the provider enforces the schema at decode time. They earn their keep on the `json_object` fallback path (Mistral, Ollama, vLLM) where the provider only guarantees _syntactic_ JSON.
 
 ### Caching
 
@@ -419,7 +419,7 @@ base_url = "http://localhost:11434/v1"
 model = "llama3"
 ```
 
-The `[ai]` section accepts `api_key` (use sparingly: it persists in `notebook.toml`; prefer the Runtime panel), `base_url`, `model`, `max_output_tokens` and `timeout_seconds`. `model` is the notebook's default for every prompt cell, and there is no UI for it: set it here, or override it for one cell with `# @model`. Any service that implements the OpenAI `/v1/chat/completions` endpoint works, including OpenAI, Anthropic, Google and Mistral through their OpenAI-compatible endpoints, Ollama, and self-hosted vLLM, TGI or LiteLLM.
+The `[ai]` section accepts `api_key` (use sparingly: it persists in `notebook.toml`; prefer the Runtime panel), `base_url`, `model`, `max_output_tokens` and `timeout_seconds` (default 60, or the server's `STRATA_AI_TIMEOUT_SECONDS`; a prompt cell ignores `# @timeout`). `model` is the notebook's default for every prompt cell, and there is no UI for it: set it here, or override it for one cell with `# @model`. Any service that implements the OpenAI `/v1/chat/completions` endpoint works, including OpenAI, Anthropic, Google and Mistral through their OpenAI-compatible endpoints, Ollama, and self-hosted vLLM, TGI or LiteLLM.
 
 On a server in service mode the request is made by the server, so a `base_url` set here is checked like an `@fetch` URL: a host on a private, loopback or link-local address is refused unless the operator lists it in `STRATA_NOTEBOOK_FETCH_ALLOWED_HOSTS`. Personal mode reaches `localhost` as before.
 
@@ -491,7 +491,7 @@ FROM lake.taxi.trips t JOIN raw USING (zone)
 GROUP BY t.zone
 ```
 
-Each mount is a view by its name over its Parquet, CSV or JSON files (`file` and `s3` mounts, read with the mount's storage options). Every catalog table the query reads is an input the way an `@table` declaration is: the cell's provenance folds its current snapshot, the query reads that snapshot, and a new snapshot makes the cell stale. Each mount's fingerprint is folded too, so a new file does the same. The catalog is attached read-only and the mounts are views; a `write` cell on the connection writes only its `path` database. The catalog's `s3.*` keys apply only under an `s3://` warehouse; otherwise its tables are read with the credentials the catalog vends.
+Each mount is a view by its name over its Parquet, CSV or JSON files (`file` and `s3` mounts, read with the mount's storage options). Every catalog table the query reads is an input the way an `@table` declaration is: the cell's provenance folds its current snapshot, the query reads that snapshot, and a new snapshot makes the cell idle (out of date) and the cells downstream of it stale. Each mount's fingerprint is folded too, so a new file does the same. The catalog is attached read-only and the mounts are views; a `write` cell on the connection writes only its `path` database. The catalog's `s3.*` keys apply only under an `s3://` warehouse; otherwise its tables are read with the credentials the catalog vends.
 
 A read cell runs reads: `SELECT`, set operations, `VALUES`, `TABLE`, `SUMMARIZE`, `PIVOT`, `DESCRIBE`, `SHOW` and plain `EXPLAIN`. Anything else (DDL, DML, `COPY`, `ATTACH`, `USE`, `CALL`, `SET`, `PRAGMA`, and `EXPLAIN ANALYZE`, which runs the statement it describes) is refused before the cell reaches the driver, naming the statement, because the read-only transaction the driver opens is one a `COMMIT` in the body can end. This holds on every driver, not only DuckDB. Use `# @sql connection=<name> write=true` for a cell that changes a database.
 
@@ -721,8 +721,9 @@ control's current value is stored as a content-addressed artifact, so:
   (or accept the cascade) to propagate the change.
 - **Returning a control to a previous value is a cache hit** - downstream cells
   that already computed for that value don't recompute.
-- The **declaration** (`slider(0, 1, …)`) is committed to `notebook.toml`; the
-  **current value** is runtime state (a drag never churns the committed file).
+- The **declaration** (`slider(0, 1, …)`) is the committed cell file,
+  `cells/<id>.widget`; the **current value** is runtime state in
+  `.strata/runtime.json` (a drag never churns a committed file).
   It travels in a [snapshot](export.md#snapshots), so an imported copy computes
   the scenario the bundle was taken from rather than the declared defaults.
 
@@ -741,7 +742,7 @@ training cell waits for a manual run.
 
 ### App view
 
-Click **App** in the notebook header (or visit `/app/<sessionId>`) to open the
+Click **App** in the notebook header (or visit `/#/app/<sessionId>`) to open the
 notebook as a **read-only interactive app**: only widget control panels,
 markdown, and display outputs render - no editor, DAG, or toolbars. The
 connection is read-only (edits and arbitrary cell runs are rejected server-side),
@@ -816,9 +817,9 @@ For loop cells, each iteration gets a suffix:
 strata://artifact/<artifact_id>@iter=<k>@v=<version>
 ```
 
-The `<artifact_id>` is content-addressed (derived from the provenance hash); same code + same inputs + same env = same artifact ID across machines and runs. The `@v=N` version increments only when the same name pointer is re-bound to a new content hash - see [Library usage](../getting-started/core.md) for how named artifacts work in the Core SDK.
+A notebook's `<artifact_id>` names a cell variable, not its content: `nb_<notebook_id>_cell_<cell_id>_var_<variable>`. Each new result for that variable is stored as the next `@v=N` of the same id, with its provenance hash (code + inputs + env) recorded on the version. The cache lookup searches by that hash, so same code + same inputs + same env finds the stored version whatever its number. A notebook keeps each id's current value plus its last 3 earlier versions, so reverting a recent edit is still a cache hit ([`STRATA_NOTEBOOK_KEEP_SUPERSEDED_VERSIONS`](../reference/configuration.md#notebook) sets how many).
 
-Notebook cell outputs follow the pattern `nb_<notebook_id>_cell_<cell_id>_var_<variable>@v=N` for the variable-level artifacts a cell produces. You don't usually need to construct these by hand; the inspect panel surfaces them and `# @loop start_from=<cell-id>@iter=k` references them by cell ID + iteration index, not the full URI.
+You don't usually need to construct these ids by hand; the inspect panel surfaces them and `# @loop start_from=<cell-id>@iter=k` references them by cell ID + iteration index, not the full URI.
 
 ---
 
@@ -943,6 +944,8 @@ R environments are managed from the **Environment** panel, at parity with Python
 
 `renv.lock` is committed config (like `uv.lock`); the built `renv/library/` is gitignored.
 
+On a server that isolates cell code (service mode, or any server with `STRATA_NOTEBOOK_HARNESS_USER` set), **Initialize renv** and **Install** are refused: renv builds packages from source, which runs their code, and writes into the notebook directory. Add packages to `renv.lock` where the notebook is authored and commit it; the server restores that lock as the harness user when the notebook opens. See [What a cell can read](../deployment/service-mode.md#what-a-cell-can-read).
+
 ### Plots
 
 R cells display plots inline, like a Python cell's matplotlib figure. Base graphics (`plot()`, `hist()`, …) and grid-based plots (ggplot2, lattice) are captured to PNG and rendered in the cell output. A bare trailing plot object auto-renders - a last-line `p` where `p <- ggplot(...)` shows the plot without an explicit `print(p)`, mirroring the R console. A cell that draws several plots produces an ordered list of image outputs.
@@ -957,7 +960,7 @@ replaced - preserving per-cell isolation; editing `renv.lock` drains and
 respawns the pool. Pure-Python notebooks and machines without `Rscript`
 never start one.
 
-R execution and display are complete; remaining R polish is tracked on GitHub: [#83](https://github.com/bearing-research/strata/issues/83) (R version matrix on CI), [#84](https://github.com/bearing-research/strata/issues/84) (cross-language run-all batching).
+R execution and display are complete; remaining R polish is tracked on GitHub: [#84](https://github.com/bearing-research/strata/issues/84) (cross-language run-all batching).
 
 ### What you need today
 
