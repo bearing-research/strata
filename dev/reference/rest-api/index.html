@@ -4648,8 +4648,11 @@ published through the ambient <code>strata</code> client. Answered by the team s
 <div class="highlight"><pre><span></span><code><a id="__codelineno-72-1" name="__codelineno-72-1" href="#__codelineno-72-1"></a><span class="p">{</span><span class="nt">"name"</span><span class="p">:</span><span class="w"> </span><span class="s2">"team/churn_model"</span><span class="p">,</span><span class="w"> </span><span class="nt">"alias"</span><span class="p">:</span><span class="w"> </span><span class="s2">"candidate"</span><span class="p">,</span><span class="w"> </span><span class="nt">"tags"</span><span class="p">:</span><span class="w"> </span><span class="p">{},</span><span class="w"> </span><span class="nt">"table"</span><span class="p">:</span><span class="w"> </span><span class="kc">null</span><span class="p">}</span>
 </code></pre></div>
 <p>Copies one of the notebook's artifacts, and the chain that produced it, into
-the team store and names it there. <code>table</code> also writes it into that Iceberg
-table in the team store's catalog. Returns <code>name</code>, <code>artifact_uri</code>, <code>copied</code>,
+the team store and names it there. <code>name</code> is optional: without it the chain is
+copied and nothing is named or stamped with the promotion tag, which is what a
+platform publishing the result needs; an <code>alias</code> without a <code>name</code> is refused
+with <code>400</code>. <code>table</code> also writes it into that Iceberg table in the team store's
+catalog. Returns <code>name</code>, <code>artifact_uri</code>, <code>copied</code>,
 <code>alias</code>, <code>alias_pending</code>, <code>table</code>, <code>table_snapshot</code> and <code>store</code>. <code>409</code> when no
 team store is configured, <code>404</code> for an artifact the notebook's store does not
 hold, <code>502</code> when the team store refuses or cannot be reached.</p>
