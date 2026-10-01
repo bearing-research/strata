@@ -115,3 +115,89 @@ class TestLogsEndpoints:
                             first_data = line
                             break
                     assert first_data is not None and first_data.startswith("data:")
+
+
+@pytest.fixture
+def ring_with_entry(monkeypatch):
+    """A fresh server-wide ring buffer holding one known record."""
+    import strata.log_buffer as log_buffer
+
+    buf = RingBufferLogHandler(capacity=100)
+    _emit(buf, logging.INFO, "tenant-a secret path /data/a")
+    monkeypatch.setattr(log_buffer, "_ring_buffer", buf)
+    return buf
+
+
+def _logs_client(tmp_path, **config_kwargs):
+    from fastapi.testclient import TestClient
+
+    import strata.server as server_module
+    from strata.server import ServerState, app
+
+    config = StrataConfig(
+        host="127.0.0.1", port=8765, cache_dir=tmp_path / "cache", **config_kwargs
+    )
+    original = server_module._state
+    server_module._state = ServerState(config)
+    try:
+        yield TestClient(app)
+    finally:
+        server_module._state = original
+
+
+@pytest.fixture
+def service_logs_client(tmp_path, ring_with_entry):
+    yield from _logs_client(
+        tmp_path,
+        deployment_mode="service",
+        auth_mode="trusted_proxy",
+        proxy_token="test-token",
+        artifact_dir=tmp_path / "artifacts",
+    )
+
+
+@pytest.fixture
+def personal_logs_client(tmp_path, ring_with_entry):
+    yield from _logs_client(tmp_path, deployment_mode="personal")
+
+
+def _principal(scopes: str) -> dict[str, str]:
+    return {
+        "X-Strata-Proxy-Token": "test-token",
+        "X-Strata-Principal": "analyst",
+        "X-Tenant-ID": "tenant-b",
+        "X-Strata-Scopes": scopes,
+    }
+
+
+class TestLogsScopeGate:
+    """The ring buffer holds every tenant's records, so principal auth requires ``admin:*``."""
+
+    # The stream case sends a bad regex so an ungated route 400s instead of tailing forever.
+    @pytest.mark.parametrize(
+        "path,params", [("/v1/logs", {}), ("/v1/logs/stream", {"regex": "(unclosed"})]
+    )
+    def test_principal_without_admin_scope_is_refused(self, service_logs_client, path, params):
+        resp = service_logs_client.get(
+            path, params=params, headers=_principal("notebook:read admin:cache")
+        )
+        assert resp.status_code == 403
+        assert "tenant-a secret" not in resp.text
+
+    def test_admin_scope_reads_entries(self, service_logs_client):
+        resp = service_logs_client.get("/v1/logs", headers=_principal("admin:*"))
+        assert resp.status_code == 200
+        assert [e["message"] for e in resp.json()["entries"]] == ["tenant-a secret path /data/a"]
+
+    def test_admin_scope_passes_the_stream_gate(self, service_logs_client):
+        # A bad regex 400s in the handler before the endless tail starts, so 400 means the
+        # gate admitted the caller.
+        resp = service_logs_client.get(
+            "/v1/logs/stream", params={"regex": "(unclosed"}, headers=_principal("admin:*")
+        )
+        assert resp.status_code == 400
+
+    def test_personal_mode_is_unchanged(self, personal_logs_client):
+        resp = personal_logs_client.get("/v1/logs")
+        assert resp.status_code == 200
+        assert [e["message"] for e in resp.json()["entries"]] == ["tenant-a secret path /data/a"]

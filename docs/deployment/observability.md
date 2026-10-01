@@ -110,6 +110,8 @@ notebook:
 - **Logs** (`/logs`) - the server-log stream with level / notebook id / regex
   filters and a **live tail**. Backed by an in-memory ring buffer:
   `GET /v1/logs` (snapshot) and `GET /v1/logs/stream` (Server-Sent Events).
+  The buffer holds every tenant's records, so under principal auth both need
+  `admin:*`.
 - **Artifacts** (`/artifacts`) - a sortable, filterable list of stored
   artifacts with summary stats. Backed by `GET /v1/artifacts` (with `since` /
   sort / order filters) and `GET /v1/artifacts/stats`.

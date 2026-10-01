@@ -281,7 +281,7 @@ auth (`admin:*` satisfies any of them):
 | `admin:tenants` | `GET /v1/admin/tenants` and `GET /v1/admin/tenants/{tenant_id}` |
 | `admin:notebook-workers` | The server-managed worker registry, every `/v1/admin/notebook-workers*` route (list, replace, add, update, delete, refresh, reload) |
 | `admin:notebooks` | Quiescing a notebook or project and releasing it (`POST /v1/notebooks/{id}/quiesce` and `/release`, `POST /v1/projects/{path}/quiesce` and `/release`) |
-| `admin:*` | Garbage collection (`POST /v1/artifacts/gc`, still limited to the caller's tenant), and reading another tenant's `GET /v1/artifacts/usage` / `stats` |
+| `admin:*` | Garbage collection (`POST /v1/artifacts/gc`, still limited to the caller's tenant), reading another tenant's `GET /v1/artifacts/usage` / `stats`, and the server-wide log buffer (`GET /v1/logs`, `GET /v1/logs/stream`) |
 | `admin:registry` | `POST /v1/registry/pending/approve` and `.../reject` - deciding protected-alias changes |
 | `artifacts:pin` | Pinning and unpinning a version against garbage collection (`POST` / `DELETE /v1/artifacts/{id}/v/{n}/pin`) |
 | `artifacts:publish` | Minting, editing and withdrawing a publication (`POST /v1/artifacts/{id}/v/{n}/publish`, `PATCH` / `DELETE /v1/publications/{token}`) |
