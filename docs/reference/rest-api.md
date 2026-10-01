@@ -760,8 +760,11 @@ POST /v1/notebooks/{session_id}/artifacts/{artifact_id}/v/{version}/promote
 ```
 
 Copies one of the notebook's artifacts, and the chain that produced it, into
-the team store and names it there. `table` also writes it into that Iceberg
-table in the team store's catalog. Returns `name`, `artifact_uri`, `copied`,
+the team store and names it there. `name` is optional: without it the chain is
+copied and nothing is named or stamped with the promotion tag, which is what a
+platform publishing the result needs; an `alias` without a `name` is refused
+with `400`. `table` also writes it into that Iceberg table in the team store's
+catalog. Returns `name`, `artifact_uri`, `copied`,
 `alias`, `alias_pending`, `table`, `table_snapshot` and `store`. `409` when no
 team store is configured, `404` for an artifact the notebook's store does not
 hold, `502` when the team store refuses or cannot be reached.
