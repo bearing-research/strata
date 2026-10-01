@@ -168,8 +168,9 @@ files, which co-mingle source, outputs, and execution counts in one
 JSON blob and produce a multi-kilobyte diff every time a cell is
 re-run, a Strata notebook is just a directory of plain text:
 
-- **Cells are `.py` files.** Normal `git diff`, `git blame`, code review
-  on a pull request, syntax highlighting in every IDE. Reordering a cell
+- **Cells are plain text files.** Python, prompt and SQL cells are `.py`,
+  R cells `.r`, markdown cells `.md` and widget cells `.widget`. Normal
+  `git diff`, `git blame`, code review on a pull request, syntax highlighting in every IDE. Reordering a cell
   edits one number in `notebook.toml`, not a giant JSON re-serialize.
 - **`notebook.toml` is the manifest.** Stable config only: cell list,
   workers, mounts, env, AI defaults, and the active variant per group
@@ -185,8 +186,9 @@ re-run, a Strata notebook is just a directory of plain text:
   those bump the timestamp. Editing source or running cells does not.
 - **Secrets stay off disk.** Env keys matching `KEY`/`SECRET`/`TOKEN`/
   `PASSWORD`/`CREDENTIAL` are blanked before persisting, so the writer
-  can't accidentally commit an API key. The name survives (so the
-  Runtime panel still knows the slot exists), the value doesn't.
+  can't accidentally commit an API key. The name survives only when the
+  block also holds a non-sensitive value; an `[env]` with nothing but
+  blanked secrets is not written at all.
 - **uv lockfile in committed config.** `pyproject.toml` + `uv.lock` pin
   the Python environment exactly the same way the rest of your repo
   does; collaborators get a reproducible environment from a fresh clone.
@@ -355,7 +357,7 @@ A cell is out of date when no stored result matches its current provenance. This
 - The environment (`uv.lock`, or an `@env` it declares) changed
 - A declared outside input moved: a mounted file, an `@table` snapshot, an `@fetch` URL's bytes, an `@dataset` alias
 
-A cell that still has a result and whose upstream moved reads **stale · upstream changed**. A cell whose own source or environment changed has nothing that matches, so it reads **idle** until it runs. The `@fetch` and `@dataset` checks run at most once a minute while you edit, and always right before the cell runs; these lookups and the `@table` catalog read happen outside the lock that serializes the staleness walk, so one slow host does not stall the server.
+A cell that still has a result and whose upstream moved reads **stale · upstream changed**. A cell whose own source, environment or declared outside input changed has nothing that matches, so it reads **idle** until it runs, and the cells downstream of it read stale. The `@fetch` and `@dataset` checks run at most once a minute while you edit, and always right before the cell runs; these lookups and the `@table` catalog read happen outside the lock that serializes the staleness walk, so one slow host does not stall the server.
 
 The **causality chain** explains why a cell is stale, tracing the change back to its root cause (e.g., "upstream cell X changed its source").
 
@@ -366,7 +368,7 @@ idle ──→ running ──→ ready ──→ stale
               └───→ error
 ```
 
-- **idle**: no current result: never executed, or its own source or environment changed since it ran
+- **idle**: no current result: never executed, or its own source, environment or a declared outside input changed since it ran
 - **running**: currently executing. If an upstream cell is edited while it runs, it stays running and finishes **stale**, since it read the old value.
 - **ready**: last execution succeeded (or was a cache hit), artifact is current
 - **stale**: it has a result, but something upstream has moved, or Run All skipped it because a cell it reads from failed
