@@ -88,7 +88,7 @@ All messages are JSON with this shape:
 | Type                 | Payload                              | Description                                |
 | -------------------- | ------------------------------------ | ------------------------------------------ |
 | `variant_set_active` | `{ "group": "...", "name": "..." }`  | Switch the active variant in a group       |
-| `variant_add`        | `{ "group": "..." }`                 | Add a new variant cell, cloning the active |
+| `variant_add`        | `{ "group": "...", "author": "..." }` | Add a new variant cell, cloning the active. `author` is optional |
 | `widget_update`      | `{ "cell_id": "...", "values": { "<name>": <value> } }` | Set widget control value(s); re-materializes + stales downstream |
 
 ## Server → Client Messages
@@ -97,15 +97,15 @@ All messages are JSON with this shape:
 
 | Type                      | Payload                                                                                                                  | Description                                      |
 | ------------------------- | ------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------ |
-| `cell_status`             | `{ "cell_id": "...", "status": "running" }`                                                                              | Status changed                                   |
-| `cell_output`             | `{ "cell_id": "...", "outputs": {...}, "display": {...}, "displays": [...], "cache_hit": false }`                        | Execution result, including rich visible outputs |
+| `cell_status`             | `{ "cell_id": "...", "status": "running", "remote_worker": "...", "remote_transport": "...", "remote_build_state": "...", "staleness_reasons": [...], "causality": {...} }` | Status changed. Only `cell_id` and `status` are always present: the `remote_*` fields come with `running` for a remote cell (`remote_build_state` is `starting` while a worker provisions the job), `staleness_reasons` and `causality` with a staleness update |
+| `cell_output`             | `{ "cell_id": "...", "outputs": {...}, "display": {...}, "displays": [...], "cache_hit": false, "duration_ms": 128, "artifact_uri": "...", "artifact_uris": {...}, "stdout": "...", "stderr": "...", "execution_method": "...", "mutation_warnings": [...] }` | Execution result, including rich visible outputs. `artifact_uris` maps each stored variable to its artifact. A remote run adds `remote_worker`, `remote_transport`, `remote_build_id` and `remote_build_state` |
 | `cell_output_delta`       | `{ "cell_id": "...", "attempt": 1, "kind": "delta", "text": "..." }`                                                     | Streamed partial output while the cell runs (today: prompt cells). `kind: "delta"` appends `text` to a per-cell buffer; `kind: "retry"` means schema validation failed - clear the buffer, `attempt` is the new attempt number, `text` is the first validator error. `kind: "notice"` is a provider-degradation message to show beside the stream, not part of its content. Ephemeral: never persisted or replayed; the final `cell_output` is canonical. Cache hits emit no deltas. |
 | `cell_console`            | `{ "cell_id": "...", "stream": "stdout", "text": "..." }`                                                                | Incremental output                               |
-| `cell_error`              | `{ "cell_id": "...", "error": "..." }`                                                                                   | Execution error                                  |
+| `cell_error`              | `{ "cell_id": "...", "error": "...", "suggest_install": "...", "suggest_install_language": "python" }`                    | Execution error. `suggest_install` names a missing package to offer installing, with `python` or `r` for which installer. A remote run adds the `remote_*` fields of `cell_output` plus `remote_error_code` |
 | `cell_iteration_progress` | `{ "cell_id": "...", "iteration": 3, "max_iter": 50, "artifact_uri": "...", "content_type": "...", "until_reached": false, "duration_ms": 128 }` | Per-iteration update from a `@loop` cell. `until_reached` is true on the iteration where `@loop_until` held |
 | `cell_variant_progress`   | `{ "cell_id": "...", "variant": "rf", "index": 1, "total": 3, "success": true, "duration_ms": 128, "error": null }`        | Per-variant update from a `# @per_variant` fan-out cell |
 | `cell_test_status`        | `{ "cell_id": "...", "status": "running" }`                                                                              | Test run lifecycle: `running` → `ready` / `error` (mirrors `cell_status`) |
-| `cell_test_results`       | `{ "cell_id": "...", "passed": 2, "failed": 1, "errored": 0, "skipped": 0, "tests": [{ "name": "...", "nodeid": "...", "outcome": "passed", "message": "..." }], "stale": false, "pytest_unavailable": false, "ran_at": 1718000000000 }` | Per-test outcomes + totals from a `cell_run_tests`. `outcome` ∈ `passed`/`failed`/`error`/`skipped`; `message` carries the rewritten-assert diff for failures. `stale` flags the result against a since-changed cell/test/input. |
+| `cell_test_results`       | `{ "cell_id": "...", "passed": 2, "failed": 1, "errored": 0, "skipped": 0, "tests": [{ "name": "...", "nodeid": "...", "outcome": "passed", "message": "..." }], "stale": false, "pytest_unavailable": false, "ran_at": 1718000000000, "auto_installed": [] }` | Per-test outcomes + totals from a `cell_run_tests`. `outcome` ∈ `passed`/`failed`/`error`/`skipped`; `message` carries the rewritten-assert diff for failures. `stale` flags the result against a since-changed cell/test/input. `auto_installed` lists packages (pytest) installed into the notebook environment for this run. |
 
 ### Cascade
 
@@ -118,21 +118,21 @@ All messages are JSON with this shape:
 
 | Type         | Payload                                               | Description                 |
 | ------------ | ----------------------------------------------------- | --------------------------- |
-| `dag_update` | `{ "edges": [...], "roots": [...], "leaves": [...], "topological_order": [...], "cells": [...], "variant_groups": [...] }` | DAG changed after cell edit. `cells` carries each cell's defines, references, upstream and downstream ids |
+| `dag_update` | `{ "edges": [...], "roots": [...], "leaves": [...], "topological_order": [...], "cells": [...], "variant_groups": [...] }` | DAG changed after cell edit. Each `cells` entry carries `id`, `defines`, `references`, `upstream_ids`, `downstream_ids`, `is_leaf`, `annotation_diagnostics`, `variant_group` / `variant_name` / `variant_active`, `is_module_cell` / `module_exports`, and `created_by` / `updated_by` |
 
 ### State
 
 | Type                | Payload                                                               | Description                              |
 | ------------------- | --------------------------------------------------------------------- | ---------------------------------------- |
-| `notebook_state`    | `{ "id": "...", "cells": [...], "dag": {...} }`                       | Full state (response to `notebook_sync`) |
-| `impact_preview`    | `{ "target_cell_id": "...", "upstream": [...], "downstream": [...] }` | Impact analysis result                   |
-| `profiling_summary` | `{ "total_execution_ms": ..., "cell_profiles": [...] }`               | Profiling metrics                        |
+| `notebook_state`    | `{ "id": "...", "cells": [...], "dag": {...}, "environment": {...}, "environment_job": {...}, "environment_job_history": [...], "r_environment": {...}, ... }` | Full state (response to `notebook_sync`). Carries the rest of the notebook's state as well (name, mounts, workers, env, variant groups) |
+| `impact_preview`    | `{ "target_cell_id": "...", "upstream": [...], "downstream": [...], "estimated_ms": 0 }` | Impact analysis result. `upstream` entries carry `cell_id`, `cell_name`, `reason`, `skip`, `estimated_ms`; `downstream` entries carry `cell_id`, `cell_name`, `current_status`, `new_status` |
+| `profiling_summary` | `{ "total_execution_ms": ..., "cache_hits": ..., "cache_misses": ..., "cache_savings_ms": ..., "team_cache_savings_ms": ..., "team_cache_hits": ..., "team_contributors": [...], "team_promotions": [...], "total_artifact_bytes": ..., "cell_profiles": [...] }` | Profiling metrics. `cell_profiles` entries carry `cell_id`, `cell_name`, `status`, `duration_ms`, `cache_hit`, `artifact_uri`, `execution_count` |
 
 ### Inspect
 
 | Type             | Payload                                                           | Description |
 | ---------------- | ----------------------------------------------------------------- | ----------- |
-| `inspect_result` | `{ "action": "eval", "ok": true, "result": "42", "type": "int" }` | REPL result |
+| `inspect_result` | `{ "cell_id": "...", "action": "eval", "expr": "...", "ok": true, "result": "42", "type": "int" }` | REPL result. `action` is `open`, `eval` or `close`; a failed eval carries `error` |
 
 ### Dependencies
 
@@ -140,8 +140,8 @@ All messages are JSON with this shape:
 | -------------------------- | --------------------------------------------------------- | ------------------------------------------------ |
 | `environment_job_started`  | `{ "environment_job": {...} }`                            | Background environment job accepted              |
 | `environment_job_progress` | `{ "environment_job": {...} }`                            | Background environment job phase/log update      |
-| `environment_job_finished` | `{ "environment_job": {...}, "environment": {...}, ... }` | Background environment job completed or failed   |
-| `dependency_changed`       | `{ "package": "...", "action": "add", "success": true }`  | Legacy compatibility event after add/remove jobs |
+| `environment_job_finished` | `{ "environment_job": {...}, "environment_job_history": [...], "cells": [...], "lockfile_changed": false, "stale_cell_count": 0, "stale_cell_ids": [...], "environment": {...}, "r_environment": {...}, "dependencies": [...], "resolved_dependencies": [...] }` | Background environment job completed or failed. The environment and dependency fields are present only on success; an import job adds `warnings` and `imported_count` |
+| `dependency_changed`       | `{ "package": "...", "action": "add", "success": true, "error": null, "lockfile_changed": true, "stale_cell_count": 0, "cells": [...] }` | Legacy compatibility event after add/remove jobs. On success it also carries `environment`, `dependencies` and `resolved_dependencies` |
 
 ### Agent
 
@@ -163,7 +163,7 @@ All messages are JSON with this shape:
 
 ## Sequence numbers
 
-Every server → client message carries a `seq` from a single counter scoped to the **notebook session** (not the WebSocket connection). The counter increments on every outbound message; it persists across reconnects to the same session and only resets when the session itself is closed (via `DELETE /v1/notebooks/{session_id}` or a server restart).
+Every server → client message carries a `seq` from a single counter scoped to the **notebook session** (not the WebSocket connection). The counter increments on every outbound message; it persists across reconnects to the same session and only resets when the session itself is closed (see [Session lifetime](#session-lifetime)).
 
 What the client uses `seq` for:
 
@@ -175,12 +175,23 @@ What the client uses `seq` for:
 
 Disconnects happen - proxy timeouts, network drops, server restarts, tab sleep. The recovery protocol:
 
-1. **Client reconnects** to `ws://.../v1/notebooks/ws/{session_id}` with the same session ID. The session itself is in-memory on the server and survives reconnects; it's cleaned up only when closed explicitly via `DELETE /v1/notebooks/{session_id}` or when the server restarts.
+1. **Client reconnects** to `ws://.../v1/notebooks/ws/{session_id}` with the same session ID. The session itself is in-memory on the server and survives reconnects until it is closed (see [Session lifetime](#session-lifetime)).
 2. **Server accepts the reconnect** and resumes emitting messages from the session's existing `seq` counter (continuing, not resetting). If the previous client disconnected within the **60-second cancel grace window** and a cell is still running, the execution survives the disconnect - the client picks up where it left off.
 3. **Client sends `notebook_sync`** as its first message after reconnecting. The server responds with `notebook_state` containing the full current state (cells, DAG, cell statuses, latest display outputs).
 4. **Client replaces local state** with the synced payload and resumes listening.
 
 There is **no replay** of missed messages - events emitted while the client was disconnected are lost. State persisted to the artifact store (`cell_output`, finished cell statuses) is recovered via `notebook_sync`; transient progress events (`cell_console` mid-stream, `cell_output_delta` for a streaming prompt cell, `cell_iteration_progress` for a `@loop` cell, `cell_variant_progress` for a `# @per_variant` fan-out cell, `cascade_progress`) are not.
+
+### Session lifetime
+
+A session ends when:
+
+- the notebook is deleted (`DELETE /v1/notebooks/{session_id}`, or `POST /v1/notebooks/delete-by-path`, which closes any session open on that directory),
+- it has had no connected WebSocket and no request for 4 hours,
+- 50 sessions are open and another notebook is opened: the least recently used session with no connected WebSocket is closed,
+- or the server restarts.
+
+The idle and count checks run when a notebook is opened, and never close a session that has a connected WebSocket. A reconnect to a closed session is refused with `1008`; call `POST /v1/notebooks/open` again for a new session ID.
 
 ### Cancelling a SQL cell
 
@@ -205,6 +216,6 @@ This is the trade-off Vue's close-tab-to-cancel semantics make with TUI-style tr
 | `1008` | Policy violation - session not found, ownership mismatch in per-user personal mode, or an auth failure on the upgrade |
 | `1011` | Internal error while handling a frame |
 
-If the session has been closed server-side (notebook deleted, server restart), the WebSocket upgrade is refused with `1008`. The client should call `POST /v1/notebooks/open` to start a new session.
+If the session has been closed server-side (notebook deleted, evicted, server restart), the WebSocket upgrade is refused with `1008`. The client should call `POST /v1/notebooks/open` to start a new session.
 
 The server does not send protocol-level pings; the WebSocket library's default frame keepalive is what holds idle connections open. If your client sees no traffic for an extended period and you can't tell whether the connection is live, the safest probe is to send `notebook_sync` and watch for the response.

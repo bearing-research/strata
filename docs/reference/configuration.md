@@ -46,9 +46,9 @@ proxy_token = "…"           # or STRATA_PROXY_TOKEN
 | `STRATA_PUBLIC_BASE_URL`                  | request     | Origin readers reach this server on; set it behind a reverse proxy so published-artifact embed URLs are the public ones |
 | `STRATA_DEPLOYMENT_MODE`                  | `personal`  | `personal` or `service`                      |
 | `STRATA_ALLOW_REMOTE_CLIENTS_IN_PERSONAL` | `false`     | Allow non-localhost clients in personal mode |
-| `STRATA_CORS_ALLOW_ORIGINS`               | _(empty)_   | Origins allowed to call the API from a browser. Empty means no cross-origin access. Personal mode has no auth, so any page allowed here can author and run cells |
+| `STRATA_CORS_ALLOW_ORIGINS`               | _(empty)_   | Origins allowed to call the API from a browser, as a JSON array (`["http://localhost:5173"]`); a comma-separated value fails at startup. Empty means no cross-origin access. Personal mode has no auth, so any page allowed here can author and run cells |
 | `STRATA_EMBED_FRAME_ANCESTORS`            | _(empty)_   | Origins allowed to embed a notebook's app view in an `<iframe>` (sets `Content-Security-Policy: frame-ancestors`). Empty means same-origin only. JSON array or comma-separated; `*` allows any host |
-| `STRATA_MCP_ENABLED`                      | `false`     | Mount the MCP server at `/mcp` so a coding agent can drive the live session. In service mode it requires principal auth (`trusted_proxy` or `api_key`); each tool call then runs as its caller and is checked against the notebook scopes. Requires the `[mcp]` extra. See [Notebook → MCP](../notebook/mcp.md) |
+| `STRATA_MCP_ENABLED`                      | `false`     | Mount the MCP server at `/mcp` so a coding agent can drive the live session. In service mode it requires principal auth (`trusted_proxy` or `api_key`); each tool call then runs as its caller and is checked against the notebook scopes. Refused at startup together with `STRATA_PERSONAL_MODE_USER_HEADER`, since the MCP endpoint does not filter sessions by owner. Requires the `[mcp]` extra. See [Notebook → MCP](../notebook/mcp.md) |
 | `STRATA_ARROW_MEMORY_POOL`                | `None`      | Arrow allocator: `default`, `system`, `jemalloc`, or `mimalloc`. Unset leaves the PyArrow default |
 
 ## Cache
@@ -67,8 +67,8 @@ proxy_token = "…"           # or STRATA_PROXY_TOKEN
 | `STRATA_FETCH_PARALLELISM`     | `4`     | Max concurrent fetches per scan |
 | `STRATA_MAX_FETCH_WORKERS`     | `32`    | Max threads in fetch pool       |
 | `STRATA_FETCH_TIMEOUT_SECONDS` | `60.0`  | Per-fetch timeout               |
-| `STRATA_FAST_CONCAT`           | `rust` when the extension is built, else `pyarrow` | Arrow IPC concat implementation. `pyarrow` parses (slower, handles more edge cases) |
-| `STRATA_MMAP_MIN_BYTES`        | `4194304` (4 MiB) | Cache reads at or above this size go through the Rust mmap path; `0` forces it always |
+| `STRATA_FAST_CONCAT`           | `rust` when the extension is built, else `pyarrow` | Arrow IPC concat implementation. `pyarrow` parses (slower, handles more edge cases). Environment only |
+| `STRATA_MMAP_MIN_BYTES`        | `4194304` (4 MiB) | Cache reads at or above this size go through the Rust mmap path; `0` forces it always. Environment only |
 
 ## Resource Limits
 
@@ -134,7 +134,7 @@ Two constraints are enforced at startup rather than papered over at runtime:
 
 | Variable             | Default | Description                          |
 | -------------------- | ------- | ------------------------------------ |
-| `STRATA_METADATA_DB` | `None`  | SQLite path for metadata persistence |
+| `STRATA_METADATA_DB` | `~/.strata/meta.sqlite` | SQLite path for metadata persistence |
 
 ## Catalog
 
@@ -143,13 +143,13 @@ Two constraints are enforced at startup rather than papered over at runtime:
 | `STRATA_CATALOG_NAME`        | `default` | Iceberg catalog name                                                                              |
 | `STRATA_CATALOG_PROPERTIES`  | `{}`      | PyIceberg catalog properties (JSON object via env; `[tool.strata.catalog_properties]` in pyproject) |
 | `STRATA_CATALOGS`            | `{}`      | Named catalogs: a JSON object of name to PyIceberg catalog properties (`[tool.strata.catalogs.<name>]` in pyproject), e.g. `{"lake": {"type": "rest", "uri": "https://catalog.example"}}`. A table in one is `<name>:<namespace>.<table>`, for `@table` and scans alike. Credentials a REST catalog vends for a table are used to read that table's files |
-| `STRATA_CATALOG_URI`         | `None`    | Catalog database URI. Merged into `catalog_properties.uri`, so it does not replace sibling keys set in pyproject |
+| `STRATA_CATALOG_URI`         | `None`    | Catalog database URI. Merged into `catalog_properties.uri`, so it does not replace sibling keys set in pyproject. Environment only |
 
 ## S3 Storage
 
 | Variable                 | Default | Description                                      |
 | ------------------------ | ------- | ------------------------------------------------ |
-| `STRATA_S3_REGION`       | `None`  | AWS region                                       |
+| `STRATA_S3_REGION`       | `None`  | AWS region (falls back to AWS_REGION)            |
 | `STRATA_S3_ENDPOINT_URL` | `None`  | Custom endpoint (MinIO, LocalStack)              |
 | `STRATA_S3_ACCESS_KEY`   | `None`  | Access key (falls back to AWS_ACCESS_KEY_ID)     |
 | `STRATA_S3_SECRET_KEY`   | `None`  | Secret key (falls back to AWS_SECRET_ACCESS_KEY) |
@@ -163,7 +163,7 @@ Unset credentials fall back to Application Default Credentials.
 | Variable                        | Default | Description                                                      |
 | ------------------------------- | ------- | ---------------------------------------------------------------- |
 | `STRATA_GCS_DEFAULT_BUCKET_LOCATION` | `None` | GCS location new buckets default to (`US`, `europe-west1`). `STRATA_GCS_PROJECT_ID` is still accepted for it and warns: it never set a project, since `GcsFileSystem` has no project parameter |
-| `STRATA_GCS_CREDENTIALS_JSON`   | `None`  | Service-account key, as either a path to the JSON file or the JSON itself. Inline key material is written to a private temp file, because `GOOGLE_APPLICATION_CREDENTIALS` only resolves paths |
+| `STRATA_GCS_CREDENTIALS_JSON`   | `None`  | Service-account key, as either a path to the JSON file or the JSON itself. Inline key material is written to a private temp file, because `GOOGLE_APPLICATION_CREDENTIALS` only resolves paths. Falls back to `GOOGLE_APPLICATION_CREDENTIALS` |
 | `STRATA_GCS_ANONYMOUS`          | `false` | Use anonymous access (public buckets, emulators)                 |
 | `STRATA_GCS_ENDPOINT_OVERRIDE`  | `None`  | Custom endpoint (fake-gcs-server and similar)                    |
 
@@ -186,7 +186,7 @@ credential.
 
 | Variable                          | Default     | Description                      |
 | --------------------------------- | ----------- | -------------------------------- |
-| `STRATA_ARTIFACT_DIR`             | `None`      | Artifact store directory. In service mode the store exists only when this is set, even when the metadata DSN and a blob backend hold everything, and startup refuses a DSN, a non-local blob backend or service writes without it |
+| `STRATA_ARTIFACT_DIR`             | `~/.strata/artifacts` in personal mode, unset in service mode | Artifact store directory. In service mode the store exists only when this is set, even when the metadata DSN and a blob backend hold everything, and startup refuses a DSN, a non-local blob backend or service writes without it |
 | `STRATA_ARTIFACT_ZOMBIE_BUILD_TIMEOUT_SECONDS` | `3600.0` | Builds stuck in `building` longer than this are demoted to `failed` at startup |
 | `STRATA_ARTIFACT_GC_INTERVAL_SECONDS` | `3600` in personal mode, unset (off) in service mode | How often the server sweeps its artifact store. `0` turns the sweep off. A sweep collects only what nothing holds: nothing named, aliased, pinned or published, nothing those or a running build depend on, and not the current value of an id somebody chose (a notebook's cell outputs). An unnamed `materialize` result is a cache entry; name or pin it to keep it. See [Cleaning up the Core artifact store](../deployment/lifecycle.md#cleaning-up-the-core-artifact-store). |
 | `STRATA_ARTIFACT_GC_MAX_BYTES` | `21474836480` (20 GiB) in personal mode, unset in service mode | When the store holds more than this, a sweep collects the least recently used until it is at 80% of it. `0` means no cap. |
@@ -444,7 +444,10 @@ The v2-pull signed-URL routes (build manifest, signed download / upload, and
 `finalize`) have no on/off switch. They are served whenever the deployment can
 issue and honor them at all (personal mode, or service mode with transforms
 enabled), so `STRATA_TRANSFORM_SIGNING_SECRET` below matters in every such
-deployment, not only in one that opted in to something.
+deployment, not only in one that opted in to something. In service mode the
+build manifest is issued only under `STRATA_AUTH_MODE=trusted_proxy`, since it
+carries upload and finalize capabilities; under any other auth mode it returns
+404.
 
 | Variable                                | Default | Description                                                                                     |
 | --------------------------------------- | ------- | ----------------------------------------------------------------------------------------------- |
@@ -479,7 +482,7 @@ deployment, not only in one that opted in to something.
 | `STRATA_NOTEBOOK_ENV_BACKEND`       | `uv`                        | How notebook Python environments are kept. `uv`: each notebook has its own `.venv`. `shared`: notebooks with the same `uv.lock` and interpreter build share one environment, and each notebook's `.venv` is a symlink to it, so a second notebook with that lock installs nothing. Adding or removing a package moves only that notebook to another environment. R libraries are shared the same way, one per `renv.lock` and R build, with `renv/library` a symlink. POSIX only. See [Shared environments](../notebook/environment.md#shared-environments). |
 | `STRATA_NOTEBOOK_SHARED_ENV_DIR`    | `envs` beside `STRATA_NOTEBOOK_STORAGE_DIR` | Where shared environments live, one directory per lockfile and interpreter. |
 | `STRATA_NOTEBOOK_SHARED_ENV_TTL_DAYS` | `7.0`                     | A shared environment no notebook links to is removed once unused this long, by an hourly sweep in the server or `strata env gc`. One a notebook links to is never removed. |
-| `STRATA_NOTEBOOK_OBJECT_CODEC` | `cloudpickle` | How a cell's value that is neither Arrow nor JSON is pickled when it is handed to another cell: `cloudpickle` (stdlib `pickle` if cloudpickle is not installed) or `pickle`. Any other value fails the cell's serialization. |
+| `STRATA_NOTEBOOK_OBJECT_CODEC` | `cloudpickle` | How a cell's value that is neither Arrow nor JSON is pickled when it is handed to another cell: `cloudpickle` (stdlib `pickle` if cloudpickle is not installed) or `pickle`. Any other value fails the cell's serialization. Environment only. |
 | `STRATA_NOTEBOOK_KEEP_SUPERSEDED_VERSIONS` | `3` | How many earlier values of each cell output a notebook's own store keeps beside the current one, so reverting a recent edit is still a cache hit. Older ones are pruned when the server opens the notebook. `0` turns pruning off and keeps every value. |
 | `STRATA_PERSONAL_MODE_USER_HEADER`  | `None`                      | Request header carrying caller identity. When set in personal mode, notebooks are stamped with the caller's identity on create and `discover`/`delete` scope to it. Intended for proxy-fronted personal deployments. |
 | `STRATA_NOTEBOOK_REMOTE_STORE_URL`  | `None`                      | Point the ambient `strata` client injected into cells at a remote shared store instead of this local notebook server, so a team publishes/consumes against one central deployment. Also what the Registry tab and the per-cell strip describe: with this set they forward there, so the dashboard shows the store the notebook actually names things in. Unset → both target the local server. Naming this server's own host and port is rejected at startup, because the registry routes would forward to themselves. See [Service Mode → shared research store](../deployment/service-mode.md#authenticated-write-back-the-shared-research-store). |
@@ -498,7 +501,7 @@ deployment, not only in one that opted in to something.
 ## TUI
 
 Defaults for the `strata-notebook-tui` client; each is also a command-line
-flag, and the flag wins.
+flag, and the flag wins. Environment only.
 
 | Variable                       | Default                 | Description                                                       |
 | ------------------------------ | ----------------------- | ----------------------------------------------------------------- |
@@ -549,30 +552,36 @@ The worker's input downloads, result uploads and log forwarding connect only to 
 
 | Variable                      | Default  | Description             |
 | ----------------------------- | -------- | ----------------------- |
-| `STRATA_LOG_LEVEL`            | `INFO`   | Log level               |
-| `STRATA_LOG_FORMAT`           | `json`   | `json` or `text`        |
+| `STRATA_LOG_LEVEL`            | `INFO`   | Log level. Environment only |
+| `STRATA_LOG_FORMAT`           | `json`   | `json` or `text`. Environment only |
 | `STRATA_TRACING_ENABLED`      | `true`   | A kill switch, not an opt-in: set `false` to disable tracing. No effect unless the `[otel]` extra is installed, which is what keeps it off by default. Environment only. |
-| `STRATA_METRICS_ENABLED`      | `true`   | Set `false` to stop collecting request/cache metrics |
+| `STRATA_METRICS_ENABLED`      | `true`   | Set `false` to stop collecting request/cache metrics. Environment only |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | `None`   | OTLP collector endpoint |
 | `OTEL_SERVICE_NAME`           | `strata` | Service name for traces |
 
 ## AI (prompt cells)
 
+The `STRATA_AI_*` variables are the server's defaults, read at startup. The
+provider keys are read from the **notebook's** environment (the Runtime panel,
+`[env]` in `notebook.toml`, or a secret manager), not from the server's shell,
+so a key exported where the server starts does not reach every notebook.
+
 | Variable                       | Default  | Description                                                  |
 | ------------------------------ | -------- | ------------------------------------------------------------ |
 | `STRATA_AI_BASE_URL`           | `None`   | OpenAI-compatible API base URL                               |
 | `STRATA_AI_MODEL`              | `None`   | Model identifier (e.g. `claude-sonnet-4-6`, `gpt-5.4`)       |
-| `STRATA_AI_API_KEY`            | `None`   | API key (generic, works with any provider)                   |
+| `STRATA_AI_API_KEY`            | `None`   | API key (generic, works with any provider). Also read from the notebook's environment, where it is used only when the server sets no key |
 | `STRATA_AI_MAX_OUTPUT_TOKENS`  | `4096`   | Max output tokens requested                                  |
 | `STRATA_AI_TIMEOUT_SECONDS`    | `60.0`   | AI request timeout                                           |
-| `ANTHROPIC_API_KEY`            | `None`   | Anthropic API key (auto-sets base URL + model)               |
-| `OPENAI_API_KEY`               | `None`   | OpenAI API key (auto-sets base URL + model)                  |
-| `GEMINI_API_KEY`               | `None`   | Google Gemini API key (auto-sets base URL + model)           |
-| `MISTRAL_API_KEY`              | `None`   | Mistral API key (auto-sets base URL + model)                 |
+| `ANTHROPIC_API_KEY`            | `None`   | Anthropic API key, from the notebook's environment (auto-sets base URL + model) |
+| `OPENAI_API_KEY`               | `None`   | OpenAI API key, from the notebook's environment (auto-sets base URL + model) |
+| `GEMINI_API_KEY`               | `None`   | Google Gemini API key, from the notebook's environment (auto-sets base URL + model) |
+| `MISTRAL_API_KEY`              | `None`   | Mistral API key, from the notebook's environment (auto-sets base URL + model) |
 
-Provider-specific keys auto-configure `base_url` and `model` defaults.
-`STRATA_AI_*` variables override provider defaults. Notebook-level `[ai]`
-config in `notebook.toml` overrides both. In service mode a `base_url` from
+Precedence, highest first: `[ai]` in `notebook.toml`, then a provider key in
+the notebook's environment, then the server's `STRATA_AI_*`. A provider key
+also sets its provider's `base_url` and `model`, so it replaces the server's
+`STRATA_AI_BASE_URL` and `STRATA_AI_MODEL` too. In service mode a `base_url` from
 `notebook.toml` is checked like an `@fetch` URL: a private, loopback or
 link-local address is refused unless its host is in
 `STRATA_NOTEBOOK_FETCH_ALLOWED_HOSTS`. `STRATA_AI_BASE_URL` is the operator's
