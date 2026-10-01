@@ -1672,7 +1672,8 @@ def _translate_conda_dependency(dependency: str) -> tuple[str | None, str | None
     lowered = normalized.lower()
     if lowered == "pip":
         return None, "Ignored explicit pip bootstrap entry from environment.yaml."
-    if lowered.startswith("python"):
+    # The interpreter pin only: python-dateutil and friends are ordinary packages.
+    if re.match(r"python(?:$|[\s=<>!~])", lowered):
         return (
             None,
             "Ignored python version pin from environment.yaml; notebook "
