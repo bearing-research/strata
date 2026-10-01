@@ -6,6 +6,7 @@ calls the LLM, and stores the response as an artifact.
 
 from __future__ import annotations
 
+import dataclasses
 import hashlib
 import json
 import logging
@@ -343,15 +344,8 @@ async def execute_prompt_cell(
     # non-OpenAI providers (which only guarantee syntactic JSON) still
     # produce schema-conforming output. The retry feeds the previous
     # response and the validator errors back to the model.
-    from strata.notebook.llm import LlmConfig as _LlmConfig
-
-    call_config = _LlmConfig(
-        base_url=llm_config.base_url,
-        api_key=llm_config.api_key,
-        model=model,
-        max_output_tokens=max_tokens,
-        timeout_seconds=llm_config.timeout_seconds,
-    )
+    # ``replace`` rather than a new config: the base_url's guard travels with it.
+    call_config = dataclasses.replace(llm_config, model=model, max_output_tokens=max_tokens)
     max_attempts = (
         analysis.validate_retries
         if analysis.validate_retries is not None

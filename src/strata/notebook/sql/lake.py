@@ -19,7 +19,9 @@ cell stale. Each mount's fingerprint is folded too.
 from __future__ import annotations
 
 import hashlib
+import os
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import sqlglot
@@ -163,7 +165,9 @@ def resolve_lake(
             if confined:
                 lake.locations.append(_table_location(table_spec, config))
     if mount_names:
-        update["mount_sources"] = _mount_sources(session, cell_id, source, mount_names, lake)
+        update["mount_sources"] = _mount_sources(
+            session, cell_id, source, mount_names, lake, config if confined else None
+        )
         if confined:
             lake.locations.extend(_mount_location(m["uri"]) for m in update["mount_sources"])
     if update:
@@ -198,8 +202,59 @@ def _mount_location(uri: str) -> str:
     return root + "/"
 
 
+# Never a confined cell's mount root, nor under one: the running process's
+# files (``/proc/self/environ``), kernel state and devices.
+_SYSTEM_TREES = (Path("/proc"), Path("/sys"), Path("/dev"))
+
+
+def local_mount_root_problem(uri: str, config: Any) -> str | None:
+    """Why a confined SQL cell may not mount the local root *uri*, or ``None``.
+
+    A confined handle may read everything under a mount's root (see
+    ``duckdb._confine``), as the server, so the root is how much of the
+    server's disk the notebook reads: ``file:///`` is all of it. Refused, after
+    following links: a root with fewer than two path components; one that
+    holds the server's state (the artifact store, the cache, the metadata
+    database, the notebook storage directory, the server's home); and one in
+    the server's home or in ``/proc``, ``/sys`` or ``/dev``, where credentials
+    and the process's own environment live. Remote mounts are not local files.
+    """
+    from strata.notebook.mounts import parse_mount_uri
+
+    scheme, path = parse_mount_uri(uri)
+    if scheme != "file":
+        return None
+    root = Path(os.path.realpath(path or "/"))
+    if len(root.parts) < 3:
+        return f"its root {root} is too near the top of the filesystem"
+    home = Path(os.path.realpath(Path.home()))
+    metadata_db = getattr(config, "metadata_db", None)
+    state = {
+        "artifact store": getattr(config, "artifact_dir", None),
+        "cache": getattr(config, "cache_dir", None),
+        "metadata database": Path(metadata_db).parent if metadata_db else None,
+        "notebook storage": getattr(config, "notebook_storage_dir", None),
+        "home directory": home,
+    }
+    for label, location in state.items():
+        if location is None:
+            continue
+        resolved = Path(os.path.realpath(location))
+        if root == resolved or root in resolved.parents:
+            return f"its root {root} holds the server's {label} ({resolved})"
+    for tree in (home, *_SYSTEM_TREES):
+        if tree in root.parents:
+            return f"its root {root} is inside {tree}"
+    return None
+
+
 def _mount_sources(
-    session: Any, cell_id: str, source: str, names: list[str], lake: Lake
+    session: Any,
+    cell_id: str,
+    source: str,
+    names: list[str],
+    lake: Lake,
+    confined_config: Any | None = None,
 ) -> list[dict[str, Any]]:
     from strata.notebook.credentials import CredentialError, CredentialResolver
     from strata.notebook.mounts import MountResolver, mount_fingerprint_sync, resolve_cell_mounts
@@ -222,6 +277,15 @@ def _mount_sources(
         mount = declared.get(name)
         if mount is None:
             raise LakeError(f"mount {name!r} is not declared for this cell")
+        if confined_config is not None:
+            # Before anything under the root is read: fingerprinting ``/``
+            # would walk the whole disk.
+            problem = local_mount_root_problem(mount.uri, confined_config)
+            if problem is not None:
+                raise LakeError(
+                    f"mount {name!r}: {problem}, and a SQL cell on this server reads "
+                    "everything under a mount's root as the server"
+                )
         try:
             storage_options = resolver.storage_options(mount)
         except CredentialError as exc:

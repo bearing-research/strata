@@ -317,6 +317,8 @@ def authorize_table_access(table_uri: str, table_identity) -> None:
     URI as a transform input share this one gate, so a table input can't be used
     to read a table the caller is denied on the direct scan path.
 
+    ``table_identity`` ``None`` (a URI that does not name a table) is denied.
+
     Raises:
         HTTPException: 401 if no principal; 403/404 (per
         ``hide_forbidden_as_not_found``) if the ACL denies the table.
@@ -334,18 +336,23 @@ def authorize_table_access(table_uri: str, table_identity) -> None:
     if principal is None:
         raise HTTPException(status_code=401, detail="Unauthorized")
 
-    named, _ = named_catalog(table_uri, state.config)
-    table_ref = TableRef.from_table_identity(
-        table_identity, table_uri=table_uri, named_catalog_name=named
-    )
-    # The names the same table has under the other address forms, which a
-    # deny rule written for any one of them must also refuse.
-    aliases = tuple(
-        TableRef(catalog=store, namespace=table_ref.namespace, table=table_ref.table)
-        for store in shared_catalog_stores(table_uri, state.config)
-        if store != table_ref.catalog
-    )
-    if not AclEvaluator(state.config.acl_config).authorize(principal, table_ref, aliases):
+    if table_identity is None:
+        # Deny-first: a table the ACL cannot name is not one it allows.
+        allowed = False
+    else:
+        named, _ = named_catalog(table_uri, state.config)
+        table_ref = TableRef.from_table_identity(
+            table_identity, table_uri=table_uri, named_catalog_name=named
+        )
+        # The names the same table has under the other address forms, which a
+        # deny rule written for any one of them must also refuse.
+        aliases = tuple(
+            TableRef(catalog=store, namespace=table_ref.namespace, table=table_ref.table)
+            for store in shared_catalog_stores(table_uri, state.config)
+            if store != table_ref.catalog
+        )
+        allowed = AclEvaluator(state.config.acl_config).authorize(principal, table_ref, aliases)
+    if not allowed:
         if state.config.hide_forbidden_as_not_found:
             raise HTTPException(status_code=404, detail="Table not found")
         raise HTTPException(status_code=403, detail="Access denied")
@@ -370,11 +377,20 @@ def resolve_input_version(input_uri: str, tenant: str | None = None) -> str:
         _authorize_artifact_read,
         _ensure_artifact_access,
         _get_artifact_store,
+        _table_identity_from_uri,
         get_state,
     )
     from strata.services.materialize import InputResolutionError, materialize_service
 
     store = _get_artifact_store(allow_server_mode=True)
+    # A table input is authorized before it is planned, on the identity its URI
+    # names, as the scan path does. Planning first answered a denied caller
+    # with the plan's failure: a 422 naming the table and its delete files, or
+    # a 400 that materialize treats as a legacy URI and builds past, the ACL
+    # never consulted. The check after resolution stays, for a catalog that
+    # resolves the table to another identity.
+    if input_uri.startswith(("file://", "s3://")):
+        authorize_table_access(input_uri, _table_identity_from_uri(input_uri))
     try:
         resolved = materialize_service.resolve_input_version(
             input_uri, store=store, planner=get_state().planner, tenant=tenant

@@ -167,3 +167,101 @@ async def test_only_service_mode_refuses_a_sqlite_write_cell_attaching_another_f
     assert result.success is allowed, result.error
     if not allowed:
         assert "ATTACH" in (result.error or "")
+
+
+# ---------------------------------------------------------------------------
+# A local mount root is how much of the server's disk a read cell may read
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("mode", "readable"), [("personal", True), ("service", False)], ids=["personal", "service"]
+)
+@pytest.mark.asyncio
+async def test_a_mount_whose_root_holds_server_state_is_refused(
+    tmp_path, monkeypatch, mode, readable
+):
+    """Confinement admits everything under a mount's root, so a notebook that
+    mounts a directory holding the server's artifact store reads the store."""
+    from strata.notebook.models import MountSpec
+    from strata.notebook.writer import update_notebook_mounts
+
+    server_root = tmp_path / "srv"
+    secret = server_root / "artifacts" / "secret.txt"
+    secret.parent.mkdir(parents=True)
+    secret.write_text("another tenant's artifact")
+    (server_root / "data.csv").write_text("a\n1\n")
+    config = StrataConfig(
+        cache_dir=tmp_path / "cache", deployment_mode=mode, artifact_dir=secret.parent
+    )
+    monkeypatch.setattr(NotebookSession, "_lake_config", lambda self: config)
+    source = f"# @sql connection=db\nSELECT content FROM read_text('{secret}')\n"
+    nb_dir = create_notebook(tmp_path, "mount_root")
+    add_cell_to_notebook(nb_dir, "c1", language="sql")
+    write_cell(nb_dir, "c1", source)
+    update_notebook_mounts(nb_dir, [MountSpec(name="srv", uri=server_root.as_uri())])
+    toml = nb_dir / "notebook.toml"
+    toml.write_text(
+        toml.read_text() + '\n[connections.db]\ndriver = "duckdb"\npath = ":memory:"\n'
+        'mounts = ["srv"]\n'
+    )
+    session = NotebookSession(parse_notebook(nb_dir), nb_dir)
+
+    result = await CellExecutor(session).execute_cell("c1", source)
+
+    assert result.success is readable, result.error
+    if not readable:
+        assert "mount 'srv'" in (result.error or "")
+        assert "artifact" in (result.error or "")
+
+
+class TestLocalMountRoots:
+    """Which local roots a confined SQL cell may mount, checked before anything
+    under the root is read (fingerprinting ``/`` would walk the whole disk)."""
+
+    @pytest.fixture
+    def config(self, tmp_path):
+        return StrataConfig(
+            cache_dir=tmp_path / "state" / "cache",
+            artifact_dir=tmp_path / "state" / "artifacts",
+            metadata_db=tmp_path / "state" / "meta" / "meta.sqlite",
+            notebook_storage_dir=tmp_path / "notebooks",
+            deployment_mode="service",
+        )
+
+    @staticmethod
+    def _problem(uri: str, config) -> str | None:
+        from strata.notebook.sql.lake import local_mount_root_problem
+
+        return local_mount_root_problem(uri, config)
+
+    @pytest.mark.parametrize("uri", ["file:///", "/", "file:///data", "/usr"])
+    def test_the_filesystem_root_and_top_level_directories(self, uri, config):
+        assert self._problem(uri, config) is not None
+
+    def test_a_link_to_the_root_is_the_root(self, tmp_path, config):
+        link = tmp_path / "data" / "everything"
+        link.parent.mkdir()
+        link.symlink_to("/")
+
+        assert self._problem(link.as_uri(), config) is not None
+
+    @pytest.mark.parametrize(
+        "subpath", ["state", "state/cache", "state/meta", "notebooks", "state/artifacts"]
+    )
+    def test_a_root_holding_server_state(self, tmp_path, config, subpath):
+        assert self._problem((tmp_path / subpath).as_uri(), config) is not None
+
+    def test_the_servers_home_and_what_is_in_it(self, config):
+        home = Path.home()
+
+        assert self._problem(home.as_uri(), config) is not None
+        assert self._problem((home / ".aws").as_uri(), config) is not None
+
+    def test_the_process_filesystem(self, config):
+        assert self._problem("file:///proc/self", config) is not None
+
+    def test_a_notebooks_own_data_and_other_directories_are_fine(self, tmp_path, config):
+        assert self._problem((tmp_path / "notebooks" / "nb" / "data").as_uri(), config) is None
+        assert self._problem((tmp_path / "lake" / "raw").as_uri(), config) is None
+        assert self._problem("s3://bucket/", config) is None

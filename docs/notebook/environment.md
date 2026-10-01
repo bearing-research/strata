@@ -35,7 +35,7 @@ matplotlib
 
 The operation runs asynchronously, you can continue editing cells while it installs.
 
-On a server in service mode, packages install from wheels only: a package with no wheel for the notebook's Python fails to resolve, and the message says a wheel is required. See [Service mode](../deployment/service-mode.md).
+On a server in service mode, packages install from wheels only: a package with no wheel for the notebook's Python fails to resolve, and the message says a wheel is required. R packages are not added from the notebook there: the server restores the notebook's committed `renv.lock` as the harness user when the notebook opens. See [Service mode](../deployment/service-mode.md).
 
 ### Import from requirements.txt
 

@@ -46,7 +46,9 @@ def fake_r(monkeypatch):
     monkeypatch.setattr(shared_env, "r_build", lambda: "R version 4.4.0 aarch64-apple-darwin20")
     restores: list[tuple[Path, dict[str, str] | None]] = []
 
-    def restore(notebook_dir: Path, *, timeout: int, env: dict[str, str] | None = None) -> bool:
+    def restore(
+        notebook_dir: Path, *, timeout: int, env: dict[str, str] | None = None, harness_user=None
+    ) -> bool:
         restores.append((notebook_dir, env))
         for package in ("jsonlite",) + (("ggplot2",) if "ggplot2" in _lock(notebook_dir) else ()):
             (notebook_dir / "renv" / "library" / "R-4.4" / package).mkdir(parents=True)
@@ -208,9 +210,11 @@ async def test_a_real_lock_restores_once_and_an_r_cell_runs_on_the_link(
     restores: list[Path] = []
     real_restore = writer._renv_restore_locked
 
-    def counted(notebook_dir: Path, *, timeout: int, env: dict[str, str] | None = None) -> bool:
+    def counted(
+        notebook_dir: Path, *, timeout: int, env: dict[str, str] | None = None, harness_user=None
+    ) -> bool:
         restores.append(notebook_dir)
-        return real_restore(notebook_dir, timeout=timeout, env=env)
+        return real_restore(notebook_dir, timeout=timeout, env=env, harness_user=harness_user)
 
     monkeypatch.setattr(writer, "_renv_restore_locked", counted)
 
@@ -238,7 +242,9 @@ def test_a_failed_restore_leaves_the_library_the_notebook_had(tmp_path, shared, 
     for package in ("ggplot2", "dplyr"):
         (notebook / "renv" / "library" / "R-4.4" / package).mkdir(parents=True)
     monkeypatch.setattr(
-        writer, "_renv_restore_locked", lambda notebook_dir, *, timeout, env=None: False
+        writer,
+        "_renv_restore_locked",
+        lambda notebook_dir, *, timeout, env=None, harness_user=None: False,
     )
 
     assert writer._renv_sync(notebook) is False

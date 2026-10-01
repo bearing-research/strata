@@ -18,6 +18,10 @@ Project routing (``project_id``, ``environment``, ``path``) comes
 from the notebook's ``[secret_manager]`` block so the non-sensitive info
 can be committed. Override via env vars (``INFISICAL_PROJECT_ID``
 etc.) is supported for quick-start use.
+
+The host is where the server's credentials are sent. On a service-mode server
+it is the operator's alone (``INFISICAL_HOST``, else the public default): a
+notebook's ``base_url`` naming anywhere else is refused before any login.
 """
 
 from __future__ import annotations
@@ -26,6 +30,7 @@ import logging
 import os
 from typing import Any
 
+from strata.notebook.harness_user import running_server_config
 from strata.notebook.secret_manager.provider import SecretFetchResult, _now_iso
 
 logger = logging.getLogger(__name__)
@@ -55,9 +60,22 @@ class InfisicalProvider:
             or _DEFAULT_ENVIRONMENT
         )
         secret_path = config.get("path") or os.environ.get("INFISICAL_PATH") or _DEFAULT_PATH
-        host = (config.get("base_url") or os.environ.get("INFISICAL_HOST") or _DEFAULT_HOST).rstrip(
-            "/"
-        )
+        operator_host = (os.environ.get("INFISICAL_HOST") or _DEFAULT_HOST).rstrip("/")
+        notebook_host = str(config.get("base_url") or "").rstrip("/")
+        host = notebook_host or operator_host
+        if (
+            host != operator_host
+            and getattr(running_server_config(), "deployment_mode", None) == "service"
+        ):
+            # The login below sends the server's machine identity to *host*,
+            # and on a shared server the notebook's author is not the operator.
+            return SecretFetchResult.failure(
+                self.name,
+                f"[secret_manager] base_url {notebook_host!r} is refused on this server: "
+                "it would receive the server's Infisical credentials. The server logs in "
+                f"only at {operator_host} (INFISICAL_HOST); remove base_url from "
+                "notebook.toml, or ask the operator to set INFISICAL_HOST.",
+            )
 
         client_id = os.environ.get("INFISICAL_CLIENT_ID")
         client_secret = os.environ.get("INFISICAL_CLIENT_SECRET")

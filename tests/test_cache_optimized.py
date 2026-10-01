@@ -179,6 +179,34 @@ class TestDiskCacheStatsAndCleanup:
         assert str(cache_dir / "v3") in caplog.text
         assert str(cache_dir / "v1") in caplog.text
 
+    def test_a_version_named_directory_the_cache_did_not_write_is_left(self, strata_config, caplog):
+        """``cache_dir`` can be a directory people keep other things in, and
+        ``v1`` is an ordinary name. A tree is removed only when everything in
+        it is what a cache writes: hex-named directories and entry files."""
+        cache_dir = strata_config.cache_dir
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        notes = cache_dir / "v1" / "my_notes.txt"
+        notes.parent.mkdir()
+        notes.write_text("user data")
+        plan = cache_dir / "v2" / "ab" / "drafts" / "plan.md"
+        plan.parent.mkdir(parents=True)
+        plan.write_text("not a cache entry")
+        # Cache-shaped, but for one file: the whole tree is left, not pruned.
+        entry = cache_dir / "v3" / "0a1b2c3d" / "ab" / "cd" / "abcd.arrowstream"
+        entry.parent.mkdir(parents=True)
+        entry.write_bytes(b"row group")
+        readme = cache_dir / "v3" / "README"
+        readme.write_text("mine")
+
+        with caplog.at_level("WARNING", logger="strata.cache"):
+            DiskCache(strata_config)
+
+        assert notes.read_text() == "user data"
+        assert plan.read_text() == "not a cache entry"
+        assert entry.exists() and readme.exists()
+        for name in ("v1", "v2", "v3"):
+            assert str(cache_dir / name) in caplog.text
+
 
 class TestCachedFetcherFetchAsStreamBytes:
     """Tests for CachedFetcher.fetch_as_stream_bytes() method."""

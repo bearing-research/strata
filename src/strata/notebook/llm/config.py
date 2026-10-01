@@ -34,6 +34,11 @@ class LlmConfig:
     model: str
     max_output_tokens: int = 4096
     timeout_seconds: float = 60.0
+    # ``None`` when ``base_url`` is trusted: the operator's, a provider default,
+    # or any URL off a service-mode server. Otherwise the notebook chose it on a
+    # shared server, and requests go through the guard ``@fetch`` uses; these
+    # are the hosts it lets through on a private address.
+    guard_hosts: tuple[str, ...] | None = None
 
 
 @dataclass
@@ -106,11 +111,12 @@ def resolve_llm_config(
             api_key = notebook_env["STRATA_AI_API_KEY"]
 
     # Layer 3 (highest): notebook.toml [ai] section
+    notebook_base_url: str | None = None
     if notebook_config:
         if notebook_config.get("api_key"):
             api_key = notebook_config["api_key"]
         if notebook_config.get("base_url"):
-            base_url = notebook_config["base_url"]
+            base_url = notebook_base_url = notebook_config["base_url"]
         if notebook_config.get("model"):
             model = notebook_config["model"]
         if notebook_config.get("max_output_tokens"):
@@ -127,7 +133,32 @@ def resolve_llm_config(
         model=model or "gpt-5.4",
         max_output_tokens=max_output_tokens,
         timeout_seconds=timeout_seconds,
+        guard_hosts=_base_url_guard(notebook_base_url, server_config),
     )
+
+
+def _base_url_guard(notebook_base_url: str | None, server_config: Any) -> tuple[str, ...] | None:
+    """The ``guard_hosts`` for a base_url ``notebook.toml`` set, if it needs one.
+
+    A prompt cell posts to its base_url from the server process and shows the
+    author the answer, error bodies included, so on a service-mode server a
+    base_url the notebook chose is a read of whatever that server can reach:
+    the cloud metadata address, an internal service. It gets the ``@fetch``
+    rule and allowlist. Naming the operator's own ``ai_base_url`` or a
+    provider's default chooses nothing new, and keeps a proxy the environment
+    sets (a guarded client connects directly).
+    """
+    if notebook_base_url is None:
+        return None
+    if getattr(server_config, "deployment_mode", None) != "service":
+        return None
+    trusted = {url for url, _ in _PROVIDER_DEFAULTS.values()}
+    operator_url = getattr(server_config, "ai_base_url", None)
+    if operator_url:
+        trusted.add(str(operator_url).rstrip("/"))
+    if notebook_base_url.rstrip("/") in trusted:
+        return None
+    return tuple(getattr(server_config, "notebook_fetch_allowed_hosts", None) or ())
 
 
 def max_output_tokens_param(base_url: str) -> str:

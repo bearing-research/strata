@@ -2023,8 +2023,10 @@ async def materialize_artifact(request: MaterializeRequest):
             # Authz / not-found failures must propagate: a denied table input
             # (403 from the table ACL) or a missing name (404) must never fall
             # back to building anyway, nor may a table Strata refuses to read
-            # (422). Only the "unresolvable URI" 400 — fake or legacy URIs used
-            # in tests — uses the raw URI as its version.
+            # (422). Only the "unresolvable URI" 400 (fake or legacy URIs used
+            # in tests) uses the raw URI as its version; a table input has
+            # passed the table ACL before it is planned, so that 400 is not a
+            # way around it.
             if e.status_code in (401, 403, 404, 422):
                 raise
             input_versions[input_uri] = input_uri

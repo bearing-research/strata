@@ -926,7 +926,9 @@ class TestTransformValidation:
         response = server_mode_auth_app.post(
             "/v1/artifacts/materialize",
             json={
-                "inputs": ["file:///fake/table"],
+                # A URI that names a table, so the table ACL (default allow) can
+                # admit it: one that names none is denied under trusted-proxy auth.
+                "inputs": ["file:///fake/warehouse#fake.table"],
                 "transform": {
                     "executor": "local://restricted_transform@v1",
                     "params": {},

@@ -55,7 +55,7 @@ The credentials only live in the server process, never in `notebook.toml`, `.str
 Open the notebook and use the **Secret manager** section in the Runtime panel:
 
 1. Pick the provider (`infisical`).
-2. Fill in `project_id`, `environment` (`dev` / `staging` / `prod`), and `path` (defaults to `/`). Base URL is only needed for self-hosted deployments.
+2. Fill in `project_id`, `environment` (`dev` / `staging` / `prod`), and `path` (defaults to `/`). Base URL is only needed for self-hosted deployments, and a service-mode server accepts only its own `INFISICAL_HOST` there.
 3. Save.
 
 The result lands in `notebook.toml` as:
@@ -108,6 +108,7 @@ Fix the cause (rotate the credential, check `project_id` / `environment` / `path
 - Secret values are **not written to disk**. `[env]` blocks on disk blank sensitive keys (`KEY`, `SECRET`, `TOKEN`, `PASSWORD`, `CREDENTIAL` name patterns) before persisting; secrets fetched at open time are in-memory only.
 - If a cell **prints** an env var, its value is captured in the cell's console output and persisted in `.strata/console/` alongside stdout/stderr. Don't `print(os.environ)` in production notebooks.
 - Authenticating credentials (`INFISICAL_CLIENT_ID` / `INFISICAL_CLIENT_SECRET` or `INFISICAL_TOKEN`) live in the process environment, set by whoever launches the server. Distribute them the same way you'd distribute any deploy secret (systemd unit, k8s secret, `.envrc` with direnv-allow, etc.) **not** in a committed file.
+- On a server in service mode the Infisical host is the operator's: a notebook `base_url` other than `INFISICAL_HOST` (or the public default) is refused before any login, since the login would send the server's credentials there. `project_id`, `environment` and `path` still come from the notebook, so every author can read whatever the server's machine identity can; scope it accordingly. See [Service Mode: A notebook's secret manager](../deployment/service-mode.md#a-notebooks-secret-manager).
 - By default a cell subprocess inherits the server's whole environment, so a cell can read those credentials too. On a server other people run cells on, set `STRATA_NOTEBOOK_HARNESS_ENV_ALLOWLIST` and `STRATA_NOTEBOOK_HARNESS_USER`; see [Service Mode: What a cell can read](../deployment/service-mode.md#what-a-cell-can-read). The notebook's own `[env]`, including fetched secrets, still reaches its cells.
 
 ## Limits
