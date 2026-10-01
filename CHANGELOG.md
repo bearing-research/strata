@@ -269,6 +269,8 @@ exhaustive commit history.
   until garbage collection.
 - **`/health/ready` no longer reports `stuck_scans`.** Nothing recorded scan
   progress, so the check could never fail readiness.
+- **`AsyncStrataClient.materialize` honors `poll_interval`.** It polled a
+  build every 0.5 s whatever was passed.
 
 ## 0.8.0 - 2026-09-27
 
