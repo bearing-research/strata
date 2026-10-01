@@ -375,9 +375,10 @@ wrong for a cell whose *point* is a side effect or fresh value:
 - reads the clock, `random`, a live API: you want a **fresh value** each run.
 
 `# @nocache` opts such a cell out. `# @nocache off` re-enables caching (useful to
-override a default you set elsewhere). It applies to every language and sits
-alongside the read-write-`@mount` rule, which already forces re-execution for
-the same reason.
+override a default you set elsewhere). It applies to every language (on a SQL
+cell it wins over any `# @cache` policy, `forever` included) and sits alongside
+the read-write-`@mount` rule, which already forces re-execution for the same
+reason.
 
 A cell that reads a `@nocache` (or read-write-mount) cell's value is keyed on
 the bytes that value stored rather than on the producer's provenance, which is
