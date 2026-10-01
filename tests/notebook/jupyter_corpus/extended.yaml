@@ -1,39 +1,26 @@
 # Extended Jupyter corpus.
 #
-# Hand-curated set of .ipynb files we want to keep working across
-# converter changes. Fetched at test time (cached locally), run
-# through the full parse → convert → dag → run → artifact pipeline.
-# Drives the nightly jupyter-corpus GitHub Actions workflow.
+# Hand-curated .ipynb files fetched at test time (cached locally) and run
+# through parse → convert → dag → run → artifact by the nightly
+# jupyter-corpus workflow.
 #
-# Each entry pins to a specific commit SHA or release tag in the URL —
-# never to `main` / `master` — so the corpus is reproducible across
-# runs. Refreshing is a deliberate act, not a moving target.
+# Every URL is pinned to a commit SHA or release tag, never `main` / `master`,
+# so runs are reproducible.
 #
-# Adding a new entry:
+# Adding an entry:
 #   1. Pick a notebook from a stable public repo.
-#   2. Resolve a permanent URL pinned to a commit SHA (or a tag like
-#      v2.2.0). Use raw.githubusercontent.com.
-#   3. Run `STRATA_CORPUS_RUN=1 pytest -k <name>` locally to confirm
-#      the entry clears the steps you expect.
-#   4. ``expected: pass``        — must run end-to-end through the
-#                                  five-step rubric.
-#      ``expected: parse_only``  — only parse + convert + dag get
-#                                  scored; run + artifact skipped.
-#                                  Use this when the notebook itself
-#                                  has aged out against current
-#                                  library versions (API drift in
-#                                  numpy / pandas / matplotlib etc.),
-#                                  needs a GPU / paid API, downloads
-#                                  multi-GB data, etc.
+#   2. Use a raw.githubusercontent.com URL pinned to a commit SHA (or a tag like
+#      v2.2.0).
+#   3. Run `STRATA_CORPUS_RUN=1 pytest -k <name>` locally to confirm it.
+#   4. ``expected: pass``: must clear all five steps.
+#      ``expected: parse_only``: only parse + convert + dag are scored. Use it
+#      when the notebook has aged out of current libraries, needs a GPU or
+#      paid API, or downloads large data.
 
 notebooks:
   # ---- Python Data Science Handbook (Jake VanderPlas) ----
-  # Stable repo, pinned to a verified commit SHA. Auto-import-capture
-  # successfully infers the deps (numpy / pandas / matplotlib), but
-  # the notebook code itself predates modern library versions and
-  # exercises behaviors that have since been removed or changed.
-  # Kept at parse_only to track the converter / DAG side without
-  # asserting ecosystem stability we don't control.
+  # Deps infer fine, but the code relies on library behavior since removed, so
+  # parse_only tracks the converter / DAG side only.
 
   - name: pdsh-numpy-array-basics
     url: https://raw.githubusercontent.com/jakevdp/PythonDataScienceHandbook/d66231454ef753818dc9213c9b5942e067266966/notebooks/02.02-The-Basics-Of-NumPy-Arrays.ipynb
@@ -51,7 +38,6 @@ notebooks:
     reason: "upstream API drift: 'seaborn-whitegrid' matplotlib style was renamed"
 
   # ---- Aurelien Geron, Hands-on Machine Learning (3rd ed) ----
-  # Stable companion repo, pinned to a verified commit SHA.
 
   - name: handson-ml3-landscape
     url: https://raw.githubusercontent.com/ageron/handson-ml3/1fa7649974e575b4634e4b532f605b4a834a4e4a/01_the_machine_learning_landscape.ipynb
@@ -59,7 +45,6 @@ notebooks:
     reason: "downloads CSVs from sklearn data URL endpoint; treat as no-network for this tier"
 
   # ---- Sebastian Raschka, Python Machine Learning (3rd ed) ----
-  # Stable companion repo, pinned to a verified commit SHA.
 
   - name: pml3-ch02-perceptron
     url: https://raw.githubusercontent.com/rasbt/python-machine-learning-book-3rd-edition/bf62496f44a92a21d23250d5ed13d2d2e617e0e2/ch02/ch02.ipynb
@@ -72,8 +57,7 @@ notebooks:
     reason: "uses sklearn.datasets fetch; treat as no-network for this tier"
 
   # ---- fast.ai book (deep learning) ----
-  # Stable companion repo, pinned to a verified commit SHA. Pulls
-  # significant model weights at runtime so this tier scores parse_only.
+  # Pulls model weights at runtime, so parse_only.
 
   - name: fastai-fastbook-intro
     url: https://raw.githubusercontent.com/fastai/fastbook/e8baa81d89f0b7be816e35f1cc813ac02038db54/01_intro.ipynb

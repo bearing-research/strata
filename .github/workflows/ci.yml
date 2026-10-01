@@ -55,8 +55,8 @@ jobs:
         run: npm run format:check
         working-directory: frontend
 
-  # strata-client must install and pass its tests with ONLY its own deps
-  # (httpx + pyarrow) — no server stack. Guards the slim-install promise.
+  # strata-client must install and pass its tests with only its own deps
+  # (httpx + pyarrow), no server stack: the slim-install promise.
   client-only:
     name: strata-client (no server deps)
     runs-on: ubuntu-latest
@@ -72,8 +72,7 @@ jobs:
       - name: Create an isolated venv with ONLY the client
         run: |
           uv venv --python 3.12 .venv-client
-          # strata-client pulls httpx + pyarrow; pytest for the runner.
-          # The server (strata-notebook) is deliberately NOT installed.
+          # The server (strata-notebook) is deliberately not installed.
           uv pip install --python .venv-client ./packages/strata-client pytest
 
       - name: Assert the server stack is absent
@@ -88,10 +87,9 @@ jobs:
       - name: Run client tests
         run: .venv-client/bin/python -m pytest packages/strata-client/tests/ -v
 
-  # strata-pool is composed by the hosted proxy, never by the notebook. Running
-  # its tests against only its own deps keeps that direction honest: the day the
-  # pool imports the server, this job fails instead of the boundary quietly
-  # disappearing.
+  # strata-pool is composed by the hosted proxy, never by the notebook. Testing
+  # it with only its own deps makes this job fail the day the pool imports the
+  # server.
   pool-only:
     name: strata-pool (no server deps)
     runs-on: ubuntu-latest
@@ -149,13 +147,9 @@ jobs:
 
       - name: Run pool tests
         working-directory: packages/strata-pool
-        # STRATA_POOL_REQUIRE_DOCKER turns "no daemon here" from a silent skip
-        # of every live test into a hard failure. The runner has Docker; if the
-        # socket ever moves, this job must say so rather than report green
-        # coverage it did not run.
-        # Each REQUIRE turns "this dependency is missing here" from a silent
-        # skip of a whole file into a hard failure. A suite that skips itself
-        # and reports green is coverage that examined nothing.
+        # Each REQUIRE turns a missing dependency (Docker daemon, server,
+        # Postgres) from a silent skip into a hard failure, so a green run
+        # means the live tests actually ran.
         env:
           STRATA_POOL_REQUIRE_DOCKER: "1"
           STRATA_POOL_REQUIRE_SERVER: "1"
@@ -163,11 +157,8 @@ jobs:
           STRATA_POOL_POSTGRES_DSN: postgresql://pool:pool@localhost:5432/pool
         run: ../../.venv-pool/bin/python -m pytest tests/ -v
 
-  # Type-check the shipped code (src + strata-client) with ty. Enforces the
-  # "type-check stays clean" invariant in CLAUDE.md — previously ty ran only
-  # manually, so a type error could (and did) land on main between manual runs.
-  # ty exits non-zero on errors; configured unresolved-import warnings for
-  # guarded optional deps (torch/jax) don't fail the build.
+  # ty exits non-zero on errors; the unresolved-import warnings configured for
+  # guarded optional deps (torch/jax) do not fail the build.
   type-check:
     name: Type Check (ty)
     runs-on: ubuntu-latest
@@ -192,20 +183,14 @@ jobs:
       - name: Type-check shipped code
         run: uv run ty check
 
-  # Fast unit tests - run on all platforms and Python versions.
-  # Windows skips the notebook subsystem (subprocess/venv/fork-style
-  # warm pool semantics diverge from POSIX). Core Strata — scanner,
-  # planner, cache, fetcher, artifact store, blob store, tenant,
-  # auth, QoS — runs on all three platforms.
+  # Fast unit tests on all platforms and Python versions. Windows skips the
+  # notebook subsystem (subprocess/venv/warm-pool semantics diverge from POSIX).
   unit-tests:
     name: Unit Tests - Python ${{ matrix.python-version }} on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
-    # Backstop so a deadlocked test (e.g. the intermittent py3.12/macOS WS portal
-    # hang) fails the job in minutes instead of running to GitHub's 6h cap. The
-    # per-test pytest-timeout below normally trips first (and dumps the stack).
-    # 45, not 30: a normal macOS run takes about 23 minutes, and on a congested
-    # runner that crossed 30 and cancelled suites that were passing. Hang
-    # detection is the per-test timeout's job, not this one.
+    # Backstop for a deadlocked test, below GitHub's 6h cap; the per-test
+    # pytest-timeout normally trips first and dumps the stack. 45, not 30: a
+    # normal macOS run takes about 23 minutes and a congested runner crossed 30.
     timeout-minutes: 45
     strategy:
       fail-fast: false
@@ -219,21 +204,11 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
-      # macOS-latest images ship with Homebrew's rust + rustup pre-
-      # installed, configured against /opt/homebrew/etc/.rustup. The
-      # setup-rust-toolchain action skips installing rustup when it
-      # detects an existing one ("Install rustup, if needed" in the
-      # action.yml), and consequently doesn't prepend ~/.cargo/bin to
-      # $GITHUB_PATH. The action then runs `rustup toolchain install
-      # stable` which lands in ~/.rustup — but cargo on PATH is still
-      # Homebrew's, looking at Homebrew's RUSTUP_HOME, which doesn't
-      # have the toolchain. The proxy then prints rustup-init's help
-      # and exits 1 from inside maturin's cargo-metadata call.
-      #
-      # Removing Homebrew's rust+rustup before the action forces the
-      # action onto its curl-install path, which puts cargo at
-      # ~/.cargo/bin, adds it to $GITHUB_PATH, and installs the stable
-      # toolchain to ~/.rustup — all consistent.
+      # macOS images ship Homebrew's rust + rustup (RUSTUP_HOME under
+      # /opt/homebrew). setup-rust-toolchain then skips installing rustup and
+      # does not put ~/.cargo/bin on PATH, so the toolchain lands in ~/.rustup
+      # while cargo still reads Homebrew's home and maturin's cargo-metadata
+      # call fails. Removing Homebrew's rust forces the action's curl install.
       - name: Remove Homebrew rust on macOS
         if: runner.os == 'macOS'
         shell: bash
@@ -254,11 +229,9 @@ jobs:
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v10.2.0
         with:
           version: "latest"
-          # The uv cache key hashes the dependency files and the OS, so every
-          # job in every workflow on one OS computes the same key, and every
-          # one that saved after the first warned "Unable to reserve cache".
-          # One saver per OS: this job on 3.13, which installs --all-extras, a
-          # superset of what the others need. Every other setup-uv restores only.
+          # Every job on one OS computes the same uv cache key, so concurrent
+          # savers warned "Unable to reserve cache". One saver per OS: this job
+          # on 3.13 (--all-extras, a superset). Every other setup-uv restores only.
           save-cache: ${{ matrix.python-version == '3.13' }}
 
       - name: Install dependencies and build Rust extension
@@ -283,10 +256,9 @@ jobs:
             --ignore=tests/notebook/test_e2e_duckdb_lake.py \
             -n auto --dist loadscope --tb=short
 
-      # The one check that needs root and a second OS user, which the suite
-      # cannot arrange: a cell run as the harness user cannot read the server's
-      # environment through /proc (item 49). The user must be able to reach
-      # the interpreter behind the venv and the checkout it imports from, so
+      # Needs root and a second OS user, which the suite cannot arrange: a cell
+      # run as the harness user must not read the server's environment through
+      # /proc. That user must reach the venv's interpreter and the checkout, so
       # every directory on both paths gets o+x.
       - name: Harness-user isolation (Linux, root)
         if: runner.os == 'Linux' && matrix.python-version == '3.13'
@@ -320,7 +292,7 @@ jobs:
             --ignore=tests/notebook \
             -n auto --dist loadscope --tb=short
 
-  # E2E and integration tests - run on Ubuntu only for speed
+  # E2E and integration tests, Ubuntu only for speed.
   e2e-tests:
     name: E2E Tests
     runs-on: ubuntu-latest
@@ -335,15 +307,10 @@ jobs:
           cache-workspaces: rust
 
       - name: Verify Rust toolchain
-        # macOS-latest runners intermittently leave the rustup proxy
-        # half-configured after setup-rust-toolchain finishes: the
-        # install step reports ✓, but cargo invoked from a child
-        # shell (eg. maturin under uv sync) resolves to rustup-init
-        # and errors out with "unexpected argument 'metadata'".
-        # Force-setting the default + dumping versions makes the
-        # proxy dispatch correctly AND fails fast with diagnostics
-        # if something is genuinely broken, instead of bubbling up
-        # as an opaque cargo-metadata failure 30 seconds later.
+        # macOS runners sometimes leave the rustup proxy half-configured, and
+        # cargo from a child shell (maturin under uv sync) resolves to
+        # rustup-init ("unexpected argument 'metadata'"). Setting the default
+        # fixes dispatch and fails fast with diagnostics if it is still broken.
         shell: bash
         run: |
           rustup default stable
@@ -372,22 +339,17 @@ jobs:
         run: |
           uv run pytest tests/test_executor_protocol.py -v --tb=short
 
-  # R-cell integration tests — separate job because R is a distinct
-  # runtime from Python, and installing it inside the matrix unit-tests
-  # job would multiply the (~30s) install cost across every Py × OS
-  # cell without any new signal (R doesn't care about the Python
-  # version). Ubuntu + macOS only — the issue #59 ship gate is
-  # "Linux + macOS green", and Windows skips notebook tests at the
-  # unit-tests level already.
+  # R-cell tests in their own job: R does not care about the Python version,
+  # so installing it in the unit-tests matrix only multiplies the cost.
+  # Ubuntu + macOS only; Windows already skips notebook tests.
   r-tests:
     name: R Tests (${{ matrix.os }} · R ${{ matrix.r }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
-      # Current R ("release") on both platforms, plus the previous minor
-      # ("oldrel-1") on Ubuntu so an R-version regression surfaces in CI
-      # without doubling the whole matrix. posit/RSPM serves binaries for
-      # both, so oldrel-1 doesn't trigger a source compile of arrow (#83).
+      # Current R on both platforms plus the previous minor ("oldrel-1") on
+      # Ubuntu, so an R-version regression surfaces without doubling the
+      # matrix. RSPM serves binaries for both, so arrow is not compiled.
       matrix:
         include:
           - os: ubuntu-latest
@@ -403,10 +365,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
-      # Same macOS Homebrew rust eviction the unit-tests job needs —
-      # see the rationale comment up there. The setup-rust-toolchain
-      # action's auto-detect path leaves cargo and rustup pointing at
-      # different homes otherwise, and `uv sync` dies inside maturin.
+      # Same Homebrew rust eviction as the unit-tests job.
       - name: Remove Homebrew rust on macOS
         if: runner.os == 'macOS'
         shell: bash
@@ -432,31 +391,19 @@ jobs:
       - name: Install dependencies and build Rust extension
         run: uv sync --python 3.12 --all-extras
 
-      # ``use-public-rspm: true`` points install.packages() at
-      # https://packagemanager.posit.co — pre-compiled Linux binaries
-      # turn the ~10-min source compile of ``arrow`` into a ~30s
-      # binary download. macOS uses CRAN's native ``.tgz`` binaries.
+      # use-public-rspm points install.packages() at posit's prebuilt Linux
+      # binaries (arrow takes ~30s instead of a ~10-min compile).
       - name: Set up R
         uses: r-lib/actions/setup-r@f9a764fea8d5c63df6ef9a5c7795bf7deb5d7e05  # v2
         with:
           r-version: ${{ matrix.r }}
           use-public-rspm: true
 
-      # Direct install instead of ``setup-r-dependencies`` — that
-      # action expects a DESCRIPTION or renv.lock at the project root,
-      # which Strata doesn't ship at the top level (the per-notebook
-      # renv.lock lives inside individual notebook dirs). Pin
-      # dependencies inline; if Phase 2 adds more R packages, switch
-      # to a real lockfile.
-      #
-      # ``jsonlite`` is the manifest-IO codec the harness uses
-      # unconditionally (``harness.R::library(jsonlite)`` at L38);
-      # ``arrow`` is lazy-loaded only when a cell actually serializes
-      # a data.frame, but the cross-language tests do exactly that, so
-      # both are required for the suite to pass. ``renv`` is needed by
-      # the real-restore integration test (test_r_cells.py) — having it
-      # pre-installed means the fixture's ``renv/activate.R`` finds it
-      # instead of bootstrap-downloading a copy mid-test.
+      # Direct install: setup-r-dependencies wants a DESCRIPTION or renv.lock
+      # at the project root, which Strata does not have. jsonlite is the
+      # harness's manifest codec, arrow serializes data.frames in the
+      # cross-language tests, and renv pre-installed keeps the real-restore
+      # test from bootstrap-downloading it mid-test.
       - name: Install R 'jsonlite' + 'arrow' + 'renv' packages
         shell: Rscript {0}
         run: |
@@ -467,10 +414,7 @@ jobs:
             }
           }
 
-      # Targeted suite rather than the full notebook suite — the
-      # unit-tests matrix already runs everything else; this job only
-      # needs to exercise the R-marked tier that the matrix skips for
-      # lack of Rscript.
+      # Only the R-marked tier the unit-tests matrix skips for lack of Rscript.
       - name: Run R-related test files
         shell: bash
         run: |
@@ -496,15 +440,10 @@ jobs:
           cache-workspaces: rust
 
       - name: Verify Rust toolchain
-        # macOS-latest runners intermittently leave the rustup proxy
-        # half-configured after setup-rust-toolchain finishes: the
-        # install step reports ✓, but cargo invoked from a child
-        # shell (eg. maturin under uv sync) resolves to rustup-init
-        # and errors out with "unexpected argument 'metadata'".
-        # Force-setting the default + dumping versions makes the
-        # proxy dispatch correctly AND fails fast with diagnostics
-        # if something is genuinely broken, instead of bubbling up
-        # as an opaque cargo-metadata failure 30 seconds later.
+        # macOS runners sometimes leave the rustup proxy half-configured, and
+        # cargo from a child shell (maturin under uv sync) resolves to
+        # rustup-init ("unexpected argument 'metadata'"). Setting the default
+        # fixes dispatch and fails fast with diagnostics if it is still broken.
         shell: bash
         run: |
           rustup default stable

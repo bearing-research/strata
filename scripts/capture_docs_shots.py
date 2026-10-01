@@ -1,28 +1,19 @@
 #!/usr/bin/env python
 """Regenerate the screenshots the docs and README embed.
 
-Screenshots rot silently: a shot of last release's layout still *looks*
-authoritative. So none of them are hand-made — every image under
-``docs/assets/`` comes out of this script, and refreshing all of them after a
-UI change is one command:
+Every image under ``docs/assets/`` comes from this script, so none can silently
+show an old layout. Refresh them all after a UI change with:
 
     uv run python scripts/capture_docs_shots.py
 
-Two very different capture paths:
+* **TUI** shots are SVG from Textual's pilot driver, fed canned
+  ``notebook_state`` frames (as ``tests/notebook/test_tui_app.py`` does): no
+  server, fully deterministic.
+* **Web** shots are PNG from ``frontend/scripts/capture-docs-shots.mjs``
+  driving Playwright against a real server this script sets up.
 
-* **TUI** shots are SVG, captured in-process with Textual's pilot driver. No
-  server, no network, no terminal: canned ``notebook_state`` frames are fed
-  straight into ``NotebookTUI._dispatch``, exactly as ``tests/notebook/
-  test_tui_app.py`` does. Fully deterministic. SVG keeps the text real, so the
-  shot stays crisp at any zoom and reads on both docs themes.
-
-* **Web** shots are PNG, captured by ``frontend/scripts/capture-docs-shots.mjs``
-  driving Playwright against a real server. This script builds the fixture
-  notebook, runs it headlessly, serves it, and hands the session id to node.
-
-The web fixture's cell sources are extracted from
-``docs/getting-started/notebook.md`` itself, so a screenshot cannot show
-different code than the page it illustrates.
+The web fixture's cells are extracted from ``docs/getting-started/notebook.md``,
+so a shot cannot show different code than the page it illustrates.
 """
 
 from __future__ import annotations
@@ -49,15 +40,12 @@ QUICKSTART_DOC = REPO_ROOT / "docs" / "getting-started" / "notebook.md"
 # TUI shots (SVG, no server)
 # --------------------------------------------------------------------------
 
-# Terminal geometry for the TUI captures. Wide enough that the cell list's
-# "time" column survives (the label column carries a source preview, so a
-# narrow terminal pushes timing off the edge), short enough that the SVG does
-# not dwarf the prose around it.
+# Wide enough to keep the cell list's "time" column on screen, short enough
+# not to dwarf the surrounding prose.
 TUI_SIZE = (132, 28)
 
-# The loader's tabular output, in the shape the server sends: column names
-# plus a row preview. The TUI renders that as a real grid (ellipsis-truncated,
-# no wrapping), which is what a reader should see in the output pane.
+# The loader's tabular output in the shape the server sends, so the TUI renders
+# a real grid.
 IRIS_COLUMNS = [
     "sepal length (cm)",
     "sepal width (cm)",
@@ -155,9 +143,7 @@ async def _capture_tui(name: str, title: str, script) -> Path:
         async with app.run_test(size=TUI_SIZE) as pilot:
             app._set_connection("connected")
             await script(app, pilot)
-            # The label column carries a source preview, so at the default
-            # split the timing column is pushed off the edge. Nudge the
-            # boundary (the app's own ctrl+right binding) so shots show it.
+            # At the default split the source preview pushes timing off screen.
             for _ in range(3):
                 await pilot.press("ctrl+right")
             await pilot.pause()
@@ -204,9 +190,8 @@ async def _tui_agent_running(app, pilot) -> None:
 async def _capture_tui_frames(title: str, script) -> list[str]:
     """Run ``script`` against a pilot-driven TUI, returning one SVG per beat.
 
-    Same canned-frame basis as the stills: no server, no network, no agent. The
-    script is handed a ``snap`` callback and decides where the beats fall, so
-    the storyboard reads as a sequence rather than being inferred from timing.
+    Canned frames, as for the stills. ``script`` calls ``snap`` at each beat,
+    so the storyboard is explicit rather than inferred from timing.
     """
     from strata.notebook.tui.app import NotebookTUI
     from strata.notebook.tui.client import TuiClient
@@ -235,12 +220,9 @@ async def _capture_tui_frames(title: str, script) -> list[str]:
 
 
 async def _tui_cache_payoff(app, pilot, snap) -> None:
-    """The beat the README slot is for: an edit downstream, and the expensive
-    upstream never runs again.
+    """The README animation: a downstream edit, and the slow upstream never reruns.
 
-    ``load`` sleeps two seconds by design in the quickstart, which is what makes
-    the payoff legible: it is the step you would notice re-running, and it does
-    not.
+    The quickstart's ``load`` sleeps two seconds, so a rerun would be noticeable.
     """
     ready = [dict(c) for c in QUICKSTART_CELLS]
 
@@ -261,9 +243,7 @@ async def _tui_cache_payoff(app, pilot, snap) -> None:
     app._dispatch(_timing("a1b2c3d4", duration_ms=1, cache_hit=True))
     app._dispatch(_timing("e5f6a7b8", duration_ms=1, cache_hit=True))
     app._dispatch(_frame("cell_status", {"cell_id": "c9d0e1f2", "status": "running"}))
-    # Switch to Console as the run starts, which is what a watcher does and what
-    # makes the next beat visible: console lines land on a tab that has to be
-    # showing, or the frame is byte-identical to this one.
+    # Show Console now, or the next beat's console lines would not be visible.
     await pilot.press("5")
     await snap()
 
@@ -311,9 +291,8 @@ TUI_SHOTS = {
 def capture_animations(frame_dir: Path) -> list[Path]:
     """SVG beats → PNG (node/Playwright) → GIF (Pillow).
 
-    Three stages because nothing in this environment renders SVG from Python.
-    Playwright is already a frontend dependency and renders it as a browser
-    would, which is how a reader will see it anyway.
+    Nothing here renders SVG from Python; Playwright (a frontend dependency)
+    renders it as a reader's browser would.
     """
     frame_dir.mkdir(parents=True, exist_ok=True)
     for old in frame_dir.glob("*.png"):
@@ -363,8 +342,7 @@ def _anchor(text: str, heading: str) -> int:
 def extract_quickstart_cells() -> list[str]:
     """Pull the quickstart's three python blocks out of the doc that shows them.
 
-    Binding the fixture to the doc's own source is the point: it makes it
-    impossible for the screenshot to show code the page doesn't.
+    The screenshot then cannot show code the page does not.
     """
     text = QUICKSTART_DOC.read_text(encoding="utf-8")
     start = _anchor(text, "## 3. Walk through a pipeline")
@@ -379,8 +357,7 @@ def extract_quickstart_cells() -> list[str]:
 
 
 def serving_bundle() -> Path | None:
-    """The built frontend ``python -m strata`` will serve, mirroring
-    ``_mount_frontend``'s candidate order in ``server.py``."""
+    """The built frontend ``python -m strata`` will serve (``_mount_frontend``'s order)."""
     for candidate in (
         REPO_ROOT / "src" / "strata" / "_frontend",
         REPO_ROOT / "frontend" / "dist",
@@ -397,11 +374,9 @@ def _newest_mtime(root: Path, pattern: str = "**/*") -> float:
 def check_bundle_is_current() -> Path:
     """Refuse to photograph a stale bundle.
 
-    Web shots are deliberately taken against the built frontend rather than the
-    Vite dev server, because the bundle is what a user installs. The trap is
-    that ``src/strata/_frontend/`` wins over ``frontend/dist/``, is gitignored,
-    and is only refreshed by a manual copy — so "regenerate the screenshots
-    after a UI change" would otherwise silently re-shoot the old UI.
+    Shots use the built bundle (what users install), and the gitignored
+    ``src/strata/_frontend/`` wins over ``frontend/dist/`` but is only refreshed
+    by a manual copy, so a stale one would silently re-shoot the old UI.
     """
     bundle = serving_bundle()
     if bundle is None:
@@ -432,11 +407,8 @@ def _strata(*args: str, cwd: Path | None = None) -> None:
     )
 
 
-# The registry walkthrough's fixture. The page shows a lineage chain of
-# "model <- features <- scan <- table @ snapshot", so the fixture builds one for
-# real: a scan of an Iceberg table, a derived feature set, then the published
-# model. A single self-contained put would photograph a one-row lineage and
-# quietly contradict the page it illustrates.
+# The registry walkthrough shows "model <- features <- scan <- table @ snapshot",
+# so the fixture builds that chain for real; one put would show a one-row lineage.
 REGISTRY_CELLS = [
     """\
 raw = strata.materialize(
@@ -477,8 +449,7 @@ print(art.uri)
 def build_warehouse(root: Path) -> str:
     """A one-table Iceberg warehouse, so the lineage chain has a real root.
 
-    Mirrors the ``temp_warehouse`` test fixture. Small on purpose: the shot
-    needs a table with a snapshot, not a realistic dataset.
+    Mirrors the ``temp_warehouse`` test fixture.
     """
     import pyarrow as pa
     from pyiceberg.catalog.sql import SqlCatalog
@@ -527,15 +498,9 @@ def _scaffold(root: Path, name: str, deps: tuple[str, ...], cells: list[str]) ->
     return nb
 
 
-# Tests for the quickstart's ``summarize`` cell. Real assertions against the
-# real frame, not placeholders: the shot is of a passing run, and a reader who
-# copies these should find they hold.
-#
-# Two, not more, and the count is a layout constraint rather than taste.
-# ``.tests-panel`` caps at 420px and splits it between the source editor and a
-# scrolling result list, so a longer file clips the editor mid-word and pushes
-# half the results out of view. That photographs as a rendering bug even though
-# it is a real scroll boundary. Two tests fit whole.
+# Real assertions for the quickstart's ``summarize`` cell; a reader may copy them.
+# Only two: ``.tests-panel`` caps at 420px, and more would clip the editor and
+# push results out of view, which photographs as a rendering bug.
 SUMMARIZE_TESTS = """\
 def test_one_row_per_species(cell):
     assert len(cell.stats) == 3
@@ -549,12 +514,9 @@ def test_setosa_has_the_shortest_petals(cell):
 def _cell_id(notebook: Path, snippet: str) -> str:
     """Resolve a cell id by a distinctive fragment of its source.
 
-    Ids are backend-generated, so nothing can hardcode one. Name annotations
-    would be the obvious handle, but these cells come from the quickstart's own
-    code blocks, which carry none — and adding annotations purely to find a cell
-    would put scaffolding into the source the screenshot shows. Position is the
-    other option and is worse: inserting a step in the quickstart would silently
-    move the tests onto the wrong cell rather than failing.
+    Ids are backend-generated, the quickstart cells carry no name annotations
+    (adding them would show in the screenshot), and matching by position would
+    silently pick the wrong cell if the quickstart gained a step.
     """
     out = subprocess.run(
         [sys.executable, "-m", "strata.cli", "cell", "list", str(notebook), "--format", "json"],
@@ -575,15 +537,9 @@ def _cell_id(notebook: Path, snippet: str) -> str:
 def publish_figure(notebook: Path, storage_dir: Path) -> str:
     """Publish the quickstart's plot and return its token.
 
-    The shot has to be of a real published artifact, not a mock: the page is
-    assembled from what the store holds, so a hand-made screenshot could show a
-    layout the code no longer produces — the exact drift every asset here is
-    generated to avoid.
-
-    ``STRATA_ARTIFACT_DIR`` points publishing at the same store ``serve()``
-    will read. That is the copy step working for real: the notebook's outputs
-    live in its own ``.strata/artifacts``, and publishing moves them across so
-    the link resolves.
+    Publishes for real so the page shows what the code produces.
+    ``STRATA_ARTIFACT_DIR`` is the store ``serve()`` reads, so publishing copies
+    the plot out of the notebook's ``.strata/artifacts`` and the link resolves.
     """
     plot_cell = _cell_id(notebook, "fig, ax = plt.subplots")
     notebook_id = tomllib.loads((notebook / "notebook.toml").read_text(encoding="utf-8"))[
@@ -618,27 +574,23 @@ def publish_figure(notebook: Path, storage_dir: Path) -> str:
 def build_fixtures(root: Path) -> tuple[Path, Path]:
     """Scaffold the two fixture notebooks the web shots photograph.
 
-    The quickstart notebook is run here so its cells carry real outputs. The
-    registry notebook is not: its cell publishes through the ambient ``strata``
-    client, so it has to execute against the running server, which the browser
-    script does over REST.
+    The quickstart notebook is run here. The registry notebook is not: it
+    publishes through the ambient ``strata`` client, so the browser script runs
+    it against the live server.
     """
     iris = _scaffold(
         root, "iris", ("pandas", "scikit-learn", "matplotlib"), extract_quickstart_cells()
     )
     _strata("run", str(iris))
 
-    # Give one cell tests and run them, so the Tests panel photographs a real
-    # result. `--file` sets the source and runs in one step; results persist to
-    # runtime.json and rehydrate on open, so the browser finds them already
-    # there rather than waiting on a live run.
+    # Run real tests so the Tests panel shows a result. Results persist to
+    # runtime.json, so the browser finds them on open.
     tests = root / "summarize.test.py"
     tests.write_text(SUMMARIZE_TESTS, encoding="utf-8")
     _strata("cell", "test", str(iris), _cell_id(iris, "stats = df.groupby"), "--file", str(tests))
 
-    # The scan cell needs the table URI, and a cell's source is the only thing
-    # the harness carries in — so bind it as a literal rather than an env var,
-    # which would also land in the screenshot as unexplained indirection.
+    # Bind the table URI as a literal: an env var would show in the screenshot
+    # as unexplained indirection.
     table_uri = build_warehouse(root)
     cells = [REGISTRY_CELLS[0].replace("TABLE_URI", repr(table_uri)), *REGISTRY_CELLS[1:]]
     registry = _scaffold(root, "registry", ("scikit-learn",), cells)
@@ -651,15 +603,11 @@ def serve(storage_dir: Path, port: int) -> subprocess.Popen:
         "STRATA_NOTEBOOK_STORAGE_DIR": str(storage_dir),
         "STRATA_DEPLOYMENT_MODE": "personal",
         "STRATA_PORT": str(port),
-        # Isolate the artifact store: the default (~/.strata/artifacts) carries
-        # whatever the developer's own notebooks published, and those names show
-        # up in the Registry tab shot.
+        # Isolated so the developer's own published names stay out of the shot.
         "STRATA_ARTIFACT_DIR": str(storage_dir / ".artifacts"),
     }
-    # Keep the output: this inherits the developer's environment, and an
-    # exported STRATA_AUTH_MODE or STRATA_MULTI_TENANT_ENABLED trips
-    # validate_mode_coherence against the personal mode forced above. Discarding
-    # stderr would report only that the process died.
+    # Keep the log: an inherited STRATA_AUTH_MODE or STRATA_MULTI_TENANT_ENABLED
+    # fails validate_mode_coherence against the forced personal mode.
     log = storage_dir / "server.log"
     log.parent.mkdir(parents=True, exist_ok=True)
     handle = log.open("wb")
@@ -717,8 +665,7 @@ def capture_web(work_dir: Path) -> None:
         try:
             proc.wait(timeout=30)
         except subprocess.TimeoutExpired:
-            # Never let cleanup replace the in-flight capture error — and never
-            # leave a server holding the port.
+            # Never let cleanup mask the capture error or leave the port held.
             proc.kill()
             proc.wait(timeout=10)
 

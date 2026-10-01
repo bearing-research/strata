@@ -1,31 +1,18 @@
 name: Release
 
-# Tag-driven release pipeline. Pushing a `v*` tag fires the build,
-# which:
-#   1. compiles the frontend SPA and stages it inside the package,
-#   2. builds platform wheels via maturin (abi3-py312 means one
-#      wheel per platform covers Python 3.12+),
-#   3. builds an sdist on Linux x86_64,
-#   4. publishes everything to TestPyPI via OIDC trusted publishing,
-#   5. waits for manual approval on the protected `pypi` environment,
-#      then publishes to PyPI.
+# A `v*` tag builds the frontend, the platform wheels (abi3-py312: one per
+# platform) and an sdist, publishes to TestPyPI via OIDC trusted publishing,
+# then to PyPI after manual approval on the protected `pypi` environment.
 #
-# OIDC trusted publishers must be configured on PyPI and TestPyPI
-# (Owner: bearing-research, Repo: strata, Workflow: release.yml,
-# Environment: testpypi / pypi) before the publish jobs can run.
-#
-# The protected `pypi` environment in GitHub repo settings should
-# require manual approval; that's the human gate between TestPyPI
-# validation and the real PyPI upload.
+# Trusted publishers must exist on PyPI and TestPyPI (Owner: bearing-research,
+# Repo: strata, Workflow: release.yml, Environment: testpypi / pypi).
 
 on:
   push:
     tags:
       - 'v*'
-  # Manual fallback for re-publishing without re-tagging — useful
-  # if a publish job hits a transient PyPI/TestPyPI hiccup. Pass the
-  # already-released version (without the leading ``v``) so the
-  # pre-flight checks still verify version consistency.
+  # Re-publish without re-tagging after a transient publish failure. The
+  # version input lets pre-flight still check version consistency.
   workflow_dispatch:
     inputs:
       version:
@@ -38,21 +25,14 @@ permissions:
 
 env:
   NODE_VERSION: '26'
-  # GitHub plans to default JS actions to Node 24 on 2026-06-02 and
-  # remove Node 20 on 2026-09-16. Opting in early silences the
-  # per-step deprecation warnings and surfaces any incompatibility
-  # now rather than at the cutover.
+  # Opt in to Node 24 for JS actions ahead of GitHub's Node 20 removal.
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
 
 jobs:
   # --- pre-flight ----------------------------------------------------
-  # Fails fast before any wheel build if the CHANGELOG is missing a
-  # section for this version. The package version lives only in
-  # ``pyproject.toml`` (``src/strata/__init__.py`` reads it via
-  # ``importlib.metadata``) so there's no dual-source drift to police —
-  # maturin builds whatever ``pyproject.toml`` says, regardless of the
-  # tag name. The single tag/pyproject sanity check below catches the
-  # cosmetic case where the tag was bumped but ``uv version`` wasn't.
+  # Fails before any wheel build if the tag disagrees with the pyproject
+  # versions or CHANGELOG.md has no section for this version. maturin builds
+  # whatever pyproject.toml says, regardless of the tag.
   preflight:
     name: Pre-flight checks
     runs-on: ubuntu-latest
@@ -62,13 +42,8 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
-          # Tag-driven runs default to the tag (github.ref =
-          # refs/tags/vX.Y.Z), which is fine. workflow_dispatch
-          # otherwise checks out the branch the user dispatched
-          # from — if main has moved since the tag, the wheels
-          # we'd build wouldn't correspond to the original tag.
-          # Redirect dispatch runs to v${inputs.version} so
-          # republish recovery actually rebuilds the tagged source.
+          # A dispatch run would otherwise build the dispatching branch, which
+          # may have moved past the tag; rebuild the tagged source instead.
           ref: ${{ github.event_name == 'workflow_dispatch' && format('v{0}', inputs.version) || github.ref }}
 
 
@@ -112,12 +87,9 @@ jobs:
               )
               sys.exit(1)
 
-          # strata-pool ships from the same tag for the same reason: it is the
-          # bring-your-own-hardware self-host path, run *alongside* a server, so
-          # a version that matches that server is the useful one. This check is
-          # what guarantees a tag never publishes a version PyPI has already
-          # seen — which is why the PyPI job can afford ``skip-existing`` (see
-          # the note there).
+          # strata-pool too: it runs alongside a server, so matching versions
+          # are the useful ones. This check guarantees a tag never publishes a
+          # version PyPI has seen, which lets the PyPI job use skip-existing.
           with open("packages/strata-pool/pyproject.toml", "rb") as f:
               pool_version = tomllib.load(f)["project"]["version"]
           if pool_version != version:
@@ -145,9 +117,8 @@ jobs:
           PY
 
   # --- frontend bundling ---------------------------------------------
-  # Build the SPA once and stage it as an artifact. Each platform's
-  # wheel job downloads it and copies it into src/strata/_frontend
-  # before maturin runs. Doing it once avoids 5x npm cold installs.
+  # Built once and shared as an artifact; each wheel job stages it into
+  # src/strata/_frontend before maturin runs.
   frontend:
     name: Build frontend
     runs-on: ubuntu-latest
@@ -155,13 +126,8 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
-          # Tag-driven runs default to the tag (github.ref =
-          # refs/tags/vX.Y.Z), which is fine. workflow_dispatch
-          # otherwise checks out the branch the user dispatched
-          # from — if main has moved since the tag, the wheels
-          # we'd build wouldn't correspond to the original tag.
-          # Redirect dispatch runs to v${inputs.version} so
-          # republish recovery actually rebuilds the tagged source.
+          # A dispatch run would otherwise build the dispatching branch, which
+          # may have moved past the tag; rebuild the tagged source instead.
           ref: ${{ github.event_name == 'workflow_dispatch' && format('v{0}', inputs.version) || github.ref }}
 
 
@@ -194,13 +160,8 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
-          # Tag-driven runs default to the tag (github.ref =
-          # refs/tags/vX.Y.Z), which is fine. workflow_dispatch
-          # otherwise checks out the branch the user dispatched
-          # from — if main has moved since the tag, the wheels
-          # we'd build wouldn't correspond to the original tag.
-          # Redirect dispatch runs to v${inputs.version} so
-          # republish recovery actually rebuilds the tagged source.
+          # A dispatch run would otherwise build the dispatching branch, which
+          # may have moved past the tag; rebuild the tagged source instead.
           ref: ${{ github.event_name == 'workflow_dispatch' && format('v{0}', inputs.version) || github.ref }}
 
 
@@ -212,10 +173,7 @@ jobs:
       - uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b  # v1
         with:
           target: ${{ matrix.target }}
-          # Linux x86_64 also produces the sdist (one source tarball
-          # is enough; the contents are identical regardless of host).
-          # `manylinux: auto` picks the most permissive manylinux tag
-          # the toolchain can satisfy.
+          # Linux x86_64 also builds the one sdist.
           args: >-
             --release --out dist
             ${{ matrix.target == 'x86_64' && '--sdist' || '' }}
@@ -239,13 +197,8 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
-          # Tag-driven runs default to the tag (github.ref =
-          # refs/tags/vX.Y.Z), which is fine. workflow_dispatch
-          # otherwise checks out the branch the user dispatched
-          # from — if main has moved since the tag, the wheels
-          # we'd build wouldn't correspond to the original tag.
-          # Redirect dispatch runs to v${inputs.version} so
-          # republish recovery actually rebuilds the tagged source.
+          # A dispatch run would otherwise build the dispatching branch, which
+          # may have moved past the tag; rebuild the tagged source instead.
           ref: ${{ github.event_name == 'workflow_dispatch' && format('v{0}', inputs.version) || github.ref }}
 
 
@@ -277,13 +230,8 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
-          # Tag-driven runs default to the tag (github.ref =
-          # refs/tags/vX.Y.Z), which is fine. workflow_dispatch
-          # otherwise checks out the branch the user dispatched
-          # from — if main has moved since the tag, the wheels
-          # we'd build wouldn't correspond to the original tag.
-          # Redirect dispatch runs to v${inputs.version} so
-          # republish recovery actually rebuilds the tagged source.
+          # A dispatch run would otherwise build the dispatching branch, which
+          # may have moved past the tag; rebuild the tagged source instead.
           ref: ${{ github.event_name == 'workflow_dispatch' && format('v{0}', inputs.version) || github.ref }}
 
 
@@ -305,9 +253,8 @@ jobs:
           if-no-files-found: error
 
   # --- strata-client wheel (pure-Python, independent distribution) ---
-  # One py3-none-any wheel + sdist, built once. No frontend, no Rust. It
-  # uploads as a dist-* artifact so the publish jobs' `pattern: dist-*`
-  # picks it up and PyPI files it under the strata-client project by name.
+  # One py3-none-any wheel + sdist, no frontend or Rust. Uploaded as a dist-*
+  # artifact so the publish jobs pick it up by pattern.
   client-wheel:
     name: wheel · strata-client
     runs-on: ubuntu-latest
@@ -325,9 +272,8 @@ jobs:
         run: uv build --package strata-client --out-dir dist
 
       - name: Smoke-test the strata-client wheel
-        # The published client wheel was never import-tested in the pipeline.
-        # Install it standalone (no server deps) and exercise its public surface
-        # so a broken client wheel fails here, not on a user's machine.
+        # Standalone install (no server deps), so a broken client wheel fails
+        # here and not on a user's machine.
         run: |
           set -euo pipefail
           CLIENT_WHEEL=$(ls dist/strata_client-*-py3-none-any.whl | head -1)
@@ -348,8 +294,7 @@ jobs:
           if-no-files-found: error
 
   # --- strata-pool wheel (pure-Python, independent distribution) ------
-  # Same shape as client-wheel: one py3-none-any wheel + sdist, uploaded as a
-  # dist-* artifact so the publish jobs pick it up by pattern.
+  # Same shape as client-wheel.
   pool-wheel:
     name: wheel · strata-pool
     runs-on: ubuntu-latest
@@ -367,12 +312,9 @@ jobs:
         run: uv build --package strata-pool --out-dir dist
 
       - name: Smoke-test the strata-pool wheel
-        # Two things this has to prove, and the second is the one that would
-        # break quietly. First, that the wheel imports at all. Second, that the
-        # base install stays slim: __init__ imports both backends eagerly, so a
-        # cloud SDK accidentally promoted out of its extra would be pulled into
-        # every install. Asserting the absence is what catches that -- importing
-        # successfully would not.
+        # Proves the wheel imports and that the base install stays slim:
+        # __init__ imports both backends eagerly, so an SDK promoted out of its
+        # extra would still import fine. Only asserting its absence catches it.
         run: |
           set -euo pipefail
           POOL_WHEEL=$(ls dist/strata_pool-*-py3-none-any.whl | head -1)
@@ -405,29 +347,18 @@ jobs:
           if-no-files-found: error
 
   # --- wheel smoke test ----------------------------------------------
-  # Install the just-built Linux x86_64 wheel in a fresh uv-managed
-  # venv, exercise the import surface, all three console scripts, and
-  # the server's /health endpoint. Catches release-pipeline bugs
-  # locally before the publish step: missing dependencies, broken
-  # entry points, native extension that doesn't load, frontend bundle
-  # missing from the wheel. Discovered via 0.1.0a0/a1 alphas (missing
-  # ``packaging`` dep, missing LICENSE in sdist) — adding here so the
-  # next class of bug fails the CI run rather than poisoning a PyPI
-  # version slot.
-  #
-  # Only the Linux x86_64 wheel is exercised because the other
-  # platforms' wheels (linux aarch64, macos x86_64) are cross-built
-  # and not natively runnable on the host. Same Python sources, so a
-  # dep or entry-point bug surfaces here regardless.
+  # Installs the Linux x86_64 wheel in a fresh venv and checks imports,
+  # console scripts, /health and the frontend bundle, so a missing dep,
+  # broken entry point or unloadable extension fails before it takes a PyPI
+  # version slot. The other wheels are cross-built and cannot run here; they
+  # share the Python sources.
   wheel-test:
     name: Smoke-test linux x86_64 wheel · python ${{ matrix.python }}
     runs-on: ubuntu-latest
     needs: [linux, macos, windows]
     strategy:
-      # abi3-py312 means one wheel installs on every Python 3.12+.
-      # The matrix validates that forward-compat claim against the
-      # actual interpreters CI knows about, not just the one
-      # setup-uv defaults to.
+      # Checks the abi3-py312 claim (one wheel for every 3.12+) on each
+      # interpreter, not just setup-uv's default.
       fail-fast: false
       matrix:
         python: ["3.12", "3.13", "3.14"]
@@ -449,21 +380,16 @@ jobs:
           WHEEL=$(ls dist/strata_notebook-*-cp312-abi3-manylinux*x86_64*.whl | head -1)
           echo "::notice::Testing wheel ${WHEEL}"
 
-          # Strata's runtime guard requires a uv-managed venv. ``uv
-          # venv`` produces one with the ``uv = <version>`` pyvenv.cfg
-          # marker the guard checks for. ``--python`` pins the matrix
-          # interpreter (uv fetches it if not already installed).
+          # Strata's runtime guard requires a uv-managed venv (the `uv =`
+          # marker in pyvenv.cfg).
           uv venv --python ${{ matrix.python }} /tmp/strata-smoke
           VIRTUAL_ENV=/tmp/strata-smoke uv pip install \
             --index https://pypi.org/simple/ \
             "${WHEEL}"
 
           echo "--- import smoke ---"
-          # The HTTP client is a separate distribution now (strata-client →
-          # ``from strata_client import StrataClient``); the server package only
-          # exposes the wire/config surface. Smoke-test what this wheel actually
-          # ships — importing the moved-out client here would wrongly fail the
-          # release.
+          # The HTTP client ships in strata-client; this package exposes only
+          # the wire/config surface.
           /tmp/strata-smoke/bin/python -c "
           import strata
           from strata import Filter, FilterOp, FilterValue, StrataConfig
@@ -478,9 +404,8 @@ jobs:
           echo "--- server boot + /health ---"
           /tmp/strata-smoke/bin/strata-notebook >/tmp/server.log 2>&1 &
           SERVER_PID=$!
-          # Poll /health for up to 30s. The server's eager warmup runs
-          # in the lifespan handler, so the first request can arrive
-          # before binding finishes on a cold runner.
+          # Poll /health for up to 30s: warmup in the lifespan handler can
+          # delay binding on a cold runner.
           for i in $(seq 1 30); do
             if curl -fsS "http://127.0.0.1:${STRATA_PORT}/health" >/dev/null 2>&1; then
               echo "::notice::server responded to /health after ${i}s"
@@ -488,8 +413,7 @@ jobs:
             fi
             sleep 1
           done
-          # Fetch /health one more time so the final response (or
-          # error) is in the log.
+          # Once more, so the final response or error is in the log.
           curl -fsS "http://127.0.0.1:${STRATA_PORT}/health" || {
             echo "::error::server did not respond to /health within 30s"
             echo "--- server log ---"
@@ -500,10 +424,8 @@ jobs:
           echo
 
           echo "--- GET / (frontend bundle present?) ---"
-          # _mount_frontend() in server.py silently skips mounting the
-          # SPA when src/strata/_frontend/index.html is absent, so a
-          # broken wheel without the bundle would still pass /health.
-          # Verify the SPA index actually serves and looks like HTML.
+          # The server silently skips mounting a missing SPA bundle, so a
+          # wheel without it would still pass /health.
           curl -fsS "http://127.0.0.1:${STRATA_PORT}/" -o /tmp/frontend.html
           if ! grep -qi '<!doctype html' /tmp/frontend.html; then
             echo "::error::GET / did not return the SPA index.html — frontend bundle missing from wheel"
@@ -531,8 +453,7 @@ jobs:
     steps:
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8.0.1
         with:
-          # All dist-* artifacts get merged into a single dist/ dir
-          # so the publish action sees every wheel + the sdist.
+          # Merge every dist-* artifact into one dist/ for the publish action.
           path: dist
           pattern: dist-*
           merge-multiple: true
@@ -541,14 +462,12 @@ jobs:
         uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33  # release/v1
         with:
           repository-url: https://test.pypi.org/legacy/
-          # Skip if the version already exists — useful on
-          # workflow_dispatch re-runs after a partial failure.
+          # Lets a workflow_dispatch re-run finish after a partial failure.
           skip-existing: true
 
   # --- PyPI publish (gated by manual approval) -----------------------
-  # The `pypi` environment in repo Settings → Environments should
-  # have a required reviewer. The promotion job sits in `waiting`
-  # state until you click "Approve and deploy" in the workflow run UI.
+  # The `pypi` environment needs a required reviewer; this job waits for
+  # "Approve and deploy" in the run UI.
   pypi:
     name: Publish to PyPI
     runs-on: ubuntu-latest
@@ -568,43 +487,30 @@ jobs:
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33  # release/v1
         with:
-          # Publishing is one upload per file, and a failure part-way leaves
-          # the earlier ones live. Without this a retry 400s on those and dies
-          # before reaching the package that actually failed, so a release that
-          # stumbles on its last package cannot be finished at all — which is
-          # exactly what 0.7.0 did, on a new sub-package with no publisher yet.
-          #
-          # This does not weaken the "a tag never republishes" guarantee: the
-          # pre-flight job fails the whole run when any of the three package
-          # versions disagrees with the tag, which is the check that was
-          # actually enforcing it.
+          # Uploads are per file, and a failure part-way leaves the earlier
+          # ones live; without this a retry 400s on them and never reaches the
+          # package that failed. A tag still never republishes: pre-flight
+          # fails the run when any package version disagrees with the tag.
           skip-existing: true
 
   # --- GitHub Release (release notes from CHANGELOG) -----------------
-  # Drafted only after PyPI publish succeeds — a Release that points
-  # at a tag whose wheels never made it to PyPI would be misleading.
+  # Only after the PyPI publish succeeds, so a Release never points at a tag
+  # whose wheels are not on PyPI.
   github-release:
     name: Create GitHub Release
     runs-on: ubuntu-latest
     needs: [preflight, pypi]
     if: startsWith(github.ref, 'refs/tags/v')
     permissions:
-      # Minimum required to create the GitHub Release for the tag. The
-      # workflow default is read-only (top-level `permissions: contents:
-      # read`); this is the only job that escalates, and only to the one
-      # scope release creation needs. Scorecard still flags any write —
-      # accepted: there is no narrower scope for publishing a Release.
+      # The only job that escalates, and only to the one scope creating a
+      # Release needs. Scorecard flags any write; accepted, as there is no
+      # narrower scope.
       contents: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
-          # Tag-driven runs default to the tag (github.ref =
-          # refs/tags/vX.Y.Z), which is fine. workflow_dispatch
-          # otherwise checks out the branch the user dispatched
-          # from — if main has moved since the tag, the wheels
-          # we'd build wouldn't correspond to the original tag.
-          # Redirect dispatch runs to v${inputs.version} so
-          # republish recovery actually rebuilds the tagged source.
+          # A dispatch run would otherwise build the dispatching branch, which
+          # may have moved past the tag; rebuild the tagged source instead.
           ref: ${{ github.event_name == 'workflow_dispatch' && format('v{0}', inputs.version) || github.ref }}
 
 
@@ -618,9 +524,8 @@ jobs:
           import re
           version = os.environ["VERSION"]
           text = open("CHANGELOG.md").read()
-          # Match "## <version>[ — date | (anything)]" up to the next
-          # "## " heading or EOF. preflight already verified the
-          # section exists; the lack of a match here would be a bug.
+          # The version's heading (and any suffix, such as a date) up to the
+          # next "## " heading or EOF. preflight already checked it exists.
           pattern = rf"^##\s+{re.escape(version)}(?:[\s—-][^\n]*)?\n(.*?)(?=^##\s|\Z)"
           match = re.search(pattern, text, flags=re.DOTALL | re.MULTILINE)
           body = match.group(1).strip() if match else ""

@@ -1,12 +1,8 @@
 name: Coverage
 
-# Daily coverage baseline, uploaded to Codecov. Kept out of the per-push
-# CI critical path because coverage tracing adds 3-4x overhead on the
-# subprocess-heavy notebook test suite — running it on every commit is
-# wasteful and the signal (per-module % drift) doesn't change quickly.
-#
-# Manual ``workflow_dispatch`` covers the "I just merged a big refactor
-# and want to recheck coverage" case.
+# Daily coverage baseline for Codecov, kept off the per-push path: tracing
+# adds 3-4x overhead on the subprocess-heavy notebook suite, and per-module
+# drift is slow. workflow_dispatch reruns it on demand.
 
 on:
   schedule:
@@ -43,11 +39,9 @@ jobs:
       - name: Install dependencies and build Rust extension
         run: uv sync --python 3.13 --all-extras
 
-      # Test scope matches the non-Windows unit-tests job in ci.yml —
-      # E2E/lineage/S3 are excluded the same way. ``continue-on-error``
-      # lets us still upload a baseline when a single test flakes under
-      # the coverage tracer (sporadic timing-sensitive failures are known
-      # on subprocess-heavy notebook tests).
+      # Same scope as the non-Windows unit-tests job in ci.yml.
+      # continue-on-error still uploads a baseline when a timing-sensitive
+      # notebook test flakes under the tracer.
       - name: Run tests with coverage
         continue-on-error: true
         run: |
@@ -66,8 +60,6 @@ jobs:
           files: coverage.xml
           fail_ci_if_error: false
           flags: notebook
-          # ``main`` is a protected branch, which Codecov treats as
-          # needing an explicit token (tokenless upload errors with
-          # "Token required because branch is protected"). Stored as
-          # a repo secret on the user's side.
+          # main is protected, and Codecov requires a token to upload for a
+          # protected branch.
           token: ${{ secrets.CODECOV_TOKEN }}

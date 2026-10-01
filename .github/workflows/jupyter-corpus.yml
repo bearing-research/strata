@@ -1,31 +1,18 @@
 name: Jupyter Corpus
 
-# Stress-test the Jupyter notebook importer against real-world
-# .ipynb files. Runs the extended corpus (URLs pinned in
-# tests/notebook/jupyter_corpus/extended.yaml) end-to-end through
-# parse → convert → dag → run → artifact. Per-PR CI exercises only
-# the in-repo smoke corpus; this workflow covers the public corpus
-# that requires network access.
-#
-# Schedule: nightly at 04:00 UTC. Also dispatchable manually from
-# the Actions tab so a release manager can refresh the signal
-# before cutting a tag.
-#
-# Failures here are report-only — corpus health is signal, not a
-# gate. A flaky download or a Jupyter notebook upstream-renamed
-# overnight shouldn't block PR merges or releases. Inspect the
-# uploaded junit artifact + the summary in the run log.
+# Runs the extended public .ipynb corpus (URLs pinned in
+# tests/notebook/jupyter_corpus/extended.yaml) through the importer end to
+# end; per-PR CI covers only the in-repo smoke corpus, as this needs network.
+# Nightly and on demand (e.g. before a tag). Report-only: a flaky download or
+# a renamed upstream notebook must not block merges. See the junit artifact.
 
 on:
   schedule:
-    # 04:00 UTC ≈ 21:00 PT / 23:00 CT — outside the usual workday
-    # so the runners aren't competing for capacity with normal CI.
+    # Outside the usual workday, so it does not compete with normal CI.
     - cron: '0 4 * * *'
   workflow_dispatch:
 
-# This workflow shouldn't gate anything else, but stale runs from
-# yesterday's cron don't add signal — cancel them when a new run
-# fires.
+# Stale runs from yesterday's cron add no signal.
 concurrency:
   group: jupyter-corpus
   cancel-in-progress: true
@@ -38,10 +25,7 @@ jobs:
     name: Extended corpus
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    # Important: report-only. Don't fail the workflow when an
-    # individual notebook breaks — the junit XML carries the per-
-    # entry detail. A workflow-level failure would just hide which
-    # entries actually broke.
+    # Report-only; the junit XML says which entries broke.
     continue-on-error: true
 
     steps:
@@ -74,8 +58,7 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
         with:
           path: ~/.cache/strata-jupyter-corpus
-          # Manifest is pinned to commit SHAs, so the URLs are
-          # immutable — the manifest hash is a safe cache key.
+          # The manifest pins commit SHAs, so its hash is a safe cache key.
           key: jupyter-corpus-${{ hashFiles('tests/notebook/jupyter_corpus/extended.yaml') }}
 
       - name: Run the extended corpus

@@ -1,13 +1,9 @@
 """Assemble rasterised frames into an animated GIF.
 
-Separate from ``capture_docs_shots.py`` because the three stages have different
-dependencies: Python renders the TUI, node/Playwright rasterises SVG, and this
-packs the result. Keeping them separate means a failure says which stage broke.
+The last of three stages (Python renders the TUI, node/Playwright rasterises
+SVG, this packs the GIF), kept separate so a failure names its stage.
 
     uv run python scripts/assemble_gif.py --in <dir> --name tui-cache-payoff
-
-Frame timings live here rather than in the storyboard: how long a reader needs
-on a frame is a property of the finished animation, not of the state it shows.
 """
 
 from __future__ import annotations
@@ -20,20 +16,16 @@ from PIL import Image
 REPO_ROOT = Path(__file__).resolve().parent.parent
 ASSETS = REPO_ROOT / "docs" / "assets"
 
-# Per-beat hold, in milliseconds. The two that carry the point -- upstream
-# resolving from cache, and the final state where it still reads cached -- get
-# the longest holds; the loop should leave a reader on the payoff, not mid-run.
+# Per-beat hold in ms. Timing belongs to the animation, not the storyboard. The
+# beats that carry the point (cache hit, final cached state) hold longest.
 HOLDS = {
     "tui-cache-payoff": [1800, 1400, 2000, 1600, 2800],
-    # The agent-drive beats. The empty notebook is held briefly -- it is the
-    # "before", not the point -- and each arrival gets long enough to read the
-    # cell that appeared without the reader having to scrub.
+    # The empty "before" is brief; each new cell is held long enough to read.
     "tui-agent-live": [1400, 2200, 2200, 2200, 3000],
 }
 
-# The SVG has rounded corners, so it rasterises with a transparent margin and
-# antialiased edges. GIF alpha is one bit, which turns that into a fringe;
-# compositing onto the terminal's own background colour avoids it entirely.
+# GIF alpha is one bit, so the SVG's antialiased rounded corners would fringe;
+# composite onto the terminal's background colour instead.
 BACKDROP = (18, 18, 18)
 
 

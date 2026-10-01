@@ -1,58 +1,41 @@
 # A Strata worker image that satisfies the strata-pool worker contract.
 #
-# Deliberately not a stage in the root Dockerfile: that one is built with no
-# ``--target``, so Docker builds its *last* stage. Appending a worker stage
-# there would silently change what ``docker build .`` produces and break the
-# server image everyone else builds.
+# Not a stage in the root Dockerfile: that one builds with no ``--target``, so
+# a new last stage would change what ``docker build .`` produces.
 #
-# At the repo root rather than in a ``docker/`` directory: a top-level
-# directory named ``docker`` makes ruff's isort classify the ``docker`` PyPI
-# package as first-party, which silently reorders imports in the integration
-# tests that use it.
+# Not under ``docker/``: a top-level ``docker`` directory makes ruff's isort
+# treat the ``docker`` PyPI package as first-party and reorder test imports.
 #
 #   docker build -f worker.Dockerfile -t strata-worker:latest .
 #
 # The pool does not pull images, so build it on the host that will run it (or
 # push it to a registry the host has already pulled from).
 #
-# CI builds this and checks the claims below: that it refuses to start without
-# a token, does not run as root, serves /health on 8080, and requires the token
-# on /execute. Until that job existed this file merged on a green check that
-# built the *root* Dockerfile, which is a different file.
+# CI builds this and checks that it refuses to start without a token, does not
+# run as root, serves /health on 8080, and requires the token on /execute.
 
 FROM python:3.14-slim
 
-# Installed with plain pip, not into a uv venv. ``strata-notebook`` refuses to
-# start outside one (src/strata/_uv_runtime.py), but the *worker* entry point
-# is deliberately not gated by that guard -- which is what lets it run on a
-# stock Python image here, and on Modal's standard image stack.
+# Plain pip, not a uv venv: the uv-runtime guard (src/strata/_uv_runtime.py)
+# gates ``strata-notebook`` but not the worker entry point, so this runs on a
+# stock Python image (and Modal's).
 #
-# The ``notebook`` extra is not optional for a worker: cells execute through
-# harness.py, which needs orjson / cloudpickle / pandas / numpy to serialize
-# what they produce. Without it the machine boots, answers /health, accepts a
-# job, and fails at the point of doing the work.
-# Requires 0.7.0 or newer: ``POST /execute``, the path the pool dispatches to,
-# ships in that release. Pinned rather than floating so a machine's worker
-# cannot drift from the server that issued its manifest.
+# The ``notebook`` extra is required: harness.py needs orjson / cloudpickle /
+# pandas / numpy to serialize results. Without it the worker boots and answers
+# /health, then fails every job.
 #
-# This installs from PyPI and uses nothing from the build context, so building
-# it inside a checkout does NOT pick up local changes to the worker -- you get
-# the published version. To test unreleased worker code, build a wheel
-# (``uv build``) and install that instead of this line.
+# Needs 0.7.0+ (``POST /execute``). Pinned so the worker cannot drift from the
+# server that issued its manifest. It installs from PyPI, so a build in a
+# checkout does NOT pick up local worker changes; for unreleased code, install
+# a ``uv build`` wheel instead. Bump the pin only *after* a release: CI builds
+# this file, and a version PyPI lacks fails the build. Until then a fresh image
+# runs a worker one version behind the server.
 #
-# This pin therefore moves *after* a release, never with it: CI builds this
-# file as written, so pointing it at a version PyPI does not have yet fails
-# the build. Bumping it is the first post-release task, and until it happens
-# a freshly built image runs a worker one version behind the server that
-# dispatches to it.
-#
-# ``uv`` comes with it, and is not optional either. A cell whose notebook has a
-# uv.lock -- which is every notebook ``strata new`` creates -- is dispatched
-# with a locked environment, and building one is a ``uv sync --frozen``
-# (worker_env.py). Without uv on PATH the worker now answers
-# ``locked_environments: false`` and the server runs the cell in this image
-# instead, which works but ignores the notebook's own pins; with it, the
-# notebook's environment is what the cell gets.
+# ``uv`` is required too: a notebook with a uv.lock (every ``strata new``
+# notebook) runs in a locked environment built by ``uv sync --frozen``
+# (worker_env.py). Without uv the worker reports
+# ``locked_environments: false`` and cells run in this image, ignoring the
+# notebook's pins.
 ARG STRATA_VERSION=0.8.0
 RUN pip install --no-cache-dir "strata-notebook[notebook]==${STRATA_VERSION}" uv
 
@@ -60,10 +43,9 @@ RUN pip install --no-cache-dir "strata-notebook[notebook]==${STRATA_VERSION}" uv
 #
 #   docker build -f worker.Dockerfile --build-arg WITH_R=true -t strata-worker:r .
 #
-# The worker runs an R cell's harness.R under Rscript, which needs jsonlite and
-# arrow in R's library. Debian does not package arrow, and compiling it takes
-# the better part of an hour, so both come as binaries from Posit's package
-# manager for this Debian release.
+# harness.R needs jsonlite and arrow. Debian does not package arrow and
+# compiling it takes about an hour, so both come as binaries from Posit's
+# package manager.
 ARG WITH_R=false
 RUN if [ "$WITH_R" = "true" ]; then \
       apt-get update \
@@ -72,8 +54,7 @@ RUN if [ "$WITH_R" = "true" ]; then \
       && Rscript -e 'options(repos = c(CRAN = "https://packagemanager.posit.co/cran/__linux__/trixie/latest"), HTTPUserAgent = sprintf("R/%s R (%s)", getRversion(), paste(getRversion(), R.version["platform"], R.version["arch"], R.version["os"]))); install.packages(c("jsonlite", "arrow")); for (p in c("jsonlite", "arrow")) if (!requireNamespace(p, quietly = TRUE)) stop(p, " did not install")'; \
     fi
 
-# Cells execute arbitrary user code, so do not run them as root. The server
-# image does the same (see the root Dockerfile).
+# Cells run arbitrary user code, so not as root.
 RUN useradd --create-home --shell /bin/bash worker
 USER worker
 WORKDIR /home/worker
@@ -82,24 +63,21 @@ WORKDIR /home/worker
 #   FROM strata-worker:latest
 #   RUN pip install --no-cache-dir torch transformers
 
-# 8080 because that is DockerBackend's default ``worker_port``. The worker's
-# own default is 9000, so this is set explicitly rather than left to agree by
-# luck; change both together or neither.
+# 8080 matches DockerBackend's default ``worker_port`` (the worker's own default
+# is 9000); change both together or neither.
 EXPOSE 8080
 
-# /health is unauthenticated by design -- it is polled before the machine is
-# trusted with anything and reveals nothing.
+# /health is unauthenticated by design: it is polled before the machine is
+# trusted and reveals nothing.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8080/health').read()"
 
-# STRATA_WORKER_TOKEN is minted per machine by the pool and injected into the
-# environment at boot; the worker reads it from there. Never bake one in.
+# The pool mints STRATA_WORKER_TOKEN per machine and injects it at boot. Never
+# bake one in.
 #
-# The library treats an unset token as "auth disabled" for backward
-# compatibility, which is defensible for a loopback-bound process and not for
-# this image: it binds 0.0.0.0 and publishes 8080, so starting without a token
-# would stand up an unauthenticated remote-code-execution endpoint. The image
-# therefore refuses to start rather than inheriting that default.
+# The library treats an unset token as "auth disabled", fine on loopback but
+# not here: this image binds 0.0.0.0, so no token would mean unauthenticated
+# remote code execution. Refuse to start instead.
 CMD ["sh", "-c", "\
 if [ -z \"${STRATA_WORKER_TOKEN:-}\" ]; then \
   echo 'refusing to start: STRATA_WORKER_TOKEN is unset, and this image binds' >&2; \

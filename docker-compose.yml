@@ -7,7 +7,6 @@
 # This builds Strata with the notebook frontend and runs it locally.
 
 services:
-  # Strata server
   strata:
     build: .
     ports:
@@ -28,8 +27,8 @@ services:
       - STRATA_PORT=8765
       - STRATA_CACHE_DIR=/home/strata/.strata/cache
       - STRATA_METADATA_DB=/home/strata/.strata/meta.sqlite
-      # Pinned explicitly so the volume mount below is the source of
-      # truth — don't rely on the config.py default to happen to match.
+      # Set explicitly so it matches the notebooks volume rather than relying
+      # on the config.py default.
       - STRATA_NOTEBOOK_STORAGE_DIR=/tmp/strata-notebooks
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8765/health').read()"]

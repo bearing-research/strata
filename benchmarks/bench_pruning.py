@@ -1,19 +1,14 @@
 """Decision benchmark: is row-group pruning worth moving to Rust?
 
-The candidate is ``ReadPlanner._should_prune_row_group`` — a Python loop that
-runs once per (row group x filter) on every *cold* scan. Before writing any
-Rust we need to know two things:
+The candidate is ``ReadPlanner._should_prune_row_group``, a Python loop that
+runs once per (row group x filter) on every cold scan. It answers two questions:
 
-1. How much of cold planning is actually the prunable Python loop, versus the
-   PyArrow C++ footer parse that Rust would NOT replace? If the loop is a sliver
-   of parse time, Rust buys nothing.
-2. How cheap is the *warm* path already? The persisted metadata cache hands the
-   loop plain ``RowGroupMeta`` dataclasses (Python dict lookups) instead of
-   PyArrow ``RowGroupMetaData`` objects (each ``.column().statistics.min`` is an
-   FFI hop). If the dataclass loop is already fast, warm scans don't need Rust.
+1. What share of cold planning is the loop, versus the PyArrow C++ footer parse
+   that Rust would not replace?
+2. How fast is the warm path, where the metadata cache feeds the loop plain
+   ``RowGroupMeta`` dataclasses instead of PyArrow objects (one FFI hop per stat)?
 
-This isolates the exact code that would move to Rust — no Iceberg, no catalog —
-so the numbers speak only to the pruning decision.
+No Iceberg or catalog is involved, so the numbers speak only to pruning.
 
 Run with: uv run python benchmarks/bench_pruning.py
 """
@@ -46,10 +41,10 @@ def _timeit(fn, iterations: int) -> dict:
 
 
 def _write_parquet(path: Path, num_groups: int) -> None:
-    """A Parquet file with ``num_groups`` row groups, each 1000 sorted rows.
+    """Write ``num_groups`` row groups of 1000 rows each.
 
-    ``val`` is globally sorted so per-row-group min/max stats partition cleanly
-    — a selective filter can prune most groups, exactly the shape pruning is for.
+    ``val`` is globally sorted, so row-group min/max stats partition cleanly and
+    a selective filter can prune most groups.
     """
     n = num_groups * ROWS_PER_GROUP
     table = pa.table(
@@ -66,9 +61,7 @@ def _write_parquet(path: Path, num_groups: int) -> None:
 def _to_dataclass_repr(meta: pq.FileMetaData, col_index_map: dict[str, int]) -> list[RowGroupMeta]:
     """Convert PyArrow metadata to the warm-cache ``RowGroupMeta`` representation.
 
-    Mirrors what the persisted metadata cache stores and reloads. The cost of
-    this conversion itself is the one-time price the warm cache pays; we time it
-    separately so it isn't hidden.
+    The conversion is the warm cache's one-time cost; it is timed separately.
     """
     rgs: list[RowGroupMeta] = []
     for i in range(meta.num_row_groups):
@@ -149,7 +142,7 @@ def main() -> None:
                 pa_rgs = [meta0.row_group(i) for i in range(meta0.num_row_groups)]
                 dc_rgs = _to_dataclass_repr(meta0, col_index_map)
 
-                # sanity: both representations prune identically
+                # Both representations must prune identically.
                 p1 = _prune_loop(planner, pa_rgs, compiled_pa)
                 p2 = _prune_loop(planner, dc_rgs, compiled_pa)
                 assert p1 == p2, f"repr disagreement: {p1} vs {p2}"

@@ -33,55 +33,44 @@ dependencies = [
     "pyiceberg[sql-sqlite,sql-postgres]>=0.12.0",
     "pyarrow>=18.0.0",
     "fastapi>=0.115.0",
-    # FastAPI itself only asks for starlette>=0.46.0; 1.3.1 is the first
-    # release with all five 2026 advisories fixed, so no install can land below.
+    # FastAPI only asks for starlette>=0.46.0; 1.3.1 fixes all five 2026 advisories.
     "starlette>=1.3.1",
-    # 0.35.0 is the first release with the sans-io WebSocket implementation
-    # (WebSocketsSansIOProtocol); server.main selects ws="websockets-sansio" to
-    # avoid the deprecated legacy asyncio protocol that breaks on CPython 3.14+.
+    # 0.35.0 adds the sans-io WebSocket protocol; server.main selects it because
+    # the legacy asyncio one is deprecated and breaks on CPython 3.14+.
     "uvicorn>=0.35.0",
     "websockets>=17.1",
     "httpx>=0.28.0",
     "duckdb>=1.5.0",
     "python-multipart>=0.0.31", # Multipart form handling; 0.0.31 fixes the 2026 advisories
-    "pydantic>=2.0.0", # For configuration validation
-    "pydantic-settings>=2.15.0", # For configuration with env var support
-    "tomli_w>=1.0.0", # For writing TOML files
+    "pydantic>=2.0.0",
+    "pydantic-settings>=2.15.0",
+    "tomli_w>=1.0.0",
     "jsonschema>=4.0.0",
     "infisicalsdk>=1.0.16",
     "packaging>=24.0",
-    "filelock>=3.16.0", # Cross-process renv mutual exclusion (issue #102)
+    "filelock>=3.16.0", # Cross-process renv mutual exclusion
 ]
 
 [project.optional-dependencies]
-# OpenTelemetry for distributed tracing
 otel = [
     "opentelemetry-api>=1.20.0",
     "opentelemetry-sdk>=1.20.0",
     "opentelemetry-exporter-otlp>=1.20.0",
     "opentelemetry-instrumentation-fastapi>=0.41b0",
 ]
-# Azure Blob Storage support
 azure = [
     "azure-storage-blob>=12.20.0",
     "azure-identity>=1.25.3",
 ]
-# Postgres metadata backend for the artifact store. Only needed to run the
-# store's system of record on a shared server instead of a local SQLite
-# file — that is, to run more than one Strata node against one store.
-# Personal mode never needs this.
+# Postgres metadata backend for the artifact store: only needed when several
+# Strata nodes share one store. Personal mode never needs it.
 postgres = [
     "psycopg[binary]>=3.1",
     "psycopg-pool>=3.2",
 ]
-# Strata Notebook runtime — DataFrame / Series / ndarray
-# serialization, display outputs (figures, images), and the
-# cloudpickle-backed object codec used for cell output values.
-# Strata core doesn't need any of these; install this extra only if
-# you use the notebook server or workers.
-# Notebook cell execution runtime: harness + pool_worker + serializer.
-# orjson is used for manifest I/O in the harness/pool_worker subprocesses.
-# cloudpickle is the default object codec for cell outputs.
+# Notebook cell runtime (harness, pool_worker, serializer): DataFrame/ndarray
+# serialization, display outputs, orjson manifest I/O, and the cloudpickle
+# object codec. Strata core needs none of it.
 notebook = [
     "pandas>=2.0.0",
     "numpy>=1.26.0",
@@ -90,9 +79,8 @@ notebook = [
     "matplotlib>=3.8.0",
     "Pillow>=10.0.0",
 ]
-# SQL cells: query parsing + ADBC connection management. Per-driver
-# packages live in their own extras so users only install what they
-# actually connect to.
+# SQL cells. Each ADBC driver has its own extra so users install only what they
+# connect to.
 sql = [
     "sqlglot>=30.13.0",
     "adbc-driver-manager>=1.0.0",
@@ -112,41 +100,33 @@ sql-bigquery = [
 sql-duckdb = [
     "duckdb>=1.5.0",
 ]
-# Notebook TUI: a read-only Textual spectator that attaches to a running
-# notebook session over the WS protocol (httpx + websockets are already core
-# deps). Install only if you want the terminal viewer (`strata-notebook-tui`).
+# Notebook TUI (`strata-notebook-tui`): a read-only Textual viewer of a running
+# session over the WS protocol.
 tui = [
     "textual>=0.80.0",
     # Pure-Python Sugiyama layered layout for the ASCII DAG view.
     "grandalf>=0.8",
-    # Inline image rendering — terminal graphics protocol (kitty/iTerm/Sixel)
-    # with a Unicode half-block fallback. The 0.13.0 and 0.13.1 wheels hold no
-    # Python modules, so 0.14.0 is the first that imports.
+    # Inline images. The 0.13.0 and 0.13.1 wheels hold no Python modules;
+    # the first that imports is 0.14.0.
     "textual-image>=0.14.0",
-    # tui/app.py imports PIL at module load; declare Pillow explicitly rather
-    # than rely on textual-image to pull it, so `[tui]` alone (the documented
-    # install) launches instead of ModuleNotFoundError: No module named 'PIL'.
-    # 12.1.0 added Image.get_flattened_data, which textual-image 0.14 calls to
-    # draw every image.
+    # tui/app.py imports PIL at load, so declare it rather than rely on
+    # textual-image to pull it in.
+    # 12.1.0 adds Image.get_flattened_data, which textual-image 0.14 calls for
+    # every image.
     "pillow>=12.1.0",
 ]
-# MCP server: exposes the live notebook session to an external coding agent
-# (Claude Code, etc.) over streamable HTTP at `/mcp`. MCPServer ships in the
-# official `mcp` package. Gated import — the server runs without this extra;
-# install it (and run in personal mode) to turn the endpoint on.
+# MCP server: exposes the live notebook session to a coding agent at `/mcp`.
+# The import is gated; install this (and run in personal mode) to enable it.
 mcp = [
     "mcp>=2.2.0",
 ]
 
 [dependency-groups]
 dev = [
-    # The independent client, installed editable from the workspace so the
-    # combined test suite (client unit tests + integrations + conftest) can
-    # import it. NOT a runtime dependency of strata-notebook — dev-only.
+    # Dev-only, editable from the workspace so the combined suite can import
+    # it; never a runtime dependency of strata-notebook.
     "strata-client",
-    # The worker pool, likewise dev-only and likewise never a runtime
-    # dependency: the notebook must keep running with no pool in sight.
-    # Installed so `ty` can resolve it and the combined suite can import it.
+    # Dev-only too (for `ty` and the suite); the notebook must run without a pool.
     "strata-pool",
     "pre-commit>=3.7.0",
     "pytest>=8.0.0",
@@ -175,7 +155,7 @@ dev = [
     "adbc-driver-manager>=1.0.0",
     "adbc-driver-postgresql>=1.0.0",
     "adbc-driver-sqlite>=1.0.0",
-    # TUI viewer (the [tui] extra) — dev-installed so its tests can import it.
+    # The [tui] extra, so its tests can import it.
     "textual>=0.80.0",
     "grandalf>=0.8",
     "textual-image>=0.14.0",
@@ -206,12 +186,9 @@ build-backend = "maturin"
 [tool.uv]
 python-preference = "only-managed"
 
-# strata-client and strata-pool are INDEPENDENT distributions — strata-notebook
-# does NOT depend on either (the client shares only the wire protocol; the pool
-# is composed by the hosted proxy, never by the notebook). Both are dev-only
-# dependencies (above), resolved from the workspace, so `uv sync` installs them
-# editable for the combined test suite while the published server wheel never
-# depends on them.
+# strata-client and strata-pool are independent distributions; strata-notebook
+# depends on neither. They are workspace members only so `uv sync` installs
+# them editable for the combined test suite.
 [tool.uv.workspace]
 members = ["packages/strata-client", "packages/strata-pool"]
 
@@ -219,28 +196,19 @@ members = ["packages/strata-client", "packages/strata-pool"]
 strata-client = { workspace = true }
 strata-pool = { workspace = true }
 
-# Maturin configuration for building the Rust extension
-# Build with: maturin develop (dev) or maturin build (release)
 [tool.maturin]
 manifest-path = "rust/Cargo.toml"
 python-source = "src"
 module-name = "strata._strata_core"
 features = ["pyo3/extension-module"]
-# python-source picks up .py files automatically, but the
-# bundled-frontend SPA is non-Python and needs explicit
-# inclusion. Release CI copies frontend/dist/ to
-# src/strata/_frontend/ before building.
+# The bundled frontend is not Python, so include it explicitly. Release CI
+# copies frontend/dist/ to src/strata/_frontend/ before building.
 include = [
     { path = "src/strata/_frontend/**/*", format = ["sdist", "wheel"] },
-    # Coding-agent skill shipped inside the package: discovered from
-    # `<site-packages>/strata/.agents/skills/` once strata-notebook is
-    # installed, so an agent learns to use the notebook as a scratchpad.
+    # Coding-agent skill, discovered from `<site-packages>/strata/.agents/skills/`.
     { path = "src/strata/.agents/skills/**/*", format = ["sdist", "wheel"] },
-    # Maturin's sdist is built via ``cargo package`` rooted at
-    # ``rust/`` and doesn't pick up files from the repo root by
-    # default. Without these, the sdist's PEP 639 ``License-File:
-    # LICENSE`` metadata points at a file the archive doesn't
-    # contain, and PyPI rejects the upload with HTTP 400.
+    # Maturin's sdist is rooted at ``rust/``. Without these, ``License-File:
+    # LICENSE`` points at a missing file and PyPI rejects the upload.
     { path = "LICENSE", format = ["sdist"] },
     { path = "README.md", format = ["sdist"] },
 ]
@@ -257,13 +225,9 @@ select = ["E", "F", "I", "UP"]
 python-version = "3.12"
 python = ".venv"
 
-# Type-check only the shipped libraries. tests/, examples/, experiments/ and
-# benchmarks/ are excluded: the examples/experiments are notebook *cells* whose
-# cross-cell variables and the ambient `strata` client are injected by the
-# harness at runtime, so ty can't see them (every reference reads as
-# unresolved); tests lean on SimpleNamespace stubs + pytest fixture injection
-# that ty likewise can't model. `ty check` (no args) now covers exactly the
-# code we ship — src/ and the packages/ distributions — and must stay clean.
+# Type-check only shipped code, which must stay clean. Examples/experiments are
+# notebook cells whose variables the harness injects, and tests rely on stubs
+# and fixture injection; ty can model neither.
 [tool.ty.src]
 include = ["src", "packages/strata-client/src", "packages/strata-pool/src"]
 
@@ -277,13 +241,10 @@ testpaths = ["tests"]
 # Repo root on sys.path so tests can import the non-packaged `evals` suite
 # (the shipped package `strata` is imported from the installed venv, not here).
 pythonpath = ["."]
-# Per-test timeout: a deadlocked test (e.g. the intermittent py3.12/macOS
-# TestClient WS portal hang) fails in 3 min with a full thread-stack dump that
-# pinpoints the culprit — instead of hanging the CI job to GitHub's 6h cap. The
-# slowest legitimate test is ~26s (a real uv sync), so 180s is generous headroom.
-# "thread" method is required: the hang is off the main thread, where the default
-# SIGALRM "signal" method can't interrupt it (it's also Windows-compatible).
-# Override per test with @pytest.mark.timeout(N) if a case ever needs longer.
+# A deadlocked test fails after 3 min with a thread-stack dump that
+# pinpoints the culprit, instead of hanging CI to GitHub's 6h cap (the slowest
+# real test takes ~26s). "thread" is required because the hangs are off the
+# main thread, where SIGALRM cannot reach. Override with @pytest.mark.timeout(N).
 timeout = 180
 timeout_method = "thread"
 markers = [
@@ -293,36 +254,28 @@ markers = [
     "locked_environments: lets remote workers build the notebook's locked environment",
 ]
 
-# Coverage is opt-in: pass ``--cov`` (or ``--cov=strata --cov-report=html``)
-# to enable it. Default test runs stay fast for tight inner-loop iteration.
-# Configuration below applies whenever coverage is collected.
+# Coverage is opt-in: pass ``--cov`` (or ``--cov=strata --cov-report=html``).
 [tool.coverage.run]
 source_pkgs = ["strata"]
 branch = true
-# Coverage data files get a per-process suffix so we can later combine
-# them via ``coverage combine`` once subprocess coverage is wired in
-# (Phase 4 — see project memory). Harmless when subprocess coverage is
-# disabled; ``coverage combine`` is a no-op on a single data file.
+# Set true (per-process data files for ``coverage combine``) once subprocess
+# coverage is wired in.
 parallel = false
 omit = [
     # Rust extension: imported, never executed from Python.
     "*/strata/_strata_core/*",
-    # Re-export shims that exist purely to keep imports stable.
+    # Re-export shim only.
     "*/strata/__init__.py",
 ]
 
 [tool.coverage.report]
-# ``exclude_also`` keeps coverage.py's built-in defaults
-# (``pragma: no cover``, ``def __repr__``, ``raise NotImplementedError``, …)
-# instead of overwriting them.
+# ``exclude_also`` keeps coverage.py's built-in exclusions instead of replacing them.
 exclude_also = [
     "if TYPE_CHECKING:",
     "if typing\\.TYPE_CHECKING:",
     "raise NotImplementedError",
     "@(abc\\.)?abstractmethod",
-    # Optional-import branches use the same shape repo-wide; ty already
-    # flags these as guarded so coverage shouldn't penalize the
-    # never-installed leg.
+    # Optional-import fallbacks: the never-installed leg is not a coverage gap.
     "except ImportError:",
     "except ModuleNotFoundError:",
 ]

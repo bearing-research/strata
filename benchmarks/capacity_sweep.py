@@ -1,28 +1,13 @@
 #!/usr/bin/env python3
-"""Capacity sweep benchmark for Strata.
+"""Capacity sweep: map Strata's safe operating envelope.
 
-Maps the "safe operating envelope" by running load sweeps at increasing
-concurrency levels and measuring throughput, latency, and error rates.
-
-Goal: Identify the "knee" where latency explodes or 429s start.
-
-Plots (conceptual):
-- 2xx throughput vs offered load
-- p95 latency (2xx only) vs offered load
-- 429 rate vs offered load
-- Other failure rate vs offered load
+Runs load at increasing concurrency and records goodput, p95 latency (2xx only),
+429 rate and error rate per level, to find the knee where latency or 429s climb.
 
 Usage:
-    # Quick sweep (5 levels, 2 min each)
     python benchmarks/capacity_sweep.py
-
-    # Detailed sweep (10 levels, 3 min each)
     python benchmarks/capacity_sweep.py --levels 10 --duration 180
-
-    # Custom load range
     python benchmarks/capacity_sweep.py --min-users 10 --max-users 100
-
-    # Connect to external server
     python benchmarks/capacity_sweep.py --no-server --base-url http://localhost:8765
 """
 
@@ -47,9 +32,7 @@ from typing import Any
 import httpx
 import pyarrow as pa
 
-# =============================================================================
-# Configuration
-# =============================================================================
+# === Configuration ===
 
 
 @dataclass
@@ -60,7 +43,7 @@ class SweepConfig:
     base_url: str = "http://127.0.0.1:8765"
     start_server: bool = True
     server_host: str = "127.0.0.1"
-    server_port: int = 0  # Auto-find
+    server_port: int = 0  # 0 picks a free port
 
     # Directories
     warehouse_dir: Path | None = None
@@ -68,17 +51,17 @@ class SweepConfig:
     keep_dirs: bool = False
 
     # Sweep parameters
-    num_levels: int = 6  # Number of load levels to test
-    min_users: int = 5  # Starting concurrency
-    max_users: int = 60  # Maximum concurrency
-    duration_per_level_s: float = 120.0  # 2 minutes per level
-    warmup_s: float = 15.0  # Warmup before each level
-    cooldown_s: float = 10.0  # Cooldown between levels
+    num_levels: int = 6
+    min_users: int = 5
+    max_users: int = 60
+    duration_per_level_s: float = 120.0
+    warmup_s: float = 15.0
+    cooldown_s: float = 10.0
 
-    # Workload mix (dashboard-heavy to stress interactive tier)
-    dashboard_ratio: float = 0.80  # 80% dashboard queries
-    analyst_ratio: float = 0.15  # 15% analyst queries
-    bulk_ratio: float = 0.05  # 5% bulk queries
+    # Dashboard-heavy, to stress the interactive tier
+    dashboard_ratio: float = 0.80
+    analyst_ratio: float = 0.15
+    bulk_ratio: float = 0.05
 
     # Table configuration
     num_tables: int = 6
@@ -86,14 +69,14 @@ class SweepConfig:
     payload_bytes: int = 100
 
     # Cache settings
-    cache_size_bytes: int = 150 * 1024 * 1024  # 150MB
+    cache_size_bytes: int = 150 * 1024 * 1024
 
-    # QoS settings (default server settings)
+    # QoS slots (server defaults)
     interactive_slots: int = 8
     bulk_slots: int = 4
 
     # Metrics collection
-    metrics_interval_s: float = 5.0  # Sample every 5s
+    metrics_interval_s: float = 5.0
     results_dir: Path = field(default_factory=lambda: Path("benchmarks/results"))
 
     # Request settings
@@ -116,34 +99,30 @@ class SweepConfig:
 
         step = (self.max_users - self.min_users) / (self.num_levels - 1)
         levels = [int(self.min_users + i * step) for i in range(self.num_levels)]
-        # Ensure max is included
+        # int() rounding can fall short of max_users.
         levels[-1] = self.max_users
         return levels
 
 
-# =============================================================================
-# Data Structures
-# =============================================================================
+# === Data Structures ===
 
 
 @dataclass
 class RequestResult:
     """Result of a single request with per-phase timing breakdown."""
 
-    # Total end-to-end latency
     total_latency_ms: float
     user_type: str  # dashboard, analyst, bulk
     status_code: int
     bytes_read: int
 
-    # Per-phase latency breakdown (to identify bottlenecks)
-    post_ms: float = 0.0  # POST /v1/scan latency
-    get_ms: float = 0.0  # GET /v1/scan/{id}/batches latency
-    delete_ms: float = 0.0  # DELETE /v1/scan/{id} latency
+    # Per-phase latency, to locate bottlenecks
+    post_ms: float = 0.0  # POST /v1/materialize
+    get_ms: float = 0.0  # stream GET
+    delete_ms: float = 0.0  # Always 0: the server frees streams by TTL
 
-    # Error classification (explicit types for debugging under load)
     error_type: str | None = None  # timeout, connection, cancelled, decode, other
-    error_detail: str | None = None  # Additional error info
+    error_detail: str | None = None
 
     timestamp: float = 0.0
 
@@ -178,43 +157,40 @@ class LevelMetrics:
 
     level_num: int
     concurrent_users: int
-    target_duration_s: float  # Requested duration
-    actual_duration_s: float = 0.0  # Actual wall time (after hard cutoff)
+    target_duration_s: float
+    actual_duration_s: float = 0.0  # Wall time, after hard cutoff
 
-    # Request counts
-    total_requests: int = 0  # Completed requests (with results)
-    attempted_requests: int = 0  # All attempts (includes in-flight at cutoff)
+    total_requests: int = 0  # Completed requests
+    attempted_requests: int = 0  # Includes requests in flight at cutoff
     success_2xx: int = 0
     rate_limited_429: int = 0
     server_error_5xx: int = 0
 
-    # Detailed error breakdown (for debugging under load)
     timeout_errors: int = 0
     connection_errors: int = 0
-    cancelled_errors: int = 0  # Client-cancelled (task cancellation)
+    cancelled_errors: int = 0
     other_errors: int = 0
 
-    # Throughput: offered vs achieved (based on attempted for true offered load)
-    offered_rps: float = 0.0  # Attempted requests / second (true offered load)
-    goodput_rps: float = 0.0  # Successful 2xx / second (achieved throughput)
+    # Throughput: offered (attempted) vs achieved (2xx)
+    offered_rps: float = 0.0
+    goodput_rps: float = 0.0
 
-    # Latency (2xx only) - total end-to-end
+    # End-to-end latency, 2xx only
     latency_p50_ms: float = 0.0
     latency_p95_ms: float = 0.0
     latency_p99_ms: float = 0.0
     latency_max_ms: float = 0.0
 
-    # Per-phase p95 latency (to identify bottlenecks)
-    post_p95_ms: float = 0.0  # POST /v1/scan
-    get_p95_ms: float = 0.0  # GET /v1/scan/{id}/batches
-    delete_p95_ms: float = 0.0  # DELETE /v1/scan/{id}
+    # Per-phase p95
+    post_p95_ms: float = 0.0
+    get_p95_ms: float = 0.0
+    delete_p95_ms: float = 0.0
 
-    # Rates
     success_rate: float = 0.0
     rate_limited_rate: float = 0.0
     error_rate: float = 0.0
 
-    # By user type (total and per-phase p95)
+    # Per user type
     dashboard_count: int = 0
     dashboard_success: int = 0
     dashboard_p95_ms: float = 0.0
@@ -259,13 +235,11 @@ class SweepResults:
     baseline_p95_ms: float = 0.0
     baseline_goodput_rps: float = 0.0
 
-    # Peak performance
     peak_goodput_rps: float = 0.0
     peak_goodput_users: int = 0
 
-    # Operational recommendation
-    recommended_max_users: int | None = None  # Safe operating point
-    recommended_goodput_rps: float = 0.0  # Expected throughput at safe point
+    recommended_max_users: int | None = None
+    recommended_goodput_rps: float = 0.0
 
     def to_dict(self) -> dict:
         return {
@@ -284,9 +258,7 @@ class SweepResults:
         }
 
 
-# =============================================================================
-# Server Management
-# =============================================================================
+# === Server Management ===
 
 
 class ServerProcess:
@@ -396,9 +368,7 @@ def find_free_port() -> int:
         return s.getsockname()[1]
 
 
-# =============================================================================
-# Dataset Generation
-# =============================================================================
+# === Dataset Generation ===
 
 
 def generate_warehouse(config: SweepConfig) -> dict[str, Any]:
@@ -453,7 +423,6 @@ def generate_warehouse(config: SweepConfig) -> dict[str, Any]:
 
         table = catalog.create_table(table_id, schema)
 
-        # Generate data
         data = pa.table(
             {
                 "id": pa.array(range(config.rows_per_table), type=pa.int64()),
@@ -499,9 +468,7 @@ def generate_warehouse(config: SweepConfig) -> dict[str, Any]:
     }
 
 
-# =============================================================================
-# Load Driver
-# =============================================================================
+# === Load Driver ===
 
 
 def _percentile(data: list[float], p: float) -> float:
@@ -529,27 +496,24 @@ class LoadDriver:
         self.num_users = num_users
         self.rng = random.Random(config.seed)
 
-        # Calculate user counts by type (allow 0 bulk users at low load)
+        # Bulk may round down to 0 users at low load.
         self.dashboard_users = int(num_users * config.dashboard_ratio)
         self.analyst_users = int(num_users * config.analyst_ratio)
         self.bulk_users = num_users - self.dashboard_users - self.analyst_users
-        # Ensure at least 1 dashboard user
         if self.dashboard_users == 0 and num_users > 0:
             self.dashboard_users = 1
             self.analyst_users = max(0, self.analyst_users - 1)
 
-        # Results collection
         self.results: list[RequestResult] = []
         self._lock = asyncio.Lock()
         self._stop_event = asyncio.Event()
 
-        # Attempt counter for true offered load (incremented before each request)
+        # Counted before each request, so offered load includes in-flight work.
         self.attempted_requests: int = 0
 
-        # HTTP client
         self._client: httpx.AsyncClient | None = None
 
-        # Metrics samples with timestamps for filtering
+        # Timestamped so samples can be filtered to the level window.
         self.metrics_samples: list[dict] = []
         self._level_start_time: float = 0.0
         self._level_end_time: float = 0.0
@@ -580,14 +544,9 @@ class LoadDriver:
     async def run_level(
         self, duration_s: float, hard_cutoff: bool = True
     ) -> tuple[list[RequestResult], float, float, float, int]:
-        """Run load for specified duration.
+        """Run load for ``duration_s``; return (results, duration, start, end, attempted).
 
-        Args:
-            duration_s: How long to run the level
-            hard_cutoff: If True, cancel tasks at end. If False, let them drain.
-
-        Returns:
-            Tuple of (results, actual_duration_s, start_time, end_time, attempted)
+        With ``hard_cutoff`` in-flight requests are cancelled at the end; without it they drain.
         """
         self.results = []
         self.metrics_samples = []
@@ -597,7 +556,6 @@ class LoadDriver:
         level_start = time.perf_counter()
         level_start_time = time.time()
 
-        # Start user tasks
         tasks = []
         user_id = 0
 
@@ -613,23 +571,19 @@ class LoadDriver:
             tasks.append(asyncio.create_task(self._user_loop("bulk", user_id)))
             user_id += 1
 
-        # Start metrics collector
         metrics_task = asyncio.create_task(self._collect_metrics())
 
-        # Run for duration then signal stop
         await asyncio.sleep(duration_s)
         self._stop_event.set()
 
         if hard_cutoff:
-            # Hard cutoff: cancel user tasks (they'll record cancelled results)
+            # Cancelled tasks record their in-flight request as cancelled.
             for t in tasks:
                 t.cancel()
 
-        # Wait for user tasks to complete (cancelled or natural)
         await asyncio.gather(*tasks, return_exceptions=True)
 
-        # Let metrics task exit naturally via stop_event (don't cancel)
-        # Give it a brief moment to collect final sample
+        # Let the metrics task take a final sample and exit via stop_event.
         try:
             await asyncio.wait_for(metrics_task, timeout=1.0)
         except TimeoutError:
@@ -652,18 +606,18 @@ class LoadDriver:
         request_start: float | None = None
         try:
             while not self._stop_event.is_set():
-                # Track when request starts for cancelled recording
+                # Non-None while in flight; read by the cancel handler.
                 request_start = time.perf_counter()
                 async with self._lock:
                     self.attempted_requests += 1
 
                 result = await self._execute_request(user_type)
-                request_start = None  # Request completed, clear tracking
+                request_start = None
 
                 async with self._lock:
                     self.results.append(result)
 
-                # Think time based on user type
+                # Think time
                 if user_type == "dashboard":
                     await asyncio.sleep(self.rng.uniform(0.5, 1.5))
                 elif user_type == "analyst":
@@ -671,7 +625,7 @@ class LoadDriver:
                 else:  # bulk
                     await asyncio.sleep(self.rng.uniform(5.0, 10.0))
         except asyncio.CancelledError:
-            # Hard cutoff - record in-flight request as cancelled with timing
+            # Hard cutoff: record the in-flight request as cancelled.
             if request_start is not None:
                 elapsed_ms = (time.perf_counter() - request_start) * 1000
                 async with self._lock:
@@ -685,14 +639,13 @@ class LoadDriver:
                             timestamp=time.time(),
                         )
                     )
-            raise  # Re-raise to properly propagate cancellation
+            raise
 
     async def _execute_request(self, user_type: str) -> RequestResult:
         """Execute a single scan request with per-phase timing."""
         request_start = time.perf_counter()
         table = self.rng.choice(self.tables_info)
 
-        # Build request
         if user_type == "dashboard":
             columns = ["id", "ts", "value"]
             filters = [{"column": "category", "op": "=", "value": "electronics"}]
@@ -709,7 +662,7 @@ class LoadDriver:
         error_type = None
         error_detail = None
 
-        # Per-phase timing (set in finally blocks for accuracy on errors)
+        # Set in finally blocks so failed requests still report phase timing.
         post_ms = 0.0
         get_ms = 0.0
         delete_ms = 0.0
@@ -717,7 +670,6 @@ class LoadDriver:
         get_start: float | None = None
 
         try:
-            # POST /v1/materialize (scan@v1 planning)
             post_start = time.perf_counter()
             try:
                 resp = await self._client.post(
@@ -760,7 +712,7 @@ class LoadDriver:
 
         except asyncio.CancelledError:
             error_type = "cancelled"
-            raise  # Re-raise to propagate cancellation
+            raise
         except httpx.TimeoutException as e:
             error_type = "timeout"
             error_detail = str(e)
@@ -773,9 +725,7 @@ class LoadDriver:
             error_type = "other"
             error_detail = f"{type(e).__name__}: {e}"
             status_code = 0
-        # No explicit cleanup: a materialize stream is freed server-side by the
-        # stream-state TTL once consumed (the old /v1/scan DELETE is gone), so
-        # delete_ms stays 0.
+        # No cleanup call: the server frees consumed streams by TTL, so delete_ms stays 0.
 
         return RequestResult(
             total_latency_ms=(time.perf_counter() - request_start) * 1000,
@@ -798,7 +748,6 @@ class LoadDriver:
                     resp = await self._client.get("/metrics")
                     if resp.status_code == 200:
                         sample = resp.json()
-                        # Add timestamp for filtering to level window
                         sample["timestamp"] = time.time()
                         self.metrics_samples.append(sample)
                 except Exception:
@@ -808,9 +757,7 @@ class LoadDriver:
             pass  # Clean exit on cancellation
 
 
-# =============================================================================
-# Sweep Runner
-# =============================================================================
+# === Sweep Runner ===
 
 
 def compute_level_metrics(
@@ -824,18 +771,11 @@ def compute_level_metrics(
     level_end_time: float = 0.0,
     attempted_requests: int = 0,
 ) -> LevelMetrics:
-    """Compute metrics for a load level.
+    """Aggregate one level's request results and server samples into ``LevelMetrics``.
 
-    Args:
-        level_num: Level number (1-indexed)
-        num_users: Number of concurrent users
-        target_duration_s: Requested duration
-        actual_duration_s: Actual wall time (after hard cutoff)
-        results: List of request results
-        metrics_samples: List of server metrics samples (with timestamps)
-        level_start_time: Unix timestamp when level started
-        level_end_time: Unix timestamp when level ended
-        attempted_requests: Total attempts started (for true offered load)
+    Server samples are limited to the [level_start_time, level_end_time] window
+    (Unix seconds) when both are set. ``attempted_requests`` includes requests cut
+    off in flight, so offered load is not understated.
     """
     metrics = LevelMetrics(
         level_num=level_num,
@@ -844,26 +784,22 @@ def compute_level_metrics(
         actual_duration_s=actual_duration_s,
     )
 
-    # Always set attempted_requests (even if no results completed)
     metrics.attempted_requests = attempted_requests
 
     if not results:
-        # Still compute offered_rps from attempts even with no completed results
         if actual_duration_s > 0:
             metrics.offered_rps = attempted_requests / actual_duration_s
         return metrics
 
     metrics.total_requests = len(results)
-    # Use attempted count for true offered load (falls back to total if not provided)
+    # Fall back to the completed count when attempts were not tracked.
     metrics.attempted_requests = attempted_requests if attempted_requests > 0 else len(results)
 
-    # Classify results
     success_results = [r for r in results if r.is_success]
     metrics.success_2xx = len(success_results)
     metrics.rate_limited_429 = sum(1 for r in results if r.is_rate_limited)
     metrics.server_error_5xx = sum(1 for r in results if r.is_5xx)
 
-    # Detailed error breakdown
     metrics.timeout_errors = sum(1 for r in results if r.error_type == "timeout")
     metrics.connection_errors = sum(1 for r in results if r.error_type == "connection")
     metrics.cancelled_errors = sum(1 for r in results if r.error_type == "cancelled")
@@ -873,7 +809,6 @@ def compute_level_metrics(
         if r.error_type is not None and r.error_type not in ("timeout", "connection", "cancelled")
     )
 
-    # Throughput: offered uses attempted count, goodput uses success count
     if actual_duration_s > 0:
         metrics.offered_rps = metrics.attempted_requests / actual_duration_s
         metrics.goodput_rps = metrics.success_2xx / actual_duration_s
@@ -881,7 +816,6 @@ def compute_level_metrics(
         metrics.offered_rps = 0.0
         metrics.goodput_rps = 0.0
 
-    # Latency (2xx only) - total end-to-end
     success_latencies = [r.total_latency_ms for r in success_results]
     if success_latencies:
         metrics.latency_p50_ms = _percentile(success_latencies, 0.50)
@@ -889,7 +823,6 @@ def compute_level_metrics(
         metrics.latency_p99_ms = _percentile(success_latencies, 0.99)
         metrics.latency_max_ms = max(success_latencies)
 
-    # Per-phase p95 latency (2xx only, to identify bottlenecks)
     post_latencies = [r.post_ms for r in success_results if r.post_ms > 0]
     get_latencies = [r.get_ms for r in success_results if r.get_ms > 0]
     delete_latencies = [r.delete_ms for r in success_results if r.delete_ms > 0]
@@ -901,7 +834,6 @@ def compute_level_metrics(
     if delete_latencies:
         metrics.delete_p95_ms = _percentile(delete_latencies, 0.95)
 
-    # Rates
     metrics.success_rate = metrics.success_2xx / metrics.total_requests
     metrics.rate_limited_rate = metrics.rate_limited_429 / metrics.total_requests
     metrics.error_rate = (
@@ -912,7 +844,6 @@ def compute_level_metrics(
         + metrics.other_errors
     ) / metrics.total_requests
 
-    # By user type (with per-phase p95 to identify tier-specific bottlenecks)
     for user_type in ["dashboard", "analyst", "bulk"]:
         type_results = [r for r in results if r.user_type == user_type]
         type_success = [r for r in type_results if r.is_success]
@@ -922,7 +853,6 @@ def compute_level_metrics(
         success = len(type_success)
         p95 = _percentile(type_latencies, 0.95) if type_latencies else 0.0
 
-        # Per-phase p95 for this user type
         type_post = [r.post_ms for r in type_success if r.post_ms > 0]
         type_get = [r.get_ms for r in type_success if r.get_ms > 0]
         post_p95 = _percentile(type_post, 0.95) if type_post else 0.0
@@ -947,16 +877,13 @@ def compute_level_metrics(
             metrics.bulk_post_p95_ms = post_p95
             metrics.bulk_get_p95_ms = get_p95
 
-    # Server metrics - filter to level window if timestamps available
     if metrics_samples:
-        # Filter samples to level window if we have timestamps
         if level_start_time > 0 and level_end_time > 0:
             window_samples = [
                 m
                 for m in metrics_samples
                 if level_start_time <= m.get("timestamp", 0) <= level_end_time
             ]
-            # Fall back to all samples if filtering removes everything
             if not window_samples:
                 window_samples = metrics_samples
         else:
@@ -983,17 +910,14 @@ def analyze_sweep(levels: list[LevelMetrics]) -> SweepResults:
     total_duration = sum(level.actual_duration_s for level in levels)
     total_requests = sum(level.total_requests for level in levels)
 
-    # Baseline from first level
     baseline = levels[0]
     baseline_p95 = baseline.latency_p95_ms
     baseline_goodput = baseline.goodput_rps
 
-    # Find peak goodput
     peak_level = max(levels, key=lambda x: x.goodput_rps)
     peak_goodput = peak_level.goodput_rps
     peak_users = peak_level.concurrent_users
 
-    # Find saturation point (429 > 5%)
     saturation_users = None
     saturation_idx = None
     for i, level in enumerate(levels):
@@ -1002,7 +926,6 @@ def analyze_sweep(levels: list[LevelMetrics]) -> SweepResults:
             saturation_idx = i
             break
 
-    # Find latency knee (p95 > 2x baseline)
     latency_knee_users = None
     latency_knee_idx = None
     if baseline_p95 > 0:
@@ -1012,7 +935,6 @@ def analyze_sweep(levels: list[LevelMetrics]) -> SweepResults:
                 latency_knee_idx = i
                 break
 
-    # Find error threshold (errors > 1%)
     error_threshold_users = None
     error_threshold_idx = None
     for i, level in enumerate(levels):
@@ -1021,8 +943,7 @@ def analyze_sweep(levels: list[LevelMetrics]) -> SweepResults:
             error_threshold_idx = i
             break
 
-    # Compute operational max: one level before the first limit is hit
-    # Find the minimum index where a limit was hit
+    # Recommend the level before the first limit hit.
     limit_indices = [
         idx for idx in [saturation_idx, latency_knee_idx, error_threshold_idx] if idx is not None
     ]
@@ -1032,14 +953,12 @@ def analyze_sweep(levels: list[LevelMetrics]) -> SweepResults:
 
     if limit_indices:
         first_limit_idx = min(limit_indices)
-        # Recommend one level before (or the first level if limit hit at level 0)
         safe_idx = max(0, first_limit_idx - 1)
         safe_level = levels[safe_idx]
         recommended_max_users = safe_level.concurrent_users
         recommended_goodput_rps = safe_level.goodput_rps
     else:
-        # No limits hit - can recommend highest tested level
-        # But note this means we haven't found the ceiling yet
+        # No limit hit: the ceiling is above the highest tested level.
         recommended_max_users = levels[-1].concurrent_users
         recommended_goodput_rps = levels[-1].goodput_rps
 
@@ -1089,7 +1008,6 @@ async def run_sweep(config: SweepConfig, tables_info: list[dict]) -> SweepResult
         print(f"\n  --- Level {i + 1}/{len(load_levels)}: {num_users} users ---")
 
         driver = LoadDriver(config, tables_info, num_users)
-        # Print driver's actual computed mix (after adjustments)
         print(
             f"  User mix: {driver.dashboard_users} dashboard, "
             f"{driver.analyst_users} analyst, {driver.bulk_users} bulk"
@@ -1097,20 +1015,18 @@ async def run_sweep(config: SweepConfig, tables_info: list[dict]) -> SweepResult
 
         await driver.start()
 
-        # Warmup (don't hard-cutoff to let requests complete)
+        # No hard cutoff during warmup, so its requests drain.
         print(f"  Warming up ({config.warmup_s}s)...")
         await driver.run_level(config.warmup_s, hard_cutoff=False)
 
-        # Drain step: wait for server to clear any residual active scans
         print("  Draining...")
         await _wait_for_server_drain(config.base_url)
 
-        # Clear warmup results for measurement
         driver.results = []
         driver.metrics_samples = []
         driver.attempted_requests = 0
 
-        # Measurement period (hard cutoff for precise timing)
+        # Hard cutoff keeps the measured window exact.
         print(f"  Measuring ({config.duration_per_level_s}s)...")
         results, actual_duration, start_time, end_time, attempted = await driver.run_level(
             config.duration_per_level_s, hard_cutoff=True
@@ -1118,7 +1034,6 @@ async def run_sweep(config: SweepConfig, tables_info: list[dict]) -> SweepResult
 
         await driver.stop()
 
-        # Compute metrics
         metrics = compute_level_metrics(
             level_num=i + 1,
             num_users=num_users,
@@ -1132,7 +1047,6 @@ async def run_sweep(config: SweepConfig, tables_info: list[dict]) -> SweepResult
         )
         level_results.append(metrics)
 
-        # Print summary with new metrics
         print(f"  Results (actual duration: {actual_duration:.1f}s):")
         print(
             f"    Offered: {metrics.offered_rps:.1f} req/s | "
@@ -1160,7 +1074,6 @@ async def run_sweep(config: SweepConfig, tables_info: list[dict]) -> SweepResult
             f"GET:{metrics.get_p95_ms:.1f}ms DEL:{metrics.delete_p95_ms:.1f}ms"
         )
 
-        # Cooldown between levels
         if i < len(load_levels) - 1:
             print(f"  Cooling down ({config.cooldown_s}s)...")
             await asyncio.sleep(config.cooldown_s)
@@ -1168,9 +1081,7 @@ async def run_sweep(config: SweepConfig, tables_info: list[dict]) -> SweepResult
     return analyze_sweep(level_results)
 
 
-# =============================================================================
-# Output
-# =============================================================================
+# === Output ===
 
 
 def print_results(results: SweepResults):
@@ -1182,7 +1093,6 @@ def print_results(results: SweepResults):
     print(f"\nTotal duration: {results.total_duration_s / 60:.1f} minutes")
     print(f"Total requests: {results.total_requests:,}")
 
-    # Capacity curve table with offered vs goodput
     print("\n" + "-" * 80)
     print("CAPACITY CURVE (offered vs goodput)")
     print("-" * 80)
@@ -1203,7 +1113,6 @@ def print_results(results: SweepResults):
             f"{level.error_rate * 100:>5.2f}%"
         )
 
-    # Per-phase latency breakdown
     print("\n" + "-" * 80)
     print("PER-PHASE p95 LATENCY (ms)")
     print("-" * 80)
@@ -1218,7 +1127,6 @@ def print_results(results: SweepResults):
             f"{level.delete_p95_ms:>10.1f}"
         )
 
-    # Key findings
     print("\n" + "-" * 80)
     print("KEY FINDINGS")
     print("-" * 80)
@@ -1248,7 +1156,6 @@ def print_results(results: SweepResults):
     else:
         print("  Error threshold (err > 1%): Not reached")
 
-    # Operational recommendation
     print("\n" + "-" * 80)
     print("OPERATIONAL RECOMMENDATION")
     print("-" * 80)
@@ -1270,7 +1177,6 @@ def print_results(results: SweepResults):
     else:
         print("\n  Insufficient data to make recommendation.")
 
-    # Per-tier breakdown for each level (total p95)
     print("\n" + "-" * 80)
     print("BY USER TYPE - TOTAL p95 (ms)")
     print("-" * 80)
@@ -1284,7 +1190,6 @@ def print_results(results: SweepResults):
             f"{level.bulk_p95_ms:>10.1f}ms"
         )
 
-    # Per-tier POST p95 (reveals QoS queueing bottlenecks)
     print("\n" + "-" * 80)
     print("BY USER TYPE - POST p95 (ms) [reveals QoS queue delays]")
     print("-" * 80)
@@ -1298,7 +1203,6 @@ def print_results(results: SweepResults):
             f"{level.bulk_post_p95_ms:>10.1f}ms"
         )
 
-    # Per-tier GET p95 (reveals streaming/cache bottlenecks)
     print("\n" + "-" * 80)
     print("BY USER TYPE - GET p95 (ms) [reveals streaming bottlenecks]")
     print("-" * 80)
@@ -1312,7 +1216,6 @@ def print_results(results: SweepResults):
             f"{level.bulk_get_p95_ms:>10.1f}ms"
         )
 
-    # ASCII chart
     print("\n" + "-" * 80)
     print("GOODPUT vs LOAD (ASCII)")
     print("-" * 80)
@@ -1336,7 +1239,6 @@ def _print_ascii_chart(results: SweepResults):
         bar_len = int(level.goodput_rps / max_goodput * chart_width)
         bar = "█" * bar_len
 
-        # Mark special points
         marker = ""
         if results.saturation_users and level.concurrent_users >= results.saturation_users:
             marker = " ← 429s"
@@ -1346,9 +1248,7 @@ def _print_ascii_chart(results: SweepResults):
         print(f"{level.concurrent_users:>4}u | {bar}{marker}")
 
 
-# =============================================================================
-# Main
-# =============================================================================
+# === Main ===
 
 
 async def main():
@@ -1364,7 +1264,6 @@ async def main():
     parser.add_argument("--dry-run", action="store_true", help="Quick validation run")
     args = parser.parse_args()
 
-    # Build config
     config = SweepConfig(
         num_levels=args.levels,
         min_users=args.min_users,
@@ -1389,7 +1288,6 @@ async def main():
         config.num_tables = 3
         config.rows_per_table = 5000
 
-    # Setup directories
     if config.start_server:
         temp_dir = Path(tempfile.mkdtemp(prefix="strata_sweep_"))
         config.warehouse_dir = temp_dir / "warehouse"
@@ -1399,13 +1297,11 @@ async def main():
 
     server = None
     try:
-        # Generate warehouse
         if config.start_server:
             print("Generating test warehouse...")
             warehouse_info = generate_warehouse(config)
             tables_info = warehouse_info["tables"]
 
-            # Start server
             port = find_free_port()
             config.server_port = port
             config.base_url = f"http://{config.server_host}:{port}"
@@ -1422,21 +1318,17 @@ async def main():
             )
             server.start()
         else:
-            # Connect to external server - need tables info
             print("Connecting to external server - using dummy tables info")
             tables_info = [
                 {"name": f"table_{i}", "uri": f"table_{i}", "rows": 10000}
                 for i in range(config.num_tables)
             ]
 
-        # Run sweep
         print("\nStarting capacity sweep...")
         results = await run_sweep(config, tables_info)
 
-        # Print results
         print_results(results)
 
-        # Save results
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         results_file = config.results_dir / f"capacity_sweep_{timestamp}.json"
         with open(results_file, "w") as f:
