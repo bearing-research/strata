@@ -3652,7 +3652,7 @@ deployment, not only in one that opted in to something.</p>
 <tr>
 <td><code>STRATA_NOTEBOOK_FETCH_ALLOWED_HOSTS</code></td>
 <td><code>[]</code></td>
-<td>Hosts <code>@fetch</code> may reach even on a private address (an internal data server). Public hosts need no entry; in service mode, private, loopback and link-local addresses are refused unless listed. Personal mode allows them, so <code>localhost</code> works on a laptop. Comma-separated exact names, or a leading dot for a suffix (<code>.internal</code>). Same rule as <code>STRATA_WORKER_ALLOWED_HOSTS</code>, and applied to every redirect hop.</td>
+<td>Hosts <code>@fetch</code>, and a prompt cell's <code>[ai] base_url</code> from <code>notebook.toml</code>, may reach even on a private address (an internal data server or model server). Public hosts need no entry; in service mode, private, loopback and link-local addresses are refused unless listed. Personal mode allows them, so <code>localhost</code> works on a laptop. Comma-separated exact names, or a leading dot for a suffix (<code>.internal</code>). Same rule as <code>STRATA_WORKER_ALLOWED_HOSTS</code>, and applied to every redirect hop.</td>
 </tr>
 <tr>
 <td><code>STRATA_NOTEBOOK_CELL_LOCK_SECONDS</code></td>
@@ -3927,7 +3927,12 @@ without a URL or a config, to find the server. The server does not read
 </table>
 <p>Provider-specific keys auto-configure <code>base_url</code> and <code>model</code> defaults.
 <code>STRATA_AI_*</code> variables override provider defaults. Notebook-level <code>[ai]</code>
-config in <code>notebook.toml</code> overrides both.</p>
+config in <code>notebook.toml</code> overrides both. In service mode a <code>base_url</code> from
+<code>notebook.toml</code> is checked like an <code>@fetch</code> URL: a private, loopback or
+link-local address is refused unless its host is in
+<code>STRATA_NOTEBOOK_FETCH_ALLOWED_HOSTS</code>. <code>STRATA_AI_BASE_URL</code> is the operator's
+and is not checked, nor is a notebook naming that same URL or a provider's
+default.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="k">[ai]</span>
 <a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="n">api_key</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">""</span><span class="w">              </span><span class="c1"># prefer the Runtime panel; writing here commits the key</span>
 <a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="n">base_url</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"http://localhost:11434/v1"</span>

@@ -2394,6 +2394,7 @@
 </code></pre></div>
 <p>Routing-only config for an external secret manager (Infisical, Doppler, AWS SM, etc.). The authentication token for the manager itself lives in the strata-notebook's process environment, <strong>not</strong> here. See <a href="../../notebook/secrets/">Secret Manager</a>.</p>
 <p>Allowed keys: <code>provider</code>, <code>project_id</code>, <code>environment</code>, <code>path</code>, <code>base_url</code>. Unknown keys are dropped on save.</p>
+<p>On a server in service mode, <code>base_url</code> must be the operator's <code>INFISICAL_HOST</code> (or the public default when unset); any other host is refused, since the server would log in there with its own credentials.</p>
 <h2 id="mounts-filesystem-mounts"><code>[[mounts]]</code> - Filesystem mounts<a class="headerlink" href="#mounts-filesystem-mounts" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="k">[[mounts]]</span>
 <a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="n">name</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"taxi_zones"</span>

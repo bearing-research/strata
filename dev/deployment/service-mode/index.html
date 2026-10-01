@@ -1944,6 +1944,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#a-notebooks-secret-manager" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        A notebook's secret manager
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -2364,6 +2375,17 @@
     <span class="md-ellipsis">
       
         What a cell is given: STRATA_NOTEBOOK_HARNESS_ENV_ALLOWLIST
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#a-notebooks-secret-manager" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        A notebook's secret manager
       
     </span>
   </a>
@@ -3006,7 +3028,7 @@ host: it runs the harness in place.</p>
 <p>Switching users needs the privilege to do it, so <strong>the server runs as root</strong>
 and drops to the harness user for every process that runs cell code: the cold
 and R harnesses, the batch harness behind Run All, the warm pool workers, the
-inspect REPL and cell tests. It is POSIX only. What the harness user needs:</p>
+inspect REPL, cell tests and the R package restore. It is POSIX only. What the harness user needs:</p>
 <table>
 <thead>
 <tr>
@@ -3050,17 +3072,46 @@ set up, it can reach only its own database, the roots of the mounts it reads,
 and the locations of the catalog tables it reads; file access outside those is
 refused, and the cell cannot turn it back on. So <code>read_text</code> of a server file,
 <code>COPY ... TO</code>, and <code>ATTACH</code> of another path all fail. A catalog table whose data
-files live outside its own location cannot be read this way. A SQLite cell also
+files live outside its own location cannot be read this way.</p>
+<p>A mount's root is therefore as much of the disk as the cell may read, as the
+server, so a SQL cell refuses a local (<code>file://</code>) mount root, after following
+links, that is <code>/</code> or has fewer than two path components (<code>/data</code>); that holds
+the server's state (the artifact directory, the cache directory, the metadata
+database's directory, the notebook storage directory or the server's home); or
+that is inside the server's home, <code>/proc</code>, <code>/sys</code> or <code>/dev</code>. The cell fails
+naming the mount. Python cells mount the same roots unchecked: they run as the
+harness user, whose own file permissions decide what a root exposes. A SQLite cell also
 runs in the server process: in a write cell <code>ATTACH</code>, <code>DETACH</code> and <code>VACUUM</code> are
 refused, since they reach other files (a read cell runs only reads already).
 Postgres, Snowflake and BigQuery cells send the query to their database server.</p>
-<p>Installing a notebook's packages runs as the server's user too, and building
+<p>Prompt cells call their model from the server process too, and show the author
+what came back. A <code>base_url</code> from the notebook's <code>[ai]</code> section is checked like
+an <code>@fetch</code> URL: http(s) only, and a host on a loopback, private or link-local
+address (the cloud metadata address among them) is refused unless it is named in
+<code>STRATA_NOTEBOOK_FETCH_ALLOWED_HOSTS</code>, the same list <code>@fetch</code> uses. The
+connection goes only to an address that passed the check, so it ignores proxy
+settings. <code>STRATA_AI_BASE_URL</code> is yours and is not checked, nor is a notebook
+naming that same URL or a provider's default one.</p>
+<p>Installing a notebook's Python packages runs as the server's user too, and building
 a package from a source distribution runs that package's build backend, code
 from wherever the package came from, with the server's environment. In service mode every <code>uv</code> command
 a notebook runs (<code>sync</code>, <code>add</code>, <code>lock</code>, the <code>uv run</code> that starts a cell)
 installs wheels only: a dependency with no wheel for the notebook's Python
 fails to resolve, and uv's message says a wheel is required. Personal mode
 still builds from source.</p>
+<p>R has no wheels-only switch: <code>renv::restore()</code> builds CRAN packages from source
+on Linux, running their configure scripts, and every <code>Rscript</code> started in a
+notebook directory sources the notebook's <code>.Rprofile</code>. So in service mode that
+code runs as the harness user, never as the server. The restore on notebook
+open runs as the harness user with the filtered environment below, and the
+notebook's <code>renv/</code> directory (and, with the shared environment backend, the
+shared R library and package cache) is handed to that user to write. The R
+package listing in the environment panel runs as the harness user too. With no
+harness user nothing is restored, and the server log says why. Installing an R
+package from the notebook (<code>renv::init</code>, adding a package) is refused, since it
+writes <code>renv.lock</code> and <code>.Rprofile</code> into the notebook directory: commit the
+package in <code>renv.lock</code> where the notebook is authored, and the server restores it
+when the notebook opens. Personal mode is unchanged.</p>
 <h3 id="what-a-cell-is-given-strata_notebook_harness_env_allowlist">What a cell is given: <code>STRATA_NOTEBOOK_HARNESS_ENV_ALLOWLIST</code><a class="headerlink" href="#what-a-cell-is-given-strata_notebook_harness_env_allowlist" title="Permanent link">&para;</a></h3>
 <p>The allowlist narrows the environment a cell receives:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="c1"># Only what cells actually need; everything else stays with the server.</span>
@@ -3078,6 +3129,23 @@ travel in the cell manifest and are applied inside the harness.</p>
 can still read the server's whole environment from <code>/proc/&lt;server pid&gt;/environ</code>,
 because it <em>is</em> that user. The allowlist decides what a cell is handed; the
 harness user is what stops it taking the rest.</p>
+<h3 id="a-notebooks-secret-manager">A notebook's secret manager<a class="headerlink" href="#a-notebooks-secret-manager" title="Permanent link">&para;</a></h3>
+<p>A notebook's <code>[secret_manager]</code> block names where its secrets come from, and the
+server fetches them with its own Infisical credentials (<code>INFISICAL_CLIENT_ID</code> /
+<code>INFISICAL_CLIENT_SECRET</code> or <code>INFISICAL_TOKEN</code>). Two consequences on a shared
+server:</p>
+<ul>
+<li><strong>The host is yours.</strong> The server logs in only at <code>INFISICAL_HOST</code> (or the
+  public <code>https://app.infisical.com</code> when unset). A notebook whose <code>base_url</code>
+  names another host fails to fetch, with a message naming <code>base_url</code>, and no
+  login is attempted: otherwise the author could have the server send its
+  credentials anywhere.</li>
+<li><strong>The project is the author's.</strong> <code>project_id</code>, <code>environment</code> and <code>path</code> come
+  from the notebook, and Strata has no list of projects a notebook may read. Any
+  notebook author can read every secret the server's machine identity can
+  read. Scope that identity to what every author on this server may see, or run
+  a separate server (with its own identity) per group that may see more.</li>
+</ul>
 <h2 id="migrating-from-personal-mode">Migrating from personal mode<a class="headerlink" href="#migrating-from-personal-mode" title="Permanent link">&para;</a></h2>
 <p>If you've been running personal mode and want to grow into service:</p>
 <ol>
