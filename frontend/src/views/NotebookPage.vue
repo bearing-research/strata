@@ -9,7 +9,7 @@ import ExportMenu from '../components/ExportMenu.vue'
 import KeyboardShortcutsModal from '../components/KeyboardShortcutsModal.vue'
 import ThemeToggle from '../components/ThemeToggle.vue'
 import { useStrata } from '../composables/useStrata'
-import { editorChrome } from '../utils/framed'
+import { editorChrome, editorQuery } from '../utils/framed'
 import { clearNotebookPerfMarks, markNotebookPerf, measureNotebookPerf } from '../utils/perf'
 
 const DagView = defineAsyncComponent(() => import('../components/DagView.vue'))
@@ -339,7 +339,7 @@ async function connectToSession(sessionId: string) {
           await router.replace({
             name: 'notebook',
             params: { sessionId: data.session_id },
-            query: { path: recoveryCandidate },
+            query: editorQuery(route.query, recoveryCandidate),
           })
         }
         return
@@ -358,6 +358,11 @@ async function connectToSession(sessionId: string) {
     }
 
     console.error('Failed to open session:', e)
+    // Framed, home would navigate the parent's frame away from the notebook.
+    if (!chrome.value.pageLinks) {
+      reconnectError.value = message
+      return
+    }
     router.replace({ name: 'home' })
     return
   } finally {
@@ -380,7 +385,7 @@ async function reopenNotebookFromRecent() {
       await router.replace({
         name: 'notebook',
         params: { sessionId: data.session_id },
-        query: { path },
+        query: editorQuery(route.query, path),
       })
     }
   } catch (e: any) {
@@ -678,10 +683,22 @@ function goHome() {
         <code>{{ recoveryPath }}</code>
       </p>
       <div class="reconnect-actions">
-        <button class="btn" :disabled="loading" @click="reopenNotebookFromRecent">
+        <button
+          v-if="recoveryPath"
+          class="btn"
+          :disabled="loading"
+          @click="reopenNotebookFromRecent"
+        >
           {{ reconnectActionLabel }}
         </button>
-        <button class="btn btn-secondary" :disabled="loading" @click="goHome">Back Home</button>
+        <button
+          v-if="chrome.pageLinks"
+          class="btn btn-secondary"
+          :disabled="loading"
+          @click="goHome"
+        >
+          Back Home
+        </button>
       </div>
     </div>
 

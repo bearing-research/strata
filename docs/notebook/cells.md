@@ -791,8 +791,9 @@ A platform that frames the full editor, not only the app view, adds `?framed=1`
 (`/#/notebook/<sessionId>?framed=1`). The editor then leaves out what the
 parent page already has: Strata's brand and the notebook's name, the **App**,
 **Artifacts** and **Logs** links (which would navigate the frame away), the
-deployment-mode badge, and **Delete Notebook**. Running, editing and export are
-unchanged. Hiding **Delete Notebook** is not access control: a platform that
+deployment-mode badge, **Delete Notebook**, and **Back Home** on the reconnect
+screen. Reopening the notebook after a lost session keeps `?framed=1`. Running,
+editing and export are unchanged. Hiding **Delete Notebook** is not access control: a platform that
 wants deletes to go through its own records refuses `DELETE
 /v1/notebooks/{session_id}` and `POST /v1/notebooks/delete-by-path` itself. The
 same `embed_frame_ancestors` rule decides which hosts may frame it.

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { editorChrome } from './framed.ts'
+import { editorChrome, editorQuery } from './framed.ts'
 
 test('standalone, the editor has all its chrome', () => {
   assert.deepEqual(editorChrome({}), {
@@ -23,4 +23,11 @@ test('framed, the parent has the brand, the links and delete', () => {
       deleteNotebook: false,
     })
   }
+})
+
+test('reopening the editor keeps it framed, and only when it was', () => {
+  assert.deepEqual(editorQuery({ framed: '1', path: 'old' }, 'nb/a'), { path: 'nb/a', framed: '1' })
+  assert.deepEqual(editorQuery({ framed: ['true'] }, 'nb/a'), { path: 'nb/a', framed: '1' })
+  assert.deepEqual(editorQuery({ path: 'old' }, 'nb/a'), { path: 'nb/a' })
+  assert.deepEqual(editorQuery({ framed: '0' }, 'nb/a'), { path: 'nb/a' })
 })

@@ -20,9 +20,21 @@ const FRAMED: EditorChrome = {
   deleteNotebook: false,
 }
 
-/** Which parts of the editor's header to show, from the route's query. */
-export function editorChrome(query: Record<string, unknown>): EditorChrome {
+function isFramed(query: Record<string, unknown>): boolean {
   const raw = query.framed
   const value = Array.isArray(raw) ? raw[0] : raw
-  return value === '1' || value === 'true' ? FRAMED : FULL
+  return value === '1' || value === 'true'
+}
+
+/** Which parts of the editor's header to show, from the route's query. */
+export function editorChrome(query: Record<string, unknown>): EditorChrome {
+  return isFramed(query) ? FRAMED : FULL
+}
+
+/** The query for the editor reopened at `path`; a framed editor stays framed. */
+export function editorQuery(
+  current: Record<string, unknown>,
+  path: string,
+): Record<string, string> {
+  return isFramed(current) ? { path, framed: '1' } : { path }
 }
