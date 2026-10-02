@@ -22,6 +22,7 @@ from strata.api.dependencies import (
     WriteStore,
 )
 from strata.api.remote_registry import quoted, relay, remote_registry
+from strata.artifact_store import ArtifactNotFoundError
 from strata.types import (
     InputChangeInfo,
     NameResolveResponse,
@@ -97,6 +98,8 @@ async def set_alias(
                 tenant=tenant_id,
                 actor=actor,
             )
+        except ArtifactNotFoundError:
+            raise HTTPException(status_code=404, detail="Artifact not found")
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e))
         if not queued:
@@ -123,6 +126,8 @@ async def set_alias(
         changed = store.set_alias(
             name, alias, request.artifact_id, request.version, tenant=tenant_id, actor=actor
         )
+    except ArtifactNotFoundError:
+        raise HTTPException(status_code=404, detail="Artifact not found")
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     if changed:
@@ -245,6 +250,8 @@ async def set_tag(
         store.set_tag(
             artifact_id, version, request.key, request.value, tenant=tenant_id, actor=actor
         )
+    except ArtifactNotFoundError:
+        raise HTTPException(status_code=404, detail="Artifact not found")
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     return {"artifact_id": artifact_id, "version": version, request.key: request.value}
@@ -330,6 +337,8 @@ async def set_name(request: NameSetRequest, store: WriteStore, principal: Curren
             tenant=tenant_id,
             actor=actor,
         )
+    except ArtifactNotFoundError:
+        raise HTTPException(status_code=404, detail="Artifact not found")
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 

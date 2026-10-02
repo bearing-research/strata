@@ -290,3 +290,49 @@ def test_reject_requires_registry_scope(tmp_path):
             headers=_headers("team-a", "alice"),
         )
         assert gone.status_code == 404
+
+
+def test_writes_to_another_tenants_artifact_answer_like_reads(tmp_path):
+    """Naming, tagging or aliasing another tenant's artifact is a 404, as reading it is.
+
+    A 400 naming the owning tenant told the caller the artifact exists and whose it is.
+    """
+    with run_server_with_context(
+        tmp_path / "cache",
+        tmp_path / "artifacts",
+        "service",
+        auth_mode="trusted_proxy",
+        proxy_token=PROXY_TOKEN,
+        multi_tenant_enabled=True,
+        service_writes_enabled=True,
+        registry_protected_aliases=["champion"],
+    ) as ctx:
+        base = ctx.base_url
+        owner = _headers("team-a", "alice", "artifacts:write")
+        other = _headers("team-b", "bob", "artifacts:write")
+        assert _publish(base, pa.table({"x": [1]}), "team/model", owner).status_code == 200
+        art_id, version = _name_ref(base, "team/model", owner)
+
+        def writes(artifact_id: str) -> list[httpx.Response]:
+            target = {"artifact_id": artifact_id, "version": int(version)}
+            return [
+                httpx.put(
+                    f"{base}/v1/artifacts/{artifact_id}/v/{version}/tags",
+                    json={"key": "k", "value": "v"},
+                    headers=other,
+                ),
+                httpx.post(f"{base}/v1/names", json={"name": "mine", **target}, headers=other),
+                httpx.put(f"{base}/v1/names/mine/aliases/candidate", json=target, headers=other),
+                httpx.put(f"{base}/v1/names/mine/aliases/champion", json=target, headers=other),
+            ]
+
+        read = httpx.get(f"{base}/v1/artifacts/{art_id}/v/{version}", headers=other)
+        assert read.status_code == 404
+        for resp in writes(art_id):
+            assert resp.status_code == 404, resp.text
+            assert resp.json() == read.json()
+            assert "team-a" not in resp.text
+        # Indistinguishable from an artifact that does not exist.
+        for resp in writes("no-such-artifact"):
+            assert resp.status_code == 404, resp.text
+            assert resp.json() == read.json()

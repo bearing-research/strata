@@ -30,6 +30,13 @@ logger = logging.getLogger(__name__)
 # --- Data types ---
 
 
+class ArtifactNotFoundError(ValueError):
+    """The artifact version does not exist, or belongs to a tenant the caller cannot write in.
+
+    One error for both, so a write cannot tell another tenant's artifact from a missing one.
+    """
+
+
 class ArtifactImportConflict(ValueError):
     """An artifact arriving from elsewhere claims an id another one holds.
 
@@ -1658,8 +1665,7 @@ class ArtifactStore:
                     artifact_tenant = row["tenant"] if row["tenant"] else None
                     if not self._can_assign_name_for_tenant(artifact_tenant, tenant):
                         raise ValueError(
-                            f"Artifact {artifact_id}@v={version} belongs to tenant "
-                            f"{artifact_tenant}, cannot assign name in tenant {tenant}"
+                            f"Artifact {artifact_id}@v={version} belongs to another tenant"
                         )
                     self._set_name_in_connection(conn, name, artifact_id, version, tenant)
                 _commit_through_fence(conn, artifact_id, version)
@@ -1676,10 +1682,7 @@ class ArtifactStore:
             normalized_artifact_tenant = artifact_tenant if artifact_tenant else None
 
             if name and not self._can_assign_name_for_tenant(normalized_artifact_tenant, tenant):
-                raise ValueError(
-                    f"Artifact {artifact_id}@v={version} belongs to tenant "
-                    f"{normalized_artifact_tenant}, cannot assign name in tenant {tenant}"
-                )
+                raise ValueError(f"Artifact {artifact_id}@v={version} belongs to another tenant")
 
             existing = self.find_by_provenance(provenance_hash, tenant=artifact_tenant)
             if existing is not None and existing.id != artifact_id:
@@ -2164,6 +2167,17 @@ class ArtifactStore:
 
     # --- Name pointers ---
 
+    @classmethod
+    def _require_writable_target(
+        cls, row, artifact_id: str, version: int, tenant: str | None
+    ) -> None:
+        """Raise :class:`ArtifactNotFoundError` unless ``row`` exists and ``tenant`` may use it.
+
+        Checked before the row's state, which would otherwise describe another tenant's artifact.
+        """
+        if row is None or not cls._can_assign_name_for_tenant(row["tenant"] or None, tenant):
+            raise ArtifactNotFoundError(f"Artifact {artifact_id}@v={version} not found")
+
     @staticmethod
     def _can_assign_name_for_tenant(
         artifact_tenant: str | None,
@@ -2204,17 +2218,10 @@ class ArtifactStore:
                 (artifact_id, version),
             )
             row = cursor.fetchone()
-            if row is None:
-                raise ValueError(f"Artifact {artifact_id}@v={version} not found")
+            self._require_writable_target(row, artifact_id, version, tenant)
             if row["state"] != "ready":
                 raise ValueError(
                     f"Artifact {artifact_id}@v={version} is not ready (state={row['state']})"
-                )
-            artifact_tenant = row["tenant"] if row["tenant"] else None
-            if not self._can_assign_name_for_tenant(artifact_tenant, tenant):
-                raise ValueError(
-                    f"Artifact {artifact_id}@v={version} belongs to tenant "
-                    f"{artifact_tenant}, cannot assign name in tenant {tenant}"
                 )
 
             # Upsert + audit in one transaction (shared with the finalize paths).
@@ -2653,17 +2660,10 @@ class ArtifactStore:
                 (artifact_id, version),
             )
             row = cursor.fetchone()
-            if row is None:
-                raise ValueError(f"Artifact {artifact_id}@v={version} not found")
+            self._require_writable_target(row, artifact_id, version, tenant)
             if row["state"] not in ("ready", "superseded"):
                 raise ValueError(
                     f"Artifact {artifact_id}@v={version} is not readable (state={row['state']})"
-                )
-            artifact_tenant = row["tenant"] if row["tenant"] else None
-            if not self._can_assign_name_for_tenant(artifact_tenant, tenant):
-                raise ValueError(
-                    f"Artifact {artifact_id}@v={version} belongs to tenant "
-                    f"{artifact_tenant}, cannot assign alias in tenant {tenant}"
                 )
 
             effective_tenant = tenant if tenant is not None else ""
@@ -2844,17 +2844,10 @@ class ArtifactStore:
                 (artifact_id, version),
             )
             row = cursor.fetchone()
-            if row is None:
-                raise ValueError(f"Artifact {artifact_id}@v={version} not found")
+            self._require_writable_target(row, artifact_id, version, tenant)
             if row["state"] not in ("ready", "superseded"):
                 raise ValueError(
                     f"Artifact {artifact_id}@v={version} is not readable (state={row['state']})"
-                )
-            artifact_tenant = row["tenant"] if row["tenant"] else None
-            if not self._can_assign_name_for_tenant(artifact_tenant, tenant):
-                raise ValueError(
-                    f"Artifact {artifact_id}@v={version} belongs to tenant "
-                    f"{artifact_tenant}, cannot tag in tenant {tenant}"
                 )
 
             effective_tenant = tenant if tenant is not None else ""
@@ -3071,17 +3064,10 @@ class ArtifactStore:
                     (artifact_id, version),
                 )
                 row = cursor.fetchone()
-                if row is None:
-                    raise ValueError(f"Artifact {artifact_id}@v={version} not found")
+                self._require_writable_target(row, artifact_id, version, tenant)
                 if row["state"] not in ("ready", "superseded"):
                     raise ValueError(
                         f"Artifact {artifact_id}@v={version} is not readable (state={row['state']})"
-                    )
-                artifact_tenant = row["tenant"] if row["tenant"] else None
-                if not self._can_assign_name_for_tenant(artifact_tenant, tenant):
-                    raise ValueError(
-                        f"Artifact {artifact_id}@v={version} belongs to tenant "
-                        f"{artifact_tenant}, cannot assign alias in tenant {tenant}"
                     )
 
             effective_tenant = tenant if tenant is not None else ""

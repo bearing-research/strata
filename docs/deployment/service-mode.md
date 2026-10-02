@@ -333,7 +333,9 @@ directly - `put`, `set_name`, `set_alias`, tags - under a strict contract:
   read-only.
 - **Tenant-scoped (team = tenant).** A write lands in the caller's tenant and
   can't target another, so teammates share a namespace and other teams are
-  isolated. The publishing principal is recorded in the registry audit.
+  isolated. A name, alias or tag aimed at another tenant's artifact answers
+  `404 Artifact not found`, the same as a missing artifact or a read of it.
+  The publishing principal is recorded in the registry audit.
 
 ```bash
 STRATA_DEPLOYMENT_MODE=service

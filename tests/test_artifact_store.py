@@ -5,6 +5,7 @@ import json
 import pytest
 
 from strata.artifact_store import (
+    ArtifactNotFoundError,
     ArtifactStore,
     TransformSpec,
     compute_provenance_hash,
@@ -785,8 +786,10 @@ class TestLegacyDefaultTenantNames:
         store.create_artifact("owned", "prov-o", tenant="acme")
         store.finalize_artifact("owned", 1, "{}", 1, 10)
 
-        with pytest.raises(ValueError, match="cannot assign name"):
+        # Answered as a missing artifact: the error must not confirm it exists, or name its tenant.
+        with pytest.raises(ArtifactNotFoundError, match="not found") as excinfo:
             store.set_name("steal", "owned", 1, tenant="globex")
+        assert "acme" not in str(excinfo.value)
 
 
 def _make_ready_artifact(store, artifact_id: str, provenance: str) -> None:
@@ -1406,8 +1409,9 @@ class TestTenantNormalization:
         """set_tag enforces ownership like set_alias."""
         store.create_artifact("owned", "p", tenant="acme")
         store.finalize_artifact("owned", 1, "{}", 1, 10)
-        with pytest.raises(ValueError, match="cannot tag in tenant"):
+        with pytest.raises(ArtifactNotFoundError, match="not found") as excinfo:
             store.set_tag("owned", 1, "k", "v", tenant="globex")
+        assert "acme" not in str(excinfo.value)
 
     def test_set_tag_rejects_non_readable(self, store):
         """Tags are only allowed on readable (ready/superseded) artifacts."""
