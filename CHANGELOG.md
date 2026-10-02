@@ -231,6 +231,12 @@ worker's token are out of other tenants' and cells' reach.
 
 ### Fixed
 
+- **A refused run says why in the notebook.** A frame the server refused for
+  want of permission (an `error` frame with code `read_only` or
+  `insufficient_scope`: a viewer's Run All, or a cell run behind a gateway
+  that admits reads only) was dropped by the notebook, so the click did
+  nothing visible. The notebook now shows the server's sentence as an error
+  notice, once while it stands.
 - **A table Strata refuses to read says why.** `POST /v1/materialize`
   returned a bare 500 for a scan of a table it cannot read (an unreadable
   delete file, now too many pending equality deletes), and accepted the same
