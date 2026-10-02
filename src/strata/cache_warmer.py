@@ -3,11 +3,12 @@
 import asyncio
 import time
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from strata.logging import get_logger
-from strata.types import Task, WarmAsyncRequest, WarmJobProgress, WarmJobStatus
+from strata.types import TableIdentity, Task, WarmAsyncRequest, WarmJobProgress, WarmJobStatus
 
 if TYPE_CHECKING:
     from strata.cache import CachedFetcher
@@ -41,6 +42,8 @@ class WarmingJob:
     errors: list[str] = field(default_factory=list)
 
     cancelled: bool = False
+    # Called with each table's planned identity; raises to skip a table the caller may not read.
+    authorize: Callable[[str, TableIdentity], None] | None = field(default=None, repr=False)
     _task: asyncio.Task | None = field(default=None, repr=False)
 
     def to_progress(self) -> WarmJobProgress:
@@ -116,14 +119,23 @@ class CacheWarmer:
                     job.cancelled = True
                     job._task.cancel()
 
-    async def start_job(self, request: WarmAsyncRequest) -> str:
-        """Start a new warming job and return its id."""
+    async def start_job(
+        self,
+        request: WarmAsyncRequest,
+        authorize: Callable[[str, TableIdentity], None] | None = None,
+    ) -> str:
+        """Start a new warming job and return its id.
+
+        ``authorize`` runs on each table's planned identity before any fetch; a table it
+        raises for is recorded as an error and skipped.
+        """
         job_id = str(uuid.uuid4())[:8]
 
         job = WarmingJob(
             job_id=job_id,
             request=request,
             tables_total=len(request.tables),
+            authorize=authorize,
         )
 
         async with self._lock:
@@ -267,6 +279,8 @@ class CacheWarmer:
                     columns=request.columns,
                     filters=[],
                 )
+                if job.authorize is not None:
+                    job.authorize(table_uri, plan.table_identity)
 
                 tasks = plan.tasks
                 if request.max_row_groups is not None:

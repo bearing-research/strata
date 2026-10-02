@@ -36,7 +36,7 @@ def _progress(job_id: str = "job-1", status: WarmJobStatus = WarmJobStatus.RUNNI
 class _StubWarmer:
     """Stand-in for a started CacheWarmer, for the warmer-present paths."""
 
-    async def start_job(self, request):
+    async def start_job(self, request, authorize=None):
         return "job-1"
 
     def list_jobs(self, include_completed=False):
@@ -362,6 +362,107 @@ def test_warm_allows_permitted_table(acl_cache_client):
     assert resp.status_code == 200, resp.text
     # Planning fails (no such warehouse), but as a per-table error, not a 403.
     assert resp.json()["errors"]
+
+
+class TestWarmTakesTheScanIdentity:
+    """Warm authorizes the identity the scan path does, before planning and again after."""
+
+    @pytest.fixture
+    def lake_state(self, tmp_path):
+        """Service mode with a named catalog ``lake`` whose ``denied`` namespace is denied."""
+        import strata.server as server_module
+        from strata.artifact_store import reset_artifact_store
+        from strata.config import AclConfig, AclRule, StrataConfig
+        from strata.server import ServerState
+
+        config = StrataConfig(
+            deployment_mode="service",
+            auth_mode="trusted_proxy",
+            proxy_token="test-token",
+            cache_dir=tmp_path / "cache",
+            artifact_dir=tmp_path / "artifacts",
+            catalogs={"lake": {"type": "rest", "uri": "http://catalog.invalid"}},
+            acl_config=AclConfig(
+                default="allow",
+                deny_rules=[AclRule(principal="*", tables=["lake:denied.*", "file:denied.*"])],
+            ),
+        )
+        reset_artifact_store()
+        original = server_module._state
+        state = ServerState(config)
+        server_module._state = state
+        try:
+            yield state
+        finally:
+            server_module._state = original
+            reset_artifact_store()
+
+    @staticmethod
+    def _planned_as(identity):
+        """A planner whose catalog resolves every URI to *identity*."""
+        from types import SimpleNamespace
+
+        def plan(**kwargs):
+            return SimpleNamespace(table_identity=identity, tasks=[])
+
+        return plan
+
+    @pytest.mark.parametrize("path", ["/v1/cache/warm", "/v1/cache/warm/async"])
+    def test_a_named_catalog_deny_rule_applies(self, lake_state, path):
+        from strata.server import app
+
+        resp = TestClient(app).post(
+            path, json={"tables": ["lake:denied.salaries"]}, headers=_proxy_headers()
+        )
+        assert resp.status_code == 404, resp.text
+        assert "job_id" not in resp.text
+
+    def test_the_planned_identity_is_checked(self, lake_state, monkeypatch):
+        from strata.server import app
+        from strata.types import TableIdentity
+
+        denied = TableIdentity(catalog="strata", namespace="denied", table="salaries")
+        monkeypatch.setattr(lake_state.planner, "plan", self._planned_as(denied))
+        resp = TestClient(app).post(
+            "/v1/cache/warm",
+            json={"tables": ["file:///wh#allowed.events"]},
+            headers=_proxy_headers(),
+        )
+        assert resp.status_code == 404, resp.text
+
+    async def test_an_async_job_checks_the_planned_identity(self, lake_state):
+        import asyncio
+        from unittest.mock import MagicMock
+
+        from httpx import ASGITransport, AsyncClient
+
+        from strata.cache_warmer import CacheWarmer
+        from strata.server import app
+        from strata.types import TableIdentity
+
+        denied = TableIdentity(catalog="strata", namespace="denied", table="salaries")
+        planner = MagicMock()
+        planner.plan.side_effect = self._planned_as(denied)
+        lake_state._cache_warmer = CacheWarmer(
+            planner=planner, fetcher=MagicMock(), metrics=MagicMock()
+        )
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as client:
+            resp = await client.post(
+                "/v1/cache/warm/async",
+                json={"tables": ["file:///wh#allowed.events"]},
+                headers=_proxy_headers(),
+            )
+            assert resp.status_code == 200, resp.text
+            job_id = resp.json()["job_id"]
+            for _ in range(100):
+                job = await client.get(f"/v1/cache/warm/jobs/{job_id}", headers=_proxy_headers())
+                if job.json()["status"] not in ("pending", "running"):
+                    break
+                await asyncio.sleep(0.01)
+        progress = job.json()
+        assert progress["status"] == "failed"
+        assert progress["tables_completed"] == 0
+        assert progress["errors"] == ["file:///wh#allowed.events: 404: Table not found"]
 
 
 @pytest.mark.parametrize("field,value", [("concurrent", 0), ("concurrent", -1)])

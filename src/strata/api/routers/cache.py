@@ -117,22 +117,16 @@ async def clear_cache_v1():
 def _authorize_warm_tables(table_uris: list[str]) -> None:
     """Apply the deny-first table ACL to every table a warm request names.
 
-    Warming is a read of the table, so it takes the same gate as a scan. Runs before planning:
-    reporting a planning failure for a denied table would confirm it exists.
+    Warming is a read of the table, so it takes the same gate as a scan, on the identity the scan
+    path parses (a named catalog's included). Runs before planning: reporting a planning failure for
+    a denied table would confirm it exists. The planned identity is checked again after planning.
     """
-    from strata.iceberg import PyIcebergCatalog
-    from strata.types import TableIdentity
+    from strata.server import _table_identity_from_uri
 
     for table_uri in table_uris:
-        _, table_id = PyIcebergCatalog.parse_table_uri(table_uri)
-        try:
-            identity = TableIdentity.from_table_id(table_id)
-        except ValueError:
-            # Not a well-formed ``namespace.table``: leave it to the handler's
-            # own error path, which reveals nothing about a table that cannot
-            # exist under this id anyway.
-            continue
-        authorize_table_access(table_uri, identity)
+        identity = _table_identity_from_uri(table_uri)
+        if identity is not None:
+            authorize_table_access(table_uri, identity)
 
 
 @router.post("/v1/cache/warm", response_model=WarmResponse)
@@ -186,6 +180,8 @@ async def warm_cache_v1(request: WarmRequest):
                 columns=request.columns,
                 filters=[],
             )
+            # As the scan path does: the catalog may resolve another identity than the URI names.
+            authorize_table_access(table_uri, plan.table_identity)
 
             tasks = plan.tasks
             if request.max_row_groups is not None:
@@ -225,6 +221,8 @@ async def warm_cache_v1(request: WarmRequest):
 
             tables_warmed += 1
 
+        except HTTPException:
+            raise
         except Exception as e:
             errors.append(f"{table_uri}: {e!s}")
 
@@ -268,7 +266,7 @@ async def warm_cache_async_v1(request: WarmAsyncRequest):
     if state._cache_warmer is None:
         raise HTTPException(status_code=503, detail="Cache warmer not initialized")
 
-    job_id = await state._cache_warmer.start_job(request)
+    job_id = await state._cache_warmer.start_job(request, authorize=authorize_table_access)
 
     return WarmAsyncResponse(
         job_id=job_id,
