@@ -2731,7 +2731,7 @@ auth (<code>admin:*</code> satisfies any of them):</p>
 </tr>
 <tr>
 <td><code>admin:*</code></td>
-<td>Garbage collection (<code>POST /v1/artifacts/gc</code>, still limited to the caller's tenant), and reading another tenant's <code>GET /v1/artifacts/usage</code> / <code>stats</code></td>
+<td>Garbage collection (<code>POST /v1/artifacts/gc</code>, still limited to the caller's tenant), reading another tenant's <code>GET /v1/artifacts/usage</code> / <code>stats</code>, and the server-wide log buffer (<code>GET /v1/logs</code>, <code>GET /v1/logs/stream</code>)</td>
 </tr>
 <tr>
 <td><code>admin:registry</code></td>

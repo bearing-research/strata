@@ -2321,7 +2321,9 @@ notebook:</p>
 <ul>
 <li><strong>Logs</strong> (<code>/logs</code>) - the server-log stream with level / notebook id / regex
   filters and a <strong>live tail</strong>. Backed by an in-memory ring buffer:
-  <code>GET /v1/logs</code> (snapshot) and <code>GET /v1/logs/stream</code> (Server-Sent Events).</li>
+  <code>GET /v1/logs</code> (snapshot) and <code>GET /v1/logs/stream</code> (Server-Sent Events).
+  The buffer holds every tenant's records, so under principal auth both need
+  <code>admin:*</code>.</li>
 <li><strong>Artifacts</strong> (<code>/artifacts</code>) - a sortable, filterable list of stored
   artifacts with summary stats. Backed by <code>GET /v1/artifacts</code> (with <code>since</code> /
   sort / order filters) and <code>GET /v1/artifacts/stats</code>.</li>

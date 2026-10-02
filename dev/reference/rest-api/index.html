@@ -4142,6 +4142,10 @@
 <td><code>admin:cache</code></td>
 </tr>
 <tr>
+<td><code>GET /v1/logs</code>, <code>GET /v1/logs/stream</code> (the ring buffer holds every tenant's records)</td>
+<td><code>admin:*</code></td>
+</tr>
+<tr>
 <td>Artifact and registry writes</td>
 <td><code>artifacts:write</code></td>
 </tr>
@@ -4833,10 +4837,14 @@ Never returns 500 on fetch failure, the error surfaces in
 <div class="highlight"><pre><span></span><code><a id="__codelineno-84-1" name="__codelineno-84-1" href="#__codelineno-84-1"></a>GET /v1/logs
 <a id="__codelineno-84-2" name="__codelineno-84-2" href="#__codelineno-84-2"></a>GET /v1/logs/stream
 </code></pre></div>
-<p><code>GET /v1/logs</code> returns a snapshot of the in-memory log ring buffer (most recent
-records first); <code>GET /v1/logs/stream</code> is a Server-Sent Events stream that tails
-new records live. Both accept optional <code>level</code> / <code>logger</code> filters. Powers the
-web UI <strong>Logs</strong> page.</p>
+<p><code>GET /v1/logs</code> returns a snapshot of the in-memory log ring buffer (the most
+recent <code>limit</code> matches, oldest first; pass the returned <code>cursor</code> back as
+<code>since</code> to get only newer records); <code>GET /v1/logs/stream</code> is a
+Server-Sent Events stream that tails new records live. Both accept optional
+<code>level</code> (minimum severity), <code>notebook</code> (exact notebook id) and <code>regex</code> filters.
+Powers the web UI <strong>Logs</strong> page.</p>
+<p>The buffer is server-wide, so under principal auth both routes require
+<code>admin:*</code> (403 otherwise). Without principal auth they stay open.</p>
 <h3 id="artifacts-listing">Artifacts listing<a class="headerlink" href="#artifacts-listing" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-85-1" name="__codelineno-85-1" href="#__codelineno-85-1"></a>GET /v1/artifacts
 <a id="__codelineno-85-2" name="__codelineno-85-2" href="#__codelineno-85-2"></a>GET /v1/artifacts/stats
