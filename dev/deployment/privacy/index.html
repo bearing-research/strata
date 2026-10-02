@@ -1835,10 +1835,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#notebook-access-url-based" class="md-nav__link">
+  <a href="#notebook-access" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Notebook access, URL-based
+        Notebook access
       
     </span>
   </a>
@@ -2122,10 +2122,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#notebook-access-url-based" class="md-nav__link">
+  <a href="#notebook-access" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Notebook access, URL-based
+        Notebook access
       
     </span>
   </a>
@@ -2241,13 +2241,15 @@
 
 
 <h1 id="privacy-sharing-model">Privacy &amp; Sharing Model<a class="headerlink" href="#privacy-sharing-model" title="Permanent link">&para;</a></h1>
-<p>Strata's notebook sharing model is <strong>URL-based</strong>, similar to Google
-Docs: notebook IDs are unguessable, and without per-user scoping
-anyone who can reach the server and has the ID can open and execute
-the notebook. Personal mode's per-user header gates every notebook
-route on the owner; service mode gates them by scope, not by owner.
-This page lays out the model honestly so you can pick the deployment
-shape that matches your trust boundary.</p>
+<p>How notebook access works depends on whether personal mode's
+per-user header (<code>STRATA_PERSONAL_MODE_USER_HEADER</code>) is set. With it
+unset, access is <strong>URL-based</strong>, similar to Google Docs: notebook IDs
+are unguessable, and anyone who can reach the server and has the ID
+can open and execute the notebook. With it set, every notebook route
+checks the notebook's owner and answers <code>404</code> to anyone else, so a
+shared link works only for its owner. Service mode gates the routes
+by scope, not by owner. This page lays out the model honestly so you
+can pick the deployment shape that matches your trust boundary.</p>
 <h2 id="whats-shared-what-isnt">What's shared, what isn't<a class="headerlink" href="#whats-shared-what-isnt" title="Permanent link">&para;</a></h2>
 <h3 id="iceberg-scan-cache-shared-by-design">Iceberg scan cache, shared by design<a class="headerlink" href="#iceberg-scan-cache-shared-by-design" title="Permanent link">&para;</a></h3>
 <p>The original Strata value prop: identical scans hit the same cache.
@@ -2271,7 +2273,7 @@ is opt-in: the <a href="../service-mode/#the-team-cache-sharing-results-nobody-n
 (<code>STRATA_NOTEBOOK_TEAM_CACHE_ENABLED</code>) offers results to a shared
 store by provenance, so identical cells in different notebooks hit
 each other there.</p>
-<h3 id="notebook-access-url-based">Notebook access, URL-based<a class="headerlink" href="#notebook-access-url-based" title="Permanent link">&para;</a></h3>
+<h3 id="notebook-access">Notebook access<a class="headerlink" href="#notebook-access" title="Permanent link">&para;</a></h3>
 <p>Notebook IDs are full UUIDs (8-char prefix for display, full UUID
 for the actual ID). They're not in any global enumeration and
 they're not in <code>discover</code>'s output unless the caller owns them.
@@ -2411,14 +2413,14 @@ implementation.</p>
 any other notebook tool: hard-private = separate instances.</p>
 <h2 id="future-direction-per-notebook-acls">Future direction: per-notebook ACLs<a class="headerlink" href="#future-direction-per-notebook-acls" title="Permanent link">&para;</a></h2>
 <p>Real per-notebook permissions (a <code>read_principals</code> / <code>write_principals</code>
-list in <code>notebook.toml</code> checked on every endpoint) would close the
-"anyone-with-URL" gap. It's not implemented today; the URL boundary
-is the deliberate choice because:</p>
+list in <code>notebook.toml</code> checked on every endpoint) would sit between
+the two shapes that exist today. With per-user scoping an owned
+notebook is its owner's alone; without it, or in service mode, anyone
+who can reach the server and has the ID (and, in service mode, the
+scope) can open it. Nothing in between is implemented:</p>
 <ul>
-<li>Collaboration via shared URLs is the dominant pattern in
-  notebook workflows.</li>
-<li>Locking down opens / cell execution introduces friction that
-  doesn't match how teams typically share work.</li>
+<li><a href="../../notebook/publishing/">Publishing</a> already hands a result to
+  someone without handing them the notebook.</li>
 <li>The handful of users who need stronger isolation already have
   the "separate instance" escape hatch.</li>
 </ul>

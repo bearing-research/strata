@@ -2153,15 +2153,18 @@ comparison.</p>
 <ul>
 <li><a href="https://fly.io/docs/flyctl/install/">Fly CLI</a> installed (<code>brew install flyctl</code> on macOS).</li>
 <li><code>fly auth login</code> completed (opens a browser; one-time).</li>
-<li>A Fly.io account with a payment method on file. The default
-  <code>shared-cpu-4x</code> VM costs roughly $5/mo always-on, which is what the
-  shipped <code>fly.toml</code> configures: it suspends idle machines but keeps one
-  running, so it does not scale to zero unless you change
-  <code>min_machines_running</code>.</li>
+<li>A Fly.io account with a payment method on file. The shipped
+  <code>fly.toml</code> runs one <code>shared-cpu-4x</code> VM with 2 GB of memory. It
+  suspends idle machines but keeps one running, so it does not scale to
+  zero unless you change <code>min_machines_running</code>. See
+  <a href="https://fly.io/docs/about/pricing/">Fly pricing</a> for what that costs.</li>
 </ul>
 <h2 id="deploy">Deploy<a class="headerlink" href="#deploy" title="Permanent link">&para;</a></h2>
+<p>App names are global on Fly, and the <code>app</code> in the shipped <code>fly.toml</code>
+is this project's own. Pick a name, set <code>app = "&lt;your-app-name&gt;"</code> in
+<code>fly.toml</code>, then:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="c1"># First time</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>fly<span class="w"> </span>apps<span class="w"> </span>create<span class="w"> </span>strata-notebook
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>fly<span class="w"> </span>apps<span class="w"> </span>create<span class="w"> </span>&lt;your-app-name&gt;
 <a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>fly<span class="w"> </span>deploy
 <a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>
 <a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="c1"># Subsequent deploys</span>

@@ -2389,14 +2389,22 @@ ephemeral containers), wrap the scrape in your own sidecar.</p>
 the compose stack.</p>
 <h2 id="generating-load">Generating load<a class="headerlink" href="#generating-load" title="Permanent link">&para;</a></h2>
 <p>A fresh stack is idle, so the Grafana panels and Jaeger are empty
-until the server does some work. The repo ships a small capacity
-sweep that hammers it with realistic Iceberg scans:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>uv<span class="w"> </span>run<span class="w"> </span>python<span class="w"> </span>benchmarks/capacity_sweep.py<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="w">  </span>--dry-run<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="w">  </span>--no-server<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="w">  </span>--base-url<span class="w"> </span>http://localhost:8765
-</code></pre></div>
-<p>After it runs:</p>
+until the server scans a table. The compose file mounts
+<code>./demo-warehouse</code> read-only at <code>/data/warehouse</code> for that. Put an
+Iceberg warehouse there whose catalog records paths under
+<code>/data/warehouse</code> (a warehouse built on the host, such as the one
+<code>examples/setup_demo.py</code> writes, records host paths that do not exist
+in the container). Then run a few <code>scan@v1</code> materializes against
+<code>http://localhost:8765</code> with the
+<a href="../../getting-started/core/#3-materialize-a-result">Python client</a>,
+using <code>file:///data/warehouse#&lt;namespace&gt;.&lt;table&gt;</code> as the input.</p>
+<p><code>benchmarks/capacity_sweep.py --no-server</code> is not a load source for
+this stack. It has no option for table URIs, so it sends placeholder
+table names, every request fails before any data is read, and the
+scan, cache and QoS panels stay flat. Without <code>--no-server</code>
+the sweep starts its own server on a free port and loads that one
+instead.</p>
+<p>After a few scans:</p>
 <ul>
 <li><strong>Grafana</strong> (<a href="http://localhost:3000">:3000</a>) - the scan-rate,
   cache, and QoS panels move within a scrape interval or two.</li>

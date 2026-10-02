@@ -2287,7 +2287,7 @@
 </tr>
 </tbody>
 </table>
-<p>Deleting a notebook also deletes its <code>.strata/artifacts/</code> - there's no shared artifact store across notebooks, so nothing leaks.</p>
+<p>Deleting a notebook also deletes its local store, <code>.strata/artifacts/</code>. Copies that already left it stay where they went: results you <a href="../../notebook/publishing/">published</a> live in the server's store, and results promoted or offered to a <a href="../service-mode/#the-team-cache-sharing-results-nobody-named">team store</a> live there.</p>
 <h2 id="cleaning-up-the-core-artifact-store">Cleaning up the Core artifact store<a class="headerlink" href="#cleaning-up-the-core-artifact-store" title="Permanent link">&para;</a></h2>
 <p>The <strong>server-side</strong> artifact store (driven by <code>StrataClient.materialize</code>) keeps
 every distinct result it computes, so it grows with every new query. In
