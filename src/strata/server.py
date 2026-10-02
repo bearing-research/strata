@@ -2422,22 +2422,19 @@ async def get_stream(stream_id: str, request: Request):
     )
 
 
-def _mount_frontend(application: FastAPI) -> None:
-    """Mount the frontend SPA from the first dist directory that exists.
+def _mount_frontend(application: FastAPI, dist_dir: Path | None = None) -> None:
+    """Mount the frontend SPA from ``dist_dir``, or the first dist directory that exists.
 
     Tries ``src/strata/_frontend/`` (bundled into the wheel at release), then
     ``<repo>/frontend/dist/`` (source installs), then ``<cwd>/frontend/dist/``.
     """
-    candidates = [
-        Path(__file__).resolve().parent / "_frontend",
-        Path(__file__).resolve().parent.parent.parent / "frontend" / "dist",
-        Path.cwd() / "frontend" / "dist",
-    ]
-    dist_dir = None
-    for c in candidates:
-        if (c / "index.html").exists():
-            dist_dir = c
-            break
+    if dist_dir is None:
+        candidates = [
+            Path(__file__).resolve().parent / "_frontend",
+            Path(__file__).resolve().parent.parent.parent / "frontend" / "dist",
+            Path.cwd() / "frontend" / "dist",
+        ]
+        dist_dir = next((c for c in candidates if (c / "index.html").exists()), None)
 
     if dist_dir is None:
         return
@@ -2448,13 +2445,16 @@ def _mount_frontend(application: FastAPI) -> None:
         name="frontend-assets",
     )
 
+    dist_root = dist_dir.resolve()
+
     # SPA fallback: any non-API GET returns index.html
     @application.get("/{full_path:path}", include_in_schema=False)
     async def spa_fallback(full_path: str):
         if full_path.startswith(("v1/", "health", "docs", "openapi")):
             raise HTTPException(status_code=404)
-        file_path = dist_dir / full_path
-        if file_path.is_file():
+        # An absolute or dot-segment path would otherwise escape the dist and read any file.
+        file_path = (dist_root / full_path).resolve()
+        if file_path.is_relative_to(dist_root) and file_path.is_file():
             return FileResponse(str(file_path))
         return FileResponse(str(dist_dir / "index.html"))
 
