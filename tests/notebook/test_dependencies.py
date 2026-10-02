@@ -354,6 +354,16 @@ dependencies:
         assert any("channels" in warning for warning in warnings)
         assert any("python version pin" in warning for warning in warnings)
 
+    @pytest.mark.parametrize("pin", ["python[version='>=3.9']", "python >=3.11", "python"])
+    def test_every_conda_python_pin_form_is_dropped(self, pin):
+        """Conda match-spec brackets are an interpreter pin too, not a package named python."""
+        requirements, warnings = parse_environment_yaml_text(
+            f'dependencies:\n  - "{pin}"\n  - python-dateutil=2.9.0\n'
+        )
+
+        assert requirements == ["python-dateutil==2.9.0"]
+        assert any("python version pin" in warning for warning in warnings)
+
     def test_import_environment_yaml_text_replaces_direct_dependencies(self, tmp_path: Path):
         """environment.yaml import should best-effort replace direct dependencies."""
         nb_dir = create_notebook(tmp_path, "environment_yaml_import")
