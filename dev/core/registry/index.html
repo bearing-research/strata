@@ -2356,7 +2356,8 @@ database named by <code>STRATA_ARTIFACT_METADATA_DSN</code>, with <code>strata m
 carry an existing SQLite store across. Each mutation is one transaction.
 Everything commits before the API responds; the audit is in-transaction with
 its mutation; server restarts are non-events. The <code>strata artifact</code> CLI reads
-a SQLite store directly (<code>--artifact-dir</code>), server up or down.</p>
+the server's configured store directly, server up or down; <code>--artifact-dir</code>
+points it at one local SQLite store instead.</p>
 
 
 

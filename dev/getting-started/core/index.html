@@ -2162,19 +2162,19 @@
 <li>Explicit lineage</li>
 <li>Safe reuse across runs and processes</li>
 </ul>
-<p>Reading from an Iceberg table is itself a <code>materialize</code> call with the built-in <code>scan@v1</code> transform: inputs are the table URIs, params hold optional projections and filters. The cache key includes the table's snapshot ID, so once you've scanned a snapshot the result is reusable forever, there's no invalidation problem.</p>
+<p>Reading from an Iceberg table is itself a <code>materialize</code> call with the built-in <code>scan@v1</code> transform: inputs are the table URIs, params hold optional projections and filters. The cache key includes the table's snapshot ID, and a snapshot never changes, so a scan result never goes stale and there's no invalidation problem. An unnamed result is still a cache entry: the store keeps it while it is used and may collect it later (see <a href="#core-behaviors">Core behaviors</a>).</p>
 <h2 id="1-start-the-server">1. Start the server<a class="headerlink" href="#1-start-the-server" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>uv<span class="w"> </span>run<span class="w"> </span>strata-notebook
 </code></pre></div>
 <h2 id="2-run-the-demo">2. Run the demo<a class="headerlink" href="#2-run-the-demo" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>uv<span class="w"> </span>run<span class="w"> </span>python<span class="w"> </span>examples/hello_world.py
 </code></pre></div>
-<p>This creates a local Iceberg table with 100K rows and times three reads against it:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>Cold run     (no cache)             ~500ms   read Parquet, cache as Arrow IPC
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>Warm run     (in-memory cache hit)  ~50ms    serve from process memory
-<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>Restart run  (disk cache hit)       ~60ms    serve from on-disk Arrow IPC
+<p>This creates a local Iceberg table with 100K rows, clears the server's row-group cache, and times the same <code>scan@v1</code> call three times:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>Run 1  (cold)       read Parquet, store the result as an artifact
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>Run 2  (cache hit)  same provenance hash: the server returns the stored artifact
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>Run 3  (cache hit)  the same artifact again, after a metadata cleanup call
 </code></pre></div>
-<p>Same inputs, same transform, three different cache states, and the third is still ~10× faster than the first because the disk cache survives restarts.</p>
+<p>Runs 2 and 3 are both artifact-store cache hits: the server finds the earlier result by provenance hash and serves its stored bytes without reading Parquet.</p>
 <h2 id="3-materialize-a-result">3. Materialize a result<a class="headerlink" href="#3-materialize-a-result" title="Permanent link">&para;</a></h2>
 <p>Table URIs use the form <code>&lt;scheme&gt;://&lt;warehouse-path&gt;#&lt;namespace&gt;.&lt;table&gt;</code>:</p>
 <ul>

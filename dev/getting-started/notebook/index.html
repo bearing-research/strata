@@ -2334,10 +2334,12 @@ drawer showing the cell DAG and per-cell timings." src="../../assets/notebook-an
 <div class="tabbed-block">
 <p>Install the CLI from PyPI into a uv-managed tool environment, then
 run it:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>uv<span class="w"> </span>tool<span class="w"> </span>install<span class="w"> </span>strata-notebook
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>uv<span class="w"> </span>tool<span class="w"> </span>install<span class="w"> </span><span class="s2">"strata-notebook[mcp,tui]"</span>
 <a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>strata-notebook
 </code></pre></div>
-<p>Personal mode is the default (single-user, writes enabled); no
+<p>The <code>mcp</code> and <code>tui</code> extras are for <code>strata agent</code> and <code>strata watch</code>
+(see <a href="#whats-next">What's next</a>); the web UI needs neither.
+Personal mode is the default (single-user, writes enabled); no
 config needed for a local run. Re-run <code>strata-notebook</code> to start it
 again on later sessions. Requires <a href="https://docs.astral.sh/uv/">uv</a>;
 plain <code>pip install</code> is not supported.</p>
@@ -2522,9 +2524,13 @@ header shows a <strong>cached</strong> badge alongside the duration ("cached ·
 5ms" or similar).</p>
 <p>The cache is content-addressed: the cache key is a hash of the
 cell's source, its upstream artifacts, and the environment lockfile.
-Re-running with the same three is always a cache hit. No <code>@memoize</code>,
+Re-running with the same three is a cache hit. No <code>@memoize</code>,
 no manual invalidation, and the cached result is byte-identical to
-what produced it the first time. Even a cell that only <code>print</code>s and
+what produced it the first time. The notebook keeps each cell's
+current value plus its last 3 earlier ones
+(<a href="../../reference/configuration/#notebook"><code>STRATA_NOTEBOOK_KEEP_SUPERSEDED_VERSIONS</code></a>),
+so reverting a recent edit is a hit too and an older value is
+computed again. Even a cell that only <code>print</code>s and
 feeds nothing downstream is cached: its console output is keyed by
 the same hash and replayed on a warm re-run. A cell that must always
 run (a side effect, a live API call, a fresh random draw) opts out

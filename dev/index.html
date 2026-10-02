@@ -2117,7 +2117,7 @@ so a commit is a readable diff rather than a wall of JSON.</p>
 producing artifacts that flow through an auto-built DAG.</p>
 <p><strong>Highlights:</strong></p>
 <ul>
-<li><strong>content-addressed:</strong> every cell output is keyed by source + inputs + environment - identical work hits the cache forever</li>
+<li><strong>content-addressed:</strong> every cell output is keyed by source + inputs + environment - identical work hits the cache, and no result ever needs invalidating</li>
 <li><strong>reactive:</strong> edit a cell, the cascade re-runs only the downstream cells that depend on it</li>
 <li><strong>dag-from-ast:</strong> Strata reads each cell's AST to wire upstream/downstream - no decorators, no manual edges</li>
 <li><strong>dag-view:</strong> the dependency graph renders alongside the cells - double-click any node to jump to its source</li>
@@ -2129,7 +2129,7 @@ producing artifacts that flow through an auto-built DAG.</p>
 <li><strong>distributed:</strong> <code># @worker gpu-fly</code> dispatches a single cell to a remote box - bring your own compute</li>
 <li><strong>mounts:</strong> <code># @mount data s3://bucket/prefix ro</code> makes any S3 / GCS / Azure prefix a local <code>pathlib.Path</code></li>
 <li><strong>isolated envs:</strong> every notebook gets its own uv-managed <code>.venv/</code>, locked and reproducible</li>
-<li><strong>auto-install:</strong> missing import in a cell? one click adds the package via uv and re-runs</li>
+<li><strong>auto-install:</strong> missing import in a cell? one click adds the package via uv; run the cell again to use it</li>
 <li><strong>headless:</strong> <code>strata run ./my-notebook</code> for CI and scheduled execution - same DAG, same cache</li>
 <li><strong>every input recorded:</strong> <code># @fetch</code> makes bytes from a URL an input and <code># @dataset</code> makes a registry name one, both content-addressed like everything else</li>
 <li><strong>lake-aware SQL:</strong> read a named catalog and the notebook's mounts in one query, pinned to the snapshot the cell's provenance records</li>
@@ -2193,17 +2193,25 @@ store. The client talks to a running Strata server.</p>
 <p><a class="md-button" href="getting-started/core/"><span class="twemoji"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13.22 19.03a.75.75 0 0 1 0-1.06L18.19 13H3.75a.75.75 0 0 1 0-1.5h14.44l-4.97-4.97a.749.749 0 0 1 .326-1.275.75.75 0 0 1 .734.215l6.25 6.25a.75.75 0 0 1 0 1.06l-6.25 6.25a.75.75 0 0 1-1.06 0"/></svg></span> Library Quickstart</a></p>
 <hr />
 <h2 id="quick-start">Quick Start<a class="headerlink" href="#quick-start" title="Permanent link">&para;</a></h2>
-<div class="tabbed-set tabbed-alternate" data-tabs="1:2"><input checked="checked" id="__tabbed_1_1" name="__tabbed_1" type="radio" /><input id="__tabbed_1_2" name="__tabbed_1" type="radio" /><div class="tabbed-labels"><label for="__tabbed_1_1">Docker</label><label for="__tabbed_1_2">From source</label></div>
+<div class="tabbed-set tabbed-alternate" data-tabs="1:3"><input checked="checked" id="__tabbed_1_1" name="__tabbed_1" type="radio" /><input id="__tabbed_1_2" name="__tabbed_1" type="radio" /><input id="__tabbed_1_3" name="__tabbed_1" type="radio" /><div class="tabbed-labels"><label for="__tabbed_1_1">uv (recommended)</label><label for="__tabbed_1_2">Docker</label><label for="__tabbed_1_3">From source</label></div>
 <div class="tabbed-content">
 <div class="tabbed-block">
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>docker<span class="w"> </span>compose<span class="w"> </span>up<span class="w"> </span>-d<span class="w"> </span>--build
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>uv<span class="w"> </span>tool<span class="w"> </span>install<span class="w"> </span><span class="s2">"strata-notebook[mcp,tui]"</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>strata-notebook
+</code></pre></div>
+<p>Then open <a href="http://localhost:8765">http://localhost:8765</a>. The <code>mcp</code>
+and <code>tui</code> extras are what <code>strata agent</code> and <code>strata watch</code> need.
+Plain <code>pip install</code> is not supported.</p>
+</div>
+<div class="tabbed-block">
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>docker<span class="w"> </span>compose<span class="w"> </span>up<span class="w"> </span>-d<span class="w"> </span>--build
 </code></pre></div>
 <p>Then open <a href="http://localhost:8765">http://localhost:8765</a>.</p>
 </div>
 <div class="tabbed-block">
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>uv<span class="w"> </span>sync
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="nb">cd</span><span class="w"> </span>frontend<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>npm<span class="w"> </span>ci<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>npm<span class="w"> </span>run<span class="w"> </span>build<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="nb">cd</span><span class="w"> </span>..
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>uv<span class="w"> </span>run<span class="w"> </span>strata-notebook
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>uv<span class="w"> </span>sync
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="nb">cd</span><span class="w"> </span>frontend<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>npm<span class="w"> </span>ci<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>npm<span class="w"> </span>run<span class="w"> </span>build<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="nb">cd</span><span class="w"> </span>..
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>uv<span class="w"> </span>run<span class="w"> </span>strata-notebook
 </code></pre></div>
 <p>Then open <a href="http://localhost:8765">http://localhost:8765</a>.</p>
 </div>
