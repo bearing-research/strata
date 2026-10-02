@@ -16,7 +16,7 @@ import json
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from strata.artifact_store import ArtifactStore, TransformSpec
+from strata.artifact_store import ArtifactStore, StagedVersion, TransformSpec
 from strata.notebook.models import ArtifactInfo
 from strata.notebook.quiesce import assert_writable
 
@@ -149,7 +149,11 @@ class NotebookArtifactManager:
         results.sort(key=lambda pair: pair[0])
         return results
 
-    def store_cell_output(
+    def store_cell_output(self, **kwargs: Any) -> ArtifactVersion:
+        """Store one cell output and make it current; arguments as for :meth:`stage_cell_output`."""
+        return self.finalize_cell_outputs([self.stage_cell_output(**kwargs)])[0]
+
+    def stage_cell_output(
         self,
         cell_id: str,
         variable_name: str,
@@ -169,8 +173,10 @@ class NotebookArtifactManager:
         principal: str | None = None,
         hardware: dict[str, Any] | None = None,
         extra_params: dict[str, str] | None = None,
-    ) -> ArtifactVersion:
-        """Store a cell output as an artifact.
+    ) -> StagedVersion:
+        """Write a cell output's bytes as a ``building`` version nobody reads yet.
+
+        :meth:`finalize_cell_outputs` makes it current, together with the rest of its run.
 
         Args:
             input_versions: Mapping of input URI to version.
@@ -235,35 +241,31 @@ class NotebookArtifactManager:
 
         self.artifact_store.blob_store.write_blob(artifact_id, version, blob_data)
 
-        byte_size = len(blob_data)
-        schema_str = schema_json if schema_json is not None else ""
-        artifact_version = self.artifact_store.finalize_artifact(
+        return StagedVersion(
             artifact_id=artifact_id,
             version=version,
-            schema_json=schema_str,
+            schema_json=schema_json if schema_json is not None else "",
             row_count=row_count or 0,
-            byte_size=byte_size,
+            byte_size=len(blob_data),
             content_sha256=hashlib.sha256(blob_data).hexdigest(),
         )
 
-        if artifact_version is None:
-            raise ValueError(f"Failed to finalize artifact {artifact_id}@v={version}")
+    def finalize_cell_outputs(self, staged: list[StagedVersion]) -> list[ArtifactVersion]:
+        """Make one cell run's staged outputs current together, or none of them.
 
-        # finalize_artifact may dedup against the same provenance under a
-        # different id and mark ours "failed". Cells resolve inputs by
-        # canonical id, so promote the canonical version back to ready.
-        if artifact_version.id != artifact_id:
-            canonical = self.artifact_store.force_finalize_canonical(
-                artifact_id=artifact_id,
-                version=version,
-                schema_json=schema_str,
-                row_count=row_count or 0,
-                byte_size=byte_size,
-            )
-            if canonical is not None:
-                artifact_version = canonical
+        Each becomes the value of its own id even when another id already holds the
+        same provenance, because cells resolve their inputs by canonical id.
+        """
+        finalized = self.artifact_store.finalize_canonical_together(staged)
+        for item, version in zip(staged, finalized, strict=True):
+            if version is None:
+                raise ValueError(f"Failed to finalize artifact {item.artifact_id}@v={item.version}")
+        return [version for version in finalized if version is not None]
 
-        return artifact_version
+    def discard_cell_outputs(self, staged: list[StagedVersion]) -> None:
+        """Mark staged outputs failed, for a run whose outputs will not all be stored."""
+        for item in staged:
+            self.artifact_store.fail_artifact(item.artifact_id, item.version)
 
     def load_artifact_data(self, artifact_id: str, version: int) -> bytes:
         """Load an artifact version's blob bytes.

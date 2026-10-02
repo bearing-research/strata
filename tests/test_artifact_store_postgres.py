@@ -290,6 +290,27 @@ class TestCanonicalPromotion:
         assert promoted.id == "a2"
         assert promoted.state == "ready"
 
+    def test_a_runs_outputs_finalize_together_or_not_at_all(self, store):
+        from strata.artifact_store import StagedVersion
+
+        first = store.create_artifact("a1", "shared-prov", _spec())
+        store.finalize_artifact("a1", first, "{}", row_count=0, byte_size=0)
+        x = StagedVersion(
+            "a2", store.create_artifact("a2", "shared-prov", _spec()), "{}", 0, 0, "d"
+        )
+        y = StagedVersion("a3", store.create_artifact("a3", "prov-y", _spec()), "{}", 0, 0, "d")
+        z = StagedVersion("a4", store.create_artifact("a4", "prov-z", _spec()), "{}", 0, 0, "d")
+        store.fail_artifact("a4", z.version)
+
+        with pytest.raises(ValueError, match="building"):
+            store.finalize_canonical_together([y, z])
+        assert store.get_artifact("a3", y.version).state == "building"
+
+        finalized = store.finalize_canonical_together([x, y])
+
+        assert [(v.id, v.state) for v in finalized] == [("a2", "ready"), ("a3", "ready")]
+        assert store.get_artifact("a1", first).state == "superseded"
+
 
 class TestGarbageCollection:
     def test_the_current_value_survives_a_rebuild_in_flight(self, store):

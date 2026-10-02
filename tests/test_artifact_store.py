@@ -1694,3 +1694,42 @@ class TestTwoIdsOneComputation:
 
         assert store.garbage_collect(max_idle_days=0)["deleted_count"] == 0
         assert store.get_latest_version(self.A).version == 1
+
+
+class TestFinalizeTogether:
+    """``finalize_canonical_together``: one cell run's outputs become current all at once."""
+
+    @staticmethod
+    def _staged(store, artifact_id: str, provenance: str):
+        from strata.artifact_store import StagedVersion
+
+        version = store.create_artifact(artifact_id, provenance)
+        store.write_blob(artifact_id, version, b"x")
+        return StagedVersion(artifact_id, version, "{}", 1, 1, "digest")
+
+    def test_each_becomes_the_canonical_row_under_its_own_id(self, store):
+        _make_ready_artifact(store, "nb_A_cell_c_var_x", "prov-x")  # another id, same result
+        _make_ready_artifact(store, "nb_B_cell_c_var_y", "prov-y")  # this id's earlier run
+        staged = [
+            self._staged(store, "nb_B_cell_c_var_x", "prov-x"),
+            self._staged(store, "nb_B_cell_c_var_y", "prov-y"),
+        ]
+
+        finalized = store.finalize_canonical_together(staged)
+
+        assert [(v.id, v.version, v.state) for v in finalized] == [
+            ("nb_B_cell_c_var_x", 1, "ready"),
+            ("nb_B_cell_c_var_y", 2, "ready"),
+        ]
+        assert store.get_artifact("nb_A_cell_c_var_x", 1).state == "superseded"
+        assert store.get_artifact("nb_B_cell_c_var_y", 1).state == "superseded"
+
+    def test_one_that_cannot_be_finalized_finalizes_none(self, store):
+        first = self._staged(store, "nb_B_cell_c_var_x", "prov-x")
+        second = self._staged(store, "nb_B_cell_c_var_y", "prov-y")
+        store.fail_artifact(second.artifact_id, second.version)
+
+        with pytest.raises(ValueError, match="building"):
+            store.finalize_canonical_together([first, second])
+
+        assert store.get_artifact(first.artifact_id, first.version).state == "building"

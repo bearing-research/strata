@@ -144,6 +144,18 @@ class ArtifactVersion:
 
 
 @dataclass(frozen=True)
+class StagedVersion:
+    """A ``building`` version whose bytes are written, waiting to be made ready."""
+
+    artifact_id: str
+    version: int
+    schema_json: str
+    row_count: int
+    byte_size: int
+    content_sha256: str
+
+
+@dataclass(frozen=True)
 class ImportedArtifact:
     """Where an imported record landed in the destination store.
 
@@ -1627,6 +1639,74 @@ class ArtifactStore:
             finally:
                 conn.close()
         return self.get_artifact(artifact_id, version)
+
+    def finalize_canonical_together(
+        self, staged: list[StagedVersion]
+    ) -> list[ArtifactVersion | None]:
+        """Make several ``building`` versions ready in one transaction, all or none.
+
+        For the outputs of one notebook cell run: finalized one at a time, a crash in
+        between would leave values from two runs current together. Each becomes the
+        single ready row for its ``(tenant, provenance_hash)`` under its own id,
+        superseding any other, as :meth:`force_finalize_canonical` does.
+
+        Raises:
+            ValueError: If a version is not found or not in "building" state.
+        """
+        if not staged:
+            return []
+        # Retried for the same race force_finalize_canonical retries.
+        for attempt in range(_CANONICAL_PROMOTE_ATTEMPTS):
+            conn = self._get_connection()
+            try:
+                self._dialect.begin_write(conn, staged[0].artifact_id)
+                now = time.time()
+                for item in staged:
+                    row = conn.execute(
+                        "SELECT provenance_hash, tenant, state FROM artifact_versions "
+                        "WHERE id = ? AND version = ?",
+                        (item.artifact_id, item.version),
+                    ).fetchone()
+                    if row is None or row["state"] != "building":
+                        conn.rollback()
+                        raise ValueError(
+                            f"Artifact {item.artifact_id}@v={item.version} not in building state"
+                        )
+                    conn.execute(
+                        """
+                        UPDATE artifact_versions SET state = 'superseded'
+                        WHERE provenance_hash = ? AND state = 'ready'
+                          AND COALESCE(tenant, '') = COALESCE(?, '')
+                          AND NOT (id = ? AND version = ?)
+                        """,
+                        (row["provenance_hash"], row["tenant"], item.artifact_id, item.version),
+                    )
+                    conn.execute(
+                        """
+                        UPDATE artifact_versions
+                        SET state = 'ready', schema_json = ?, row_count = ?, byte_size = ?,
+                            content_sha256 = ?, last_used_at = ?
+                        WHERE id = ? AND version = ?
+                        """,
+                        (
+                            item.schema_json,
+                            item.row_count,
+                            item.byte_size,
+                            item.content_sha256,
+                            now,
+                            item.artifact_id,
+                            item.version,
+                        ),
+                    )
+                conn.commit()
+                break
+            except self._dialect.integrity_error:
+                conn.rollback()
+                if attempt == _CANONICAL_PROMOTE_ATTEMPTS - 1:
+                    raise
+            finally:
+                conn.close()
+        return [self.get_artifact(item.artifact_id, item.version) for item in staged]
 
     def finalize_and_set_name(
         self,
