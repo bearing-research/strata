@@ -4146,11 +4146,11 @@
 <td><code>admin:*</code></td>
 </tr>
 <tr>
-<td>Artifact and registry writes</td>
+<td>Artifact and registry writes, including <code>name</code> on <code>POST /v1/materialize</code></td>
 <td><code>artifacts:write</code></td>
 </tr>
 <tr>
-<td><code>GET /v1/cache/entries</code>, <code>GET /v1/debug/cache/inspect</code></td>
+<td><code>GET /v1/cache/entries</code>, <code>GET /v1/cache/histogram</code>, <code>GET /v1/debug/cache/inspect</code>, <code>POST /v1/metadata/cleanup</code></td>
 <td><code>admin:cache</code></td>
 </tr>
 <tr>
@@ -4179,6 +4179,10 @@
 </tr>
 <tr>
 <td><code>POST /v1/artifacts/gc</code>, and another tenant's <code>GET /v1/artifacts/usage</code> / <code>stats</code></td>
+<td><code>admin:*</code></td>
+</tr>
+<tr>
+<td><code>GET /metrics/tables</code>, <code>GET /metrics/tables/{table_id}</code> (every tenant's table names), and <code>/v1/debug/*</code> other than cache inspection</td>
 <td><code>admin:*</code></td>
 </tr>
 </tbody>
