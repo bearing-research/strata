@@ -245,8 +245,14 @@ def create_app(
         return [asdict(spec) for spec in pool.machine_types.values()]
 
     @app.get("/v1/workers", dependencies=guard)
-    async def list_workers() -> list[dict]:
-        return [_worker_json(worker) for worker in pool.store.list_workers()]
+    async def list_workers(
+        tenant_id: Annotated[str | None, Depends(tenant_filter)],
+    ) -> list[dict]:
+        return [
+            _worker_json(worker)
+            for worker in pool.store.list_workers()
+            if tenant_id is None or worker.tenant_id == tenant_id
+        ]
 
     @app.get("/v1/usage", dependencies=guard)
     async def list_usage(

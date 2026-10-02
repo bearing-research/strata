@@ -299,6 +299,24 @@ class TestInspection:
         stored = api.pool.store.list_workers()[0].auth_token
         assert stored not in str(listed), "the machine's own credential must not be served"
 
+    async def test_a_tenant_lists_only_its_own_machines(self, api):
+        await api.post("/v1/jobs/sync?machine_type=cpu", content=b"a", headers=AUTH)
+        await api.post(
+            "/v1/jobs/sync?machine_type=cpu",
+            content=b"b",
+            headers={"Authorization": f"Bearer {TOKEN}", "X-Strata-Tenant": "globex"},
+        )
+
+        own = (await api.get("/v1/workers", headers=AUTH)).json()
+        assert [worker["tenant_id"] for worker in own] == ["acme"]
+        other = await api.get("/v1/workers?tenant_id=globex", headers=AUTH)
+        assert other.status_code == 403
+
+        fleet = (await api.get("/v1/workers", headers=ADMIN)).json()
+        assert sorted(worker["tenant_id"] for worker in fleet) == ["acme", "globex"]
+        globex = (await api.get("/v1/workers?tenant_id=globex", headers=ADMIN)).json()
+        assert [worker["tenant_id"] for worker in globex] == ["globex"]
+
     async def test_usage_is_reported_per_tenant_for_billing(self, api):
         await api.post("/v1/jobs/sync?machine_type=cpu", content=b"a", headers=AUTH)
         await api.post(

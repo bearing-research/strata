@@ -178,7 +178,7 @@ deployment cannot forget the call that stops it paying for idle machines.
 | `GET /v1/jobs/{id}/result` | The raw result bytes; 409 while the job is not finished, 404 for another tenant's job |
 | `GET /v1/machine-types` | What a caller may ask for: the catalogue an annotation resolves against. `env` and `provider_options` values read `<redacted>` without the admin token |
 | `PUT /v1/machine-types` | Replace the catalogue without a restart; persisted, so a restart serves it. Admin token only |
-| `GET /v1/workers` | The fleet, without machine credentials |
+| `GET /v1/workers` | The caller's tenant's machines, without their credentials; the admin token sees the whole fleet, or one tenant with `?tenant_id=` |
 | `GET /v1/usage` | The billing feed: the caller's tenant only; the admin token sees every tenant, or one with `?tenant_id=` |
 | `GET /health` | Outside the token check, for load balancers |
 
@@ -213,8 +213,9 @@ as 504. The caller has to be able to tell "your code raised" from "we could
 not run it".
 
 Every route but `/health` requires `Authorization: Bearer <api_token>` (the
-admin token is accepted wherever the API token is), and
-every job route requires `X-Strata-Tenant`, reads included. A tenant reads only
+admin token is accepted wherever the API token is), and every job route
+requires `X-Strata-Tenant`, reads included. So do the worker and usage
+listings, unless the caller presents the admin token. A tenant reads only
 its own jobs: another tenant's job id answers 404, not 403, so the id does not
 confirm the job exists. **The caller is trusted for tenant
 identity**: it authenticates as itself and asserts whose work this is. The
