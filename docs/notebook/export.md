@@ -110,6 +110,11 @@ For each cell, the exporter emits in order:
    App-view snapshots do not show failed cells: they mirror the live app
    view, which shows only cells with output.
 
+Markdown (markdown cells, markdown outputs, and the README intro) exports
+the way the UI shows it: raw HTML is escaped to visible text, and
+`javascript:`, `vbscript:` and non-image `data:` link targets become `#`.
+Code spans and fenced code keep their text unchanged.
+
 ## Cell-kind specifics
 
 ### Prompt cells, response excluded by design

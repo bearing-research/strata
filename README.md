@@ -32,15 +32,15 @@ plain `.py` files plus a manifest, so a commit is a readable diff rather than
 a wall of JSON.
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/notebook-anatomy-dark.png">
-  <img alt="The Strata notebook UI: a Python cell with its source and an interactive table of results, sidebar panels for mounts, workers and environment, and a bottom drawer showing the cell DAG and per-cell timings." src="docs/assets/notebook-anatomy-light.png">
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/bearing-research/strata/main/docs/assets/notebook-anatomy-dark.png">
+  <img alt="The Strata notebook UI: a Python cell with its source and an interactive table of results, sidebar panels for mounts, workers and environment, and a bottom drawer showing the cell DAG and per-cell timings." src="https://raw.githubusercontent.com/bearing-research/strata/main/docs/assets/notebook-anatomy-light.png">
 </picture>
 
 **Docs:** [bearing-research.github.io/strata](https://bearing-research.github.io/strata/)
 
 ## Point an agent at it
 
-Install it as a one-command [Claude Code plugin](plugins/strata-scratchpad/)
+Install it as a one-command [Claude Code plugin](https://github.com/bearing-research/strata/tree/main/plugins/strata-scratchpad)
 (needs the `strata` CLI on `PATH`; `uv tool install "strata-notebook[mcp,tui]"`):
 
 ```

@@ -767,7 +767,8 @@ copy a ready-to-paste snippet, or build it yourself:
         title="Strata notebook" style="width:100%;border:0"></iframe>
 <script>
   addEventListener('message', (e) => {
-    if (e.data && e.data.type === 'strata:embed:resize')
+    if (e.origin === 'http://localhost:8765' &&
+        e.data && e.data.type === 'strata:embed:resize')
       document.querySelector('iframe[title="Strata notebook"]').style.height =
         e.data.height + 'px'
   })
@@ -777,7 +778,9 @@ copy a ready-to-paste snippet, or build it yourself:
 `?embed=1` drops the standalone chrome (the title bar and **← Edit** link) so the
 view blends into the host page, and the embedded app posts its content height to
 the parent frame (`{ type: 'strata:embed:resize', height }`) so the optional
-listener above sizes the iframe with no inner scrollbar. Widgets stay live inside
+listener above sizes the iframe with no inner scrollbar. The listener accepts
+heights only from the Strata server's origin, so another frame on the page
+cannot resize it. Widgets stay live inside
 the frame, so with **⚡ Live** on it's a fully interactive embedded panel.
 
 **Cross-origin embedding is opt-in.** By default a notebook is framable only from
@@ -792,8 +795,9 @@ A platform that frames the full editor, not only the app view, adds `?framed=1`
 (`/#/notebook/<sessionId>?framed=1`). The editor then leaves out what the
 parent page already has: Strata's brand and the notebook's name, the **App**,
 **Artifacts** and **Logs** links (which would navigate the frame away), the
-deployment-mode badge, and **Delete Notebook**. Running, editing and export are
-unchanged. Hiding **Delete Notebook** is not access control: a platform that
+deployment-mode badge, **Delete Notebook**, and **Back Home** on the reconnect
+screen. Reopening the notebook after a lost session keeps `?framed=1`. Running,
+editing and export are unchanged. Hiding **Delete Notebook** is not access control: a platform that
 wants deletes to go through its own records refuses `DELETE
 /v1/notebooks/{session_id}` and `POST /v1/notebooks/delete-by-path` itself. The
 same `embed_frame_ancestors` rule decides which hosts may frame it.
@@ -802,7 +806,7 @@ same `embed_frame_ancestors` rule decides which hosts may frame it.
 
 ## Markdown Cells
 
-Plain prose between cells, rendered with `markdown-it` + `DOMPurify` for safe HTML output. Useful for section headings, methodology notes, and annotating decision points in a notebook. Markdown cells are **not** part of the DAG - they don't produce artifacts, don't participate in cascade execution, and don't have an `id` / variable that downstream cells can reference. They survive saves and exports verbatim.
+Plain prose between cells, rendered with `markdown-it` + `DOMPurify` for safe HTML output. Useful for section headings, methodology notes, and annotating decision points in a notebook. Markdown cells are **not** part of the DAG - they don't produce artifacts, don't participate in cascade execution, and don't have an `id` / variable that downstream cells can reference. They survive saves verbatim; a markdown export escapes raw HTML, as the UI does.
 
 ```markdown
 ## Stage 1: Load + Clean

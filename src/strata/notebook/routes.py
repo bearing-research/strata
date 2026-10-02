@@ -1076,11 +1076,11 @@ async def import_jupyter_notebook(
 
     timing = NotebookTimingRecorder()
 
-    # Read once into memory (bounded by the cap): it must parse as JSON before
+    # Read into memory, at most one byte past the cap: it must parse as JSON before
     # anything touches the storage tree.
     with timing.phase("read_upload"):
         try:
-            payload = await file.read()
+            payload = await file.read(_MAX_IPYNB_UPLOAD_BYTES + 1)
         finally:
             await file.close()
     if not payload:

@@ -277,53 +277,145 @@ def _render_cell(
 
 
 _ANSI_ESCAPE_RE = None
-# Lazy-compiled: block, void, on*=, link
-_SANITIZE_RES: tuple[re.Pattern[str], re.Pattern[str], re.Pattern[str], re.Pattern[str]] | None = (
-    None
-)
 
 
 def _sanitize_markdown_body(body: str) -> str:
-    """Neutralize active-content HTML in user-authored markdown.
+    """Neutralize raw HTML and script-capable link targets in user-authored markdown.
 
-    The UI sanitizes with DOMPurify; exported markdown goes to python-markdown /
-    mkdocs and would otherwise publish live HTML. Dangerous tags are HTML-escaped
-    so the reader sees their source; benign inline HTML passes through, and
-    ``javascript:`` / ``data:text/html`` link targets become ``#``.
+    Matches the UI, which renders with markdown-it ``html: false``: every raw ``<`` outside
+    code is entity-escaped so tags show as text (http/https/mailto autolinks stay), and
+    ``javascript:`` / ``vbscript:`` / non-image ``data:`` link destinations become ``#``.
     """
-    global _SANITIZE_RES
-    if _SANITIZE_RES is None:
-        import re
+    import re
 
-        flags = re.IGNORECASE | re.DOTALL
-        _SANITIZE_RES = (
-            # Whole-block dangerous tags — escape opening + contents + closer.
-            re.compile(
-                r"<\s*(script|style|iframe|object|embed)\b[^>]*>.*?<\s*/\s*\1\s*>",
-                flags,
-            ),
-            # Self-closing or unclosed dangerous tags (no body to swallow).
-            re.compile(
-                r"<\s*(script|style|iframe|object|embed|meta|link|base)\b[^>]*/?>",
-                flags,
-            ),
-            # Any tag carrying an on*= event handler.
-            re.compile(r"<[^>]*\son[a-z]+\s*=\s*(?:\"[^\"]*\"|'[^']*'|[^\s>]+)[^>]*>", flags),
-            # Markdown link with a javascript: or data:text/html target.
-            re.compile(
-                r"\]\(\s*(?:javascript|data\s*:\s*text/html)[^)]*\)",
-                flags,
-            ),
+    pieces: list[str] = []
+    fence: str | None = None
+    prose: list[str] = []
+    for line in body.splitlines(keepends=True):
+        if fence is None:
+            opener = re.match(r" {0,3}(`{3,}|~{3,})", line)
+            if opener and not (opener.group(1)[0] == "`" and "`" in line[opener.end() :]):
+                pieces.append(_sanitize_markdown_prose("".join(prose)))
+                prose = []
+                fence = opener.group(1)
+                pieces.append(line)
+            else:
+                prose.append(line)
+            continue
+        pieces.append(line)
+        closer = re.match(r" {0,3}(`{3,}|~{3,})[ \t]*$", line.rstrip("\r\n"))
+        if closer and closer.group(1)[0] == fence[0] and len(closer.group(1)) >= len(fence):
+            fence = None
+    pieces.append(_sanitize_markdown_prose("".join(prose)))
+    return "".join(pieces)
+
+
+def _sanitize_markdown_prose(text: str) -> str:
+    """Sanitize markdown outside fenced code: link targets everywhere, ``<`` outside code spans."""
+    import re
+
+    text = _neutralize_link_targets(text)
+    out: list[str] = []
+    pos = 0
+    runs = list(re.finditer(r"`+", text))
+    i = 0
+    while i < len(runs):
+        opener = runs[i]
+        match = next(
+            (j for j in range(i + 1, len(runs)) if len(runs[j].group()) == len(opener.group())),
+            None,
         )
+        if match is None:
+            i += 1
+            continue
+        out.append(_escape_raw_html(text[pos : opener.start()]))
+        out.append(text[opener.start() : runs[match].end()])
+        pos = runs[match].end()
+        i = match + 1
+    out.append(_escape_raw_html(text[pos:]))
+    return "".join(out)
 
-    from html import escape
 
-    block_re, void_re, on_re, link_re = _SANITIZE_RES
-    body = block_re.sub(lambda m: escape(m.group(0)), body)
-    body = void_re.sub(lambda m: escape(m.group(0)), body)
-    body = on_re.sub(lambda m: escape(m.group(0)), body)
-    body = link_re.sub("](#)", body)
-    return body
+def _escape_raw_html(text: str) -> str:
+    import re
+
+    # Keep http(s)/mailto and email autolinks; any other ``<`` could open a tag.
+    return re.sub(
+        r"<(?!(?:(?:https?|mailto):[^\s<>]*|[\w.+-]+@[\w-]+(?:\.[\w-]+)+)>)",
+        "&lt;",
+        text,
+        flags=re.IGNORECASE,
+    )
+
+
+def _neutralize_link_targets(text: str) -> str:
+    """Rewrite inline-link and reference-definition destinations with an unsafe scheme to ``#``."""
+    import re
+
+    out: list[str] = []
+    pos = 0
+    for opener in re.finditer(r"\]\(", text):
+        start = opener.end()
+        if start < pos:
+            continue
+        while start < len(text) and text[start] in " \t\r\n":
+            start += 1
+        end = _link_destination_end(text, start)
+        if _is_unsafe_link(text[start:end]):
+            out.append(text[pos:start])
+            out.append("#")
+            pos = end
+    out.append(text[pos:])
+    text = "".join(out)
+
+    def _ref(m: re.Match[str]) -> str:
+        return m.group(1) + ("#" if _is_unsafe_link(m.group(2)) else m.group(2))
+
+    return re.sub(
+        r"^( {0,3}\[[^\]\n]+\]:[ \t]*(?:\r?\n[ \t]*)?)(<[^>\n]*>|\S+)",
+        _ref,
+        text,
+        flags=re.MULTILINE,
+    )
+
+
+def _link_destination_end(text: str, start: int) -> int:
+    """Index just past a CommonMark link destination starting at ``start``."""
+    if start < len(text) and text[start] == "<":
+        close = text.find(">", start)
+        newline = text.find("\n", start)
+        if close != -1 and (newline == -1 or close < newline):
+            return close + 1
+    depth = 0
+    i = start
+    while i < len(text):
+        ch = text[i]
+        if ch == "\\":
+            i += 2
+            continue
+        if ch.isspace() or ord(ch) < 0x20:
+            break
+        if ch == "(":
+            depth += 1
+        elif ch == ")":
+            if depth == 0:
+                break
+            depth -= 1
+        i += 1
+    return min(i, len(text))
+
+
+def _is_unsafe_link(destination: str) -> bool:
+    import html
+    import re
+
+    # Decode the way a markdown renderer and then a browser would before checking the scheme.
+    target = html.unescape(destination.strip("<>"))
+    target = re.sub(r"\\([!-/:-@\[-`{-~])", r"\1", target)
+    target = re.sub(r"[\x00-\x20\x7f]", "", target).lower()
+    if re.match(r"data:image/(?:gif|png|jpeg|webp);", target):
+        return False
+    return re.match(r"(?:javascript|vbscript|data):", target) is not None
 
 
 def _truncate_text(text: str, max_bytes: int) -> str:

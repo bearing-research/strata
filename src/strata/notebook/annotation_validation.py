@@ -30,20 +30,17 @@ _SUPPORTED_MOUNT_SCHEMES = frozenset({"file", "s3", "gs", "gcs", "az", "azure"})
 
 
 def _table_uri_malformed(uri: str) -> bool:
-    """True when the scan could not name the table, by the parse ``table_identity_for`` uses.
+    """True when ``@table`` resolution could not name the table: no namespace or no table.
 
-    The named-catalog split is skipped: a catalog name holds no dot, so the
-    ``<namespace>.<table>`` check passes or fails the same either way.
+    Resolution hands the id to the Iceberg catalog, which takes nested namespaces
+    (``db.sch.events``). The named-catalog split is skipped: a catalog name holds
+    no dot, so the check passes or fails the same either way.
     """
     from strata.iceberg import PyIcebergCatalog
-    from strata.types import TableIdentity
 
     _warehouse, table_id = PyIcebergCatalog.parse_table_uri(uri)
-    try:
-        TableIdentity.from_table_id(table_id)
-    except ValueError:
-        return True
-    return False
+    parts = table_id.split(".")
+    return len(parts) < 2 or not all(parts)
 
 
 def validate_cell_annotations(

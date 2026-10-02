@@ -9,7 +9,8 @@ import ExportMenu from '../components/ExportMenu.vue'
 import KeyboardShortcutsModal from '../components/KeyboardShortcutsModal.vue'
 import ThemeToggle from '../components/ThemeToggle.vue'
 import { useStrata } from '../composables/useStrata'
-import { editorChrome } from '../utils/framed'
+import { embedSnippet } from '../utils/embedSnippet'
+import { editorChrome, editorQuery } from '../utils/framed'
 import { clearNotebookPerfMarks, markNotebookPerf, measureNotebookPerf } from '../utils/perf'
 
 const DagView = defineAsyncComponent(() => import('../components/DagView.vue'))
@@ -36,17 +37,8 @@ const chrome = computed(() => editorChrome(route.query))
 const router = useRouter()
 const { record, remove, findBySessionId } = useRecentNotebooks()
 
-// Export menu "Embed": an app-view iframe snippet plus its auto-resize listener.
-function embedSnippet(): string {
-  const url = `${window.location.origin}/#/app/${props.sessionId}?embed=1`
-  return [
-    `<iframe src="${url}" title="Strata notebook" style="width:100%;border:0"></iframe>`,
-    `<script>addEventListener('message',e=>{if(e.data&&e.data.type==='strata:embed:resize')`,
-    `document.querySelector('iframe[title=\\'Strata notebook\\']').style.height=e.data.height+'px'})<\/script>`,
-  ].join('\n')
-}
 async function copyEmbedSnippet() {
-  await navigator.clipboard.writeText(embedSnippet())
+  await navigator.clipboard.writeText(embedSnippet(window.location.origin, props.sessionId))
   pushToast('Embed snippet copied to clipboard')
 }
 
@@ -339,7 +331,7 @@ async function connectToSession(sessionId: string) {
           await router.replace({
             name: 'notebook',
             params: { sessionId: data.session_id },
-            query: { path: recoveryCandidate },
+            query: editorQuery(route.query, recoveryCandidate),
           })
         }
         return
@@ -358,6 +350,11 @@ async function connectToSession(sessionId: string) {
     }
 
     console.error('Failed to open session:', e)
+    // Framed, home would navigate the parent's frame away from the notebook.
+    if (!chrome.value.pageLinks) {
+      reconnectError.value = message
+      return
+    }
     router.replace({ name: 'home' })
     return
   } finally {
@@ -380,7 +377,7 @@ async function reopenNotebookFromRecent() {
       await router.replace({
         name: 'notebook',
         params: { sessionId: data.session_id },
-        query: { path },
+        query: editorQuery(route.query, path),
       })
     }
   } catch (e: any) {
@@ -678,10 +675,22 @@ function goHome() {
         <code>{{ recoveryPath }}</code>
       </p>
       <div class="reconnect-actions">
-        <button class="btn" :disabled="loading" @click="reopenNotebookFromRecent">
+        <button
+          v-if="recoveryPath"
+          class="btn"
+          :disabled="loading"
+          @click="reopenNotebookFromRecent"
+        >
           {{ reconnectActionLabel }}
         </button>
-        <button class="btn btn-secondary" :disabled="loading" @click="goHome">Back Home</button>
+        <button
+          v-if="chrome.pageLinks"
+          class="btn btn-secondary"
+          :disabled="loading"
+          @click="goHome"
+        >
+          Back Home
+        </button>
       </div>
     </div>
 

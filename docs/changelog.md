@@ -50,6 +50,13 @@ worker's token are out of other tenants' and cells' reach.
 
 ### Added
 
+- **The notebook editor can be framed.** Under `?framed=1`
+  (`#/notebook/<id>?framed=1`) the editor leaves out what a platform framing
+  it already has: Strata's brand and the notebook's name, the links to the
+  App, Artifacts and Logs pages (which would navigate the frame away from the
+  notebook), the deployment-mode badge, and Delete Notebook, which is the
+  platform's to offer so its own records see it. Running, editing, export
+  and the rest are unchanged.
 - **The artifact store stays bounded on its own.** A personal server sweeps its
   store every hour, collecting results unused for 30 days and, once the store
   is over 20 GiB, the least recently used down to 80% of that. Use is a cache
@@ -233,6 +240,12 @@ worker's token are out of other tenants' and cells' reach.
 
 ### Fixed
 
+- **A refused run says why in the notebook.** A frame the server refused for
+  want of permission (an `error` frame with code `read_only` or
+  `insufficient_scope`: a viewer's Run All, or a cell run behind a gateway
+  that admits reads only) was dropped by the notebook, so the click did
+  nothing visible. The notebook now shows the server's sentence as an error
+  notice, once while it stands.
 - **A table Strata refuses to read says why.** `POST /v1/materialize`
   returned a bare 500 for a scan of a table it cannot read (an unreadable
   delete file, now too many pending equality deletes), and accepted the same

@@ -2289,6 +2289,32 @@ def test_import_endpoint_enforces_upload_size_cap(client, monkeypatch, tmp_path)
     assert "MB cap" in resp.json()["detail"]
 
 
+def test_import_endpoint_reads_at_most_one_byte_past_the_cap(client, monkeypatch, tmp_path):
+    """An oversized upload is never pulled whole into memory to learn it is too big."""
+    from starlette.datastructures import UploadFile
+
+    _import_storage(monkeypatch, tmp_path)
+    monkeypatch.setattr("strata.notebook.routes._MAX_IPYNB_UPLOAD_BYTES", 50)
+    read_sizes: list[int] = []
+    original_read = UploadFile.read
+
+    async def recording_read(self, size: int = -1) -> bytes:
+        data = await original_read(self, size)
+        read_sizes.append(len(data))
+        return data
+
+    monkeypatch.setattr(UploadFile, "read", recording_read)
+    payload = _ipynb_bytes([_code("x = 1\n" * 1000)])
+
+    resp = client.post(
+        "/v1/notebooks/import",
+        files={"file": ("huge.ipynb", payload, "application/x-ipynb+json")},
+    )
+
+    assert resp.status_code == 413
+    assert read_sizes == [51]
+
+
 def test_import_endpoint_rejects_path_traversal_in_name(client, monkeypatch, tmp_path):
     """``name=../escaped`` must not land the notebook outside the storage root."""
     storage = _import_storage(monkeypatch, tmp_path / "storage")

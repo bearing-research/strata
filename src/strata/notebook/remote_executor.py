@@ -325,6 +325,22 @@ def capture_worker_secrets() -> None:
         os.environ.pop(name)
 
 
+def parent_still_holds_secret(name: str, proc: Path = Path("/proc")) -> bool:
+    """Whether the parent's environment block still carries this secret.
+
+    A launcher such as ``uv run`` stays alive as the parent with the secret in its
+    environment, where a cell can read it from ``/proc/<ppid>/environ``. Linux only.
+    """
+    value = _CAPTURED_SECRETS.get(name)
+    if not value:
+        return False
+    try:
+        environ = (proc / str(os.getppid()) / "environ").read_bytes()
+    except OSError:
+        return False
+    return f"{name}={value}".encode() in environ.split(b"\0")
+
+
 def worker_secret(name: str) -> str:
     """One of the worker's secrets, wherever it is now."""
     return _CAPTURED_SECRETS.get(name) or os.environ.get(name, "") or ""
@@ -1256,6 +1272,13 @@ def main(argv: list[str] | None = None) -> int:
     # Before any cell can spawn: a harness under this uid can read
     # /proc/<ppid>/environ, so secrets move from the environment into memory.
     capture_worker_secrets()
+    if parent_still_holds_secret("STRATA_WORKER_TOKEN"):
+        logger.warning(
+            "strata-worker's parent process (pid %d) still holds STRATA_WORKER_TOKEN in "
+            "its environment, where a cell can read it. Run the installed strata-worker "
+            "directly rather than through `uv run`.",
+            os.getppid(),
+        )
 
     # Cells run arbitrary code, so a non-loopback bind without a token lets
     # anyone who reaches the port run code as this user. Make that loud.

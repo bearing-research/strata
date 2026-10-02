@@ -559,13 +559,19 @@ class TestTableAnnotationValidation:
         cell = _cell("# @table trips file:///data/warehouse#\nx = trips_snapshot")
         assert "table_uri_malformed" in _codes(cell, _nb())
 
-    @pytest.mark.parametrize("uri", ["lake:sales.orders", "nyc.trips", "s3://bucket/wh#nyc.trips"])
+    @pytest.mark.parametrize(
+        "uri",
+        ["lake:sales.orders", "nyc.trips", "s3://bucket/wh#nyc.trips"]
+        + ["file:///wh#db.sch.events", "lake:a.b.c", "a.b.c"],
+    )
     def test_every_form_execution_accepts_passes(self, uri):
-        """A named catalog and the default catalog are valid forms, not only a warehouse."""
+        """A named catalog, the default catalog and nested namespaces are valid forms."""
         cell = _cell(f"# @table trips {uri}\nx = trips_snapshot")
         assert "table_uri_malformed" not in _codes(cell, _nb())
 
-    @pytest.mark.parametrize("uri", ["lake:sales", "trips", "file:///wh#trips", "a.b.c"])
+    @pytest.mark.parametrize(
+        "uri", ["lake:sales", "trips", "file:///wh#trips", "file:///wh#db..t", "wh#", "a.b."]
+    )
     def test_a_table_id_without_namespace_and_table_is_flagged(self, uri):
         cell = _cell(f"# @table trips {uri}\nx = trips_snapshot")
         diagnostics = validate_cell_annotations(cell, _nb())
@@ -573,24 +579,31 @@ class TestTableAnnotationValidation:
         assert malformed, uri
         assert "`<catalog>:<namespace>.<table>`" in malformed[0].message
 
-    @pytest.mark.parametrize(
-        "uri",
-        ["lake:sales.orders", "other:sales.orders", "nyc.trips", "/wh#nyc.trips", "lake:sales"]
-        + ["trips", "file:///wh#trips", "file:///wh", "a.b.c", "wh#"],
-    )
-    def test_agrees_with_the_scan_identity_parse(self, uri, tmp_path):
-        """The validator flags exactly the URIs the planner's ``table_identity_for`` rejects."""
-        from strata.config import StrataConfig
-        from strata.iceberg import table_identity_for
-        from strata.notebook.annotation_validation import _table_uri_malformed
+    def test_a_nested_namespace_resolves_at_execution(self, tmp_path):
+        """The validator stays quiet on a nested namespace because execution resolves it."""
+        import pyarrow as pa
+        from pyiceberg.catalog.sql import SqlCatalog
 
-        config = StrataConfig(cache_dir=tmp_path, catalogs={"lake": {"type": "rest"}})
-        try:
-            table_identity_for(uri, config)
-            rejected = False
-        except ValueError:
-            rejected = True
-        assert _table_uri_malformed(uri) is rejected
+        from strata.config import StrataConfig
+        from strata.notebook.annotation_validation import _table_uri_malformed
+        from strata.notebook.models import TableSpec
+        from strata.notebook.tables import resolve_table_snapshot
+
+        catalog = SqlCatalog(
+            "strata", uri=f"sqlite:///{tmp_path}/catalog.db", warehouse=f"file://{tmp_path}"
+        )
+        catalog.create_namespace(("db",))
+        catalog.create_namespace(("db", "sch"))
+        data = pa.table({"x": [1]})
+        catalog.create_table("db.sch.events", schema=data.schema).append(data)
+        uri = f"file://{tmp_path}#db.sch.events"
+
+        snapshot = resolve_table_snapshot(
+            TableSpec(name="events", uri=uri), StrataConfig(cache_dir=tmp_path / "cache")
+        )
+
+        assert snapshot > 0
+        assert _table_uri_malformed(uri) is False
 
     def test_shadowed_define_flagged(self):
         cell = _cell("# @table trips file:///wh#db.t\ntrips = 'overwritten'")
