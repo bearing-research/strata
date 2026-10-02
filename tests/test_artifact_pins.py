@@ -151,6 +151,26 @@ class TestTheRoutesInServiceMode:
         # route, so its sweep reaches globex too.
         assert store.get_artifact("other", other_old) is None
 
+    def test_gc_sweeps_in_a_worker_thread(self, service, monkeypatch):
+        client, store = service
+        sweeps: list[bool] = []
+
+        def recording_sweep(**kwargs):
+            try:
+                asyncio.get_running_loop()
+                sweeps.append(True)
+            except RuntimeError:
+                sweeps.append(False)
+            return {"deleted_count": 0, "deleted_bytes": 0, "store_bytes": 0}
+
+        monkeypatch.setattr(store, "garbage_collect", recording_sweep)
+
+        response = client.post("/v1/artifacts/gc", headers=_as("ops", "acme", "admin:*"))
+
+        assert response.status_code == 200, response.text
+        # False: no event loop in the thread the sweep ran on.
+        assert sweeps == [False]
+
     def test_a_pin_over_the_api_protects_the_chain_and_names_who_placed_it(self, service):
         client, store = service
         rows, figure = _superseded_chain(store, tenant="acme")

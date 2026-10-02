@@ -1024,7 +1024,9 @@ async def garbage_collect_artifacts(
         policy["max_bytes"] = max_bytes
     if min_idle_seconds is not None:
         policy["min_idle_seconds"] = min_idle_seconds
-    return store.garbage_collect(
+    # A sweep unlinks a blob per version; on the loop it would stall every route.
+    return await asyncio.to_thread(
+        store.garbage_collect,
         **policy,
         tenant=tenant_filter,
         collect_latest=collect_latest,
