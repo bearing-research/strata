@@ -1,7 +1,7 @@
 """Read-only routes over the in-memory structured log ring buffer.
 
-Unauthenticated and system-wide: fine on a loopback personal deployment, but
-service mode needs a scope gate before exposing it.
+The buffer is server-wide (every tenant's records), so under principal auth both
+routes require ``admin:*``; without principal auth they stay open.
 """
 
 from __future__ import annotations
@@ -13,6 +13,8 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import StreamingResponse
+
+from strata.api.dependencies import require_scope
 
 router = APIRouter(tags=["logs"])
 
@@ -33,7 +35,7 @@ def _read(
         raise HTTPException(status_code=400, detail=f"invalid regex: {exc}")
 
 
-@router.get("/v1/logs")
+@router.get("/v1/logs", dependencies=[require_scope("admin:*")])
 async def get_logs(
     since: int = 0,
     level: str | None = None,
@@ -45,12 +47,12 @@ async def get_logs(
 
     Filters: ``level`` (minimum severity), ``notebook`` (exact ``notebook_id``),
     ``regex`` (matched against the message). Pass the returned ``cursor`` back as
-    ``since`` to page forward.
+    ``since`` to page forward. Requires ``admin:*`` under principal auth.
     """
     return _read(since, level, notebook, regex, limit)
 
 
-@router.get("/v1/logs/stream")
+@router.get("/v1/logs/stream", dependencies=[require_scope("admin:*")])
 async def stream_logs(
     since: int = 0,
     level: str | None = None,
@@ -59,7 +61,8 @@ async def stream_logs(
 ) -> StreamingResponse:
     """Tail the log stream as Server-Sent Events, one ``data:`` frame per entry.
 
-    Reconnect with ``?since=<last cursor>`` to resume without gaps.
+    Reconnect with ``?since=<last cursor>`` to resume without gaps. Requires
+    ``admin:*`` under principal auth.
     """
     # Validate the regex up front so a bad pattern is a 400, not a silently closed stream.
     if regex is not None:

@@ -60,6 +60,7 @@ Under `trusted_proxy`, **every** `/v1/*` endpoint requires `X-Strata-Principal` 
 | Content and configuration changes that run nothing: `/open`, `/create`, `/import`, `/import-snapshot`, notebook delete, cell add/edit/reorder/delete, a cell's test source, mounts, connections, workers (except provisioning an SSH worker), env, secret manager, name, timeout, variants, quiesce/release, promote | `notebook:write` |
 | Anything that runs code - execute, running tests, dependency and Python-version changes (uv runs build scripts), provisioning an SSH worker - **and any route nobody has classified** | `notebook:execute` |
 | `POST /v1/cache/clear` | `admin:cache` |
+| `GET /v1/logs`, `GET /v1/logs/stream` (the ring buffer holds every tenant's records) | `admin:*` |
 | Artifact and registry writes | `artifacts:write` |
 | `GET /v1/cache/entries`, `GET /v1/debug/cache/inspect` | `admin:cache` |
 | Minting, editing and withdrawing a publication (`POST /v1/artifacts/{id}/v/{n}/publish`, `PATCH` / `DELETE /v1/publications/{token}`) | `artifacts:publish` |
@@ -939,10 +940,15 @@ GET /v1/logs
 GET /v1/logs/stream
 ```
 
-`GET /v1/logs` returns a snapshot of the in-memory log ring buffer (most recent
-records first); `GET /v1/logs/stream` is a Server-Sent Events stream that tails
-new records live. Both accept optional `level` / `logger` filters. Powers the
-web UI **Logs** page.
+`GET /v1/logs` returns a snapshot of the in-memory log ring buffer (the most
+recent `limit` matches, oldest first; pass the returned `cursor` back as
+`since` to get only newer records); `GET /v1/logs/stream` is a
+Server-Sent Events stream that tails new records live. Both accept optional
+`level` (minimum severity), `notebook` (exact notebook id) and `regex` filters.
+Powers the web UI **Logs** page.
+
+The buffer is server-wide, so under principal auth both routes require
+`admin:*` (403 otherwise). Without principal auth they stay open.
 
 ### Artifacts listing
 
