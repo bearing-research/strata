@@ -1681,6 +1681,45 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#core-transform-executors" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Core transform executors
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Core transform executors">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#post-executor_urlv1execute" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        POST {executor_url}/v1/execute
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pull-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Pull model
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -2230,6 +2269,45 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#core-transform-executors" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Core transform executors
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Core transform executors">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#post-executor_urlv1execute" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        POST {executor_url}/v1/execute
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pull-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Pull model
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -2491,7 +2569,7 @@
 </tr>
 <tr>
 <td><code>413</code></td>
-<td>Input exceeds <code>STRATA_WORKER_MAX_INPUT_BYTES</code> (default 2 GiB)</td>
+<td>Pull model only: an input exceeds <code>STRATA_WORKER_MAX_INPUT_BYTES</code> (default 2 GiB)</td>
 </tr>
 <tr>
 <td><code>500</code></td>
@@ -2693,6 +2771,123 @@ change.</p>
 <h2 id="implementing-a-custom-worker">Implementing a custom worker<a class="headerlink" href="#implementing-a-custom-worker" title="Permanent link">&para;</a></h2>
 <p>The minimum surface is <code>POST /v1/execute</code> + <code>GET /health</code>. The reference Python implementation is <code>create_notebook_executor_app()</code> in <code>src/strata/notebook/remote_executor.py</code> and is the canonical specification when in doubt.</p>
 <p>A custom worker doesn't have to run Python - it just has to accept the <code>notebook_cell@v1</code> envelope, execute the source somehow, and return the bundle. In practice almost all workers wrap a Python interpreter (since cells are Python) and the <code>strata-worker</code> script is the path of least resistance.</p>
+<h2 id="core-transform-executors">Core transform executors<a class="headerlink" href="#core-transform-executors" title="Permanent link">&para;</a></h2>
+<p>Everything above is the notebook-cell contract. The Core build runner, which
+executes <code>POST /v1/materialize</code> transforms other than <code>scan@v1</code>, uses a simpler
+one. Each transform ref is matched against the registry in
+<code>[tool.strata.transforms]</code>:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="k">[tool.strata.transforms]</span>
+<a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a><span class="n">enabled</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="kc">true</span>
+<a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a>
+<a id="__codelineno-14-4" name="__codelineno-14-4" href="#__codelineno-14-4"></a><span class="k">[[tool.strata.transforms.registry]]</span>
+<a id="__codelineno-14-5" name="__codelineno-14-5" href="#__codelineno-14-5"></a><span class="n">ref</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"pandas_script@*"</span>
+<a id="__codelineno-14-6" name="__codelineno-14-6" href="#__codelineno-14-6"></a><span class="n">executor_url</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"http://executor:8080"</span>
+<a id="__codelineno-14-7" name="__codelineno-14-7" href="#__codelineno-14-7"></a><span class="n">timeout_seconds</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">300</span>
+<a id="__codelineno-14-8" name="__codelineno-14-8" href="#__codelineno-14-8"></a><span class="n">max_output_bytes</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">1073741824</span>
+<a id="__codelineno-14-9" name="__codelineno-14-9" href="#__codelineno-14-9"></a><span class="n">max_input_bytes</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span>
+<a id="__codelineno-14-10" name="__codelineno-14-10" href="#__codelineno-14-10"></a><span class="n">requires_scope</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"transforms:pandas"</span>
+</code></pre></div>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Type</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>ref</code></td>
+<td>string (required)</td>
+<td>Glob matched against the transform ref, e.g. <code>duckdb_sql@v1</code> or <code>pandas_script@*</code>. The first matching entry wins.</td>
+</tr>
+<tr>
+<td><code>executor_url</code></td>
+<td>string</td>
+<td>Base URL; the runner posts to <code>{executor_url}/v1/execute</code>. Empty or <code>embedded://local</code> runs a built-in transform in-process.</td>
+</tr>
+<tr>
+<td><code>timeout_seconds</code></td>
+<td>float</td>
+<td>Per-build timeout. Default <code>300</code>; <code>0</code> uses <code>STRATA_BUILD_RUNNER_DEFAULT_TIMEOUT</code>.</td>
+</tr>
+<tr>
+<td><code>max_output_bytes</code></td>
+<td>integer</td>
+<td>Output cap, enforced while the response streams in. Default <code>0</code>, which uses <code>STRATA_BUILD_RUNNER_DEFAULT_MAX_OUTPUT</code>.</td>
+</tr>
+<tr>
+<td><code>max_input_bytes</code></td>
+<td>integer</td>
+<td>Cap on the total size of the inputs; the build fails before the call when they exceed it. Default <code>0</code> (no cap).</td>
+</tr>
+<tr>
+<td><code>requires_scope</code></td>
+<td>string</td>
+<td>Scope a principal needs to materialize this transform, checked under principal auth.</td>
+</tr>
+</tbody>
+</table>
+<p>With no <code>[tool.strata.transforms]</code> block, the registry holds only the
+in-process <code>duckdb_sql@v1</code>. With one, it holds only the listed entries, and
+only when <code>enabled = true</code>. A ref no entry matches is refused at
+<code>POST /v1/materialize</code> (<code>403</code> in service mode, <code>400</code> in personal mode).</p>
+<h3 id="post-executor_urlv1execute"><code>POST {executor_url}/v1/execute</code><a class="headerlink" href="#post-executor_urlv1execute" title="Permanent link">&para;</a></h3>
+<p><code>multipart/form-data</code> with the header <code>X-Strata-Executor-Protocol: v1</code>. Strata
+sends no credentials, so keep the executor where only Strata can reach it.</p>
+<table>
+<thead>
+<tr>
+<th>Part</th>
+<th>Content type</th>
+<th>Content</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>metadata</code></td>
+<td><code>application/json</code></td>
+<td>The envelope below</td>
+</tr>
+<tr>
+<td><code>input0</code>, <code>input1</code>, …</td>
+<td><code>application/vnd.apache.arrow.stream</code></td>
+<td>One Arrow IPC stream per input, in the order the transform lists them. Artifacts, names and table scans all arrive as Arrow</td>
+</tr>
+</tbody>
+</table>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a><span class="p">{</span>
+<a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a><span class="w">  </span><span class="nt">"protocol_version"</span><span class="p">:</span><span class="w"> </span><span class="s2">"v1"</span><span class="p">,</span>
+<a id="__codelineno-15-3" name="__codelineno-15-3" href="#__codelineno-15-3"></a><span class="w">  </span><span class="nt">"build_id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"…"</span><span class="p">,</span>
+<a id="__codelineno-15-4" name="__codelineno-15-4" href="#__codelineno-15-4"></a><span class="w">  </span><span class="nt">"tenant"</span><span class="p">:</span><span class="w"> </span><span class="s2">"team-a"</span><span class="p">,</span>
+<a id="__codelineno-15-5" name="__codelineno-15-5" href="#__codelineno-15-5"></a><span class="w">  </span><span class="nt">"principal"</span><span class="p">:</span><span class="w"> </span><span class="s2">"alice"</span><span class="p">,</span>
+<a id="__codelineno-15-6" name="__codelineno-15-6" href="#__codelineno-15-6"></a><span class="w">  </span><span class="nt">"provenance_hash"</span><span class="p">:</span><span class="w"> </span><span class="s2">"…"</span><span class="p">,</span>
+<a id="__codelineno-15-7" name="__codelineno-15-7" href="#__codelineno-15-7"></a><span class="w">  </span><span class="nt">"transform"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-15-8" name="__codelineno-15-8" href="#__codelineno-15-8"></a><span class="w">    </span><span class="nt">"ref"</span><span class="p">:</span><span class="w"> </span><span class="s2">"pandas_script@v1"</span><span class="p">,</span>
+<a id="__codelineno-15-9" name="__codelineno-15-9" href="#__codelineno-15-9"></a><span class="w">    </span><span class="nt">"code_hash"</span><span class="p">:</span><span class="w"> </span><span class="s2">"&lt;first 16 hex of sha256 of the transform spec&gt;"</span><span class="p">,</span>
+<a id="__codelineno-15-10" name="__codelineno-15-10" href="#__codelineno-15-10"></a><span class="w">    </span><span class="nt">"params"</span><span class="p">:</span><span class="w"> </span><span class="p">{}</span>
+<a id="__codelineno-15-11" name="__codelineno-15-11" href="#__codelineno-15-11"></a><span class="w">  </span><span class="p">},</span>
+<a id="__codelineno-15-12" name="__codelineno-15-12" href="#__codelineno-15-12"></a><span class="w">  </span><span class="nt">"inputs"</span><span class="p">:</span><span class="w"> </span><span class="p">[{</span><span class="nt">"name"</span><span class="p">:</span><span class="w"> </span><span class="s2">"input0"</span><span class="p">,</span><span class="w"> </span><span class="nt">"format"</span><span class="p">:</span><span class="w"> </span><span class="s2">"arrow_ipc_stream"</span><span class="p">}]</span>
+<a id="__codelineno-15-13" name="__codelineno-15-13" href="#__codelineno-15-13"></a><span class="p">}</span>
+</code></pre></div>
+<p><code>tenant</code> and <code>principal</code> come from the caller's principal, and are <code>null</code> without principal auth.</p>
+<p>A success is <code>200</code> with an Arrow IPC stream as the body, which becomes the
+artifact. An optional <code>X-Strata-Logs</code> header carries the executor's logs,
+base64-encoded. A failure is a <code>4xx</code> or <code>5xx</code> with a JSON body:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a><span class="p">{</span><span class="nt">"success"</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="p">,</span><span class="w"> </span><span class="nt">"error_code"</span><span class="p">:</span><span class="w"> </span><span class="s2">"…"</span><span class="p">,</span><span class="w"> </span><span class="nt">"error_message"</span><span class="p">:</span><span class="w"> </span><span class="s2">"…"</span><span class="p">}</span>
+</code></pre></div>
+<p>Any error status fails the build.</p>
+<h3 id="pull-model">Pull model<a class="headerlink" href="#pull-model" title="Permanent link">&para;</a></h3>
+<p>An executor can pull a core build instead: <code>GET /v1/builds/{build_id}/manifest</code>
+returns the manifest shape shown under
+<a href="#post-v1execute-manifest-pull-model"><code>POST /v1/execute-manifest</code></a>, with
+<code>metadata</code> holding only <code>build_id</code>, <code>artifact_id</code>, <code>version</code>, <code>executor_ref</code>
+and <code>params</code>. Download each input from its URL, upload the result as an Arrow
+IPC stream to <code>output.url</code>, then <code>POST {}</code> to <code>finalize_url</code>. <code>output.max_bytes</code>
+is the server-wide <code>STRATA_BUILD_RUNNER_DEFAULT_MAX_OUTPUT</code>, not the registry
+entry's cap. Fetching the manifest claims a pending build; a build the local
+runner already claimed answers <code>409</code>. In service mode the manifest is issued
+only under <code>STRATA_AUTH_MODE=trusted_proxy</code>.</p>
 
 
 

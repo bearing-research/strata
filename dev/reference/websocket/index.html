@@ -1771,6 +1771,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#session-lifetime" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Session lifetime
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#cancelling-a-sql-cell" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2503,6 +2514,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#session-lifetime" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Session lifetime
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#cancelling-a-sql-cell" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2760,8 +2782,8 @@
 </tr>
 <tr>
 <td><code>variant_add</code></td>
-<td><code>{ "group": "..." }</code></td>
-<td>Add a new variant cell, cloning the active</td>
+<td><code>{ "group": "...", "author": "..." }</code></td>
+<td>Add a new variant cell, cloning the active. <code>author</code> is optional</td>
 </tr>
 <tr>
 <td><code>widget_update</code></td>
@@ -2783,13 +2805,13 @@
 <tbody>
 <tr>
 <td><code>cell_status</code></td>
-<td><code>{ "cell_id": "...", "status": "running" }</code></td>
-<td>Status changed</td>
+<td><code>{ "cell_id": "...", "status": "running", "remote_worker": "...", "remote_transport": "...", "remote_build_state": "...", "staleness_reasons": [...], "causality": {...} }</code></td>
+<td>Status changed. Only <code>cell_id</code> and <code>status</code> are always present: the <code>remote_*</code> fields come with <code>running</code> for a remote cell (<code>remote_build_state</code> is <code>starting</code> while a worker provisions the job), <code>staleness_reasons</code> and <code>causality</code> with a staleness update</td>
 </tr>
 <tr>
 <td><code>cell_output</code></td>
-<td><code>{ "cell_id": "...", "outputs": {...}, "display": {...}, "displays": [...], "cache_hit": false }</code></td>
-<td>Execution result, including rich visible outputs</td>
+<td><code>{ "cell_id": "...", "outputs": {...}, "display": {...}, "displays": [...], "cache_hit": false, "duration_ms": 128, "artifact_uri": "...", "artifact_uris": {...}, "stdout": "...", "stderr": "...", "execution_method": "...", "mutation_warnings": [...] }</code></td>
+<td>Execution result, including rich visible outputs. <code>artifact_uris</code> maps each stored variable to its artifact. A remote run adds <code>remote_worker</code>, <code>remote_transport</code>, <code>remote_build_id</code> and <code>remote_build_state</code></td>
 </tr>
 <tr>
 <td><code>cell_output_delta</code></td>
@@ -2803,8 +2825,8 @@
 </tr>
 <tr>
 <td><code>cell_error</code></td>
-<td><code>{ "cell_id": "...", "error": "..." }</code></td>
-<td>Execution error</td>
+<td><code>{ "cell_id": "...", "error": "...", "suggest_install": "...", "suggest_install_language": "python" }</code></td>
+<td>Execution error. <code>suggest_install</code> names a missing package to offer installing, with <code>python</code> or <code>r</code> for which installer. A remote run adds the <code>remote_*</code> fields of <code>cell_output</code> plus <code>remote_error_code</code></td>
 </tr>
 <tr>
 <td><code>cell_iteration_progress</code></td>
@@ -2823,8 +2845,8 @@
 </tr>
 <tr>
 <td><code>cell_test_results</code></td>
-<td><code>{ "cell_id": "...", "passed": 2, "failed": 1, "errored": 0, "skipped": 0, "tests": [{ "name": "...", "nodeid": "...", "outcome": "passed", "message": "..." }], "stale": false, "pytest_unavailable": false, "ran_at": 1718000000000 }</code></td>
-<td>Per-test outcomes + totals from a <code>cell_run_tests</code>. <code>outcome</code> ∈ <code>passed</code>/<code>failed</code>/<code>error</code>/<code>skipped</code>; <code>message</code> carries the rewritten-assert diff for failures. <code>stale</code> flags the result against a since-changed cell/test/input.</td>
+<td><code>{ "cell_id": "...", "passed": 2, "failed": 1, "errored": 0, "skipped": 0, "tests": [{ "name": "...", "nodeid": "...", "outcome": "passed", "message": "..." }], "stale": false, "pytest_unavailable": false, "ran_at": 1718000000000, "auto_installed": [] }</code></td>
+<td>Per-test outcomes + totals from a <code>cell_run_tests</code>. <code>outcome</code> ∈ <code>passed</code>/<code>failed</code>/<code>error</code>/<code>skipped</code>; <code>message</code> carries the rewritten-assert diff for failures. <code>stale</code> flags the result against a since-changed cell/test/input. <code>auto_installed</code> lists packages (pytest) installed into the notebook environment for this run.</td>
 </tr>
 </tbody>
 </table>
@@ -2863,7 +2885,7 @@
 <tr>
 <td><code>dag_update</code></td>
 <td><code>{ "edges": [...], "roots": [...], "leaves": [...], "topological_order": [...], "cells": [...], "variant_groups": [...] }</code></td>
-<td>DAG changed after cell edit. <code>cells</code> carries each cell's defines, references, upstream and downstream ids</td>
+<td>DAG changed after cell edit. Each <code>cells</code> entry carries <code>id</code>, <code>defines</code>, <code>references</code>, <code>upstream_ids</code>, <code>downstream_ids</code>, <code>is_leaf</code>, <code>annotation_diagnostics</code>, <code>variant_group</code> / <code>variant_name</code> / <code>variant_active</code>, <code>is_module_cell</code> / <code>module_exports</code>, and <code>created_by</code> / <code>updated_by</code></td>
 </tr>
 </tbody>
 </table>
@@ -2879,18 +2901,18 @@
 <tbody>
 <tr>
 <td><code>notebook_state</code></td>
-<td><code>{ "id": "...", "cells": [...], "dag": {...} }</code></td>
-<td>Full state (response to <code>notebook_sync</code>)</td>
+<td><code>{ "id": "...", "cells": [...], "dag": {...}, "environment": {...}, "environment_job": {...}, "environment_job_history": [...], "r_environment": {...}, ... }</code></td>
+<td>Full state (response to <code>notebook_sync</code>). Carries the rest of the notebook's state as well (name, mounts, workers, env, variant groups)</td>
 </tr>
 <tr>
 <td><code>impact_preview</code></td>
-<td><code>{ "target_cell_id": "...", "upstream": [...], "downstream": [...] }</code></td>
-<td>Impact analysis result</td>
+<td><code>{ "target_cell_id": "...", "upstream": [...], "downstream": [...], "estimated_ms": 0 }</code></td>
+<td>Impact analysis result. <code>upstream</code> entries carry <code>cell_id</code>, <code>cell_name</code>, <code>reason</code>, <code>skip</code>, <code>estimated_ms</code>; <code>downstream</code> entries carry <code>cell_id</code>, <code>cell_name</code>, <code>current_status</code>, <code>new_status</code></td>
 </tr>
 <tr>
 <td><code>profiling_summary</code></td>
-<td><code>{ "total_execution_ms": ..., "cell_profiles": [...] }</code></td>
-<td>Profiling metrics</td>
+<td><code>{ "total_execution_ms": ..., "cache_hits": ..., "cache_misses": ..., "cache_savings_ms": ..., "team_cache_savings_ms": ..., "team_cache_hits": ..., "team_contributors": [...], "team_promotions": [...], "total_artifact_bytes": ..., "cell_profiles": [...] }</code></td>
+<td>Profiling metrics. <code>cell_profiles</code> entries carry <code>cell_id</code>, <code>cell_name</code>, <code>status</code>, <code>duration_ms</code>, <code>cache_hit</code>, <code>artifact_uri</code>, <code>execution_count</code></td>
 </tr>
 </tbody>
 </table>
@@ -2906,8 +2928,8 @@
 <tbody>
 <tr>
 <td><code>inspect_result</code></td>
-<td><code>{ "action": "eval", "ok": true, "result": "42", "type": "int" }</code></td>
-<td>REPL result</td>
+<td><code>{ "cell_id": "...", "action": "eval", "expr": "...", "ok": true, "result": "42", "type": "int" }</code></td>
+<td>REPL result. <code>action</code> is <code>open</code>, <code>eval</code> or <code>close</code>; a failed eval carries <code>error</code></td>
 </tr>
 </tbody>
 </table>
@@ -2933,13 +2955,13 @@
 </tr>
 <tr>
 <td><code>environment_job_finished</code></td>
-<td><code>{ "environment_job": {...}, "environment": {...}, ... }</code></td>
-<td>Background environment job completed or failed</td>
+<td><code>{ "environment_job": {...}, "environment_job_history": [...], "cells": [...], "lockfile_changed": false, "stale_cell_count": 0, "stale_cell_ids": [...], "environment": {...}, "r_environment": {...}, "dependencies": [...], "resolved_dependencies": [...] }</code></td>
+<td>Background environment job completed or failed. The environment and dependency fields are present only on success; an import job adds <code>warnings</code> and <code>imported_count</code></td>
 </tr>
 <tr>
 <td><code>dependency_changed</code></td>
-<td><code>{ "package": "...", "action": "add", "success": true }</code></td>
-<td>Legacy compatibility event after add/remove jobs</td>
+<td><code>{ "package": "...", "action": "add", "success": true, "error": null, "lockfile_changed": true, "stale_cell_count": 0, "cells": [...] }</code></td>
+<td>Legacy compatibility event after add/remove jobs. On success it also carries <code>environment</code>, <code>dependencies</code> and <code>resolved_dependencies</code></td>
 </tr>
 </tbody>
 </table>
@@ -2995,7 +3017,7 @@
 </tbody>
 </table>
 <h2 id="sequence-numbers">Sequence numbers<a class="headerlink" href="#sequence-numbers" title="Permanent link">&para;</a></h2>
-<p>Every server → client message carries a <code>seq</code> from a single counter scoped to the <strong>notebook session</strong> (not the WebSocket connection). The counter increments on every outbound message; it persists across reconnects to the same session and only resets when the session itself is closed (via <code>DELETE /v1/notebooks/{session_id}</code> or a server restart).</p>
+<p>Every server → client message carries a <code>seq</code> from a single counter scoped to the <strong>notebook session</strong> (not the WebSocket connection). The counter increments on every outbound message; it persists across reconnects to the same session and only resets when the session itself is closed (see <a href="#session-lifetime">Session lifetime</a>).</p>
 <p>What the client uses <code>seq</code> for:</p>
 <ul>
 <li><strong>Ordering.</strong> Messages arrive in <code>seq</code> order under normal conditions. Every frame carries its own number, including the console and result of one execution and each cell of a batch, so if your client coalesces state updates, key dedupe on <code>seq</code> rather than <code>type</code>.</li>
@@ -3005,12 +3027,21 @@
 <h2 id="reconnection-semantics">Reconnection semantics<a class="headerlink" href="#reconnection-semantics" title="Permanent link">&para;</a></h2>
 <p>Disconnects happen - proxy timeouts, network drops, server restarts, tab sleep. The recovery protocol:</p>
 <ol>
-<li><strong>Client reconnects</strong> to <code>ws://.../v1/notebooks/ws/{session_id}</code> with the same session ID. The session itself is in-memory on the server and survives reconnects; it's cleaned up only when closed explicitly via <code>DELETE /v1/notebooks/{session_id}</code> or when the server restarts.</li>
+<li><strong>Client reconnects</strong> to <code>ws://.../v1/notebooks/ws/{session_id}</code> with the same session ID. The session itself is in-memory on the server and survives reconnects until it is closed (see <a href="#session-lifetime">Session lifetime</a>).</li>
 <li><strong>Server accepts the reconnect</strong> and resumes emitting messages from the session's existing <code>seq</code> counter (continuing, not resetting). If the previous client disconnected within the <strong>60-second cancel grace window</strong> and a cell is still running, the execution survives the disconnect - the client picks up where it left off.</li>
 <li><strong>Client sends <code>notebook_sync</code></strong> as its first message after reconnecting. The server responds with <code>notebook_state</code> containing the full current state (cells, DAG, cell statuses, latest display outputs).</li>
 <li><strong>Client replaces local state</strong> with the synced payload and resumes listening.</li>
 </ol>
 <p>There is <strong>no replay</strong> of missed messages - events emitted while the client was disconnected are lost. State persisted to the artifact store (<code>cell_output</code>, finished cell statuses) is recovered via <code>notebook_sync</code>; transient progress events (<code>cell_console</code> mid-stream, <code>cell_output_delta</code> for a streaming prompt cell, <code>cell_iteration_progress</code> for a <code>@loop</code> cell, <code>cell_variant_progress</code> for a <code># @per_variant</code> fan-out cell, <code>cascade_progress</code>) are not.</p>
+<h3 id="session-lifetime">Session lifetime<a class="headerlink" href="#session-lifetime" title="Permanent link">&para;</a></h3>
+<p>A session ends when:</p>
+<ul>
+<li>the notebook is deleted (<code>DELETE /v1/notebooks/{session_id}</code>, or <code>POST /v1/notebooks/delete-by-path</code>, which closes any session open on that directory),</li>
+<li>it has had no connected WebSocket and no request for 4 hours,</li>
+<li>50 sessions are open and another notebook is opened: the least recently used session with no connected WebSocket is closed,</li>
+<li>or the server restarts.</li>
+</ul>
+<p>The idle and count checks run when a notebook is opened, and never close a session that has a connected WebSocket. A reconnect to a closed session is refused with <code>1008</code>; call <code>POST /v1/notebooks/open</code> again for a new session ID.</p>
 <h3 id="cancelling-a-sql-cell">Cancelling a SQL cell<a class="headerlink" href="#cancelling-a-sql-cell" title="Permanent link">&para;</a></h3>
 <p>A cancel stops the notebook waiting for the cell: the run is abandoned, no
 result is published, the cell leaves <code>running</code>, and the next cell can start.
@@ -3044,7 +3075,7 @@ was going to cost; what it no longer costs is the notebook.</p>
 </tr>
 </tbody>
 </table>
-<p>If the session has been closed server-side (notebook deleted, server restart), the WebSocket upgrade is refused with <code>1008</code>. The client should call <code>POST /v1/notebooks/open</code> to start a new session.</p>
+<p>If the session has been closed server-side (notebook deleted, evicted, server restart), the WebSocket upgrade is refused with <code>1008</code>. The client should call <code>POST /v1/notebooks/open</code> to start a new session.</p>
 <p>The server does not send protocol-level pings; the WebSocket library's default frame keepalive is what holds idle connections open. If your client sees no traffic for an extended period and you can't tell whether the connection is live, the safest probe is to send <code>notebook_sync</code> and watch for the response.</p>
 
 

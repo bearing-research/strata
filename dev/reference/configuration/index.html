@@ -2671,7 +2671,7 @@ authentication. This is a startup error, not a warning:</p>
 <tr>
 <td><code>STRATA_CORS_ALLOW_ORIGINS</code></td>
 <td><em>(empty)</em></td>
-<td>Origins allowed to call the API from a browser. Empty means no cross-origin access. Personal mode has no auth, so any page allowed here can author and run cells</td>
+<td>Origins allowed to call the API from a browser, as a JSON array (<code>["http://localhost:5173"]</code>); a comma-separated value fails at startup. Empty means no cross-origin access. Personal mode has no auth, so any page allowed here can author and run cells</td>
 </tr>
 <tr>
 <td><code>STRATA_EMBED_FRAME_ANCESTORS</code></td>
@@ -2681,7 +2681,7 @@ authentication. This is a startup error, not a warning:</p>
 <tr>
 <td><code>STRATA_MCP_ENABLED</code></td>
 <td><code>false</code></td>
-<td>Mount the MCP server at <code>/mcp</code> so a coding agent can drive the live session. In service mode it requires principal auth (<code>trusted_proxy</code> or <code>api_key</code>); each tool call then runs as its caller and is checked against the notebook scopes. Requires the <code>[mcp]</code> extra. See <a href="../../notebook/mcp/">Notebook → MCP</a></td>
+<td>Mount the MCP server at <code>/mcp</code> so a coding agent can drive the live session. In service mode it requires principal auth (<code>trusted_proxy</code> or <code>api_key</code>); each tool call then runs as its caller and is checked against the notebook scopes. Refused at startup together with <code>STRATA_PERSONAL_MODE_USER_HEADER</code>, since the MCP endpoint does not filter sessions by owner. Requires the <code>[mcp]</code> extra. See <a href="../../notebook/mcp/">Notebook → MCP</a></td>
 </tr>
 <tr>
 <td><code>STRATA_ARROW_MEMORY_POOL</code></td>
@@ -2750,12 +2750,12 @@ authentication. This is a startup error, not a warning:</p>
 <tr>
 <td><code>STRATA_FAST_CONCAT</code></td>
 <td><code>rust</code> when the extension is built, else <code>pyarrow</code></td>
-<td>Arrow IPC concat implementation. <code>pyarrow</code> parses (slower, handles more edge cases)</td>
+<td>Arrow IPC concat implementation. <code>pyarrow</code> parses (slower, handles more edge cases). Environment only</td>
 </tr>
 <tr>
 <td><code>STRATA_MMAP_MIN_BYTES</code></td>
 <td><code>4194304</code> (4 MiB)</td>
-<td>Cache reads at or above this size go through the Rust mmap path; <code>0</code> forces it always</td>
+<td>Cache reads at or above this size go through the Rust mmap path; <code>0</code> forces it always. Environment only</td>
 </tr>
 </tbody>
 </table>
@@ -2942,7 +2942,7 @@ normal work as overload and walk the tier down to its floor.</p>
 <tbody>
 <tr>
 <td><code>STRATA_METADATA_DB</code></td>
-<td><code>None</code></td>
+<td><code>~/.strata/meta.sqlite</code></td>
 <td>SQLite path for metadata persistence</td>
 </tr>
 </tbody>
@@ -2975,7 +2975,7 @@ normal work as overload and walk the tier down to its floor.</p>
 <tr>
 <td><code>STRATA_CATALOG_URI</code></td>
 <td><code>None</code></td>
-<td>Catalog database URI. Merged into <code>catalog_properties.uri</code>, so it does not replace sibling keys set in pyproject</td>
+<td>Catalog database URI. Merged into <code>catalog_properties.uri</code>, so it does not replace sibling keys set in pyproject. Environment only</td>
 </tr>
 </tbody>
 </table>
@@ -2992,7 +2992,7 @@ normal work as overload and walk the tier down to its floor.</p>
 <tr>
 <td><code>STRATA_S3_REGION</code></td>
 <td><code>None</code></td>
-<td>AWS region</td>
+<td>AWS region (falls back to AWS_REGION)</td>
 </tr>
 <tr>
 <td><code>STRATA_S3_ENDPOINT_URL</code></td>
@@ -3036,7 +3036,7 @@ Unset credentials fall back to Application Default Credentials.</p>
 <tr>
 <td><code>STRATA_GCS_CREDENTIALS_JSON</code></td>
 <td><code>None</code></td>
-<td>Service-account key, as either a path to the JSON file or the JSON itself. Inline key material is written to a private temp file, because <code>GOOGLE_APPLICATION_CREDENTIALS</code> only resolves paths</td>
+<td>Service-account key, as either a path to the JSON file or the JSON itself. Inline key material is written to a private temp file, because <code>GOOGLE_APPLICATION_CREDENTIALS</code> only resolves paths. Falls back to <code>GOOGLE_APPLICATION_CREDENTIALS</code></td>
 </tr>
 <tr>
 <td><code>STRATA_GCS_ANONYMOUS</code></td>
@@ -3107,7 +3107,7 @@ credential.</p>
 <tbody>
 <tr>
 <td><code>STRATA_ARTIFACT_DIR</code></td>
-<td><code>None</code></td>
+<td><code>~/.strata/artifacts</code> in personal mode, unset in service mode</td>
 <td>Artifact store directory. In service mode the store exists only when this is set, even when the metadata DSN and a blob backend hold everything, and startup refuses a DSN, a non-local blob backend or service writes without it</td>
 </tr>
 <tr>
@@ -3447,7 +3447,10 @@ toggles <code>enabled</code> there.</p>
 <code>finalize</code>) have no on/off switch. They are served whenever the deployment can
 issue and honor them at all (personal mode, or service mode with transforms
 enabled), so <code>STRATA_TRANSFORM_SIGNING_SECRET</code> below matters in every such
-deployment, not only in one that opted in to something.</p>
+deployment, not only in one that opted in to something. In service mode the
+build manifest is issued only under <code>STRATA_AUTH_MODE=trusted_proxy</code>, since it
+carries upload and finalize capabilities; under any other auth mode it returns
+404.</p>
 <table>
 <thead>
 <tr>
@@ -3602,7 +3605,7 @@ deployment, not only in one that opted in to something.</p>
 <tr>
 <td><code>STRATA_NOTEBOOK_OBJECT_CODEC</code></td>
 <td><code>cloudpickle</code></td>
-<td>How a cell's value that is neither Arrow nor JSON is pickled when it is handed to another cell: <code>cloudpickle</code> (stdlib <code>pickle</code> if cloudpickle is not installed) or <code>pickle</code>. Any other value fails the cell's serialization.</td>
+<td>How a cell's value that is neither Arrow nor JSON is pickled when it is handed to another cell: <code>cloudpickle</code> (stdlib <code>pickle</code> if cloudpickle is not installed) or <code>pickle</code>. Any other value fails the cell's serialization. Environment only.</td>
 </tr>
 <tr>
 <td><code>STRATA_NOTEBOOK_KEEP_SUPERSEDED_VERSIONS</code></td>
@@ -3678,7 +3681,7 @@ deployment, not only in one that opted in to something.</p>
 </table>
 <h2 id="tui">TUI<a class="headerlink" href="#tui" title="Permanent link">&para;</a></h2>
 <p>Defaults for the <code>strata-notebook-tui</code> client; each is also a command-line
-flag, and the flag wins.</p>
+flag, and the flag wins. Environment only.</p>
 <table>
 <thead>
 <tr>
@@ -3839,12 +3842,12 @@ without a URL or a config, to find the server. The server does not read
 <tr>
 <td><code>STRATA_LOG_LEVEL</code></td>
 <td><code>INFO</code></td>
-<td>Log level</td>
+<td>Log level. Environment only</td>
 </tr>
 <tr>
 <td><code>STRATA_LOG_FORMAT</code></td>
 <td><code>json</code></td>
-<td><code>json</code> or <code>text</code></td>
+<td><code>json</code> or <code>text</code>. Environment only</td>
 </tr>
 <tr>
 <td><code>STRATA_TRACING_ENABLED</code></td>
@@ -3854,7 +3857,7 @@ without a URL or a config, to find the server. The server does not read
 <tr>
 <td><code>STRATA_METRICS_ENABLED</code></td>
 <td><code>true</code></td>
-<td>Set <code>false</code> to stop collecting request/cache metrics</td>
+<td>Set <code>false</code> to stop collecting request/cache metrics. Environment only</td>
 </tr>
 <tr>
 <td><code>OTEL_EXPORTER_OTLP_ENDPOINT</code></td>
@@ -3869,6 +3872,10 @@ without a URL or a config, to find the server. The server does not read
 </tbody>
 </table>
 <h2 id="ai-prompt-cells">AI (prompt cells)<a class="headerlink" href="#ai-prompt-cells" title="Permanent link">&para;</a></h2>
+<p>The <code>STRATA_AI_*</code> variables are the server's defaults, read at startup. The
+provider keys are read from the <strong>notebook's</strong> environment (the Runtime panel,
+<code>[env]</code> in <code>notebook.toml</code>, or a secret manager), not from the server's shell,
+so a key exported where the server starts does not reach every notebook.</p>
 <table>
 <thead>
 <tr>
@@ -3891,7 +3898,7 @@ without a URL or a config, to find the server. The server does not read
 <tr>
 <td><code>STRATA_AI_API_KEY</code></td>
 <td><code>None</code></td>
-<td>API key (generic, works with any provider)</td>
+<td>API key (generic, works with any provider). Also read from the notebook's environment, where it is used only when the server sets no key</td>
 </tr>
 <tr>
 <td><code>STRATA_AI_MAX_OUTPUT_TOKENS</code></td>
@@ -3906,28 +3913,29 @@ without a URL or a config, to find the server. The server does not read
 <tr>
 <td><code>ANTHROPIC_API_KEY</code></td>
 <td><code>None</code></td>
-<td>Anthropic API key (auto-sets base URL + model)</td>
+<td>Anthropic API key, from the notebook's environment (auto-sets base URL + model)</td>
 </tr>
 <tr>
 <td><code>OPENAI_API_KEY</code></td>
 <td><code>None</code></td>
-<td>OpenAI API key (auto-sets base URL + model)</td>
+<td>OpenAI API key, from the notebook's environment (auto-sets base URL + model)</td>
 </tr>
 <tr>
 <td><code>GEMINI_API_KEY</code></td>
 <td><code>None</code></td>
-<td>Google Gemini API key (auto-sets base URL + model)</td>
+<td>Google Gemini API key, from the notebook's environment (auto-sets base URL + model)</td>
 </tr>
 <tr>
 <td><code>MISTRAL_API_KEY</code></td>
 <td><code>None</code></td>
-<td>Mistral API key (auto-sets base URL + model)</td>
+<td>Mistral API key, from the notebook's environment (auto-sets base URL + model)</td>
 </tr>
 </tbody>
 </table>
-<p>Provider-specific keys auto-configure <code>base_url</code> and <code>model</code> defaults.
-<code>STRATA_AI_*</code> variables override provider defaults. Notebook-level <code>[ai]</code>
-config in <code>notebook.toml</code> overrides both. In service mode a <code>base_url</code> from
+<p>Precedence, highest first: <code>[ai]</code> in <code>notebook.toml</code>, then a provider key in
+the notebook's environment, then the server's <code>STRATA_AI_*</code>. A provider key
+also sets its provider's <code>base_url</code> and <code>model</code>, so it replaces the server's
+<code>STRATA_AI_BASE_URL</code> and <code>STRATA_AI_MODEL</code> too. In service mode a <code>base_url</code> from
 <code>notebook.toml</code> is checked like an <code>@fetch</code> URL: a private, loopback or
 link-local address is refused unless its host is in
 <code>STRATA_NOTEBOOK_FETCH_ALLOWED_HOSTS</code>. <code>STRATA_AI_BASE_URL</code> is the operator's
