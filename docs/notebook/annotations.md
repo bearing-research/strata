@@ -137,19 +137,10 @@ embeddings = model.encode(abstracts, batch_size=256)
 
 Useful for cells that download data, train models, or call slow external APIs. The timeout applies to the full execution including any remote worker round-trip.
 
-!!! warning "Prompt-cell timeout vs AI API timeout"
-    Prompt cells have two timeouts that can collide silently. The
-    cell-level `# @timeout` (default **300 s**) wraps the whole cell;
-    the AI API call inside has its own timeout from
-    `STRATA_AI_TIMEOUT_SECONDS` / `[ai] timeout_seconds` in
-    `notebook.toml` (default **60 s**).
-
-    With defaults, the cell-level wrap fires first and you get a
-    cell timeout while the API call would have succeeded eventually.
-    Set `# @timeout` on prompt cells to at least
-    `STRATA_AI_TIMEOUT_SECONDS + a few seconds of slack` (e.g.
-    `# @timeout 90`), or lower `STRATA_AI_TIMEOUT_SECONDS` to match
-    the cell budget.
+`@timeout` does not apply to prompt or SQL cells. A prompt cell's model call
+is bounded by `[ai] timeout_seconds` in `notebook.toml`, or the server's
+`STRATA_AI_TIMEOUT_SECONDS` (default 60 s); a SQL cell's deadline is set at
+the connection.
 
 ---
 
@@ -208,7 +199,8 @@ Format: `# @mount <name> <uri> [ro|rw] [credential=<name>]`. Defaults to `ro` (r
 
 Declare a URL the cell reads. The bytes are downloaded into the notebook's
 cache and **their digest becomes part of the cell's provenance**, so the cell
-goes stale when the URL starts serving something else - instead of the URL
+goes out of date (idle) and its downstream cells stale when the URL starts
+serving something else - instead of the URL
 string being in the source hash and the bytes being in nothing.
 
 ```python
@@ -249,7 +241,7 @@ connection goes only to an address that passed the check, so a name cannot
 pass with a public address and then connect to `127.0.0.1`; for the same
 reason service mode fetches directly and ignores `HTTPS_PROXY`. Personal
 mode allows those addresses, so `http://localhost:8000/data.csv` works on your
-own machine, and uses the proxy settings as usual. A URL that cannot be checked shows the cell as stale, and running
+own machine, and uses the proxy settings as usual. A URL that cannot be checked shows the cell as out of date, and running
 it fails with the reason. A cell with `@fetch` runs on its own in Run All rather
 than in a batch.
 
@@ -263,8 +255,9 @@ on `<name>`.
 ## @dataset
 
 Declare a registry name the cell reads. The name resolves to one artifact
-version, and **that version becomes part of the cell's provenance**, so a cell
-that reads the team's champion model goes stale when `champion` moves. Resolving
+version, and **that version becomes part of the cell's provenance**, so when
+`champion` moves, a cell that reads the team's champion model goes out of date
+(idle) and its downstream cells stale. Resolving
 the name with the `strata` client inside the cell records nothing: the name is
 in the source hash and the version is in nothing.
 
@@ -275,11 +268,12 @@ predictions = model.predict(features)
 
 Format: `# @dataset <name> <registry-name>[@<alias>|@v=<n>]`.
 
-- **`taxi/model@champion`** follows the alias. The cell goes stale when the
-  alias points somewhere else.
+- **`taxi/model@champion`** follows the alias. The cell goes out of date when
+  the alias points somewhere else.
 - **`taxi/model`** follows the name pointer the same way.
 - **`taxi/model@v=3`** pins version 3 of the artifact the name points at. A
-  pinned dataset never makes the cell stale, as `snapshot=` does for `@table`.
+  pinned dataset never makes the cell out of date, as `snapshot=` does for
+  `@table`.
 
 The server resolves the name in its own registry, or in the team store when
 `STRATA_NOTEBOOK_REMOTE_STORE_URL` is set. The version is copied into the
@@ -294,7 +288,7 @@ walks from a downstream result through the cell to the named version.
 
 The registry is asked at most once a minute while staleness is being
 recomputed, and always right before the cell runs. A name that does not
-resolve shows the cell as stale, and running it fails with the reason. A cell
+resolve shows the cell as out of date, and running it fails with the reason. A cell
 with `@dataset` runs on its own in Run All rather than in a batch. `@loop` and
 R cells cannot declare one; read the dataset in an upstream Python cell.
 
@@ -302,7 +296,8 @@ R cells cannot declare one; read the dataset in an upstream Python cell.
 
 Declare an Iceberg table input. The table's current snapshot id becomes part
 of the cell's provenance: **when new data lands in the table, the cell goes
-stale and the normal cascade machinery re-runs it** - no manual data-version
+out of date (idle), its downstream cells go stale, and the normal cascade
+machinery re-runs them** - no manual data-version
 bookkeeping. For an end-to-end walkthrough (build a warehouse, scan it,
 retrain on new data, pin a snapshot), see
 [Lake-Aware Cells](lake-aware-cells.md).
@@ -339,7 +334,7 @@ Catalogs are named on the server, not in `notebook.toml`, because the scan the
 cell runs happens in the server and has to resolve the same name.
 
 `snapshot=<id>` pins the table: the cell reads that snapshot forever and never
-goes stale on new data (the lake-side analog of a mount `pin`). Without a pin,
+goes out of date on new data (the lake-side analog of a mount `pin`). Without a pin,
 the snapshot is re-resolved every time staleness is evaluated.
 
 Like mount variables, the injected names live only in the declaring cell's
@@ -348,7 +343,7 @@ To use the snapshot id downstream, export it as a real variable:
 `scanned_snapshot = trips_snapshot`.
 
 If the catalog is unreachable when provenance is computed, the cell is
-conservatively treated as stale; if it is still unreachable at execution time,
+conservatively treated as out of date; if it is still unreachable at execution time,
 the run fails with a clear error.
 
 ## @nocache
@@ -494,6 +489,9 @@ Key/value parameters:
   stored iteration `k`. Useful for forking a converged run to explore a
   variant. `<cell-id>` is the upstream loop cell's `id` in
   `notebook.toml` (not its `@name`) - see [Cell IDs](#cell-ids).
+- `until=<expr>`, (optional) the same early exit as `@loop_until`, inline.
+  Parameters are split on whitespace, so the expression cannot contain a
+  space (`until=acc["loss"]<0.05`); use `@loop_until` for anything longer.
 
 ### `@loop_until`
 
@@ -801,6 +799,21 @@ exist.)
 
 ---
 
+## Widget and App View Annotations
+
+### `@live`
+
+On a [widget cell](cells.md#widget-cells), `# @live` makes a control change
+auto-run the cheap downstream cells instead of only marking them stale.
+`# @live off` turns it back off. See [Live mode](cells.md#live-mode).
+
+### `@app hide`
+
+`# @app hide` keeps a cell out of the read-only [app view](cells.md#app-view),
+for a setup cell whose output is noise. It applies to any cell.
+
+---
+
 ## Cross-Cell Ordering
 
 ### `@after`
@@ -839,7 +852,7 @@ When the same setting is configured at multiple levels, the most specific wins:
 | Setting | Annotation | Cell config (notebook.toml) | Notebook default |
 |---------|-----------|---------------------------|-----------------|
 | **Worker** | `# @worker X` | `cell.worker` field | `notebook.worker` field |
-| **Timeout** | `# @timeout N` | `cell.timeout` field | 300 seconds |
+| **Timeout** | `# @timeout N` | `cell.timeout` field | `notebook.timeout` field, else 300 seconds |
 | **Env vars** | `# @env K=V` | `cell.env` overrides | `notebook.env` defaults |
 | **Mounts** | `# @mount ...` | `cell.mounts` overrides | `notebook.mounts` defaults |
 | **SQL connection** | `# @sql connection=X` | (annotation only) | none; required for SQL cells |
