@@ -13,8 +13,8 @@
 #   curl http://localhost:8765/metrics/prometheus
 #   curl http://localhost:8765/health
 #
-# Run load test to generate traces:
-#   uv run python benchmarks/capacity_sweep.py --dry-run --no-server --base-url http://localhost:8765
+# Generate traces: run a few scan@v1 materializes against a table under
+# /data/warehouse (see docs/deployment/observability.md, "Generating load").
 
 services:
   # Strata server with tracing enabled
