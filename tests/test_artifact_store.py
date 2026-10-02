@@ -489,7 +489,8 @@ class TestForeignKeyEnforcement:
         conn = store._get_connection()
         try:
             conn.execute(
-                "UPDATE artifact_versions SET created_at = 0 WHERE id = ? AND version = 1",
+                "UPDATE artifact_versions SET created_at = 0, last_used_at = 0 "
+                "WHERE id = ? AND version = 1",
                 ("art-1",),
             )
             conn.commit()

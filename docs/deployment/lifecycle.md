@@ -111,8 +111,8 @@ A version is collected only when nothing holds it:
   built from. A notebook stores each cell output under its own id and reads the
   latest version back, so that version stays. An id the store made up for one
   `materialize` has no such value;
-- it has not been used in the last hour: a cache hit, a read of its data, or a
-  request that names it as an input all count.
+- it has not been used in the last hour: finishing its build, a cache hit, a
+  read of its data, or a request that names it as an input all count.
 
 So **an unnamed result is a cache entry**. Its URI keeps working while it is
 used, and once it is collected the same request computes it again. To keep a

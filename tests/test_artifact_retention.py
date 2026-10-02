@@ -83,7 +83,7 @@ class TestUse:
     def test_a_provenance_hit_is_a_use(self, store):
         key = _ready(store)
         provenance = store.get_artifact(*key).provenance_hash
-        assert _row(store, *key)["last_used_at"] is None
+        _set(store, *key, last_used_at=None)
 
         store.find_by_provenance(provenance)
 
@@ -92,6 +92,7 @@ class TestUse:
     @pytest.mark.parametrize("read", ["read_blob", "open_blob_reader"])
     def test_reading_the_bytes_is_a_use(self, store, read):
         key = _ready(store)
+        _set(store, *key, last_used_at=None)
 
         result = getattr(store, read)(*key)
         if read == "open_blob_reader":
@@ -113,6 +114,7 @@ class TestUse:
     def test_hashing_the_bytes_is_not_a_use(self, store):
         """Finalize and verify hash every version; neither is anyone using it."""
         key = _ready(store)  # finalize computed the digest
+        _set(store, *key, last_used_at=None)
 
         store.blob_digest(*key)
         store.verify_artifacts()
@@ -135,10 +137,45 @@ class TestUse:
             def __getattr__(self, name):
                 return getattr(self._conn, name)
 
+        _set(store, *key, last_used_at=None)
         monkeypatch.setattr(store, "_get_connection", lambda: Refusing(real()))
 
         assert store.read_blob(*key) == b"x" * 100
         assert _row(store, *key)["last_used_at"] is None
+
+    @pytest.mark.parametrize("finalize", ["finalize_artifact", "finalize_and_set_name"])
+    def test_finishing_a_build_is_a_use(self, store, finalize):
+        """A build that ran for hours must not finalize looking idle since it started, the first
+        thing a sweep under the byte cap would collect.
+        """
+        artifact_id = str(uuid.uuid4())
+        version = store.create_artifact(artifact_id, "prov-long", minted=True)
+        _set(store, artifact_id, version, created_at=time.time() - 3 * 3600)
+        store.write_blob(artifact_id, version, b"x" * 100)
+
+        getattr(store, finalize)(artifact_id, version, "{}", 1, 100)
+
+        assert _row(store, artifact_id, version)["last_used_at"] == pytest.approx(
+            time.time(), abs=60
+        )
+        assert store.garbage_collect(max_bytes=50, min_idle_seconds=3600)["deleted_count"] == 0
+
+    def test_a_canonical_promotion_is_a_use(self, store):
+        """A notebook output deduped against another id and promoted back is as fresh."""
+        store.create_artifact("nb_a_cell_c_var_x", "prov-shared")
+        store.write_blob("nb_a_cell_c_var_x", 1, b"x")
+        store.finalize_artifact("nb_a_cell_c_var_x", 1, "{}", 1, 1)
+        store.create_artifact("nb_b_cell_c_var_x", "prov-shared")
+        _set(store, "nb_b_cell_c_var_x", 1, created_at=0.0)
+        store.write_blob("nb_b_cell_c_var_x", 1, b"x")
+        deduped = store.finalize_artifact("nb_b_cell_c_var_x", 1, "{}", 1, 1)
+        assert deduped.id == "nb_a_cell_c_var_x"
+
+        store.force_finalize_canonical("nb_b_cell_c_var_x", 1, "{}", 1, 1)
+
+        assert _row(store, "nb_b_cell_c_var_x", 1)["last_used_at"] == pytest.approx(
+            time.time(), abs=60
+        )
 
 
 class TestMinted:

@@ -509,7 +509,7 @@ CREATE TABLE IF NOT EXISTS artifact_versions (
     principal TEXT,  -- Principal ID that created this artifact
     content_sha256 TEXT,  -- Digest of the stored bytes (see migration 1)
     blob_attempt TEXT,  -- Build attempt whose bytes this reads; NULL = shared key (migration 4)
-    last_used_at REAL,  -- Last hit or read; NULL = never since created (migration 6)
+    last_used_at REAL,  -- Last finalize, hit or read; NULL reads as created_at (migration 6)
     minted INTEGER NOT NULL DEFAULT 0,  -- 1 = the store made up the id (migration 6)
     PRIMARY KEY (id, version)
 );
@@ -1368,10 +1368,21 @@ class ArtifactStore:
                     """
                     UPDATE artifact_versions
                     SET state = 'ready', schema_json = ?, row_count = ?, byte_size = ?,
-                        content_sha256 = ?, blob_attempt = ?
+                        content_sha256 = ?, blob_attempt = ?, last_used_at = ?
                     WHERE id = ? AND version = ? AND state = 'building'
                     """,
-                    (schema_json, row_count, byte_size, digest, blob_attempt, artifact_id, version),
+                    (
+                        schema_json,
+                        row_count,
+                        byte_size,
+                        digest,
+                        blob_attempt,
+                        # Idle time counts from now: a long build would otherwise finalize
+                        # looking idle since it started and be the first a sweep collects.
+                        time.time(),
+                        artifact_id,
+                        version,
+                    ),
                 )
                 if cursor.rowcount == 0:
                     # Another process may have finalized it.
@@ -1596,10 +1607,11 @@ class ArtifactStore:
                     SET state = 'ready',
                         schema_json = ?,
                         row_count = ?,
-                        byte_size = ?
+                        byte_size = ?,
+                        last_used_at = ?
                     WHERE id = ? AND version = ? AND state = 'failed'
                     """,
-                    (schema_json, row_count, byte_size, artifact_id, version),
+                    (schema_json, row_count, byte_size, time.time(), artifact_id, version),
                 )
                 conn.commit()
                 break
@@ -1719,10 +1731,18 @@ class ArtifactStore:
                     """
                     UPDATE artifact_versions
                     SET state = 'ready', schema_json = ?, row_count = ?, byte_size = ?,
-                        blob_attempt = ?
+                        blob_attempt = ?, last_used_at = ?
                     WHERE id = ? AND version = ? AND state = 'building'
                     """,
-                    (schema_json, row_count, byte_size, blob_attempt, artifact_id, version),
+                    (
+                        schema_json,
+                        row_count,
+                        byte_size,
+                        blob_attempt,
+                        time.time(),
+                        artifact_id,
+                        version,
+                    ),
                 )
                 if cursor.rowcount == 0:
                     # Another process may have finalized it.
