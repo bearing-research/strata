@@ -1214,11 +1214,12 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="strata-worker",
         description=(
-            "Run a Strata notebook worker — an HTTP endpoint that accepts "
-            "cells and returns their outputs. Cells run in the Python "
-            "environment this process was started in, so install your "
-            "workload dependencies (pandas, torch, datafusion, ...) before "
-            "launching."
+            "Run a Strata notebook worker: an HTTP endpoint that accepts "
+            "cells and returns their outputs. With uv on PATH, a cell from a "
+            "notebook with a uv.lock runs in that locked environment, built "
+            "once per lock. Otherwise cells run in the Python environment "
+            "this process was started in, so install your workload "
+            "dependencies (pandas, torch, datafusion, ...) before launching."
         ),
     )
     parser.add_argument("--host", default="0.0.0.0", help="Bind host (default: 0.0.0.0)")

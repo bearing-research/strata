@@ -273,6 +273,7 @@ Only a small set of methods is permitted (`describe`, `head`, `tail` on pandas o
 | `# @output json\|text`   | Coerce the response to JSON (or keep as free-form text)                   | `text`               |
 | `# @output_schema {…}`   | Inline JSON Schema pinning the response shape                             | None                 |
 | `# @validate_retries N`  | Total attempts for the validate-and-retry loop (1 initial + N−1 retries)  | `3`                  |
+| `# @nocache`             | Call the model on every run; never serve a cache hit                      | Cache on             |
 
 Example using several at once:
 
@@ -662,6 +663,7 @@ The [`sql_orders_report`](../examples/sql_orders_report.md) example notebook wal
 | --------------------------------------- | ----------------------------------------------------- |
 | `# @sql connection=<name> [write=true]` | Mark the cell as SQL; reference a declared connection |
 | `# @cache <policy>`                     | Override the default `fingerprint` cache policy       |
+| `# @nocache`                            | Always re-execute; wins over any `# @cache` policy    |
 | `# @name <identifier>`                  | Name the output variable (default: `result`)          |
 | `# @after <cell-id>`                    | Add an ordering-only DAG edge to an upstream cell     |
 

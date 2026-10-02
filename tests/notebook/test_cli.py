@@ -502,6 +502,48 @@ class TestNew:
         assert _new("../escape", tmp_path) == 2
 
 
+class TestWidgetCells:
+    """``strata run`` executes widget cells like the session does, not as unsupported."""
+
+    def test_widget_cell_runs_and_feeds_downstream(self, tmp_path, capsys):
+        from strata.notebook.writer import add_cell_to_notebook, write_cell
+
+        notebook_dir = _build_notebook(tmp_path, cells=[])
+        add_cell_to_notebook(notebook_dir, "controls", None, language="widget")
+        write_cell(notebook_dir, "controls", "alpha = slider(0, 10, default=3)\n")
+        add_cell_to_notebook(notebook_dir, "doc", "controls", language="markdown")
+        write_cell(notebook_dir, "doc", "# Notes\n")
+        add_cell_to_notebook(notebook_dir, "consume", "doc")
+        write_cell(notebook_dir, "consume", "beta = alpha * 2\nprint(beta)\n")
+        _mk_fake_venv(notebook_dir)
+
+        exit_code = run_main([str(notebook_dir), "--no-sync", "--format", "json"])
+
+        payload = json.loads(capsys.readouterr().out)
+        assert exit_code == 0, payload
+        by_id = {c["id"]: c for c in payload["cells"]}
+        assert by_id["controls"]["status"] == "ok", by_id["controls"]
+        assert by_id["controls"]["outputs"][0]["name"] == "alpha"
+        assert by_id["doc"]["status"] == "ok"
+        assert by_id["consume"]["status"] == "ok", by_id["consume"]
+        assert by_id["consume"]["stdout"] == "6\n"
+
+    def test_human_summary_counts_the_widget_cell_as_ran(self, tmp_path, capsys):
+        from strata.notebook.writer import add_cell_to_notebook, write_cell
+
+        notebook_dir = _build_notebook(tmp_path, cells=[])
+        add_cell_to_notebook(notebook_dir, "controls", None, language="widget")
+        write_cell(notebook_dir, "controls", "alpha = slider(0, 10, default=3)\n")
+        _mk_fake_venv(notebook_dir)
+
+        assert run_main([str(notebook_dir), "--no-sync"]) == 0
+
+        out = capsys.readouterr().out
+        assert "unsupported language" not in out
+        assert "skipped" not in out
+        assert "1 ran" in out
+
+
 # Round-trip contract: a notebook hand-written from the docs alone (no writer
 # helpers, no server) parses, validates, and runs.
 

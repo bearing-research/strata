@@ -29,6 +29,23 @@ _BUILTIN_WORKER_NAMES = frozenset({"local"})
 _SUPPORTED_MOUNT_SCHEMES = frozenset({"file", "s3", "gs", "gcs", "az", "azure"})
 
 
+def _table_uri_malformed(uri: str) -> bool:
+    """True when the scan could not name the table, by the parse ``table_identity_for`` uses.
+
+    The named-catalog split is skipped: a catalog name holds no dot, so the
+    ``<namespace>.<table>`` check passes or fails the same either way.
+    """
+    from strata.iceberg import PyIcebergCatalog
+    from strata.types import TableIdentity
+
+    _warehouse, table_id = PyIcebergCatalog.parse_table_uri(uri)
+    try:
+        TableIdentity.from_table_id(table_id)
+    except ValueError:
+        return True
+    return False
+
+
 def validate_cell_annotations(
     cell: CellState,
     notebook_state: NotebookState,
@@ -109,15 +126,15 @@ def validate_cell_annotations(
     for table in annotations.tables:
         line = _find_annotation_line(cell.source, "table", table.name)
 
-        # table_uri_malformed: must be <warehouse>#<namespace>.<table>
-        if "#" not in table.uri or not table.uri.split("#", 1)[1]:
+        if _table_uri_malformed(table.uri):
             diagnostics.append(
                 AnnotationDiagnostic(
                     severity=DiagnosticSeverity.WARN,
                     code="table_uri_malformed",
                     message=(
                         f"`@table {table.name}` URI should be "
-                        "`<warehouse>#<namespace>.<table>` "
+                        "`<warehouse>#<namespace>.<table>`, "
+                        "`<catalog>:<namespace>.<table>` or `<namespace>.<table>` "
                         "(e.g. file:///data/warehouse#nyc.trips)."
                     ),
                     line=line,

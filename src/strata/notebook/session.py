@@ -84,6 +84,7 @@ from strata.notebook.workers import (
 from strata.notebook.writer import (
     _renv_sync,
     _uv_sync,
+    drop_blanked_secrets,
     update_cell_display_outputs,
     update_environment_metadata,
 )
@@ -2017,7 +2018,7 @@ class NotebookSession:
         does not invalidate it.
         """
         annotations = parse_annotations(cell.source)
-        resolved = dict(cell.env)
+        resolved = drop_blanked_secrets(cell.env)
         resolved.update(annotations.env)
         declared = set(annotations.env) | set(getattr(cell, "env_overrides", {}) or {})
         return narrow_env_for_provenance(cell.source, resolved, declared)

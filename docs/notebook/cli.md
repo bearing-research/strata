@@ -26,6 +26,9 @@ UI works with; you can pass any notebook directory from `STRATA_NOTEBOOK_STORAGE
 or anywhere else on the filesystem. `strata run` is **local-only** - it does
 not talk to a running `strata-notebook` or a service-mode deployment. Each
 invocation opens its own `NotebookSession`, runs the cells, and exits.
+Python, R, SQL, prompt and widget cells all run (a widget cell stores its
+controls' current values); markdown cells are reported as `ok` with nothing to
+run.
 
 ### Options
 

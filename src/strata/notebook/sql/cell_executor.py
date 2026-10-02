@@ -68,6 +68,9 @@ async def execute_sql_cell(
 
     # ---- annotations + connection resolution ----------------------
     annotations = parse_annotations(source)
+    # Above every @cache policy, forever included.
+    if annotations.nocache:
+        use_cache = False
     if annotations.sql is None or not annotations.sql.connection:
         return _error_result(
             "SQL cell is missing `# @sql connection=<name>`.",

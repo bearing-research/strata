@@ -288,6 +288,7 @@ async def _run_async(args: argparse.Namespace) -> int:
                 CellLanguage.PROMPT,
                 CellLanguage.SQL,
                 CellLanguage.R,
+                CellLanguage.WIDGET,
             }:
                 entry = {
                     "id": cell_id,

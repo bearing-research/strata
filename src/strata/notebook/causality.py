@@ -15,6 +15,7 @@ from strata.notebook.annotations import parse_annotations
 from strata.notebook.env import compute_execution_env_hash, narrow_env_for_provenance
 from strata.notebook.provenance import compute_provenance_hash, compute_source_hash
 from strata.notebook.workers import worker_runtime_identity
+from strata.notebook.writer import drop_blanked_secrets
 
 if TYPE_CHECKING:
     from strata.notebook.session import NotebookSession
@@ -89,7 +90,7 @@ def compute_causality_on_staleness(
         details: list[CausalityDetail] = []
         annotations = parse_annotations(cell.source)
         source_hash = compute_source_hash(cell.source)
-        runtime_env = dict(cell.env)
+        runtime_env = drop_blanked_secrets(cell.env)
         runtime_env.update(annotations.env)
         declared_env_keys = set(annotations.env) | set(cell.env_overrides or {})
         provenance_env = narrow_env_for_provenance(cell.source, runtime_env, declared_env_keys)

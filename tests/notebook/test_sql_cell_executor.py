@@ -185,6 +185,38 @@ async def test_sql_cell_cache_hit_on_unchanged_inputs(tmp_path):
     assert first["artifact_uri"] == second["artifact_uri"]
 
 
+@pytest.mark.parametrize(
+    "cell_source",
+    [
+        "# @sql connection=db\n# @cache forever\n# @nocache\nSELECT * FROM events\n",
+        "# @sql connection=db write=true\n# @nocache\n"
+        "INSERT INTO events (name, value) VALUES ('d', 40)\n",
+    ],
+    ids=["read-cache-forever", "write"],
+)
+@pytest.mark.asyncio
+async def test_sql_cell_nocache_reruns_every_time(tmp_path, cell_source):
+    """``# @nocache`` outranks every ``# @cache`` policy, including forever and write cells."""
+    db_path = tmp_path / "events.db"
+    _seed_sqlite(db_path)
+    nb_dir = _build_notebook_with_sql_cell(tmp_path, db_path=db_path, cell_source=cell_source)
+    session = _make_session(nb_dir)
+
+    from strata.notebook.sql.cell_executor import execute_sql_cell
+
+    src = _read_cell(nb_dir, "c1")
+    first = await execute_sql_cell(session, "c1", src)
+    second = await execute_sql_cell(session, "c1", src)
+
+    assert first["success"] and second["success"], (first.get("error"), second.get("error"))
+    assert first["cache_hit"] is False
+    assert second["cache_hit"] is False
+    assert second["execution_method"] == "sql"
+    if "INSERT" in cell_source:
+        with sqlite3.connect(db_path) as conn:
+            assert conn.execute("SELECT COUNT(*) FROM events WHERE name = 'd'").fetchone() == (2,)
+
+
 @pytest.mark.asyncio
 async def test_sql_cell_fingerprint_invalidates_on_schema_change(tmp_path):
     """External DDL changes SQLite's ``schema_version``, so the next run re-executes.

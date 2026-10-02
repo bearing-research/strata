@@ -287,9 +287,10 @@ class StrataConfig(BaseSettings):
     # defence; the browser runs there too.
     cors_allow_origins: list[str] = []
     # Mount the MCP server at ``/mcp`` so an external coding agent can drive the live session over
-    # streamable HTTP. PERSONAL MODE ONLY: it exposes the loopback API's read/run/author surface
-    # with no per-request auth (enforced in ``validate_mode_coherence``). Needs the ``[mcp]`` extra;
-    # without it the flag warns and no-ops.
+    # streamable HTTP. It exposes the read/run/author surface, so ``validate_mode_coherence``
+    # allows it in personal mode without ``personal_mode_user_header``, or in service mode only
+    # with principal auth, where each tool call is checked against its caller's scopes. Needs the
+    # ``[mcp]`` extra; without it the flag warns and no-ops.
     mcp_enabled: bool = False
     # Request header naming the calling user when a personal-mode deployment sits behind an
     # authenticating proxy (Cloudflare Access, Pomerium, etc.). Notebooks are stamped with the

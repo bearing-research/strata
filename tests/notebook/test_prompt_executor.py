@@ -402,6 +402,30 @@ async def test_cache_hit_emits_no_deltas(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_nocache_prompt_cell_calls_the_model_every_run(tmp_path):
+    """``# @nocache`` skips the cache hit, so an identical rerun asks the model again."""
+    from strata.notebook.llm import LlmConfig
+    from strata.notebook.prompt_executor import execute_prompt_cell
+
+    session = _prompt_session(tmp_path, "# @nocache\nTell me something.")
+    fake, calls = _fake_stream_returning("first answer", "second answer")
+    cfg = LlmConfig(base_url="https://api.openai.com/v1", api_key="sk", model="m")
+
+    on_delta, _frames = _delta_collector()
+    source = session.notebook_state.cells[0].source
+    with mock.patch("strata.notebook.prompt_executor.chat_completion_stream", fake):
+        first = await execute_prompt_cell(session, "p1", source, cfg, on_delta=on_delta)
+        second = await execute_prompt_cell(session, "p1", source, cfg, on_delta=on_delta)
+
+    assert first["cache_hit"] is False
+    assert second["cache_hit"] is False
+    assert len(calls) == 2
+    assert second["display_output"].get("scalar") == "second answer"
+    # The directive is not part of the prompt sent to the model.
+    assert "@nocache" not in calls[0]["messages"][-1]["content"]
+
+
+@pytest.mark.asyncio
 async def test_on_delta_failure_does_not_fail_cell(tmp_path):
     """A broken WS callback is logged and swallowed; the cell still stores its artifact."""
     from strata.notebook.llm import LlmConfig

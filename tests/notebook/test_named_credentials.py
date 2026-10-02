@@ -33,6 +33,14 @@ class TestResolution:
             "anon": "false",
         }
 
+    def test_a_blanked_secret_in_the_notebook_env_falls_through_to_the_server(self, monkeypatch):
+        """notebook.toml blanks secret values on disk; the placeholder is not an override."""
+        monkeypatch.setenv("LAB_KEY", "server-key")
+        monkeypatch.setenv("LAB_SECRET", "server-secret")
+        resolver = CredentialResolver(REGISTRY, env={"LAB_KEY": "", "LAB_SECRET": ""})
+
+        assert resolver.resolve("lab-bucket")["secret"] == "server-secret"
+
     def test_an_unknown_name_is_named(self):
         with pytest.raises(CredentialError, match="'nope'"):
             CredentialResolver(REGISTRY).resolve("nope")

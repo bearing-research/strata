@@ -13,6 +13,7 @@ import logging
 import time
 from typing import TYPE_CHECKING, Any
 
+from strata.notebook.annotations import parse_annotations
 from strata.notebook.llm import (
     LlmCompletionResult,
     LlmConfig,
@@ -196,6 +197,8 @@ async def execute_prompt_cell(
     start_time = time.time()
     analysis = analyze_prompt_cell(source)
     output_name = analysis.name
+    if parse_annotations(source).nocache:
+        use_cache = False
 
     model = analysis.model or llm_config.model
     temperature = analysis.temperature if analysis.temperature is not None else 0.0

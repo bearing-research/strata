@@ -698,6 +698,57 @@ token = os.getenv("NOTEBOOK_TOKEN")
         assert result.outputs["token"]["preview"] == "saved-default"
 
     @pytest.mark.asyncio
+    async def test_blanked_secret_on_disk_does_not_mask_server_env(
+        self, tmp_path, monkeypatch: pytest.MonkeyPatch
+    ):
+        """A sensitive key blanked in notebook.toml leaves the server's value visible.
+
+        An empty non-sensitive value is still an intentional override.
+        """
+        from strata.notebook.writer import (
+            add_cell_to_notebook,
+            create_notebook,
+            update_notebook_env,
+        )
+
+        monkeypatch.setenv("STRATA_TEST_API_KEY", "server-secret")
+        monkeypatch.setenv("STRATA_TEST_PLAIN", "server-plain")
+        notebook_dir = create_notebook(tmp_path, "Env Notebook")
+        add_cell_to_notebook(notebook_dir, "cell1", None)
+        add_cell_to_notebook(notebook_dir, "cell2", "cell1")
+        update_notebook_env(
+            notebook_dir,
+            {"STRATA_TEST_API_KEY": "typed-secret", "STRATA_TEST_PLAIN": "", "OTHER": "x"},
+        )
+        toml_text = (notebook_dir / "notebook.toml").read_text()
+        assert 'STRATA_TEST_API_KEY = ""' in toml_text
+
+        session = NotebookSession(parse_notebook(notebook_dir), notebook_dir)
+        session.refresh_environment_runtime()
+        # The key name stays for re-entry in the UI.
+        assert session.notebook_state.env["STRATA_TEST_API_KEY"] == ""
+
+        source = """
+import os
+secret = os.environ.get("STRATA_TEST_API_KEY")
+plain = os.environ.get("STRATA_TEST_PLAIN")
+"""
+        cell = next(c for c in session.notebook_state.cells if c.id == "cell1")
+        cell.source = source
+        # A consumer, so cell1's outputs are stored and staleness can report ready.
+        consumer = next(c for c in session.notebook_state.cells if c.id == "cell2")
+        consumer.source = "pair = (secret, plain)"
+        session.re_analyze_cell("cell1")
+        session.re_analyze_cell("cell2")
+        result = await CellExecutor(session).execute_cell("cell1", source)
+
+        assert result.success is True, result.error
+        assert result.outputs["secret"]["preview"] == "server-secret"
+        assert result.outputs["plain"]["preview"] == ""
+        # Staleness drops the blanked key too, so the cell is not stale forever.
+        assert session.compute_staleness()["cell1"].status.value == "ready"
+
+    @pytest.mark.asyncio
     async def test_execute_uses_timeout_annotation(
         self,
         sample_notebook,

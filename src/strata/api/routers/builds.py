@@ -129,14 +129,12 @@ async def get_build_manifest(build_id: str, request: Request, build_store: Build
 
     state = get_state()
 
-    # This route mints capabilities (signed upload + finalize URLs), and nothing binds
-    # the uploaded bytes to the executor's identity. Service mode with auth_mode="none"
-    # passes the coherence check, so without trusted-proxy auth anyone who learned a
-    # build id could upload forged bytes that later identical materializes serve as a
-    # dedup hit. ``_authorize_build_access`` returns early outside trusted_proxy.
-    # Only minting is gated: redeeming stays authorized by the signature alone, since a
-    # pull-model worker holds a capability, not a principal. Personal mode is exempt
-    # (single operator, loopback-bound by default).
+    # A manifest mints signed upload and finalize URLs, a write capability, so it follows the
+    # write rules: open where writes_enabled (personal mode, as require_writes_enabled), and in
+    # service mode only under trusted-proxy auth (as service_writes_enabled). Nothing binds the
+    # uploaded bytes to the executor, so an unchecked caller could upload forged bytes that later
+    # identical materializes serve as a dedup hit. Redeeming needs only the signature, since a
+    # pull-model worker holds a capability, not a principal.
     if not state.config.writes_enabled and state.config.auth_mode != "trusted_proxy":
         raise HTTPException(
             status_code=404,
