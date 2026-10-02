@@ -722,7 +722,8 @@ class TestTheCliOnAPostgresStore:
             assert cmd_archive(args) == 0
 
             artifact = store.get_artifact("fig", version)
-            assert out.read_bytes() == bundle_zip(store, artifact, publication=publication)
+            bundle_zip(store, artifact, tmp_path / "direct.zip", publication=publication)
+            assert out.read_bytes() == (tmp_path / "direct.zip").read_bytes()
         finally:
             dialect.close()
 

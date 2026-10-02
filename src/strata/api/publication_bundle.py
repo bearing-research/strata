@@ -7,10 +7,13 @@ digest, needing no server. ``strata artifact archive`` and
 
 from __future__ import annotations
 
+import dataclasses
 import hashlib
-import io
 import json
+import os
+import shutil
 import tempfile
+import uuid
 import zipfile
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -137,6 +140,13 @@ def write_bundle(
     return written
 
 
+# A tabular artifact larger than this is archived without its Parquet copy. Fixed, so a
+# publication's archive stays the same bytes on every build.
+PARQUET_COMPANION_MAX_BYTES = 128 * 1024 * 1024
+
+# Under the store's directory: each publication's built archive, in a directory per token.
+ARCHIVE_CACHE_DIRNAME = "publication-archives"
+
 # Every zip member gets this timestamp and these permissions, so two archives of
 # one publication are byte-identical (``ZipFile.write`` stamps each mtime).
 _ZIP_DATE_TIME = (1980, 1, 1, 0, 0, 0)
@@ -146,14 +156,16 @@ _ZIP_FILE_MODE = 0o644 << 16
 def bundle_zip(
     store: ArtifactStore,
     artifact: ArtifactVersion,
+    out: Path,
     *,
     publication: Publication,
     max_depth: int = 10,
     tenant: str | None = None,
-) -> bytes:
-    """The bundle as one zip, byte for byte the same each time it is built.
+) -> str:
+    """Write the bundle to *out* as one zip, byte for byte the same each time it is built.
 
-    Members are in :func:`write_bundle`'s reading order.
+    Members are in :func:`write_bundle`'s reading order, streamed from disk so an
+    artifact's size never sits in memory. Returns the zip's sha256 hex digest.
 
     Raises:
         ValueError: As :func:`write_bundle`.
@@ -163,14 +175,70 @@ def bundle_zip(
         written = write_bundle(
             store, artifact, dest, publication=publication, max_depth=max_depth, tenant=tenant
         )
-        buffer = io.BytesIO()
-        with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as bundle:
+        with (
+            open(out, "wb") as handle,
+            zipfile.ZipFile(handle, "w", zipfile.ZIP_DEFLATED) as bundle,
+        ):
             for name in written:
                 info = zipfile.ZipInfo(name, date_time=_ZIP_DATE_TIME)
                 info.compress_type = zipfile.ZIP_DEFLATED
                 info.external_attr = _ZIP_FILE_MODE
-                bundle.writestr(info, (dest / name).read_bytes())
-    return buffer.getvalue()
+                # Known up front, as ``writestr`` would set it, so the headers (and the
+                # zip64 decision) match an in-memory build exactly.
+                info.file_size = (dest / name).stat().st_size
+                with bundle.open(info, "w") as member, open(dest / name, "rb") as source:
+                    shutil.copyfileobj(source, member, 1024 * 1024)
+    digest = hashlib.sha256()
+    with open(out, "rb") as handle:
+        while chunk := handle.read(1024 * 1024):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def cached_bundle_zip(
+    store: ArtifactStore, artifact: ArtifactVersion, *, publication: Publication
+) -> tuple[Path, str]:
+    """The zip :func:`bundle_zip` builds for *publication*, built once and kept on disk.
+
+    Keyed by everything in the publication record, so editing its credits rebuilds it.
+    Returns ``(path, sha256 hex digest)``.
+
+    Raises:
+        ValueError: As :func:`write_bundle`.
+    """
+    record = {k: v for k, v in dataclasses.asdict(publication).items() if k != "revoked_at"}
+    key = hashlib.sha256(json.dumps(record, sort_keys=True, default=str).encode()).hexdigest()
+    cache_dir = _archive_cache_dir(store, publication.token)
+    prefix = f"{key[:32]}-"
+    cached = next(cache_dir.glob(f"{prefix}*.zip"), None)
+    if cached is not None:
+        return cached, cached.stem.removeprefix(prefix)
+
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    partial = cache_dir / f"{prefix}{uuid.uuid4().hex}.partial"
+    try:
+        digest = bundle_zip(store, artifact, partial, publication=publication)
+    except BaseException:
+        partial.unlink(missing_ok=True)
+        raise
+    final = cache_dir / f"{prefix}{digest}.zip"
+    os.replace(partial, final)
+    # An archive of an earlier record of this publication is never served again.
+    for stale in cache_dir.glob("*.zip"):
+        if stale != final:
+            stale.unlink(missing_ok=True)
+    return final, digest
+
+
+def drop_cached_bundles(store: ArtifactStore, token: str) -> None:
+    """Remove every cached archive of the publication *token*."""
+    cache_dir = _archive_cache_dir(store, token)
+    if cache_dir.exists():
+        shutil.rmtree(cache_dir)
+
+
+def _archive_cache_dir(store: ArtifactStore, token: str) -> Path:
+    return store.artifact_dir / ARCHIVE_CACHE_DIRNAME / token
 
 
 def _write_parquet_companion(
@@ -179,9 +247,14 @@ def _write_parquet_companion(
     """Write ``artifact.parquet`` beside the Arrow bytes, for tabular artifacts.
 
     Repositories index Parquet; the Arrow file stays as the archived, digested
-    bytes. Returns the filename, or ``None`` when the artifact is not tabular.
+    bytes. Returns the filename, or ``None`` when the artifact is not tabular or is
+    larger than :data:`PARQUET_COMPANION_MAX_BYTES`.
     """
     from strata.notebook.serializer import write_table_export
+
+    # The conversion holds the whole table in memory; past this the Arrow file stands alone.
+    if (store.blob_size(artifact.id, artifact.version) or 0) > PARQUET_COMPANION_MAX_BYTES:
+        return None
 
     reader_cm = store.open_blob_reader(artifact.id, artifact.version)
     if reader_cm is None:

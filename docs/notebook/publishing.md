@@ -229,7 +229,9 @@ figure3-bundle/
 A tabular artifact's bytes are Arrow IPC (`artifact.arrow`), and the bundle
 also carries `artifact.parquet`, the same rows in a format a data repository
 indexes. The manifest's digest covers the Arrow file; the Parquet file carries
-its own.
+its own. A table whose Arrow file is over 128 MiB is archived without the
+Parquet copy, since converting it holds the whole table in memory. The limit is
+fixed, so it never makes one publication's archive differ between builds.
 
 Deposit the directory with Zenodo or OSF and cite the DOI. The archive's
 retention promise then stands behind the link instead of yours.
@@ -245,7 +247,9 @@ implementation, because two implementations of a set of files that describe
 each other would drift and neither would stop producing a bundle. The response
 carries a `Content-Digest` of the zip, and the zip is the same bytes on every
 request, so a digest you record at deposit time can be checked against a later
-fetch.
+fetch. The server builds it once and keeps it under `publication-archives/` in
+the artifact directory: later requests send that file, editing the
+publication's authors or identifiers rebuilds it, and withdrawing deletes it.
 
 To build that zip from the store directly, name the publication rather than the
 artifact. The bundle then carries the publication's own record, with the

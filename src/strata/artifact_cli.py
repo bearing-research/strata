@@ -6,7 +6,6 @@ These work directly on the artifact store; no server is required.
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import os
 import sys
@@ -705,10 +704,13 @@ def cmd_archive(args: argparse.Namespace) -> int:
         if dest.exists() and not getattr(args, "force", False):
             print(f"{dest} exists. Use --force to replace it.")
             return 1
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        partial = dest.with_name(f".{dest.name}.partial")
         try:
-            payload = bundle_zip(
+            digest = bundle_zip(
                 store,
                 artifact,
+                partial,
                 publication=publication,
                 max_depth=args.max_depth,
                 tenant=getattr(args, "tenant", None),
@@ -716,9 +718,8 @@ def cmd_archive(args: argparse.Namespace) -> int:
         except ValueError as exc:
             print(f"Cannot archive: {exc}")
             return 1
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        dest.write_bytes(payload)
-        print(f"Wrote {dest} (sha256 {hashlib.sha256(payload).hexdigest()})")
+        os.replace(partial, dest)
+        print(f"Wrote {dest} (sha256 {digest})")
         return 0
 
     # A bundle's files describe each other (index.html and README.md name one payload and one

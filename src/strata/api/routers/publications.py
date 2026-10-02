@@ -11,13 +11,14 @@ public.
 
 from __future__ import annotations
 
+import asyncio
 import json
 from html import escape
 from typing import Literal
 from urllib.parse import quote
 
 from fastapi import APIRouter, HTTPException, Request, Response
-from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from strata.api.badge import badge_for
@@ -28,6 +29,7 @@ from strata.api.dependencies import (
     require_scope,
 )
 from strata.api.provenance_ld import build_crate
+from strata.api.publication_bundle import cached_bundle_zip, drop_cached_bundles
 from strata.api.publication_page import (
     build_record,
     content_type_of,
@@ -214,6 +216,7 @@ async def revoke_publication(
         token, tenant=tenant_filter, actor=principal.id if principal is not None else None
     ):
         raise HTTPException(status_code=404, detail="No active publication with that token")
+    drop_cached_bundles(store, token)
     return {"revoked": True, "token": token}
 
 
@@ -358,6 +361,10 @@ async def publication_data(token: str, store: ReadStore):
     return StreamingResponse(_iter_blob(), media_type=media_type, headers=headers)
 
 
+# One archive build per publication at a time; a second request waits for the first's file.
+_archive_locks: dict[str, asyncio.Lock] = {}
+
+
 @router.get("/p/{token}/archive.zip")
 async def publication_archive(token: str, store: ReadStore):
     """The self-contained bundle as a zip, as ``strata artifact archive`` writes it.
@@ -367,23 +374,23 @@ async def publication_archive(token: str, store: ReadStore):
     upstream bytes. A withdrawn publication gets a 410.
     """
     from base64 import b64encode
-    from hashlib import sha256
-
-    from strata.api.publication_bundle import bundle_zip
 
     publication, artifact = _load_published(store, token, require_active=True)
 
-    try:
-        payload = bundle_zip(store, artifact, publication=publication)
-    except ValueError as exc:
-        raise HTTPException(status_code=404, detail=str(exc))
+    # Built off the loop and once per publication record: anyone with the link can ask.
+    async with _archive_locks.setdefault(token, asyncio.Lock()):
+        try:
+            path, digest = await asyncio.to_thread(
+                cached_bundle_zip, store, artifact, publication=publication
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc))
 
-    digest = b64encode(sha256(payload).digest()).decode()
-    return Response(
-        content=payload,
+    return FileResponse(
+        path,
         media_type="application/zip",
         headers={
-            "Content-Digest": f"sha-256=:{digest}:",
+            "Content-Digest": f"sha-256=:{b64encode(bytes.fromhex(digest)).decode()}:",
             "Content-Disposition": f'attachment; filename="{token}.zip"',
         },
     )
@@ -403,7 +410,9 @@ async def verify_publication(token: str, store: ReadStore):
             detail="No digest was recorded for this publication; nothing to check against",
         )
 
-    actual = store.blob_digest(publication.artifact_id, publication.version)
+    actual = await asyncio.to_thread(
+        store.blob_digest, publication.artifact_id, publication.version
+    )
     return {
         "matches": actual == publication.content_sha256,
         "recorded_sha256": publication.content_sha256,
