@@ -44,6 +44,7 @@ def create_app(
     pool: Pool,
     *,
     api_token: str | None = None,
+    admin_token: str | None = None,
     scaler_interval_seconds: float = 10.0,
 ) -> FastAPI:
     """Build the pool's HTTP app; its lifespan recovers the fleet and starts the scaler.
@@ -51,16 +52,32 @@ def create_app(
     Args:
         api_token: Bearer token every route except `/health` requires. None
             disables the check (local development only: anyone could run jobs).
+        admin_token: Bearer token for the operator, also accepted wherever
+            `api_token` is. Replacing the machine-type catalogue needs it. None
+            refuses catalogue writes over HTTP: the operator sets the catalogue
+            in the code that constructs the pool.
         scaler_interval_seconds: How often idle machines are reaped.
     """
     if api_token is None:
         logger.warning("pool API starting with no token; anyone who can reach it can run jobs")
 
+    def is_admin(authorization: str | None) -> bool:
+        return admin_token is not None and authorization == f"Bearer {admin_token}"
+
     async def require_token(authorization: Annotated[str | None, Header()] = None) -> None:
-        if api_token is None:
+        if api_token is None or is_admin(authorization):
             return
         if authorization != f"Bearer {api_token}":
             raise HTTPException(status_code=401, detail="invalid or missing API token")
+
+    async def require_admin(authorization: Annotated[str | None, Header()] = None) -> None:
+        if admin_token is None:
+            raise HTTPException(
+                status_code=403,
+                detail="no admin token is configured; the catalogue is set where the pool is built",
+            )
+        if not is_admin(authorization):
+            raise HTTPException(status_code=403, detail="this route needs the admin token")
 
     async def tenant(request: Request) -> str:
         value = request.headers.get(TENANT_HEADER)
@@ -173,7 +190,9 @@ def create_app(
         """What a caller may ask for. The catalogue an annotation resolves against."""
         return [asdict(spec) for spec in pool.machine_types.values()]
 
-    @app.put("/v1/machine-types", dependencies=guard)
+    # A catalogue entry decides which image receives a tenant's jobs and
+    # their signed URLs, so rewriting it is the operator's call alone.
+    @app.put("/v1/machine-types", dependencies=[*guard, Depends(require_admin)])
     async def replace_machine_types(request: Request) -> list[dict]:
         """Replace the whole machine-type catalogue, without a restart.
 

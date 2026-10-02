@@ -30,6 +30,8 @@ pytestmark = pytest.mark.skipif(not _HAS_SERVER, reason="needs the `server` extr
 
 TOKEN = "pool-token"
 AUTH = {"Authorization": f"Bearer {TOKEN}", "X-Strata-Tenant": "acme"}
+ADMIN_TOKEN = "operator-token"
+ADMIN = {"Authorization": f"Bearer {ADMIN_TOKEN}"}
 
 
 @pytest.fixture
@@ -47,7 +49,7 @@ async def api(tmp_path):
         client=client_to_workers,
         health_poll_seconds=0,
     )
-    app = create_app(pool, api_token=TOKEN, scaler_interval_seconds=3600)
+    app = create_app(pool, api_token=TOKEN, admin_token=ADMIN_TOKEN, scaler_interval_seconds=3600)
 
     async with app.router.lifespan_context(app):
         async with httpx.AsyncClient(
@@ -208,6 +210,54 @@ class TestAuth:
         response = await api.get("/health")
         assert response.status_code == 200
         assert response.json()["status"] == "ok"
+
+
+class TestCatalogueWrites:
+    async def test_a_tenant_token_cannot_rewrite_the_catalogue(self, api):
+        """Otherwise one tenant could point another's machine type at its own image."""
+        response = await api.put(
+            "/v1/machine-types", json=[{"name": "cpu", "image": "evil"}], headers=AUTH
+        )
+
+        assert response.status_code == 403
+        assert api.pool.machine_types["cpu"].image == "w"
+        assert api.pool.store.load_machine_types() is None
+
+    async def test_the_admin_token_rewrites_the_catalogue(self, api):
+        response = await api.put(
+            "/v1/machine-types", json=[{"name": "cpu", "image": "w2"}], headers=ADMIN
+        )
+
+        assert response.status_code == 200
+        assert api.pool.machine_types["cpu"].image == "w2"
+        assert [spec.image for spec in api.pool.store.load_machine_types()] == ["w2"]
+
+    async def test_the_admin_token_also_runs_jobs(self, api):
+        response = await api.post(
+            "/v1/jobs/sync?machine_type=cpu",
+            content=b"work",
+            headers={**ADMIN, "X-Strata-Tenant": "acme"},
+        )
+        assert response.status_code == 200
+
+    async def test_without_an_admin_token_no_one_rewrites_the_catalogue(self, tmp_path):
+        from strata_pool.api import create_app
+
+        store = PoolStore(tmp_path / "pool.sqlite")
+        pool = Pool(store, FakeBackend(), [MachineType(name="cpu", image="w")])
+        app = create_app(pool, api_token=TOKEN, scaler_interval_seconds=3600)
+        async with app.router.lifespan_context(app):
+            async with httpx.AsyncClient(
+                transport=httpx.ASGITransport(app=app), base_url="http://pool"
+            ) as client:
+                response = await client.put(
+                    "/v1/machine-types", json=[{"name": "cpu", "image": "evil"}], headers=AUTH
+                )
+
+        assert response.status_code == 403
+        assert "no admin token" in response.json()["detail"]
+        assert pool.machine_types["cpu"].image == "w"
+        store.close()
 
 
 class TestInspection:

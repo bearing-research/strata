@@ -147,6 +147,7 @@ async def test_the_catalogue_set_over_the_api_serves_jobs_and_survives_a_restart
     from strata_pool.api import create_app
 
     auth = {"Authorization": "Bearer t", "X-Strata-Tenant": "acme"}
+    admin = {"Authorization": "Bearer admin"}
     workers = httpx.AsyncClient(transport=httpx.MockTransport(FakeWorkers().handle))
 
     async def serve(store):
@@ -157,7 +158,7 @@ async def test_the_catalogue_set_over_the_api_serves_jobs_and_survives_a_restart
             client=workers,
             health_poll_seconds=0,
         )
-        app = create_app(pool, api_token="t", scaler_interval_seconds=3600)
+        app = create_app(pool, api_token="t", admin_token="admin", scaler_interval_seconds=3600)
         return app
 
     store = PoolStore(tmp_path / "pool.sqlite")
@@ -166,13 +167,13 @@ async def test_the_catalogue_set_over_the_api_serves_jobs_and_survives_a_restart
         async with httpx.AsyncClient(
             transport=httpx.ASGITransport(app=app), base_url="http://pool"
         ) as client:
-            bad = await client.put("/v1/machine-types", json=[{"name": "x"}], headers=auth)
+            bad = await client.put("/v1/machine-types", json=[{"name": "x"}], headers=admin)
             assert bad.status_code == 400
 
             put = await client.put(
                 "/v1/machine-types",
                 json=[{"name": "cpu", "image": "w"}, {"name": "gpu", "image": "g", "gpu_count": 2}],
-                headers=auth,
+                headers=admin,
             )
             assert put.status_code == 200
             run = await client.post(
