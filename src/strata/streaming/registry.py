@@ -44,7 +44,7 @@ class StreamRegistry:
     """The live ``stream_id -> StreamState`` table plus TTL cleanup scheduling.
 
     ``on_expire``, injected by ``ServerState``, runs the scan-side cleanup for a stream whose
-    TTL elapsed.
+    TTL elapsed; ``on_drop`` gets the dropped stream itself.
     """
 
     def __init__(
@@ -54,6 +54,7 @@ class StreamRegistry:
         on_expire: Callable[[str], None] | None = None,
         on_claim: Callable[[str, float], None] | None = None,
         on_release: Callable[[str], None] | None = None,
+        on_drop: Callable[[StreamState], None] | None = None,
     ) -> None:
         self._streams: dict[str, StreamState] = {}
         self._cleanup_tasks: dict[str, asyncio.Task[None]] = {}
@@ -63,6 +64,8 @@ class StreamRegistry:
         # (and free) on a single node.
         self._on_claim = on_claim
         self._on_release = on_release
+        # Told of each stream its TTL drops, to settle an artifact nobody built.
+        self._on_drop = on_drop
 
     def get(self, stream_id: str) -> StreamState | None:
         return self._streams.get(stream_id)
@@ -118,10 +121,13 @@ class StreamRegistry:
 
             if scan_id is not None and self._on_expire is not None:
                 self._on_expire(scan_id)
-            if self._streams.pop(stream_id, None) is not None and self._on_release is not None:
+            dropped = self._streams.pop(stream_id, None)
+            if dropped is not None and self._on_release is not None:
                 # Bypasses pop(), so release the claim here or an expired stream keeps
                 # advertising this node until its row expires.
                 self._on_release(stream_id)
+            if dropped is not None and self._on_drop is not None:
+                self._on_drop(dropped)
 
         self._cleanup_tasks[stream_id] = asyncio.create_task(_cleanup())
 

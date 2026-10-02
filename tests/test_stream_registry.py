@@ -153,3 +153,54 @@ def test_a_cleanup_whose_loop_closed_under_it_closes_without_raising():
     task = reg._cleanup_tasks["s1"]
     task._log_destroy_pending = False  # stranded on purpose; asyncio would log it
     task.get_coro().close()
+
+
+async def test_an_expired_stream_is_handed_to_on_drop():
+    dropped: list[StreamState] = []
+    reg = StreamRegistry(ttl_seconds=0.01, on_drop=dropped.append)
+    st = _stream()
+    reg.register(st)
+
+    reg.schedule_cleanup("s1", scan_id="scan-s1")
+    await asyncio.sleep(0.05)
+
+    assert dropped == [st]
+
+
+def test_a_stream_miss_nobody_fetches_fails_its_artifact(tmp_path, temp_warehouse):
+    """Its build starts only when the stream is fetched, so without this the row stays
+    ``building`` for good, holding its chain against collection.
+    """
+    import time
+
+    import httpx
+
+    from strata.artifact_store import ArtifactStore
+    from tests.conftest import run_server_with_context
+
+    (tmp_path / "cache").mkdir()
+    (tmp_path / "artifacts").mkdir()
+    with run_server_with_context(
+        tmp_path / "cache", tmp_path / "artifacts", "personal", stream_state_ttl_seconds=0.1
+    ) as ctx:
+        response = httpx.post(
+            f"{ctx.base_url}/v1/materialize",
+            json={
+                "inputs": [temp_warehouse["table_uri"]],
+                "transform": {"executor": "scan@v1", "params": {}},
+                "mode": "stream",
+            },
+            timeout=30,
+        )
+        response.raise_for_status()
+        assert response.json()["state"] == "building"
+        artifact_id, version = response.json()["artifact_uri"].split("/")[-1].split("@v=")
+        store = ArtifactStore(tmp_path / "artifacts")
+
+        deadline = time.monotonic() + 30
+        while store.get_artifact(artifact_id, int(version)).state == "building":
+            if time.monotonic() > deadline:
+                break
+            time.sleep(0.05)
+
+        assert store.get_artifact(artifact_id, int(version)).state == "failed"

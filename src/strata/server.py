@@ -232,7 +232,17 @@ class ServerState:
             on_expire=self.scan_builds.expire_scan,
             on_claim=self._claim_stream_ownership,
             on_release=self._release_stream_ownership,
+            on_drop=self._fail_unbuilt_stream,
         )
+
+    def _fail_unbuilt_stream(self, stream_state: StreamState) -> None:
+        """Fail the artifact of a stream-mode miss that expired unfetched.
+
+        Its build starts only when the stream is fetched, so the row would stay
+        ``building`` for good, holding its chain against collection.
+        """
+        if stream_state.background_task is None:
+            self.scan_builds.mark_stream_artifact_failed(self, stream_state)
 
     def _ownership_store(self):
         """The stream ownership store, or None outside a multi-node setup.
