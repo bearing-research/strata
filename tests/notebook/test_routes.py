@@ -9,6 +9,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from strata.notebook.dependencies import EnvironmentOperationLog
 from strata.notebook.routes import get_session_manager, router
 from strata.notebook.session import EnvironmentJobSnapshot
 from strata.notebook.writer import (
@@ -27,7 +28,9 @@ def no_uv_sync(monkeypatch):
 
     async def _fake_run_uv_command_streaming(*args, **kwargs):
         del args, kwargs
-        return SimpleNamespace(success=True, error=None, operation_log=None)
+        return SimpleNamespace(
+            success=True, error=None, operation_log=EnvironmentOperationLog(command="uv")
+        )
 
     monkeypatch.setattr(
         "strata.notebook.dependencies.run_uv_command_streaming",
@@ -136,6 +139,48 @@ def test_open_notebook(client, tmp_path):
     assert "session_open" in response.headers["Server-Timing"]
 
 
+def test_open_syncs_the_environment_in_a_job_off_the_event_loop(client, monkeypatch, tmp_path):
+    """``uv sync`` and the renv restore run as an environment job, not inline in the route."""
+    from strata.notebook.session import NotebookSession
+
+    notebook_dir = create_notebook(tmp_path, "Deferred Sync")
+    (notebook_dir / "renv.lock").write_text('{"R": {"Version": "4.4.0"}, "Packages": {}}')
+    inline_syncs: list[Path] = []
+    monkeypatch.setattr(
+        "strata.notebook.session._uv_sync",
+        lambda path, **kw: inline_syncs.append(path) or True,
+    )
+    restores: list[bool] = []
+
+    def recording_renv_sync(path):
+        try:
+            asyncio.get_running_loop()
+            restores.append(True)
+        except RuntimeError:
+            restores.append(False)
+        return True
+
+    monkeypatch.setattr("strata.notebook.session._renv_sync", recording_renv_sync)
+    submitted: list[str] = []
+    real_submit = NotebookSession.submit_environment_job
+
+    async def recording_submit(self, **kwargs):
+        submitted.append(kwargs["action"])
+        return await real_submit(self, **kwargs)
+
+    monkeypatch.setattr(NotebookSession, "submit_environment_job", recording_submit)
+
+    response = client.post("/v1/notebooks/open", json={"path": str(notebook_dir)})
+
+    assert response.status_code == 200, response.text
+    assert inline_syncs == []
+    assert submitted == ["sync"]
+    # Awaited: the open still answers with an environment cells can run in.
+    assert response.json()["environment"]["sync_state"] == "ready"
+    # False: no event loop in the thread the restore ran on.
+    assert restores == [False]
+
+
 def test_open_notebook_reuses_existing_session_in_personal_mode(client, monkeypatch, tmp_path):
     notebook_dir = create_notebook(tmp_path, "Reusable Notebook")
     set_server_state(
@@ -186,10 +231,10 @@ def test_open_notebook_rehydrates_environment_job_history(client, tmp_path):
 
     assert response.status_code == 200
     data = response.json()
-    assert data["environment_job"]["action"] == "import"
-    assert data["environment_job"]["status"] == "completed"
-    assert len(data["environment_job_history"]) == 1
-    assert data["environment_job_history"][0]["stale_cell_count"] == 1
+    # Newest first: the open's own environment sync, then the persisted import.
+    assert [job["action"] for job in data["environment_job_history"]] == ["sync", "import"]
+    assert data["environment_job_history"][1]["status"] == "completed"
+    assert data["environment_job_history"][1]["stale_cell_count"] == 1
 
 
 def test_open_notebook_rehydrates_cached_status(client, tmp_path):

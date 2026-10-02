@@ -2362,33 +2362,14 @@ class NotebookSession:
         clears ``sync_error``; failure records the error but keeps the last-good fields.
         State lives in ``runtime.json``, so reopens never churn ``notebook.toml``.
         """
-        lockfile = self.path / "renv.lock"
-        if not lockfile.exists():
+        if not (self.path / "renv.lock").exists():
             # Python-only (or pre-init R): clear stale R state so a removed lockfile leaves
             # no phantom hash or error.
             self._clear_r_runtime_if_present()
             return
 
-        try:
-            lock_bytes = lockfile.read_bytes()
-        except OSError as exc:
-            logger.warning("Could not read renv.lock to hash: %s", exc)
-            return
-        lock_hash = hashlib.sha256(lock_bytes).hexdigest()
-
-        previous = load_runtime_state(self.path).r
-        if (
-            previous.lock_hash == lock_hash
-            and not previous.sync_error
-            and self._renv_library_present()
-        ):
-            # Library matches the lockfile, last sync succeeded and the library dir still
-            # exists: skip the ~1-2s Rscript spawn (this fires on every reopen).
-            logger.debug(
-                "renv sync skipped for %s — lockfile hash unchanged + library present (%s)",
-                self.path,
-                lock_hash[:12],
-            )
+        lock_hash = self._renv_restore_due()
+        if lock_hash is None:
             return
 
         started = _time.perf_counter()
@@ -2415,6 +2396,37 @@ class NotebookSession:
             last_synced_at=int(_time.time() * 1000),
             r_version=self._probe_r_version(),
         )
+
+    def _renv_restore_due(self) -> str | None:
+        """The ``renv.lock`` hash when the R library needs a restore, else ``None``.
+
+        ``None`` too without a readable ``renv.lock``.
+        """
+        lockfile = self.path / "renv.lock"
+        try:
+            lock_bytes = lockfile.read_bytes()
+        except FileNotFoundError:
+            return None
+        except OSError as exc:
+            logger.warning("Could not read renv.lock to hash: %s", exc)
+            return None
+        lock_hash = hashlib.sha256(lock_bytes).hexdigest()
+
+        previous = load_runtime_state(self.path).r
+        if (
+            previous.lock_hash == lock_hash
+            and not previous.sync_error
+            and self._renv_library_present()
+        ):
+            # Library matches the lockfile, last sync succeeded and the library dir still
+            # exists: skip the ~1-2s Rscript spawn (this fires on every reopen).
+            logger.debug(
+                "renv sync skipped for %s — lockfile hash unchanged + library present (%s)",
+                self.path,
+                lock_hash[:12],
+            )
+            return None
+        return lock_hash
 
     def _renv_library_present(self) -> bool:
         """Whether the project's renv library exists *and* is non-empty.
@@ -3188,6 +3200,11 @@ class NotebookSession:
             result.success,
             duration_ms=result.operation_log.duration_ms or 0,
         )
+        # No-op without ``renv.lock``; R restores whatever uv did, as an open did inline.
+        try:
+            await asyncio.to_thread(self.ensure_renv_synced)
+        except Exception as exc:
+            logger.warning("Failed to sync renv: %s", exc)
         if not result.success:
             raise RuntimeError(result.error or "uv sync failed")
 
@@ -3427,8 +3444,9 @@ class SessionManager:
         Args:
             skip_initial_venv_sync: Reuse an existing venv and only refresh
                 lightweight runtime metadata on first open.
-            defer_initial_venv_sync: Mark the environment pending background
-                initialization instead of syncing during open.
+            defer_initial_venv_sync: Sync nothing during open: when the environment
+                needs a ``uv sync`` or ``renv`` restore, mark it pending for the caller
+                to run as an environment job.
             reuse_existing: Return an already-open session for the same path.
             timing: Request timing recorder for internal phases.
         """
@@ -3455,6 +3473,14 @@ class SessionManager:
                     phase, prepare = "session_env_sync", existing.ensure_venv_synced
                 else:
                     phase, prepare = "session_env_refresh", existing.refresh_environment_runtime
+                if defer_initial_venv_sync and (
+                    phase == "session_env_sync"
+                    or not (existing.path / ".venv" / "bin" / "python").exists()
+                    or existing._renv_restore_due() is not None
+                ):
+                    existing.mark_environment_pending()
+                    existing.touch()
+                    return existing
                 try:
                     if timing is None:
                         prepare()
@@ -3506,15 +3532,17 @@ class SessionManager:
             # The notebook still opens; it just can't execute cells.
             logger.warning("Failed to sync venv: %s", e)
 
-        # No-op without ``renv.lock``. A failed R sync doesn't block opening.
-        try:
-            if timing is None:
-                session.ensure_renv_synced()
-            else:
-                with timing.phase("session_renv_sync"):
+        # No-op without ``renv.lock``. A failed R sync doesn't block opening. Deferred,
+        # the environment job restores it.
+        if not defer_initial_venv_sync:
+            try:
+                if timing is None:
                     session.ensure_renv_synced()
-        except Exception as e:
-            logger.warning("Failed to sync renv: %s", e)
+                else:
+                    with timing.phase("session_renv_sync"):
+                        session.ensure_renv_synced()
+            except Exception as e:
+                logger.warning("Failed to sync renv: %s", e)
 
         try:
             if session._should_start_warm_pool():

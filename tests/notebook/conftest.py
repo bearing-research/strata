@@ -174,6 +174,25 @@ def fast_notebook_env(monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRe
     monkeypatch.setattr("strata.notebook.writer._uv_sync", _fake_uv_sync)
     monkeypatch.setattr("strata.notebook.session._uv_sync", _fake_uv_sync)
 
+    # Opening a notebook syncs through the streaming environment job.
+    from strata.notebook import dependencies as _dependencies
+
+    _run_uv_command_streaming = _dependencies.run_uv_command_streaming
+
+    async def _fake_streaming_sync(notebook_dir, args, **kwargs):
+        if args[:1] != ["sync"]:
+            return await _run_uv_command_streaming(notebook_dir, args, **kwargs)
+        ok = _fake_uv_sync(Path(notebook_dir))
+        return _dependencies._UvCommandResult(
+            success=ok,
+            error=None,
+            operation_log=_dependencies.EnvironmentOperationLog(command="uv sync", duration_ms=0),
+        )
+
+    monkeypatch.setattr(
+        "strata.notebook.dependencies.run_uv_command_streaming", _fake_streaming_sync
+    )
+
     def _harness_command_direct(self, manifest_path: Path, venv_python: Path, harness_user):
         """The harness with Python directly instead of ``uv run``.
 
