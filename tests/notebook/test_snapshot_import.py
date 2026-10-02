@@ -196,6 +196,22 @@ class TestRefusals:
 
         assert not (tmp_path / "dst").exists()
 
+    def test_a_bundle_that_expands_past_the_cap_is_refused_before_extracting(
+        self, tmp_path, monkeypatch
+    ):
+        monkeypatch.setattr("strata.notebook.snapshot_import._MAX_UNCOMPRESSED_BYTES", 1024 * 1024)
+        bomb = tmp_path / "bomb.zip"
+        with zipfile.ZipFile(bomb, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+            archive.writestr("artifacts.json", "{}")
+            archive.writestr("notebook.toml", 'notebook_id = "x"\n')
+            archive.writestr("artifacts/big@v=1", b"\0" * (4 * 1024 * 1024))
+        assert bomb.stat().st_size < 1024 * 1024
+
+        with pytest.raises(NotASnapshotError, match="import cap"):
+            import_snapshot(bomb, tmp_path / "dst")
+
+        assert not (tmp_path / "dst").exists()
+
     def test_an_occupied_destination_is_refused(self, ran, tmp_path):
         dst = tmp_path / "dst"
         dst.mkdir()
@@ -228,6 +244,26 @@ class TestRunningTheImport:
         assert cells["report"]["cache_hit"] is False, "report must run, or nothing is read back"
         assert cells["report"]["status"] == "ok", cells["report"].get("error")
         assert cells["report"]["stdout"].strip() == "12 recomputed"
+
+
+class TestArtifactBytes:
+    def test_artifact_members_stream_rather_than_load_whole(self, ran, tmp_path, monkeypatch):
+        bundle = _export(ran, tmp_path / "snap.zip")
+        whole_reads: list[str] = []
+        original_read = zipfile.ZipFile.read
+
+        def recording_read(self, name, pwd=None):
+            whole_reads.append(name if isinstance(name, str) else name.filename)
+            return original_read(self, name, pwd)
+
+        monkeypatch.setattr(zipfile.ZipFile, "read", recording_read)
+
+        imported = import_snapshot(bundle, tmp_path / "dst")
+
+        assert imported.imported_artifacts > 0
+        assert "artifacts.json" in whole_reads
+        assert [n for n in whole_reads if n.startswith("artifacts/")] == []
+        assert _statuses(imported.notebook_dir) == _statuses(ran)
 
 
 class TestAFailureHalfwayThrough:

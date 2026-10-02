@@ -316,7 +316,9 @@ strata import demo.snapshot.zip     # a snapshot → ./demo/
 
 Over REST the same bundle is a multipart upload to
 `POST /v1/notebooks/import-snapshot`, with the `file`, `name` and
-`parent_path` fields of the Jupyter route and a 2 GiB cap.
+`parent_path` fields of the Jupyter route and a 2 GiB cap. Either way, a
+bundle whose files would expand to more than 16 GiB is refused before anything
+is extracted.
 
 What you get:
 

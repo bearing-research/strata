@@ -26,6 +26,11 @@ from strata.notebook.snapshot import SNAPSHOT_FORMAT_VERSION
 
 _ARTIFACT_URI_PREFIX = "strata://artifact/"
 
+# Bounds what an archive may expand to on disk; zipfile stops each member at its declared
+# size, so summing the declared sizes bounds the real output.
+_MAX_UNCOMPRESSED_BYTES = 16 * 1024 * 1024 * 1024
+_COPY_CHUNK_BYTES = 1024 * 1024
+
 
 _SAFE_SEGMENT = re.compile(r"^[A-Za-z0-9._-]+$")
 
@@ -99,7 +104,9 @@ def import_snapshot(
         try:
             # 1. Bytes and rows, into the notebook's own store.
             store = ArtifactStore(staging / ".strata" / "artifacts")
-            landed = _import_records(archive, store, manifest.get("records", {}), rename)
+            landed = _import_records(
+                archive, store, manifest.get("records", {}), rename, scratch=staging
+            )
 
             # 2. The committed files.
             _write_committed_files(archive, staging, notebook_toml, old_id, new_id, owner)
@@ -135,6 +142,12 @@ def import_snapshot(
 
 def _validate(archive: zipfile.ZipFile) -> tuple[dict[str, Any], dict[str, Any]]:
     """Refuse early, before anything is written."""
+    expanded = sum(info.file_size for info in archive.infolist())
+    if expanded > _MAX_UNCOMPRESSED_BYTES:
+        raise NotASnapshotError(
+            f"the bundle expands to {expanded} bytes, over the "
+            f"{_MAX_UNCOMPRESSED_BYTES // (1024**3)} GiB import cap"
+        )
     names = set(archive.namelist())
     if "artifacts.json" not in names:
         raise NotASnapshotError(
@@ -208,6 +221,8 @@ def _import_records(
     store: ArtifactStore,
     records: dict[str, dict[str, Any]],
     rename,
+    *,
+    scratch: Path,
 ) -> dict[str, str]:
     """Import every carried record, ancestors first; return old ref to landed ref.
 
@@ -230,8 +245,14 @@ def _import_records(
         record = remap_input_versions(record, edge_map)
         record = replace(record, id=rename(record.id))
 
-        blob = archive.read(f"artifacts/{old_ref}")
-        imported = store.import_artifact(record, blob)
+        # Streamed through a file so a large artifact never sits whole in memory.
+        blob_path = scratch / f".import-blob-{uuid.uuid4().hex}"
+        try:
+            with archive.open(f"artifacts/{old_ref}") as src, open(blob_path, "wb") as dst:
+                shutil.copyfileobj(src, dst, _COPY_CHUNK_BYTES)
+            imported = store.import_artifact(record, blob_path)
+        finally:
+            blob_path.unlink(missing_ok=True)
         remap[old_ref] = imported.ref
     return remap
 
