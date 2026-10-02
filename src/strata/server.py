@@ -2304,7 +2304,8 @@ async def get_stream(stream_id: str, request: Request):
         if principal is None:
             raise HTTPException(status_code=401, detail="Unauthorized")
 
-        if plan.owner_principal != principal.id:
+        # Principal ids are only unique within a tenant.
+        if plan.owner_principal != principal.id or plan.owner_tenant != principal.tenant:
             if not principal.has_scope("admin:*"):
                 if state.config.hide_forbidden_as_not_found:
                     raise HTTPException(status_code=404, detail=f"Stream {stream_id} not found")

@@ -134,6 +134,37 @@ class TestServiceModeScanAcl:
             assert ipc.open_stream(stream.content).read_all().num_rows == 500
 
 
+class TestStreamOwnership:
+    def test_same_principal_id_in_another_tenant_cannot_read_the_stream(
+        self, temp_warehouse, tmp_path
+    ):
+        """A principal id is unique only within its tenant, so the stream owner includes both."""
+        cache_dir = tmp_path / "cache"
+        cache_dir.mkdir()
+        with run_server_with_context(
+            cache_dir,
+            None,
+            "service",
+            auth_mode="trusted_proxy",
+            proxy_token="test-token",
+            multi_tenant_enabled=True,
+        ) as ctx:
+            owner = _auth("alice")
+            namesake = {**owner, "X-Tenant-ID": "team-b"}
+            resp = requests.post(
+                f"{ctx.base_url}/v1/materialize",
+                json=_scan(temp_warehouse["table_uri"]),
+                headers=owner,
+            )
+            assert resp.status_code == 200
+            stream_url = f"{ctx.base_url}{resp.json()['stream_url']}"
+
+            assert requests.get(stream_url, headers=namesake).status_code == 404
+            stream = requests.get(stream_url, headers=owner)
+            assert stream.status_code == 200
+            assert ipc.open_stream(stream.content).read_all().num_rows == 500
+
+
 class TestMaterializeNameNeedsWriteScope:
     """``name`` on materialize writes a registry name, so it takes the ``POST /v1/names`` gate."""
 

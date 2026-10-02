@@ -206,7 +206,7 @@ Compared to personal mode:
   into a table (`POST /v1/artifacts/{id}/v/{n}/export`). Deny rules
   cannot be bypassed by allow rules, deny-first evaluation. A stream
   (`GET /v1/streams/{id}`) is readable only by the principal that
-  started it, and admin endpoints such as `POST /v1/cache/clear` need
+  started it, in the tenant it started it in, and admin endpoints such as `POST /v1/cache/clear` need
   their [scope](#scope-gated-endpoints).
 - **Per-tenant resources** when multi-tenancy is on. Each tenant
   gets its own QoS limiter pool, its own metric labels, and its own
