@@ -38,7 +38,7 @@ DATA_BUCKET = "s3://my-bucket"
 ANTHROPIC_API_KEY = ""              # blanked: keys matching KEY/SECRET/TOKEN/PASSWORD/CREDENTIAL
 ```
 
-**What gets blanked.** Values for keys whose name contains `KEY`, `SECRET`, `TOKEN`, `PASSWORD`, or `CREDENTIAL` are written as empty strings to disk. The actual secret is read from the runtime environment at execution time. The blanked entry is still committed so users can see which env vars a notebook *expects* without leaking the value into the repo.
+**What gets blanked.** Values for keys whose name contains `KEY`, `SECRET`, `TOKEN`, `PASSWORD`, or `CREDENTIAL` are written as empty strings to disk. The blanked entry is still committed so users can see which env vars a notebook *expects* without leaking the value into the repo. On open the key comes back empty: fill it in the Runtime panel, or let a [secret manager](#secret_manager-external-secret-manager-wiring) fill it. Until then a cell sees the variable set to an empty string, which hides a value of the same name in the server's environment.
 
 **Whole-block elision.** If every entry is either empty or a blanked sensitive key, the writer omits the `[env]` block entirely on save. Typing an API key into the Runtime panel doesn't churn the committed file.
 
@@ -52,10 +52,12 @@ model = "claude-sonnet-4-6"
 | Key | Type | Description |
 | --- | --- | --- |
 | `model` | string | Notebook-level default LLM model. Overridden by `# @model <id>` in prompt cells. |
+| `base_url` | string | OpenAI-compatible API base URL, e.g. a local Ollama or vLLM server. |
+| `api_key` | string | API key. Written to disk as is, not blanked, so it is committed with the file; prefer the Runtime panel. |
+| `max_output_tokens` | integer | Max output tokens requested. Default `4096`. |
+| `timeout_seconds` | float | Request timeout. Default `60.0`. |
 
-Advanced provider fields (`base_url`, `timeout_seconds`, `max_output_tokens`, …) are documented in [Provider configuration](../notebook/cells.md#provider-configuration).
-
-The API key and base URL come from the runtime environment (`ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / `GEMINI_API_KEY` / `STRATA_AI_API_KEY` / `STRATA_AI_BASE_URL`) - they never live in this file.
+Every key is optional and overrides the same setting from the notebook's environment (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`, `MISTRAL_API_KEY`, `STRATA_AI_API_KEY`) and from the server's `STRATA_AI_*`. See [Provider configuration](../notebook/cells.md#provider-configuration).
 
 ## `[secret_manager]` - External secret-manager wiring
 
@@ -68,7 +70,7 @@ path = "/notebook-secrets"
 base_url = "https://app.infisical.com"
 ```
 
-Routing-only config for an external secret manager (Infisical, Doppler, AWS SM, etc.). The authentication token for the manager itself lives in the strata-notebook's process environment, **not** here. See [Secret Manager](../notebook/secrets.md).
+Routing-only config for an external secret manager. Infisical is the only supported `provider`. The authentication token for the manager itself lives in the strata-notebook's process environment, **not** here. See [Secret Manager](../notebook/secrets.md).
 
 Allowed keys: `provider`, `project_id`, `environment`, `path`, `base_url`. Unknown keys are dropped on save.
 

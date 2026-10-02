@@ -171,7 +171,7 @@ A cell that raises still answers `200`: the bundle's manifest says `"success": f
 | `400` | Missing/invalid `metadata`, unsupported `protocol_version`, unsupported `transform.ref`, malformed input descriptor, unknown cell `language` |
 | `401` | Token gate failed |
 | `408` | Cell execution exceeded `timeout_seconds` |
-| `413` | Input exceeds `STRATA_WORKER_MAX_INPUT_BYTES` (default 2 GiB) |
+| `413` | Pull model only: an input exceeds `STRATA_WORKER_MAX_INPUT_BYTES` (default 2 GiB) |
 | `500` | The harness could not run: the locked environment failed to build, `Rscript` is missing for an R cell, or the subprocess crashed |
 | `502` | Pull model only: downloading an input, uploading the bundle, or finalizing failed |
 | `503` | The worker is full (see above) |
@@ -412,3 +412,88 @@ Workers do not return structured error codes - the HTTP status is the machine-re
 The minimum surface is `POST /v1/execute` + `GET /health`. The reference Python implementation is `create_notebook_executor_app()` in `src/strata/notebook/remote_executor.py` and is the canonical specification when in doubt.
 
 A custom worker doesn't have to run Python - it just has to accept the `notebook_cell@v1` envelope, execute the source somehow, and return the bundle. In practice almost all workers wrap a Python interpreter (since cells are Python) and the `strata-worker` script is the path of least resistance.
+
+## Core transform executors
+
+Everything above is the notebook-cell contract. The Core build runner, which
+executes `POST /v1/materialize` transforms other than `scan@v1`, uses a simpler
+one. Each transform ref is matched against the registry in
+`[tool.strata.transforms]`:
+
+```toml
+[tool.strata.transforms]
+enabled = true
+
+[[tool.strata.transforms.registry]]
+ref = "pandas_script@*"
+executor_url = "http://executor:8080"
+timeout_seconds = 300
+max_output_bytes = 1073741824
+max_input_bytes = 0
+requires_scope = "transforms:pandas"
+```
+
+| Key | Type | Description |
+| --- | --- | --- |
+| `ref` | string (required) | Glob matched against the transform ref, e.g. `duckdb_sql@v1` or `pandas_script@*`. The first matching entry wins. |
+| `executor_url` | string | Base URL; the runner posts to `{executor_url}/v1/execute`. Empty or `embedded://local` runs a built-in transform in-process. |
+| `timeout_seconds` | float | Per-build timeout. Default `300`; `0` uses `STRATA_BUILD_RUNNER_DEFAULT_TIMEOUT`. |
+| `max_output_bytes` | integer | Output cap, enforced while the response streams in. Default `0`, which uses `STRATA_BUILD_RUNNER_DEFAULT_MAX_OUTPUT`. |
+| `max_input_bytes` | integer | Cap on the total size of the inputs; the build fails before the call when they exceed it. Default `0` (no cap). |
+| `requires_scope` | string | Scope a principal needs to materialize this transform, checked under principal auth. |
+
+With no `[tool.strata.transforms]` block, the registry holds only the
+in-process `duckdb_sql@v1`. With one, it holds only the listed entries, and
+only when `enabled = true`. A ref no entry matches is refused at
+`POST /v1/materialize` (`403` in service mode, `400` in personal mode).
+
+### `POST {executor_url}/v1/execute`
+
+`multipart/form-data` with the header `X-Strata-Executor-Protocol: v1`. Strata
+sends no credentials, so keep the executor where only Strata can reach it.
+
+| Part | Content type | Content |
+| --- | --- | --- |
+| `metadata` | `application/json` | The envelope below |
+| `input0`, `input1`, … | `application/vnd.apache.arrow.stream` | One Arrow IPC stream per input, in the order the transform lists them. Artifacts, names and table scans all arrive as Arrow |
+
+```json
+{
+  "protocol_version": "v1",
+  "build_id": "…",
+  "tenant": "team-a",
+  "principal": "alice",
+  "provenance_hash": "…",
+  "transform": {
+    "ref": "pandas_script@v1",
+    "code_hash": "<first 16 hex of sha256 of the transform spec>",
+    "params": {}
+  },
+  "inputs": [{"name": "input0", "format": "arrow_ipc_stream"}]
+}
+```
+
+`tenant` and `principal` come from the caller's principal, and are `null` without principal auth.
+
+A success is `200` with an Arrow IPC stream as the body, which becomes the
+artifact. An optional `X-Strata-Logs` header carries the executor's logs,
+base64-encoded. A failure is a `4xx` or `5xx` with a JSON body:
+
+```json
+{"success": false, "error_code": "…", "error_message": "…"}
+```
+
+Any error status fails the build.
+
+### Pull model
+
+An executor can pull a core build instead: `GET /v1/builds/{build_id}/manifest`
+returns the manifest shape shown under
+[`POST /v1/execute-manifest`](#post-v1execute-manifest-pull-model), with
+`metadata` holding only `build_id`, `artifact_id`, `version`, `executor_ref`
+and `params`. Download each input from its URL, upload the result as an Arrow
+IPC stream to `output.url`, then `POST {}` to `finalize_url`. `output.max_bytes`
+is the server-wide `STRATA_BUILD_RUNNER_DEFAULT_MAX_OUTPUT`, not the registry
+entry's cap. Fetching the manifest claims a pending build; a build the local
+runner already claimed answers `409`. In service mode the manifest is issued
+only under `STRATA_AUTH_MODE=trusted_proxy`.
