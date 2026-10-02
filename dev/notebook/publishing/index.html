@@ -2350,6 +2350,12 @@ never a switch on a whole notebook, and the CLI prints the full list of steps
 the link will expose before you use it.</p>
 <p>Upstream <strong>data</strong> is never served. The page describes the steps; only the
 published artifact's own bytes are downloadable, at <code>/p/&lt;token&gt;/data</code>.</p>
+<p>Those bytes are served as data, never as a page. A PNG, Arrow, JSON or Markdown
+artifact is served under its own type; any other declared type (HTML or SVG, for
+instance, which a writer can set freely) downloads as
+<code>application/octet-stream</code>. Every response carries
+<code>X-Content-Type-Options: nosniff</code> and <code>Content-Security-Policy: sandbox</code>, so
+nothing published runs script on your server's origin.</p>
 <h2 id="withdrawing">Withdrawing<a class="headerlink" href="#withdrawing" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>strata<span class="w"> </span>artifact<span class="w"> </span>unpublish<span class="w"> </span>&lt;token&gt;
 </code></pre></div>
@@ -2431,7 +2437,9 @@ paper outlives most servers, so there is a second form:</p>
 <p>A tabular artifact's bytes are Arrow IPC (<code>artifact.arrow</code>), and the bundle
 also carries <code>artifact.parquet</code>, the same rows in a format a data repository
 indexes. The manifest's digest covers the Arrow file; the Parquet file carries
-its own.</p>
+its own. A table whose Arrow file is over 128 MiB is archived without the
+Parquet copy, since converting it holds the whole table in memory. The limit is
+fixed, so it never makes one publication's archive differ between builds.</p>
 <p>Deposit the directory with Zenodo or OSF and cite the DOI. The archive's
 retention promise then stands behind the link instead of yours.</p>
 <p>A published artifact serves the same bundle as a zip:</p>
@@ -2442,7 +2450,9 @@ implementation, because two implementations of a set of files that describe
 each other would drift and neither would stop producing a bundle. The response
 carries a <code>Content-Digest</code> of the zip, and the zip is the same bytes on every
 request, so a digest you record at deposit time can be checked against a later
-fetch.</p>
+fetch. The server builds it once and keeps it under <code>publication-archives/</code> in
+the artifact directory: later requests send that file, editing the
+publication's authors or identifiers rebuilds it, and withdrawing deletes it.</p>
 <p>To build that zip from the store directly, name the publication rather than the
 artifact. The bundle then carries the publication's own record, with the
 authors and identifiers the hosted page shows, and a <code>--to</code> ending in <code>.zip</code>
