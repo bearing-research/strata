@@ -2702,6 +2702,21 @@ for anyone extending the ACL engine.</p>
 input, is refused before planning with <code>404 Table not found</code>, so the answer
 does not reveal that the table exists. Set
 <code>STRATA_HIDE_FORBIDDEN_AS_NOT_FOUND=false</code> to get <code>403</code> instead.</p>
+<p>The cache is shared, so the same rules gate reading a stored result: its data,
+metadata, lineage and dependents, publishing it, and exporting it into a table
+(<code>POST /v1/artifacts/{id}/v/{n}/export</code>). An export copies the result into a
+table the caller can then scan, so it is refused both when the caller is denied
+the target table and when the caller is denied a table the result was read from.
+Rules have no separate write permission: a table a caller may read, it may export
+into, unless another tenant <a href="#promoting-into-an-iceberg-table">owns it</a>.</p>
+<p>A result is gated by every table in its lineage, not only the ones it read
+directly. A transform over a cached scan of a denied table is denied too, as is
+anything computed from that result, and the same holds when such a result is
+used as a transform input. The check follows the store's recorded input edges up
+to 100 steps back; a result with a deeper lineage is refused with <code>403</code>, since a
+table past that point cannot be checked. An ancestor that retention has already
+collected cannot be checked either, so a deny rule only reaches results whose
+lineage is still in the store.</p>
 <h3 id="scope-gated-endpoints">Scope-gated endpoints<a class="headerlink" href="#scope-gated-endpoints" title="Permanent link">&para;</a></h3>
 <p>A few operations require a specific scope under trusted-proxy or API-key
 auth (<code>admin:*</code> satisfies any of them):</p>
@@ -2995,9 +3010,15 @@ store's configured catalog.</p>
   it, so the current snapshot is always one version. A table Strata did not
   write is refused rather than replaced. A notebook's <code>@table</code> on
   it goes stale when the next version is written, as for any other table.</li>
+<li>A table belongs to the tenant whose export last wrote it. Another tenant's
+  export to it is refused like a denied table (<code>404 Table not found</code>, or <code>403</code>
+  with <code>STRATA_HIDE_FORBIDDEN_AS_NOT_FOUND=false</code>), even when the ACL lets that
+  tenant read it. An <code>admin:*</code> export is not tenant-scoped, and leaves a table
+  only another unscoped export can replace.</li>
 <li>Each snapshot's summary names what it holds: <code>strata.artifact_id</code>,
-  <code>strata.version</code>, <code>strata.provenance_hash</code>, and <code>strata.promoted_by</code> when the
-  store knows the caller. (An overwrite commits a delete and then an append; the
+  <code>strata.version</code>, <code>strata.provenance_hash</code>, <code>strata.promoted_by</code> when the
+  store knows the caller, and <code>strata.tenant</code> when the export was
+  tenant-scoped. (An overwrite commits a delete and then an append; the
   append is the snapshot that holds the version.)</li>
 <li>A new version may add columns or widen a type. One whose schema the table
   cannot evolve to is refused before anything is written.</li>
