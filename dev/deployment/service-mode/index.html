@@ -2698,6 +2698,10 @@ wider than it reads.</p>
 <p>Evaluation: deny rules → allow rules → default. <a href="https://github.com/bearing-research/strata/tree/main/src/strata">Wildcard and principal
 matching semantics are documented in source</a>
 for anyone extending the ACL engine.</p>
+<p>Under principal auth a denied table, whether scanned or used as a transform
+input, is refused before planning with <code>404 Table not found</code>, so the answer
+does not reveal that the table exists. Set
+<code>STRATA_HIDE_FORBIDDEN_AS_NOT_FOUND=false</code> to get <code>403</code> instead.</p>
 <h3 id="scope-gated-endpoints">Scope-gated endpoints<a class="headerlink" href="#scope-gated-endpoints" title="Permanent link">&para;</a></h3>
 <p>A few operations require a specific scope under trusted-proxy or API-key
 auth (<code>admin:*</code> satisfies any of them):</p>
@@ -2718,8 +2722,12 @@ auth (<code>admin:*</code> satisfies any of them):</p>
 <td><code>GET /v1/admin/tenants</code> and <code>GET /v1/admin/tenants/{tenant_id}</code></td>
 </tr>
 <tr>
+<td><code>admin:notebook-workers</code></td>
+<td>The server-managed worker registry, every <code>/v1/admin/notebook-workers*</code> route (list, replace, add, update, delete, refresh, reload)</td>
+</tr>
+<tr>
 <td><code>admin:notebooks</code></td>
-<td>Quiescing a notebook or project (<code>POST /v1/notebooks/{id}/quiesce</code>, <code>POST /v1/projects/{path}/quiesce</code>)</td>
+<td>Quiescing a notebook or project and releasing it (<code>POST /v1/notebooks/{id}/quiesce</code> and <code>/release</code>, <code>POST /v1/projects/{path}/quiesce</code> and <code>/release</code>)</td>
 </tr>
 <tr>
 <td><code>admin:*</code></td>

@@ -1254,6 +1254,45 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#widget-and-app-view-annotations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Widget and App View Annotations
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Widget and App View Annotations">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#live" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        @live
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#app-hide" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        @app hide
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#cross-cell-ordering" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2784,6 +2823,45 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#widget-and-app-view-annotations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Widget and App View Annotations
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Widget and App View Annotations">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#live" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        @live
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#app-hide" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        @app hide
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#cross-cell-ordering" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2948,20 +3026,10 @@ is 300 seconds (5 minutes); the value must be a positive number.</p>
 <a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="n">embeddings</span> <span class="o">=</span> <span class="n">model</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span><span class="n">abstracts</span><span class="p">,</span> <span class="n">batch_size</span><span class="o">=</span><span class="mi">256</span><span class="p">)</span>
 </code></pre></div>
 <p>Useful for cells that download data, train models, or call slow external APIs. The timeout applies to the full execution including any remote worker round-trip.</p>
-<div class="admonition warning">
-<p class="admonition-title">Prompt-cell timeout vs AI API timeout</p>
-<p>Prompt cells have two timeouts that can collide silently. The
-cell-level <code># @timeout</code> (default <strong>300 s</strong>) wraps the whole cell;
-the AI API call inside has its own timeout from
-<code>STRATA_AI_TIMEOUT_SECONDS</code> / <code>[ai] timeout_seconds</code> in
-<code>notebook.toml</code> (default <strong>60 s</strong>).</p>
-<p>With defaults, the cell-level wrap fires first and you get a
-cell timeout while the API call would have succeeded eventually.
-Set <code># @timeout</code> on prompt cells to at least
-<code>STRATA_AI_TIMEOUT_SECONDS + a few seconds of slack</code> (e.g.
-<code># @timeout 90</code>), or lower <code>STRATA_AI_TIMEOUT_SECONDS</code> to match
-the cell budget.</p>
-</div>
+<p><code>@timeout</code> does not apply to prompt or SQL cells. A prompt cell's model call
+is bounded by <code>[ai] timeout_seconds</code> in <code>notebook.toml</code>, or the server's
+<code>STRATA_AI_TIMEOUT_SECONDS</code> (default 60 s); a SQL cell's deadline is set at
+the connection.</p>
 <hr />
 <h2 id="env">@env<a class="headerlink" href="#env" title="Permanent link">&para;</a></h2>
 <p>Set an environment variable for this cell only, overriding the notebook-level value.</p>
@@ -3004,7 +3072,8 @@ joining, <code>.read_text()</code>, <code>.iterdir()</code>, etc.</p>
 <h2 id="fetch">@fetch<a class="headerlink" href="#fetch" title="Permanent link">&para;</a></h2>
 <p>Declare a URL the cell reads. The bytes are downloaded into the notebook's
 cache and <strong>their digest becomes part of the cell's provenance</strong>, so the cell
-goes stale when the URL starts serving something else - instead of the URL
+goes out of date (idle) and its downstream cells stale when the URL starts
+serving something else - instead of the URL
 string being in the source hash and the bytes being in nothing.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="c1"># @fetch zones https://example.org/taxi_zones.csv</span>
 <a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="kn">import</span><span class="w"> </span><span class="nn">pandas</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">pd</span>
@@ -3040,7 +3109,7 @@ connection goes only to an address that passed the check, so a name cannot
 pass with a public address and then connect to <code>127.0.0.1</code>; for the same
 reason service mode fetches directly and ignores <code>HTTPS_PROXY</code>. Personal
 mode allows those addresses, so <code>http://localhost:8000/data.csv</code> works on your
-own machine, and uses the proxy settings as usual. A URL that cannot be checked shows the cell as stale, and running
+own machine, and uses the proxy settings as usual. A URL that cannot be checked shows the cell as out of date, and running
 it fails with the reason. A cell with <code>@fetch</code> runs on its own in Run All rather
 than in a batch.</p>
 <p>On a remote worker the server does the fetching: the bytes travel with the
@@ -3051,8 +3120,9 @@ older one does not recognise the input and the cell fails with a <code>NameError
 on <code>&lt;name&gt;</code>.</p>
 <h2 id="dataset">@dataset<a class="headerlink" href="#dataset" title="Permanent link">&para;</a></h2>
 <p>Declare a registry name the cell reads. The name resolves to one artifact
-version, and <strong>that version becomes part of the cell's provenance</strong>, so a cell
-that reads the team's champion model goes stale when <code>champion</code> moves. Resolving
+version, and <strong>that version becomes part of the cell's provenance</strong>, so when
+<code>champion</code> moves, a cell that reads the team's champion model goes out of date
+(idle) and its downstream cells stale. Resolving
 the name with the <code>strata</code> client inside the cell records nothing: the name is
 in the source hash and the version is in nothing.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="c1"># @dataset model taxi/model@champion</span>
@@ -3060,11 +3130,12 @@ in the source hash and the version is in nothing.</p>
 </code></pre></div>
 <p>Format: <code># @dataset &lt;name&gt; &lt;registry-name&gt;[@&lt;alias&gt;|@v=&lt;n&gt;]</code>.</p>
 <ul>
-<li><strong><code>taxi/model@champion</code></strong> follows the alias. The cell goes stale when the
-  alias points somewhere else.</li>
+<li><strong><code>taxi/model@champion</code></strong> follows the alias. The cell goes out of date when
+  the alias points somewhere else.</li>
 <li><strong><code>taxi/model</code></strong> follows the name pointer the same way.</li>
 <li><strong><code>taxi/model@v=3</code></strong> pins version 3 of the artifact the name points at. A
-  pinned dataset never makes the cell stale, as <code>snapshot=</code> does for <code>@table</code>.</li>
+  pinned dataset never makes the cell out of date, as <code>snapshot=</code> does for
+  <code>@table</code>.</li>
 </ul>
 <p>The server resolves the name in its own registry, or in the team store when
 <code>STRATA_NOTEBOOK_REMOTE_STORE_URL</code> is set. The version is copied into the
@@ -3077,13 +3148,14 @@ as an input, so lineage, in the dashboard and in <code>strata artifact lineage</
 walks from a downstream result through the cell to the named version.</p>
 <p>The registry is asked at most once a minute while staleness is being
 recomputed, and always right before the cell runs. A name that does not
-resolve shows the cell as stale, and running it fails with the reason. A cell
+resolve shows the cell as out of date, and running it fails with the reason. A cell
 with <code>@dataset</code> runs on its own in Run All rather than in a batch. <code>@loop</code> and
 R cells cannot declare one; read the dataset in an upstream Python cell.</p>
 <h2 id="table">@table<a class="headerlink" href="#table" title="Permanent link">&para;</a></h2>
 <p>Declare an Iceberg table input. The table's current snapshot id becomes part
 of the cell's provenance: <strong>when new data lands in the table, the cell goes
-stale and the normal cascade machinery re-runs it</strong> - no manual data-version
+out of date (idle), its downstream cells go stale, and the normal cascade
+machinery re-runs them</strong> - no manual data-version
 bookkeeping. For an end-to-end walkthrough (build a warehouse, scan it,
 retrain on new data, pin a snapshot), see
 <a href="../lake-aware-cells/">Lake-Aware Cells</a>.</p>
@@ -3114,14 +3186,14 @@ name must be a valid Python identifier.</p>
 <p>Catalogs are named on the server, not in <code>notebook.toml</code>, because the scan the
 cell runs happens in the server and has to resolve the same name.</p>
 <p><code>snapshot=&lt;id&gt;</code> pins the table: the cell reads that snapshot forever and never
-goes stale on new data (the lake-side analog of a mount <code>pin</code>). Without a pin,
+goes out of date on new data (the lake-side analog of a mount <code>pin</code>). Without a pin,
 the snapshot is re-resolved every time staleness is evaluated.</p>
 <p>Like mount variables, the injected names live only in the declaring cell's
 namespace - they are not cell <em>defines</em> and do not flow to downstream cells.
 To use the snapshot id downstream, export it as a real variable:
 <code>scanned_snapshot = trips_snapshot</code>.</p>
 <p>If the catalog is unreachable when provenance is computed, the cell is
-conservatively treated as stale; if it is still unreachable at execution time,
+conservatively treated as out of date; if it is still unreachable at execution time,
 the run fails with a clear error.</p>
 <h2 id="nocache">@nocache<a class="headerlink" href="#nocache" title="Permanent link">&para;</a></h2>
 <p>Force the cell to <strong>always re-execute</strong>: never serve a provenance cache hit.</p>
@@ -3219,6 +3291,9 @@ iteration and the <code>carry</code> variable threads state between them.</p>
   stored iteration <code>k</code>. Useful for forking a converged run to explore a
   variant. <code>&lt;cell-id&gt;</code> is the upstream loop cell's <code>id</code> in
   <code>notebook.toml</code> (not its <code>@name</code>) - see <a href="#cell-ids">Cell IDs</a>.</li>
+<li><code>until=&lt;expr&gt;</code>, (optional) the same early exit as <code>@loop_until</code>, inline.
+  Parameters are split on whitespace, so the expression cannot contain a
+  space (<code>until=acc["loss"]&lt;0.05</code>); use <code>@loop_until</code> for anything longer.</li>
 </ul>
 <h3 id="loop_until"><code>@loop_until</code><a class="headerlink" href="#loop_until" title="Permanent link">&para;</a></h3>
 <p>Python expression evaluated after each iteration in the cell's namespace. When
@@ -3474,6 +3549,15 @@ the bootstrap step, source is the only place a group comes into
 existence, which keeps <code>notebook.toml</code> honest about <em>which</em> groups
 exist.)</p>
 <hr />
+<h2 id="widget-and-app-view-annotations">Widget and App View Annotations<a class="headerlink" href="#widget-and-app-view-annotations" title="Permanent link">&para;</a></h2>
+<h3 id="live"><code>@live</code><a class="headerlink" href="#live" title="Permanent link">&para;</a></h3>
+<p>On a <a href="../cells/#widget-cells">widget cell</a>, <code># @live</code> makes a control change
+auto-run the cheap downstream cells instead of only marking them stale.
+<code># @live off</code> turns it back off. See <a href="../cells/#live-mode">Live mode</a>.</p>
+<h3 id="app-hide"><code>@app hide</code><a class="headerlink" href="#app-hide" title="Permanent link">&para;</a></h3>
+<p><code># @app hide</code> keeps a cell out of the read-only <a href="../cells/#app-view">app view</a>,
+for a setup cell whose output is noise. It applies to any cell.</p>
+<hr />
 <h2 id="cross-cell-ordering">Cross-Cell Ordering<a class="headerlink" href="#cross-cell-ordering" title="Permanent link">&para;</a></h2>
 <h3 id="after"><code>@after</code><a class="headerlink" href="#after" title="Permanent link">&para;</a></h3>
 <p>Add an ordering-only DAG edge from another cell to this one. Useful when the
@@ -3518,7 +3602,7 @@ doesn't affect per-variable provenance hashes.</p>
 <td><strong>Timeout</strong></td>
 <td><code># @timeout N</code></td>
 <td><code>cell.timeout</code> field</td>
-<td>300 seconds</td>
+<td><code>notebook.timeout</code> field, else 300 seconds</td>
 </tr>
 <tr>
 <td><strong>Env vars</strong></td>

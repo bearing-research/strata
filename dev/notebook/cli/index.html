@@ -1284,6 +1284,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#workers-strata-worker" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Workers (strata worker)
+      
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -2291,6 +2302,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#workers-strata-worker" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Workers (strata worker)
+      
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -2424,8 +2446,8 @@ can parse per-cell status without screen-scraping.</p>
 had clicked <strong>Run All</strong> in the UI. Cached artifacts are reused, the first run
 populates the cache; subsequent runs on unchanged source + inputs return
 instantly.</p>
-<p>Passing <code>--force</code> invalidates the cache and forces a full rebuild, which is
-what you usually want in CI if you're testing that the code <em>still produces</em>
+<p>Passing <code>--force</code> skips each cell's cache lookup, so every cell re-executes
+(nothing cached is deleted), which is what you usually want in CI if you're testing that the code <em>still produces</em>
 the expected artifacts.</p>
 <h2 id="what-does-not-happen">What Does Not Happen<a class="headerlink" href="#what-does-not-happen" title="Permanent link">&para;</a></h2>
 <ul>
@@ -2451,7 +2473,7 @@ subprocesses, no LLM calls:</p>
 <li>the DAG builds without cycles</li>
 <li>per-cell annotation diagnostics - the <strong>same validation the server runs
   on open / reload</strong> (<code>worker_unknown</code>, <code>loop_missing_carry</code>,
-  <code>sql_missing_connection</code>, <code>fetch_unreadable</code>, <code>dataset_unreadable</code>,
+  <code>sql_connection_missing</code>, <code>fetch_unreadable</code>, <code>dataset_unreadable</code>,
   malformed <code>@output_schema</code>, …)</li>
 </ul>
 <p>Exit codes mirror <code>strata run</code>: <code>0</code> valid (warnings allowed), <code>1</code> invalid
@@ -2607,6 +2629,12 @@ offline against a directory or <code>--server/--session</code> against a running
 MCP server wrapping the same operations is also available; see
 <a href="../mcp/">MCP Server</a>, or <a href="../agent/"><code>strata agent</code></a> for the one-command on-ramp
 that stands it up and points a coding agent at a live session.</p>
+<h2 id="workers-strata-worker">Workers (<code>strata worker</code>)<a class="headerlink" href="#workers-strata-worker" title="Permanent link">&para;</a></h2>
+<p><code>strata worker ls|add|rm|default &lt;notebook_dir&gt; ...</code> edits the notebook's
+<code>[[workers]]</code> block, and <code>strata worker add-ssh|rm-ssh</code> connects a box you reach
+over SSH to a running server. See
+<a href="../workers/#from-the-cli">Registering workers from the CLI</a> and
+<a href="../workers/#run-cells-on-a-machine-you-can-ssh-to">Run cells on a machine you can SSH to</a>.</p>
 
 
 

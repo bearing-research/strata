@@ -1091,6 +1091,28 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#from-the-cli" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        From the CLI
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#signed-workers-and-private-hosts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Signed workers and private hosts
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#server-managed-workers-service-mode" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2294,6 +2316,28 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#from-the-cli" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        From the CLI
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#signed-workers-and-private-hosts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Signed workers and private hosts
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#server-managed-workers-service-mode" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2756,17 +2800,21 @@ wrong boots machines to recompute results that already exist.</p>
 <a id="__codelineno-24-2" name="__codelineno-24-2" href="#__codelineno-24-2"></a>pip<span class="w"> </span>install<span class="w"> </span><span class="s2">"strata-pool[server]"</span><span class="w">  </span><span class="c1"># plus the HTTP service</span>
 </code></pre></div>
 <p>It ships Docker, Fly and RunPod backends, per-worker credentials, tenant-scoped
-machines, a fleet cap, and usage metering. Cloud SDKs live in the backend
-extras, so the base install pulls only <code>httpx</code>. Build the image the pool
-drives with:</p>
+machines, a fleet cap, and usage metering. The backends talk to Docker, Fly
+and RunPod over <code>httpx</code>, so the base install pulls only <code>httpx</code>; the extras
+are <code>server</code> (the HTTP service) and <code>postgres</code> (a Postgres store). Build the
+image the pool drives with:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-25-1" name="__codelineno-25-1" href="#__codelineno-25-1"></a>docker<span class="w"> </span>build<span class="w"> </span>-f<span class="w"> </span>worker.Dockerfile<span class="w"> </span>-t<span class="w"> </span>strata-worker:latest<span class="w"> </span>.
 </code></pre></div>
 <p>For R cells, build it with R and the packages <code>harness.R</code> needs:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-26-1" name="__codelineno-26-1" href="#__codelineno-26-1"></a>docker<span class="w"> </span>build<span class="w"> </span>-f<span class="w"> </span>worker.Dockerfile<span class="w"> </span>--build-arg<span class="w"> </span><span class="nv">WITH_R</span><span class="o">=</span><span class="nb">true</span><span class="w"> </span>-t<span class="w"> </span>strata-worker:r<span class="w"> </span>.
 </code></pre></div>
-<p>That image needs <code>strata-notebook</code> <strong>0.7.0 or newer</strong> - <code>POST /execute</code> ships
-in that release - and it installs from PyPI, so building it inside a checkout
-does not pick up local worker changes.</p>
+<p>The image installs a released <code>strata-notebook</code> from PyPI, pinned by
+<code>ARG STRATA_VERSION</code>; pass <code>--build-arg STRATA_VERSION=&lt;version&gt;</code> for another
+release (0.7.0 or newer, the first with <code>POST /execute</code>). Building it inside a
+checkout does not pick up local worker changes. The container refuses to start
+without <code>STRATA_WORKER_TOKEN</code>, since it binds <code>0.0.0.0</code>; the pool mints one per
+machine, and you set it yourself to run the image by hand.</p>
 <p>See <a href="../worker-pool/">Worker Pool</a> for machine types, dispatch, the HTTP
 service, and the isolation model.</p>
 <h2 id="registering-workers">Registering workers<a class="headerlink" href="#registering-workers" title="Permanent link">&para;</a></h2>
@@ -2828,13 +2876,25 @@ service, and the isolation model.</p>
 <a id="__codelineno-27-16" name="__codelineno-27-16" href="#__codelineno-27-16"></a><span class="n">transport</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"direct"</span>
 <a id="__codelineno-27-17" name="__codelineno-27-17" href="#__codelineno-27-17"></a><span class="n">token_env</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"STRATA_MODAL_WORKER_TOKEN"</span>
 </code></pre></div>
+<h3 id="from-the-cli">From the CLI<a class="headerlink" href="#from-the-cli" title="Permanent link">&para;</a></h3>
+<p><code>strata worker</code> edits the same <code>[[workers]]</code> block from a shell, without a running server. A running server picks the change up on its next session reload.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-28-1" name="__codelineno-28-1" href="#__codelineno-28-1"></a>strata<span class="w"> </span>worker<span class="w"> </span>ls<span class="w"> </span>./my-notebook
+<a id="__codelineno-28-2" name="__codelineno-28-2" href="#__codelineno-28-2"></a>strata<span class="w"> </span>worker<span class="w"> </span>add<span class="w"> </span>./my-notebook<span class="w"> </span>fly-cpu<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-28-3" name="__codelineno-28-3" href="#__codelineno-28-3"></a><span class="w">  </span>--url<span class="w"> </span>https://my-strata-worker.fly.dev/v1/execute<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-28-4" name="__codelineno-28-4" href="#__codelineno-28-4"></a><span class="w">  </span>--runtime-id<span class="w"> </span>fly-cpu-v1<span class="w"> </span>--token-env<span class="w"> </span>STRATA_FLY_WORKER_TOKEN<span class="w"> </span>--default
+<a id="__codelineno-28-5" name="__codelineno-28-5" href="#__codelineno-28-5"></a>strata<span class="w"> </span>worker<span class="w"> </span>default<span class="w"> </span>./my-notebook<span class="w"> </span>fly-cpu<span class="w">   </span><span class="c1"># omit the name, or pass local, to clear</span>
+<a id="__codelineno-28-6" name="__codelineno-28-6" href="#__codelineno-28-6"></a>strata<span class="w"> </span>worker<span class="w"> </span>rm<span class="w"> </span>./my-notebook<span class="w"> </span>fly-cpu
+</code></pre></div>
+<p><code>add</code> replaces a worker of the same name; <code>--transport</code> defaults to <code>direct</code>, and <code>--default</code> also makes it the notebook default. <code>rm</code> refuses the built-in <code>local</code> worker and clears the default if it named the removed one. Each prints the resulting worker list, as JSON by default (<code>--format human</code> for a table). In service mode the server owns worker definitions, so these commands are refused. For a box you reach over SSH, use <a href="#run-cells-on-a-machine-you-can-ssh-to"><code>add-ssh</code> / <code>rm-ssh</code></a> instead.</p>
+<h3 id="signed-workers-and-private-hosts">Signed workers and private hosts<a class="headerlink" href="#signed-workers-and-private-hosts" title="Permanent link">&para;</a></h3>
+<p>A <code>signed</code> (pull) worker fetches its inputs from, and uploads its result to, the URLs in the manifest, so it refuses any manifest URL whose host resolves to a private, loopback or link-local address. A Strata server on your own network trips this. Name its host in <code>STRATA_WORKER_ALLOWED_HOSTS</code> on the worker, or set <code>STRATA_WORKER_ALLOW_LOCAL_HOSTS=1</code> to turn the check off (local dev). Those connections also ignore <code>HTTPS_PROXY</code>, so a worker that reaches the server only through a proxy needs <code>STRATA_WORKER_ALLOW_LOCAL_HOSTS</code>. See <a href="../../reference/configuration/#worker">Worker configuration</a>.</p>
 <h3 id="server-managed-workers-service-mode">Server-managed workers (service mode)<a class="headerlink" href="#server-managed-workers-service-mode" title="Permanent link">&para;</a></h3>
 <p>A service-mode server keeps its own registry, managed through
 <code>/v1/admin/notebook-workers*</code> rather than any notebook's <code>[[workers]]</code>. Two
 things are worth knowing about where it lives:</p>
 <p><strong>It is persisted.</strong> Changes made through the admin routes are written to
 <code>notebook_workers.json</code> in the server's artifact directory and survive a
-restart. Before, they lived only in memory and the next restart reverted them.</p>
+restart.</p>
 <p><strong>The file wins over <code>[tool.strata.transforms] notebook_workers</code>.</strong> The
 configured table is the bootstrap; once anything has been changed through the
 admin routes, that file is the registry and editing the config table has no
@@ -2856,40 +2916,40 @@ definitions stay editable either way.</p>
 <h2 id="authentication">Authentication<a class="headerlink" href="#authentication" title="Permanent link">&para;</a></h2>
 <p>By default the worker accepts any caller that can reach its URL. For any worker deployed to a public endpoint, set a bearer token so only your notebook server can dispatch cells.</p>
 <p><strong>1. Generate a token</strong> (any opaque string; 32+ random bytes is plenty):</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-28-1" name="__codelineno-28-1" href="#__codelineno-28-1"></a>python<span class="w"> </span>-c<span class="w"> </span><span class="s2">"import secrets; print(secrets.token_urlsafe(32))"</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-29-1" name="__codelineno-29-1" href="#__codelineno-29-1"></a>python<span class="w"> </span>-c<span class="w"> </span><span class="s2">"import secrets; print(secrets.token_urlsafe(32))"</span>
 </code></pre></div>
 <p><strong>2. Set <code>STRATA_WORKER_TOKEN</code> on the worker.</strong></p>
 <p>For Fly.io, store it as a secret (encrypted, injected at runtime, not visible in fly.toml):</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-29-1" name="__codelineno-29-1" href="#__codelineno-29-1"></a>fly<span class="w"> </span>secrets<span class="w"> </span><span class="nb">set</span><span class="w"> </span><span class="nv">STRATA_WORKER_TOKEN</span><span class="o">=</span>&lt;paste-token-here&gt;
+<div class="highlight"><pre><span></span><code><a id="__codelineno-30-1" name="__codelineno-30-1" href="#__codelineno-30-1"></a>fly<span class="w"> </span>secrets<span class="w"> </span><span class="nb">set</span><span class="w"> </span><span class="nv">STRATA_WORKER_TOKEN</span><span class="o">=</span>&lt;paste-token-here&gt;
 </code></pre></div>
 <p>For Modal, attach a secret to the function:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-30-1" name="__codelineno-30-1" href="#__codelineno-30-1"></a><span class="nd">@app</span><span class="o">.</span><span class="n">function</span><span class="p">(</span>
-<a id="__codelineno-30-2" name="__codelineno-30-2" href="#__codelineno-30-2"></a>    <span class="n">gpu</span><span class="o">=</span><span class="s2">"A10G"</span><span class="p">,</span>
-<a id="__codelineno-30-3" name="__codelineno-30-3" href="#__codelineno-30-3"></a>    <span class="n">scaledown_window</span><span class="o">=</span><span class="mi">60</span><span class="p">,</span>
-<a id="__codelineno-30-4" name="__codelineno-30-4" href="#__codelineno-30-4"></a>    <span class="n">secrets</span><span class="o">=</span><span class="p">[</span><span class="n">modal</span><span class="o">.</span><span class="n">Secret</span><span class="o">.</span><span class="n">from_name</span><span class="p">(</span><span class="s2">"strata-worker-token"</span><span class="p">)],</span>
-<a id="__codelineno-30-5" name="__codelineno-30-5" href="#__codelineno-30-5"></a><span class="p">)</span>
-<a id="__codelineno-30-6" name="__codelineno-30-6" href="#__codelineno-30-6"></a><span class="nd">@modal</span><span class="o">.</span><span class="n">asgi_app</span><span class="p">()</span>
-<a id="__codelineno-30-7" name="__codelineno-30-7" href="#__codelineno-30-7"></a><span class="k">def</span><span class="w"> </span><span class="nf">gpu_executor</span><span class="p">():</span> <span class="o">...</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-31-1" name="__codelineno-31-1" href="#__codelineno-31-1"></a><span class="nd">@app</span><span class="o">.</span><span class="n">function</span><span class="p">(</span>
+<a id="__codelineno-31-2" name="__codelineno-31-2" href="#__codelineno-31-2"></a>    <span class="n">gpu</span><span class="o">=</span><span class="s2">"A10G"</span><span class="p">,</span>
+<a id="__codelineno-31-3" name="__codelineno-31-3" href="#__codelineno-31-3"></a>    <span class="n">scaledown_window</span><span class="o">=</span><span class="mi">60</span><span class="p">,</span>
+<a id="__codelineno-31-4" name="__codelineno-31-4" href="#__codelineno-31-4"></a>    <span class="n">secrets</span><span class="o">=</span><span class="p">[</span><span class="n">modal</span><span class="o">.</span><span class="n">Secret</span><span class="o">.</span><span class="n">from_name</span><span class="p">(</span><span class="s2">"strata-worker-token"</span><span class="p">)],</span>
+<a id="__codelineno-31-5" name="__codelineno-31-5" href="#__codelineno-31-5"></a><span class="p">)</span>
+<a id="__codelineno-31-6" name="__codelineno-31-6" href="#__codelineno-31-6"></a><span class="nd">@modal</span><span class="o">.</span><span class="n">asgi_app</span><span class="p">()</span>
+<a id="__codelineno-31-7" name="__codelineno-31-7" href="#__codelineno-31-7"></a><span class="k">def</span><span class="w"> </span><span class="nf">gpu_executor</span><span class="p">():</span> <span class="o">...</span>
 </code></pre></div>
 <p>…then create the Modal secret once: <code>modal secret create strata-worker-token STRATA_WORKER_TOKEN=&lt;paste-token-here&gt;</code>.</p>
 <p><strong>3. Tell the notebook server about the token.</strong> Export it as an environment variable wherever you run <code>strata-notebook</code>:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-31-1" name="__codelineno-31-1" href="#__codelineno-31-1"></a><span class="nb">export</span><span class="w"> </span><span class="nv">STRATA_FLY_WORKER_TOKEN</span><span class="o">=</span>&lt;paste-token-here&gt;
-<a id="__codelineno-31-2" name="__codelineno-31-2" href="#__codelineno-31-2"></a>uv<span class="w"> </span>run<span class="w"> </span>strata-notebook
+<div class="highlight"><pre><span></span><code><a id="__codelineno-32-1" name="__codelineno-32-1" href="#__codelineno-32-1"></a><span class="nb">export</span><span class="w"> </span><span class="nv">STRATA_FLY_WORKER_TOKEN</span><span class="o">=</span>&lt;paste-token-here&gt;
+<a id="__codelineno-32-2" name="__codelineno-32-2" href="#__codelineno-32-2"></a>uv<span class="w"> </span>run<span class="w"> </span>strata-notebook
 </code></pre></div>
 <p>…and reference that env var in <code>notebook.toml</code>:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-32-1" name="__codelineno-32-1" href="#__codelineno-32-1"></a><span class="k">[workers.config]</span>
-<a id="__codelineno-32-2" name="__codelineno-32-2" href="#__codelineno-32-2"></a><span class="n">url</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"https://my-strata-worker.fly.dev/v1/execute"</span>
-<a id="__codelineno-32-3" name="__codelineno-32-3" href="#__codelineno-32-3"></a><span class="n">transport</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"direct"</span>
-<a id="__codelineno-32-4" name="__codelineno-32-4" href="#__codelineno-32-4"></a><span class="n">token_env</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"STRATA_FLY_WORKER_TOKEN"</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-33-1" name="__codelineno-33-1" href="#__codelineno-33-1"></a><span class="k">[workers.config]</span>
+<a id="__codelineno-33-2" name="__codelineno-33-2" href="#__codelineno-33-2"></a><span class="n">url</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"https://my-strata-worker.fly.dev/v1/execute"</span>
+<a id="__codelineno-33-3" name="__codelineno-33-3" href="#__codelineno-33-3"></a><span class="n">transport</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"direct"</span>
+<a id="__codelineno-33-4" name="__codelineno-33-4" href="#__codelineno-33-4"></a><span class="n">token_env</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"STRATA_FLY_WORKER_TOKEN"</span>
 </code></pre></div>
 <p><code>token_env</code> is preferred over <code>token</code> because the literal-token form gets committed to your notebook repo. Use <code>token = "..."</code> only for one-off local experiments.</p>
 <p>A worker with <code>STRATA_WORKER_TOKEN</code> set rejects unauthenticated requests with <code>401 Unauthorized</code>. <code>/health</code> stays open so platform health probes work without the secret. <code>strata-worker</code> takes the token out of its process environment at startup and holds it in memory, so a cell it runs cannot read it from <code>os.environ</code> or from <code>/proc/&lt;ppid&gt;/environ</code>.</p>
 <h2 id="using-workers-in-cells">Using workers in cells<a class="headerlink" href="#using-workers-in-cells" title="Permanent link">&para;</a></h2>
 <p>Annotate any cell with <code># @worker &lt;name&gt;</code>:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-33-1" name="__codelineno-33-1" href="#__codelineno-33-1"></a><span class="c1"># @name Embed Abstracts</span>
-<a id="__codelineno-33-2" name="__codelineno-33-2" href="#__codelineno-33-2"></a><span class="c1"># @worker modal-gpu</span>
-<a id="__codelineno-33-3" name="__codelineno-33-3" href="#__codelineno-33-3"></a><span class="c1"># @timeout 300</span>
-<a id="__codelineno-33-4" name="__codelineno-33-4" href="#__codelineno-33-4"></a><span class="n">embeddings</span> <span class="o">=</span> <span class="n">model</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span><span class="n">abstracts</span><span class="p">,</span> <span class="n">batch_size</span><span class="o">=</span><span class="mi">256</span><span class="p">)</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-34-1" name="__codelineno-34-1" href="#__codelineno-34-1"></a><span class="c1"># @name Embed Abstracts</span>
+<a id="__codelineno-34-2" name="__codelineno-34-2" href="#__codelineno-34-2"></a><span class="c1"># @worker modal-gpu</span>
+<a id="__codelineno-34-3" name="__codelineno-34-3" href="#__codelineno-34-3"></a><span class="c1"># @timeout 300</span>
+<a id="__codelineno-34-4" name="__codelineno-34-4" href="#__codelineno-34-4"></a><span class="n">embeddings</span> <span class="o">=</span> <span class="n">model</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span><span class="n">abstracts</span><span class="p">,</span> <span class="n">batch_size</span><span class="o">=</span><span class="mi">256</span><span class="p">)</span>
 </code></pre></div>
 <p>The worker annotation is the <strong>only</strong> change needed; the cell code itself is identical to local execution. On a worker that runs locked environments the cell gets the notebook's own packages; on one that does not, the worker's image needs them installed.</p>
 <h3 id="precedence">Precedence<a class="headerlink" href="#precedence" title="Permanent link">&para;</a></h3>
@@ -2942,7 +3002,7 @@ the isolation boundary makes it a footgun worth designing around explicitly.</p>
 <p>If you don't set <code>runtime_id</code>, the identity is the backend, the name and a hash of the worker's config, so two notebooks with a worker named <code>gpu</code> pointing at different URLs already get different identities. Set <code>runtime_id</code> when you want the opposite: two differently configured workers treated as one runtime, so a result computed on either is a cache hit for the other.</p>
 <h2 id="health-checks">Health checks<a class="headerlink" href="#health-checks" title="Permanent link">&para;</a></h2>
 <p>Every worker exposes <code>GET /health</code>. The notebook UI polls this and shows a green/red badge next to cells that use the worker. The badge is advisory: execution does not consult it, so a cell dispatched to a worker that has gone down fails when the connection does, not before.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-34-1" name="__codelineno-34-1" href="#__codelineno-34-1"></a>curl<span class="w"> </span>https://my-worker.example.com/health
+<div class="highlight"><pre><span></span><code><a id="__codelineno-35-1" name="__codelineno-35-1" href="#__codelineno-35-1"></a>curl<span class="w"> </span>https://my-worker.example.com/health
 </code></pre></div>
 <p>The <code>/health</code> endpoint is <strong>not</strong> gated by <code>STRATA_WORKER_TOKEN</code> - platform health probes (Fly, k8s liveness, Cloudflare) don't need the secret.</p>
 <h2 id="troubleshooting">Troubleshooting<a class="headerlink" href="#troubleshooting" title="Permanent link">&para;</a></h2>
