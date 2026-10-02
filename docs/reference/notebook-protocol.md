@@ -99,7 +99,10 @@ enforcement is symmetric across REST and WS, with no opt-outs.
 - Under `trusted_proxy`, every `/v1/*` request needs `X-Strata-Principal`,
   `X-Strata-Proxy-Token`, and `X-Tenant-ID` (if multi-tenant); under
   `api_key`, `Authorization: Bearer <key>`. The WS upgrade carries the same
-  credentials; a missing or invalid one closes with `1008`.
+  credentials; a missing or invalid one closes with `1008`. Under `api_key`
+  the key is checked again on every frame that needs `notebook:write` or
+  `notebook:execute`, and the socket closes with `1008 Unauthorized` once
+  the key is revoked or expired.
 - `/open`, `/create` and `/discover` work in service mode. What is
   personal-mode-only is narrower: the two path-keyed deletes and the two
   `/sessions` routes, which return `403 Forbidden` elsewhere.

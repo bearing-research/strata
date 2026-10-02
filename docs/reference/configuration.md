@@ -398,7 +398,9 @@ credentials. Pass `--dsn` (or set `STRATA_ARTIFACT_METADATA_DSN`) when the
 metadata lives on Postgres, so the CLI writes where the server reads.
 
 **Revocation is immediate**: verification reads the row on each request, so a
-revoked key stops working at once rather than after a cache expiry.
+revoked key stops working at once rather than after a cache expiry. A notebook
+WebSocket opened with the key re-checks it on every frame that edits or runs
+something and closes on the first one after revocation.
 
 ### Running several nodes behind one address
 

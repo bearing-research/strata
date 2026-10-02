@@ -42,6 +42,7 @@ from strata.notebook.models import (
 from strata.notebook.presence import lock_window_seconds
 from strata.notebook.protocol import MessageType
 from strata.notebook.scopes import (
+    NOTEBOOK_SCOPE_READ,
     required_scope_for_frame,
 )
 from strata.notebook.session import CellStateSnapshot, SessionManager
@@ -654,6 +655,23 @@ def _frame_scope_error(msg_type: str) -> str | None:
     return f"'{msg_type}' requires the {required} scope"
 
 
+def _api_key_no_longer_valid(websocket: WebSocket) -> bool:
+    """Whether the socket's API key has been revoked or has expired since the upgrade.
+
+    The upgrade verifies the key once; without this an open socket outlives its revocation.
+    """
+    from strata.auth import AuthError, parse_api_key_principal
+    from strata.server import get_state
+
+    if _configured_auth_mode() != "api_key":
+        return False
+    try:
+        parse_api_key_principal(dict(websocket.headers), get_state().config)
+    except AuthError:
+        return True
+    return False
+
+
 async def _authenticate_websocket(websocket: WebSocket) -> bool:
     """Authenticate a WS upgrade; False means the socket is already closed.
 
@@ -761,6 +779,15 @@ async def notebook_websocket(websocket: WebSocket, notebook_id: str):
                     )
                 )
                 continue
+            # One key lookup per frame that changes or runs something, so a revoked key stops
+            # writing at once; read frames skip it.
+            if required_scope_for_frame(msg_type) != NOTEBOOK_SCOPE_READ and (
+                _api_key_no_longer_valid(websocket)
+            ):
+                logger.warning("ws_auth_failed reason=api_key_no_longer_valid")
+                await _cleanup_notebook_websocket(notebook_id, websocket)
+                await websocket.close(code=1008, reason="Unauthorized")
+                return
             # Under trusted-proxy auth each frame needs its notebook scope.
             scope_error = _frame_scope_error(msg_type)
             if scope_error is not None:
