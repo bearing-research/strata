@@ -286,6 +286,11 @@ class StrataConfig(BaseSettings):
     # which in personal mode has no auth and can execute arbitrary Python. Loopback binding is no
     # defence; the browser runs there too.
     cors_allow_origins: list[str] = []
+    # Host header names this server answers to, beyond loopback names, IP literals and ``host``.
+    # Without the check a DNS-rebinding page shares an origin with the server and passes the
+    # origin guard. Always on in personal mode; service mode checks only when this is set. Exact
+    # names or a leading dot for a suffix (``.example.com``); ``*`` turns the check off.
+    allowed_hosts: Annotated[list[str], NoDecode] = Field(default_factory=list)
     # Mount the MCP server at ``/mcp`` so an external coding agent can drive the live session over
     # streamable HTTP. It exposes the read/run/author surface, so ``validate_mode_coherence``
     # allows it in personal mode without ``personal_mode_user_header``, or in service mode only
@@ -590,7 +595,7 @@ class StrataConfig(BaseSettings):
             raise ValueError(f"{info.field_name} must be a JSON object")
         return v
 
-    @field_validator("notebook_fetch_allowed_hosts", mode="before")
+    @field_validator("notebook_fetch_allowed_hosts", "allowed_hosts", mode="before")
     @classmethod
     def normalize_fetch_allowed_hosts(cls, v: Any) -> list[str]:
         """Accept a list or comma-separated host names."""

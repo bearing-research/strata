@@ -16,6 +16,10 @@ primary_region = "sjc"
   STRATA_PORT = "8765"
   STRATA_DEPLOYMENT_MODE = "personal"
   STRATA_ALLOW_REMOTE_CLIENTS_IN_PERSONAL = "true"
+  # The name browsers reach the app on; anything else is refused as a
+  # possible DNS-rebinding page. Change it with the app name, and add any
+  # custom domain (comma-separated).
+  STRATA_ALLOWED_HOSTS = "strata-notebook.fly.dev"
   # Per-user notebook scoping behind Cloudflare Access (or any authenticating
   # proxy that injects the user's email). Without a proxy the header is absent
   # and Strata acts single-user, so this is safe either way. See

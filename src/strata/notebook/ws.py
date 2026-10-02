@@ -729,6 +729,17 @@ async def _authenticate_websocket(websocket: WebSocket) -> bool:
     return True
 
 
+def _ws_origin_allowed(websocket: WebSocket) -> bool:
+    """Same rule as the HTTP origin guard; browsers apply no CORS to WebSockets.
+
+    Non-browser clients (the TUI, the SDK) send no ``Origin`` and pass.
+    """
+    from strata.server import _origin_is_allowed
+
+    origin = websocket.headers.get("origin")
+    return origin is None or _origin_is_allowed(websocket, origin)
+
+
 @router.websocket("/ws/{notebook_id}")
 async def notebook_websocket(websocket: WebSocket, notebook_id: str):
     """WebSocket endpoint for real-time notebook updates.
@@ -736,6 +747,11 @@ async def notebook_websocket(websocket: WebSocket, notebook_id: str):
     Frame types are the ``MessageType`` enum in ``protocol.py``;
     ``docs/reference/notebook-protocol.md`` is the client reference.
     """
+    # Otherwise any page the user visits can open this socket and run cells.
+    if not _ws_origin_allowed(websocket):
+        await websocket.close(code=1008, reason="Origin not allowed")
+        return
+
     # No HTTP middleware runs for a WS upgrade. First, so an unauthenticated
     # caller can't learn whether a notebook_id exists.
     if not await _authenticate_websocket(websocket):

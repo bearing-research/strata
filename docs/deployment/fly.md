@@ -79,6 +79,7 @@ The `fly.toml` at the repo root configures:
 [env]
   STRATA_DEPLOYMENT_MODE = "personal"
   STRATA_ALLOW_REMOTE_CLIENTS_IN_PERSONAL = "true"
+  STRATA_ALLOWED_HOSTS = "strata-notebook.fly.dev"
   STRATA_PERSONAL_MODE_USER_HEADER = "Cf-Access-Authenticated-User-Email"
   STRATA_NOTEBOOK_PYTHON_VERSIONS = '["3.12","3.13"]'
   UV_PYTHON_DOWNLOADS = "automatic"
@@ -95,6 +96,12 @@ bind to `0.0.0.0` instead of loopback only - without it, Strata
 refuses to start on a Fly machine because the Fly proxy can't reach
 a loopback bind. Setting this is the explicit acknowledgment that
 you understand the personal-mode trust model (see the warning above).
+
+`STRATA_ALLOWED_HOSTS` names the host browsers reach the app on.
+Personal mode answers only to loopback names, IP literals and the names
+listed here, which keeps DNS-rebinding pages out; a request for any
+other `Host` gets a 400. Set it to `<your-app-name>.fly.dev` and add
+any custom domain, comma-separated.
 
 ## Monitoring
 

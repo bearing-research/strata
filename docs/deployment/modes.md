@@ -87,6 +87,20 @@ STRATA_DEPLOYMENT_MODE=personal \
 Opt in only if you have separate protection (firewall, VPN, private
 network): personal mode exposes write endpoints with no authentication.
 
+Loopback binding alone does not keep web pages out: the browser runs on
+the same machine. Personal mode refuses a cross-origin page's writes
+and its notebook WebSocket, and answers only to the `Host` names it
+expects, so a DNS-rebinding page that resolves its own name to
+`127.0.0.1` gets a 400. The expected
+names are `localhost`, `127.0.0.1`, `[::1]`, any IP literal,
+`STRATA_HOST`, and whatever you list in `STRATA_ALLOWED_HOSTS`. When
+you reach a remote personal-mode server by name (`devbox.lan`,
+`strata.example.com`), list that name:
+
+```bash
+STRATA_ALLOWED_HOSTS=devbox.lan,strata.example.com
+```
+
 Artifacts persist to `~/.strata/artifacts` unless `STRATA_ARTIFACT_DIR`
 is set. Notebook deletion and session discovery/reconnect APIs are
 personal-mode-only.
@@ -131,6 +145,7 @@ Set:
 STRATA_DEPLOYMENT_MODE=personal
 STRATA_ALLOW_REMOTE_CLIENTS_IN_PERSONAL=true
 STRATA_PERSONAL_MODE_USER_HEADER=Cf-Access-Authenticated-User-Email
+STRATA_ALLOWED_HOSTS=strata.example.com   # the name users browse to
 ```
 
 The header value is whatever your proxy injects after authenticating the
