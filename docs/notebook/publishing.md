@@ -113,6 +113,13 @@ the link will expose before you use it.
 Upstream **data** is never served. The page describes the steps; only the
 published artifact's own bytes are downloadable, at `/p/<token>/data`.
 
+Those bytes are served as data, never as a page. A PNG, Arrow, JSON or Markdown
+artifact is served under its own type; any other declared type (HTML or SVG, for
+instance, which a writer can set freely) downloads as
+`application/octet-stream`. Every response carries
+`X-Content-Type-Options: nosniff` and `Content-Security-Policy: sandbox`, so
+nothing published runs script on your server's origin.
+
 ## Withdrawing
 
 ```bash

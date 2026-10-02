@@ -1105,7 +1105,10 @@ async def frame_ancestors_middleware(request: Request, call_next):
     else:
         origins = list(getattr(_state.config, "embed_frame_ancestors", [])) if _state else []
         ancestors = "*" if "*" in origins else " ".join(["'self'", *origins])
-    response.headers["Content-Security-Policy"] = f"frame-ancestors {ancestors}"
+    policy = f"frame-ancestors {ancestors}"
+    # Kept: a route serving stored bytes sets its own sandbox policy.
+    existing = response.headers.get("Content-Security-Policy")
+    response.headers["Content-Security-Policy"] = f"{existing}; {policy}" if existing else policy
     return response
 
 

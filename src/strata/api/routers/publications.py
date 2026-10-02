@@ -34,6 +34,7 @@ from strata.api.publication_page import (
     render_embed,
     render_publication,
 )
+from strata.api.served_bytes import served_media_type
 from strata.services.artifact import ArtifactService
 
 router = APIRouter(tags=["publications"])
@@ -342,7 +343,7 @@ async def publication_data(token: str, store: ReadStore):
 
     Ancestors are described on the page but their bytes are never served.
     """
-    publication, _ = _load_published(store, token, require_active=True)
+    publication, artifact = _load_published(store, token, require_active=True)
 
     reader_cm = store.open_blob_reader(publication.artifact_id, publication.version)
     if reader_cm is None:
@@ -353,11 +354,8 @@ async def publication_data(token: str, store: ReadStore):
             while chunk := reader.read(1024 * 1024):
                 yield chunk
 
-    return StreamingResponse(
-        _iter_blob(),
-        media_type=content_type_of(store.get_artifact(publication.artifact_id, publication.version))
-        or "application/octet-stream",
-    )
+    media_type, headers = served_media_type(content_type_of(artifact))
+    return StreamingResponse(_iter_blob(), media_type=media_type, headers=headers)
 
 
 @router.get("/p/{token}/archive.zip")
