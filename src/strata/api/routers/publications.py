@@ -483,7 +483,9 @@ async def publication_embed(token: str, store: ReadStore, http_request: Request)
             lineage=lineage,
             image_src=image_src,
             page_url=f"{_public_base(http_request)}/p/{token}",
-        )
+        ),
+        # Only this route may be framed anywhere; the middleware's default covers the rest.
+        headers={"Content-Security-Policy": "frame-ancestors *"},
     )
 
 

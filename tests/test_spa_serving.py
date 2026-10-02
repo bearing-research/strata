@@ -75,3 +75,14 @@ def test_a_file_inside_the_dist_is_served(spa):
     client, _ = spa
     assert client.get("/favicon.svg").text == "<svg/>"
     assert client.get("/notebook/anything").text == INDEX
+
+
+@pytest.mark.parametrize("path", ["/p/x/embed/", "/p//x/embed", "/p/x/embed%2f"])
+def test_only_the_embed_route_itself_may_be_framed_anywhere(spa, path):
+    """These miss the embed route and fall to index.html, the live app behind its hash route."""
+    client, _ = spa
+
+    response = client.get("http://testserver" + path)
+
+    assert response.text == INDEX
+    assert response.headers["content-security-policy"] == "frame-ancestors 'self'"

@@ -315,19 +315,6 @@ def _is_public_publication_request(request: Request) -> bool:
     return path.startswith("/p/") or path.startswith("/v1/publications/")
 
 
-def _is_public_embed_request(request: Request) -> bool:
-    """Return True for a published artifact's embed card, which any origin may frame.
-
-    Matched on the full path shape, not an ``/embed`` suffix: the SPA catch-all serves
-    ``index.html`` for any path and the frontend is hash-routed, so a suffix match would let
-    any origin frame the live notebook app.
-    """
-    if request.method != "GET":
-        return False
-    parts = [segment for segment in request.url.path.split("/") if segment]
-    return len(parts) == 3 and parts[0] == "p" and parts[2] == "embed"
-
-
 def _deny_build_access() -> None:
     """Raise the configured build access error."""
     state = get_state()
@@ -1098,17 +1085,18 @@ async def frame_ancestors_middleware(request: Request, call_next):
     """Set ``Content-Security-Policy: frame-ancestors`` from ``embed_frame_ancestors``.
 
     Default ``'self'``; listing origins opts into cross-origin embedding, ``*`` allows any.
+    A route that sets its own policy keeps it: the publication embed card allows any origin.
     """
     response = await call_next(request)
-    if _is_public_embed_request(request):
-        ancestors = "*"
-    else:
-        origins = list(getattr(_state.config, "embed_frame_ancestors", [])) if _state else []
-        ancestors = "*" if "*" in origins else " ".join(["'self'", *origins])
-    policy = f"frame-ancestors {ancestors}"
-    # Kept: a route serving stored bytes sets its own sandbox policy.
+    origins = list(getattr(_state.config, "embed_frame_ancestors", [])) if _state else []
+    ancestors = "*" if "*" in origins else " ".join(["'self'", *origins])
+    # A route's own policy is kept (stored bytes are sandboxed; the publication embed card
+    # allows any origin); frame-ancestors is added only where that policy has none.
     existing = response.headers.get("Content-Security-Policy")
-    response.headers["Content-Security-Policy"] = f"{existing}; {policy}" if existing else policy
+    if not existing:
+        response.headers["Content-Security-Policy"] = f"frame-ancestors {ancestors}"
+    elif "frame-ancestors" not in existing:
+        response.headers["Content-Security-Policy"] = f"{existing}; frame-ancestors {ancestors}"
     return response
 
 
