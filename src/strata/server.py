@@ -1086,6 +1086,7 @@ async def frame_ancestors_middleware(request: Request, call_next):
 
     Default ``'self'``; listing origins opts into cross-origin embedding, ``*`` allows any.
     A route that sets its own policy keeps it: the publication embed card allows any origin.
+    Also sets ``X-Content-Type-Options: nosniff``.
     """
     response = await call_next(request)
     origins = list(getattr(_state.config, "embed_frame_ancestors", [])) if _state else []
@@ -1097,6 +1098,7 @@ async def frame_ancestors_middleware(request: Request, call_next):
         response.headers["Content-Security-Policy"] = f"frame-ancestors {ancestors}"
     elif "frame-ancestors" not in existing:
         response.headers["Content-Security-Policy"] = f"{existing}; frame-ancestors {ancestors}"
+    response.headers["X-Content-Type-Options"] = "nosniff"
     return response
 
 

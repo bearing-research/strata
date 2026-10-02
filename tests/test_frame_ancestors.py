@@ -59,3 +59,9 @@ def test_header_present_on_every_route(tmp_path, path):
         resp = client.get(path)
         assert "content-security-policy" in resp.headers
         assert "frame-ancestors" in resp.headers["content-security-policy"]
+
+
+@pytest.mark.parametrize("path", ["/health", "/v1/notebooks"])
+def test_responses_forbid_content_sniffing(tmp_path, path):
+    for client in _client(tmp_path):
+        assert client.get(path).headers["x-content-type-options"] == "nosniff"
