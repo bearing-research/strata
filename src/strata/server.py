@@ -1597,23 +1597,44 @@ _authorize_table_access = authorize_table_access
 _resolve_input_version = resolve_input_version
 
 
-def _authorize_artifact_read(artifact) -> None:
+# How far back a read follows an artifact's lineage to find the tables it came from.
+_ACL_MAX_ANCESTRY_DEPTH = 100
+
+
+def _authorize_artifact_read(artifact, store) -> None:
     """ACL-gate reading an artifact's bytes or metadata under trusted-proxy auth.
 
     The cache is shared, so a principal denied a table must not read it back through a cached
-    result: re-checks the table ACL for each table input in the stored transform spec (no
-    Iceberg I/O). No-op without trusted-proxy auth; tenant scoping still applies.
+    result, nor through anything computed from one: re-checks the table ACL for each table input
+    in the stored transform spec of the artifact and of every artifact in its lineage (store
+    reads only, no Iceberg I/O). No-op without trusted-proxy auth; tenant scoping still applies.
     """
     state = get_state()
     if not state.config.principal_auth_enabled:
         return
-    if not getattr(artifact, "transform_spec", None):
+
+    _authorize_spec_tables(getattr(artifact, "transform_spec", None))
+    ancestor_specs = store.ancestor_transform_specs(artifact, max_depth=_ACL_MAX_ANCESTRY_DEPTH)
+    if ancestor_specs is None:
+        # Fails closed: a table beyond the bound could be one the caller is denied.
+        raise HTTPException(
+            status_code=403,
+            detail=f"Artifact lineage is deeper than {_ACL_MAX_ANCESTRY_DEPTH} steps; "
+            "its source tables cannot be authorized",
+        )
+    for spec_json in ancestor_specs:
+        _authorize_spec_tables(spec_json)
+
+
+def _authorize_spec_tables(spec_json: str | None) -> None:
+    """Check the table ACL for each table input a stored transform spec names."""
+    if not spec_json:
         return
 
     from strata.artifact_store import TransformSpec
 
     try:
-        spec = TransformSpec.from_json(artifact.transform_spec)
+        spec = TransformSpec.from_json(spec_json)
     except Exception:
         return  # unparseable spec → no table inputs to gate
 

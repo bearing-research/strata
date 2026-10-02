@@ -3374,6 +3374,55 @@ class ArtifactStore:
 
     # --- Lineage and dependency queries ---
 
+    def ancestor_transform_specs(
+        self, artifact: ArtifactVersion, *, max_depth: int
+    ) -> list[str] | None:
+        """The stored ``transform_spec`` of every version *artifact* was computed from.
+
+        Follows the recorded input edges (``_ancestor_of``) one query per level, across
+        tenants. Versions no longer in the store are skipped. ``None`` when ancestors
+        remain past ``max_depth`` levels.
+        """
+
+        def edges(input_versions: str | None) -> list[tuple[str, int]]:
+            if not input_versions:
+                return []
+            return [
+                ancestor
+                for uri, recorded in json.loads(input_versions).items()
+                if (ancestor := _ancestor_of(uri, recorded)) is not None
+            ]
+
+        seen = {(artifact.id, artifact.version)}
+        level = edges(artifact.input_versions)
+        specs: list[str] = []
+        if not level:
+            return specs
+        conn = self._get_connection()
+        try:
+            for _ in range(max_depth):
+                pending = [node for node in dict.fromkeys(level) if node not in seen]
+                if not pending:
+                    return specs
+                seen.update(pending)
+                level = []
+                for start in range(0, len(pending), 250):
+                    batch = pending[start : start + 250]
+                    where = " OR ".join("(id = ? AND version = ?)" for _ in batch)
+                    for row in conn.execute(
+                        "SELECT transform_spec, input_versions FROM artifact_versions "
+                        f"WHERE {where}",
+                        [value for node in batch for value in node],
+                    ).fetchall():
+                        if row["transform_spec"]:
+                            specs.append(row["transform_spec"])
+                        level.extend(edges(row["input_versions"]))
+            if any(node not in seen for node in level):
+                return None
+            return specs
+        finally:
+            conn.close()
+
     def find_dependents(
         self,
         artifact_id: str,

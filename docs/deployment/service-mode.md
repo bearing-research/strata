@@ -278,6 +278,15 @@ the target table and when the caller is denied a table the result was read from.
 Rules have no separate write permission: a table a caller may read, it may export
 into, unless another tenant [owns it](#promoting-into-an-iceberg-table).
 
+A result is gated by every table in its lineage, not only the ones it read
+directly. A transform over a cached scan of a denied table is denied too, as is
+anything computed from that result, and the same holds when such a result is
+used as a transform input. The check follows the store's recorded input edges up
+to 100 steps back; a result with a deeper lineage is refused with `403`, since a
+table past that point cannot be checked. An ancestor that retention has already
+collected cannot be checked either, so a deny rule only reaches results whose
+lineage is still in the store.
+
 ### Scope-gated endpoints
 
 A few operations require a specific scope under trusted-proxy or API-key
