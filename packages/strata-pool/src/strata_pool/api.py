@@ -5,6 +5,7 @@ caller presents the API token and asserts the tenant in a header, which the
 pool trusts: it must be reachable only from the proxy.
 """
 
+import hmac
 import logging
 from dataclasses import asdict
 from typing import Annotated
@@ -72,13 +73,18 @@ def create_app(
     if api_token is None:
         logger.warning("pool API starting with no token; anyone who can reach it can run jobs")
 
+    def bearer_is(authorization: str | None, token: str) -> bool:
+        return authorization is not None and hmac.compare_digest(
+            authorization.encode(), f"Bearer {token}".encode()
+        )
+
     def is_admin(authorization: str | None) -> bool:
-        return admin_token is not None and authorization == f"Bearer {admin_token}"
+        return admin_token is not None and bearer_is(authorization, admin_token)
 
     async def require_token(authorization: Annotated[str | None, Header()] = None) -> None:
         if api_token is None or is_admin(authorization):
             return
-        if authorization != f"Bearer {api_token}":
+        if not bearer_is(authorization, api_token):
             raise HTTPException(status_code=401, detail="invalid or missing API token")
 
     async def require_admin(authorization: Annotated[str | None, Header()] = None) -> None:
