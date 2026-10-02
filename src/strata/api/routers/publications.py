@@ -129,7 +129,7 @@ async def publish_artifact(
     # by anyone with the link. A principal the ACL denies the artifact's inputs
     # cannot read it here and must not be able to publish it either.
     artifact = _ensure_artifact_access(store.get_artifact(artifact_id, version), tenant_filter)
-    _authorize_artifact_read(artifact)
+    _authorize_artifact_read(artifact, store)
     try:
         publication = store.publish_artifact(
             artifact_id,

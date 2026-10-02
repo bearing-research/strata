@@ -278,7 +278,7 @@ async def get_artifact_info(
         store.get_artifact(artifact_id, version),
         tenant_filter,
     )
-    _authorize_artifact_read(artifact)
+    _authorize_artifact_read(artifact, store)
 
     return ArtifactInfoResponse(
         artifact_id=artifact.id,
@@ -676,7 +676,7 @@ async def find_artifact_by_provenance(
             headers={PROVENANCE_MISS_HEADER: "1"},
         )
     artifact = _ensure_artifact_access(artifact, tenant_filter)
-    _authorize_artifact_read(artifact)
+    _authorize_artifact_read(artifact, store)
 
     return ArtifactProvenanceMatchResponse(
         artifact_id=artifact.id,
@@ -946,8 +946,8 @@ async def export_artifact_to_table(
     ``table`` is a ``<warehouse>#ns.table`` URI or ``ns.table`` in the configured catalog.
     """
     from strata.api.dependencies import authorize_table_access
-    from strata.iceberg import table_identity_for
-    from strata.server import _ensure_artifact_access, get_state
+    from strata.iceberg import TableOfAnotherTenant, table_identity_for
+    from strata.server import _authorize_artifact_read, _ensure_artifact_access, get_state
     from strata.table_export import export_artifact
 
     config = get_state().config
@@ -959,6 +959,8 @@ async def export_artifact_to_table(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     authorize_table_access(request.table, identity)
     artifact = _ensure_artifact_access(store.get_artifact(artifact_id, version), tenant_filter)
+    # Exporting copies the bytes into a table the caller can scan, so it is a read of them.
+    _authorize_artifact_read(artifact, store)
     try:
         written = await asyncio.to_thread(
             export_artifact,
@@ -970,6 +972,10 @@ async def export_artifact_to_table(
             alias=request.alias,
             tenant=tenant_filter,
         )
+    except TableOfAnotherTenant as exc:
+        if config.hide_forbidden_as_not_found:
+            raise HTTPException(status_code=404, detail="Table not found") from exc
+        raise HTTPException(status_code=403, detail="Access denied") from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {
@@ -1047,7 +1053,7 @@ async def get_artifact_data(
         tenant_filter,
     )
     # Result retrieval is ACL-gated: re-check the table ACL of the inputs.
-    _authorize_artifact_read(artifact)
+    _authorize_artifact_read(artifact, store)
     if artifact.state not in ("ready", "superseded"):
         raise HTTPException(
             status_code=400,
@@ -1112,7 +1118,7 @@ async def get_artifact_lineage(
     )
     # Same table-ACL re-check as the sibling read endpoints: the graph carries every upstream table
     # URI, pinned snapshot and transform ref, most of what a deny rule withholds.
-    _authorize_artifact_read(artifact)
+    _authorize_artifact_read(artifact, store)
 
     if artifact.state not in ("ready", "superseded"):
         raise HTTPException(
@@ -1148,7 +1154,7 @@ async def get_artifact_dependents(
         store.get_artifact(artifact_id, version),
         tenant_filter,
     )
-    _authorize_artifact_read(artifact)
+    _authorize_artifact_read(artifact, store)
 
     if artifact.state not in ("ready", "superseded"):
         raise HTTPException(

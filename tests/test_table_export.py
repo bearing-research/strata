@@ -361,31 +361,41 @@ class TestWhoMayExport:
         )
         reset_artifact_store()
         monkeypatch.setattr(server_module, "_state", ServerState(config))
-        # Stamped with the caller's tenant, as a write-back from a notebook is.
         store = get_artifact_store(artifact_dir)
+        return TestClient(app), TestWhoMayExport._rows(store, "rows")
+
+    @staticmethod
+    def _rows(store, artifact_id, *, inputs=(), tenant="acme"):
+        """A ready tabular version, stamped with a tenant as a notebook write-back is."""
+        import hashlib
+
         from strata.artifact_store import TransformSpec
 
         version = store.create_artifact(
-            "rows",
-            "a" * 64,
+            artifact_id,
+            hashlib.sha256(f"{artifact_id}/{tenant}".encode()).hexdigest(),
             transform_spec=TransformSpec(
-                executor="notebook/cell@v1", params={"content_type": "arrow/ipc"}, inputs=[]
+                executor="notebook/cell@v1",
+                params={"content_type": "arrow/ipc"},
+                inputs=list(inputs),
             ),
-            tenant="acme",
+            tenant=tenant,
         )
         blob = _ipc(pa.table({"x": [1]}))
-        with store.open_blob_writer("rows", version) as writer:
+        with store.open_blob_writer(artifact_id, version) as writer:
             writer.write(blob)
-        store.finalize_artifact("rows", version, schema_json="", row_count=1, byte_size=len(blob))
-        return TestClient(app), SimpleNamespace(id="rows", version=version)
+        store.finalize_artifact(
+            artifact_id, version, schema_json="", row_count=1, byte_size=len(blob)
+        )
+        return SimpleNamespace(id=artifact_id, version=version)
 
     @staticmethod
-    def _headers() -> dict[str, str]:
+    def _headers(tenant: str = "acme") -> dict[str, str]:
         return {
             "X-Strata-Proxy-Token": "sekrit",
             "X-Strata-Principal": "scientist",
-            "X-Strata-Tenant": "acme",
-            "X-Tenant-ID": "acme",
+            "X-Strata-Tenant": tenant,
+            "X-Tenant-ID": tenant,
             "X-Strata-Scopes": "artifacts:write",
         }
 
@@ -429,6 +439,92 @@ class TestWhoMayExport:
         # the ACL and not a missing artifact.
         assert allowed.status_code == 200, allowed.text
         assert _catalog(tmp_path / "wh").load_table("taxi.features") is not None
+
+    def test_an_artifact_read_from_a_denied_table_is_not_exported(self, tmp_path, monkeypatch):
+        """Exporting copies the bytes into a table the caller can scan, so it is a read of them."""
+        from strata.artifact_store import get_artifact_store
+
+        client, _ = self._service(
+            monkeypatch,
+            tmp_path,
+            service_writes_enabled=True,
+            acl_config={
+                "default": "allow",
+                "deny_rules": [{"principal": "scientist", "tables": ["file:secret.*"]}],
+            },
+        )
+        store = get_artifact_store(tmp_path / "service-artifacts")
+        secret = self._rows(store, "secret-rows", inputs=[f"file://{tmp_path}/lake#secret.events"])
+        open_rows = self._rows(store, "open-rows", inputs=[f"file://{tmp_path}/lake#open.events"])
+
+        def _export(rows, table: str):
+            return client.post(
+                f"/v1/artifacts/{rows.id}/v/{rows.version}/export",
+                json={"table": f"{tmp_path / 'wh'}#taxi.{table}"},
+                headers=self._headers(),
+            )
+
+        denied = _export(secret, "copy")
+        allowed = _export(open_rows, "other")
+
+        assert denied.status_code in (403, 404), denied.text
+        # The same caller exports an artifact of allowed tables, so the refusal is the ACL.
+        assert allowed.status_code == 200, allowed.text
+        assert not _catalog(tmp_path / "wh").table_exists("taxi.copy")
+
+    def test_another_tenants_table_is_not_overwritten(self, tmp_path, monkeypatch):
+        """The table ACL has no write verb, so the tenant that exported a table owns it."""
+        from strata.artifact_store import get_artifact_store
+
+        client, _ = self._service(monkeypatch, tmp_path, service_writes_enabled=True)
+        store = get_artifact_store(tmp_path / "service-artifacts")
+        table = f"{tmp_path / 'wh'}#taxi.features"
+
+        def _export(artifact_id: str, tenant: str):
+            rows = self._rows(store, artifact_id, tenant=tenant)
+            return client.post(
+                f"/v1/artifacts/{rows.id}/v/{rows.version}/export",
+                json={"table": table},
+                headers=self._headers(tenant),
+            )
+
+        first = _export("acme-v1", "acme")
+        other_tenant = _export("globex-v1", "globex")
+        same_tenant = _export("acme-v2", "acme")
+
+        assert first.status_code == 200, first.text
+        assert other_tenant.status_code == 404, other_tenant.text
+        assert other_tenant.json()["detail"] == "Table not found"
+        assert same_tenant.status_code == 200, same_tenant.text
+        current = _catalog(tmp_path / "wh").load_table("taxi.features").current_snapshot()
+        assert current.summary["strata.artifact_id"] == "acme-v2"
+        assert current.summary["strata.tenant"] == "acme"
+        assert [a for a, _ in _written_versions(tmp_path / "wh")] == ["acme-v1", "acme-v2"]
+
+
+def test_a_tenant_scoped_export_refuses_a_table_written_for_another(tmp_path, notebook_store):
+    """Scoped writes replace only their own tenant's table; an unscoped one (personal, admin)
+    is not checked.
+    """
+    from strata.iceberg import TableOfAnotherTenant
+
+    store = notebook_store.artifact_store
+    uri = f"{tmp_path / 'wh'}#taxi.features"
+    config = _config(tmp_path)
+    first = _version(notebook_store, pa.table({"trip": [1]}), tag="1")
+    second = _version(notebook_store, pa.table({"trip": [2]}), tag="2")
+    third = _version(notebook_store, pa.table({"trip": [3]}), tag="3")
+
+    export_artifact(store, first, uri, config=config, tenant="acme")
+    with pytest.raises(TableOfAnotherTenant):
+        export_artifact(store, second, uri, config=config, tenant="globex")
+    # An unscoped write leaves no tenant, so a scoped one cannot replace it either.
+    export_artifact(store, third, uri, config=config)
+    with pytest.raises(TableOfAnotherTenant):
+        export_artifact(store, second, uri, config=config, tenant="acme")
+
+    table = _catalog(tmp_path / "wh").load_table("taxi.features")
+    assert table.scan().to_arrow().column("trip").to_pylist() == [3]
 
 
 def test_a_named_catalogs_table_is_written_in_that_catalog(tmp_path, notebook_store):

@@ -462,6 +462,12 @@ class TestArtifactReadAcl:
     of the inputs in the stored transform_spec.
     """
 
+    @pytest.fixture
+    def store(self, tmp_path):
+        from strata.artifact_store import ArtifactStore
+
+        return ArtifactStore(tmp_path / "artifacts")
+
     @staticmethod
     def _artifact(table_uri):
         from unittest.mock import MagicMock
@@ -472,6 +478,7 @@ class TestArtifactReadAcl:
         art.transform_spec = TransformSpec(
             executor="scan@v1", params={}, inputs=[table_uri]
         ).to_json()
+        art.input_versions = None
         return art
 
     @staticmethod
@@ -492,7 +499,7 @@ class TestArtifactReadAcl:
         monkeypatch.setattr(server_module, "_state", state)
         return server_module
 
-    def test_denied_table_read_rejected(self, monkeypatch):
+    def test_denied_table_read_rejected(self, monkeypatch, store):
         from fastapi import HTTPException
 
         server_module = self._patch_state(monkeypatch, auth="trusted_proxy")
@@ -500,28 +507,28 @@ class TestArtifactReadAcl:
         set_principal(Principal(id="intruder"))
         try:
             with pytest.raises(HTTPException) as exc:
-                server_module._authorize_artifact_read(art)
+                server_module._authorize_artifact_read(art, store)
             assert exc.value.status_code == 403
         finally:
             set_principal(None)
 
-    def test_allowed_table_read_passes(self, monkeypatch):
+    def test_allowed_table_read_passes(self, monkeypatch, store):
         server_module = self._patch_state(monkeypatch, auth="trusted_proxy")
         art = self._artifact("file:///wh#public.events")
         set_principal(Principal(id="analyst"))
         try:
-            server_module._authorize_artifact_read(art)  # no raise
+            server_module._authorize_artifact_read(art, store)  # no raise
         finally:
             set_principal(None)
 
-    def test_no_auth_is_noop(self, monkeypatch):
+    def test_no_auth_is_noop(self, monkeypatch, store):
         # Without trusted-proxy auth there is no principal or ACL, so the read is allowed
         # (tenant scoping is enforced separately by _ensure_artifact_access).
         server_module = self._patch_state(monkeypatch, auth="none")
         art = self._artifact("file:///wh#secret.events")
-        server_module._authorize_artifact_read(art)  # no raise
+        server_module._authorize_artifact_read(art, store)  # no raise
 
-    def test_artifact_without_table_inputs_is_noop(self, monkeypatch):
+    def test_artifact_without_table_inputs_is_noop(self, monkeypatch, store):
         # An artifact whose inputs are all artifacts has no table ACL to check; tenant
         # scoping is the gate.
         from unittest.mock import MagicMock
@@ -535,11 +542,154 @@ class TestArtifactReadAcl:
             params={},
             inputs=["strata://artifact/abc@v=1"],
         ).to_json()
+        art.input_versions = None
         set_principal(Principal(id="intruder"))
         try:
-            server_module._authorize_artifact_read(art)  # no raise
+            server_module._authorize_artifact_read(art, store)  # no raise
         finally:
             set_principal(None)
+
+
+class TestDerivedResultsInheritTheAcl:
+    """A result computed from a denied table is denied too, however many steps removed.
+
+    Otherwise a transform (or a notebook write-back) over a cached scan hands the table's rows,
+    and in lineage its name, to a principal the ACL refuses.
+    """
+
+    @staticmethod
+    def _service(monkeypatch, tmp_path):
+        from fastapi.testclient import TestClient
+
+        import strata.server as server_module
+        from strata.artifact_store import get_artifact_store, reset_artifact_store
+        from strata.server import ServerState, app
+
+        artifact_dir = tmp_path / "artifacts"
+        config = StrataConfig(
+            deployment_mode="service",
+            auth_mode="trusted_proxy",
+            proxy_token="sekrit",
+            artifact_dir=artifact_dir,
+            cache_dir=tmp_path / "cache",
+            acl_config={
+                "default": "allow",
+                "deny_rules": [{"principal": "bob", "tables": ["file:secret.*"]}],
+            },
+        )
+        reset_artifact_store()
+        monkeypatch.setattr(server_module, "_state", ServerState(config))
+        return TestClient(app), get_artifact_store(artifact_dir)
+
+    @staticmethod
+    def _ready(store, artifact_id, *, inputs, input_versions):
+        import io
+
+        import pyarrow as pa
+
+        from strata.artifact_store import TransformSpec
+
+        version = store.create_artifact(
+            artifact_id,
+            artifact_id.ljust(64, "0"),
+            transform_spec=TransformSpec(executor="t@v1", params={}, inputs=inputs),
+            input_versions=input_versions,
+            tenant="acme",
+        )
+        sink = io.BytesIO()
+        table = pa.table({"name": ["secret_0"]})
+        with pa.ipc.new_stream(sink, table.schema) as writer:
+            writer.write_table(table)
+        store.write_blob(artifact_id, version, sink.getvalue())
+        store.finalize_artifact(
+            artifact_id, version, schema_json="", row_count=1, byte_size=len(sink.getvalue())
+        )
+        return version
+
+    def _chain(self, store, table_uri: str, prefix: str) -> str:
+        """scan -> transform over it by id -> transform over that by name; returns the last id."""
+        self._ready(store, f"{prefix}scan", inputs=[table_uri], input_versions={table_uri: "42"})
+        scan_uri = f"strata://artifact/{prefix}scan@v=1"
+        self._ready(
+            store,
+            f"{prefix}mid",
+            inputs=[scan_uri],
+            input_versions={scan_uri: f"{prefix}scan@v=1"},
+        )
+        store.set_name(f"{prefix}mid", f"{prefix}mid", 1, tenant="acme")
+        name_uri = f"strata://name/{prefix}mid"
+        self._ready(
+            store, f"{prefix}top", inputs=[name_uri], input_versions={name_uri: f"{prefix}mid@v=1"}
+        )
+        return f"{prefix}top"
+
+    @staticmethod
+    def _as(principal: str) -> dict[str, str]:
+        return {
+            "X-Strata-Proxy-Token": "sekrit",
+            "X-Strata-Principal": principal,
+            "X-Tenant-ID": "acme",
+        }
+
+    def test_two_steps_from_a_denied_table_is_still_denied(self, monkeypatch, tmp_path):
+        client, store = self._service(monkeypatch, tmp_path)
+        secret = self._chain(store, f"file://{tmp_path}/wh#secret.events", "s-")
+        public = self._chain(store, f"file://{tmp_path}/wh#public.events", "p-")
+
+        for route in ("", "/data", "/lineage", "/dependents"):
+            denied = client.get(f"/v1/artifacts/{secret}/v/1{route}", headers=self._as("bob"))
+            assert denied.status_code == 404, (route, denied.text)
+            assert "secret" not in denied.text
+            # Another principal reads the same chain; bob reads a chain of allowed tables.
+            for principal, artifact_id in (("dave", secret), ("bob", public)):
+                allowed = client.get(
+                    f"/v1/artifacts/{artifact_id}/v/1{route}", headers=self._as(principal)
+                )
+                assert allowed.status_code == 200, (route, principal, allowed.text)
+
+    def test_a_lineage_past_the_bound_fails_closed(self, monkeypatch, tmp_path):
+        import strata.server as server_module
+
+        client, store = self._service(monkeypatch, tmp_path)
+        public = self._chain(store, f"file://{tmp_path}/wh#public.events", "p-")
+
+        monkeypatch.setattr(server_module, "_ACL_MAX_ANCESTRY_DEPTH", 1)
+        response = client.get(f"/v1/artifacts/{public}/v/1/data", headers=self._as("bob"))
+
+        assert response.status_code == 403, response.text
+        assert "deeper than 1" in response.text
+
+    def test_the_chain_is_read_one_level_at_a_time(self, tmp_path):
+        """The walk costs a query per level of the lineage, not one per ancestor."""
+        from strata.artifact_store import ArtifactStore
+
+        store = ArtifactStore(tmp_path / "artifacts")
+        parents = []
+        for index in range(5):
+            table_uri = f"file:///wh#t{index}.events"
+            self._ready(store, f"leaf{index}", inputs=[table_uri], input_versions={})
+            parents.append(f"strata://artifact/leaf{index}@v=1")
+        self._ready(
+            store,
+            "fan-in",
+            inputs=parents,
+            input_versions={uri: f"leaf{i}@v=1" for i, uri in enumerate(parents)},
+        )
+        fan_in = store.get_artifact("fan-in", 1)
+        leaf_specs = sorted(store.get_artifact(f"leaf{i}", 1).transform_spec for i in range(5))
+        statements = []
+        connect = store._get_connection
+
+        def counting_connection():
+            conn = connect()
+            conn.set_trace_callback(statements.append)
+            return conn
+
+        store._get_connection = counting_connection
+        specs = store.ancestor_transform_specs(fan_in, max_depth=10)
+
+        assert sorted(specs) == leaf_specs
+        assert len([sql for sql in statements if sql.lstrip().startswith("SELECT")]) == 1
 
 
 class TestAclRuleMatchingFailsClosed:

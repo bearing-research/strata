@@ -14,7 +14,7 @@ from pyiceberg.catalog.sql import SqlCatalog
 from pyiceberg.exceptions import NamespaceAlreadyExistsError, NoSuchTableError, ValidationError
 from pyiceberg.schema import Schema
 from pyiceberg.table import Table
-from pyiceberg.table.snapshots import Operation
+from pyiceberg.table.snapshots import Operation, Snapshot
 
 from strata.config import StrataConfig
 from strata.types import ACL_STORE_NAMES, TableIdentity
@@ -283,6 +283,11 @@ SUMMARY_ARTIFACT_ID = "strata.artifact_id"
 SUMMARY_VERSION = "strata.version"
 SUMMARY_PROVENANCE = "strata.provenance_hash"
 SUMMARY_PROMOTED_BY = "strata.promoted_by"
+SUMMARY_TENANT = "strata.tenant"
+
+
+class TableOfAnotherTenant(PermissionError):
+    """The table's latest export was written for another tenant."""
 
 
 @dataclass(frozen=True)
@@ -294,16 +299,20 @@ class TableWrite:
     created: bool
 
 
-def _strata_has_written(table: Table) -> bool:
-    """Return whether any snapshot of *table* was written by an export.
+def _last_strata_write(table: Table) -> Snapshot | None:
+    """The latest snapshot of *table* an export wrote, or None if Strata never wrote it.
 
     Later exports overwrite, so a table Strata never wrote (e.g. a mistyped
     production name) must not be treated as Strata's. Uses the marker ``tag`` recognises.
     """
-    return any(
-        snapshot.summary is not None and snapshot.summary.get(SUMMARY_ARTIFACT_ID)
+    written = [
+        snapshot
         for snapshot in table.snapshots()
-    )
+        if snapshot.summary is not None and snapshot.summary.get(SUMMARY_ARTIFACT_ID)
+    ]
+    if not written:
+        return None
+    return max(written, key=lambda s: s.timestamp_ms)
 
 
 class IcebergWriter:
@@ -312,8 +321,8 @@ class IcebergWriter:
     The first write appends and later ones overwrite, so the current snapshot is
     one artifact version and history is the sequence written. Adding columns and
     widening types evolve the schema; other changes are refused before writing.
-    Snapshot summaries carry artifact id, version, provenance hash and writer; an
-    alias is an Iceberg tag on its version's snapshot.
+    Snapshot summaries carry artifact id, version, provenance hash, writer and
+    tenant; an alias is an Iceberg tag on its version's snapshot.
     """
 
     def __init__(self, catalogs: PyIcebergCatalog) -> None:
@@ -347,7 +356,18 @@ class IcebergWriter:
         provenance_hash: str,
         promoted_by: str | None,
         alias: str | None = None,
+        tenant: str | None = None,
     ) -> TableWrite:
+        """Write *data* as the table's current snapshot.
+
+        ``tenant`` is the tenant the write is scoped to (None: unscoped, as in personal
+        mode or for an admin). A scoped write may only replace a table whose latest
+        export was written for the same tenant.
+
+        Raises:
+            TableOfAnotherTenant: The table's latest export belongs to another tenant.
+            ValueError: Strata did not write the table, or the schema cannot evolve.
+        """
         catalog, table_id = self._table_id(table_uri)
         properties = {
             SUMMARY_ARTIFACT_ID: artifact_id,
@@ -356,6 +376,8 @@ class IcebergWriter:
         }
         if promoted_by:
             properties[SUMMARY_PROMOTED_BY] = promoted_by
+        if tenant is not None:
+            properties[SUMMARY_TENANT] = tenant
         # Schema metadata is the writer's (pandas index layout, Strata's shape
         # tags) and means nothing to a table.
         data = data.replace_schema_metadata(None)
@@ -372,13 +394,19 @@ class IcebergWriter:
         if table.current_snapshot() is None:
             table.append(data, snapshot_properties=properties)
         else:
-            if not created and not _strata_has_written(table):
+            last_write = _last_strata_write(table)
+            if last_write is None:
                 raise ValueError(
                     f"{table_uri} holds data Strata did not write, and a later "
                     f"write replaces the table's contents -- refusing to "
                     f"overwrite it with {artifact_id}@v={version}. Export to a "
                     f"table of its own, or append to this one outside Strata."
                 )
+            assert last_write.summary is not None
+            # The table ACL has no write verb, so the tenant that last exported here owns
+            # the table; without this any tenant allowed to read it could replace it.
+            if tenant is not None and last_write.summary.get(SUMMARY_TENANT) != tenant:
+                raise TableOfAnotherTenant(f"{table_uri} was written for another tenant")
             try:
                 with table.update_schema() as update:
                     update.union_by_name(data.schema)

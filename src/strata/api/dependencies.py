@@ -322,7 +322,7 @@ def resolve_input_version(input_uri: str, tenant: str | None = None) -> str:
     # input could read another tenant's blob, or in pull mode get a signed URL for it.
     if resolved.artifact is not None:
         _ensure_artifact_access(resolved.artifact, tenant)
-        _authorize_artifact_read(resolved.artifact)
+        _authorize_artifact_read(resolved.artifact, store)
         # A result read only as another computation's input is still in use:
         # its downstream's cache hits never read it, and retention would
         # otherwise collect it while every request for the downstream needs it.

@@ -111,6 +111,19 @@ class TestRoundTrip:
         assert resolved is not None
         assert resolved.id == "a1"
 
+    def test_ancestors_are_read_through_their_input_edges(self, store):
+        """The ACL's lineage walk: rows matched on (id, version) pairs, read by column name."""
+        scan = TransformSpec(executor="scan@v1", params={}, inputs=["file:///wh#secret.events"])
+        store.create_artifact("scan", "p-scan", scan)
+        mid_input = "strata://artifact/scan@v=1"
+        store.create_artifact("mid", "p-mid", _spec(), input_versions={mid_input: "scan@v=1"})
+        top_input = "strata://name/mid"
+        store.create_artifact("top", "p-top", _spec(), input_versions={top_input: "mid@v=1"})
+
+        specs = store.ancestor_transform_specs(store.get_artifact("top", 1), max_depth=10)
+
+        assert sorted(specs) == sorted([scan.to_json(), _spec().to_json()])
+
     def test_tags_and_aliases_round_trip(self, store):
         # Exercises _REGISTRY_SCHEMA_SQL, which carries the one AUTOINCREMENT
         # column in the schema (registry_audit.seq).
