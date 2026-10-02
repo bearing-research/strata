@@ -242,11 +242,11 @@ def test_a_parent_that_still_holds_the_token_is_found(tmp_path, monkeypatch):
     monkeypatch.setitem(_CAPTURED_SECRETS, "STRATA_WORKER_TOKEN", "worker-bearer-token")
 
     (proc / "4242" / "environ").write_bytes(b"HOME=/h\0STRATA_WORKER_TOKEN=worker-bearer-token\0")
-    assert parent_still_holds_secret("STRATA_WORKER_TOKEN", proc) == 4242
+    assert parent_still_holds_secret("STRATA_WORKER_TOKEN", proc)
 
     (proc / "4242" / "environ").write_bytes(b"HOME=/h\0STRATA_WORKER_TOKEN=another\0")
-    assert parent_still_holds_secret("STRATA_WORKER_TOKEN", proc) is None
-    assert parent_still_holds_secret("STRATA_WORKER_TOKEN", tmp_path / "no-proc") is None
+    assert not parent_still_holds_secret("STRATA_WORKER_TOKEN", proc)
+    assert not parent_still_holds_secret("STRATA_WORKER_TOKEN", tmp_path / "no-proc")
 
 
 def test_the_worker_warns_when_its_parent_still_holds_the_token(monkeypatch, caplog):
@@ -259,8 +259,9 @@ def test_the_worker_warns_when_its_parent_still_holds_the_token(monkeypatch, cap
     monkeypatch.setattr(
         remote_executor,
         "parent_still_holds_secret",
-        lambda name: 4242 if name == "STRATA_WORKER_TOKEN" else None,
+        lambda name: name == "STRATA_WORKER_TOKEN",
     )
+    monkeypatch.setattr(remote_executor.os, "getppid", lambda: 4242)
 
     with caplog.at_level("WARNING", logger=remote_executor.logger.name):
         assert remote_executor.main(["--host", "127.0.0.1", "--port", "9"]) == 0
