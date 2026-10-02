@@ -154,3 +154,34 @@ class TestPromptCells:
         assert '"k": "v"' in rendered
         assert "41" in rendered
         assert "Not rendered" not in result["stderr"]
+
+
+class TestSqlBinds:
+    @pytest.mark.asyncio
+    async def test_object_bind_is_refused_not_unpickled(self, tmp_path):
+        pytest.importorskip("adbc_driver_sqlite")
+        marker = tmp_path / "marker"
+        session = _session(
+            tmp_path,
+            [
+                ("prod", _producer_source(marker), None, "python"),
+                ("q1", "# @sql connection=db\nSELECT :evil AS v\n", "prod", "sql"),
+            ],
+        )
+        toml = session.path / "notebook.toml"
+        db = tmp_path / "db.sqlite"
+        toml.write_text(
+            toml.read_text() + f'\n[connections.db]\ndriver = "sqlite"\npath = "{db}"\n'
+        )
+        session = NotebookSession(parse_notebook(session.path), session.path)
+        session.venv_python = Path(sys.executable)
+        executor = await _run(session, "prod")
+        marker.unlink(missing_ok=True)
+
+        cell = session.notebook_state.get_cell("q1")
+        assert cell is not None
+        result = await executor.execute_cell("q1", cell.source)
+
+        assert not _server_unpickled(marker)
+        assert not result.success
+        assert "bind param :evil has unsupported type 'PickledObject'" in (result.error or "")
