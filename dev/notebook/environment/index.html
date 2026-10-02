@@ -2264,6 +2264,7 @@
 <li>Runs <code>uv sync</code> to create a <code>.venv/</code> and <code>uv.lock</code></li>
 <li>All cell execution uses this notebook-local venv</li>
 </ol>
+<p>Opening a notebook runs the same <code>uv sync</code> (and restores <code>renv.lock</code>, when the notebook has one) as an environment job, which keeps the server responsive to other requests and tabs while it runs; the open answers once the job finishes, so cells can run straight away. The job appears in the Environment panel's history. Reopening a notebook that is already open skips the job unless its <code>.venv</code> is missing or its <code>renv.lock</code> changed.</p>
 <p>A hash of the lockfiles (<code>uv.lock</code>, plus <code>renv.lock</code> when the notebook has one) participates in provenance, so changing the environment invalidates all cached cell outputs. When <code>uv.lock</code> has a dev group, only the runtime dependency closure is hashed, so adding a dev tool such as <code>pytest</code> leaves the cache alone.</p>
 <p>A cell sent to a <a href="../workers/">remote worker</a> runs in this same locked environment when the worker supports it, so the lock describes what the cell ran against there too.</p>
 <h2 id="python-version">Python Version<a class="headerlink" href="#python-version" title="Permanent link">&para;</a></h2>

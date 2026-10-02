@@ -2355,7 +2355,10 @@ client can do - there's no internal API.</p>
    directory path. The response carries everything you need to render the UI
    cold - see <a href="#cold-start-payload">Cold-start payload</a> below. The
    <code>session_id</code> in the response is the route parameter for every subsequent
-   call.</li>
+   call. The environment sync (<code>uv sync</code>, <code>renv</code> restore) runs as an
+   environment job that the open waits for, so cells can run once it
+   returns; sockets already connected to a reopened session see its
+   <code>environment_job_*</code> frames.</li>
 </ol>
 <p>Alternatively, if you already have a <code>session_id</code> from a previous open
    (page refresh case), <code>GET /v1/notebooks/sessions/{session_id}</code> returns
@@ -2546,6 +2549,8 @@ against the preserved execution state.</p>
   window. The grace constant (<code>_GRACE_CANCEL_SECONDS</code> in <code>ws.py</code>) is a
   module-level number you can override at startup if you want a different
   default.</li>
+<li><strong>Only the run that was going when the last tab left is cancelled.</strong> A run
+  another surface (REST, CLI, MCP) starts during the window is left alone.</li>
 <li><strong>Missed deltas are not replayed.</strong> Per-cell deltas emitted while you were
   disconnected (<code>cell_console</code> mid-stream, <code>cell_output_delta</code>,
   <code>cell_iteration_progress</code>, <code>cascade_progress</code>) are dropped. On reconnect, send <code>notebook_sync</code> and

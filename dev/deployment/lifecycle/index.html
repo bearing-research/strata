@@ -2353,7 +2353,8 @@ the caller's tenant.</p>
 <p>A <strong>notebook's own</strong> artifact store (<code>.strata/artifacts/</code>) keeps each cell
 output's current value plus its three most recent earlier values, so reverting
 a recent edit is still a cache hit. Older values are pruned in the background
-when the server opens the notebook. Set <code>STRATA_NOTEBOOK_KEEP_SUPERSEDED_VERSIONS</code>
+each time the server opens the notebook, including a reopen of a notebook that
+is already open. Set <code>STRATA_NOTEBOOK_KEEP_SUPERSEDED_VERSIONS</code>
 to keep more, or to <code>0</code> to keep every value. Deleting the notebook deletes its
 store.</p>
 <h2 id="cleaning-up-the-iceberg-row-group-cache">Cleaning up the Iceberg row-group cache<a class="headerlink" href="#cleaning-up-the-iceberg-row-group-cache" title="Permanent link">&para;</a></h2>

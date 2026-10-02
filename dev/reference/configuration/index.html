@@ -3614,7 +3614,7 @@ carries upload and finalize capabilities; under any other auth mode it returns
 <tr>
 <td><code>STRATA_NOTEBOOK_KEEP_SUPERSEDED_VERSIONS</code></td>
 <td><code>3</code></td>
-<td>How many earlier values of each cell output a notebook's own store keeps beside the current one, so reverting a recent edit is still a cache hit. Older ones are pruned when the server opens the notebook. <code>0</code> turns pruning off and keeps every value.</td>
+<td>How many earlier values of each cell output a notebook's own store keeps beside the current one, so reverting a recent edit is still a cache hit. Older ones are pruned each time the server opens the notebook, an already-open one included. <code>0</code> turns pruning off and keeps every value.</td>
 </tr>
 <tr>
 <td><code>STRATA_PERSONAL_MODE_USER_HEADER</code></td>
