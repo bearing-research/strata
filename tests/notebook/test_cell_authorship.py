@@ -224,9 +224,16 @@ class TestConcurrentStructuralEdit:
 
         def _open(file, mode="r", *args, **kwargs):
             handle = real_open(file, mode, *args, **kwargs)
-            # Another process adds a cell just after the source write, while
-            # this call still holds its pre-write view of notebook.toml.
-            if not landed and "w" in mode and pathlib.Path(str(file)) == cell_file:
+            # Another process adds a cell just after the source write (to a temp
+            # sibling, then replaced), while this call still holds its pre-write
+            # view of notebook.toml.
+            path = pathlib.Path(str(file))
+            if (
+                not landed
+                and ("w" in mode or "x" in mode)
+                and path.parent == cell_file.parent
+                and cell_file.name in path.name
+            ):
                 landed.append(True)
                 add_cell_to_notebook(notebook, "c2", "c1", author="local")
             return handle

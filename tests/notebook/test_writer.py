@@ -1,5 +1,9 @@
 """Tests for notebook writer."""
 
+import builtins
+import errno
+import io
+import os
 import tempfile
 import tomllib
 from datetime import UTC, datetime
@@ -25,6 +29,7 @@ from strata.notebook.writer import (
     rename_notebook,
     reorder_cells,
     set_variant_active,
+    update_cell_console_output,
     update_environment_metadata,
     update_notebook_connections,
     update_notebook_env,
@@ -33,6 +38,7 @@ from strata.notebook.writer import (
     update_notebook_workers,
     update_requires_python,
     write_cell,
+    write_cell_tests,
     write_notebook_toml,
 )
 
@@ -997,3 +1003,70 @@ def test_reorder_cells_renumbers_every_cell_contiguously():
         with open(notebook_dir / "notebook.toml", "rb") as handle:
             orders = [cell["order"] for cell in tomllib.load(handle)["cells"]]
         assert orders == list(range(len(orders)))
+
+
+class _FullDiskFile:
+    """A file handle whose writes fail as on a full disk, after the open succeeded."""
+
+    def __init__(self, handle):
+        self._handle = handle
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc_info):
+        self._handle.close()
+
+    def write(self, data):
+        raise OSError(errno.ENOSPC, "No space left on device")
+
+    def __getattr__(self, name):
+        return getattr(self._handle, name)
+
+
+def _fill_disk_under(root: Path, monkeypatch) -> None:
+    """Make every write-mode open under *root* fail its writes with ENOSPC."""
+    real_open = builtins.open
+
+    def full_disk_open(file, mode="r", *args, **kwargs):
+        handle = real_open(file, mode, *args, **kwargs)
+        if (
+            isinstance(file, (str, os.PathLike))
+            and any(flag in mode for flag in "wxa")
+            and Path(file).resolve().is_relative_to(root.resolve())
+        ):
+            return _FullDiskFile(handle)
+        return handle
+
+    monkeypatch.setattr(builtins, "open", full_disk_open)
+    # Path.write_text opens through io.open.
+    monkeypatch.setattr(io, "open", full_disk_open)
+
+
+@pytest.mark.parametrize(
+    ("relative", "rewrite"),
+    [
+        ("cells/c1.py", lambda nb: write_cell(nb, "c1", "x = 2")),
+        ("cells/c1.test.py", lambda nb: write_cell_tests(nb, "c1", "def test_b(): pass")),
+        ("pyproject.toml", lambda nb: update_requires_python(nb, "3.13")),
+        (".strata/console/c1.json", lambda nb: update_cell_console_output(nb, "c1", "new", "")),
+    ],
+)
+def test_a_full_disk_mid_write_keeps_the_last_good_file(tmp_path, monkeypatch, relative, rewrite):
+    nb = create_notebook(tmp_path, "Full Disk", python_version="3.12", initialize_environment=False)
+    add_cell_to_notebook(nb, "c1")
+    write_cell(nb, "c1", "x = 1")
+    write_cell_tests(nb, "c1", "def test_a(): pass")
+    update_cell_console_output(nb, "c1", "old", "")
+    target = nb / relative
+    before = target.read_bytes()
+    assert before
+
+    _fill_disk_under(nb, monkeypatch)
+    with pytest.raises(OSError) as excinfo:
+        rewrite(nb)
+    monkeypatch.undo()
+
+    assert excinfo.value.errno == errno.ENOSPC
+    assert target.read_bytes() == before
+    assert not [p for p in target.parent.iterdir() if p.name.endswith(".tmp")]
