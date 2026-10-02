@@ -336,6 +336,7 @@ channels:
   - conda-forge
 dependencies:
   - python=3.13
+  - python-dateutil=2.9.0
   - pyarrow=22.0.0
   - six=1.17.0
   - pip
@@ -344,7 +345,12 @@ dependencies:
 """
         )
 
-        assert requirements == ["pyarrow==22.0.0", "six==1.17.0", "requests==2.32.3"]
+        assert requirements == [
+            "python-dateutil==2.9.0",
+            "pyarrow==22.0.0",
+            "six==1.17.0",
+            "requests==2.32.3",
+        ]
         assert any("channels" in warning for warning in warnings)
         assert any("python version pin" in warning for warning in warnings)
 
