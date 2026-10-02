@@ -10,6 +10,8 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import logging
+import os
 import sys
 import time
 from contextlib import contextmanager
@@ -181,7 +183,28 @@ async def _drain_warm_pool(session: Any) -> None:
         pass
 
 
+@contextmanager
+def _quiet_notebook_logs():
+    """Hold notebook loggers at WARNING; per-cell INFO lines would bury the run's own output.
+
+    ``STRATA_LOG_LEVEL`` opts back in. Restored on exit, so an in-process caller keeps its level.
+    """
+    notebook_logger = logging.getLogger("strata.notebook")
+    previous = notebook_logger.level
+    if "STRATA_LOG_LEVEL" not in os.environ:
+        notebook_logger.setLevel(logging.WARNING)
+    try:
+        yield
+    finally:
+        notebook_logger.setLevel(previous)
+
+
 async def _run_async(args: argparse.Namespace) -> int:
+    with _quiet_notebook_logs():
+        return await _run_notebook(args)
+
+
+async def _run_notebook(args: argparse.Namespace) -> int:
     notebook_dir = Path(args.path).expanduser().resolve()
 
     if not notebook_dir.is_dir():

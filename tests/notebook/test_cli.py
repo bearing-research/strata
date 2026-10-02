@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 from pathlib import Path
 from unittest.mock import patch
 
@@ -277,6 +278,56 @@ class TestExecutionFlow:
 
         assert exit_code == 0
         assert set(honor_calls) == {"c1", "c2"}
+
+
+class TestRunLogging:
+    """Per-cell INFO logs went to stderr as JSON lines, burying the run's own output."""
+
+    @pytest.fixture
+    def notebook(self, tmp_path, monkeypatch):
+        # As configure_logging leaves it in the CLI process.
+        monkeypatch.setattr(logging.getLogger("strata"), "level", logging.INFO)
+        notebook_dir = _build_notebook(tmp_path, cells=[("c1", "x = 1", None)])
+        _mk_fake_venv(notebook_dir)
+        return notebook_dir
+
+    def _run_recording(self, notebook: Path, fmt: str) -> list[logging.LogRecord]:
+        records: list[logging.LogRecord] = []
+        handler = logging.Handler()
+        handler.emit = records.append  # type: ignore[method-assign]
+        executor_logger = logging.getLogger("strata.notebook.executor")
+
+        async def logging_execute_cell(self, cell_id, source, timeout_seconds=30):
+            executor_logger.info("execute_cell %s", cell_id)
+            executor_logger.warning("a warning about %s", cell_id)
+            return _make_result(cell_id, success=True)
+
+        executor_logger.addHandler(handler)
+        try:
+            with patch(
+                "strata.notebook.executor.CellExecutor.execute_cell", new=logging_execute_cell
+            ):
+                assert run_main([str(notebook), "--no-sync", "--format", fmt]) == 0
+        finally:
+            executor_logger.removeHandler(handler)
+        return records
+
+    @pytest.mark.parametrize("fmt", ["human", "json"])
+    def test_info_logs_are_held_back_and_warnings_kept(self, notebook, monkeypatch, fmt):
+        monkeypatch.delenv("STRATA_LOG_LEVEL", raising=False)
+        before = logging.getLogger("strata.notebook").level
+
+        records = self._run_recording(notebook, fmt)
+
+        assert [r.levelno for r in records] == [logging.WARNING]
+        assert logging.getLogger("strata.notebook").level == before
+
+    def test_strata_log_level_opts_back_in(self, notebook, monkeypatch):
+        monkeypatch.setenv("STRATA_LOG_LEVEL", "INFO")
+
+        records = self._run_recording(notebook, "human")
+
+        assert [r.levelno for r in records] == [logging.INFO, logging.WARNING]
 
 
 class TestRCellsHeadless:
