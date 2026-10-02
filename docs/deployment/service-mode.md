@@ -229,6 +229,9 @@ alphanumeric / `_` / `-` characters and hashed into:
   cache dir. Artifacts are not split by directory; each row records
   its tenant, and reads are filtered by it.
 - **QoS limiters**: interactive + bulk semaphores per tenant.
+- **Cache warm jobs**: a background job from `POST /v1/cache/warm/async`
+  is listed, read and cancelled (`/v1/cache/warm/jobs*`) only by its
+  own tenant; `admin:*` sees every tenant's.
 - **Metric labels**: Prometheus output carries a `tenant` label so
   you can dashboard per-tenant usage.
 

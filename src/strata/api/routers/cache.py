@@ -15,8 +15,10 @@ from typing import Annotated
 from fastapi import APIRouter, HTTPException, Query
 
 from strata.api.dependencies import authorize_table_access, require_scope
+from strata.auth import get_principal
 from strata.cache_metrics import get_eviction_tracker
 from strata.cache_stats import get_cache_histogram
+from strata.tenant import get_tenant_id
 from strata.types import (
     Task,
     WarmAsyncRequest,
@@ -127,6 +129,17 @@ def _authorize_warm_tables(table_uris: list[str]) -> None:
         identity = _table_identity_from_uri(table_uri)
         if identity is not None:
             authorize_table_access(table_uri, identity)
+
+
+def _warm_job_tenant() -> str | None:
+    """The tenant whose warm jobs the caller sees, or ``None`` for every tenant (``admin:*``).
+
+    A job's tables are the caller's, so another tenant must not list, read or cancel it.
+    """
+    principal = get_principal()
+    if principal is not None and principal.has_scope("admin:*"):
+        return None
+    return get_tenant_id()
 
 
 @router.post("/v1/cache/warm", response_model=WarmResponse)
@@ -266,7 +279,9 @@ async def warm_cache_async_v1(request: WarmAsyncRequest):
     if state._cache_warmer is None:
         raise HTTPException(status_code=503, detail="Cache warmer not initialized")
 
-    job_id = await state._cache_warmer.start_job(request, authorize=authorize_table_access)
+    job_id = await state._cache_warmer.start_job(
+        request, authorize=authorize_table_access, tenant=get_tenant_id()
+    )
 
     return WarmAsyncResponse(
         job_id=job_id,
@@ -288,7 +303,9 @@ async def list_warm_jobs_v1(
     if state._cache_warmer is None:
         return {"jobs": []}
 
-    jobs = state._cache_warmer.list_jobs(include_completed=include_completed)
+    jobs = state._cache_warmer.list_jobs(
+        include_completed=include_completed, tenant=_warm_job_tenant()
+    )
     return {"jobs": [j.model_dump() for j in jobs]}
 
 
@@ -302,7 +319,7 @@ async def get_warm_job_v1(job_id: str):
     if state._cache_warmer is None:
         raise HTTPException(status_code=404, detail="Job not found")
 
-    progress = state._cache_warmer.get_progress(job_id)
+    progress = state._cache_warmer.get_progress(job_id, tenant=_warm_job_tenant())
     if progress is None:
         raise HTTPException(status_code=404, detail="Job not found")
 
@@ -319,7 +336,7 @@ async def cancel_warm_job_v1(job_id: str):
     if state._cache_warmer is None:
         raise HTTPException(status_code=404, detail="Job not found")
 
-    cancelled = await state._cache_warmer.cancel_job(job_id)
+    cancelled = await state._cache_warmer.cancel_job(job_id, tenant=_warm_job_tenant())
 
     if cancelled:
         return {"cancelled": True, "message": f"Job {job_id} cancelled"}
