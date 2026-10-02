@@ -24,6 +24,11 @@ if TYPE_CHECKING:
     from strata.artifact_store import ArtifactVersion
 
 
+# A cell run creates and finalizes its outputs in one pass, and no build runner writes
+# here, so a ``building`` row this old was left by a crash.
+_ABANDONED_BUILD_SECONDS = 3600.0
+
+
 class NotebookArtifactManager:
     """Notebook-specific operations over ``ArtifactStore`` and ``BlobStore``."""
 
@@ -51,7 +56,8 @@ class NotebookArtifactManager:
         """Drop each cell output's values older than its newest *keep_superseded*.
 
         Keeps every output's current value, anything named, pinned or published, and
-        anything used in the last *min_idle_seconds*.
+        anything used in the last *min_idle_seconds*. Values a crash left half-written
+        are failed first, so they no longer hold their inputs.
 
         Raises:
             NotebookQuiesced: the notebook is held still for a copy, which
@@ -60,6 +66,7 @@ class NotebookArtifactManager:
         from strata.notebook.quiesce import assert_writable
 
         assert_writable(self.artifact_dir)
+        self.artifact_store.sweep_zombie_builds(_ABANDONED_BUILD_SECONDS)
         return self.artifact_store.garbage_collect(
             keep_superseded=keep_superseded, min_idle_seconds=min_idle_seconds
         )

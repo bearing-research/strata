@@ -463,6 +463,9 @@ def _add_import_staging(conn: StoreConnection, dialect: SqlDialect) -> None:
 # recorded time can be this far behind the last real use.
 _USE_RESOLUTION_SECONDS = 300.0
 
+# How long a temp file goes untouched before a sweep takes it for a dead write's.
+_ABANDONED_WRITE_SECONDS = 3600.0
+
 # A sweep over its byte cap collects down to this fraction of it, so the next
 # write does not put it straight back over (the row-group cache does the same).
 _EVICT_TO_FRACTION = 0.8
@@ -4189,6 +4192,10 @@ class ArtifactStore:
         finally:
             conn.close()
 
+        removed = self.blob_store.remove_stale_temp_files(_ABANDONED_WRITE_SECONDS)
+        if removed:
+            logger.info("garbage_collect: removed %d temp file(s) of abandoned writes", removed)
+
         # Best-effort blob cleanup after the metadata is durably gone; a failure only orphans bytes.
         #
         # Outside the connection scope: thousands of remote deletes at 50-200ms each would hold a
@@ -4324,8 +4331,9 @@ class ArtifactStore:
     def sweep_zombie_builds(self, max_age_seconds: float = 3600) -> int:
         """Mark ``building`` artifacts older than ``max_age_seconds`` as failed; return the count.
 
-        Startup only: it demotes every old enough ``building`` row unconditionally,
-        which is safe only before the build runner accepts work.
+        It demotes every old enough ``building`` row unconditionally, which is safe
+        only where no live writer holds one that long: a server before its build
+        runner accepts work, or a notebook's own store.
         """
         conn = self._get_connection()
         try:

@@ -12,6 +12,7 @@ import io
 import logging
 import os
 import tempfile
+import time
 from abc import ABC, abstractmethod
 from collections.abc import Buffer, Callable, Iterator
 from contextlib import contextmanager
@@ -110,6 +111,14 @@ class BlobStore(ABC):
     def delete_blob(self, artifact_id: str, version: int) -> bool:
         """Delete a blob; return False if it did not exist."""
         ...
+
+    def remove_stale_temp_files(self, idle_seconds: float) -> int:
+        """Remove partial writes a killed process left, untouched for ``idle_seconds``.
+
+        Returns how many went. Only the local store stages writes beside its blobs; the
+        others stage in the system temp dir.
+        """
+        return 0
 
     def presign_get(self, artifact_id: str, version: int, ttl_seconds: int) -> str | None:
         """Return a URL that reads this blob straight from the object store, or ``None``.
@@ -244,6 +253,20 @@ class LocalBlobStore(BlobStore):
             return False
         path.unlink()
         return True
+
+    def remove_stale_temp_files(self, idle_seconds: float) -> int:
+        """Remove the ``*.tmp`` files of writes that died, untouched for ``idle_seconds``."""
+        cutoff = time.time() - idle_seconds
+        removed = 0
+        for path in self.blobs_dir.glob("*.tmp"):
+            try:
+                # A live write keeps touching its file, so an old mtime means nobody is writing.
+                if path.stat().st_mtime < cutoff:
+                    path.unlink()
+                    removed += 1
+            except FileNotFoundError:
+                continue  # its writer finished or gave up meanwhile
+        return removed
 
 
 class S3BlobStore(BlobStore):

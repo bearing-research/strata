@@ -773,6 +773,46 @@ class TestNotebookStores:
 
         assert all(_exists(store, (self.OUTPUT, v)) for v in range(1, 6))
 
+    def test_a_write_a_crash_left_stops_holding_what_it_read(self, tmp_path):
+        """A crash between create and finalize leaves a ``building`` row, a root that would
+        keep every input behind it for good.
+        """
+        from strata.notebook.artifact_integration import NotebookArtifactManager
+
+        manager = NotebookArtifactManager("nb", artifact_dir=tmp_path / "artifacts")
+        store = manager.artifact_store
+        up = "nb_nb_cell_up_var_x"
+        _values(store, up, 1)
+        ref = f"{up}@v=1"
+        crashed = store.create_artifact(
+            "nb_nb_cell_dn_var_y", "prov-dn", input_versions={f"strata://artifact/{ref}": ref}
+        )
+        _set(store, "nb_nb_cell_dn_var_y", crashed, created_at=time.time() - 2 * 3600)
+        for version in range(2, 6):
+            store.create_artifact(up, f"prov-{up}-{version}")
+            store.write_blob(up, version, b"x")
+            store.finalize_artifact(up, version, "{}", 1, 1)
+
+        manager.prune(keep_superseded=1, min_idle_seconds=0)
+
+        assert store.get_artifact("nb_nb_cell_dn_var_y", crashed).state == "failed"
+        assert not _exists(store, (up, 1))
+
+    def test_a_dead_writes_temp_file_goes_and_a_live_one_stays(self, store):
+        import os
+
+        dead = store.blobs_dir / "nb_x@v=1.arrow.k3j2.tmp"
+        live = store.blobs_dir / "nb_x@v=2.arrow.q9z1.tmp"
+        for path in (dead, live):
+            path.write_bytes(b"partial")
+        two_hours_ago = time.time() - 2 * 3600
+        os.utime(dead, (two_hours_ago, two_hours_ago))
+
+        store.garbage_collect(max_idle_days=30)
+
+        assert not dead.exists()
+        assert live.exists()
+
     def test_the_setting_reads_from_the_environment(self, tmp_path, monkeypatch):
         from strata.config import StrataConfig
 
