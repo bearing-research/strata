@@ -27,7 +27,12 @@ them.
 lake, package installs are wheels only, outbound requests connect only to the
 address the guard checked, R restores run as the harness user, the server's
 Infisical credentials go only to the operator's host, and the log buffer and a
-worker's token are out of other tenants' and cells' reach.
+worker's token are out of other tenants' and cells' reach. Nothing the server
+stores is unpickled or served as a page in its process or on its origin.
+
+**Personal servers are harder to reach from a web page.** A request under a
+hostname the server does not know is refused, which closes DNS rebinding, and
+no route serves files from outside the frontend.
 
 **Upgrading from 0.8.0:**
 
@@ -47,6 +52,24 @@ worker's token are out of other tenants' and cells' reach.
 - strata-pool: reading a job needs the `X-Strata-Tenant` header that
   submitted it.
 - `/health/ready` no longer has a `stuck_scans` field.
+- Personal mode refuses a request whose `Host` is not loopback, an IP
+  address, the bind host or a name in the new `STRATA_ALLOWED_HOSTS`: a server
+  reached by a LAN hostname or a custom domain needs that name listed. A
+  browser WebSocket from another origin needs `STRATA_CORS_ALLOW_ORIGINS`.
+- Secret env values are no longer sent to clients: REST and WebSocket
+  responses carry `"__strata_masked__"` in their place, and sending the marker
+  back keeps the value.
+- A prompt cell that reads a pickled Python object sees a placeholder, and a
+  SQL bind of a pickled value is refused: the server no longer unpickles cell
+  data.
+- Service mode: `name=` on materialize needs `artifacts:write`; under api_key
+  the tenant comes from the key, not `X-Tenant-ID`; the cache histogram,
+  metadata cleanup, `/metrics/tables*` and `/v1/debug/*` need `admin:cache` or
+  `admin:*`.
+- strata-pool: `PUT /v1/machine-types` needs the new `admin_token`;
+  `/v1/usage` and `/v1/workers` return only the caller's tenant.
+- Cells whose `[env]` held a blanked secret re-run once, since that empty
+  value no longer reaches them.
 
 ### Added
 
@@ -153,6 +176,17 @@ worker's token are out of other tenants' and cells' reach.
   strata-notebook` for a release, or `uv sync && uv run strata-notebook` from
   a checkout. `strata --help` prints from any Python; every command is still
   refused outside a uv-managed environment before it does anything.
+- **Published bytes are served as data.** Only Strata's own types are shown
+  inline (`image/png`, the Arrow stream, `application/json`,
+  `text/markdown`), now under their real media types; anything else downloads
+  as `application/octet-stream`. Every such response carries
+  `X-Content-Type-Options: nosniff` and a `sandbox` policy. `archive.zip` is
+  built once per publication and cached on disk, and a table over 128 MiB is
+  archived without its Parquet copy.
+- **Markdown export escapes raw HTML** as text, as the notebook shows it, and
+  turns `javascript:` and similar link targets into `#`.
+- **`strata run` keeps notebook INFO logs off stderr**; `STRATA_LOG_LEVEL`
+  brings them back.
 
 ### Security
 
@@ -237,6 +271,42 @@ worker's token are out of other tenants' and cells' reach.
   and its `/result` took no tenant, so any token holder could read another
   tenant's job by id. They now need the submitting tenant's `X-Strata-Tenant`
   and answer 404 for anyone else.
+- **The web UI's fallback route no longer serves files outside the
+  frontend.** `GET //etc/passwd` or `/%2fetc%2fpasswd` returned the file, in
+  both modes, to any caller the server admitted.
+- **A web page can no longer drive a personal server by DNS rebinding.** The
+  origin guard trusted the request's own `Host`, and the notebook WebSocket
+  checked no Origin, so a page whose name was rebound to 127.0.0.1 could
+  create and run cells. Unexpected `Host` headers are refused (over HTTP and
+  WebSocket), and the WebSocket checks Origin.
+- **The server never unpickles cell data.** Prompt cells, SQL binds and cell
+  tests loaded pickled values inside the server process, so a cell running as
+  the harness user, or an artifact carried in by a snapshot import, could run
+  code as the server. Cell-test inputs are now loaded in the test process.
+- **A publication cannot serve a page on the server's origin.**
+  `/p/{token}/data` used the content type the uploader declared, so
+  `text/html` or an SVG ran script there.
+- **Exports follow the table ACL and stay in their tenant.** Exporting an
+  artifact read from a denied table copied it somewhere readable, and an
+  export could overwrite another tenant's table. The ACL now also covers
+  results derived from a denied table.
+- **Secret env values stay on the server**, even for a `notebook:read`
+  principal in another tenant.
+- **Service-mode authorization gaps closed:** registry names set through
+  materialize, the tenant context under api_key, stream ownership across
+  tenants, cache warming past a deny rule, warm jobs and operator diagnostics
+  visible to every tenant, a write error naming another tenant, and a
+  WebSocket that kept working after its API key was revoked.
+- **strata-pool's catalogue is the operator's:** any token holder could
+  rewrite a machine type's image and read its `env`, and read every tenant's
+  usage and workers. Tokens are compared in constant time.
+- **Uploads are bounded before they are read:** an `.ipynb` import reads at
+  most its cap, and a snapshot whose members would expand past 16 GiB is
+  refused.
+- **Only the publication embed card may be framed by any site**; a lookalike
+  path no longer frames the editor.
+- **A worker started through `uv run` warns that its parent still holds the
+  token**, and the docs start `strata-worker` directly.
 
 ### Fixed
 
@@ -356,6 +426,25 @@ worker's token are out of other tenants' and cells' reach.
 - **`environment.yaml` import keeps packages whose names start with
   `python`.** `python-dateutil` and the like were dropped as if they were the
   interpreter pin.
+- **A tab closed in the last minute no longer cancels a later run.** The
+  grace teardown cancelled whatever was running when it expired, including a
+  CLI, agent or REST run started after the tab closed.
+- **A full disk no longer empties a cell file.** Cell, test, `pyproject.toml`
+  and console writes go through a temp file, as `notebook.toml` does.
+- **One slow dependency no longer stalls the server.** `uv sync` and the renv
+  restore on open, the secret-manager fetch (now capped at 20 s and no longer
+  repeated on every structural edit), `POST /v1/artifacts/gc` and building
+  `archive.zip` run off the event loop.
+- **A crash between storing two outputs of one run no longer mixes runs**: a
+  run's outputs become current together.
+- **A `mode="stream"` miss nobody fetches is marked failed** instead of
+  staying `building`, and abandoned writes (old `building` rows in a notebook
+  store, stale blob `.tmp` files) are reclaimed.
+- **Postgres stores no longer log a pool warning on every read.**
+- **The PyPI page shows its images and links**, `index.html` is served with
+  `Cache-Control: no-cache`, every response carries
+  `X-Content-Type-Options: nosniff`, and strata-client and strata-pool ship
+  their LICENSE.
 
 ## 0.8.0 - 2026-09-27
 
