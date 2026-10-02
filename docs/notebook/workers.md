@@ -388,9 +388,10 @@ pip install "strata-pool[server]"  # plus the HTTP service
 ```
 
 It ships Docker, Fly and RunPod backends, per-worker credentials, tenant-scoped
-machines, a fleet cap, and usage metering. Cloud SDKs live in the backend
-extras, so the base install pulls only `httpx`. Build the image the pool
-drives with:
+machines, a fleet cap, and usage metering. The backends talk to Docker, Fly
+and RunPod over `httpx`, so the base install pulls only `httpx`; the extras
+are `server` (the HTTP service) and `postgres` (a Postgres store). Build the
+image the pool drives with:
 
 ```bash
 docker build -f worker.Dockerfile -t strata-worker:latest .
@@ -402,9 +403,12 @@ For R cells, build it with R and the packages `harness.R` needs:
 docker build -f worker.Dockerfile --build-arg WITH_R=true -t strata-worker:r .
 ```
 
-That image needs `strata-notebook` **0.7.0 or newer** - `POST /execute` ships
-in that release - and it installs from PyPI, so building it inside a checkout
-does not pick up local worker changes.
+The image installs a released `strata-notebook` from PyPI, pinned by
+`ARG STRATA_VERSION`; pass `--build-arg STRATA_VERSION=<version>` for another
+release (0.7.0 or newer, the first with `POST /execute`). Building it inside a
+checkout does not pick up local worker changes. The container refuses to start
+without `STRATA_WORKER_TOKEN`, since it binds `0.0.0.0`; the pool mints one per
+machine, and you set it yourself to run the image by hand.
 
 See [Worker Pool](worker-pool.md) for machine types, dispatch, the HTTP
 service, and the isolation model.
@@ -445,6 +449,25 @@ transport = "direct"
 token_env = "STRATA_MODAL_WORKER_TOKEN"
 ```
 
+### From the CLI
+
+`strata worker` edits the same `[[workers]]` block from a shell, without a running server. A running server picks the change up on its next session reload.
+
+```bash
+strata worker ls ./my-notebook
+strata worker add ./my-notebook fly-cpu \
+  --url https://my-strata-worker.fly.dev/v1/execute \
+  --runtime-id fly-cpu-v1 --token-env STRATA_FLY_WORKER_TOKEN --default
+strata worker default ./my-notebook fly-cpu   # omit the name, or pass local, to clear
+strata worker rm ./my-notebook fly-cpu
+```
+
+`add` replaces a worker of the same name; `--transport` defaults to `direct`, and `--default` also makes it the notebook default. `rm` refuses the built-in `local` worker and clears the default if it named the removed one. Each prints the resulting worker list, as JSON by default (`--format human` for a table). In service mode the server owns worker definitions, so these commands are refused. For a box you reach over SSH, use [`add-ssh` / `rm-ssh`](#run-cells-on-a-machine-you-can-ssh-to) instead.
+
+### Signed workers and private hosts
+
+A `signed` (pull) worker fetches its inputs from, and uploads its result to, the URLs in the manifest, so it refuses any manifest URL whose host resolves to a private, loopback or link-local address. A Strata server on your own network trips this. Name its host in `STRATA_WORKER_ALLOWED_HOSTS` on the worker, or set `STRATA_WORKER_ALLOW_LOCAL_HOSTS=1` to turn the check off (local dev). Those connections also ignore `HTTPS_PROXY`, so a worker that reaches the server only through a proxy needs `STRATA_WORKER_ALLOW_LOCAL_HOSTS`. See [Worker configuration](../reference/configuration.md#worker).
+
 ### Server-managed workers (service mode)
 
 A service-mode server keeps its own registry, managed through
@@ -453,7 +476,7 @@ things are worth knowing about where it lives:
 
 **It is persisted.** Changes made through the admin routes are written to
 `notebook_workers.json` in the server's artifact directory and survive a
-restart. Before, they lived only in memory and the next restart reverted them.
+restart.
 
 **The file wins over `[tool.strata.transforms] notebook_workers`.** The
 configured table is the bootstrap; once anything has been changed through the

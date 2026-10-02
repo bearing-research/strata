@@ -91,8 +91,8 @@ had clicked **Run All** in the UI. Cached artifacts are reused, the first run
 populates the cache; subsequent runs on unchanged source + inputs return
 instantly.
 
-Passing `--force` invalidates the cache and forces a full rebuild, which is
-what you usually want in CI if you're testing that the code *still produces*
+Passing `--force` skips each cell's cache lookup, so every cell re-executes
+(nothing cached is deleted), which is what you usually want in CI if you're testing that the code *still produces*
 the expected artifacts.
 
 ## What Does Not Happen
@@ -125,7 +125,7 @@ strata validate <notebook_dir> [--format human|json]
 - the DAG builds without cycles
 - per-cell annotation diagnostics - the **same validation the server runs
   on open / reload** (`worker_unknown`, `loop_missing_carry`,
-  `sql_missing_connection`, `fetch_unreadable`, `dataset_unreadable`,
+  `sql_connection_missing`, `fetch_unreadable`, `dataset_unreadable`,
   malformed `@output_schema`, …)
 
 Exit codes mirror `strata run`: `0` valid (warnings allowed), `1` invalid
@@ -326,3 +326,11 @@ offline against a directory or `--server/--session` against a running server. An
 MCP server wrapping the same operations is also available; see
 [MCP Server](mcp.md), or [`strata agent`](agent.md) for the one-command on-ramp
 that stands it up and points a coding agent at a live session.
+
+## Workers (`strata worker`)
+
+`strata worker ls|add|rm|default <notebook_dir> ...` edits the notebook's
+`[[workers]]` block, and `strata worker add-ssh|rm-ssh` connects a box you reach
+over SSH to a running server. See
+[Registering workers from the CLI](workers.md#from-the-cli) and
+[Run cells on a machine you can SSH to](workers.md#run-cells-on-a-machine-you-can-ssh-to).

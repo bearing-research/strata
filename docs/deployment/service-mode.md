@@ -265,6 +265,11 @@ Evaluation: deny rules → allow rules → default. [Wildcard and principal
 matching semantics are documented in source](https://github.com/bearing-research/strata/tree/main/src/strata)
 for anyone extending the ACL engine.
 
+Under principal auth a denied table, whether scanned or used as a transform
+input, is refused before planning with `404 Table not found`, so the answer
+does not reveal that the table exists. Set
+`STRATA_HIDE_FORBIDDEN_AS_NOT_FOUND=false` to get `403` instead.
+
 ### Scope-gated endpoints
 
 A few operations require a specific scope under trusted-proxy or API-key
@@ -274,7 +279,8 @@ auth (`admin:*` satisfies any of them):
 |---|---|
 | `admin:cache` | `POST /v1/cache/clear`, `GET /v1/cache/entries`, `GET /v1/debug/cache/inspect` |
 | `admin:tenants` | `GET /v1/admin/tenants` and `GET /v1/admin/tenants/{tenant_id}` |
-| `admin:notebooks` | Quiescing a notebook or project (`POST /v1/notebooks/{id}/quiesce`, `POST /v1/projects/{path}/quiesce`) |
+| `admin:notebook-workers` | The server-managed worker registry, every `/v1/admin/notebook-workers*` route (list, replace, add, update, delete, refresh, reload) |
+| `admin:notebooks` | Quiescing a notebook or project and releasing it (`POST /v1/notebooks/{id}/quiesce` and `/release`, `POST /v1/projects/{path}/quiesce` and `/release`) |
 | `admin:*` | Garbage collection (`POST /v1/artifacts/gc`, still limited to the caller's tenant), and reading another tenant's `GET /v1/artifacts/usage` / `stats` |
 | `admin:registry` | `POST /v1/registry/pending/approve` and `.../reject` - deciding protected-alias changes |
 | `artifacts:pin` | Pinning and unpinning a version against garbage collection (`POST` / `DELETE /v1/artifacts/{id}/v/{n}/pin`) |

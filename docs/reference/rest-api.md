@@ -1,6 +1,13 @@
 # REST API Reference
 
-This page documents the **notebook** REST surface, mounted under `/v1/notebooks`. Strata Core also exposes a `POST /v1/materialize` endpoint for direct artifact materialization; see the [Library Quickstart](../getting-started/core.md) for that surface.
+This page documents the **notebook** REST surface, mounted under `/v1/notebooks`, plus the core routes a client meets most: materialize, streams, health and metrics ([Core API](#core-api)), and the log buffer and artifact listing ([Observability](#observability)). It does not list every route. The rest are documented with their feature:
+
+- Registry and names (`/v1/registry/*`, `/v1/names*`): [Registry](../core/registry.md)
+- Publications (`/v1/artifacts/{id}/v/{n}/publish`, `/v1/publications*`, `/p/*`): [Publishing](../notebook/publishing.md)
+- Admin, debug and cache routes (`/v1/admin/*`, `/v1/debug/*`, `/v1/cache/*`): [Service Mode](../deployment/service-mode.md) and [Observability](../deployment/observability.md)
+- Garbage collection (`POST /v1/artifacts/gc`): [Operations & Lifecycle](../deployment/lifecycle.md#cleaning-up-the-core-artifact-store)
+
+For materializing from Python, see the [Library Quickstart](../getting-started/core.md). The live OpenAPI schema ([below](#canonical-machine-readable-spec)) lists every route.
 
 The remote-worker contract - `/v1/execute`, `/v1/notebook-execute`, `/v1/execute-manifest`, `/health` - is documented separately on the [Executor Protocol](executor-protocol.md) page. Those endpoints live on a different process (`strata-worker`), not the main server.
 
@@ -54,6 +61,14 @@ Under `trusted_proxy`, **every** `/v1/*` endpoint requires `X-Strata-Principal` 
 | Anything that runs code - execute, running tests, dependency and Python-version changes (uv runs build scripts), provisioning an SSH worker - **and any route nobody has classified** | `notebook:execute` |
 | `POST /v1/cache/clear` | `admin:cache` |
 | Artifact and registry writes | `artifacts:write` |
+| `GET /v1/cache/entries`, `GET /v1/debug/cache/inspect` | `admin:cache` |
+| Minting, editing and withdrawing a publication (`POST /v1/artifacts/{id}/v/{n}/publish`, `PATCH` / `DELETE /v1/publications/{token}`) | `artifacts:publish` |
+| Pinning and unpinning a version (`POST` / `DELETE /v1/artifacts/{id}/v/{n}/pin`) | `artifacts:pin` |
+| `GET /v1/admin/tenants`, `GET /v1/admin/tenants/{tenant_id}` | `admin:tenants` |
+| `/v1/admin/notebook-workers*` (the server-managed worker registry) | `admin:notebook-workers` |
+| `POST /v1/registry/pending/approve` and `.../reject` | `admin:registry` |
+| Quiesce and release (`POST /v1/notebooks/{id}/quiesce` / `release`, `POST /v1/projects/{path}/quiesce` / `release`) | `admin:notebooks` |
+| `POST /v1/artifacts/gc`, and another tenant's `GET /v1/artifacts/usage` / `stats` | `admin:*` |
 
 `notebook:execute` is the default on purpose: an operation nobody classified is treated as the most dangerous kind. The per-route table is `src/strata/notebook/scopes.py`, and the same table checks WebSocket frames - a principal that cannot run a cell over the socket cannot run it over REST either.
 
@@ -63,11 +78,26 @@ Personal mode with no header configured is effectively trust-on-first-call - any
 
 ### Error shape
 
-All `4xx` and `5xx` responses use FastAPI's standard JSON shape:
+Most `4xx` and `5xx` responses use FastAPI's standard JSON shape:
 
 ```json
 {"detail": "<human-readable error message>"}
 ```
+
+Some carry an object in `detail` instead. The notebook `409`s name a `code`
+and a `message`, plus context for that code: `environment_job` on
+`ENVIRONMENT_BUSY`, `cell_id` and `held_by` on `cell_locked`. Some core-route
+`400`s and `403`s name an `error` (`writes_disabled`, `transform_unknown`, …)
+and a `message`.
+
+```json
+{"detail": {"code": "cell_locked", "cell_id": "a1b2c3d4", "held_by": "alice", "message": "..."}}
+```
+
+Three middleware responses are plain text, not JSON: the tenant check's `400`
+(missing or invalid tenant header) and `403` (tenant not enabled), and the rate
+limiter's `429`, which also sets `Retry-After` (whole seconds) and
+`X-RateLimit-Limit-Type`.
 
 Validation errors (`422`) come from Pydantic and contain structured field info:
 
@@ -88,7 +118,6 @@ Validation errors (`422`) come from Pydantic and contain structured field info:
 | Status | Common cause |
 | --- | --- |
 | `200` | Success |
-| `204` | Success, no body (e.g. `DELETE` operations) |
 | `400` | Malformed request (invalid path, bad enum value) |
 | `401` | Service mode auth header missing or proxy-token mismatch |
 | `403` | Authenticated, but missing the required scope (e.g. `admin:cache`), or a personal-mode-only endpoint called in service mode. A table the ACL denies, or another tenant's artifact, build or stream, is `404` instead while `STRATA_HIDE_FORBIDDEN_AS_NOT_FOUND=true` (the default) |
@@ -248,7 +277,7 @@ GET /v1/notebooks/discover
 ```
 
 Lists notebook directories under the configured storage root. Returns
-`{ "root", "notebooks": [{ "path", "name", "notebook_id", "updated_at" }] }`
+`{ "root", "notebooks": [{ "path", "name", "notebook_id", "updated_at", "owner" }] }`
 sorted newest-first. Used by the "Open existing" UI so users pick from a list
 instead of typing a filesystem path. Available in both modes; requires
 `notebook:read` under principal auth. With `STRATA_PERSONAL_MODE_USER_HEADER`
@@ -330,11 +359,12 @@ POST /v1/notebooks/{session_id}/cells
 ```json
 {
   "after_cell_id": "optional-cell-id",
-  "language": "python"
+  "language": "python",
+  "author": "optional-name"
 }
 ```
 
-`language` may be `python`, `prompt`, `markdown`, `sql`, `r`, or `widget`. Defaults to `python`. An `after_cell_id` the notebook does not have is a `400`.
+`language` may be `python`, `prompt`, `markdown`, `sql`, `r`, or `widget`. Defaults to `python`. An `after_cell_id` the notebook does not have is a `400`. `author` is honored only without principal auth, as on [Update Cell Source](#update-cell-source).
 
 ### Update Cell Source
 
