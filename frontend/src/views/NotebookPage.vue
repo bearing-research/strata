@@ -9,6 +9,7 @@ import ExportMenu from '../components/ExportMenu.vue'
 import KeyboardShortcutsModal from '../components/KeyboardShortcutsModal.vue'
 import ThemeToggle from '../components/ThemeToggle.vue'
 import { useStrata } from '../composables/useStrata'
+import { editorChrome } from '../utils/framed'
 import { clearNotebookPerfMarks, markNotebookPerf, measureNotebookPerf } from '../utils/perf'
 
 const DagView = defineAsyncComponent(() => import('../components/DagView.vue'))
@@ -30,6 +31,8 @@ const InspectSwapConfirm = defineAsyncComponent(
 const props = defineProps<{ sessionId: string }>()
 
 const route = useRoute()
+// Framed by a platform (`?framed=1`): it has the brand, the links and delete.
+const chrome = computed(() => editorChrome(route.query))
 const router = useRouter()
 const { record, remove, findBySessionId } = useRecentNotebooks()
 
@@ -540,7 +543,7 @@ function goHome() {
     <InspectSwapConfirm />
     <!-- Header -->
     <header class="header">
-      <div class="header-left">
+      <div v-if="chrome.brand" class="header-left">
         <span class="logo" role="button" tabindex="0" title="Home" @click="goHome">◆ strata</span>
         <span v-if="!editingName" class="notebook-name" @dblclick="startEditName">
           {{ notebook.name }}
@@ -557,28 +560,35 @@ function goHome() {
         />
       </div>
       <div class="header-right">
-        <router-link
-          :to="`/app/${sessionId}`"
-          class="header-logs-link"
-          data-testid="nav-app"
-          title="Open as read-only app (widgets + outputs)"
-        >
-          App
-        </router-link>
-        <router-link
-          to="/artifacts"
-          class="header-logs-link"
-          data-testid="nav-artifacts"
-          title="Artifact store"
-        >
-          Artifacts
-        </router-link>
-        <router-link to="/logs" class="header-logs-link" data-testid="nav-logs" title="Server logs">
-          Logs
-        </router-link>
+        <template v-if="chrome.pageLinks">
+          <router-link
+            :to="`/app/${sessionId}`"
+            class="header-logs-link"
+            data-testid="nav-app"
+            title="Open as read-only app (widgets + outputs)"
+          >
+            App
+          </router-link>
+          <router-link
+            to="/artifacts"
+            class="header-logs-link"
+            data-testid="nav-artifacts"
+            title="Artifact store"
+          >
+            Artifacts
+          </router-link>
+          <router-link
+            to="/logs"
+            class="header-logs-link"
+            data-testid="nav-logs"
+            title="Server logs"
+          >
+            Logs
+          </router-link>
+        </template>
         <ThemeToggle />
         <span
-          v-if="!loading && notebook.id && workerModeKnown"
+          v-if="chrome.modeBadge && !loading && notebook.id && workerModeKnown"
           class="mode-badge"
           :class="{
             service: !workerDefinitionsEditable,
@@ -620,6 +630,7 @@ function goHome() {
           @select="onExportSelect"
         />
         <button
+          v-if="chrome.deleteNotebook"
           class="btn btn-danger"
           data-testid="notebook-delete"
           :disabled="deleteButtonDisabled"
