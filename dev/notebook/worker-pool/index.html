@@ -2373,8 +2373,12 @@ the cell. A machine running a job is neither probed nor reaped.</p>
 </code></pre></div>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">strata_pool.api</span><span class="w"> </span><span class="kn">import</span> <span class="n">create_app</span>
 <a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>
-<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="n">app</span> <span class="o">=</span> <span class="n">create_app</span><span class="p">(</span><span class="n">pool</span><span class="p">,</span> <span class="n">api_token</span><span class="o">=</span><span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="p">[</span><span class="s2">"STRATA_POOL_TOKEN"</span><span class="p">])</span>
-<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="c1"># uvicorn strata_pool_service:app</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="n">app</span> <span class="o">=</span> <span class="n">create_app</span><span class="p">(</span>
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a>    <span class="n">pool</span><span class="p">,</span>
+<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a>    <span class="n">api_token</span><span class="o">=</span><span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="p">[</span><span class="s2">"STRATA_POOL_TOKEN"</span><span class="p">],</span>
+<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a>    <span class="n">admin_token</span><span class="o">=</span><span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"STRATA_POOL_ADMIN_TOKEN"</span><span class="p">),</span>  <span class="c1"># optional, operator only</span>
+<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a><span class="p">)</span>
+<a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a><span class="c1"># uvicorn strata_pool_service:app</span>
 </code></pre></div>
 <p>The app's lifespan calls <code>recover()</code> and <code>start_scaler()</code> itself, so a
 deployment cannot forget the call that stops it paying for idle machines.</p>
@@ -2404,19 +2408,19 @@ deployment cannot forget the call that stops it paying for idle machines.</p>
 </tr>
 <tr>
 <td><code>GET /v1/machine-types</code></td>
-<td>What a caller may ask for: the catalogue an annotation resolves against</td>
+<td>What a caller may ask for: the catalogue an annotation resolves against. <code>env</code> and <code>provider_options</code> values read <code>&lt;redacted&gt;</code> without the admin token</td>
 </tr>
 <tr>
 <td><code>PUT /v1/machine-types</code></td>
-<td>Replace the catalogue without a restart; persisted, so a restart serves it</td>
+<td>Replace the catalogue without a restart; persisted, so a restart serves it. Admin token only</td>
 </tr>
 <tr>
 <td><code>GET /v1/workers</code></td>
-<td>The fleet, without machine credentials</td>
+<td>The caller's tenant's machines, without their credentials; the admin token sees the whole fleet, or one tenant with <code>?tenant_id=</code></td>
 </tr>
 <tr>
 <td><code>GET /v1/usage</code></td>
-<td>The billing feed, filterable by tenant</td>
+<td>The billing feed: the caller's tenant only; the admin token sees every tenant, or one with <code>?tenant_id=</code></td>
 </tr>
 <tr>
 <td><code>GET /health</code></td>
@@ -2428,6 +2432,12 @@ deployment cannot forget the call that stops it paying for idle machines.</p>
 (required), <code>priority</code> (default 0, higher runs first), <code>session_id</code> and
 <code>timeout_seconds</code> (both optional). <code>POST /v1/jobs/sync</code> also takes
 <code>wait_seconds</code> (default 300), which bounds the wait and not the job.</p>
+<p>Replacing the catalogue needs the <strong>admin token</strong>. A catalogue entry decides
+which image receives a tenant's jobs, and with them the signed URLs for that
+tenant's data, so the API token every caller holds cannot rewrite it. A pool
+built without an <code>admin_token</code> refuses catalogue writes over HTTP with 403:
+the catalogue is then the one passed to <code>Pool(machine_types=...)</code>, unless an
+earlier admin <code>PUT</code> stored one, which replaces it on start.</p>
 <p>Replacing the catalogue takes effect at once. A new type accepts jobs straight
 away. A removed type accepts none: its queued jobs fail with the reason, and
 its machines finish what they are running, then retire once idle past the
@@ -2443,8 +2453,10 @@ under the caller's.</p>
 <p>A job that fails <strong>on the worker</strong> comes back as 502, and one that times out
 as 504. The caller has to be able to tell "your code raised" from "we could
 not run it".</p>
-<p>Every route but <code>/health</code> requires <code>Authorization: Bearer &lt;api_token&gt;</code>, and
-every job route requires <code>X-Strata-Tenant</code>, reads included. A tenant reads only
+<p>Every route but <code>/health</code> requires <code>Authorization: Bearer &lt;api_token&gt;</code> (the
+admin token is accepted wherever the API token is), and every job route
+requires <code>X-Strata-Tenant</code>, reads included. So do the worker and usage
+listings, unless the caller presents the admin token. A tenant reads only
 its own jobs: another tenant's job id answers 404, not 403, so the id does not
 confirm the job exists. <strong>The caller is trusted for tenant
 identity</strong>: it authenticates as itself and asserts whose work this is. The
