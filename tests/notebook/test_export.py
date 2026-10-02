@@ -301,7 +301,7 @@ def test_export_markdown_cell_renders_without_cell_banner(tmp_path: Path) -> Non
 
 
 def test_export_sanitizes_active_html_in_markdown_cells(tmp_path: Path) -> None:
-    """The UI runs markdown cells through DOMPurify; the export must match before python-markdown
+    """The UI renders markdown with raw HTML off; the export must match before python-markdown
     passes raw HTML into the published page.
     """
     nb_dir = _make_notebook(tmp_path)
@@ -319,23 +319,65 @@ def test_export_sanitizes_active_html_in_markdown_cells(tmp_path: Path) -> None:
 
     rendered = export_notebook(nb_dir)
 
-    # The heading survives: the sanitizer must be surgical, not strip benign
-    # markdown formatting around it.
     assert "## Sanitization" in rendered
-
-    # All four attack vectors are neutralized: script/iframe tags
-    # escaped to entity form (display as literal text, not live HTML),
-    # on* handlers escaped, dangerous link schemes rewritten to "#".
-    # ``onerror=`` survives only inside the entity-escaped img tag.
     assert "<script>" not in rendered
-    assert "&lt;script&gt;" in rendered
+    assert "&lt;script>" in rendered
     assert "<iframe" not in rendered
-    assert "&lt;iframe" in rendered
     assert "<img " not in rendered
     assert "&lt;img" in rendered
     assert "javascript:" not in rendered
     assert "data:text/html" not in rendered
-    assert "](#)" in rendered
+    assert "[click](#)" in rendered
+    assert "[doc](#)" in rendered
+
+
+@pytest.mark.parametrize(
+    ("payload", "expected"),
+    [
+        ("<img/src=x/onerror=alert(1)>", "&lt;img/src=x/onerror=alert(1)>"),
+        ('<a href="javascript:alert(1)">x</a>', '&lt;a href="javascript:alert(1)">x&lt;/a>'),
+        ("<form action=javascript:alert(1)><button>go</button></form>", None),
+        ('<svg><a xlink:href="javascript:alert(1)"><text>x</text></a></svg>', None),
+        ("<javascript:alert(1)>", "&lt;javascript:alert(1)>"),
+        ("[x]( javascript:alert(1))", "[x]( #)"),
+        ("[x](javascript:alert(1))", "[x](#)"),
+        ("[x](<javascript:alert(1)>)", "[x](#)"),
+        ("[x](jav&#x61;script:alert(1))", "[x](#)"),
+        ("[x](JavaScript\\:alert(1))", "[x](#)"),
+        ("[x](vbscript:msgbox(1))", "[x](#)"),
+        ("[x](data:text/html,<script>alert(1)</script>)", "[x](#)"),
+        ("[r]: javascript:alert(1)\n\n[go][r]", "[r]: #\n\n[go][r]"),
+    ],
+)
+def test_sanitizer_neutralizes_bypass_payloads(payload: str, expected: str | None) -> None:
+    from strata.notebook.export import _sanitize_markdown_body
+
+    sanitized = _sanitize_markdown_body(payload)
+
+    assert "<" not in sanitized.replace("&lt;", "")
+    if expected is not None:
+        assert sanitized == expected
+
+
+def test_sanitizer_keeps_code_safe_links_and_markdown(tmp_path: Path) -> None:
+    """Escaping is limited to raw HTML: code keeps its ``<``, safe links and quotes survive."""
+    from strata.notebook.export import _sanitize_markdown_body
+
+    body = (
+        "> quote with a < b\n\n"
+        "`<b>inline</b>` and <b>bold</b>\n\n"
+        "[ok](https://example.com/a_(b)) <https://example.com> <mailto:a@b.c> <a@b.co>\n\n"
+        "![img](data:image/png;base64,AAAA)\n\n"
+        "```html\n<script>shown as code</script>\n```\n"
+    )
+
+    assert _sanitize_markdown_body(body) == (
+        "> quote with a &lt; b\n\n"
+        "`<b>inline</b>` and &lt;b>bold&lt;/b>\n\n"
+        "[ok](https://example.com/a_(b)) <https://example.com> <mailto:a@b.c> <a@b.co>\n\n"
+        "![img](data:image/png;base64,AAAA)\n\n"
+        "```html\n<script>shown as code</script>\n```\n"
+    )
 
 
 def test_export_sanitizes_active_html_in_readme(tmp_path: Path) -> None:
@@ -352,11 +394,11 @@ def test_export_sanitizes_active_html_in_readme(tmp_path: Path) -> None:
 
     rendered = export_notebook(nb_dir)
     assert "<script>" not in rendered
-    assert "&lt;script&gt;alert(&#x27;readme&#x27;)&lt;/script&gt;" in rendered
+    assert "&lt;script>alert('readme')&lt;/script>" in rendered
 
 
-def test_export_preserves_benign_inline_html(tmp_path: Path) -> None:
-    """Don't over-escape: ``<sub>``, ``<details>``, ``<sup>`` and similar pass through unchanged."""
+def test_export_escapes_benign_inline_html_like_the_ui(tmp_path: Path) -> None:
+    """The UI shows raw HTML as text, so ``<sub>`` and ``<details>`` export as text too."""
     nb_dir = _make_notebook(tmp_path)
     add_cell_to_notebook(nb_dir, "ok", language="markdown")
     write_cell(
@@ -367,9 +409,8 @@ def test_export_preserves_benign_inline_html(tmp_path: Path) -> None:
     )
 
     rendered = export_notebook(nb_dir)
-    assert "<sub>2</sub>" in rendered
-    assert "<details>" in rendered
-    assert "<summary>more</summary>" in rendered
+    assert "H&lt;sub>2&lt;/sub>O" in rendered
+    assert "<details>" not in rendered
 
 
 def test_export_renders_readme_intro_when_present(tmp_path: Path) -> None:
