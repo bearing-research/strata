@@ -48,6 +48,13 @@ worker's token are out of other tenants' and cells' reach.
 
 ### Added
 
+- **The notebook editor can be framed.** Under `?framed=1`
+  (`#/notebook/<id>?framed=1`) the editor leaves out what a platform framing
+  it already has: Strata's brand and the notebook's name, the links to the
+  App, Artifacts and Logs pages (which would navigate the frame away from the
+  notebook), the deployment-mode badge, and Delete Notebook, which is the
+  platform's to offer so its own records see it. Running, editing, export
+  and the rest are unchanged.
 - **The artifact store stays bounded on its own.** A personal server sweeps its
   store every hour, collecting results unused for 30 days and, once the store
   is over 20 GiB, the least recently used down to 80% of that. Use is a cache
