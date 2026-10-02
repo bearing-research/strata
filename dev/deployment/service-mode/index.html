@@ -3070,7 +3070,9 @@ venv's <code>python</code>. Install them somewhere world-readable with
 <code>UV_PYTHON_INSTALL_DIR=/opt/uv-python</code>. Nothing else needs arranging: the
 per-run directories a cell writes into are handed to the harness user, the
 harness runs the venv's interpreter directly rather than through <code>uv run</code>, and
-the artifact store is never read by the cell.</p>
+the artifact store is never read by the cell. The server, in turn, never
+unpickles what a cell stored: prompt and SQL cells do not load a pickled value,
+and cell tests load their inputs in the test process.</p>
 <p>A cell run this way still shares the host's kernel and sees what any local user
 can. A notebook that needs more isolation than that wants a worker on another
 machine.</p>

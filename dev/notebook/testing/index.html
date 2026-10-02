@@ -2205,7 +2205,7 @@ whatever <code>X</code> is at the end of the cell:</p>
 <a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>    <span class="k">assert</span> <span class="p">(</span><span class="n">cell</span><span class="o">.</span><span class="n">sales</span><span class="p">[</span><span class="s2">"revenue"</span><span class="p">]</span> <span class="o">==</span> <span class="n">expected</span><span class="p">)</span><span class="o">.</span><span class="n">all</span><span class="p">()</span>
 </code></pre></div>
 <p>The cell body runs <strong>once</strong> per test session (in a fixture), with its upstream
-artifacts deserialized and injected - so <code>cell.sales</code> is the actual DataFrame
+artifacts deserialized in the test process and injected - so <code>cell.sales</code> is the actual DataFrame
 your upstream cell produced, not a mock. If the cell source itself raises, every
 test that requests <code>cell</code> reports a clear <em>setup</em> error rather than an opaque
 collection failure.</p>
