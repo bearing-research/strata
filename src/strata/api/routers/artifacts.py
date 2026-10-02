@@ -945,7 +945,7 @@ async def export_artifact_to_table(
     ``table`` is a ``<warehouse>#ns.table`` URI or ``ns.table`` in the configured catalog.
     """
     from strata.api.dependencies import authorize_table_access
-    from strata.iceberg import table_identity_for
+    from strata.iceberg import TableOfAnotherTenant, table_identity_for
     from strata.server import _authorize_artifact_read, _ensure_artifact_access, get_state
     from strata.table_export import export_artifact
 
@@ -971,6 +971,10 @@ async def export_artifact_to_table(
             alias=request.alias,
             tenant=tenant_filter,
         )
+    except TableOfAnotherTenant as exc:
+        if config.hide_forbidden_as_not_found:
+            raise HTTPException(status_code=404, detail="Table not found") from exc
+        raise HTTPException(status_code=403, detail="Access denied") from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {

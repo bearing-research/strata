@@ -61,7 +61,8 @@ def export_artifact(
     """Write *artifact* into *table_uri* as its current snapshot.
 
     Raises ``ValueError`` when the artifact is not a table or its schema cannot
-    evolve the table's.
+    evolve the table's, and ``TableOfAnotherTenant`` when *tenant* is set and the
+    table's latest export was written for another tenant.
     """
     if artifact.state not in ("ready", "superseded"):
         raise ValueError(
@@ -76,6 +77,7 @@ def export_artifact(
         provenance_hash=artifact.provenance_hash,
         promoted_by=promoted_by,
         alias=alias,
+        tenant=tenant,
     )
     store.set_tag(artifact.id, artifact.version, EXPORT_TAG, table_uri, tenant=tenant)
     return written

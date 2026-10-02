@@ -275,6 +275,8 @@ metadata, lineage and dependents, publishing it, and exporting it into a table
 (`POST /v1/artifacts/{id}/v/{n}/export`). An export copies the result into a
 table the caller can then scan, so it is refused both when the caller is denied
 the target table and when the caller is denied a table the result was read from.
+Rules have no separate write permission: a table a caller may read, it may export
+into, unless another tenant [owns it](#promoting-into-an-iceberg-table).
 
 ### Scope-gated endpoints
 
@@ -548,9 +550,15 @@ store's configured catalog.
   it, so the current snapshot is always one version. A table Strata did not
   write is refused rather than replaced. A notebook's `@table` on
   it goes stale when the next version is written, as for any other table.
+- A table belongs to the tenant whose export last wrote it. Another tenant's
+  export to it is refused like a denied table (`404 Table not found`, or `403`
+  with `STRATA_HIDE_FORBIDDEN_AS_NOT_FOUND=false`), even when the ACL lets that
+  tenant read it. An `admin:*` export is not tenant-scoped, and leaves a table
+  only another unscoped export can replace.
 - Each snapshot's summary names what it holds: `strata.artifact_id`,
-  `strata.version`, `strata.provenance_hash`, and `strata.promoted_by` when the
-  store knows the caller. (An overwrite commits a delete and then an append; the
+  `strata.version`, `strata.provenance_hash`, `strata.promoted_by` when the
+  store knows the caller, and `strata.tenant` when the export was
+  tenant-scoped. (An overwrite commits a delete and then an append; the
   append is the snapshot that holds the version.)
 - A new version may add columns or widen a type. One whose schema the table
   cannot evolve to is refused before anything is written.
