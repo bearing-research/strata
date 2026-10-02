@@ -103,6 +103,9 @@ def _replace_file_atomically(path: Path, write: Callable[[BinaryIO], Any]) -> No
     tmp_path = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
     try:
         with open(tmp_path, "xb") as f:
+            # Keep a mode the user narrowed (e.g. a notebook.toml holding an [ai] api_key).
+            with contextlib.suppress(FileNotFoundError):
+                os.chmod(tmp_path, path.stat().st_mode & 0o7777)
             write(f)
             f.flush()
             os.fsync(f.fileno())

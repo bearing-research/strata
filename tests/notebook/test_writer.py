@@ -1070,3 +1070,14 @@ def test_a_full_disk_mid_write_keeps_the_last_good_file(tmp_path, monkeypatch, r
     assert excinfo.value.errno == errno.ENOSPC
     assert target.read_bytes() == before
     assert not [p for p in target.parent.iterdir() if p.name.endswith(".tmp")]
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX file modes")
+def test_a_rewrite_keeps_a_mode_the_user_narrowed(tmp_path):
+    nb = create_notebook(tmp_path, "Private", python_version="3.12", initialize_environment=False)
+    toml_path = nb / "notebook.toml"
+    os.chmod(toml_path, 0o600)
+
+    update_notebook_timeout(nb, 12.0)
+
+    assert toml_path.stat().st_mode & 0o777 == 0o600
