@@ -2365,7 +2365,10 @@ client can do - there's no internal API.</p>
    the same payload shape.
 2. <strong>Connect the WebSocket.</strong> <code>ws://.../v1/notebooks/ws/{session_id}</code>. The
    handler verifies the session exists and (if owned) that the caller is the
-   owner - refuses with close code <code>1008 Notebook not found</code> otherwise. The
+   owner - refuses with close code <code>1008 Notebook not found</code> otherwise. A
+   browser upgrade whose <code>Origin</code> is neither the server's own nor listed in
+   <code>STRATA_CORS_ALLOW_ORIGINS</code> closes first with <code>1008 Origin not allowed</code>;
+   clients that send no <code>Origin</code> (the TUI, scripts) are unaffected. The
    only frame sent on accept is <code>presence</code> (see
    <a href="#presence-and-soft-locks">Presence and soft locks</a>).
 3. <strong>Send <code>notebook_sync</code></strong> as the first client → server message. The server

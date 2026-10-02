@@ -2279,14 +2279,25 @@ addresses unless you opt in:</p>
 </code></pre></div>
 <p>Opt in only if you have separate protection (firewall, VPN, private
 network): personal mode exposes write endpoints with no authentication.</p>
+<p>Loopback binding alone does not keep web pages out: the browser runs on
+the same machine. Personal mode refuses a cross-origin page's writes
+and its notebook WebSocket, and answers only to the <code>Host</code> names it
+expects, so a DNS-rebinding page that resolves its own name to
+<code>127.0.0.1</code> gets a 400. The expected
+names are <code>localhost</code>, <code>127.0.0.1</code>, <code>[::1]</code>, any IP literal,
+<code>STRATA_HOST</code>, and whatever you list in <code>STRATA_ALLOWED_HOSTS</code>. When
+you reach a remote personal-mode server by name (<code>devbox.lan</code>,
+<code>strata.example.com</code>), list that name:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="nv">STRATA_ALLOWED_HOSTS</span><span class="o">=</span>devbox.lan,strata.example.com
+</code></pre></div>
 <p>Artifacts persist to <code>~/.strata/artifacts</code> unless <code>STRATA_ARTIFACT_DIR</code>
 is set. Notebook deletion and session discovery/reconnect APIs are
 personal-mode-only.</p>
 <h2 id="service-mode">Service mode<a class="headerlink" href="#service-mode" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="nv">STRATA_DEPLOYMENT_MODE</span><span class="o">=</span>service<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="w">  </span><span class="nv">STRATA_AUTH_MODE</span><span class="o">=</span>trusted_proxy<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="w">  </span><span class="nv">STRATA_PROXY_TOKEN</span><span class="o">=</span>&lt;shared-secret&gt;<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="w">  </span>uv<span class="w"> </span>run<span class="w"> </span>strata-notebook
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="nv">STRATA_DEPLOYMENT_MODE</span><span class="o">=</span>service<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="w">  </span><span class="nv">STRATA_AUTH_MODE</span><span class="o">=</span>trusted_proxy<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="w">  </span><span class="nv">STRATA_PROXY_TOKEN</span><span class="o">=</span>&lt;shared-secret&gt;<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="w">  </span>uv<span class="w"> </span>run<span class="w"> </span>strata-notebook
 </code></pre></div>
 <p>Short version: an upstream proxy authenticates the caller, injects
 identity headers (<code>X-Strata-Principal</code>, tenant header,
@@ -2311,9 +2322,10 @@ storage root, <code>&lt;notebook_storage_dir&gt;/&lt;identity&gt;/</code>, and e
 route is confined to it. A notebook's artifacts live under its own
 directory, so they land inside that root too.</p>
 <p>Set:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="nv">STRATA_DEPLOYMENT_MODE</span><span class="o">=</span>personal
-<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="nv">STRATA_ALLOW_REMOTE_CLIENTS_IN_PERSONAL</span><span class="o">=</span><span class="nb">true</span>
-<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="nv">STRATA_PERSONAL_MODE_USER_HEADER</span><span class="o">=</span>Cf-Access-Authenticated-User-Email
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="nv">STRATA_DEPLOYMENT_MODE</span><span class="o">=</span>personal
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="nv">STRATA_ALLOW_REMOTE_CLIENTS_IN_PERSONAL</span><span class="o">=</span><span class="nb">true</span>
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="nv">STRATA_PERSONAL_MODE_USER_HEADER</span><span class="o">=</span>Cf-Access-Authenticated-User-Email
+<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="nv">STRATA_ALLOWED_HOSTS</span><span class="o">=</span>strata.example.com<span class="w">   </span><span class="c1"># the name users browse to</span>
 </code></pre></div>
 <p>The header value is whatever your proxy injects after authenticating the
 caller. Strata treats the value as opaque: email, GitHub login, internal

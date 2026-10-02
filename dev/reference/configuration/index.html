@@ -2674,6 +2674,11 @@ authentication. This is a startup error, not a warning:</p>
 <td>Origins allowed to call the API from a browser, as a JSON array (<code>["http://localhost:5173"]</code>); a comma-separated value fails at startup. Empty means no cross-origin access. Personal mode has no auth, so any page allowed here can author and run cells</td>
 </tr>
 <tr>
+<td><code>STRATA_ALLOWED_HOSTS</code></td>
+<td><em>(empty)</em></td>
+<td>Host names the server answers to, beyond <code>localhost</code>, <code>127.0.0.1</code>, <code>[::1]</code> (any port), IP literals and <code>STRATA_HOST</code>. Comma-separated; a leading dot matches a suffix (<code>.example.com</code>); <code>*</code> turns the check off. Any other <code>Host</code> gets 400 (HTTP) or a closed socket (WebSocket), which stops DNS-rebinding pages. Always checked in personal mode; service mode checks only when this is set. List the public hostname of a personal-mode server reached by name (Fly, a LAN name, a Codespace)</td>
+</tr>
+<tr>
 <td><code>STRATA_EMBED_FRAME_ANCESTORS</code></td>
 <td><em>(empty)</em></td>
 <td>Origins allowed to embed a notebook's app view in an <code>&lt;iframe&gt;</code> (sets <code>Content-Security-Policy: frame-ancestors</code>). Empty means same-origin only. JSON array or comma-separated; <code>*</code> allows any host</td>
