@@ -7,31 +7,62 @@ exhaustive commit history.
 
 ## Unreleased
 
+The artifact store looks after its own size, Iceberg tables that other engines
+delete from or evolve are read correctly instead of refused, and service mode
+closes several ways a notebook could reach past its own data.
+
+**The store stays bounded.** A personal server now collects results nobody has
+used for a while, least recently used first, and never anything named, pinned,
+published or still needed by something kept. A notebook keeps each cell's
+current value and its last few versions.
+
+**More tables read correctly.** Scans apply merge-on-read deletes (positional
+deletes, deletion vectors and equality deletes) and follow schema changes by
+field id, so tables Spark, Flink and DuckDB write are read as Iceberg defines
+them.
+
+**Service mode is tighter.** SQL cells are confined to their own database and
+lake, package installs are wheels only, outbound requests connect only to the
+address the guard checked, R restores run as the harness user, the server's
+Infisical credentials go only to the operator's host, and the log buffer and a
+worker's token are out of other tenants' and cells' reach.
+
+**Upgrading from 0.8.0:**
+
+- Scan caches are rebuilt: the first scan of each table reads from storage.
+  The artifact store's metadata migrates on first start, one way.
+- New minimums: pyiceberg 0.12, DuckDB 1.5, sqlglot 30.13; mcp 2.2 with
+  `[mcp]`; textual-image 0.14 and Pillow 12.1 with `[tui]`.
+- Unnamed `materialize` results can now be collected in personal mode; name or
+  pin a result to keep it. `STRATA_ARTIFACT_GC_MAX_AGE_DAYS` is removed and a
+  leftover value is ignored (use `STRATA_ARTIFACT_GC_MAX_IDLE_DAYS`);
+  `garbage_collect(max_age_days=)` is now `max_idle_days`, and a bare
+  `POST /v1/artifacts/gc` applies the configured retention.
+- Nanosecond timestamps in v1 and v2 tables come back as microseconds.
+- Service mode: dependencies without a wheel no longer install; guarded
+  outbound connections ignore `HTTPS_PROXY`; R packages are not added from the
+  notebook where cells are isolated; `/v1/logs` needs `admin:*`.
+- strata-pool: reading a job needs the `X-Strata-Tenant` header that
+  submitted it.
+- `/health/ready` no longer has a `stuck_scans` field.
+
 ### Added
 
 - **The artifact store stays bounded on its own.** A personal server sweeps its
-  store every hour, collecting results unused for 30 days, and the least
-  recently used whenever the store is over 20 GiB (down to 80% of that).
-  Before, every distinct `materialize` was kept forever, and the existing
-  sweep, which was off by default, could not have collected one anyway: each
-  result is the only version of an id the store made up for it, and the latest
-  version of an id was always kept. Retention now tracks when a version was
-  last used (a cache hit, a read, or a request that names it as an input)
-  rather than when it was made, and knows which ids the store made up, so a
-  notebook's cell outputs, whose latest version is the cell's value, are
-  still kept. Nothing named, aliased, pinned, published, awaiting alias
-  approval or still building is collected, nor anything those, or a
-  notebook's current values, were built from, nor anything used in the last
-  hour; a copy promoted into a store counts as just used. The first sweep
-  runs a minute after the server starts. `strata artifact gc` runs or
-  previews a sweep without a server, and `POST /v1/artifacts/gc` takes
-  `dry_run`. Every limit is a setting: `STRATA_ARTIFACT_GC_INTERVAL_SECONDS`,
-  `_MAX_BYTES`, `_MAX_IDLE_DAYS` and `_MIN_IDLE_SECONDS`. Service mode sweeps
-  only when an operator sets the interval, and a tenant's cap covers that
-  tenant's own share. A notebook's own store keeps each cell output's current
-  value and its three most recent earlier ones
-  (`STRATA_NOTEBOOK_KEEP_SUPERSEDED_VERSIONS`), pruned when the server opens
-  the notebook (not while it is held still for a copy).
+  store every hour, collecting results unused for 30 days and, once the store
+  is over 20 GiB, the least recently used down to 80% of that. Use is a cache
+  hit, a read, or a request that names a result as an input. Nothing named,
+  aliased, pinned, published, awaiting alias approval or still building is
+  collected, nor anything those were built from, nor anything used in the last
+  hour. `strata artifact gc` runs or previews a sweep without a server, and
+  `POST /v1/artifacts/gc` and the client's `garbage_collect` take `dry_run`,
+  `max_bytes`, `max_idle_days`, `min_idle_seconds` and `collect_latest`. Each
+  limit is a setting (`STRATA_ARTIFACT_GC_INTERVAL_SECONDS`, `_MAX_BYTES`,
+  `_MAX_IDLE_DAYS`, `_MIN_IDLE_SECONDS`); service mode sweeps only when an
+  operator sets the interval, and a tenant's cap covers its own share. A
+  notebook's store keeps each cell output's current value and its three most
+  recent earlier ones (`STRATA_NOTEBOOK_KEEP_SUPERSEDED_VERSIONS`), pruned
+  when the server opens the notebook.
 - **A result can be promoted without a name.** `POST
   /v1/notebooks/{id}/artifacts/{aid}/v/{n}/promote` without `name` copies the
   result and its chain into the team store and names nothing, so a platform
@@ -50,8 +81,8 @@ exhaustive commit history.
   the delete's partition or across the table for an unpartitioned one. A
   delete file whose key range cannot meet a row group is skipped for it.
   Applying equality deletes holds their keys in memory, so a scan in which a
-  row group would need more than `max_equality_delete_rows` (10 million by
-  default) is refused while planning, with a message pointing at compaction,
+  row group would need more than `STRATA_MAX_EQUALITY_DELETE_ROWS` (10 million
+  by default) is refused while planning, with a message pointing at compaction,
   never read partially. A delete file in ORC or Avro, or keyed on a struct
   column, is refused the same way. Keys compare the values the scan returns:
   on a v1 or v2 table a key a file holds in nanoseconds is truncated to
@@ -66,9 +97,7 @@ exhaustive commit history.
   struct, list or map column. A column added with a default (format v3) reads
   its default from files that predate it, and an identity-partition column a
   file omits (a Hive-layout file registered with `add_files`) reads the
-  file's partition value, as pyiceberg reads it. Nanosecond timestamps in a
-  v1 or v2 table, nested ones included, are read at the table's microsecond
-  unit, truncating.
+  file's partition value, as pyiceberg reads it.
 
 ### Changed
 
@@ -78,21 +107,27 @@ exhaustive commit history.
   Name it or pin it to keep it. `STRATA_ARTIFACT_GC_MAX_AGE_DAYS` is gone:
   `STRATA_ARTIFACT_GC_MAX_IDLE_DAYS` counts from a version's last use, and
   `garbage_collect` (client and route) takes `max_idle_days` in place of
-  `max_age_days`.
+  `max_age_days`; a leftover `STRATA_ARTIFACT_GC_MAX_AGE_DAYS` is ignored, and
+  a bare `POST /v1/artifacts/gc` applies the configured retention.
+- **Nanosecond timestamps in v1 and v2 tables come back as microseconds.**
+  Those formats define timestamps in microseconds, but a file can hold
+  nanoseconds (or INT96), which 0.8.0 returned as `timestamp[ns]`. They are now
+  read at the table's microsecond unit, truncating, nested ones included.
 - **Nothing 0.8.0 cached for a scan is reused.** The row-group cache moves to
   a new version directory, the metadata store is discarded and rebuilt, and a
   scan's provenance now includes the schema, so scan artifacts are built
   afresh. 0.8.0 could have cached rows a merge-on-read delete removed, or a
   column's values under another column's name. The first scan of each table
   after upgrading reads from storage. The old `v3` directory under the cache
-  directory is deleted when the server starts, and the log says so.
+  directory is deleted at startup when it holds nothing but cache entries;
+  anything else is left in place with a warning.
 - **pyiceberg 0.12 or newer is required.** Before 0.12, pyiceberg misread a
   manifest whose entries leave their snapshot id to be inherited, which is how
   DuckDB writes them, and dropped the delete files those manifests listed.
 - **The `[mcp]` extra needs mcp 2.2 or newer.** mcp 2 renamed `FastMCP` to
   `MCPServer`, and the notebook's `/mcp` endpoint now uses it. With mcp 1
-  still installed, `/mcp` is off after upgrading: the server logs why,
-  naming the module that failed to import, and keeps running without it.
+  still installed, `/mcp` is off after upgrading: the server logs that the
+  installed mcp is too old and keeps running without it.
 - **sqlglot 30.13 or newer is required**, the first release that writes
   DuckDB's snapshot clause after a table's alias.
 - **DuckDB 1.5 or newer is required** (`strata-notebook`, its `sql-duckdb`
@@ -171,7 +206,28 @@ exhaustive commit history.
 - **A denied table input is denied before it is planned.** A principal denied
   a table used as a transform input got a 422 naming the table and its
   delete-file paths, or a 400 that let materialize build without checking the
-  ACL. It now gets a 403, or a 404 under `STRATA_HIDE_FORBIDDEN_AS_NOT_FOUND`.
+  ACL. It now gets a 404 (a 403 with
+  `STRATA_HIDE_FORBIDDEN_AS_NOT_FOUND=false`), before anything is planned.
+- **A cell cannot read the worker's token from its parent process.** The
+  worker took `STRATA_WORKER_TOKEN` and the credential variables out of
+  `os.environ`, but `/proc/<pid>/environ` still showed the environment it
+  started with, and on the worker image cells run as the worker's user. The
+  values are now zeroed there too. An app built directly with
+  `create_notebook_executor_app()`, as in the Modal example, does not do this
+  yet.
+- **The server's log buffer needs `admin:*`.** `GET /v1/logs` and
+  `/v1/logs/stream` hold every tenant's records and were open to any
+  authenticated principal. Under principal auth they now need `admin:*`;
+  personal mode is unchanged.
+- **Secrets fetched from Infisical stay out of `notebook.toml`.** Saving the
+  Runtime panel sent every row back, and values whose names do not look secret
+  (`DATABASE_URL`) were written to the committed file and stopped following
+  rotations. An unchanged fetched value is no longer written and keeps its
+  source; an edited one is a manual override as before.
+- **strata-pool job reads are scoped to their tenant.** `GET /v1/jobs/{id}`
+  and its `/result` took no tenant, so any token holder could read another
+  tenant's job by id. They now need the submitting tenant's `X-Strata-Tenant`
+  and answer 404 for anyone else.
 
 ### Fixed
 
@@ -193,8 +249,9 @@ exhaustive commit history.
   `read_parquet(...)` or `query_table(...)` or a Postgres set-returning
   function, DuckDB's `FROM 'file.parquet'` (or `"file.parquet"`, or
   `file.parquet` unquoted), and BigQuery's wildcard tables and
-  `INFORMATION_SCHEMA` views name their table only when the query runs, so the default cache could not see it change and kept returning
-  the first result. Such a cell now runs its query every time, its header
+  `INFORMATION_SCHEMA` views name their table only when the query runs, so
+  the default cache could not see it change and kept returning the first
+  result. Such a cell now runs its query every time, its header
   says why, and its result's content is folded into its provenance, so a
   downstream cell re-runs exactly when the rows changed instead of serving a
   result computed from the old ones. `# @cache session` or `ttl` opts back
@@ -223,10 +280,6 @@ exhaustive commit history.
   nullable, and the scan refused to stream the two as one schema. Every
   column, and every field inside a struct, list or map, now reads at the
   snapshot's nullability.
-- **Starting the cache no longer deletes a user's `v1` directory.** On
-  startup the disk cache removed every `v<N>` directory in `cache_dir` other
-  than its own, whatever it held. It now removes only trees that contain
-  nothing but cache entries, and leaves anything else with a warning.
 - **Notebook uv commands act on the notebook's environment.** A server
   started with `UV_PROJECT_ENVIRONMENT` set passed it to every `uv sync`,
   `add`, `lock` and the `uv run` that starts a cell, which then acted on the
@@ -271,6 +324,23 @@ exhaustive commit history.
   progress, so the check could never fail readiness.
 - **`AsyncStrataClient.materialize` honors `poll_interval`.** It polled a
   build every 0.5 s whatever was passed.
+- **A blanked secret no longer hides the server's value from a cell.**
+  `notebook.toml` keeps a secret-looking `[env]` name with an empty value, and
+  a cell saw that empty string in place of a value of the same name in the
+  server's environment until someone filled it in (and a `${VAR}` in a named
+  credential resolved to it too). An empty secret-looking value is no longer
+  passed on.
+- **`# @nocache` applies to SQL and prompt cells.** Only Python and R cells
+  honoured it, so a SQL cell with `# @cache forever` kept serving its stored
+  result.
+- **`@table` no longer warns on the forms it accepts.** The diagnostic asked
+  for `<warehouse>#<namespace>.<table>` even for `<catalog>:<namespace>.<table>`
+  and `<namespace>.<table>`, which a cell reads fine.
+- **`strata run` runs widget cells.** It reported them as skipped with
+  "unsupported language".
+- **`environment.yaml` import keeps packages whose names start with
+  `python`.** `python-dateutil` and the like were dropped as if they were the
+  interpreter pin.
 
 ## 0.8.0 - 2026-09-27
 
