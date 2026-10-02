@@ -3378,7 +3378,11 @@ them.</p>
 lake, package installs are wheels only, outbound requests connect only to the
 address the guard checked, R restores run as the harness user, the server's
 Infisical credentials go only to the operator's host, and the log buffer and a
-worker's token are out of other tenants' and cells' reach.</p>
+worker's token are out of other tenants' and cells' reach. Nothing the server
+stores is unpickled or served as a page in its process or on its origin.</p>
+<p><strong>Personal servers are harder to reach from a web page.</strong> A request under a
+hostname the server does not know is refused, which closes DNS rebinding, and
+no route serves files from outside the frontend.</p>
 <p><strong>Upgrading from 0.8.0:</strong></p>
 <ul>
 <li>Scan caches are rebuilt: the first scan of each table reads from storage.
@@ -3397,6 +3401,24 @@ worker's token are out of other tenants' and cells' reach.</p>
 <li>strata-pool: reading a job needs the <code>X-Strata-Tenant</code> header that
   submitted it.</li>
 <li><code>/health/ready</code> no longer has a <code>stuck_scans</code> field.</li>
+<li>Personal mode refuses a request whose <code>Host</code> is not loopback, an IP
+  address, the bind host or a name in the new <code>STRATA_ALLOWED_HOSTS</code>: a server
+  reached by a LAN hostname or a custom domain needs that name listed. A
+  browser WebSocket from another origin needs <code>STRATA_CORS_ALLOW_ORIGINS</code>.</li>
+<li>Secret env values are no longer sent to clients: REST and WebSocket
+  responses carry <code>"__strata_masked__"</code> in their place, and sending the marker
+  back keeps the value.</li>
+<li>A prompt cell that reads a pickled Python object sees a placeholder, and a
+  SQL bind of a pickled value is refused: the server no longer unpickles cell
+  data.</li>
+<li>Service mode: <code>name=</code> on materialize needs <code>artifacts:write</code>; under api_key
+  the tenant comes from the key, not <code>X-Tenant-ID</code>; the cache histogram,
+  metadata cleanup, <code>/metrics/tables*</code> and <code>/v1/debug/*</code> need <code>admin:cache</code> or
+  <code>admin:*</code>.</li>
+<li>strata-pool: <code>PUT /v1/machine-types</code> needs the new <code>admin_token</code>;
+  <code>/v1/usage</code> and <code>/v1/workers</code> return only the caller's tenant.</li>
+<li>Cells whose <code>[env]</code> held a blanked secret re-run once, since that empty
+  value no longer reaches them.</li>
 </ul>
 <h3 id="added">Added<a class="headerlink" href="#added" title="Permanent link">&para;</a></h3>
 <ul>
@@ -3503,6 +3525,17 @@ worker's token are out of other tenants' and cells' reach.</p>
   strata-notebook</code> for a release, or <code>uv sync &amp;&amp; uv run strata-notebook</code> from
   a checkout. <code>strata --help</code> prints from any Python; every command is still
   refused outside a uv-managed environment before it does anything.</li>
+<li><strong>Published bytes are served as data.</strong> Only Strata's own types are shown
+  inline (<code>image/png</code>, the Arrow stream, <code>application/json</code>,
+  <code>text/markdown</code>), now under their real media types; anything else downloads
+  as <code>application/octet-stream</code>. Every such response carries
+  <code>X-Content-Type-Options: nosniff</code> and a <code>sandbox</code> policy. <code>archive.zip</code> is
+  built once per publication and cached on disk, and a table over 128 MiB is
+  archived without its Parquet copy.</li>
+<li><strong>Markdown export escapes raw HTML</strong> as text, as the notebook shows it, and
+  turns <code>javascript:</code> and similar link targets into <code>#</code>.</li>
+<li><strong><code>strata run</code> keeps notebook INFO logs off stderr</strong>; <code>STRATA_LOG_LEVEL</code>
+  brings them back.</li>
 </ul>
 <h3 id="security">Security<a class="headerlink" href="#security" title="Permanent link">&para;</a></h3>
 <ul>
@@ -3587,6 +3620,42 @@ worker's token are out of other tenants' and cells' reach.</p>
   and its <code>/result</code> took no tenant, so any token holder could read another
   tenant's job by id. They now need the submitting tenant's <code>X-Strata-Tenant</code>
   and answer 404 for anyone else.</li>
+<li><strong>The web UI's fallback route no longer serves files outside the
+  frontend.</strong> <code>GET //etc/passwd</code> or <code>/%2fetc%2fpasswd</code> returned the file, in
+  both modes, to any caller the server admitted.</li>
+<li><strong>A web page can no longer drive a personal server by DNS rebinding.</strong> The
+  origin guard trusted the request's own <code>Host</code>, and the notebook WebSocket
+  checked no Origin, so a page whose name was rebound to 127.0.0.1 could
+  create and run cells. Unexpected <code>Host</code> headers are refused (over HTTP and
+  WebSocket), and the WebSocket checks Origin.</li>
+<li><strong>The server never unpickles cell data.</strong> Prompt cells, SQL binds and cell
+  tests loaded pickled values inside the server process, so a cell running as
+  the harness user, or an artifact carried in by a snapshot import, could run
+  code as the server. Cell-test inputs are now loaded in the test process.</li>
+<li><strong>A publication cannot serve a page on the server's origin.</strong>
+  <code>/p/{token}/data</code> used the content type the uploader declared, so
+  <code>text/html</code> or an SVG ran script there.</li>
+<li><strong>Exports follow the table ACL and stay in their tenant.</strong> Exporting an
+  artifact read from a denied table copied it somewhere readable, and an
+  export could overwrite another tenant's table. The ACL now also covers
+  results derived from a denied table.</li>
+<li><strong>Secret env values stay on the server</strong>, even for a <code>notebook:read</code>
+  principal in another tenant.</li>
+<li><strong>Service-mode authorization gaps closed:</strong> registry names set through
+  materialize, the tenant context under api_key, stream ownership across
+  tenants, cache warming past a deny rule, warm jobs and operator diagnostics
+  visible to every tenant, a write error naming another tenant, and a
+  WebSocket that kept working after its API key was revoked.</li>
+<li><strong>strata-pool's catalogue is the operator's:</strong> any token holder could
+  rewrite a machine type's image and read its <code>env</code>, and read every tenant's
+  usage and workers. Tokens are compared in constant time.</li>
+<li><strong>Uploads are bounded before they are read:</strong> an <code>.ipynb</code> import reads at
+  most its cap, and a snapshot whose members would expand past 16 GiB is
+  refused.</li>
+<li><strong>Only the publication embed card may be framed by any site</strong>; a lookalike
+  path no longer frames the editor.</li>
+<li><strong>A worker started through <code>uv run</code> warns that its parent still holds the
+  token</strong>, and the docs start <code>strata-worker</code> directly.</li>
 </ul>
 <h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Permanent link">&para;</a></h3>
 <ul>
@@ -3706,6 +3775,25 @@ worker's token are out of other tenants' and cells' reach.</p>
 <li><strong><code>environment.yaml</code> import keeps packages whose names start with
   <code>python</code>.</strong> <code>python-dateutil</code> and the like were dropped as if they were the
   interpreter pin.</li>
+<li><strong>A tab closed in the last minute no longer cancels a later run.</strong> The
+  grace teardown cancelled whatever was running when it expired, including a
+  CLI, agent or REST run started after the tab closed.</li>
+<li><strong>A full disk no longer empties a cell file.</strong> Cell, test, <code>pyproject.toml</code>
+  and console writes go through a temp file, as <code>notebook.toml</code> does.</li>
+<li><strong>One slow dependency no longer stalls the server.</strong> <code>uv sync</code> and the renv
+  restore on open, the secret-manager fetch (now capped at 20 s and no longer
+  repeated on every structural edit), <code>POST /v1/artifacts/gc</code> and building
+  <code>archive.zip</code> run off the event loop.</li>
+<li><strong>A crash between storing two outputs of one run no longer mixes runs</strong>: a
+  run's outputs become current together.</li>
+<li><strong>A <code>mode="stream"</code> miss nobody fetches is marked failed</strong> instead of
+  staying <code>building</code>, and abandoned writes (old <code>building</code> rows in a notebook
+  store, stale blob <code>.tmp</code> files) are reclaimed.</li>
+<li><strong>Postgres stores no longer log a pool warning on every read.</strong></li>
+<li><strong>The PyPI page shows its images and links</strong>, <code>index.html</code> is served with
+  <code>Cache-Control: no-cache</code>, every response carries
+  <code>X-Content-Type-Options: nosniff</code>, and strata-client and strata-pool ship
+  their LICENSE.</li>
 </ul>
 <h2 id="080-2026-09-27">0.8.0 - 2026-09-27<a class="headerlink" href="#080-2026-09-27" title="Permanent link">&para;</a></h2>
 <p>A notebook stops being one person's machine. This release is about the three
