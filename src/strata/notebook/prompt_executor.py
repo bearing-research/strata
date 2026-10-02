@@ -209,6 +209,7 @@ async def execute_prompt_cell(
     system_prompt = analysis.system_prompt
 
     variables, input_hashes = _load_upstream_variables(session, cell_id)
+    object_note = _object_input_note(variables)
 
     rendered = render_prompt_template(
         analysis.template_body,
@@ -272,7 +273,7 @@ async def execute_prompt_cell(
                     "display_outputs": [display_output],
                     "display_output": display_output,
                     "stdout": "",
-                    "stderr": "",
+                    "stderr": object_note,
                     "error": None,
                     "cache_hit": True,
                     "duration_ms": int(duration_ms),
@@ -481,9 +482,15 @@ async def execute_prompt_cell(
         "display_outputs": [display_output],
         "display_output": display_output,
         "stdout": "",
-        "stderr": (
-            f"Model: {result.model} | "
-            f"Tokens: {total_input_tokens}→{total_output_tokens}{retries_suffix}"
+        "stderr": "\n".join(
+            filter(
+                None,
+                [
+                    object_note,
+                    f"Model: {result.model} | "
+                    f"Tokens: {total_input_tokens}→{total_output_tokens}{retries_suffix}",
+                ],
+            )
         ),
         "error": None,
         "cache_hit": False,
@@ -630,6 +637,20 @@ def _load_upstream_variables(
     return variables, input_hashes
 
 
+_OBJECT_PLACEHOLDER = "<Python object: prompt cells read only tables, JSON values and text>"
+
+
+def _object_input_note(variables: dict[str, Any]) -> str:
+    """Name the inputs rendered as the object placeholder, or return ``""``."""
+    names = [name for name, value in variables.items() if value is _OBJECT_PLACEHOLDER]
+    if not names:
+        return ""
+    return (
+        f"Not rendered: {', '.join(names)} (Python object). Prompt cells read only "
+        "tables, JSON values and text; convert it in the producing cell."
+    )
+
+
 def _parse_output(blob: bytes, content_type: str) -> Any:
     """Parse artifact blob back to a Python value."""
     if content_type == "arrow/ipc":
@@ -650,12 +671,8 @@ def _parse_output(blob: bytes, content_type: str) -> Any:
         except Exception:
             return blob.decode(errors="replace")
     elif content_type == "pickle/object":
-        import pickle
-
-        try:
-            return pickle.loads(blob)  # noqa: S301
-        except Exception:
-            return blob.decode(errors="replace")
+        # Unpickling would run the producing cell's code as the server user.
+        return _OBJECT_PLACEHOLDER
     return blob.decode(errors="replace")
 
 
