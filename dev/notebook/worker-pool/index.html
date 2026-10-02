@@ -2396,11 +2396,11 @@ deployment cannot forget the call that stops it paying for idle machines.</p>
 </tr>
 <tr>
 <td><code>GET /v1/jobs/{id}</code></td>
-<td>Status, without the payload or result</td>
+<td>Status, without the payload or result; 404 for another tenant's job</td>
 </tr>
 <tr>
 <td><code>GET /v1/jobs/{id}/result</code></td>
-<td>The raw result bytes; 409 while the job is not finished</td>
+<td>The raw result bytes; 409 while the job is not finished, 404 for another tenant's job</td>
 </tr>
 <tr>
 <td><code>GET /v1/machine-types</code></td>
@@ -2424,6 +2424,10 @@ deployment cannot forget the call that stops it paying for idle machines.</p>
 </tr>
 </tbody>
 </table>
+<p>Both job submit routes take their options as query parameters: <code>machine_type</code>
+(required), <code>priority</code> (default 0, higher runs first), <code>session_id</code> and
+<code>timeout_seconds</code> (both optional). <code>POST /v1/jobs/sync</code> also takes
+<code>wait_seconds</code> (default 300), which bounds the wait and not the job.</p>
 <p>Replacing the catalogue takes effect at once. A new type accepts jobs straight
 away. A removed type accepts none: its queued jobs fail with the reason, and
 its machines finish what they are running, then retire once idle past the
@@ -2440,7 +2444,9 @@ under the caller's.</p>
 as 504. The caller has to be able to tell "your code raised" from "we could
 not run it".</p>
 <p>Every route but <code>/health</code> requires <code>Authorization: Bearer &lt;api_token&gt;</code>, and
-job routes require <code>X-Strata-Tenant</code>. <strong>The caller is trusted for tenant
+every job route requires <code>X-Strata-Tenant</code>, reads included. A tenant reads only
+its own jobs: another tenant's job id answers 404, not 403, so the id does not
+confirm the job exists. <strong>The caller is trusted for tenant
 identity</strong>: it authenticates as itself and asserts whose work this is. The
 pool does not authenticate end users and must never be reachable from
 anywhere but the proxy.</p>
