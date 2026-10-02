@@ -168,7 +168,8 @@ the caller's tenant.
 A **notebook's own** artifact store (`.strata/artifacts/`) keeps each cell
 output's current value plus its three most recent earlier values, so reverting
 a recent edit is still a cache hit. Older values are pruned in the background
-when the server opens the notebook. Set `STRATA_NOTEBOOK_KEEP_SUPERSEDED_VERSIONS`
+each time the server opens the notebook, including a reopen of a notebook that
+is already open. Set `STRATA_NOTEBOOK_KEEP_SUPERSEDED_VERSIONS`
 to keep more, or to `0` to keep every value. Deleting the notebook deletes its
 store.
 

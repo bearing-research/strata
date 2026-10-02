@@ -641,6 +641,48 @@ class TestNotebookStores:
             True,
         ]
 
+    def test_reopening_a_notebook_that_is_already_open_prunes_it_too(self, tmp_path, monkeypatch):
+        """A personal server reuses the session, which would otherwise never prune again."""
+        import threading
+        from types import SimpleNamespace
+
+        from strata.notebook import harness_user
+        from strata.notebook.session import SessionManager
+
+        notebook, store = self._notebook_with_history(tmp_path)
+        config = SimpleNamespace(
+            notebook_keep_superseded_versions=2, artifact_gc_min_idle_seconds=0
+        )
+        monkeypatch.setattr(harness_user, "running_server_config", lambda: config)
+        monkeypatch.setattr("strata.notebook.session._uv_sync", lambda path, **kw: True)
+        manager = SessionManager()
+
+        def open_and_wait_for_the_prune():
+            session = manager.open_notebook(notebook, reuse_existing=True)
+            for thread in threading.enumerate():
+                if thread.name == "notebook-artifact-prune":
+                    thread.join(timeout=30)
+            return session
+
+        first = open_and_wait_for_the_prune()
+        # Two more edits of the same output while the session stays open.
+        for version in (6, 7):
+            store.create_artifact(self.OUTPUT, f"prov-{self.OUTPUT}-{version}")
+            store.write_blob(self.OUTPUT, version, b"x")
+            store.finalize_artifact(self.OUTPUT, version, "{}", 1, 1)
+        second = open_and_wait_for_the_prune()
+
+        assert second is first
+        assert [_exists(store, (self.OUTPUT, v)) for v in range(1, 8)] == [
+            False,
+            False,
+            False,
+            False,
+            True,
+            True,
+            True,
+        ]
+
     @pytest.mark.parametrize("config", [None, "off"], ids=["no server", "set to 0"])
     def test_without_a_server_or_with_pruning_off_nothing_changes(
         self, tmp_path, monkeypatch, config

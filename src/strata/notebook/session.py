@@ -3462,6 +3462,8 @@ class SessionManager:
                     existing.mark_environment_pending()
                     existing.touch()
                     return existing
+                # A reused session may have been open for days; prune as a fresh open does.
+                _prune_artifacts_in_background(existing)
                 if timing is None:
                     existing.reload()
                 else:
