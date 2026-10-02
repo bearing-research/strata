@@ -73,7 +73,7 @@ services:
       start_period: 10s
 
   proxy:
-    image: nginx:1.30-alpine
+    image: nginx:1.31-alpine
     depends_on:
       strata:
         condition: service_healthy
