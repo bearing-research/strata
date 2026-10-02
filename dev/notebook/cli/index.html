@@ -2397,7 +2397,8 @@ artifact, a cache hit replays that artifact without re-emitting console
 output, so <code>stdout</code> can be absent on warm runs (<code>--force</code> re-executes). A
 leaf cell that only <code>print</code>s is different: its stdout/stderr are cached by
 provenance and replayed on a warm hit. Errors and pre-flight diagnostics go to
-stderr regardless of format. Pipe stdout to <code>jq</code>:
+stderr regardless of format. The executor's per-cell INFO logs are held back
+during a run; set <code>STRATA_LOG_LEVEL=INFO</code> to see them. Pipe stdout to <code>jq</code>:
 <code>strata run ... --format json | jq '.cells[] | select(.status == "error")'</code>.</p>
 <h3 id="exit-codes">Exit Codes<a class="headerlink" href="#exit-codes" title="Permanent link">&para;</a></h3>
 <table>

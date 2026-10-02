@@ -4189,16 +4189,19 @@ copy a ready-to-paste snippet, or build it yourself:</p>
 <a id="__codelineno-34-2" name="__codelineno-34-2" href="#__codelineno-34-2"></a>        <span class="na">title</span><span class="o">=</span><span class="s">"Strata notebook"</span> <span class="na">style</span><span class="o">=</span><span class="s">"width:100%;border:0"</span><span class="p">&gt;&lt;/</span><span class="nt">iframe</span><span class="p">&gt;</span>
 <a id="__codelineno-34-3" name="__codelineno-34-3" href="#__codelineno-34-3"></a><span class="p">&lt;</span><span class="nt">script</span><span class="p">&gt;</span>
 <a id="__codelineno-34-4" name="__codelineno-34-4" href="#__codelineno-34-4"></a><span class="w">  </span><span class="nx">addEventListener</span><span class="p">(</span><span class="s1">'message'</span><span class="p">,</span><span class="w"> </span><span class="p">(</span><span class="nx">e</span><span class="p">)</span><span class="w"> </span><span class="p">=&gt;</span><span class="w"> </span><span class="p">{</span>
-<a id="__codelineno-34-5" name="__codelineno-34-5" href="#__codelineno-34-5"></a><span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="nx">e</span><span class="p">.</span><span class="nx">data</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="nx">e</span><span class="p">.</span><span class="nx">data</span><span class="p">.</span><span class="nx">type</span><span class="w"> </span><span class="o">===</span><span class="w"> </span><span class="s1">'strata:embed:resize'</span><span class="p">)</span>
-<a id="__codelineno-34-6" name="__codelineno-34-6" href="#__codelineno-34-6"></a><span class="w">      </span><span class="nb">document</span><span class="p">.</span><span class="nx">querySelector</span><span class="p">(</span><span class="s1">'iframe[title="Strata notebook"]'</span><span class="p">).</span><span class="nx">style</span><span class="p">.</span><span class="nx">height</span><span class="w"> </span><span class="o">=</span>
-<a id="__codelineno-34-7" name="__codelineno-34-7" href="#__codelineno-34-7"></a><span class="w">        </span><span class="nx">e</span><span class="p">.</span><span class="nx">data</span><span class="p">.</span><span class="nx">height</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="s1">'px'</span>
-<a id="__codelineno-34-8" name="__codelineno-34-8" href="#__codelineno-34-8"></a><span class="w">  </span><span class="p">})</span>
-<a id="__codelineno-34-9" name="__codelineno-34-9" href="#__codelineno-34-9"></a><span class="p">&lt;/</span><span class="nt">script</span><span class="p">&gt;</span>
+<a id="__codelineno-34-5" name="__codelineno-34-5" href="#__codelineno-34-5"></a><span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="nx">e</span><span class="p">.</span><span class="nx">origin</span><span class="w"> </span><span class="o">===</span><span class="w"> </span><span class="s1">'http://localhost:8765'</span><span class="w"> </span><span class="o">&amp;&amp;</span>
+<a id="__codelineno-34-6" name="__codelineno-34-6" href="#__codelineno-34-6"></a><span class="w">        </span><span class="nx">e</span><span class="p">.</span><span class="nx">data</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="nx">e</span><span class="p">.</span><span class="nx">data</span><span class="p">.</span><span class="nx">type</span><span class="w"> </span><span class="o">===</span><span class="w"> </span><span class="s1">'strata:embed:resize'</span><span class="p">)</span>
+<a id="__codelineno-34-7" name="__codelineno-34-7" href="#__codelineno-34-7"></a><span class="w">      </span><span class="nb">document</span><span class="p">.</span><span class="nx">querySelector</span><span class="p">(</span><span class="s1">'iframe[title="Strata notebook"]'</span><span class="p">).</span><span class="nx">style</span><span class="p">.</span><span class="nx">height</span><span class="w"> </span><span class="o">=</span>
+<a id="__codelineno-34-8" name="__codelineno-34-8" href="#__codelineno-34-8"></a><span class="w">        </span><span class="nx">e</span><span class="p">.</span><span class="nx">data</span><span class="p">.</span><span class="nx">height</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="s1">'px'</span>
+<a id="__codelineno-34-9" name="__codelineno-34-9" href="#__codelineno-34-9"></a><span class="w">  </span><span class="p">})</span>
+<a id="__codelineno-34-10" name="__codelineno-34-10" href="#__codelineno-34-10"></a><span class="p">&lt;/</span><span class="nt">script</span><span class="p">&gt;</span>
 </code></pre></div>
 <p><code>?embed=1</code> drops the standalone chrome (the title bar and <strong>← Edit</strong> link) so the
 view blends into the host page, and the embedded app posts its content height to
 the parent frame (<code>{ type: 'strata:embed:resize', height }</code>) so the optional
-listener above sizes the iframe with no inner scrollbar. Widgets stay live inside
+listener above sizes the iframe with no inner scrollbar. The listener accepts
+heights only from the Strata server's origin, so another frame on the page
+cannot resize it. Widgets stay live inside
 the frame, so with <strong>⚡ Live</strong> on it's a fully interactive embedded panel.</p>
 <p><strong>Cross-origin embedding is opt-in.</strong> By default a notebook is framable only from
 its own origin (<code>Content-Security-Policy: frame-ancestors 'self'</code>). To embed on
@@ -4210,14 +4213,15 @@ allow any host. Accepts a comma-separated list or a JSON array.</p>
 (<code>/#/notebook/&lt;sessionId&gt;?framed=1</code>). The editor then leaves out what the
 parent page already has: Strata's brand and the notebook's name, the <strong>App</strong>,
 <strong>Artifacts</strong> and <strong>Logs</strong> links (which would navigate the frame away), the
-deployment-mode badge, and <strong>Delete Notebook</strong>. Running, editing and export are
-unchanged. Hiding <strong>Delete Notebook</strong> is not access control: a platform that
+deployment-mode badge, <strong>Delete Notebook</strong>, and <strong>Back Home</strong> on the reconnect
+screen. Reopening the notebook after a lost session keeps <code>?framed=1</code>. Running,
+editing and export are unchanged. Hiding <strong>Delete Notebook</strong> is not access control: a platform that
 wants deletes to go through its own records refuses <code>DELETE
 /v1/notebooks/{session_id}</code> and <code>POST /v1/notebooks/delete-by-path</code> itself. The
 same <code>embed_frame_ancestors</code> rule decides which hosts may frame it.</p>
 <hr />
 <h2 id="markdown-cells">Markdown Cells<a class="headerlink" href="#markdown-cells" title="Permanent link">&para;</a></h2>
-<p>Plain prose between cells, rendered with <code>markdown-it</code> + <code>DOMPurify</code> for safe HTML output. Useful for section headings, methodology notes, and annotating decision points in a notebook. Markdown cells are <strong>not</strong> part of the DAG - they don't produce artifacts, don't participate in cascade execution, and don't have an <code>id</code> / variable that downstream cells can reference. They survive saves and exports verbatim.</p>
+<p>Plain prose between cells, rendered with <code>markdown-it</code> + <code>DOMPurify</code> for safe HTML output. Useful for section headings, methodology notes, and annotating decision points in a notebook. Markdown cells are <strong>not</strong> part of the DAG - they don't produce artifacts, don't participate in cascade execution, and don't have an <code>id</code> / variable that downstream cells can reference. They survive saves verbatim; a markdown export escapes raw HTML, as the UI does.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-35-1" name="__codelineno-35-1" href="#__codelineno-35-1"></a><span class="gu">## Stage 1: Load + Clean</span>
 <a id="__codelineno-35-2" name="__codelineno-35-2" href="#__codelineno-35-2"></a>
 <a id="__codelineno-35-3" name="__codelineno-35-3" href="#__codelineno-35-3"></a>The next two cells pull last quarter's events and drop rows with

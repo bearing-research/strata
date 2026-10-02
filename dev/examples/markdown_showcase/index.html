@@ -2107,7 +2107,7 @@ data, not formatting.</p>
 <a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="k">-</span><span class="w"> </span>[<span class="nt">no links</span>](<span class="na">http://example.com</span>)
 </code></pre></div>
 <p>Fenced HTML, should be HTML-escaped, not rendered:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="ni">&amp;lt;</span>script<span class="ni">&amp;gt;</span>alert(<span class="ni">&amp;quot;</span>hi<span class="ni">&amp;quot;</span>)<span class="ni">&amp;lt;</span>/script<span class="ni">&amp;gt;</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="p">&lt;</span><span class="nt">script</span><span class="p">&gt;</span><span class="nx">alert</span><span class="p">(</span><span class="s2">"hi"</span><span class="p">)&lt;/</span><span class="nt">script</span><span class="p">&gt;</span>
 </code></pre></div>
 <h2 id="single-level">Single-level<a class="headerlink" href="#single-level" title="Permanent link">&para;</a></h2>
 <blockquote>
@@ -2170,16 +2170,16 @@ DOMPurify. Each item below should appear as <strong>literal text or a no-op</str
 attribute reaching the DOM.</p>
 <h3 id="script-injection">Script injection<a class="headerlink" href="#script-injection" title="Permanent link">&para;</a></h3>
 <p>Below should render as plain text inside a paragraph, not run:</p>
-<p>&lt;script&gt;alert(&#x27;XSS via raw script tag&#x27;)&lt;/script&gt;</p>
+<p>&lt;script&gt;alert('XSS via raw script tag')&lt;/script&gt;</p>
 <h3 id="inline-html-attempts">Inline HTML attempts<a class="headerlink" href="#inline-html-attempts" title="Permanent link">&para;</a></h3>
 <p>The renderer is configured with <code>html: false</code>, so any inline HTML
 we accidentally let through still gets sanitized. The next line should
 remain as a paragraph with the angle-bracket text visible:</p>
-<p>&lt;img src=&quot;x&quot; onerror=&quot;alert(&#x27;attribute XSS&#x27;)&quot; /&gt;</p>
+<p>&lt;img src="x" onerror="alert('attribute XSS')" /&gt;</p>
 <h3 id="javascript-urls"><code>javascript:</code> URLs<a class="headerlink" href="#javascript-urls" title="Permanent link">&para;</a></h3>
 <p>A markdown link with a <code>javascript:</code> URL should either render as
 inert text or be stripped entirely, never as a clickable executor:</p>
-<p><a href="#">click here please</a>)</p>
+<p><a href="# allowed'">click here please</a>)</p>
 <h3 id="on-handler-attempts-inside-markdown"><code>on*</code> handler attempts inside markdown<a class="headerlink" href="#on-handler-attempts-inside-markdown" title="Permanent link">&para;</a></h3>
 <p>Markdown doesn't have a syntax for HTML attributes, but if a future
 extension allowed <code>{onclick=...}</code> style attribute lists, it must not

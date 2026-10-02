@@ -2443,6 +2443,10 @@ alongside Markdown and HTML.</p>
    App-view snapshots do not show failed cells: they mirror the live app
    view, which shows only cells with output.</li>
 </ol>
+<p>Markdown (markdown cells, markdown outputs, and the README intro) exports
+the way the UI shows it: raw HTML is escaped to visible text, and
+<code>javascript:</code>, <code>vbscript:</code> and non-image <code>data:</code> link targets become <code>#</code>.
+Code spans and fenced code keep their text unchanged.</p>
 <h2 id="cell-kind-specifics">Cell-kind specifics<a class="headerlink" href="#cell-kind-specifics" title="Permanent link">&para;</a></h2>
 <h3 id="prompt-cells-response-excluded-by-design">Prompt cells, response excluded by design<a class="headerlink" href="#prompt-cells-response-excluded-by-design" title="Permanent link">&para;</a></h3>
 <p>Prompt cells render the <strong>template only</strong>. Cached LLM responses are

@@ -2490,8 +2490,13 @@
 <h2 id="quick-start-run-a-worker-locally">Quick start: run a worker locally<a class="headerlink" href="#quick-start-run-a-worker-locally" title="Permanent link">&para;</a></h2>
 <p>Start by getting a worker running on your own machine. This verifies your install before you spend time on a cloud deploy, and the same <code># @worker name</code> annotation works against both local and cloud workers.</p>
 <p><strong>1. Start the worker:</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>uv<span class="w"> </span>run<span class="w"> </span>strata-worker<span class="w"> </span>--port<span class="w"> </span><span class="m">9000</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>strata-worker<span class="w"> </span>--port<span class="w"> </span><span class="m">9000</span>
 </code></pre></div>
+<p>Run the installed <code>strata-worker</code> (for example <code>.venv/bin/strata-worker</code>), not
+<code>uv run strata-worker</code>: <code>uv run</code> stays alive as the worker's parent with
+<code>STRATA_WORKER_TOKEN</code> still in its environment, where a cell can read it from
+<code>/proc/&lt;pid&gt;/environ</code>. On Linux the worker logs a warning at startup when its
+parent still holds the token.</p>
 <p>You should see uvicorn start up:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>INFO:     Started server process [12345]
 <a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>INFO:     Uvicorn running on http://0.0.0.0:9000
@@ -2546,7 +2551,7 @@ to, and the cell runs in-process while appearing to be configured.</p>
 <p>When the cell runs, the UI shows a pulsing <strong>"dispatching → local-dev"</strong> badge during execution. The <code>hostname</code> artifact is what the worker process saw. On one machine that is the same name your laptop reports, so it confirms the round trip rather than the location; point the worker at another host and the name changes.</p>
 <h3 id="sharing-one-machine-concurrency-and-gpus">Sharing one machine: concurrency and GPUs<a class="headerlink" href="#sharing-one-machine-concurrency-and-gpus" title="Permanent link">&para;</a></h3>
 <p>A worker runs as many cells at once as it is sent. On a machine several people's cells reach, cap it, and let the worker hand out GPUs itself:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>uv<span class="w"> </span>run<span class="w"> </span>strata-worker<span class="w"> </span>--port<span class="w"> </span><span class="m">9000</span><span class="w"> </span>--max-concurrent<span class="w"> </span><span class="m">2</span><span class="w"> </span>--gpu-slots<span class="w"> </span><span class="m">2</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>strata-worker<span class="w"> </span>--port<span class="w"> </span><span class="m">9000</span><span class="w"> </span>--max-concurrent<span class="w"> </span><span class="m">2</span><span class="w"> </span>--gpu-slots<span class="w"> </span><span class="m">2</span>
 </code></pre></div>
 <ul>
 <li><strong><code>--max-concurrent N</code></strong>: the worker refuses execution number N+1 with <code>503</code> and a <code>Retry-After</code> header, before downloading any inputs. Unset, it is unlimited.</li>

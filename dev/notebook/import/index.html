@@ -2780,7 +2780,9 @@ same verb reads it back, told apart by the file:</p>
 </code></pre></div>
 <p>Over REST the same bundle is a multipart upload to
 <code>POST /v1/notebooks/import-snapshot</code>, with the <code>file</code>, <code>name</code> and
-<code>parent_path</code> fields of the Jupyter route and a 2 GiB cap.</p>
+<code>parent_path</code> fields of the Jupyter route and a 2 GiB cap. Either way, a
+bundle whose files would expand to more than 16 GiB is refused before anything
+is extracted.</p>
 <p>What you get:</p>
 <ul>
 <li><strong>Carried cells are cache hits</strong> before anything runs, with their outputs

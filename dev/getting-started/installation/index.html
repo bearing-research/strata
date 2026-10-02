@@ -2438,8 +2438,8 @@ and call <code>strata-notebook</code> / <code>strata</code> / <code>strata-worke
 <td>Read-only terminal viewer that attaches to a running notebook session. Needs the <code>[tui]</code> extra. See <a href="../../notebook/tui/">Terminal Viewer</a>.</td>
 </tr>
 <tr>
-<td><code>uv run strata-worker --port 9000</code></td>
-<td>Start a remote worker for <code># @worker</code> cells. See <a href="../../notebook/workers/">Distributed Workers</a>.</td>
+<td><code>strata-worker --port 9000</code></td>
+<td>Start a remote worker for <code># @worker</code> cells. Run the installed binary (for example <code>.venv/bin/strata-worker</code>), not through <code>uv run</code>, whose process would keep <code>STRATA_WORKER_TOKEN</code> readable to cells. See <a href="../../notebook/workers/">Distributed Workers</a>.</td>
 </tr>
 </tbody>
 </table>
