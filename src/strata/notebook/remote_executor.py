@@ -299,7 +299,7 @@ def _scrub_environ_value(name: str) -> None:
     try:
         getenv = ctypes.CDLL(None).getenv
     except (OSError, AttributeError) as exc:
-        logger.warning("Could not scrub %s from the environment block: %s", name, exc)
+        logger.warning("Could not scrub worker secrets from the environment block: %s", exc)
         return
     getenv.argtypes = [ctypes.c_char_p]
     getenv.restype = ctypes.c_void_p
