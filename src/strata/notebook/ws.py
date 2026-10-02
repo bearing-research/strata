@@ -484,17 +484,24 @@ async def _release_execution_request(
             execution_state.requested_cell = None
 
 
-async def _tear_down_notebook_state(notebook_id: str) -> None:
-    """Cancel the active execution task and drop inspect/exec state. Idempotent."""
+async def _tear_down_notebook_state(
+    notebook_id: str, departed_task: asyncio.Task[Any] | None
+) -> None:
+    """Cancel *departed_task* if still running and drop inspect/exec state. Idempotent.
+
+    *departed_task* is the run that was active when the last socket left; a run
+    another surface (REST, CLI, MCP) started since is left alone.
+    """
     execution_state = _notebook_execution_state.get(notebook_id)
     if execution_state is not None:
         task = execution_state.active_task()
-        if task is not None:
+        if task is not None and task is departed_task:
             task.cancel()
             await asyncio.gather(task, return_exceptions=True)
-        # Keep the object: its outbound sequence belongs to the still-open
-        # session, and restarting at 1 reads as already-seen frames to a client.
-        execution_state.reset_execution()
+        if task is None or task is departed_task:
+            # Keep the object: its outbound sequence belongs to the still-open
+            # session, and restarting at 1 reads as already-seen frames to a client.
+            execution_state.reset_execution()
 
     inspect_manager = _notebook_inspect_managers.pop(notebook_id, None)
     if inspect_manager is not None:
@@ -507,11 +514,14 @@ async def _tear_down_notebook_state(notebook_id: str) -> None:
             )
 
 
-async def _grace_cancel_then_tear_down(notebook_id: str, grace_seconds: float) -> None:
+async def _grace_cancel_then_tear_down(
+    notebook_id: str, grace_seconds: float, departed_task: asyncio.Task[Any] | None
+) -> None:
     """Wait the grace window, then drop notebook state if nobody reconnected.
 
-    A reconnect during the window cancels this task; otherwise the running cell is
-    cancelled and execution and inspect state are dropped.
+    A reconnect during the window cancels this task; otherwise *departed_task* (the
+    run active at the last disconnect) is cancelled and execution and inspect state
+    are dropped.
     """
     try:
         await asyncio.sleep(grace_seconds)
@@ -522,7 +532,7 @@ async def _grace_cancel_then_tear_down(notebook_id: str, grace_seconds: float) -
         # A reconnect whose cancel lost the race; connections are the truth.
         return
     try:
-        await _tear_down_notebook_state(notebook_id)
+        await _tear_down_notebook_state(notebook_id, departed_task)
     finally:
         _notebook_grace_tasks.pop(notebook_id, None)
 
@@ -551,23 +561,26 @@ async def _cleanup_notebook_websocket(
 
     del _notebook_connections[notebook_id]
 
+    execution_state = _notebook_execution_state.get(notebook_id)
+    departed_task = execution_state.active_task() if execution_state is not None else None
+
     existing = _notebook_grace_tasks.pop(notebook_id, None)
     if existing is not None and not existing.done():
         existing.cancel()
 
     if _GRACE_CANCEL_SECONDS <= 0:
         # Tests zero the window; shutdown paths would leak if deferred.
-        await _tear_down_notebook_state(notebook_id)
+        await _tear_down_notebook_state(notebook_id, departed_task)
         return
 
     try:
         loop = asyncio.get_running_loop()
     except RuntimeError:
         # No running loop (e.g. at shutdown): tear down inline.
-        await _tear_down_notebook_state(notebook_id)
+        await _tear_down_notebook_state(notebook_id, departed_task)
         return
     _notebook_grace_tasks[notebook_id] = loop.create_task(
-        _grace_cancel_then_tear_down(notebook_id, _GRACE_CANCEL_SECONDS)
+        _grace_cancel_then_tear_down(notebook_id, _GRACE_CANCEL_SECONDS, departed_task)
     )
 
 

@@ -162,6 +162,8 @@ What this means for a client:
   window. The grace constant (`_GRACE_CANCEL_SECONDS` in `ws.py`) is a
   module-level number you can override at startup if you want a different
   default.
+- **Only the run that was going when the last tab left is cancelled.** A run
+  another surface (REST, CLI, MCP) starts during the window is left alone.
 - **Missed deltas are not replayed.** Per-cell deltas emitted while you were
   disconnected (`cell_console` mid-stream, `cell_output_delta`,
   `cell_iteration_progress`, `cascade_progress`) are dropped. On reconnect, send `notebook_sync` and

@@ -204,7 +204,7 @@ was going to cost; what it no longer costs is the notebook.
 
 ### Cancel-on-disconnect grace window
 
-When the **last** WebSocket for a notebook drops, the handler schedules a teardown task instead of running it immediately. Any incoming upgrade for the same `session_id` within ~60 seconds cancels the pending task and resumes against the preserved execution and inspect state. Past the window, the running execution is cancelled and inspect REPLs are closed.
+When the **last** WebSocket for a notebook drops, the handler schedules a teardown task instead of running it immediately. Any incoming upgrade for the same `session_id` within ~60 seconds cancels the pending task and resumes against the preserved execution and inspect state. Past the window, the execution that was running when the last socket dropped is cancelled and inspect REPLs are closed; a run another surface (REST, CLI, MCP) started during the window is left alone.
 
 This is the trade-off Vue's close-tab-to-cancel semantics make with TUI-style transients: closing a tab still cancels (just after a ~60s delay), but a tmux detach or a network blip won't kill a long-running cell. The grace constant lives at `_GRACE_CANCEL_SECONDS` in `src/strata/notebook/ws.py` if you need to tune it for your deployment.
 

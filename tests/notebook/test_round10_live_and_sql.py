@@ -204,7 +204,7 @@ async def test_the_sequence_survives_a_reconnect_after_the_grace_window(tmp_path
     assert before == 5
 
     # The last client goes away and the grace window expires.
-    await _tear_down_notebook_state(session.id)
+    await _tear_down_notebook_state(session.id, None)
 
     assert next_notebook_sequence(session.id) > before
 
