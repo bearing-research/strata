@@ -251,3 +251,132 @@ class TestRefusals:
             names = bundle.namelist()
 
         assert [n for n in names if Path(n).suffix == ".arrow"] == ["artifact.arrow"]
+
+
+def _on_the_event_loop() -> bool:
+    import asyncio
+
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return False
+    return True
+
+
+class TestBuildingIt:
+    """Anyone with the link can ask for the zip, so a build must neither stall the server nor
+    repeat.
+    """
+
+    @staticmethod
+    def _count_builds(monkeypatch) -> list[bool]:
+        """Record, per build, whether it ran on the event loop's thread."""
+        from strata.api import publication_bundle
+
+        builds: list[bool] = []
+        real = publication_bundle.bundle_zip
+
+        def spy(*args, **kwargs):
+            builds.append(_on_the_event_loop())
+            return real(*args, **kwargs)
+
+        monkeypatch.setattr(publication_bundle, "bundle_zip", spy)
+        return builds
+
+    def test_it_is_built_off_the_event_loop(self, served, monkeypatch):
+        base_url, publication, _ = served
+        builds = self._count_builds(monkeypatch)
+
+        assert _fetch(base_url, publication.token).status_code == 200
+
+        assert builds == [False]
+
+    def test_a_second_fetch_reuses_the_first_build(self, served, monkeypatch):
+        base_url, publication, _ = served
+        builds = self._count_builds(monkeypatch)
+
+        first = _fetch(base_url, publication.token)
+        second = _fetch(base_url, publication.token)
+
+        assert len(builds) == 1
+        assert first.content == second.content
+        assert first.headers["Content-Digest"] == second.headers["Content-Digest"]
+
+    def test_new_credits_rebuild_it_and_replace_the_old_one(self, served, monkeypatch):
+        from strata.api.publication_bundle import ARCHIVE_CACHE_DIRNAME
+
+        base_url, publication, artifact_dir = served
+        builds = self._count_builds(monkeypatch)
+        _fetch(base_url, publication.token)
+
+        ArtifactStore(artifact_dir).update_publication_credits(
+            publication.token, external_ids=[{"scheme": "doi", "value": "10.5555/figure-1"}]
+        )
+        response = _fetch(base_url, publication.token)
+
+        assert len(builds) == 2
+        with zipfile.ZipFile(io.BytesIO(response.content)) as bundle:
+            assert "10.5555/figure-1" in bundle.read("manifest.json").decode()
+        cached = list((artifact_dir / ARCHIVE_CACHE_DIRNAME / publication.token).iterdir())
+        assert len(cached) == 1
+
+    def test_withdrawing_drops_the_built_copy(self, served):
+        from strata.api.publication_bundle import ARCHIVE_CACHE_DIRNAME
+
+        base_url, publication, artifact_dir = served
+        _fetch(base_url, publication.token)
+        cache_dir = artifact_dir / ARCHIVE_CACHE_DIRNAME / publication.token
+        assert any(cache_dir.iterdir())
+
+        revoked = httpx.delete(f"{base_url}/v1/publications/{publication.token}", timeout=10)
+
+        assert revoked.status_code == 200
+        assert not cache_dir.exists()
+
+    def test_verify_hashes_off_the_event_loop(self, served, monkeypatch):
+        base_url, publication, _ = served
+        calls: list[bool] = []
+        real = ArtifactStore.blob_digest
+
+        def spy(self, *args, **kwargs):
+            calls.append(_on_the_event_loop())
+            return real(self, *args, **kwargs)
+
+        monkeypatch.setattr(ArtifactStore, "blob_digest", spy)
+
+        verified = httpx.get(f"{base_url}/p/{publication.token}/verify", timeout=10).json()
+
+        assert verified["matches"] is True
+        assert calls == [False]
+
+
+class TestALargeTable:
+    def test_it_is_archived_without_its_parquet_copy(self, served, monkeypatch, tmp_path):
+        """The Parquet rendering holds the whole table in memory, so past a fixed size the Arrow
+        file stands alone, and the route and the CLI still agree byte for byte.
+        """
+        from strata.api import publication_bundle
+
+        base_url, publication, artifact_dir = served
+        monkeypatch.setattr(
+            publication_bundle, "PARQUET_COMPANION_MAX_BYTES", len(_arrow_bytes()) - 1
+        )
+
+        response = _fetch(base_url, publication.token)
+        by_cli = tmp_path / "deposit.zip"
+        assert _archive(artifact_dir, by_cli, token=publication.token) == 0
+
+        with zipfile.ZipFile(io.BytesIO(response.content)) as bundle:
+            assert "artifact.parquet" not in bundle.namelist()
+            assert "additional_files" not in bundle.read("manifest.json").decode()
+            assert bundle.read("artifact.arrow") == _arrow_bytes()
+        assert by_cli.read_bytes() == response.content
+
+    def test_at_the_cap_it_still_carries_one(self, served, monkeypatch):
+        from strata.api import publication_bundle
+
+        base_url, publication, _ = served
+        monkeypatch.setattr(publication_bundle, "PARQUET_COMPANION_MAX_BYTES", len(_arrow_bytes()))
+
+        with zipfile.ZipFile(io.BytesIO(_fetch(base_url, publication.token).content)) as bundle:
+            assert "artifact.parquet" in bundle.namelist()

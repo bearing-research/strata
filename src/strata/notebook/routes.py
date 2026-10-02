@@ -3199,13 +3199,14 @@ async def get_cell_output_blob(
     cell_id: str,
     index: int,
 ):
-    """Return one display output's stored bytes under its own content type.
+    """Return one display output's stored bytes, under its content type when Strata renders it.
 
     The frontend payload carries a base64 data URL; this serves the raw file for
     clients that want one.
     """
     from fastapi import Response
 
+    from strata.api.served_bytes import served_media_type
     from strata.notebook.ops import NotebookOpsError, display_output_at
 
     cell = session.notebook_state.get_cell(cell_id)
@@ -3220,10 +3221,11 @@ async def get_cell_output_blob(
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
+    media_type, headers = served_media_type(output.content_type or "")
     return Response(
         content=blob,
-        media_type=output.content_type or "application/octet-stream",
-        headers={"X-Strata-Output-Index": str(resolved)},
+        media_type=media_type,
+        headers={**headers, "X-Strata-Output-Index": str(resolved)},
     )
 
 

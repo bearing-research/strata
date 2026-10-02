@@ -34,6 +34,7 @@ from strata.api.dependencies import (
     store_for_scope,
 )
 from strata.api.remote_registry import quoted, relay, remote_registry
+from strata.api.served_bytes import data_headers
 from strata.artifact_store import ArtifactStore, reject_unsafe_artifact_id
 from strata.artifact_transfer import PROMOTION_TAG
 from strata.blob_store import BLOB_STREAM_CHUNK_BYTES
@@ -1072,6 +1073,7 @@ async def get_artifact_data(
         media_type="application/vnd.apache.arrow.stream",
         headers={
             "X-Arrow-Row-Count": str(artifact.row_count or 0),
+            **data_headers(),
         },
     )
 

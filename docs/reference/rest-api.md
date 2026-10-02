@@ -489,7 +489,9 @@ GET /v1/notebooks/{session_id}/cells/{cell_id}/outputs/{index}/blob
 ```
 
 Serves one display output (a plot's PNG, say) under its own content type, with
-the resolved index in `X-Strata-Output-Index`. What `strata cell output --out`
+the resolved index in `X-Strata-Output-Index`. A type Strata does not render
+(anything but PNG, Arrow, JSON or Markdown) downloads as
+`application/octet-stream`. What `strata cell output --out`
 and the MCP `save_cell_output` tool read.
 
 ## Variants

@@ -167,6 +167,32 @@ def test_the_route_serves_the_blob_as_itself(tmp_path: Path, monkeypatch):
     assert "no index 7" in missing.json()["detail"]
 
 
+def test_the_route_never_serves_a_blob_as_a_page(tmp_path: Path, monkeypatch):
+    """A content type Strata did not produce is downloaded, never rendered on this origin."""
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from strata.notebook.routes import get_session_manager, router
+
+    monkeypatch.setattr("strata.notebook.session._uv_sync", lambda path, **kw: True)
+    notebook_dir, _ = _notebook_with_a_plot(tmp_path)
+
+    app = FastAPI()
+    app.include_router(router)
+    client = TestClient(app)
+    sid = client.post("/v1/notebooks/open", json={"path": str(notebook_dir)}).json()["session_id"]
+    session = get_session_manager().get_session(sid)
+    session.notebook_state.get_cell("p").display_outputs[0].content_type = "text/html"
+
+    resp = client.get(f"/v1/notebooks/{sid}/cells/p/outputs/-1/blob")
+
+    assert resp.status_code == 200
+    assert resp.headers["content-type"] == "application/octet-stream"
+    assert resp.headers["content-disposition"] == "attachment"
+    assert resp.headers["x-content-type-options"] == "nosniff"
+    assert resp.headers["content-security-policy"] == "sandbox"
+
+
 def test_the_cli_writes_the_file_and_reports_it(tmp_path: Path, capsys):
     import json as _json
 
