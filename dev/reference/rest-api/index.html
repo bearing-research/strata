@@ -4817,6 +4817,11 @@ default. Returns the new timeout and the refreshed cell list.</p>
 <code>KEY</code>/<code>SECRET</code>/<code>TOKEN</code>/<code>PASSWORD</code>/<code>CREDENTIAL</code>) are blanked on disk but kept
 in-memory for the session so key-dependent cells keep working. Returns the
 merged env, per-key sources, and refreshed cell list.</p>
+<p>No response or WebSocket frame carries a secret value: a non-empty value under a
+sensitive name, or one fetched from the secret manager, is sent as
+<code>"__strata_masked__"</code> (in the notebook's <code>env</code> and in each cell's <code>env</code> and
+<code>env_overrides</code>). Send that marker back to keep a key's current value; any other
+value replaces it.</p>
 <h3 id="update-secret-manager-config">Update Secret Manager Config<a class="headerlink" href="#update-secret-manager-config" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-81-1" name="__codelineno-81-1" href="#__codelineno-81-1"></a>PUT /v1/notebooks/{session_id}/secret-manager/config
 </code></pre></div>
