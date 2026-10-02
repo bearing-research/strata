@@ -179,7 +179,7 @@ deployment cannot forget the call that stops it paying for idle machines.
 | `GET /v1/machine-types` | What a caller may ask for: the catalogue an annotation resolves against. `env` and `provider_options` values read `<redacted>` without the admin token |
 | `PUT /v1/machine-types` | Replace the catalogue without a restart; persisted, so a restart serves it. Admin token only |
 | `GET /v1/workers` | The fleet, without machine credentials |
-| `GET /v1/usage` | The billing feed, filterable by tenant |
+| `GET /v1/usage` | The billing feed: the caller's tenant only; the admin token sees every tenant, or one with `?tenant_id=` |
 | `GET /health` | Outside the token check, for load balancers |
 
 Both job submit routes take their options as query parameters: `machine_type`

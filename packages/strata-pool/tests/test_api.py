@@ -307,10 +307,25 @@ class TestInspection:
             headers={"Authorization": f"Bearer {TOKEN}", "X-Strata-Tenant": "globex"},
         )
 
-        acme = (await api.get("/v1/usage?tenant_id=acme", headers=AUTH)).json()
+        acme = (await api.get("/v1/usage?tenant_id=acme", headers=ADMIN)).json()
         assert len(acme) == 1
         assert acme[0]["duration_ms"] > 0
-        assert len((await api.get("/v1/usage", headers=AUTH)).json()) == 2
+        assert len((await api.get("/v1/usage", headers=ADMIN)).json()) == 2
+
+    async def test_a_tenant_reads_only_its_own_usage(self, api):
+        await api.post("/v1/jobs/sync?machine_type=cpu", content=b"a", headers=AUTH)
+        await api.post(
+            "/v1/jobs/sync?machine_type=cpu",
+            content=b"b",
+            headers={"Authorization": f"Bearer {TOKEN}", "X-Strata-Tenant": "globex"},
+        )
+
+        own = (await api.get("/v1/usage", headers=AUTH)).json()
+        assert [event["tenant_id"] for event in own] == ["acme"]
+        other = await api.get("/v1/usage?tenant_id=globex", headers=AUTH)
+        assert other.status_code == 403
+        no_tenant = await api.get("/v1/usage", headers={"Authorization": f"Bearer {TOKEN}"})
+        assert no_tenant.status_code == 400
 
 
 async def test_serving_the_pool_starts_the_scaler(tmp_path):

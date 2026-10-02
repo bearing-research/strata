@@ -96,6 +96,21 @@ def create_app(
             raise HTTPException(status_code=400, detail=f"{TENANT_HEADER} is required")
         return value
 
+    async def tenant_filter(
+        request: Request,
+        authorization: Annotated[str | None, Header()] = None,
+        tenant_id: str | None = Query(default=None),
+    ) -> str | None:
+        """Whose rows a listing returns: the caller's tenant, or for the admin any (None is all)."""
+        if is_admin(authorization):
+            return tenant_id
+        own = await tenant(request)
+        if tenant_id is not None and tenant_id != own:
+            raise HTTPException(
+                status_code=403, detail="another tenant's rows need the admin token"
+            )
+        return own
+
     async def lifespan(app: FastAPI):
         # The catalogue last set over the API outlives the process that set
         # it; the one this process was constructed with is only the default.
@@ -234,7 +249,9 @@ def create_app(
         return [_worker_json(worker) for worker in pool.store.list_workers()]
 
     @app.get("/v1/usage", dependencies=guard)
-    async def list_usage(tenant_id: str | None = Query(default=None)) -> list[dict]:
+    async def list_usage(
+        tenant_id: Annotated[str | None, Depends(tenant_filter)],
+    ) -> list[dict]:
         """The billing feed. One event per terminal job, monotonic duration."""
         return [_usage_json(event) for event in pool.store.list_usage(tenant_id)]
 
