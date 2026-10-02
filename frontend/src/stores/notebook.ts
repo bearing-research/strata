@@ -49,6 +49,7 @@ import { parseArtifactRef, parseArtifactUris } from '../utils/artifactRef'
 import { shouldAdoptRemoteSource } from '../utils/cellSourceSync'
 import { othersOnCell as othersOnCellIn } from '../utils/presence'
 import { flattenLineage, lineageToTree, type LineageTreeNode } from '../utils/lineage'
+import { refusalNotice } from '../utils/refusal'
 import { markNotebookPerf, measureNotebookPerf } from '../utils/perf'
 import { consumePrefetchedNotebookSession } from '../utils/notebookSessionPrefetch'
 import {
@@ -2426,6 +2427,11 @@ function initializeWebSocket() {
       }
       if (p.code === 'cell_locked' && typeof p.cell_id === 'string') {
         cellLocks.value[p.cell_id] = typeof p.held_by === 'string' ? p.held_by : 'someone'
+      }
+      // A refused run or edit says why, once, rather than doing nothing.
+      const refused = refusalNotice(p)
+      if (refused && !toasts.value.some((t) => t.message === refused)) {
+        pushToast(refused, 'error', 6000)
       }
     })
 
