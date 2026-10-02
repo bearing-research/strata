@@ -1668,6 +1668,15 @@ def _authorize_artifact_write() -> None:
         )
 
 
+def _authorize_name_write() -> None:
+    """Gate ``name`` on a materialize request with the ``POST /v1/names`` write gate.
+
+    The name is set on a cache hit and again when a miss finalizes, so refuse it at admission.
+    """
+    _get_artifact_store(allow_write=True)
+    _authorize_artifact_write()
+
+
 @app.post("/v1/artifacts/materialize", response_model=MaterializeResponse)
 async def materialize_artifact(request: MaterializeRequest):
     """Materialize a computed artifact: the cached one on a provenance hit, else a build spec.
@@ -1688,6 +1697,8 @@ async def materialize_artifact(request: MaterializeRequest):
     executor_ref = transform.executor
 
     transform_defn = _validate_transform_allowed(executor_ref, principal=principal)
+    if request.name:
+        _authorize_name_write()
 
     store = _get_artifact_store(allow_server_mode=True)
 
@@ -1985,6 +1996,9 @@ async def _handle_identity_materialize(
         )
 
     filters = identity_params.to_strata_filters()
+
+    if request.name:
+        _authorize_name_write()
 
     # Authorize before planning: the 400/413 planning errors would tell a denied
     # caller the table exists and its size, and planning costs manifest reads.

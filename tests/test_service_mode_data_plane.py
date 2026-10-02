@@ -132,3 +132,84 @@ class TestServiceModeScanAcl:
             )
             assert stream.status_code == 200
             assert ipc.open_stream(stream.content).read_all().num_rows == 500
+
+
+class TestMaterializeNameNeedsWriteScope:
+    """``name`` on materialize writes a registry name, so it takes the ``POST /v1/names`` gate."""
+
+    @staticmethod
+    def _headers(principal: str, scopes: str = "") -> dict:
+        return {**_auth(principal), "X-Strata-Scopes": scopes}
+
+    @staticmethod
+    def _named_scan(table_uri: str, name: str, mode: str) -> dict:
+        return {**_scan(table_uri), "name": name, "mode": mode}
+
+    def test_name_without_artifacts_write_is_refused(self, temp_warehouse, tmp_path):
+        cache_dir = tmp_path / "cache"
+        cache_dir.mkdir()
+        with run_server_with_context(
+            cache_dir,
+            tmp_path / "artifacts",
+            "service",
+            auth_mode="trusted_proxy",
+            proxy_token="test-token",
+            service_writes_enabled=True,
+        ) as ctx:
+            table_uri = temp_warehouse["table_uri"]
+            writer = self._headers("alice", "artifacts:write")
+            reader = self._headers("carol")
+
+            # Miss: refused before anything is built or named.
+            miss = requests.post(
+                f"{ctx.base_url}/v1/materialize",
+                json=self._named_scan(table_uri, "prod", "artifact"),
+                headers=reader,
+            )
+            assert miss.status_code == 403
+            assert miss.json()["detail"]["error"] == "missing_scope"
+
+            # Hit: the writer's scan is cached, and naming it still needs the scope.
+            first = requests.post(
+                f"{ctx.base_url}/v1/materialize", json=_scan(table_uri), headers=writer
+            )
+            assert first.status_code == 200
+            stream = requests.get(f"{ctx.base_url}{first.json()['stream_url']}", headers=writer)
+            assert stream.status_code == 200
+            hit = requests.post(
+                f"{ctx.base_url}/v1/materialize",
+                json=self._named_scan(table_uri, "prod", "stream"),
+                headers=reader,
+            )
+            assert hit.status_code == 403
+            assert requests.get(f"{ctx.base_url}/v1/names/prod", headers=writer).status_code == 404
+
+            # The writer may name it.
+            named = requests.post(
+                f"{ctx.base_url}/v1/materialize",
+                json=self._named_scan(table_uri, "prod", "stream"),
+                headers=writer,
+            )
+            assert named.status_code == 200
+            assert named.json()["hit"] is True
+            resolved = requests.get(f"{ctx.base_url}/v1/names/prod", headers=writer)
+            assert resolved.status_code == 200
+            assert resolved.json()["artifact_uri"] == named.json()["artifact_uri"]
+
+    def test_name_without_service_writes_is_refused(self, temp_warehouse, tmp_path):
+        cache_dir = tmp_path / "cache"
+        cache_dir.mkdir()
+        with run_server_with_context(
+            cache_dir,
+            tmp_path / "artifacts",
+            "service",
+            auth_mode="trusted_proxy",
+            proxy_token="test-token",
+        ) as ctx:
+            resp = requests.post(
+                f"{ctx.base_url}/v1/materialize",
+                json=self._named_scan(temp_warehouse["table_uri"], "prod", "artifact"),
+                headers=self._headers("alice", "artifacts:write"),
+            )
+            assert resp.status_code == 403
+            assert resp.json()["detail"]["error"] == "writes_disabled"

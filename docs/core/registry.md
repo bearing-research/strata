@@ -131,7 +131,8 @@ move unless they hold the `admin:*` break-glass scope. The audit log is
 tenant-scoped: a principal reads only its own tenant's history (`admin:*`
 sees the whole store). In personal mode (single operator, no auth) these
 gates are inert. Resolving names/aliases is a tenant-scoped read in service
-mode; *publishing* them (`set_name` / `set_alias`) requires opting into
+mode; *publishing* them (`set_name` / `set_alias`, or `name=` on a
+materialize) requires opting into
 `service_writes_enabled` and holding the `artifacts:write` scope - see
 [Service Mode → shared research store](../deployment/service-mode.md#authenticated-write-back-the-shared-research-store).
 

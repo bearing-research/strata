@@ -61,7 +61,7 @@ Under `trusted_proxy`, **every** `/v1/*` endpoint requires `X-Strata-Principal` 
 | Anything that runs code - execute, running tests, dependency and Python-version changes (uv runs build scripts), provisioning an SSH worker - **and any route nobody has classified** | `notebook:execute` |
 | `POST /v1/cache/clear` | `admin:cache` |
 | `GET /v1/logs`, `GET /v1/logs/stream` (the ring buffer holds every tenant's records) | `admin:*` |
-| Artifact and registry writes | `artifacts:write` |
+| Artifact and registry writes, including `name` on `POST /v1/materialize` | `artifacts:write` |
 | `GET /v1/cache/entries`, `GET /v1/debug/cache/inspect` | `admin:cache` |
 | Minting, editing and withdrawing a publication (`POST /v1/artifacts/{id}/v/{n}/publish`, `PATCH` / `DELETE /v1/publications/{token}`) | `artifacts:publish` |
 | Pinning and unpinning a version (`POST` / `DELETE /v1/artifacts/{id}/v/{n}/pin`) | `artifacts:pin` |

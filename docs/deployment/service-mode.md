@@ -285,7 +285,7 @@ auth (`admin:*` satisfies any of them):
 | `admin:registry` | `POST /v1/registry/pending/approve` and `.../reject` - deciding protected-alias changes |
 | `artifacts:pin` | Pinning and unpinning a version against garbage collection (`POST` / `DELETE /v1/artifacts/{id}/v/{n}/pin`) |
 | `artifacts:publish` | Minting, editing and withdrawing a publication (`POST /v1/artifacts/{id}/v/{n}/publish`, `PATCH` / `DELETE /v1/publications/{token}`) |
-| `artifacts:write` | Publishing in service mode (`put` / `set_name` / `set_alias` / tags) when `service_writes_enabled=true`. See [below](#authenticated-write-back-the-shared-research-store). |
+| `artifacts:write` | Publishing in service mode (`put` / `set_name` / `set_alias` / tags, and `name` on `POST /v1/materialize`) when `service_writes_enabled=true`. See [below](#authenticated-write-back-the-shared-research-store). |
 | `notebook:read` | Every notebook `GET` over REST, and observing a notebook over its WebSocket (sync, previews, profiling) |
 | `notebook:write` | Changing a notebook without running anything: creating, editing, reordering and deleting cells, and setting mounts, connections, workers, env, timeout, name and variants. REST and WebSocket alike. |
 | `notebook:execute` | Running code or changing its environment: executing a cell or its tests, run-all, dependency changes and environment sync, requirements imports, the Python version, SSH workers, the inspect REPL and widget updates. REST and WebSocket alike. |
