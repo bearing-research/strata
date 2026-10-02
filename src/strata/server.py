@@ -1172,9 +1172,10 @@ async def rate_limit_middleware(request: Request, call_next):
 async def tenant_context_middleware(request: Request, call_next):
     """Set the request's tenant context from the tenant header (default ``X-Tenant-ID``).
 
-    Without multi-tenancy every request gets ``_default``. Missing header falls back to
-    ``_default`` unless required (400); an invalid id is 400, a disabled tenant 403. Health,
-    metrics and self-authenticating routes skip this.
+    Under principal auth the tenant is the authenticated principal's, and an API key
+    caller's header is ignored. Without multi-tenancy every request gets ``_default``.
+    Missing header falls back to ``_default`` unless required (400); an invalid id is
+    400, a disabled tenant 403. Health, metrics and self-authenticating routes skip this.
     """
     path = request.url.path
     if (
@@ -1203,7 +1204,13 @@ async def tenant_context_middleware(request: Request, call_next):
             clear_tenant_context()
 
     tenant_header = getattr(config, "tenant_header", "X-Tenant-ID")
-    tenant_id = request.headers.get(tenant_header)
+    principal = get_principal()
+    if config.principal_auth_enabled and principal is not None:
+        # The authenticated principal's tenant, not the header: under api_key the
+        # header is the client's own claim. Under trusted_proxy both are the proxy's.
+        tenant_id = principal.tenant
+    else:
+        tenant_id = request.headers.get(tenant_header)
 
     if not tenant_id:
         if getattr(config, "require_tenant_header", False):

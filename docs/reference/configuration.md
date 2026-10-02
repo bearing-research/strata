@@ -370,6 +370,8 @@ Authorization: Bearer strata_<key_id>_<secret>
 
 A key resolves to the same principal a proxy header would have produced, so ACL
 rules, tenant scoping, and scope checks behave identically across both modes.
+The tenant is always the key's: an `X-Tenant-ID` header the caller sends is
+ignored, for QoS limiters and log attribution as well as for data access.
 
 Keys are stored in the artifact store's database, which means they follow
 whichever metadata backend it uses and are shared across nodes automatically.

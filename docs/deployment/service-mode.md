@@ -217,7 +217,10 @@ Compared to personal mode:
 
 `STRATA_MULTI_TENANT_ENABLED=true` activates per-tenant isolation.
 With `STRATA_REQUIRE_TENANT_HEADER=true`, requests without a tenant
-header are rejected. The tenant ID is validated as 1–64
+header are rejected. Under `api_key` auth the tenant is the key's own
+and an `X-Tenant-ID` the caller sends is ignored, so a key cannot pick
+another tenant's limiters or log attribution; under `trusted_proxy` it
+is the header the proxy sets. The tenant ID is validated as 1–64
 alphanumeric / `_` / `-` characters and hashed into:
 
 - **Cache keys**: tenant A and tenant B can scan the same Iceberg
