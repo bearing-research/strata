@@ -2,16 +2,11 @@
 """
 Strata Hello World Demo
 
-This script demonstrates Strata's caching capabilities:
+This script demonstrates Strata's caching:
 1. Creates a sample Iceberg table with 100K rows
-2. Measures COLD run (no cache)
-3. Measures WARM run (cache hit)
-4. Simulates RESTART (clears in-memory cache, keeps disk cache)
-
-Expected output:
-  Cold run:     ~500ms (reading from Parquet files)
-  Warm run:     ~50ms  (reading from Arrow IPC cache)
-  Restart run:  ~60ms  (reading from disk cache)
+2. Times a cold scan (reads Parquet, stores the result as an artifact)
+3. Times the same scan again (an artifact-store cache hit)
+4. Times it once more after a metadata cleanup call (still a cache hit)
 
 Usage:
   # With local server:
@@ -37,7 +32,7 @@ try:
     from pyiceberg.types import DoubleType, LongType, NestedField, StringType
 except ImportError:
     print("Missing dependencies. Install with:")
-    print("  pip install pyiceberg[sql-sqlite] pyarrow")
+    print("  uv sync --all-extras  (from a Strata checkout)")
     sys.exit(1)
 
 
@@ -108,7 +103,7 @@ def run_benchmark(server_url: str, table_uri: str) -> dict:
         from strata_client import StrataClient
     except ImportError:
         print("Strata not installed. Install with:")
-        print("  pip install -e .")
+        print("  uv sync --all-extras  (from a Strata checkout)")
         sys.exit(1)
 
     import httpx
@@ -151,26 +146,16 @@ def run_benchmark(server_url: str, table_uri: str) -> dict:
         print(f"  Rows: {total_rows:,}")
 
         # WARM RUN
-        print("\n[2/3] WARM RUN (cache hit)...")
+        print("\n[2/3] CACHE HIT...")
         start = time.perf_counter()
         table = fetch_table()
         warm_time = (time.perf_counter() - start) * 1000
         results["warm_ms"] = warm_time
         print(f"  Time: {warm_time:.1f}ms")
 
-        # Check metrics
-        metrics = client.metrics()
-        print(f"  Cache hits: {metrics.get('cache_hits', 0)}")
-
-        # RESTART SIMULATION
-        # We can't easily restart the server, but we can clear the in-memory
-        # metadata caches while keeping the disk cache
-        print("\n[3/3] RESTART RUN (disk cache only)...")
-        # Clear metadata stats endpoint tells server to refresh caches
-        # This simulates the effect of a restart where disk cache persists
-        import requests
-
-        requests.post(f"{server_url}/v1/metadata/cleanup")
+        # Clearing the metadata caches does not touch stored artifacts.
+        print("\n[3/3] CACHE HIT after a metadata cleanup...")
+        httpx.post(f"{server_url}/v1/metadata/cleanup")
 
         start = time.perf_counter()
         table = fetch_table()
@@ -195,8 +180,8 @@ def print_summary(results: dict):
     restart = results.get("restart_ms", 0)
 
     print(f"\n  Cold run:     {cold:>8.1f} ms  (no cache)")
-    print(f"  Warm run:     {warm:>8.1f} ms  (in-memory cache)")
-    print(f"  Restart run:  {restart:>8.1f} ms  (disk cache)")
+    print(f"  Cache hit:    {warm:>8.1f} ms  (artifact store)")
+    print(f"  After cleanup:{restart:>8.1f} ms  (artifact store)")
 
     if cold > 0 and warm > 0:
         speedup = cold / warm

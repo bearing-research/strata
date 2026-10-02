@@ -15,7 +15,7 @@ This gives you:
 - Explicit lineage
 - Safe reuse across runs and processes
 
-Reading from an Iceberg table is itself a `materialize` call with the built-in `scan@v1` transform: inputs are the table URIs, params hold optional projections and filters. The cache key includes the table's snapshot ID, so once you've scanned a snapshot the result is reusable forever, there's no invalidation problem.
+Reading from an Iceberg table is itself a `materialize` call with the built-in `scan@v1` transform: inputs are the table URIs, params hold optional projections and filters. The cache key includes the table's snapshot ID, and a snapshot never changes, so a scan result never goes stale and there's no invalidation problem. An unnamed result is still a cache entry: the store keeps it while it is used and may collect it later (see [Core behaviors](#core-behaviors)).
 
 ## 1. Start the server
 
@@ -29,15 +29,15 @@ uv run strata-notebook
 uv run python examples/hello_world.py
 ```
 
-This creates a local Iceberg table with 100K rows and times three reads against it:
+This creates a local Iceberg table with 100K rows, clears the server's row-group cache, and times the same `scan@v1` call three times:
 
 ```
-Cold run     (no cache)             ~500ms   read Parquet, cache as Arrow IPC
-Warm run     (in-memory cache hit)  ~50ms    serve from process memory
-Restart run  (disk cache hit)       ~60ms    serve from on-disk Arrow IPC
+Run 1  (cold)       read Parquet, store the result as an artifact
+Run 2  (cache hit)  same provenance hash: the server returns the stored artifact
+Run 3  (cache hit)  the same artifact again, after a metadata cleanup call
 ```
 
-Same inputs, same transform, three different cache states, and the third is still ~10× faster than the first because the disk cache survives restarts.
+Runs 2 and 3 are both artifact-store cache hits: the server finds the earlier result by provenance hash and serves its stored bytes without reading Parquet.
 
 ## 3. Materialize a result
 

@@ -33,7 +33,7 @@ producing artifacts that flow through an auto-built DAG.
 
 **Highlights:**
 
-- **content-addressed:** every cell output is keyed by source + inputs + environment - identical work hits the cache forever
+- **content-addressed:** every cell output is keyed by source + inputs + environment - identical work hits the cache, and no result ever needs invalidating
 - **reactive:** edit a cell, the cascade re-runs only the downstream cells that depend on it
 - **dag-from-ast:** Strata reads each cell's AST to wire upstream/downstream - no decorators, no manual edges
 - **dag-view:** the dependency graph renders alongside the cells - double-click any node to jump to its source
@@ -45,7 +45,7 @@ producing artifacts that flow through an auto-built DAG.
 - **distributed:** `# @worker gpu-fly` dispatches a single cell to a remote box - bring your own compute
 - **mounts:** `# @mount data s3://bucket/prefix ro` makes any S3 / GCS / Azure prefix a local `pathlib.Path`
 - **isolated envs:** every notebook gets its own uv-managed `.venv/`, locked and reproducible
-- **auto-install:** missing import in a cell? one click adds the package via uv and re-runs
+- **auto-install:** missing import in a cell? one click adds the package via uv; run the cell again to use it
 - **headless:** `strata run ./my-notebook` for CI and scheduled execution - same DAG, same cache
 - **every input recorded:** `# @fetch` makes bytes from a URL an input and `# @dataset` makes a registry name one, both content-addressed like everything else
 - **lake-aware SQL:** read a named catalog and the notebook's mounts in one query, pinned to the snapshot the cell's provenance records
@@ -100,6 +100,17 @@ store. The client talks to a running Strata server.
 ---
 
 ## Quick Start
+
+=== "uv (recommended)"
+
+    ```bash
+    uv tool install "strata-notebook[mcp,tui]"
+    strata-notebook
+    ```
+
+    Then open [http://localhost:8765](http://localhost:8765). The `mcp`
+    and `tui` extras are what `strata agent` and `strata watch` need.
+    Plain `pip install` is not supported.
 
 === "Docker"
 
