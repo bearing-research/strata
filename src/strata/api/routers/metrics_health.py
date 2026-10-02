@@ -10,6 +10,7 @@ from __future__ import annotations
 import pyarrow as pa
 from fastapi import APIRouter, HTTPException, Response
 
+from strata.api.dependencies import require_scope
 from strata.cache_metrics import get_eviction_tracker
 from strata.gc_tracker import get_gc_stats
 from strata.health import HealthStatus, run_health_checks
@@ -198,10 +199,13 @@ async def metrics():
     return stats
 
 
-@router.get("/metrics/tables")
+@router.get("/metrics/tables", dependencies=[require_scope("admin:*")])
 async def metrics_tables(limit: int = 10):
     """Get per-table metrics (scans, latency percentiles, cache hit rate, bytes, pruning) for the
     most accessed tables.
+
+    Requires ``admin:*`` under principal auth, as does the single-table route: the table
+    names span every tenant.
     """
     from strata.server import get_state
 
@@ -209,7 +213,7 @@ async def metrics_tables(limit: int = 10):
     return {"tables": state.metrics.get_top_tables(limit)}
 
 
-@router.get("/metrics/tables/{table_id:path}")
+@router.get("/metrics/tables/{table_id:path}", dependencies=[require_scope("admin:*")])
 async def metrics_table(table_id: str):
     """Get metrics for one table by canonical identity (``catalog.namespace.table``)."""
     from strata.server import get_state

@@ -72,12 +72,13 @@ async def get_cache_evictions_v1(
     return result
 
 
-@router.get("/v1/cache/histogram")
+@router.get("/v1/cache/histogram", dependencies=[require_scope("admin:cache")])
 async def get_cache_histogram_v1():
     """Get cache hit/miss statistics: lifetime, 1m/5m/1h windows, and top tables.
 
     Counts are exact for each window and recorded per row group, not per request.
-    ``covered_seconds`` is how much of the window the counts span.
+    ``covered_seconds`` is how much of the window the counts span. Requires ``admin:cache``:
+    ``top_tables`` names every tenant's tables.
     """
     histogram = get_cache_histogram()
     return histogram.get_summary()

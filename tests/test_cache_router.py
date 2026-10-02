@@ -583,6 +583,36 @@ class TestCachePlaneInformationDisclosure:
         """No-auth deployments keep their open introspection."""
         client, _ = cache_client
         assert client.get("/v1/cache/entries").status_code == 200
+        for method, path, _scope in self.OPERATOR_ROUTES:
+            assert client.request(method, path).status_code != 403, path
+
+    # Table names from every tenant, process-wide diagnostics, and a write to the shared
+    # metadata store: operator-only under principal auth.
+    OPERATOR_ROUTES = [
+        ("GET", "/v1/cache/histogram", "admin:cache"),
+        ("POST", "/v1/metadata/cleanup", "admin:cache"),
+        ("GET", "/metrics/tables", "admin:*"),
+        ("GET", "/metrics/tables/strata.ns.t", "admin:*"),
+        ("GET", "/v1/debug/latency", "admin:*"),
+        ("GET", "/v1/debug/gc/pauses", "admin:*"),
+        ("GET", "/v1/debug/pools", "admin:*"),
+        ("GET", "/v1/debug/connections", "admin:*"),
+        ("GET", "/v1/debug/memory?detailed=true", "admin:*"),
+        ("GET", "/v1/debug/rate-limits", "admin:*"),
+    ]
+
+    @pytest.mark.parametrize(("method", "path", "scope"), OPERATOR_ROUTES)
+    def test_operator_routes_need_their_scope(self, acl_cache_client, method, path, scope):
+        def status(scopes: str) -> int:
+            headers = {**_proxy_headers(), "X-Strata-Scopes": scopes}
+            return acl_cache_client.request(method, path, headers=headers).status_code
+
+        assert status("notebook:read artifacts:write") == 403
+        if scope != "admin:*":
+            assert status(scope) != 403
+        else:
+            assert status("admin:cache") == 403
+        assert status("admin:*") != 403
 
 
 class TestDebugInspectPrefixLayout:
