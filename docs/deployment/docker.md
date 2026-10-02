@@ -106,6 +106,15 @@ environment:
   - STRATA_CACHE_DIR=/home/strata/.strata/cache
 ```
 
+Browsing to `localhost` or the machine's IP address works as is. To
+reach the container by a host name (`devbox.lan`), add that name:
+personal mode answers only to the names it expects, so a DNS-rebinding
+page cannot drive it.
+
+```yaml
+  - STRATA_ALLOWED_HOSTS=devbox.lan
+```
+
 See [Configuration Reference](../reference/configuration.md) for all options.
 
 ## Building the image manually

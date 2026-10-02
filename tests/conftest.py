@@ -86,6 +86,12 @@ def _never_publish_into_the_real_store(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _allow_testclient_host(monkeypatch):
+    """The in-process clients send ``Host: testserver`` or ``test``; personal mode refuses both."""
+    monkeypatch.setenv("STRATA_ALLOWED_HOSTS", "testserver,test")
+
+
+@pytest.fixture(autouse=True)
 def _reset_process_globals():
     """Reset process-global server state after every test.
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import ipaddress
 import math
 import os
 import re
@@ -25,11 +26,15 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import (
     FileResponse,
     JSONResponse,
+    PlainTextResponse,
     RedirectResponse,
     Response,
     StreamingResponse,
 )
 from fastapi.staticfiles import StaticFiles
+from starlette.datastructures import Headers
+from starlette.types import ASGIApp, Receive, Scope, Send
+from starlette.websockets import WebSocketClose
 
 from strata.api.dependencies import (
     authorize_table_access,
@@ -90,6 +95,7 @@ from strata.types import (
     MaterializeRequest,
     MaterializeResponse,
 )
+from strata.url_safety import host_is_allowlisted
 
 logger = get_logger(__name__)
 
@@ -1312,6 +1318,63 @@ async def auth_middleware(request: Request, call_next):
     finally:
         set_principal(None)
 
+
+_LOOPBACK_HOST_NAMES = frozenset({"localhost", "127.0.0.1", "::1"})
+
+
+def _host_name(host_header: str) -> str:
+    """The name in a Host header, lowercased and without the port: ``[::1]:8765`` is ``::1``."""
+    host = host_header.strip().lower()
+    if host.startswith("["):
+        return host[1:].split("]", 1)[0]
+    return host.rsplit(":", 1)[0]
+
+
+def _host_is_allowed(host_header: str | None, config: StrataConfig) -> bool:
+    """Whether this server answers to *host_header* (see ``StrataConfig.allowed_hosts``)."""
+    configured = tuple(config.allowed_hosts)
+    if "*" in configured or (config.deployment_mode != "personal" and not configured):
+        return True
+    if host_header is None:
+        # Browsers always send Host, so a request without one is no rebinding page.
+        return True
+    name = _host_name(host_header)
+    if name in _LOOPBACK_HOST_NAMES or name == config.host.lower():
+        return True
+    try:
+        ipaddress.ip_address(name)
+    except ValueError:
+        return host_is_allowlisted(name, configured)
+    # Rebinding needs a DNS name the attacker controls; an IP literal is not one.
+    return True
+
+
+class HostAllowlistMiddleware:
+    """Refuse a Host the server does not answer to, the DNS-rebinding defence.
+
+    A rebound page is same-origin with its own name, so the origin guard alone admits it.
+    Pure ASGI because ``@app.middleware("http")`` never sees WebSocket upgrades.
+    """
+
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] in ("http", "websocket"):
+            host = Headers(scope=scope).get("host")
+            if not _host_is_allowed(host, get_state().config):
+                logger.warning("host_refused", host=host, path=scope.get("path"))
+                if scope["type"] == "http":
+                    refusal = PlainTextResponse(f"Host {host!r} is not allowed.", status_code=400)
+                    await refusal(scope, receive, send)
+                else:
+                    await WebSocketClose(code=1008)(scope, receive, send)
+                return
+        await self.app(scope, receive, send)
+
+
+# Added after every other middleware so it runs first: the origin guard trusts Host.
+app.add_middleware(HostAllowlistMiddleware)
 
 # No-op if OTel is not installed.
 instrument_fastapi(app)

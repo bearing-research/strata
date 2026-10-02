@@ -22,6 +22,10 @@ The `.devcontainer/` configuration provides:
 ## Port forwarding
 
 Port **8765** is forwarded automatically with `onAutoForward: "openBrowser"`, so your browser opens the notebook UI as soon as the server is ready.
+`start.sh` lists the forwarded name (`<codespace>-8765.app.github.dev`)
+in `STRATA_ALLOWED_HOSTS`: personal mode answers only to names it
+expects, which keeps DNS-rebinding pages out. If you start the server
+yourself, set it the same way.
 
 ## Contributing to Strata
 
