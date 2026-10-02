@@ -86,7 +86,7 @@ Infisical (project_id, env, path)
 - On **session open**, Strata pulls all secrets at the configured path and merges them into `notebook.env` where the key isn't already present (or where the existing value is a blanked sensitive placeholder from disk).
 - On **Refresh** (button in the Runtime panel), Strata re-fetches without reopening. New/rotated values take effect for the next cell run.
 - Values typed **manually in the Runtime panel** override the manager's. Saving writes a manual value to the committed `notebook.toml` `[env]` unless its name looks sensitive (see [Security notes](#security-notes)), so a manual `DATABASE_URL` still wins after a reopen; a sensitive-looking one lasts for the current session. Remove the row to fall back to the manager's version.
-- Saving the panel leaves a fetched row alone when you didn't type a new value: its value is not written to `notebook.toml` (a key the file already declares stays declared, blank), it keeps its source badge, and the next Refresh replaces it.
+- Saving the panel leaves a fetched row alone when you didn't type a new value: its value is not written to `notebook.toml` (a key the file already declares stays declared, blank), it keeps its source badge, and the next Refresh replaces it. This holds for a tab opened before a rotation too: its save keeps the rotated value.
 
 Each env row in the Runtime panel shows a green source badge (`INFISICAL`) next to its name when the value came from the manager. Rows without a badge are manual overrides or local-only vars.
 

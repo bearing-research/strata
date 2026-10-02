@@ -559,6 +559,17 @@ class TestUpdateEnvEndpointWithFetchedSecrets:
         assert _session_env(session_id)["DATABASE_URL"] == "postgres://v1"
         assert self._toml_env(session_id) == {}
 
+    def test_a_stale_tab_save_keeps_the_rotated_value(self, client) -> None:
+        tc, session_id, monkeypatch = client
+        tab_a = self._fetch(tc, session_id, monkeypatch, "postgres://v1")["env"]
+        self._fetch(tc, session_id, monkeypatch, "postgres://v2")  # another tab's Refresh
+
+        resp = tc.put(f"/v1/notebooks/{session_id}/env", json={"env": tab_a})
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["env_sources"]["DATABASE_URL"] == "infisical"
+        assert _session_env(session_id)["DATABASE_URL"] == "postgres://v2"
+        assert self._toml_env(session_id) == {}
+
 
 class TestUpdateNotebookSecretManager:
     def test_writes_cleaned_config_to_toml(self, tmp_path) -> None:
