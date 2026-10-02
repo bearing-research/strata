@@ -99,7 +99,7 @@ function save() {
         <span
           v-if="sourceLabel(row.key)"
           class="env-source-badge"
-          :title="`Value fetched from ${sourceLabel(row.key)}. Edit here to override for this session.`"
+          :title="`Value fetched from ${sourceLabel(row.key)}. An edit here overrides it and is saved to notebook.toml (secret-looking names blanked).`"
         >
           {{ sourceLabel(row.key) }}
         </span>
