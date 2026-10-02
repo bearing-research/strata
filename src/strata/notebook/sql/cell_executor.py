@@ -885,6 +885,10 @@ def _content_type_of(artifact: Any) -> str:
         return "json/object"
 
 
+class PickledObject:
+    """A pickled upstream value, left unloaded; its type name is what a ``BindError`` shows."""
+
+
 def _deserialize_blob(blob: bytes, content_type: str) -> Any:
     """Decode just enough of an artifact for a SQL bind: the scalar and Arrow paths."""
     if content_type == "json/object":
@@ -902,12 +906,8 @@ def _deserialize_blob(blob: bytes, content_type: str) -> Any:
         except Exception:  # noqa: BLE001
             return blob
     if content_type == "pickle/object":
-        import pickle
-
-        try:
-            return pickle.loads(blob)  # noqa: S301
-        except Exception:  # noqa: BLE001
-            return None
+        # Unpickling would run the producing cell's code as the server user.
+        return PickledObject()
     return blob
 
 

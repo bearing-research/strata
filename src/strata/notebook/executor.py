@@ -566,9 +566,7 @@ class CellExecutor:
         inputs injected and runs ``pytest`` in the notebook venv. It does not go
         through the harness and never touches the artifact cache or cell status.
         """
-        # Lazy: the serializer needs the [notebook] extra, which executor.py must not import
-        # at module load. cell_test_runner is stdlib-only, kept beside its single caller.
-        from strata.notebook import serializer
+        # cell_test_runner is stdlib-only, kept beside its single caller.
         from strata.notebook.cell_test_runner import (
             PytestUnavailableError,
             run_cell_tests_in_dir,
@@ -616,21 +614,6 @@ class CellExecutor:
             blob_dir.mkdir()
             input_specs = self._load_input_blobs(cell_id, blob_dir)
 
-            inputs: dict[str, Any] = {}
-            for var_name, spec in input_specs.items():
-                try:
-                    inputs[var_name] = serializer.deserialize_value(
-                        spec["content_type"], blob_dir / spec["file"]
-                    )
-                except Exception:
-                    # A non-deserializable input (e.g. R-only) stays unbound; a test reading it
-                    # fails via the cell fixture instead of aborting the run.
-                    logger.exception(
-                        "Cell-test input %s could not be deserialized for cell %s",
-                        var_name,
-                        cell_id,
-                    )
-
             # The run directory is created inside this server-private one; a harness user must
             # reach it.
             hand_over(Path(tmp), harness_user)
@@ -641,7 +624,8 @@ class CellExecutor:
                     venv_python=venv_python,
                     cell_source=source,
                     test_source=test_source,
-                    inputs=inputs,
+                    inputs=input_specs,
+                    input_dir=blob_dir,
                     env=identity_env(self._harness_env(), harness_user),
                     run_as=harness_user,
                 )

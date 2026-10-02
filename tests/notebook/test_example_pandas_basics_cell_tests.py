@@ -13,6 +13,7 @@ from pathlib import Path
 import pytest
 
 from strata.notebook.cell_test_runner import run_cell_tests_in_dir
+from strata.notebook.serializer import serialize_value
 
 _CELLS = Path(__file__).parents[2] / "examples" / "pandas_basics" / "cells"
 
@@ -46,13 +47,19 @@ def test_pandas_basics_cell_tests_pass(upstream_sales, tmp_path):
     for cell_id, cell_file, inputs in plan:
         test_path = _CELLS / f"{cell_id}.test.py"
         assert test_path.exists(), f"missing example test file: {test_path}"
+        input_dir = tmp_path / f"{cell_id}-inputs"
+        specs = {}
+        for name, value in inputs.items():
+            payload = serialize_value(value, input_dir, name)
+            specs[name] = {"content_type": payload["content_type"], "file": payload["file"]}
 
         result = run_cell_tests_in_dir(
             rundir=tmp_path / cell_id,
             venv_python=Path(sys.executable),
             cell_source=_src(cell_file),
             test_source=test_path.read_text(),
-            inputs=inputs,
+            inputs=specs,
+            input_dir=input_dir,
         )
 
         assert result["passed"] >= 1, f"{cell_id}: expected passing tests, got {result}"

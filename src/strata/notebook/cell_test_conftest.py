@@ -2,21 +2,44 @@
 
 Named ``cell_test_conftest`` so the project's own pytest run does not load it;
 the cell-test runner copies it to ``<rundir>/conftest.py``. The run dir also
-holds ``inputs.pkl`` (pickled ``{var_name: value}``), ``cell_source.py``, the
+holds ``inputs.json`` (the serializer's path, the input dir and a
+``{var_name: {content_type, file}}`` map), ``cell_source.py``, the
 user's tests staged as ``test_<cell>.py`` (so pytest rewrites their asserts),
 and the ``results.json`` this plugin writes on session finish.
 """
 
 from __future__ import annotations
 
+import importlib.util
 import json
-import pickle
+import sys
 import types
 from pathlib import Path
 
 import pytest
 
 _RUNDIR = Path(__file__).resolve().parent
+
+
+def _load_inputs() -> dict[str, object]:
+    """Deserialize the upstream inputs here, in the notebook venv, never in the server."""
+    manifest = json.loads((_RUNDIR / "inputs.json").read_text())
+    spec = importlib.util.spec_from_file_location("_nb_serializer", manifest["serializer"])
+    assert spec is not None and spec.loader is not None
+    serializer = importlib.util.module_from_spec(spec)
+    sys.modules["_nb_serializer"] = serializer
+    spec.loader.exec_module(serializer)
+
+    input_dir = Path(manifest["input_dir"])
+    inputs: dict[str, object] = {}
+    for name, item in manifest["inputs"].items():
+        try:
+            inputs[name] = serializer.deserialize_value(
+                item["content_type"], input_dir / item["file"]
+            )
+        except Exception as exc:  # noqa: BLE001 - e.g. R-only; a test reading it fails on the name
+            print(f"Input {name} was not loaded: {type(exc).__name__}: {exc}", file=sys.stderr)
+    return inputs
 
 
 @pytest.fixture(scope="session")
@@ -27,8 +50,7 @@ def cell():
     as a setup error on every test that requests ``cell``, not a collection error.
     """
     namespace: dict[str, object] = {}
-    inputs = pickle.loads((_RUNDIR / "inputs.pkl").read_bytes())
-    namespace.update(inputs)
+    namespace.update(_load_inputs())
 
     cell_source = (_RUNDIR / "cell_source.py").read_text()
     try:

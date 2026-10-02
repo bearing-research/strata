@@ -246,6 +246,7 @@ Variables are injected with `{{ expression }}`. The expression is resolved again
 | pandas Series     | Name, length and dtype, then as many values as fit         |
 | numpy ndarray     | Shape + dtype + first 10 elements                          |
 | dict / list       | JSON, indented                                             |
+| Python object (stored as a pickle: a class instance, a fitted model) | A placeholder. The server never unpickles a cell's output, so the prompt says the value is a Python object and the cell's console names it. Convert it in the producing cell (`str(model)`, a dict). |
 | anything else     | `str(value)`                                               |
 
 Each variable has a 2,000-token budget (about 8,000 characters) per template render. A frame or series drops rows past the budget and ends with `... (N more rows)`; other values are cut with a `... (truncated)` marker.
@@ -255,8 +256,8 @@ Each variable has a 2,000-token budget (about 8,000 characters) per template ren
 ```
 {{ df.describe() }}     # OK, pandas describe() is allow-listed
 {{ df.head() }}         # OK
-{{ obj.attr }}          # OK, attribute access (non-callable)
-{{ obj.mutate() }}      # blocked (unknown method); left as-is in the template
+{{ df.shape }}          # OK, attribute access (non-callable)
+{{ df.to_csv() }}       # blocked (unknown method); left as-is in the template
 ```
 
 Only a small set of methods is permitted (`describe`, `head`, `tail` on pandas objects), called with no arguments. Arbitrary method calls are blocked to keep template rendering side-effect-free.
@@ -502,7 +503,7 @@ The **Schema panel** in the sidebar shows the tables and columns visible through
 
 ### Bind parameters
 
-`:name` placeholders resolve against upstream cell variables. Strata coerces a strict allowlist of Python types (`int`, `float`, `str`, `bytes`, `bool`, `None`, `Decimal`, `UUID`, `datetime`/`date`/`time`) into ADBC bind values; anything else (a list, a numpy scalar, a custom object) is rejected with a clear error. **No string substitution ever**: values flow through ADBC's prepared-statement layer, so adversarial strings (`'; DROP TABLE …`) round-trip as data, not SQL.
+`:name` placeholders resolve against upstream cell variables. Strata coerces a strict allowlist of Python types (`int`, `float`, `str`, `bytes`, `bool`, `None`, `Decimal`, `UUID`, `datetime`/`date`/`time`) into ADBC bind values; anything else (a list, a numpy scalar, a custom object) is rejected with a clear error. A value stored as a Python pickle is rejected without being loaded: the server never unpickles a cell's output. **No string substitution ever**: values flow through ADBC's prepared-statement layer, so adversarial strings (`'; DROP TABLE …`) round-trip as data, not SQL.
 
 ```python
 # upstream Python cell

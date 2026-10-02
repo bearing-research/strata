@@ -6,8 +6,9 @@ export ``__arrow_c_stream__`` or ``__dlpack__``; shape in the schema metadata
 ``module/import``, ``module/cell``, ``module/cell-instance``, ``pickle/object``
 (everything else) and ``application/x-r-rds`` (R-only; Python refuses to read it).
 
-harness.py, pool_worker.py and inspect_harness.py load this file by path with
-``importlib.util``: they run in the notebook's venv and cannot ``import strata``.
+harness.py, pool_worker.py, inspect_harness.py and cell_test_conftest.py load this
+file by path with ``importlib.util``: they run in the notebook's venv and cannot
+``import strata``.
 """
 
 from __future__ import annotations
