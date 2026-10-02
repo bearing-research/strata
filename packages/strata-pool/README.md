@@ -159,7 +159,11 @@ pip install 'strata-pool[server]'
 ```python
 from strata_pool.api import create_app
 
-app = create_app(pool, api_token=os.environ["STRATA_POOL_TOKEN"])
+app = create_app(
+    pool,
+    api_token=os.environ["STRATA_POOL_TOKEN"],
+    admin_token=os.environ.get("STRATA_POOL_ADMIN_TOKEN"),  # optional, operator only
+)
 # uvicorn strata_pool_service:app
 ```
 
@@ -172,16 +176,23 @@ deployment cannot forget the call that stops it paying for idle machines.
 | `POST /v1/jobs/sync` | Queue and block. 200 with the result bytes, or 202 and an id if `wait_seconds` runs out |
 | `GET /v1/jobs/{id}` | Status, without the payload or result; 404 for another tenant's job |
 | `GET /v1/jobs/{id}/result` | The raw result bytes; 409 while the job is not finished, 404 for another tenant's job |
-| `GET /v1/machine-types` | What a caller may ask for: the catalogue an annotation resolves against |
-| `PUT /v1/machine-types` | Replace the catalogue without a restart; persisted, so a restart serves it |
-| `GET /v1/workers` | The fleet, without machine credentials |
-| `GET /v1/usage` | The billing feed, filterable by tenant |
+| `GET /v1/machine-types` | What a caller may ask for: the catalogue an annotation resolves against. `env` and `provider_options` values read `<redacted>` without the admin token |
+| `PUT /v1/machine-types` | Replace the catalogue without a restart; persisted, so a restart serves it. Admin token only |
+| `GET /v1/workers` | The caller's tenant's machines, without their credentials; the admin token sees the whole fleet, or one tenant with `?tenant_id=` |
+| `GET /v1/usage` | The billing feed: the caller's tenant only; the admin token sees every tenant, or one with `?tenant_id=` |
 | `GET /health` | Outside the token check, for load balancers |
 
 Both job submit routes take their options as query parameters: `machine_type`
 (required), `priority` (default 0, higher runs first), `session_id` and
 `timeout_seconds` (both optional). `POST /v1/jobs/sync` also takes
 `wait_seconds` (default 300), which bounds the wait and not the job.
+
+Replacing the catalogue needs the **admin token**. A catalogue entry decides
+which image receives a tenant's jobs, and with them the signed URLs for that
+tenant's data, so the API token every caller holds cannot rewrite it. A pool
+built without an `admin_token` refuses catalogue writes over HTTP with 403:
+the catalogue is then the one passed to `Pool(machine_types=...)`, unless an
+earlier admin `PUT` stored one, which replaces it on start.
 
 Replacing the catalogue takes effect at once. A new type accepts jobs straight
 away. A removed type accepts none: its queued jobs fail with the reason, and
@@ -201,8 +212,10 @@ A job that fails **on the worker** comes back as 502, and one that times out
 as 504. The caller has to be able to tell "your code raised" from "we could
 not run it".
 
-Every route but `/health` requires `Authorization: Bearer <api_token>`, and
-every job route requires `X-Strata-Tenant`, reads included. A tenant reads only
+Every route but `/health` requires `Authorization: Bearer <api_token>` (the
+admin token is accepted wherever the API token is), and every job route
+requires `X-Strata-Tenant`, reads included. So do the worker and usage
+listings, unless the caller presents the admin token. A tenant reads only
 its own jobs: another tenant's job id answers 404, not 403, so the id does not
 confirm the job exists. **The caller is trusted for tenant
 identity**: it authenticates as itself and asserts whose work this is. The

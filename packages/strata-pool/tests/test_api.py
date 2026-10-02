@@ -30,6 +30,8 @@ pytestmark = pytest.mark.skipif(not _HAS_SERVER, reason="needs the `server` extr
 
 TOKEN = "pool-token"
 AUTH = {"Authorization": f"Bearer {TOKEN}", "X-Strata-Tenant": "acme"}
+ADMIN_TOKEN = "operator-token"
+ADMIN = {"Authorization": f"Bearer {ADMIN_TOKEN}"}
 
 
 @pytest.fixture
@@ -43,11 +45,19 @@ async def api(tmp_path):
     pool = Pool(
         store,
         backend,
-        [MachineType(name="cpu", image="w"), MachineType(name="gpu", image="w")],
+        [
+            MachineType(name="cpu", image="w"),
+            MachineType(
+                name="gpu",
+                image="w",
+                env={"HF_TOKEN": "hf_operator_secret"},
+                provider_options={"registryAuthId": "operator-registry-auth"},
+            ),
+        ],
         client=client_to_workers,
         health_poll_seconds=0,
     )
-    app = create_app(pool, api_token=TOKEN, scaler_interval_seconds=3600)
+    app = create_app(pool, api_token=TOKEN, admin_token=ADMIN_TOKEN, scaler_interval_seconds=3600)
 
     async with app.router.lifespan_context(app):
         async with httpx.AsyncClient(
@@ -210,10 +220,74 @@ class TestAuth:
         assert response.json()["status"] == "ok"
 
 
+class TestCatalogueWrites:
+    async def test_a_tenant_token_cannot_rewrite_the_catalogue(self, api):
+        """Otherwise one tenant could point another's machine type at its own image."""
+        response = await api.put(
+            "/v1/machine-types", json=[{"name": "cpu", "image": "evil"}], headers=AUTH
+        )
+
+        assert response.status_code == 403
+        assert api.pool.machine_types["cpu"].image == "w"
+        assert api.pool.store.load_machine_types() is None
+
+    async def test_the_admin_token_rewrites_the_catalogue(self, api):
+        response = await api.put(
+            "/v1/machine-types", json=[{"name": "cpu", "image": "w2"}], headers=ADMIN
+        )
+
+        assert response.status_code == 200
+        assert api.pool.machine_types["cpu"].image == "w2"
+        assert [spec.image for spec in api.pool.store.load_machine_types()] == ["w2"]
+
+    async def test_the_admin_token_also_runs_jobs(self, api):
+        response = await api.post(
+            "/v1/jobs/sync?machine_type=cpu",
+            content=b"work",
+            headers={**ADMIN, "X-Strata-Tenant": "acme"},
+        )
+        assert response.status_code == 200
+
+    async def test_without_an_admin_token_no_one_rewrites_the_catalogue(self, tmp_path):
+        from strata_pool.api import create_app
+
+        store = PoolStore(tmp_path / "pool.sqlite")
+        pool = Pool(store, FakeBackend(), [MachineType(name="cpu", image="w")])
+        app = create_app(pool, api_token=TOKEN, scaler_interval_seconds=3600)
+        async with app.router.lifespan_context(app):
+            async with httpx.AsyncClient(
+                transport=httpx.ASGITransport(app=app), base_url="http://pool"
+            ) as client:
+                response = await client.put(
+                    "/v1/machine-types", json=[{"name": "cpu", "image": "evil"}], headers=AUTH
+                )
+
+        assert response.status_code == 403
+        assert "no admin token" in response.json()["detail"]
+        assert pool.machine_types["cpu"].image == "w"
+        store.close()
+
+
 class TestInspection:
     async def test_machine_types_are_listed_for_a_caller_to_resolve_against(self, api):
         response = await api.get("/v1/machine-types", headers=AUTH)
         assert {spec["name"] for spec in response.json()} == {"cpu", "gpu"}
+
+    async def test_a_tenant_sees_operator_settings_by_name_only(self, api):
+        listed = (await api.get("/v1/machine-types", headers=AUTH)).json()
+
+        gpu = next(spec for spec in listed if spec["name"] == "gpu")
+        assert gpu["env"] == {"HF_TOKEN": "<redacted>"}
+        assert gpu["provider_options"] == {"registryAuthId": "<redacted>"}
+        assert "hf_operator_secret" not in str(listed)
+        assert "operator-registry-auth" not in str(listed)
+
+    async def test_the_admin_sees_the_whole_catalogue(self, api):
+        listed = (await api.get("/v1/machine-types", headers=ADMIN)).json()
+
+        gpu = next(spec for spec in listed if spec["name"] == "gpu")
+        assert gpu["env"] == {"HF_TOKEN": "hf_operator_secret"}
+        assert gpu["provider_options"] == {"registryAuthId": "operator-registry-auth"}
 
     async def test_workers_are_listed_without_their_credentials(self, api):
         await api.post("/v1/jobs/sync?machine_type=cpu", content=b"work", headers=AUTH)
@@ -225,6 +299,24 @@ class TestInspection:
         stored = api.pool.store.list_workers()[0].auth_token
         assert stored not in str(listed), "the machine's own credential must not be served"
 
+    async def test_a_tenant_lists_only_its_own_machines(self, api):
+        await api.post("/v1/jobs/sync?machine_type=cpu", content=b"a", headers=AUTH)
+        await api.post(
+            "/v1/jobs/sync?machine_type=cpu",
+            content=b"b",
+            headers={"Authorization": f"Bearer {TOKEN}", "X-Strata-Tenant": "globex"},
+        )
+
+        own = (await api.get("/v1/workers", headers=AUTH)).json()
+        assert [worker["tenant_id"] for worker in own] == ["acme"]
+        other = await api.get("/v1/workers?tenant_id=globex", headers=AUTH)
+        assert other.status_code == 403
+
+        fleet = (await api.get("/v1/workers", headers=ADMIN)).json()
+        assert sorted(worker["tenant_id"] for worker in fleet) == ["acme", "globex"]
+        globex = (await api.get("/v1/workers?tenant_id=globex", headers=ADMIN)).json()
+        assert [worker["tenant_id"] for worker in globex] == ["globex"]
+
     async def test_usage_is_reported_per_tenant_for_billing(self, api):
         await api.post("/v1/jobs/sync?machine_type=cpu", content=b"a", headers=AUTH)
         await api.post(
@@ -233,10 +325,25 @@ class TestInspection:
             headers={"Authorization": f"Bearer {TOKEN}", "X-Strata-Tenant": "globex"},
         )
 
-        acme = (await api.get("/v1/usage?tenant_id=acme", headers=AUTH)).json()
+        acme = (await api.get("/v1/usage?tenant_id=acme", headers=ADMIN)).json()
         assert len(acme) == 1
         assert acme[0]["duration_ms"] > 0
-        assert len((await api.get("/v1/usage", headers=AUTH)).json()) == 2
+        assert len((await api.get("/v1/usage", headers=ADMIN)).json()) == 2
+
+    async def test_a_tenant_reads_only_its_own_usage(self, api):
+        await api.post("/v1/jobs/sync?machine_type=cpu", content=b"a", headers=AUTH)
+        await api.post(
+            "/v1/jobs/sync?machine_type=cpu",
+            content=b"b",
+            headers={"Authorization": f"Bearer {TOKEN}", "X-Strata-Tenant": "globex"},
+        )
+
+        own = (await api.get("/v1/usage", headers=AUTH)).json()
+        assert [event["tenant_id"] for event in own] == ["acme"]
+        other = await api.get("/v1/usage?tenant_id=globex", headers=AUTH)
+        assert other.status_code == 403
+        no_tenant = await api.get("/v1/usage", headers={"Authorization": f"Bearer {TOKEN}"})
+        assert no_tenant.status_code == 400
 
 
 async def test_serving_the_pool_starts_the_scaler(tmp_path):

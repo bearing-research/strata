@@ -5,6 +5,7 @@ caller presents the API token and asserts the tenant in a header, which the
 pool trusts: it must be reachable only from the proxy.
 """
 
+import hmac
 import logging
 from dataclasses import asdict
 from typing import Annotated
@@ -18,6 +19,7 @@ from strata_pool.types import Job, JobState, MachineType, UsageEvent, Worker
 logger = logging.getLogger(__name__)
 
 TENANT_HEADER = "X-Strata-Tenant"
+REDACTED = "<redacted>"
 
 
 def _job_json(job: Job) -> dict:
@@ -36,6 +38,16 @@ def _worker_json(worker: Worker) -> dict:
     return fields
 
 
+def _machine_type_json(spec: MachineType, *, full: bool) -> dict:
+    """A catalogue entry; without `full`, operator settings keep their names but not values."""
+    fields = asdict(spec)
+    if not full:
+        # Both commonly carry credentials (a registry login, a model-hub token).
+        fields["env"] = dict.fromkeys(spec.env, REDACTED)
+        fields["provider_options"] = dict.fromkeys(spec.provider_options, REDACTED)
+    return fields
+
+
 def _usage_json(event: UsageEvent) -> dict:
     return asdict(event)
 
@@ -44,6 +56,7 @@ def create_app(
     pool: Pool,
     *,
     api_token: str | None = None,
+    admin_token: str | None = None,
     scaler_interval_seconds: float = 10.0,
 ) -> FastAPI:
     """Build the pool's HTTP app; its lifespan recovers the fleet and starts the scaler.
@@ -51,22 +64,58 @@ def create_app(
     Args:
         api_token: Bearer token every route except `/health` requires. None
             disables the check (local development only: anyone could run jobs).
+        admin_token: Bearer token for the operator, also accepted wherever
+            `api_token` is. Replacing the machine-type catalogue needs it. None
+            refuses catalogue writes over HTTP: the operator sets the catalogue
+            in the code that constructs the pool.
         scaler_interval_seconds: How often idle machines are reaped.
     """
     if api_token is None:
         logger.warning("pool API starting with no token; anyone who can reach it can run jobs")
 
+    def bearer_is(authorization: str | None, token: str) -> bool:
+        return authorization is not None and hmac.compare_digest(
+            authorization.encode(), f"Bearer {token}".encode()
+        )
+
+    def is_admin(authorization: str | None) -> bool:
+        return admin_token is not None and bearer_is(authorization, admin_token)
+
     async def require_token(authorization: Annotated[str | None, Header()] = None) -> None:
-        if api_token is None:
+        if api_token is None or is_admin(authorization):
             return
-        if authorization != f"Bearer {api_token}":
+        if not bearer_is(authorization, api_token):
             raise HTTPException(status_code=401, detail="invalid or missing API token")
+
+    async def require_admin(authorization: Annotated[str | None, Header()] = None) -> None:
+        if admin_token is None:
+            raise HTTPException(
+                status_code=403,
+                detail="no admin token is configured; the catalogue is set where the pool is built",
+            )
+        if not is_admin(authorization):
+            raise HTTPException(status_code=403, detail="this route needs the admin token")
 
     async def tenant(request: Request) -> str:
         value = request.headers.get(TENANT_HEADER)
         if not value:
             raise HTTPException(status_code=400, detail=f"{TENANT_HEADER} is required")
         return value
+
+    async def tenant_filter(
+        request: Request,
+        authorization: Annotated[str | None, Header()] = None,
+        tenant_id: str | None = Query(default=None),
+    ) -> str | None:
+        """Whose rows a listing returns: the caller's tenant, or for the admin any (None is all)."""
+        if is_admin(authorization):
+            return tenant_id
+        own = await tenant(request)
+        if tenant_id is not None and tenant_id != own:
+            raise HTTPException(
+                status_code=403, detail="another tenant's rows need the admin token"
+            )
+        return own
 
     async def lifespan(app: FastAPI):
         # The catalogue last set over the API outlives the process that set
@@ -169,11 +218,16 @@ def create_app(
         return _terminal_response(job)
 
     @app.get("/v1/machine-types", dependencies=guard)
-    async def list_machine_types() -> list[dict]:
+    async def list_machine_types(
+        authorization: Annotated[str | None, Header()] = None,
+    ) -> list[dict]:
         """What a caller may ask for. The catalogue an annotation resolves against."""
-        return [asdict(spec) for spec in pool.machine_types.values()]
+        full = is_admin(authorization)
+        return [_machine_type_json(spec, full=full) for spec in pool.machine_types.values()]
 
-    @app.put("/v1/machine-types", dependencies=guard)
+    # A catalogue entry decides which image receives a tenant's jobs and
+    # their signed URLs, so rewriting it is the operator's call alone.
+    @app.put("/v1/machine-types", dependencies=[*guard, Depends(require_admin)])
     async def replace_machine_types(request: Request) -> list[dict]:
         """Replace the whole machine-type catalogue, without a restart.
 
@@ -197,11 +251,19 @@ def create_app(
         return [asdict(spec) for spec in pool.machine_types.values()]
 
     @app.get("/v1/workers", dependencies=guard)
-    async def list_workers() -> list[dict]:
-        return [_worker_json(worker) for worker in pool.store.list_workers()]
+    async def list_workers(
+        tenant_id: Annotated[str | None, Depends(tenant_filter)],
+    ) -> list[dict]:
+        return [
+            _worker_json(worker)
+            for worker in pool.store.list_workers()
+            if tenant_id is None or worker.tenant_id == tenant_id
+        ]
 
     @app.get("/v1/usage", dependencies=guard)
-    async def list_usage(tenant_id: str | None = Query(default=None)) -> list[dict]:
+    async def list_usage(
+        tenant_id: Annotated[str | None, Depends(tenant_filter)],
+    ) -> list[dict]:
         """The billing feed. One event per terminal job, monotonic duration."""
         return [_usage_json(event) for event in pool.store.list_usage(tenant_id)]
 
