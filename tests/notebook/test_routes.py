@@ -510,7 +510,9 @@ def test_delete_notebook_endpoint_removes_directory_and_closes_session(client, t
     artifact_file = notebook_dir / ".strata" / "artifacts" / "result.bin"
     artifact_file.parent.mkdir(parents=True, exist_ok=True)
     artifact_file.write_bytes(b"artifact")
-    venv_marker = notebook_dir / ".venv" / "bin" / "python"
+    # Never write to .venv/bin/python: under a shared environment it links to the real
+    # interpreter, and writing through it truncates the developer's Python.
+    venv_marker = notebook_dir / ".venv" / "deleted-with-the-notebook"
     venv_marker.parent.mkdir(parents=True, exist_ok=True)
     venv_marker.write_text("", encoding="utf-8")
 
