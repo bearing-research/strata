@@ -89,8 +89,9 @@ network): personal mode exposes write endpoints with no authentication.
 
 Loopback binding alone does not keep web pages out: the browser runs on
 the same machine. Personal mode refuses a cross-origin page's writes
-and answers only to the `Host` names it expects, so a DNS-rebinding
-page that resolves its own name to `127.0.0.1` gets a 400. The expected
+and its notebook WebSocket, and answers only to the `Host` names it
+expects, so a DNS-rebinding page that resolves its own name to
+`127.0.0.1` gets a 400. The expected
 names are `localhost`, `127.0.0.1`, `[::1]`, any IP literal,
 `STRATA_HOST`, and whatever you list in `STRATA_ALLOWED_HOSTS`. When
 you reach a remote personal-mode server by name (`devbox.lan`,

@@ -33,6 +33,7 @@ from fastapi.responses import (
 )
 from fastapi.staticfiles import StaticFiles
 from starlette.datastructures import Headers
+from starlette.requests import HTTPConnection
 from starlette.types import ASGIApp, Receive, Scope, Send
 from starlette.websockets import WebSocketClose
 
@@ -1024,12 +1025,12 @@ def _configured_cors_origins() -> list[str]:
         return []
 
 
-def _origin_is_allowed(request: Request, origin: str) -> bool:
-    """Whether *origin* may make cross-origin calls to this server.
+def _origin_is_allowed(conn: HTTPConnection, origin: str) -> bool:
+    """Whether *origin* may make cross-origin calls (or open a WebSocket) to this server.
 
     Same-origin is always allowed (bundled frontend); others come from ``cors_allow_origins``.
     """
-    host = request.headers.get("host")
+    host = conn.headers.get("host")
     if host and origin in (f"http://{host}", f"https://{host}"):
         return True
     return origin in _configured_cors_origins()

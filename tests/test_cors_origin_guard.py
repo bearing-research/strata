@@ -117,3 +117,66 @@ class TestLegitimateCallersAreUnaffected:
             headers={"Origin": EVIL},
         )
         assert resp.status_code == 403
+
+
+async def _ws_upgrade(origin: str | None) -> list[dict]:
+    """Drive a WS upgrade through the real app (no TestClient portal) and return what it sent."""
+    sent: list[dict] = []
+
+    async def receive():
+        return {"type": "websocket.connect"}
+
+    async def send(message):
+        sent.append(message)
+
+    headers = [(b"host", b"127.0.0.1:8765")]
+    if origin is not None:
+        headers.append((b"origin", origin.encode()))
+    scope = {
+        "type": "websocket",
+        "asgi": {"version": "3.0"},
+        "scheme": "ws",
+        "path": "/v1/notebooks/ws/no-such-session",
+        "raw_path": b"/v1/notebooks/ws/no-such-session",
+        "root_path": "",
+        "query_string": b"",
+        "headers": headers,
+        "client": ("127.0.0.1", 50000),
+        "server": ("127.0.0.1", 8765),
+        "subprotocols": [],
+    }
+    await app(scope, receive, send)
+    return sent
+
+
+def _reached_the_session_lookup(sent: list[dict]) -> bool:
+    # A guessed session id gets this reason; the origin check closes before the lookup.
+    return any(m.get("reason") == "Notebook not found" for m in sent)
+
+
+class TestTheNotebookWebSocketChecksOrigin:
+    """Browsers apply no CORS to WebSockets, so a cross-site page can open one to loopback."""
+
+    @pytest.mark.asyncio
+    async def test_a_foreign_origin_is_closed_before_the_session_lookup(self, client):
+        client()
+        sent = await _ws_upgrade(EVIL)
+        assert sent[0]["type"] == "websocket.close"
+        assert sent[0]["code"] == 1008
+        assert not _reached_the_session_lookup(sent)
+
+    @pytest.mark.asyncio
+    async def test_same_origin_is_allowed(self, client):
+        client()
+        assert _reached_the_session_lookup(await _ws_upgrade("http://127.0.0.1:8765"))
+
+    @pytest.mark.asyncio
+    async def test_no_origin_is_allowed(self, client):
+        """The TUI and SDK clients send no Origin."""
+        client()
+        assert _reached_the_session_lookup(await _ws_upgrade(None))
+
+    @pytest.mark.asyncio
+    async def test_a_configured_dev_origin_is_allowed(self, client):
+        client(cors_allow_origins=["http://localhost:5173"])
+        assert _reached_the_session_lookup(await _ws_upgrade("http://localhost:5173"))

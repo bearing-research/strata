@@ -36,7 +36,10 @@ The minimum sequence to render a notebook view:
    the same payload shape.
 2. **Connect the WebSocket.** `ws://.../v1/notebooks/ws/{session_id}`. The
    handler verifies the session exists and (if owned) that the caller is the
-   owner - refuses with close code `1008 Notebook not found` otherwise. The
+   owner - refuses with close code `1008 Notebook not found` otherwise. A
+   browser upgrade whose `Origin` is neither the server's own nor listed in
+   `STRATA_CORS_ALLOW_ORIGINS` closes first with `1008 Origin not allowed`;
+   clients that send no `Origin` (the TUI, scripts) are unaffected. The
    only frame sent on accept is `presence` (see
    [Presence and soft locks](#presence-and-soft-locks)).
 3. **Send `notebook_sync`** as the first client → server message. The server
