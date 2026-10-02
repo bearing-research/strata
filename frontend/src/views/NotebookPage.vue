@@ -9,6 +9,7 @@ import ExportMenu from '../components/ExportMenu.vue'
 import KeyboardShortcutsModal from '../components/KeyboardShortcutsModal.vue'
 import ThemeToggle from '../components/ThemeToggle.vue'
 import { useStrata } from '../composables/useStrata'
+import { embedSnippet } from '../utils/embedSnippet'
 import { editorChrome, editorQuery } from '../utils/framed'
 import { clearNotebookPerfMarks, markNotebookPerf, measureNotebookPerf } from '../utils/perf'
 
@@ -36,17 +37,8 @@ const chrome = computed(() => editorChrome(route.query))
 const router = useRouter()
 const { record, remove, findBySessionId } = useRecentNotebooks()
 
-// Export menu "Embed": an app-view iframe snippet plus its auto-resize listener.
-function embedSnippet(): string {
-  const url = `${window.location.origin}/#/app/${props.sessionId}?embed=1`
-  return [
-    `<iframe src="${url}" title="Strata notebook" style="width:100%;border:0"></iframe>`,
-    `<script>addEventListener('message',e=>{if(e.data&&e.data.type==='strata:embed:resize')`,
-    `document.querySelector('iframe[title=\\'Strata notebook\\']').style.height=e.data.height+'px'})<\/script>`,
-  ].join('\n')
-}
 async function copyEmbedSnippet() {
-  await navigator.clipboard.writeText(embedSnippet())
+  await navigator.clipboard.writeText(embedSnippet(window.location.origin, props.sessionId))
   pushToast('Embed snippet copied to clipboard')
 }
 
