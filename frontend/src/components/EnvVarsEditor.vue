@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue'
+import { envDraftRows, envPayload, type EnvDraftRow } from '../utils/envMask'
 
 const _SENSITIVE_PATTERNS = ['KEY', 'SECRET', 'TOKEN', 'PASSWORD', 'CREDENTIAL']
 
@@ -8,10 +9,8 @@ function isSensitiveKey(key: string): boolean {
   return _SENSITIVE_PATTERNS.some((p) => upper.includes(p))
 }
 
-interface EnvRow {
+interface EnvRow extends EnvDraftRow {
   localId: string
-  key: string
-  value: string
 }
 
 const props = withDefaults(
@@ -51,17 +50,16 @@ function nextLocalId(): string {
 watch(
   () => props.env,
   (env) => {
-    draft.value = Object.entries(env || {}).map(([key, value], index) => ({
+    draft.value = envDraftRows(env || {}).map((row, index) => ({
+      ...row,
       localId: draft.value[index]?.localId ?? nextLocalId(),
-      key,
-      value,
     }))
   },
   { immediate: true, deep: true },
 )
 
 function addRow() {
-  draft.value.push({ localId: nextLocalId(), key: '', value: '' })
+  draft.value.push({ localId: nextLocalId(), key: '', value: '', maskedKey: null })
 }
 
 function removeRow(index: number) {
@@ -69,10 +67,7 @@ function removeRow(index: number) {
 }
 
 function save() {
-  const env = Object.fromEntries(
-    draft.value.map((row) => [row.key.trim(), row.value] as const).filter(([key]) => key),
-  )
-  emit('save', env)
+  emit('save', envPayload(draft.value))
 }
 </script>
 
@@ -107,8 +102,8 @@ function save() {
       <input
         v-model="row.value"
         class="env-input env-value"
-        :type="isSensitiveKey(row.key) ? 'password' : 'text'"
-        placeholder="value"
+        :type="isSensitiveKey(row.key) || row.maskedKey ? 'password' : 'text'"
+        :placeholder="row.maskedKey ? 'set (hidden); type to replace' : 'value'"
         :disabled="readOnly"
       />
       <button v-if="!readOnly" class="env-remove" @click="removeRow(index)">×</button>

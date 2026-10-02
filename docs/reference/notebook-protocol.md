@@ -126,7 +126,7 @@ further calls are required before showing a useful UI. The shape is
 | `path` | Absolute notebook directory path. |
 | `dag` | Formatted upstream/downstream/staleness map. |
 | Runtime config | `deployment_mode`, `default_parent_path`, `available_python_versions`, `default_python_version`, `python_selection_fixed`, `registry_enabled`, `team_store_configured`. |
-| `id`, `name`, `owner`, `worker`, `timeout`, `env`, `ai` | `notebook.toml` |
+| `id`, `name`, `owner`, `worker`, `timeout`, `env`, `ai` | `notebook.toml`, plus fetched secrets in `env`; secret values are masked (see [Update Notebook Default Env](rest-api.md#update-notebook-default-env)) |
 | `env_sources`, `env_fetch_error`, `env_fetched_at` | Secret-manager fetch status |
 | `workers`, `mounts`, `connections`, `malformed_connections`, `secret_manager_config`, `variant_groups` | `notebook.toml` |
 | `cells` (full) | Source, status, display outputs, console stdout/stderr, provenance hashes, causality chains, DAG shadow warnings, per-cell overrides. |

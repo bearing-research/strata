@@ -903,6 +903,12 @@ Replaces the `[env]` block in `notebook.toml`. Sensitive values (keys matching
 in-memory for the session so key-dependent cells keep working. Returns the
 merged env, per-key sources, and refreshed cell list.
 
+No response or WebSocket frame carries a secret value: a non-empty value under a
+sensitive name, or one fetched from the secret manager, is sent as
+`"__strata_masked__"` (in the notebook's `env` and in each cell's `env` and
+`env_overrides`). Send that marker back to keep a key's current value; any other
+value replaces it.
+
 ### Update Secret Manager Config
 
 ```

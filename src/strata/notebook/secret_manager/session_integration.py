@@ -7,16 +7,50 @@ on open and on refresh.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import TYPE_CHECKING
 
 from strata.notebook.secret_manager.provider import SecretFetchResult
 from strata.notebook.secret_manager.registry import get_provider
+from strata.notebook.writer import _is_sensitive_env_key
 
 if TYPE_CHECKING:
     from strata.notebook.models import NotebookState
 
 
 MANUAL_SOURCE = "manual"
+
+# Sent to clients in place of a secret value; sent back, it means "unchanged".
+MASKED_ENV_VALUE = "__strata_masked__"
+
+
+def mask_env(env: Mapping[str, str], sources: Mapping[str, str]) -> dict[str, str]:
+    """Return ``env`` with secret values replaced by ``MASKED_ENV_VALUE``.
+
+    A value is secret when its name looks sensitive or a secret manager supplied
+    it. Empty values stay empty, so a client can tell an unset key from a set one.
+    """
+    return {
+        key: (
+            MASKED_ENV_VALUE
+            if value
+            and (_is_sensitive_env_key(key) or sources.get(key, MANUAL_SOURCE) != MANUAL_SOURCE)
+            else value
+        )
+        for key, value in env.items()
+    }
+
+
+def unmask_env(submitted: Mapping[str, str], current: Mapping[str, str]) -> dict[str, str]:
+    """Resolve ``MASKED_ENV_VALUE`` entries in a client's env to the current values.
+
+    A masked key with no current value is dropped.
+    """
+    return {
+        key: current[key] if value == MASKED_ENV_VALUE else value
+        for key, value in submitted.items()
+        if value != MASKED_ENV_VALUE or key in current
+    }
 
 
 def fetch_configured_secrets(state: NotebookState) -> SecretFetchResult | None:
