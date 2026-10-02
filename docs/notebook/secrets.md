@@ -85,6 +85,7 @@ Infisical (project_id, env, path)
 
 - On **session open**, Strata pulls all secrets at the configured path and merges them into `notebook.env` where the key isn't already present (or where the existing value is a blanked sensitive placeholder from disk).
 - On **Refresh** (button in the Runtime panel), Strata re-fetches without reopening. New/rotated values take effect for the next cell run.
+- Saving a new secret-manager config fetches again. Other edits (adding a cell, changing the env, a worker or a timeout) reuse the values from the last fetch rather than calling the manager.
 - Values typed **manually in the Runtime panel** override the manager's. Saving writes a manual value to the committed `notebook.toml` `[env]` unless its name looks sensitive (see [Security notes](#security-notes)), so a manual `DATABASE_URL` still wins after a reopen; a sensitive-looking one lasts for the current session. Remove the row to fall back to the manager's version.
 - Saving the panel leaves a fetched row alone when you didn't change its value: its value is not written to `notebook.toml` (a key the file already declares stays declared, blank), it keeps its source badge, and the next Refresh replaces it.
 
@@ -96,7 +97,7 @@ Rotate the secret in Infisical, then hit the **Refresh** button. Cells that run 
 
 ## Fetch errors
 
-When a fetch fails, bad credentials, network error, wrong project, the notebook still opens. The error surfaces in the Runtime panel's Secret manager block. Common messages:
+When a fetch fails, bad credentials, network error, wrong project, the notebook still opens. The error surfaces in the Runtime panel's Secret manager block. A manager that does not answer within 20 seconds counts as a failed fetch. Common messages:
 
 > No Infisical credentials in the process environment. Set either `INFISICAL_CLIENT_ID` + `INFISICAL_CLIENT_SECRET` (Machine Identity / Universal Auth, recommended) or `INFISICAL_TOKEN` (service token, legacy) in the shell that launched Strata.
 

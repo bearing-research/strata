@@ -43,14 +43,19 @@ def _now_iso() -> str:
     return dt.datetime.now(dt.UTC).isoformat().replace("+00:00", "Z")
 
 
+# Applied by a provider to each request, and by the server to the whole fetch.
+SECRET_FETCH_TIMEOUT_SECONDS = 20.0
+
+
 class SecretProvider(Protocol):
     """Minimal interface every secret-manager integration implements.
 
-    ``fetch(config)`` runs on session open and on explicit refresh. It must not raise
-    on network or auth errors; it returns them in ``error`` and the session keeps
-    running.
+    ``fetch(config, timeout=...)`` runs on session open and on explicit refresh. It
+    must not raise on network or auth errors; it returns them in ``error`` and the
+    session keeps running. No single request may wait longer than ``timeout``
+    seconds.
     """
 
     name: str
 
-    def fetch(self, config: dict[str, Any]) -> SecretFetchResult: ...
+    def fetch(self, config: dict[str, Any], *, timeout: float) -> SecretFetchResult: ...

@@ -839,6 +839,8 @@ async def open_notebook(req: OpenNotebookRequest, request: Request) -> JSONRespo
                 reuse_existing=_reuse_open_session_by_path(),
                 timing=timing,
             )
+        with timing.phase("session_secrets"):
+            await session.refresh_secrets_async()
 
         with timing.phase("serialize"):
             data = session.serialize_notebook_state()
@@ -1110,6 +1112,8 @@ async def import_jupyter_notebook(
             defer_initial_venv_sync=True,
             timing=timing,
         )
+    with timing.phase("session_secrets"):
+        await session.refresh_secrets_async()
 
     with timing.phase("environment_job_submit"):
         try:
@@ -1249,6 +1253,8 @@ async def import_snapshot_bundle(
             defer_initial_venv_sync=True,
             timing=timing,
         )
+    with timing.phase("session_secrets"):
+        await session.refresh_secrets_async()
 
     with timing.phase("environment_job_submit"):
         try:
@@ -2687,6 +2693,7 @@ async def update_notebook_secret_manager_config(
         config = req.model_dump(exclude_none=True)
         update_notebook_secret_manager(session.path, config)
         session.reload()
+        await session.refresh_secrets_async()
         # Runtime-panel keys are blanked on disk; restore in-memory values for keys
         # the fetch isn't replacing.
         for cell in session.notebook_state.cells:
@@ -2715,7 +2722,7 @@ async def refresh_notebook_secret_manager(notebook_id: str, session: SessionDep)
     ``env_fetch_error``.
     """
     try:
-        session.refresh_secrets()
+        await session.refresh_secrets_async()
         # So the executor picks up rotated values immediately.
         for cell in session.notebook_state.cells:
             resolved = dict(session.notebook_state.env)

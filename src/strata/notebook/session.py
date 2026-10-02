@@ -97,6 +97,7 @@ if TYPE_CHECKING:
     from strata.artifact_store import ArtifactVersion
     from strata.notebook.artifact_integration import NotebookArtifactManager
     from strata.notebook.pool import WarmProcessPool
+    from strata.notebook.secret_manager import SecretFetchResult
 
 logger = logging.getLogger(__name__)
 _ENVIRONMENT_JOB_HISTORY_LIMIT = 8
@@ -244,7 +245,8 @@ class EnvironmentJobSnapshot:
 class NotebookSession:
     """Holds state for one open notebook."""
 
-    def __init__(self, notebook_state: NotebookState, path: Path):
+    def __init__(self, notebook_state: NotebookState, path: Path, *, fetch_secrets: bool = True):
+        """``fetch_secrets=False`` leaves the first fetch to :meth:`refresh_secrets_async`."""
         from strata.notebook.env_backend import EnvironmentBackend, get_backend
 
         self.id: str = str(uuid.uuid4())
@@ -307,31 +309,76 @@ class NotebookSession:
         self._synchronous_environment_mutation: str | None = None
         self._load_environment_job_history()
 
+        # The last secret fetch and the ``[secret_manager]`` config it was made for.
+        self._secret_fetch: tuple[dict[str, Any], SecretFetchResult | None] | None = None
+
         self._analyze_and_build_dag()
         self._run_annotation_validation()
         # Merge manager secrets into env before cells see it.
-        self._apply_configured_secrets()
+        if fetch_secrets:
+            self.refresh_secrets()
+        else:
+            self._merge_secrets()
 
-    def _apply_configured_secrets(self) -> None:
-        """Fetch and merge secrets from the configured provider, if any.
+    def _merge_secrets(self) -> None:
+        """Merge the last secret fetch into env, unless ``[secret_manager]`` changed since.
 
         Updates ``notebook_state.env`` and the ``env_sources`` / ``env_fetch_error`` /
-        ``env_fetched_at`` fields in place; with no ``[secret_manager]`` block every key
-        is still stamped ``manual``. Mirrors the env into each cell's resolved env,
-        which the executor reads.
+        ``env_fetched_at`` fields in place; with no fetch every key is stamped
+        ``manual``. Mirrors the env into each cell's resolved env, which the executor
+        reads. A reload lands here rather than refetching: a fetch is a network call,
+        so it happens on open and on refresh only.
         """
-        from strata.notebook.secret_manager import apply_secrets_to_notebook_state
+        from strata.notebook.secret_manager.session_integration import merge_secrets_into_state
 
-        apply_secrets_to_notebook_state(self.notebook_state)
+        result = None
+        if self._secret_fetch is not None:
+            config, fetched = self._secret_fetch
+            if config == self.notebook_state.secret_manager_config:
+                result = fetched
+        merge_secrets_into_state(self.notebook_state, result)
         # Preserve cell-level overrides, as update_notebook_env_endpoint does.
         for cell in self.notebook_state.cells:
             resolved = dict(self.notebook_state.env)
             resolved.update(cell.env_overrides or {})
             cell.env = resolved
 
-    def refresh_secrets(self):
-        """Re-fetch secrets and re-merge into env (the Refresh button)."""
-        self._apply_configured_secrets()
+    def refresh_secrets(self) -> None:
+        """Re-fetch secrets and re-merge into env, blocking; servers use the async form."""
+        from strata.notebook.secret_manager import fetch_configured_secrets
+
+        config = dict(self.notebook_state.secret_manager_config)
+        self._secret_fetch = (config, fetch_configured_secrets(self.notebook_state))
+        self._merge_secrets()
+
+    async def refresh_secrets_async(self) -> None:
+        """Re-fetch secrets in a worker thread and re-merge into env (the Refresh button).
+
+        Gives up after ``SECRET_FETCH_TIMEOUT_SECONDS`` and records that as the fetch
+        error. Recomputes staleness when the merge changed a cell's env, since a
+        referenced secret enters provenance.
+        """
+        from strata.notebook.secret_manager import SecretFetchResult, fetch_configured_secrets
+        from strata.notebook.secret_manager.provider import SECRET_FETCH_TIMEOUT_SECONDS
+
+        config = dict(self.notebook_state.secret_manager_config)
+        try:
+            result = await asyncio.wait_for(
+                asyncio.to_thread(fetch_configured_secrets, self.notebook_state),
+                SECRET_FETCH_TIMEOUT_SECONDS,
+            )
+        except TimeoutError:
+            result = SecretFetchResult.failure(
+                str(config.get("provider") or ""),
+                f"The secret manager did not answer within {SECRET_FETCH_TIMEOUT_SECONDS:g}s.",
+            )
+        envs_before = [cell.env for cell in self.notebook_state.cells]
+        # Recorded against the config it used, so a reload that changed the config
+        # meanwhile does not merge it.
+        self._secret_fetch = (config, result)
+        self._merge_secrets()
+        if [cell.env for cell in self.notebook_state.cells] != envs_before:
+            await self.compute_staleness_async()
 
     def _run_annotation_validation(self) -> None:
         """Validate annotations across all cells (on open/reload only)."""
@@ -492,7 +539,7 @@ class NotebookSession:
         self.notebook_state = parse_notebook(self.path)
         self._analyze_and_build_dag()
         self._run_annotation_validation()
-        self._apply_configured_secrets()
+        self._merge_secrets()
         # Restore ``last_provenance_hash`` *before* computing staleness, or every cell
         # falls back to IDLE and none can be marked STALE.
         self._restore_execution_history(previous_cells)
@@ -3434,7 +3481,8 @@ class SessionManager:
         else:
             with timing.phase("session_parse"):
                 notebook_state = parse_notebook(Path(directory))
-        session = NotebookSession(notebook_state, Path(directory))
+        # The caller fetches secrets with ``refresh_secrets_async``, off the event loop.
+        session = NotebookSession(notebook_state, Path(directory), fetch_secrets=False)
         _prune_artifacts_in_background(session)
 
         # A fresh notebook may already have a synced .venv from create_notebook(), so

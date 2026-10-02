@@ -5,6 +5,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import pytest
+import requests
 
 from strata.notebook.models import NotebookState
 from strata.notebook.secret_manager.infisical import InfisicalProvider
@@ -38,6 +39,8 @@ class _FakeClient:
             token_auth=SimpleNamespace(login=self._token_login),
         )
         self.secrets = SimpleNamespace(list_secrets=self._list_secrets)
+        # The SDK sends every call through this ``requests`` session.
+        self.api = SimpleNamespace(session=requests.Session())
 
     def _universal_login(self, client_id: str, client_secret: str):
         if self._login_exc:
@@ -181,6 +184,32 @@ class TestInfisicalProvider:
         result = InfisicalProvider().fetch({"project_id": "proj"})
         assert result.secrets == {}
         assert "list_secrets failed" in (result.error or "")
+
+    def test_every_request_carries_the_timeout(self, monkeypatch) -> None:
+        """The SDK sets no timeout of its own; a silent host would hold the fetch forever."""
+        from requests.adapters import HTTPAdapter
+
+        monkeypatch.setenv("INFISICAL_TOKEN", "tok")
+        client = _FakeClient(list_secrets_return=SimpleNamespace(secrets=[]))
+        _install_fake_sdk_client(monkeypatch, client)
+        sent: list[object] = []
+
+        def recording_send(self, request, **kwargs):
+            sent.append(kwargs["timeout"])
+            response = requests.Response()
+            response.status_code = 200
+            response._content = b"{}"
+            response.request = request
+            return response
+
+        monkeypatch.setattr(HTTPAdapter, "send", recording_send)
+
+        result = InfisicalProvider().fetch({"project_id": "p"}, timeout=7.5)
+        # A call the way the SDK makes one: no timeout of its own.
+        client.api.session.get("https://infisical.example.com/api/v3/secrets/raw")
+
+        assert result.error is None
+        assert sent == [7.5]
 
     def test_host_routing_uses_config_then_env_then_default(self, monkeypatch) -> None:
         """config.base_url beats INFISICAL_HOST beats the public default."""
@@ -382,7 +411,7 @@ def _install_fake_provider(
     class _Fake:
         name = "infisical"
 
-        def fetch(self, config):
+        def fetch(self, config, *, timeout):
             if error is not None:
                 return SecretFetchResult.failure("infisical", error)
             return SecretFetchResult(
@@ -647,3 +676,119 @@ class TestUpdateSecretManagerConfigEndpoint:
             json={"provider": "infisical"},
         )
         assert resp.status_code == 404
+
+
+class _RecordingProvider:
+    """Records where and how each fetch ran; ``gate`` holds a fetch until set."""
+
+    name = "infisical"
+
+    def __init__(self, secrets: dict[str, str], gate=None) -> None:
+        self.secrets = secrets
+        self.gate = gate
+        self.calls: list[dict] = []
+
+    def fetch(self, config, *, timeout):
+        import asyncio
+
+        try:
+            asyncio.get_running_loop()
+            on_event_loop = True
+        except RuntimeError:
+            on_event_loop = False
+        self.calls.append({"timeout": timeout, "on_event_loop": on_event_loop})
+        if self.gate is not None:
+            self.gate.wait()
+        return SecretFetchResult(
+            secrets=dict(self.secrets), source="infisical", fetched_at="2026-10-02T00:00:00Z"
+        )
+
+
+def _install_recording_provider(monkeypatch, provider: _RecordingProvider) -> None:
+    from strata.notebook.secret_manager import registry
+
+    monkeypatch.setitem(registry._cache, "infisical", provider)
+
+
+class TestFetchStaysOffTheEventLoop:
+    def test_open_fetches_in_a_worker_thread_with_the_timeout(self, client) -> None:
+        from strata.notebook.secret_manager.provider import SECRET_FETCH_TIMEOUT_SECONDS
+
+        tc, session_id, monkeypatch = client
+        provider = _RecordingProvider({"API_KEY": "sk-1"})
+        _install_recording_provider(monkeypatch, provider)
+        from strata.notebook.routes import get_session_manager
+
+        path = get_session_manager().get_session(session_id).path
+
+        resp = tc.post("/v1/notebooks/open", json={"path": str(path)})
+
+        assert resp.status_code == 200, resp.text
+        assert provider.calls == [{"timeout": SECRET_FETCH_TIMEOUT_SECONDS, "on_event_loop": False}]
+
+    def test_refresh_fetches_in_a_worker_thread(self, client) -> None:
+        tc, session_id, monkeypatch = client
+        provider = _RecordingProvider({"API_KEY": "sk-1"})
+        _install_recording_provider(monkeypatch, provider)
+
+        resp = tc.post(f"/v1/notebooks/{session_id}/secret-manager/refresh")
+
+        assert resp.json()["env"]["API_KEY"] == "sk-1"
+        assert [call["on_event_loop"] for call in provider.calls] == [False]
+
+    def test_a_structural_edit_reuses_the_last_fetch(self, client) -> None:
+        tc, session_id, monkeypatch = client
+        provider = _RecordingProvider({"API_KEY": "sk-1"})
+        _install_recording_provider(monkeypatch, provider)
+        tc.post(f"/v1/notebooks/{session_id}/secret-manager/refresh")
+
+        for _ in range(2):
+            assert tc.post(f"/v1/notebooks/{session_id}/cells", json={}).status_code == 200
+
+        assert len(provider.calls) == 1
+        from strata.notebook.routes import get_session_manager
+
+        session = get_session_manager().get_session(session_id)
+        assert session.notebook_state.env["API_KEY"] == "sk-1"
+        assert session.notebook_state.env_sources["API_KEY"] == "infisical"
+        assert all(cell.env["API_KEY"] == "sk-1" for cell in session.notebook_state.cells)
+
+    def test_changing_the_config_fetches_again(self, client) -> None:
+        tc, session_id, monkeypatch = client
+        provider = _RecordingProvider({"API_KEY": "sk-1"})
+        _install_recording_provider(monkeypatch, provider)
+        tc.post(f"/v1/notebooks/{session_id}/secret-manager/refresh")
+
+        resp = tc.put(
+            f"/v1/notebooks/{session_id}/secret-manager/config",
+            json={"provider": "infisical", "project_id": "other"},
+        )
+
+        assert resp.status_code == 200, resp.text
+        assert len(provider.calls) == 2
+        assert resp.json()["env"]["API_KEY"] == "sk-1"
+
+    async def test_a_silent_provider_is_given_up_on(self, tmp_path, monkeypatch) -> None:
+        import threading
+
+        from strata.notebook.parser import parse_notebook
+        from strata.notebook.secret_manager import provider as provider_module
+        from strata.notebook.session import NotebookSession
+        from strata.notebook.writer import create_notebook
+
+        nb_dir = create_notebook(tmp_path, "Silent Secrets", initialize_environment=False)
+        with open(nb_dir / "notebook.toml", "a", encoding="utf-8") as f:
+            f.write('\n[secret_manager]\nprovider = "infisical"\nproject_id = "p"\n')
+        session = NotebookSession(parse_notebook(nb_dir), nb_dir, fetch_secrets=False)
+        gate = threading.Event()
+        provider = _RecordingProvider({"API_KEY": "sk-1"}, gate=gate)
+        _install_recording_provider(monkeypatch, provider)
+        monkeypatch.setattr(provider_module, "SECRET_FETCH_TIMEOUT_SECONDS", 0.05)
+        try:
+            await session.refresh_secrets_async()
+        finally:
+            # Released only now, so the fetch cannot have answered in time.
+            gate.set()
+
+        assert "did not answer" in (session.notebook_state.env_fetch_error or "")
+        assert "API_KEY" not in session.notebook_state.env
