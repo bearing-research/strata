@@ -31,8 +31,14 @@ Start by getting a worker running on your own machine. This verifies your instal
 **1. Start the worker:**
 
 ```bash
-uv run strata-worker --port 9000
+strata-worker --port 9000
 ```
+
+Run the installed `strata-worker` (for example `.venv/bin/strata-worker`), not
+`uv run strata-worker`: `uv run` stays alive as the worker's parent with
+`STRATA_WORKER_TOKEN` still in its environment, where a cell can read it from
+`/proc/<pid>/environ`. On Linux the worker logs a warning at startup when its
+parent still holds the token.
 
 You should see uvicorn start up:
 
@@ -108,7 +114,7 @@ When the cell runs, the UI shows a pulsing **"dispatching → local-dev"** badge
 A worker runs as many cells at once as it is sent. On a machine several people's cells reach, cap it, and let the worker hand out GPUs itself:
 
 ```bash
-uv run strata-worker --port 9000 --max-concurrent 2 --gpu-slots 2
+strata-worker --port 9000 --max-concurrent 2 --gpu-slots 2
 ```
 
 - **`--max-concurrent N`**: the worker refuses execution number N+1 with `503` and a `Retry-After` header, before downloading any inputs. Unset, it is unlimited.

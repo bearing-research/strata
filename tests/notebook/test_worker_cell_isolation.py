@@ -229,6 +229,45 @@ def test_a_captured_secret_is_gone_from_the_workers_environment_block():
     assert result.stdout.split() == ["worker-bearer-token", "lab-credentials", "False", "False"]
 
 
+def test_a_parent_that_still_holds_the_token_is_found(tmp_path, monkeypatch):
+    """``uv run`` stays alive as the worker's parent with the token in its environment
+    block, where a cell can read it; scrubbing the worker's own block does not reach it.
+    """
+    from strata.notebook import remote_executor
+    from strata.notebook.remote_executor import _CAPTURED_SECRETS, parent_still_holds_secret
+
+    proc = tmp_path / "proc"
+    (proc / "4242").mkdir(parents=True)
+    monkeypatch.setattr(remote_executor.os, "getppid", lambda: 4242)
+    monkeypatch.setitem(_CAPTURED_SECRETS, "STRATA_WORKER_TOKEN", "worker-bearer-token")
+
+    (proc / "4242" / "environ").write_bytes(b"HOME=/h\0STRATA_WORKER_TOKEN=worker-bearer-token\0")
+    assert parent_still_holds_secret("STRATA_WORKER_TOKEN", proc) == 4242
+
+    (proc / "4242" / "environ").write_bytes(b"HOME=/h\0STRATA_WORKER_TOKEN=another\0")
+    assert parent_still_holds_secret("STRATA_WORKER_TOKEN", proc) is None
+    assert parent_still_holds_secret("STRATA_WORKER_TOKEN", tmp_path / "no-proc") is None
+
+
+def test_the_worker_warns_when_its_parent_still_holds_the_token(monkeypatch, caplog):
+    import uvicorn
+
+    from strata.notebook import remote_executor
+
+    monkeypatch.setattr(uvicorn, "run", lambda *args, **kwargs: None)
+    monkeypatch.setattr(remote_executor, "capture_worker_secrets", lambda: None)
+    monkeypatch.setattr(
+        remote_executor,
+        "parent_still_holds_secret",
+        lambda name: 4242 if name == "STRATA_WORKER_TOKEN" else None,
+    )
+
+    with caplog.at_level("WARNING", logger=remote_executor.logger.name):
+        assert remote_executor.main(["--host", "127.0.0.1", "--port", "9"]) == 0
+
+    assert any("parent process (pid 4242)" in r.getMessage() for r in caplog.records)
+
+
 def test_an_allowlist_written_as_json_is_read_the_way_the_server_reads_it(monkeypatch):
     """The validator accepts a JSON array; reading only the comma form would leave no env."""
     from strata.config import StrataConfig
