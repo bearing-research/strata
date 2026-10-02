@@ -7,6 +7,9 @@ connection names. A cell is someone else's code; it gets only what its manifest 
 from __future__ import annotations
 
 import json
+import os
+import subprocess
+import sys
 import tarfile
 from pathlib import Path
 
@@ -198,6 +201,32 @@ def test_the_workers_secrets_leave_the_environment_a_cell_can_reach(monkeypatch)
         assert "AKIA" in worker_secret("STRATA_NOTEBOOK_CREDENTIALS")
     finally:
         _CAPTURED_SECRETS.clear()
+
+
+@pytest.mark.skipif(not Path("/proc/self/environ").exists(), reason="needs /proc")
+def test_a_captured_secret_is_gone_from_the_workers_environment_block():
+    """``/proc/<pid>/environ`` reads the environment the process started with, which
+    unsetting a variable does not change; the value itself has to be overwritten.
+    """
+    script = (
+        "from pathlib import Path\n"
+        "from strata.notebook.remote_executor import capture_worker_secrets, worker_secret\n"
+        "capture_worker_secrets()\n"
+        "block = Path('/proc/self/environ').read_bytes()\n"
+        "token = worker_secret('STRATA_WORKER_TOKEN')\n"
+        "credentials = worker_secret('STRATA_NOTEBOOK_CREDENTIALS')\n"
+        "print(token, credentials, token.encode() in block, credentials.encode() in block)\n"
+    )
+    env = {
+        **os.environ,
+        "STRATA_WORKER_TOKEN": "worker-bearer-token",
+        "STRATA_NOTEBOOK_CREDENTIALS": "lab-credentials",
+    }
+    result = subprocess.run(
+        [sys.executable, "-c", script], env=env, capture_output=True, text=True, check=True
+    )
+
+    assert result.stdout.split() == ["worker-bearer-token", "lab-credentials", "False", "False"]
 
 
 def test_an_allowlist_written_as_json_is_read_the_way_the_server_reads_it(monkeypatch):

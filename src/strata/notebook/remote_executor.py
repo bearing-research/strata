@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import ctypes
 import hmac
 import json
 import logging
@@ -287,17 +288,41 @@ _WORKER_SECRETS = (
 _CAPTURED_SECRETS: dict[str, str] = {}
 
 
+def _scrub_environ_value(name: str) -> None:
+    """Zero the bytes of ``name``'s value in libc's environment block.
+
+    ``/proc/<pid>/environ`` reads the process's original environment from memory,
+    and unsetting a variable leaves those bytes in place.
+    """
+    if sys.platform == "win32":
+        return
+    try:
+        getenv = ctypes.CDLL(None).getenv
+    except (OSError, AttributeError) as exc:
+        logger.warning("Could not scrub worker secrets from the environment block: %s", exc)
+        return
+    getenv.argtypes = [ctypes.c_char_p]
+    getenv.restype = ctypes.c_void_p
+    address = getenv(name.encode())
+    if address:
+        ctypes.memset(address, 0, len(ctypes.string_at(address)))
+
+
 def capture_worker_secrets() -> None:
     """Take the worker's secrets out of the process environment, into memory.
 
     A cell runs as a child under the same uid and could read them from
-    ``/proc/<ppid>/environ``; deleting them leaves nothing to read. Called by the
-    worker entry point, so an in-process app in a test still reads the environment.
+    ``/proc/<ppid>/environ``, so each value is zeroed in the environment block
+    before it is unset. Called by the worker entry point, so an in-process app in a
+    test still reads the environment.
     """
     for name in _WORKER_SECRETS:
-        value = os.environ.pop(name, None)
-        if value is not None:
-            _CAPTURED_SECRETS[name] = value
+        value = os.environ.get(name)
+        if value is None:
+            continue
+        _CAPTURED_SECRETS[name] = value
+        _scrub_environ_value(name)
+        os.environ.pop(name)
 
 
 def worker_secret(name: str) -> str:
