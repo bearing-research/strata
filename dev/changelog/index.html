@@ -3363,31 +3363,58 @@
 exhaustive commit history.</p>
 <p>The authoritative copy of this file lives at <a href="https://github.com/bearing-research/strata/blob/main/CHANGELOG.md"><code>CHANGELOG.md</code></a> in the repo root; this docs page mirrors it. Maintainers: keep the two in sync when editing.</p>
 <h2 id="unreleased">Unreleased<a class="headerlink" href="#unreleased" title="Permanent link">&para;</a></h2>
+<p>The artifact store looks after its own size, Iceberg tables that other engines
+delete from or evolve are read correctly instead of refused, and service mode
+closes several ways a notebook could reach past its own data.</p>
+<p><strong>The store stays bounded.</strong> A personal server now collects results nobody has
+used for a while, least recently used first, and never anything named, pinned,
+published or still needed by something kept. A notebook keeps each cell's
+current value and its last few versions.</p>
+<p><strong>More tables read correctly.</strong> Scans apply merge-on-read deletes (positional
+deletes, deletion vectors and equality deletes) and follow schema changes by
+field id, so tables Spark, Flink and DuckDB write are read as Iceberg defines
+them.</p>
+<p><strong>Service mode is tighter.</strong> SQL cells are confined to their own database and
+lake, package installs are wheels only, outbound requests connect only to the
+address the guard checked, R restores run as the harness user, the server's
+Infisical credentials go only to the operator's host, and the log buffer and a
+worker's token are out of other tenants' and cells' reach.</p>
+<p><strong>Upgrading from 0.8.0:</strong></p>
+<ul>
+<li>Scan caches are rebuilt: the first scan of each table reads from storage.
+  The artifact store's metadata migrates on first start, one way.</li>
+<li>New minimums: pyiceberg 0.12, DuckDB 1.5, sqlglot 30.13; mcp 2.2 with
+  <code>[mcp]</code>; textual-image 0.14 and Pillow 12.1 with <code>[tui]</code>.</li>
+<li>Unnamed <code>materialize</code> results can now be collected in personal mode; name or
+  pin a result to keep it. <code>STRATA_ARTIFACT_GC_MAX_AGE_DAYS</code> is removed and a
+  leftover value is ignored (use <code>STRATA_ARTIFACT_GC_MAX_IDLE_DAYS</code>);
+  <code>garbage_collect(max_age_days=)</code> is now <code>max_idle_days</code>, and a bare
+  <code>POST /v1/artifacts/gc</code> applies the configured retention.</li>
+<li>Nanosecond timestamps in v1 and v2 tables come back as microseconds.</li>
+<li>Service mode: dependencies without a wheel no longer install; guarded
+  outbound connections ignore <code>HTTPS_PROXY</code>; R packages are not added from the
+  notebook where cells are isolated; <code>/v1/logs</code> needs <code>admin:*</code>.</li>
+<li>strata-pool: reading a job needs the <code>X-Strata-Tenant</code> header that
+  submitted it.</li>
+<li><code>/health/ready</code> no longer has a <code>stuck_scans</code> field.</li>
+</ul>
 <h3 id="added">Added<a class="headerlink" href="#added" title="Permanent link">&para;</a></h3>
 <ul>
 <li><strong>The artifact store stays bounded on its own.</strong> A personal server sweeps its
-  store every hour, collecting results unused for 30 days, and the least
-  recently used whenever the store is over 20 GiB (down to 80% of that).
-  Before, every distinct <code>materialize</code> was kept forever, and the existing
-  sweep, which was off by default, could not have collected one anyway: each
-  result is the only version of an id the store made up for it, and the latest
-  version of an id was always kept. Retention now tracks when a version was
-  last used (a cache hit, a read, or a request that names it as an input)
-  rather than when it was made, and knows which ids the store made up, so a
-  notebook's cell outputs, whose latest version is the cell's value, are
-  still kept. Nothing named, aliased, pinned, published, awaiting alias
-  approval or still building is collected, nor anything those, or a
-  notebook's current values, were built from, nor anything used in the last
-  hour; a copy promoted into a store counts as just used. The first sweep
-  runs a minute after the server starts. <code>strata artifact gc</code> runs or
-  previews a sweep without a server, and <code>POST /v1/artifacts/gc</code> takes
-  <code>dry_run</code>. Every limit is a setting: <code>STRATA_ARTIFACT_GC_INTERVAL_SECONDS</code>,
-  <code>_MAX_BYTES</code>, <code>_MAX_IDLE_DAYS</code> and <code>_MIN_IDLE_SECONDS</code>. Service mode sweeps
-  only when an operator sets the interval, and a tenant's cap covers that
-  tenant's own share. A notebook's own store keeps each cell output's current
-  value and its three most recent earlier ones
-  (<code>STRATA_NOTEBOOK_KEEP_SUPERSEDED_VERSIONS</code>), pruned when the server opens
-  the notebook (not while it is held still for a copy).</li>
+  store every hour, collecting results unused for 30 days and, once the store
+  is over 20 GiB, the least recently used down to 80% of that. Use is a cache
+  hit, a read, or a request that names a result as an input. Nothing named,
+  aliased, pinned, published, awaiting alias approval or still building is
+  collected, nor anything those were built from, nor anything used in the last
+  hour. <code>strata artifact gc</code> runs or previews a sweep without a server, and
+  <code>POST /v1/artifacts/gc</code> and the client's <code>garbage_collect</code> take <code>dry_run</code>,
+  <code>max_bytes</code>, <code>max_idle_days</code>, <code>min_idle_seconds</code> and <code>collect_latest</code>. Each
+  limit is a setting (<code>STRATA_ARTIFACT_GC_INTERVAL_SECONDS</code>, <code>_MAX_BYTES</code>,
+  <code>_MAX_IDLE_DAYS</code>, <code>_MIN_IDLE_SECONDS</code>); service mode sweeps only when an
+  operator sets the interval, and a tenant's cap covers its own share. A
+  notebook's store keeps each cell output's current value and its three most
+  recent earlier ones (<code>STRATA_NOTEBOOK_KEEP_SUPERSEDED_VERSIONS</code>), pruned
+  when the server opens the notebook.</li>
 <li><strong>A result can be promoted without a name.</strong> <code>POST
   /v1/notebooks/{id}/artifacts/{aid}/v/{n}/promote</code> without <code>name</code> copies the
   result and its chain into the team store and names nothing, so a platform
@@ -3406,8 +3433,8 @@ exhaustive commit history.</p>
   the delete's partition or across the table for an unpartitioned one. A
   delete file whose key range cannot meet a row group is skipped for it.
   Applying equality deletes holds their keys in memory, so a scan in which a
-  row group would need more than <code>max_equality_delete_rows</code> (10 million by
-  default) is refused while planning, with a message pointing at compaction,
+  row group would need more than <code>STRATA_MAX_EQUALITY_DELETE_ROWS</code> (10 million
+  by default) is refused while planning, with a message pointing at compaction,
   never read partially. A delete file in ORC or Avro, or keyed on a struct
   column, is refused the same way. Keys compare the values the scan returns:
   on a v1 or v2 table a key a file holds in nanoseconds is truncated to
@@ -3422,9 +3449,7 @@ exhaustive commit history.</p>
   struct, list or map column. A column added with a default (format v3) reads
   its default from files that predate it, and an identity-partition column a
   file omits (a Hive-layout file registered with <code>add_files</code>) reads the
-  file's partition value, as pyiceberg reads it. Nanosecond timestamps in a
-  v1 or v2 table, nested ones included, are read at the table's microsecond
-  unit, truncating.</li>
+  file's partition value, as pyiceberg reads it.</li>
 </ul>
 <h3 id="changed">Changed<a class="headerlink" href="#changed" title="Permanent link">&para;</a></h3>
 <ul>
@@ -3434,21 +3459,27 @@ exhaustive commit history.</p>
   Name it or pin it to keep it. <code>STRATA_ARTIFACT_GC_MAX_AGE_DAYS</code> is gone:
   <code>STRATA_ARTIFACT_GC_MAX_IDLE_DAYS</code> counts from a version's last use, and
   <code>garbage_collect</code> (client and route) takes <code>max_idle_days</code> in place of
-  <code>max_age_days</code>.</li>
+  <code>max_age_days</code>; a leftover <code>STRATA_ARTIFACT_GC_MAX_AGE_DAYS</code> is ignored, and
+  a bare <code>POST /v1/artifacts/gc</code> applies the configured retention.</li>
+<li><strong>Nanosecond timestamps in v1 and v2 tables come back as microseconds.</strong>
+  Those formats define timestamps in microseconds, but a file can hold
+  nanoseconds (or INT96), which 0.8.0 returned as <code>timestamp[ns]</code>. They are now
+  read at the table's microsecond unit, truncating, nested ones included.</li>
 <li><strong>Nothing 0.8.0 cached for a scan is reused.</strong> The row-group cache moves to
   a new version directory, the metadata store is discarded and rebuilt, and a
   scan's provenance now includes the schema, so scan artifacts are built
   afresh. 0.8.0 could have cached rows a merge-on-read delete removed, or a
   column's values under another column's name. The first scan of each table
   after upgrading reads from storage. The old <code>v3</code> directory under the cache
-  directory is deleted when the server starts, and the log says so.</li>
+  directory is deleted at startup when it holds nothing but cache entries;
+  anything else is left in place with a warning.</li>
 <li><strong>pyiceberg 0.12 or newer is required.</strong> Before 0.12, pyiceberg misread a
   manifest whose entries leave their snapshot id to be inherited, which is how
   DuckDB writes them, and dropped the delete files those manifests listed.</li>
 <li><strong>The <code>[mcp]</code> extra needs mcp 2.2 or newer.</strong> mcp 2 renamed <code>FastMCP</code> to
   <code>MCPServer</code>, and the notebook's <code>/mcp</code> endpoint now uses it. With mcp 1
-  still installed, <code>/mcp</code> is off after upgrading: the server logs why,
-  naming the module that failed to import, and keeps running without it.</li>
+  still installed, <code>/mcp</code> is off after upgrading: the server logs that the
+  installed mcp is too old and keeps running without it.</li>
 <li><strong>sqlglot 30.13 or newer is required</strong>, the first release that writes
   DuckDB's snapshot clause after a table's alias.</li>
 <li><strong>DuckDB 1.5 or newer is required</strong> (<code>strata-notebook</code>, its <code>sql-duckdb</code>
@@ -3527,7 +3558,28 @@ exhaustive commit history.</p>
 <li><strong>A denied table input is denied before it is planned.</strong> A principal denied
   a table used as a transform input got a 422 naming the table and its
   delete-file paths, or a 400 that let materialize build without checking the
-  ACL. It now gets a 403, or a 404 under <code>STRATA_HIDE_FORBIDDEN_AS_NOT_FOUND</code>.</li>
+  ACL. It now gets a 404 (a 403 with
+  <code>STRATA_HIDE_FORBIDDEN_AS_NOT_FOUND=false</code>), before anything is planned.</li>
+<li><strong>A cell cannot read the worker's token from its parent process.</strong> The
+  worker took <code>STRATA_WORKER_TOKEN</code> and the credential variables out of
+  <code>os.environ</code>, but <code>/proc/&lt;pid&gt;/environ</code> still showed the environment it
+  started with, and on the worker image cells run as the worker's user. The
+  values are now zeroed there too. An app built directly with
+  <code>create_notebook_executor_app()</code>, as in the Modal example, does not do this
+  yet.</li>
+<li><strong>The server's log buffer needs <code>admin:*</code>.</strong> <code>GET /v1/logs</code> and
+  <code>/v1/logs/stream</code> hold every tenant's records and were open to any
+  authenticated principal. Under principal auth they now need <code>admin:*</code>;
+  personal mode is unchanged.</li>
+<li><strong>Secrets fetched from Infisical stay out of <code>notebook.toml</code>.</strong> Saving the
+  Runtime panel sent every row back, and values whose names do not look secret
+  (<code>DATABASE_URL</code>) were written to the committed file and stopped following
+  rotations. An unchanged fetched value is no longer written and keeps its
+  source; an edited one is a manual override as before.</li>
+<li><strong>strata-pool job reads are scoped to their tenant.</strong> <code>GET /v1/jobs/{id}</code>
+  and its <code>/result</code> took no tenant, so any token holder could read another
+  tenant's job by id. They now need the submitting tenant's <code>X-Strata-Tenant</code>
+  and answer 404 for anyone else.</li>
 </ul>
 <h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Permanent link">&para;</a></h3>
 <ul>
@@ -3549,8 +3601,9 @@ exhaustive commit history.</p>
   <code>read_parquet(...)</code> or <code>query_table(...)</code> or a Postgres set-returning
   function, DuckDB's <code>FROM 'file.parquet'</code> (or <code>"file.parquet"</code>, or
   <code>file.parquet</code> unquoted), and BigQuery's wildcard tables and
-  <code>INFORMATION_SCHEMA</code> views name their table only when the query runs, so the default cache could not see it change and kept returning
-  the first result. Such a cell now runs its query every time, its header
+  <code>INFORMATION_SCHEMA</code> views name their table only when the query runs, so
+  the default cache could not see it change and kept returning the first
+  result. Such a cell now runs its query every time, its header
   says why, and its result's content is folded into its provenance, so a
   downstream cell re-runs exactly when the rows changed instead of serving a
   result computed from the old ones. <code># @cache session</code> or <code>ttl</code> opts back
@@ -3579,10 +3632,6 @@ exhaustive commit history.</p>
   nullable, and the scan refused to stream the two as one schema. Every
   column, and every field inside a struct, list or map, now reads at the
   snapshot's nullability.</li>
-<li><strong>Starting the cache no longer deletes a user's <code>v1</code> directory.</strong> On
-  startup the disk cache removed every <code>v&lt;N&gt;</code> directory in <code>cache_dir</code> other
-  than its own, whatever it held. It now removes only trees that contain
-  nothing but cache entries, and leaves anything else with a warning.</li>
 <li><strong>Notebook uv commands act on the notebook's environment.</strong> A server
   started with <code>UV_PROJECT_ENVIRONMENT</code> set passed it to every <code>uv sync</code>,
   <code>add</code>, <code>lock</code> and the <code>uv run</code> that starts a cell, which then acted on the
@@ -3627,6 +3676,23 @@ exhaustive commit history.</p>
   progress, so the check could never fail readiness.</li>
 <li><strong><code>AsyncStrataClient.materialize</code> honors <code>poll_interval</code>.</strong> It polled a
   build every 0.5 s whatever was passed.</li>
+<li><strong>A blanked secret no longer hides the server's value from a cell.</strong>
+  <code>notebook.toml</code> keeps a secret-looking <code>[env]</code> name with an empty value, and
+  a cell saw that empty string in place of a value of the same name in the
+  server's environment until someone filled it in (and a <code>${VAR}</code> in a named
+  credential resolved to it too). An empty secret-looking value is no longer
+  passed on.</li>
+<li><strong><code># @nocache</code> applies to SQL and prompt cells.</strong> Only Python and R cells
+  honoured it, so a SQL cell with <code># @cache forever</code> kept serving its stored
+  result.</li>
+<li><strong><code>@table</code> no longer warns on the forms it accepts.</strong> The diagnostic asked
+  for <code>&lt;warehouse&gt;#&lt;namespace&gt;.&lt;table&gt;</code> even for <code>&lt;catalog&gt;:&lt;namespace&gt;.&lt;table&gt;</code>
+  and <code>&lt;namespace&gt;.&lt;table&gt;</code>, which a cell reads fine.</li>
+<li><strong><code>strata run</code> runs widget cells.</strong> It reported them as skipped with
+  "unsupported language".</li>
+<li><strong><code>environment.yaml</code> import keeps packages whose names start with
+  <code>python</code>.</strong> <code>python-dateutil</code> and the like were dropped as if they were the
+  interpreter pin.</li>
 </ul>
 <h2 id="080-2026-09-27">0.8.0 - 2026-09-27<a class="headerlink" href="#080-2026-09-27" title="Permanent link">&para;</a></h2>
 <p>A notebook stops being one person's machine. This release is about the three
