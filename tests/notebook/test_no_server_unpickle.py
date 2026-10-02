@@ -185,3 +185,25 @@ class TestSqlBinds:
         assert not _server_unpickled(marker)
         assert not result.success
         assert "bind param :evil has unsupported type 'PickledObject'" in (result.error or "")
+
+
+class TestCellTests:
+    @pytest.mark.asyncio
+    async def test_inputs_are_deserialized_in_the_test_process(self, tmp_path):
+        marker = tmp_path / "marker"
+        session = _session(
+            tmp_path,
+            [
+                ("prod", _producer_source(marker), None, "python"),
+                ("c2", "y = evil\n", "prod", "python"),
+            ],
+        )
+        executor = await _run(session, "prod")
+        marker.unlink(missing_ok=True)
+
+        result = await executor.run_cell_tests("c2", "def test_y(cell):\n    assert cell.y\n")
+
+        assert not _server_unpickled(marker)
+        # The load still happens, in the pytest subprocess that runs as the harness user.
+        assert marker.exists()
+        assert result.errored == 0

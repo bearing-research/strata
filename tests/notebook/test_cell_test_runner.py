@@ -16,6 +16,7 @@ from strata.notebook.cell_test_runner import (
     PytestUnavailableError,
     run_cell_tests_in_dir,
 )
+from strata.notebook.serializer import serialize_value
 
 _PY = Path(sys.executable)
 
@@ -30,6 +31,7 @@ def test_pass_and_fail_totals(tmp_path):
             "def test_fail(cell):\n    assert cell.add(1, 2) == 5\n"
         ),
         inputs={},
+        input_dir=tmp_path,
     )
     assert res["passed"] == 1
     assert res["failed"] == 1
@@ -37,12 +39,15 @@ def test_pass_and_fail_totals(tmp_path):
 
 
 def test_inputs_are_injected(tmp_path):
+    # `factor` is an upstream input, not cell-defined; the test process deserializes it.
+    spec = serialize_value(10, tmp_path / "inputs", "factor")
     res = run_cell_tests_in_dir(
         rundir=tmp_path / "run",
         venv_python=_PY,
         cell_source="def scale(x):\n    return x * factor\n",
         test_source="def test_scale(cell):\n    assert cell.scale(3) == 30\n",
-        inputs={"factor": 10},  # `factor` is an upstream input, not cell-defined
+        inputs={"factor": {"content_type": spec["content_type"], "file": spec["file"]}},
+        input_dir=tmp_path / "inputs",
     )
     assert res["passed"] == 1
 
@@ -56,6 +61,7 @@ def test_collection_error_becomes_one_error(tmp_path):
         cell_source="x = 1\n",
         test_source="def test_broken(cell):\n    assert (\n",  # unbalanced paren
         inputs={},
+        input_dir=tmp_path,
     )
     assert res["errored"] == 1
     assert res["passed"] == 0
@@ -71,4 +77,5 @@ def test_pytest_unavailable_raises(tmp_path):
             cell_source="x = 1\n",
             test_source="def test_x(cell):\n    assert True\n",
             inputs={},
+            input_dir=tmp_path,
         )

@@ -42,7 +42,7 @@ def test_revenue_is_units_times_price(cell):
 ```
 
 The cell body runs **once** per test session (in a fixture), with its upstream
-artifacts deserialized and injected - so `cell.sales` is the actual DataFrame
+artifacts deserialized in the test process and injected - so `cell.sales` is the actual DataFrame
 your upstream cell produced, not a mock. If the cell source itself raises, every
 test that requests `cell` reports a clear *setup* error rather than an opaque
 collection failure.

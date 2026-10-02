@@ -1,6 +1,6 @@
 """Run a cell's pytest tests in an isolated run dir.
 
-Stages the cell source, the user's test file and the resolved inputs in a temp
+Stages the cell source, the user's test file and an input manifest in a temp
 dir, then runs ``pytest`` in the notebook venv with the ``cell_test_conftest``
 plugin copied in as ``conftest.py``. Staging the tests under a ``test_*.py``
 name gets native collection and assertion rewriting. Not on the keystroke path.
@@ -9,7 +9,6 @@ name gets native collection and assertion rewriting. Not on the keystroke path.
 from __future__ import annotations
 
 import json
-import pickle
 import shutil
 import subprocess
 from pathlib import Path
@@ -18,6 +17,7 @@ from typing import Any
 from strata.notebook.harness_user import HarnessUser, hand_over, spawn_kwargs
 
 _CONFTEST_TEMPLATE = Path(__file__).parent / "cell_test_conftest.py"
+_SERIALIZER = Path(__file__).parent / "serializer.py"
 
 # Cell tests are quick unit checks; a runaway test must not hang the WS connection.
 _DEFAULT_TIMEOUT_SECONDS = 120.0
@@ -51,11 +51,15 @@ def run_cell_tests_in_dir(
     cell_source: str,
     test_source: str,
     inputs: dict[str, Any],
+    input_dir: Path,
     timeout_seconds: float = _DEFAULT_TIMEOUT_SECONDS,
     env: dict[str, str] | None = None,
     run_as: HarnessUser | None = None,
 ) -> dict[str, Any]:
     """Stage *rundir* and run pytest; return the parsed ``results.json`` dict.
+
+    ``inputs`` maps each upstream variable to its ``{content_type, file}`` spec, the
+    file in *input_dir*. The test process deserializes them: the server never does.
 
     The dict has totals (``passed``/``failed``/``errored``/``skipped``) plus a
     ``tests`` list of ``{name, nodeid, outcome, message}``. ``env`` and ``run_as``
@@ -70,7 +74,8 @@ def run_cell_tests_in_dir(
     rundir.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(_CONFTEST_TEMPLATE, rundir / "conftest.py")
     (rundir / "cell_source.py").write_text(cell_source, encoding="utf-8")
-    (rundir / "inputs.pkl").write_bytes(pickle.dumps(inputs))
+    manifest = {"serializer": str(_SERIALIZER), "input_dir": str(input_dir), "inputs": inputs}
+    (rundir / "inputs.json").write_text(json.dumps(manifest), encoding="utf-8")
     test_file = rundir / "test_cell.py"
     test_file.write_text(test_source, encoding="utf-8")
     hand_over(rundir, run_as)

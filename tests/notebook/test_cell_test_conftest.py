@@ -8,13 +8,15 @@ the introspected diff, not a bare ``AssertionError``.
 from __future__ import annotations
 
 import json
-import pickle
 import shutil
 import subprocess
 import sys
 from pathlib import Path
 
-_CONFTEST_SRC = Path(__file__).resolve().parents[2] / "src/strata/notebook/cell_test_conftest.py"
+from strata.notebook.serializer import serialize_value
+
+_NOTEBOOK_SRC = Path(__file__).resolve().parents[2] / "src/strata/notebook"
+_CONFTEST_SRC = _NOTEBOOK_SRC / "cell_test_conftest.py"
 
 
 def _run(tmp_path: Path, cell_source: str, inputs: dict, test_source: str) -> dict:
@@ -23,7 +25,17 @@ def _run(tmp_path: Path, cell_source: str, inputs: dict, test_source: str) -> di
     rundir.mkdir()
     shutil.copyfile(_CONFTEST_SRC, rundir / "conftest.py")
     (rundir / "cell_source.py").write_text(cell_source)
-    (rundir / "inputs.pkl").write_bytes(pickle.dumps(inputs))
+    input_dir = tmp_path / "inputs"
+    specs = {}
+    for name, value in inputs.items():
+        payload = serialize_value(value, input_dir, name)
+        specs[name] = {"content_type": payload["content_type"], "file": payload["file"]}
+    manifest = {
+        "serializer": str(_NOTEBOOK_SRC / "serializer.py"),
+        "input_dir": str(input_dir),
+        "inputs": specs,
+    }
+    (rundir / "inputs.json").write_text(json.dumps(manifest))
     test_file = rundir / "test_cell.py"
     test_file.write_text(test_source)
 
