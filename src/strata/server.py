@@ -315,19 +315,6 @@ def _is_public_publication_request(request: Request) -> bool:
     return path.startswith("/p/") or path.startswith("/v1/publications/")
 
 
-def _is_public_embed_request(request: Request) -> bool:
-    """Return True for a published artifact's embed card, which any origin may frame.
-
-    Matched on the full path shape, not an ``/embed`` suffix: the SPA catch-all serves
-    ``index.html`` for any path and the frontend is hash-routed, so a suffix match would let
-    any origin frame the live notebook app.
-    """
-    if request.method != "GET":
-        return False
-    parts = [segment for segment in request.url.path.split("/") if segment]
-    return len(parts) == 3 and parts[0] == "p" and parts[2] == "embed"
-
-
 def _deny_build_access() -> None:
     """Raise the configured build access error."""
     state = get_state()
@@ -1098,17 +1085,20 @@ async def frame_ancestors_middleware(request: Request, call_next):
     """Set ``Content-Security-Policy: frame-ancestors`` from ``embed_frame_ancestors``.
 
     Default ``'self'``; listing origins opts into cross-origin embedding, ``*`` allows any.
+    A route that sets its own policy keeps it: the publication embed card allows any origin.
+    Also sets ``X-Content-Type-Options: nosniff``.
     """
     response = await call_next(request)
-    if _is_public_embed_request(request):
-        ancestors = "*"
-    else:
-        origins = list(getattr(_state.config, "embed_frame_ancestors", [])) if _state else []
-        ancestors = "*" if "*" in origins else " ".join(["'self'", *origins])
-    policy = f"frame-ancestors {ancestors}"
-    # Kept: a route serving stored bytes sets its own sandbox policy.
+    origins = list(getattr(_state.config, "embed_frame_ancestors", [])) if _state else []
+    ancestors = "*" if "*" in origins else " ".join(["'self'", *origins])
+    # A route's own policy is kept (stored bytes are sandboxed; the publication embed card
+    # allows any origin); frame-ancestors is added only where that policy has none.
     existing = response.headers.get("Content-Security-Policy")
-    response.headers["Content-Security-Policy"] = f"{existing}; {policy}" if existing else policy
+    if not existing:
+        response.headers["Content-Security-Policy"] = f"frame-ancestors {ancestors}"
+    elif "frame-ancestors" not in existing:
+        response.headers["Content-Security-Policy"] = f"{existing}; frame-ancestors {ancestors}"
+    response.headers["X-Content-Type-Options"] = "nosniff"
     return response
 
 
@@ -2465,22 +2455,19 @@ async def get_stream(stream_id: str, request: Request):
     )
 
 
-def _mount_frontend(application: FastAPI) -> None:
-    """Mount the frontend SPA from the first dist directory that exists.
+def _mount_frontend(application: FastAPI, dist_dir: Path | None = None) -> None:
+    """Mount the frontend SPA from ``dist_dir``, or the first dist directory that exists.
 
     Tries ``src/strata/_frontend/`` (bundled into the wheel at release), then
     ``<repo>/frontend/dist/`` (source installs), then ``<cwd>/frontend/dist/``.
     """
-    candidates = [
-        Path(__file__).resolve().parent / "_frontend",
-        Path(__file__).resolve().parent.parent.parent / "frontend" / "dist",
-        Path.cwd() / "frontend" / "dist",
-    ]
-    dist_dir = None
-    for c in candidates:
-        if (c / "index.html").exists():
-            dist_dir = c
-            break
+    if dist_dir is None:
+        candidates = [
+            Path(__file__).resolve().parent / "_frontend",
+            Path(__file__).resolve().parent.parent.parent / "frontend" / "dist",
+            Path.cwd() / "frontend" / "dist",
+        ]
+        dist_dir = next((c for c in candidates if (c / "index.html").exists()), None)
 
     if dist_dir is None:
         return
@@ -2491,15 +2478,21 @@ def _mount_frontend(application: FastAPI) -> None:
         name="frontend-assets",
     )
 
+    dist_root = dist_dir.resolve()
+    index = dist_root / "index.html"
+
     # SPA fallback: any non-API GET returns index.html
     @application.get("/{full_path:path}", include_in_schema=False)
     async def spa_fallback(full_path: str):
         if full_path.startswith(("v1/", "health", "docs", "openapi")):
             raise HTTPException(status_code=404)
-        file_path = dist_dir / full_path
-        if file_path.is_file():
-            return FileResponse(str(file_path))
-        return FileResponse(str(dist_dir / "index.html"))
+        # An absolute or dot-segment path would otherwise escape the dist and read any file.
+        file_path = (dist_root / full_path).resolve()
+        if not (file_path.is_relative_to(dist_root) and file_path.is_file()):
+            file_path = index
+        # index.html names this build's hashed assets; a cached copy outlives an upgrade.
+        headers = {"Cache-Control": "no-cache"} if file_path == index else None
+        return FileResponse(str(file_path), headers=headers)
 
 
 _mount_frontend(app)

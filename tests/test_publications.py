@@ -476,6 +476,8 @@ class TestTheBytesAreServedAsData:
         assert response.headers["content-disposition"] == "attachment"
         assert response.headers["x-content-type-options"] == "nosniff"
         assert "sandbox" in _csp_directives(response)
+        # The route's own sandbox policy keeps the server's framing rule too.
+        assert "frame-ancestors 'self'" in _csp_directives(response)
 
     @pytest.mark.parametrize(
         ("content_type", "served_as"),
