@@ -1,8 +1,8 @@
 """Glue between ``SessionManager`` and the secret-provider layer.
 
 Keeps the merge precedence between fetched secrets and user-typed env values in
-one place, so session code only calls :func:`apply_secrets_to_notebook_state`
-on open and on refresh.
+one place. Session code fetches on open and on refresh only, and re-merges the
+last fetch with :func:`merge_secrets_into_state` when it reloads.
 """
 
 from __future__ import annotations
@@ -10,7 +10,10 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import TYPE_CHECKING
 
-from strata.notebook.secret_manager.provider import SecretFetchResult
+from strata.notebook.secret_manager.provider import (
+    SECRET_FETCH_TIMEOUT_SECONDS,
+    SecretFetchResult,
+)
 from strata.notebook.secret_manager.registry import get_provider
 from strata.notebook.writer import _is_sensitive_env_key
 
@@ -53,7 +56,9 @@ def unmask_env(submitted: Mapping[str, str], current: Mapping[str, str]) -> dict
     }
 
 
-def fetch_configured_secrets(state: NotebookState) -> SecretFetchResult | None:
+def fetch_configured_secrets(
+    state: NotebookState, *, timeout: float = SECRET_FETCH_TIMEOUT_SECONDS
+) -> SecretFetchResult | None:
     """Return the fetch result for ``state``'s configured provider.
 
     ``None`` when the notebook has no ``[secret_manager]`` block. Never raises: an
@@ -75,23 +80,30 @@ def fetch_configured_secrets(state: NotebookState) -> SecretFetchResult | None:
     except Exception as exc:  # SecretProviderError or anything weirder
         return SecretFetchResult.failure(provider_name, str(exc))
     try:
-        return provider.fetch(dict(config))
+        return provider.fetch(dict(config), timeout=timeout)
     except Exception as exc:
         # The protocol says fetch should not raise, but a buggy provider
         # shouldn't take the session down.
         return SecretFetchResult.failure(provider_name, f"provider raised: {exc}")
 
 
-def apply_secrets_to_notebook_state(state: NotebookState) -> SecretFetchResult | None:
-    """Fetch secrets and merge them into ``state.env`` in place.
+def apply_secrets_to_notebook_state(
+    state: NotebookState, *, timeout: float = SECRET_FETCH_TIMEOUT_SECONDS
+) -> SecretFetchResult | None:
+    """Fetch secrets and merge them into ``state.env`` in place."""
+    result = fetch_configured_secrets(state, timeout=timeout)
+    merge_secrets_into_state(state, result)
+    return result
+
+
+def merge_secrets_into_state(state: NotebookState, result: SecretFetchResult | None) -> None:
+    """Merge a fetch *result* (``None``: no provider) into ``state.env`` in place.
 
     A fetched secret fills a key that is absent, blank (sensitive values are
     blanked on disk), or was filled by the provider last time (so rotation is
     picked up). A non-empty value the user set this session wins. Always stamps
     ``env_sources`` so every key has an origin label for the UI.
     """
-    result = fetch_configured_secrets(state)
-
     # Provider-filled values are the provider's, so a refresh replaces them;
     # otherwise a rotated secret would keep its old value as if set by hand.
     fetched_before = {
@@ -102,7 +114,7 @@ def apply_secrets_to_notebook_state(state: NotebookState) -> SecretFetchResult |
     if result is None:
         state.env_fetch_error = None
         state.env_fetched_at = None
-        return None
+        return
 
     state.env_fetched_at = result.fetched_at
     state.env_fetch_error = result.error
@@ -113,5 +125,3 @@ def apply_secrets_to_notebook_state(state: NotebookState) -> SecretFetchResult |
             state.env[key] = value
             state.env_sources[key] = result.source
         # else: manual override wins.
-
-    return result

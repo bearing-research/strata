@@ -29,7 +29,10 @@ The minimum sequence to render a notebook view:
    directory path. The response carries everything you need to render the UI
    cold - see [Cold-start payload](#cold-start-payload) below. The
    `session_id` in the response is the route parameter for every subsequent
-   call.
+   call. The environment sync (`uv sync`, `renv` restore) runs as an
+   environment job that the open waits for, so cells can run once it
+   returns; sockets already connected to a reopened session see its
+   `environment_job_*` frames.
 
    Alternatively, if you already have a `session_id` from a previous open
    (page refresh case), `GET /v1/notebooks/sessions/{session_id}` returns
@@ -165,6 +168,8 @@ What this means for a client:
   window. The grace constant (`_GRACE_CANCEL_SECONDS` in `ws.py`) is a
   module-level number you can override at startup if you want a different
   default.
+- **Only the run that was going when the last tab left is cancelled.** A run
+  another surface (REST, CLI, MCP) starts during the window is left alone.
 - **Missed deltas are not replayed.** Per-cell deltas emitted while you were
   disconnected (`cell_console` mid-stream, `cell_output_delta`,
   `cell_iteration_progress`, `cascade_progress`) are dropped. On reconnect, send `notebook_sync` and

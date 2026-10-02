@@ -1297,7 +1297,7 @@ async def test_inspect_sessions_closed_when_last_websocket_disconnects(
     assert fake.frames_of("inspect_result")[-1]["payload"]["ok"] is True
 
     # The last disconnect tears down notebook state (zero-grace path).
-    await _tear_down_notebook_state(session.id)
+    await _tear_down_notebook_state(session.id, None)
 
     assert close_counter["count"] == 1
     assert session.id not in _notebook_inspect_managers
@@ -1370,7 +1370,7 @@ async def test_grace_window_expires_drops_state(notebook_session, monkeypatch):
     from strata.notebook.ws import _notebook_connections
 
     _notebook_connections.pop(session.id, None)
-    await _grace_cancel_then_tear_down(session.id, 0.0)
+    await _grace_cancel_then_tear_down(session.id, 0.0, None)
 
     assert close_counter["count"] == 1
     assert session.id not in _notebook_inspect_managers
@@ -1440,7 +1440,7 @@ async def test_grace_window_expiry_cancels_active_execution(notebook_session):
     # No connections remain; run the grace-teardown body directly with a
     # zero wait so the running execution task is cancelled deterministically.
     _notebook_connections.pop(session.id, None)
-    await _grace_cancel_then_tear_down(session.id, 0.0)
+    await _grace_cancel_then_tear_down(session.id, 0.0, task)
 
     assert task.done()
     assert task.cancelled()
@@ -1448,6 +1448,85 @@ async def test_grace_window_expiry_cancels_active_execution(notebook_session):
     # outbound sequence counter lives on it and the session is still open.
     assert _notebook_execution_state[session.id].execution_task is None
     assert _notebook_execution_state[session.id].running_cell is None
+
+
+@pytest.mark.asyncio
+async def test_grace_expiry_spares_a_run_started_after_the_last_disconnect(
+    notebook_session, monkeypatch
+):
+    """A tab closed while idle must not cancel a REST/CLI/MCP run started during the window."""
+    from strata.notebook.ws import (
+        _cleanup_notebook_websocket,
+        _notebook_execution_state,
+        _notebook_grace_tasks,
+        execute_cell_exclusive,
+    )
+
+    _, session = notebook_session
+    grace = 4321.0
+    monkeypatch.setattr("strata.notebook.ws._GRACE_CANCEL_SECONDS", grace)
+    expire = asyncio.Event()
+    real_sleep = asyncio.sleep
+
+    async def gated_sleep(delay, *args, **kwargs):
+        # The grace window ends when the test says so, not on a clock.
+        if delay == grace:
+            await expire.wait()
+            return None
+        return await real_sleep(delay, *args, **kwargs)
+
+    monkeypatch.setattr(asyncio, "sleep", gated_sleep)
+    cell_id = session.notebook_state.cells[0].id
+    release = asyncio.Event()
+
+    async def agent_run(_state):
+        await release.wait()
+        return None
+
+    fake, _ = _make_fake_ws(session)
+    await _cleanup_notebook_websocket(session.id, cast(WebSocket, fake))
+    grace_task = _notebook_grace_tasks[session.id]
+
+    run = asyncio.create_task(
+        execute_cell_exclusive(session, cell_id, session.id, operation=agent_run)
+    )
+    await _wait_until(lambda: _notebook_execution_state[session.id].execution_task is not None)
+    agent_task = _notebook_execution_state[session.id].execution_task
+    assert not grace_task.done()
+
+    expire.set()
+    await asyncio.gather(grace_task, return_exceptions=True)
+
+    assert agent_task is not None and not agent_task.done()
+    assert _notebook_execution_state[session.id].execution_task is agent_task
+    release.set()
+    await run
+    assert not agent_task.cancelled()
+
+
+@pytest.mark.asyncio
+async def test_grace_expiry_cancels_the_run_active_at_the_last_disconnect(
+    notebook_session, monkeypatch
+):
+    from strata.notebook.ws import (
+        _cleanup_notebook_websocket,
+        _ensure_execution_state,
+        _notebook_grace_tasks,
+    )
+
+    _, session = notebook_session
+    monkeypatch.setattr("strata.notebook.ws._GRACE_CANCEL_SECONDS", 0.001)
+
+    fake, _ = _make_fake_ws(session)
+    state = _ensure_execution_state(session.id)
+    task = asyncio.create_task(asyncio.sleep(60))
+    state.execution_task = task
+
+    await _cleanup_notebook_websocket(session.id, cast(WebSocket, fake))
+    await asyncio.gather(_notebook_grace_tasks[session.id], return_exceptions=True)
+
+    assert task.cancelled()
+    assert state.execution_task is None
 
 
 @pytest.mark.asyncio
@@ -1478,7 +1557,7 @@ async def test_last_websocket_disconnect_cancels_running_execution(notebook_sess
     await _wait_until(entered.is_set)
 
     # Zero-grace teardown cancels the in-flight execution and drops state.
-    await _tear_down_notebook_state(session.id)
+    await _tear_down_notebook_state(session.id, task)
 
     assert cancelled.is_set()
     assert _notebook_execution_state[session.id].execution_task is None

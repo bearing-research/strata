@@ -837,8 +837,31 @@ async def open_notebook(req: OpenNotebookRequest, request: Request) -> JSONRespo
             session = _session_manager.open_notebook(
                 notebook_path,
                 reuse_existing=_reuse_open_session_by_path(),
+                defer_initial_venv_sync=True,
                 timing=timing,
             )
+        with timing.phase("session_secrets"):
+            await session.refresh_secrets_async()
+        # ``uv sync`` and the ``renv`` restore run as an environment job, off the event
+        # loop. Awaited, so a client can run cells as soon as open returns.
+        if (
+            session.environment_sync_state == "pending"
+            and not session.has_active_environment_mutation()
+        ):
+            with timing.phase("session_env_sync"):
+                try:
+                    await session.submit_environment_job(action="sync")
+                except Exception as exc:
+                    logger.exception("Failed to start the environment sync for %s", notebook_path)
+                    session.environment_sync_state = "failed"
+                    session.environment_sync_error = (
+                        f"Failed to start notebook environment sync: {exc}"
+                    )
+                    session.environment_sync_notice = None
+                job_task = session.wait_for_environment_job_task()
+                if job_task is not None:
+                    # Shielded: a client that hangs up must not cancel the sync.
+                    await asyncio.shield(job_task)
 
         with timing.phase("serialize"):
             data = session.serialize_notebook_state()
@@ -1110,6 +1133,8 @@ async def import_jupyter_notebook(
             defer_initial_venv_sync=True,
             timing=timing,
         )
+    with timing.phase("session_secrets"):
+        await session.refresh_secrets_async()
 
     with timing.phase("environment_job_submit"):
         try:
@@ -1249,6 +1274,8 @@ async def import_snapshot_bundle(
             defer_initial_venv_sync=True,
             timing=timing,
         )
+    with timing.phase("session_secrets"):
+        await session.refresh_secrets_async()
 
     with timing.phase("environment_job_submit"):
         try:
@@ -2693,6 +2720,7 @@ async def update_notebook_secret_manager_config(
         config = req.model_dump(exclude_none=True)
         update_notebook_secret_manager(session.path, config)
         session.reload()
+        await session.refresh_secrets_async()
         # Runtime-panel keys are blanked on disk; restore in-memory values for keys
         # the fetch isn't replacing.
         for cell in session.notebook_state.cells:
@@ -2721,7 +2749,7 @@ async def refresh_notebook_secret_manager(notebook_id: str, session: SessionDep)
     ``env_fetch_error``.
     """
     try:
-        session.refresh_secrets()
+        await session.refresh_secrets_async()
         # So the executor picks up rotated values immediately.
         for cell in session.notebook_state.cells:
             resolved = dict(session.notebook_state.env)

@@ -17,7 +17,11 @@ import os
 from typing import Any
 
 from strata.notebook.harness_user import running_server_config
-from strata.notebook.secret_manager.provider import SecretFetchResult, _now_iso
+from strata.notebook.secret_manager.provider import (
+    SECRET_FETCH_TIMEOUT_SECONDS,
+    SecretFetchResult,
+    _now_iso,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +35,9 @@ class InfisicalProvider:
 
     name = "infisical"
 
-    def fetch(self, config: dict[str, Any]) -> SecretFetchResult:
+    def fetch(
+        self, config: dict[str, Any], *, timeout: float = SECRET_FETCH_TIMEOUT_SECONDS
+    ) -> SecretFetchResult:
         project_id = config.get("project_id") or os.environ.get("INFISICAL_PROJECT_ID")
         if not project_id:
             return SecretFetchResult.failure(
@@ -84,6 +90,11 @@ class InfisicalProvider:
             )
 
         client = InfisicalSDKClient(host=host)
+        # The SDK sets no timeout, so a host that accepts and never answers holds the
+        # fetch forever.
+        adapter = _timeout_adapter(timeout)
+        client.api.session.mount("http://", adapter)
+        client.api.session.mount("https://", adapter)
         try:
             if client_id and client_secret:
                 client.auth.universal_auth.login(
@@ -123,3 +134,22 @@ class InfisicalProvider:
             fetched_at=_now_iso(),
             error=None,
         )
+
+
+def _timeout_adapter(timeout: float) -> Any:
+    """A ``requests`` adapter that gives a request sent without a timeout *timeout*.
+
+    Built on call so ``requests`` loads only when a notebook fetches secrets.
+    """
+    from requests.adapters import HTTPAdapter
+
+    class TimeoutAdapter(HTTPAdapter):
+        def send(self, request, stream=False, timeout=None, verify=True, cert=None, proxies=None):
+            if timeout is None:
+                timeout = default_timeout
+            return super().send(
+                request, stream=stream, timeout=timeout, verify=verify, cert=cert, proxies=proxies
+            )
+
+    default_timeout = timeout
+    return TimeoutAdapter()

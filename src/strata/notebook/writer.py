@@ -8,7 +8,6 @@ import os
 import re
 import shutil
 import subprocess
-import tempfile
 import time
 import tomllib
 import uuid
@@ -16,7 +15,7 @@ from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
 from importlib.metadata import PackageNotFoundError, metadata
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, BinaryIO
 
 import filelock
 import tomli_w
@@ -95,23 +94,39 @@ def _dump_notebook_toml(data: dict[str, Any], fp: Any) -> None:
                 tomli_w.dump(nested_value, fp)
 
 
-def _write_notebook_toml_atomic(notebook_toml_path: Path, toml_data: dict[str, Any]) -> None:
-    """Serialize *toml_data* and atomically replace ``notebook.toml``.
+def _replace_file_atomically(path: Path, write: Callable[[BinaryIO], Any]) -> None:
+    """Write *path* through *write* into a temp sibling, fsync it, then ``os.replace`` it.
 
-    Writes a temp sibling and ``os.replace``s it, so a crash mid-write cannot
-    leave a truncated file (losing the cell list and orphaning artifacts).
+    A crash or a full disk mid-write leaves the previous file intact instead of
+    truncated.
     """
-    fd, tmp_path = tempfile.mkstemp(
-        dir=str(notebook_toml_path.parent), prefix=".notebook.toml.", suffix=".tmp"
-    )
+    tmp_path = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
     try:
-        with os.fdopen(fd, "wb") as f:
-            _dump_notebook_toml(toml_data, f)
-        os.replace(tmp_path, notebook_toml_path)
+        with open(tmp_path, "xb") as f:
+            # Keep a mode the user narrowed (e.g. a notebook.toml holding an [ai] api_key).
+            with contextlib.suppress(FileNotFoundError):
+                os.chmod(tmp_path, path.stat().st_mode & 0o7777)
+            write(f)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_path, path)
     except BaseException:
         with contextlib.suppress(FileNotFoundError):
             os.unlink(tmp_path)
         raise
+
+
+def _write_text_atomic(path: Path, text: str) -> None:
+    """Atomically replace *path* with UTF-8 *text*."""
+    _replace_file_atomically(path, lambda f: f.write(text.encode("utf-8")))
+
+
+def _write_notebook_toml_atomic(notebook_toml_path: Path, toml_data: dict[str, Any]) -> None:
+    """Serialize *toml_data* and atomically replace ``notebook.toml``.
+
+    A truncated file would lose the cell list and orphan artifacts.
+    """
+    _replace_file_atomically(notebook_toml_path, lambda f: _dump_notebook_toml(toml_data, f))
 
 
 _SENSITIVE_KEY_PATTERNS = ("KEY", "SECRET", "TOKEN", "PASSWORD", "CREDENTIAL")
@@ -298,8 +313,7 @@ def write_cell(notebook_dir: Path, cell_id: str, source: str, author: str | None
     cell_file = cells_dir / cell_meta["file"]
     cell_file.parent.mkdir(parents=True, exist_ok=True)
 
-    with open(cell_file, "w", encoding="utf-8") as f:
-        f.write(source)
+    _write_text_atomic(cell_file, source)
 
     if author and cell_meta.get("updated_by") != author:
         # Through the helper, which re-reads: rewriting the snapshot loaded above would
@@ -341,8 +355,7 @@ def write_cell_tests(notebook_dir: Path, cell_id: str, test_source: str) -> None
 
     if test_source.strip():
         cells_dir.mkdir(exist_ok=True)
-        with open(test_file, "w", encoding="utf-8") as f:
-            f.write(test_source)
+        _write_text_atomic(test_file, test_source)
     elif test_file.exists():
         test_file.unlink()
 
@@ -1000,7 +1013,7 @@ def update_requires_python(notebook_dir: Path, new_minor: str) -> str:
         return old_spec
 
     updated = text[: match.start()] + new_line + text[match.end() :]
-    pyproject_path.write_text(updated, encoding="utf-8")
+    _write_text_atomic(pyproject_path, updated)
     return old_spec
 
 
@@ -1362,11 +1375,9 @@ def update_cell_console_output(
     if stdout or stderr:
         import json
 
-        with open(console_file, "w", encoding="utf-8") as f:
-            json.dump(
-                {"stdout": stdout[:max_len], "stderr": stderr[:max_len]},
-                f,
-            )
+        _write_text_atomic(
+            console_file, json.dumps({"stdout": stdout[:max_len], "stderr": stderr[:max_len]})
+        )
     elif console_file.exists():
         console_file.unlink()
 

@@ -97,6 +97,7 @@ if TYPE_CHECKING:
     from strata.artifact_store import ArtifactVersion
     from strata.notebook.artifact_integration import NotebookArtifactManager
     from strata.notebook.pool import WarmProcessPool
+    from strata.notebook.secret_manager import SecretFetchResult
 
 logger = logging.getLogger(__name__)
 _ENVIRONMENT_JOB_HISTORY_LIMIT = 8
@@ -244,7 +245,8 @@ class EnvironmentJobSnapshot:
 class NotebookSession:
     """Holds state for one open notebook."""
 
-    def __init__(self, notebook_state: NotebookState, path: Path):
+    def __init__(self, notebook_state: NotebookState, path: Path, *, fetch_secrets: bool = True):
+        """``fetch_secrets=False`` leaves the first fetch to :meth:`refresh_secrets_async`."""
         from strata.notebook.env_backend import EnvironmentBackend, get_backend
 
         self.id: str = str(uuid.uuid4())
@@ -307,31 +309,76 @@ class NotebookSession:
         self._synchronous_environment_mutation: str | None = None
         self._load_environment_job_history()
 
+        # The last secret fetch and the ``[secret_manager]`` config it was made for.
+        self._secret_fetch: tuple[dict[str, Any], SecretFetchResult | None] | None = None
+
         self._analyze_and_build_dag()
         self._run_annotation_validation()
         # Merge manager secrets into env before cells see it.
-        self._apply_configured_secrets()
+        if fetch_secrets:
+            self.refresh_secrets()
+        else:
+            self._merge_secrets()
 
-    def _apply_configured_secrets(self) -> None:
-        """Fetch and merge secrets from the configured provider, if any.
+    def _merge_secrets(self) -> None:
+        """Merge the last secret fetch into env, unless ``[secret_manager]`` changed since.
 
         Updates ``notebook_state.env`` and the ``env_sources`` / ``env_fetch_error`` /
-        ``env_fetched_at`` fields in place; with no ``[secret_manager]`` block every key
-        is still stamped ``manual``. Mirrors the env into each cell's resolved env,
-        which the executor reads.
+        ``env_fetched_at`` fields in place; with no fetch every key is stamped
+        ``manual``. Mirrors the env into each cell's resolved env, which the executor
+        reads. A reload lands here rather than refetching: a fetch is a network call,
+        so it happens on open and on refresh only.
         """
-        from strata.notebook.secret_manager import apply_secrets_to_notebook_state
+        from strata.notebook.secret_manager.session_integration import merge_secrets_into_state
 
-        apply_secrets_to_notebook_state(self.notebook_state)
+        result = None
+        if self._secret_fetch is not None:
+            config, fetched = self._secret_fetch
+            if config == self.notebook_state.secret_manager_config:
+                result = fetched
+        merge_secrets_into_state(self.notebook_state, result)
         # Preserve cell-level overrides, as update_notebook_env_endpoint does.
         for cell in self.notebook_state.cells:
             resolved = dict(self.notebook_state.env)
             resolved.update(cell.env_overrides or {})
             cell.env = resolved
 
-    def refresh_secrets(self):
-        """Re-fetch secrets and re-merge into env (the Refresh button)."""
-        self._apply_configured_secrets()
+    def refresh_secrets(self) -> None:
+        """Re-fetch secrets and re-merge into env, blocking; servers use the async form."""
+        from strata.notebook.secret_manager import fetch_configured_secrets
+
+        config = dict(self.notebook_state.secret_manager_config)
+        self._secret_fetch = (config, fetch_configured_secrets(self.notebook_state))
+        self._merge_secrets()
+
+    async def refresh_secrets_async(self) -> None:
+        """Re-fetch secrets in a worker thread and re-merge into env (the Refresh button).
+
+        Gives up after ``SECRET_FETCH_TIMEOUT_SECONDS`` and records that as the fetch
+        error. Recomputes staleness when the merge changed a cell's env, since a
+        referenced secret enters provenance.
+        """
+        from strata.notebook.secret_manager import SecretFetchResult, fetch_configured_secrets
+        from strata.notebook.secret_manager.provider import SECRET_FETCH_TIMEOUT_SECONDS
+
+        config = dict(self.notebook_state.secret_manager_config)
+        try:
+            result = await asyncio.wait_for(
+                asyncio.to_thread(fetch_configured_secrets, self.notebook_state),
+                SECRET_FETCH_TIMEOUT_SECONDS,
+            )
+        except TimeoutError:
+            result = SecretFetchResult.failure(
+                str(config.get("provider") or ""),
+                f"The secret manager did not answer within {SECRET_FETCH_TIMEOUT_SECONDS:g}s.",
+            )
+        envs_before = [cell.env for cell in self.notebook_state.cells]
+        # Recorded against the config it used, so a reload that changed the config
+        # meanwhile does not merge it.
+        self._secret_fetch = (config, result)
+        self._merge_secrets()
+        if [cell.env for cell in self.notebook_state.cells] != envs_before:
+            await self.compute_staleness_async()
 
     def _run_annotation_validation(self) -> None:
         """Validate annotations across all cells (on open/reload only)."""
@@ -492,7 +539,7 @@ class NotebookSession:
         self.notebook_state = parse_notebook(self.path)
         self._analyze_and_build_dag()
         self._run_annotation_validation()
-        self._apply_configured_secrets()
+        self._merge_secrets()
         # Restore ``last_provenance_hash`` *before* computing staleness, or every cell
         # falls back to IDLE and none can be marked STALE.
         self._restore_execution_history(previous_cells)
@@ -2323,33 +2370,14 @@ class NotebookSession:
         clears ``sync_error``; failure records the error but keeps the last-good fields.
         State lives in ``runtime.json``, so reopens never churn ``notebook.toml``.
         """
-        lockfile = self.path / "renv.lock"
-        if not lockfile.exists():
+        if not (self.path / "renv.lock").exists():
             # Python-only (or pre-init R): clear stale R state so a removed lockfile leaves
             # no phantom hash or error.
             self._clear_r_runtime_if_present()
             return
 
-        try:
-            lock_bytes = lockfile.read_bytes()
-        except OSError as exc:
-            logger.warning("Could not read renv.lock to hash: %s", exc)
-            return
-        lock_hash = hashlib.sha256(lock_bytes).hexdigest()
-
-        previous = load_runtime_state(self.path).r
-        if (
-            previous.lock_hash == lock_hash
-            and not previous.sync_error
-            and self._renv_library_present()
-        ):
-            # Library matches the lockfile, last sync succeeded and the library dir still
-            # exists: skip the ~1-2s Rscript spawn (this fires on every reopen).
-            logger.debug(
-                "renv sync skipped for %s — lockfile hash unchanged + library present (%s)",
-                self.path,
-                lock_hash[:12],
-            )
+        lock_hash = self._renv_restore_due()
+        if lock_hash is None:
             return
 
         started = _time.perf_counter()
@@ -2376,6 +2404,37 @@ class NotebookSession:
             last_synced_at=int(_time.time() * 1000),
             r_version=self._probe_r_version(),
         )
+
+    def _renv_restore_due(self) -> str | None:
+        """The ``renv.lock`` hash when the R library needs a restore, else ``None``.
+
+        ``None`` too without a readable ``renv.lock``.
+        """
+        lockfile = self.path / "renv.lock"
+        try:
+            lock_bytes = lockfile.read_bytes()
+        except FileNotFoundError:
+            return None
+        except OSError as exc:
+            logger.warning("Could not read renv.lock to hash: %s", exc)
+            return None
+        lock_hash = hashlib.sha256(lock_bytes).hexdigest()
+
+        previous = load_runtime_state(self.path).r
+        if (
+            previous.lock_hash == lock_hash
+            and not previous.sync_error
+            and self._renv_library_present()
+        ):
+            # Library matches the lockfile, last sync succeeded and the library dir still
+            # exists: skip the ~1-2s Rscript spawn (this fires on every reopen).
+            logger.debug(
+                "renv sync skipped for %s — lockfile hash unchanged + library present (%s)",
+                self.path,
+                lock_hash[:12],
+            )
+            return None
+        return lock_hash
 
     def _renv_library_present(self) -> bool:
         """Whether the project's renv library exists *and* is non-empty.
@@ -3149,6 +3208,11 @@ class NotebookSession:
             result.success,
             duration_ms=result.operation_log.duration_ms or 0,
         )
+        # No-op without ``renv.lock``; R restores whatever uv did, as an open did inline.
+        try:
+            await asyncio.to_thread(self.ensure_renv_synced)
+        except Exception as exc:
+            logger.warning("Failed to sync renv: %s", exc)
         if not result.success:
             raise RuntimeError(result.error or "uv sync failed")
 
@@ -3388,8 +3452,9 @@ class SessionManager:
         Args:
             skip_initial_venv_sync: Reuse an existing venv and only refresh
                 lightweight runtime metadata on first open.
-            defer_initial_venv_sync: Mark the environment pending background
-                initialization instead of syncing during open.
+            defer_initial_venv_sync: Sync nothing during open: when the environment
+                needs a ``uv sync`` or ``renv`` restore, mark it pending for the caller
+                to run as an environment job.
             reuse_existing: Return an already-open session for the same path.
             timing: Request timing recorder for internal phases.
         """
@@ -3405,6 +3470,8 @@ class SessionManager:
                     existing.mark_environment_pending()
                     existing.touch()
                     return existing
+                # A reused session may have been open for days; prune as a fresh open does.
+                _prune_artifacts_in_background(existing)
                 if timing is None:
                     existing.reload()
                 else:
@@ -3416,6 +3483,14 @@ class SessionManager:
                     phase, prepare = "session_env_sync", existing.ensure_venv_synced
                 else:
                     phase, prepare = "session_env_refresh", existing.refresh_environment_runtime
+                if defer_initial_venv_sync and (
+                    phase == "session_env_sync"
+                    or not (existing.path / ".venv" / "bin" / "python").exists()
+                    or existing._renv_restore_due() is not None
+                ):
+                    existing.mark_environment_pending()
+                    existing.touch()
+                    return existing
                 try:
                     if timing is None:
                         prepare()
@@ -3442,7 +3517,8 @@ class SessionManager:
         else:
             with timing.phase("session_parse"):
                 notebook_state = parse_notebook(Path(directory))
-        session = NotebookSession(notebook_state, Path(directory))
+        # The caller fetches secrets with ``refresh_secrets_async``, off the event loop.
+        session = NotebookSession(notebook_state, Path(directory), fetch_secrets=False)
         _prune_artifacts_in_background(session)
 
         # A fresh notebook may already have a synced .venv from create_notebook(), so
@@ -3466,15 +3542,17 @@ class SessionManager:
             # The notebook still opens; it just can't execute cells.
             logger.warning("Failed to sync venv: %s", e)
 
-        # No-op without ``renv.lock``. A failed R sync doesn't block opening.
-        try:
-            if timing is None:
-                session.ensure_renv_synced()
-            else:
-                with timing.phase("session_renv_sync"):
+        # No-op without ``renv.lock``. A failed R sync doesn't block opening. Deferred,
+        # the environment job restores it.
+        if not defer_initial_venv_sync:
+            try:
+                if timing is None:
                     session.ensure_renv_synced()
-        except Exception as e:
-            logger.warning("Failed to sync renv: %s", e)
+                else:
+                    with timing.phase("session_renv_sync"):
+                        session.ensure_renv_synced()
+            except Exception as e:
+                logger.warning("Failed to sync renv: %s", e)
 
         try:
             if session._should_start_warm_pool():
