@@ -463,6 +463,11 @@ def _add_import_staging(conn: StoreConnection, dialect: SqlDialect) -> None:
 # recorded time can be this far behind the last real use.
 _USE_RESOLUTION_SECONDS = 300.0
 
+# Versions garbage_collect deletes per transaction, and how long it leaves SQLite's write
+# lock free between them.
+_GC_DELETE_BATCH = 1000
+_GC_BATCH_PAUSE_SECONDS = 0.1
+
 # How long a temp file goes untouched before a sweep takes it for a dead write's.
 _ABANDONED_WRITE_SECONDS = 3600.0
 
@@ -4135,7 +4140,15 @@ class ArtifactStore:
             # 'ready' rows whose blob is gone after a crash or a raising backend, a corrupt store;
             # losing a blob whose row is gone only wastes bytes.
             collected: list[tuple[str, int]] = []
-            for row in chosen.values():
+            for position, row in enumerate(chosen.values()):
+                # Committed in batches: one transaction over a large sweep holds SQLite's write
+                # lock long enough to stall every writer behind it.
+                if position and position % _GC_DELETE_BATCH == 0:
+                    conn.commit()
+                    if self._dialect.name == "sqlite":
+                        # A waiting writer polls the lock (up to every 100 ms) rather than
+                        # queueing, so it only gets in if the lock stays free that long.
+                        time.sleep(_GC_BATCH_PAUSE_SECONDS)
                 artifact_id, version, byte_size = row["id"], row["version"], row["byte_size"] or 0
 
                 # Re-checked here, not trusted from the SELECT: a hit or a new hold during the

@@ -345,6 +345,44 @@ class TestWhatIsCollected:
         assert _exists(store, key)
         assert store.read_blob(*key) == b"x" * 100
 
+    def test_a_large_sweep_commits_in_batches(self, store, monkeypatch):
+        """One transaction over a 100k-row sweep held SQLite's write lock for seconds, and every
+        create_artifact waited behind it.
+        """
+        import strata.artifact_store as artifact_store_module
+
+        monkeypatch.setattr(artifact_store_module, "_GC_DELETE_BATCH", 2)
+        monkeypatch.setattr(artifact_store_module, "_GC_BATCH_PAUSE_SECONDS", 0.0)
+        keys = [_ready(store) for _ in range(5)]
+        for key in keys:
+            _last_used(store, key, 40 * DAY)
+        real = store._get_connection
+        deletes_per_commit: list[int] = []
+
+        class Counting:
+            def __init__(self, conn):
+                self._conn = conn
+                self._deletes = 0
+
+            def execute(self, sql, *args):
+                if sql.strip().startswith("DELETE FROM artifact_versions"):
+                    self._deletes += 1
+                return self._conn.execute(sql, *args)
+
+            def commit(self):
+                deletes_per_commit.append(self._deletes)
+                self._deletes = 0
+                self._conn.commit()
+
+            def __getattr__(self, name):
+                return getattr(self._conn, name)
+
+        monkeypatch.setattr(store, "_get_connection", lambda: Counting(real()))
+
+        assert store.garbage_collect(max_idle_days=30)["deleted_count"] == 5
+        assert sum(deletes_per_commit) == 5
+        assert max(deletes_per_commit) == 2
+
     def test_a_dry_run_names_what_would_go_and_deletes_nothing(self, store):
         idle = _ready(store)
         _last_used(store, idle, 40 * DAY)
