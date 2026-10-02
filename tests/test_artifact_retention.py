@@ -308,6 +308,37 @@ class TestWhatIsCollected:
         assert not _exists(store, (artifact_id, 1))
         assert not _exists(store, (artifact_id, 2))
 
+    @pytest.mark.parametrize("meanwhile", ["hit", "pin", "alias"])
+    def test_a_use_or_hold_during_the_sweep_keeps_the_version(self, store, monkeypatch, meanwhile):
+        """The sweep chooses, walks the protected chains, then deletes; whatever lands in between
+        must count, or a cache hit is handed a version whose bytes are about to go.
+        """
+        key = _ready(store)
+        _last_used(store, key, 40 * DAY)
+        provenance = store.get_artifact(*key).provenance_hash
+        chosen_then = ArtifactStore._without_version_gaps
+
+        def act_after_choosing(conn, chosen):
+            if meanwhile == "hit":
+                store.find_by_provenance(provenance)
+            elif meanwhile == "pin":
+                store.pin_artifact(*key, "review")
+            else:
+                store.set_name("model", *key)
+                store.set_alias("model", "champion", *key)
+                store.delete_name("model")
+            return chosen_then(conn, chosen)
+
+        monkeypatch.setattr(
+            ArtifactStore, "_without_version_gaps", staticmethod(act_after_choosing)
+        )
+
+        result = store.garbage_collect(max_idle_days=30, min_idle_seconds=3600)
+
+        assert result["deleted_count"] == 0
+        assert _exists(store, key)
+        assert store.read_blob(*key) == b"x" * 100
+
     def test_a_dry_run_names_what_would_go_and_deletes_nothing(self, store):
         idle = _ready(store)
         _last_used(store, idle, 40 * DAY)

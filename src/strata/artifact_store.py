@@ -4052,6 +4052,32 @@ class ArtifactStore:
             for row in chosen.values():
                 artifact_id, version, byte_size = row["id"], row["version"], row["byte_size"] or 0
 
+                # Re-checked here, not trusted from the SELECT: a hit or a new hold during the
+                # sweep keeps the version. The no-op UPDATE also locks the row, so a use cannot
+                # land between this check and the DELETE.
+                claimed = conn.execute(
+                    """
+                    UPDATE artifact_versions SET state = state
+                    WHERE id = ? AND version = ? AND COALESCE(last_used_at, created_at) <= ?
+                      AND NOT EXISTS (SELECT 1 FROM artifact_names n
+                                      WHERE n.artifact_id = ? AND n.version = ?)
+                      AND NOT EXISTS (SELECT 1 FROM artifact_aliases a
+                                      WHERE a.artifact_id = ? AND a.version = ?)
+                      AND NOT EXISTS (SELECT 1 FROM artifact_pins p
+                                      WHERE p.artifact_id = ? AND p.version = ?)
+                      AND NOT EXISTS (SELECT 1 FROM artifact_publications pub
+                                      WHERE pub.artifact_id = ? AND pub.version = ?)
+                    """,
+                    (artifact_id, version, row["used"], *(artifact_id, version) * 4),
+                )
+                if claimed.rowcount == 0:
+                    logger.info(
+                        "garbage_collect: keeping %s@v=%d, used or held since it was selected.",
+                        artifact_id,
+                        version,
+                    )
+                    continue
+
                 self._delete_version_children(conn, artifact_id, version)
                 try:
                     conn.execute(

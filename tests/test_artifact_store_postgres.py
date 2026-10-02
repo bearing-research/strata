@@ -355,6 +355,29 @@ class TestGarbageCollection:
             conn.close()
         assert row["last_used_at"] == pytest.approx(time.time(), abs=60)
 
+    def test_a_hit_during_the_sweep_keeps_the_version(self, store, monkeypatch):
+        """Another node's cache hit commits while this sweep is between choosing and deleting."""
+        artifact = "0b6f2a4e-6d1a-4c0e-9b1e-2f8d6a3c1e03"
+        self._ready(store, artifact, "prov-hit", minted=True)
+        self._last_used(store, artifact, 7200)
+        chosen_then = ArtifactStore._without_version_gaps
+
+        def hit_after_choosing(conn, chosen):
+            # Its own thread, so its own pooled connection and transaction.
+            hit = threading.Thread(target=store.find_by_provenance, args=("prov-hit",))
+            hit.start()
+            hit.join()
+            return chosen_then(conn, chosen)
+
+        monkeypatch.setattr(
+            ArtifactStore, "_without_version_gaps", staticmethod(hit_after_choosing)
+        )
+
+        result = store.garbage_collect(max_idle_days=0, min_idle_seconds=3600)
+
+        assert result["deleted_count"] == 0
+        assert store.get_artifact(artifact, 1) is not None
+
 
 class TestConnectionPool:
     """A bounded pool is only safe here because acquisition is re-entrant."""
