@@ -3617,6 +3617,11 @@ It appears in the <a href="../../core/registry/#in-the-notebook-the-registry-das
 <td>Total attempts for the validate-and-retry loop (1 initial + N−1 retries)</td>
 <td><code>3</code></td>
 </tr>
+<tr>
+<td><code># @nocache</code></td>
+<td>Call the model on every run; never serve a cache hit</td>
+<td>Cache on</td>
+</tr>
 </tbody>
 </table>
 <p>Example using several at once:</p>
@@ -4037,6 +4042,10 @@ database's rows.</p>
 <tr>
 <td><code># @cache &lt;policy&gt;</code></td>
 <td>Override the default <code>fingerprint</code> cache policy</td>
+</tr>
+<tr>
+<td><code># @nocache</code></td>
+<td>Always re-execute; wins over any <code># @cache</code> policy</td>
 </tr>
 <tr>
 <td><code># @name &lt;identifier&gt;</code></td>

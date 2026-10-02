@@ -3215,9 +3215,10 @@ wrong for a cell whose <em>point</em> is a side effect or fresh value:</p>
 <li>reads the clock, <code>random</code>, a live API: you want a <strong>fresh value</strong> each run.</li>
 </ul>
 <p><code># @nocache</code> opts such a cell out. <code># @nocache off</code> re-enables caching (useful to
-override a default you set elsewhere). It applies to every language and sits
-alongside the read-write-<code>@mount</code> rule, which already forces re-execution for
-the same reason.</p>
+override a default you set elsewhere). It applies to every language (on a SQL
+cell it wins over any <code># @cache</code> policy, <code>forever</code> included) and sits alongside
+the read-write-<code>@mount</code> rule, which already forces re-execution for the same
+reason.</p>
 <p>A cell that reads a <code>@nocache</code> (or read-write-mount) cell's value is keyed on
 the bytes that value stored rather than on the producer's provenance, which is
 the same on every run. A new value re-runs the consumer; a run that produces the
