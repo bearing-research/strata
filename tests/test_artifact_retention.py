@@ -196,6 +196,7 @@ class TestMinted:
         store = ArtifactStore(tmp_path / "old")
         minted = _ready(store)
         named = _ready(store, "nb_abc_cell_def_var_model")
+        _set(store, *minted, created_at=time.time() - 40 * DAY)
         conn = sqlite3.connect(store.db_path)
         conn.execute("UPDATE schema_version SET version = ?", (_LATEST_SCHEMA_VERSION - 1,))
         conn.execute("ALTER TABLE artifact_versions DROP COLUMN minted")
@@ -207,7 +208,12 @@ class TestMinted:
 
         assert _row(reopened, *minted)["minted"] == 1
         assert _row(reopened, *named)["minted"] == 0
-        assert _row(reopened, *minted)["last_used_at"] is None
+        # The release before recorded no use, so a result it used yesterday must not be
+        # collected by the first sweep for looking as old as its creation.
+        assert _row(reopened, *minted)["last_used_at"] == pytest.approx(time.time(), abs=60)
+        assert (
+            reopened.garbage_collect(max_idle_days=30, min_idle_seconds=3600)["deleted_count"] == 0
+        )
 
 
 class TestWhatIsCollected:

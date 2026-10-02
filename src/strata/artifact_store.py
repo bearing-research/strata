@@ -462,13 +462,16 @@ _MINTED_ID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3
 def _add_use_and_minted(conn: StoreConnection, dialect: SqlDialect) -> None:
     """Add ``last_used_at`` and ``minted``, which retention keys on.
 
-    ``last_used_at`` NULL reads as ``created_at``. ``minted`` marks an id the store
-    made up for one computation, whose latest version may be collected. Existing
-    rows are backfilled by shape: uuid4 ids are minted, ``nb_...`` ids are not, so
-    a caller-chosen uuid-shaped id may be recomputed after a long idle.
+    ``last_used_at`` NULL reads as ``created_at``. Existing rows start their idle
+    clock at the upgrade, since earlier releases recorded no use and a result used
+    yesterday would otherwise look as old as its creation. ``minted`` marks an id the
+    store made up for one computation, whose latest version may be collected.
+    Existing rows are backfilled by shape: uuid4 ids are minted, ``nb_...`` ids are
+    not, so a caller-chosen uuid-shaped id may be recomputed after a long idle.
     """
     if not dialect.column_exists(conn, "artifact_versions", "last_used_at"):
         conn.execute(f"ALTER TABLE artifact_versions ADD COLUMN last_used_at {dialect.float_type}")
+        conn.execute("UPDATE artifact_versions SET last_used_at = ?", (time.time(),))
     if not dialect.column_exists(conn, "artifact_versions", "minted"):
         conn.execute(
             "ALTER TABLE artifact_versions "
