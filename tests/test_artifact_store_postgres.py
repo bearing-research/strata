@@ -403,6 +403,26 @@ class TestGarbageCollection:
 class TestConnectionPool:
     """A bounded pool is only safe here because acquisition is re-entrant."""
 
+    def test_reads_return_their_connection_without_a_pool_warning(self, store, caplog):
+        """psycopg_pool warns and rolls back whenever a connection comes back mid-transaction,
+        which every read did, burying real warnings under one per call.
+        """
+        import logging
+
+        version = store.create_artifact("warn-a", "warn-p", _spec())
+        store.write_blob("warn-a", version, b"x")
+        store.finalize_artifact("warn-a", version, "{}", row_count=0, byte_size=1)
+
+        with caplog.at_level(logging.WARNING, logger="psycopg.pool"):
+            store.get_artifact("warn-a", version)
+            store.get_latest_version("warn-a")
+            store.find_by_provenance("warn-p")
+            store.read_blob("warn-a", version)
+            store.list_artifacts()
+            store.stats()
+
+        assert [r.getMessage() for r in caplog.records if r.name.startswith("psycopg")] == []
+
     def test_nested_acquisition_reuses_one_pooled_connection(self, postgres_dsn):
         dialect = PostgresDialect(postgres_dsn)
         try:
