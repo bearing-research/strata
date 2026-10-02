@@ -1174,9 +1174,14 @@ class NotebookSession:
         """Serialize a cell with session-coupled overlays.
 
         Adds hydrated display outputs, causality chains and DAG shadow warnings to
-        ``CellState.serialize()``.
+        ``CellState.serialize()``, and masks secret env values.
         """
+        from strata.notebook.secret_manager.session_integration import mask_env
+
         data = cell.serialize()
+        sources = self.notebook_state.env_sources
+        data["env"] = mask_env(cell.env, sources)
+        data["env_overrides"] = mask_env(cell.env_overrides, sources)
         if cell.display_outputs:
             data["display_outputs"] = [
                 self._hydrate_display_output(output) for output in cell.display_outputs
@@ -1360,7 +1365,10 @@ class NotebookSession:
 
     def serialize_notebook_state(self) -> dict[str, Any]:
         """Serialize notebook state with enriched cell metadata."""
+        from strata.notebook.secret_manager.session_integration import mask_env
+
         data = self.notebook_state.model_dump()
+        data["env"] = mask_env(self.notebook_state.env, self.notebook_state.env_sources)
         data["cells"] = self.serialize_cells()
         data["environment"] = self.serialize_environment_state()
         data["environment_job"] = self.serialize_environment_job_state()

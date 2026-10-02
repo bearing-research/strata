@@ -2594,17 +2594,21 @@ async def update_notebook_env_endpoint(
     session: SessionDep,
     req: EnvConfigRequest,
 ) -> dict:
-    """Replace the notebook-level default env vars."""
-    from strata.notebook.secret_manager.session_integration import MANUAL_SOURCE
+    """Replace the notebook-level default env vars.
+
+    A value of ``MASKED_ENV_VALUE`` (as clients receive secrets) keeps the current one.
+    """
+    from strata.notebook.secret_manager.session_integration import MANUAL_SOURCE, unmask_env
 
     try:
+        state = session.notebook_state
+        env = unmask_env(req.env, state.env)
         # The panel sends every row back. An unchanged provider-fetched value is not
         # an edit: keep it out of the committed notebook.toml and keep its source.
-        state = session.notebook_state
         previous_sources = dict(state.env_sources)
         fetched = {
             key
-            for key, value in req.env.items()
+            for key, value in env.items()
             if previous_sources.get(key, MANUAL_SOURCE) != MANUAL_SOURCE
             and state.env.get(key) == value
         }
@@ -2612,7 +2616,7 @@ async def update_notebook_env_endpoint(
         # records which variables the notebook expects.
         with open(session.path / "notebook.toml", "rb") as f:
             declared = tomllib.load(f).get("env", {})
-        to_write = {key: value for key, value in req.env.items() if key not in fetched}
+        to_write = {key: value for key, value in env.items() if key not in fetched}
         to_write.update({key: "" for key in fetched if key in declared})
         update_notebook_env(session.path, to_write)
         session.reload()
@@ -2620,7 +2624,7 @@ async def update_notebook_env_endpoint(
         # them in memory for the LLM config and Runtime panel. Edits are manual
         # overrides (for the UI badge).
         state = session.notebook_state
-        for key, value in req.env.items():
+        for key, value in env.items():
             if key in fetched and key in state.env:
                 continue  # the reload refetched it, possibly rotated
             state.env[key] = value
@@ -2647,8 +2651,10 @@ async def update_notebook_env_endpoint(
 
 def _serialize_env_response(session) -> dict:
     """Env-endpoint response shape shared with the secret-manager refresh path."""
+    from strata.notebook.secret_manager.session_integration import mask_env
+
     return {
-        "env": session.notebook_state.env,
+        "env": mask_env(session.notebook_state.env, session.notebook_state.env_sources),
         "env_sources": session.notebook_state.env_sources,
         "env_fetch_error": session.notebook_state.env_fetch_error,
         "env_fetched_at": session.notebook_state.env_fetched_at,

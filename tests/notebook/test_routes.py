@@ -1220,19 +1220,59 @@ def test_update_notebook_env_restores_sensitive_values_on_cells(client, tmp_path
 
     assert response.status_code == 200
     data = response.json()
-    # Both the notebook-level view AND each cell's resolved env must
-    # carry the real sensitive value, not the blanked placeholder.
-    assert data["env"]["ALPACA_API_KEY"] == "AKXYZ123"
     assert data["env"]["DEBUG"] == "true"
-    assert data["cells"][0]["env"]["ALPACA_API_KEY"] == "AKXYZ123"
     assert data["cells"][0]["env"]["DEBUG"] == "true"
 
-    # The executor reads cell.env, so it must match too or the executor sees a
-    # blanked value.
+    # The notebook-level env and each cell's resolved env must carry the real
+    # value, not the blanked placeholder: the executor reads cell.env.
     session = get_session_manager().get_session(session_id)
     assert session is not None
+    assert session.notebook_state.env["ALPACA_API_KEY"] == "AKXYZ123"
     cell = session.notebook_state.cells[0]
     assert cell.env["ALPACA_API_KEY"] == "AKXYZ123"
+
+
+def test_secret_env_values_never_reach_clients(client, tmp_path):
+    """Sensitive values are masked in every serialized view; a masked save keeps them."""
+    from strata.notebook.secret_manager.session_integration import MASKED_ENV_VALUE
+
+    notebook_dir = create_notebook(tmp_path, "Masked Env Test")
+    add_cell_to_notebook(notebook_dir, "cell-1")
+    session_id = open_session_id(client, notebook_dir)
+    response = client.put(
+        f"/v1/notebooks/{session_id}/env",
+        json={"env": {"OPENAI_API_KEY": "sk-secret", "LOG_LEVEL": "info", "DB_PASSWORD": ""}},
+    )
+    assert response.status_code == 200, response.text
+    session = get_session_manager().get_session(session_id)
+    assert session is not None
+
+    views = {
+        "put": response.json(),
+        "get_cells": client.get(f"/v1/notebooks/{session_id}/cells").json(),
+        "notebook_sync": session.serialize_notebook_state(),
+    }
+    for name, view in views.items():
+        assert "sk-secret" not in json.dumps(view, default=str), name
+    expected = {"OPENAI_API_KEY": MASKED_ENV_VALUE, "LOG_LEVEL": "info", "DB_PASSWORD": ""}
+    assert views["put"]["env"] == expected
+    assert views["notebook_sync"]["env"] == expected
+    assert views["notebook_sync"]["cells"][0]["env"] == expected
+
+    # Saving the masked marker back is "unchanged"; an edit replaces the value.
+    response = client.put(
+        f"/v1/notebooks/{session_id}/env",
+        json={"env": {"OPENAI_API_KEY": MASKED_ENV_VALUE, "LOG_LEVEL": "debug"}},
+    )
+    assert response.status_code == 200, response.text
+    assert session.notebook_state.env == {"OPENAI_API_KEY": "sk-secret", "LOG_LEVEL": "debug"}
+    assert session.notebook_state.cells[0].env["OPENAI_API_KEY"] == "sk-secret"
+
+    response = client.put(
+        f"/v1/notebooks/{session_id}/env", json={"env": {"OPENAI_API_KEY": "sk-new"}}
+    )
+    assert response.status_code == 200, response.text
+    assert session.notebook_state.env == {"OPENAI_API_KEY": "sk-new"}
 
 
 def test_update_cell_source(client, tmp_path):

@@ -12,6 +12,7 @@ from strata.notebook.secret_manager.provider import SecretFetchResult, SecretPro
 from strata.notebook.secret_manager.registry import _reset_for_tests, get_provider
 from strata.notebook.secret_manager.session_integration import (
     MANUAL_SOURCE,
+    MASKED_ENV_VALUE,
     apply_secrets_to_notebook_state,
     fetch_configured_secrets,
 )
@@ -429,6 +430,15 @@ def client(tmp_path, monkeypatch):
         _reset_for_tests()
 
 
+def _session_env(session_id) -> dict:
+    """The server-side env, which clients only see masked."""
+    from strata.notebook.routes import get_session_manager
+
+    session = get_session_manager().get_session(session_id)
+    assert session is not None
+    return session.notebook_state.env
+
+
 class TestRefreshEndpoint:
     def test_refresh_returns_env_sources(self, client) -> None:
         tc, session_id, monkeypatch = client
@@ -436,9 +446,10 @@ class TestRefreshEndpoint:
         resp = tc.post(f"/v1/notebooks/{session_id}/secret-manager/refresh")
         assert resp.status_code == 200, resp.text
         body = resp.json()
-        assert body["env"]["ALPACA_API_KEY"] == "AKROT8"
+        assert body["env"]["ALPACA_API_KEY"] == MASKED_ENV_VALUE
         assert body["env_sources"]["ALPACA_API_KEY"] == "infisical"
         assert body["env_fetch_error"] is None
+        assert _session_env(session_id)["ALPACA_API_KEY"] == "AKROT8"
 
     def test_refresh_surfaces_fetch_error(self, client) -> None:
         tc, session_id, monkeypatch = client
@@ -463,8 +474,11 @@ class TestUpdateEnvEndpointWithFetchedSecrets:
         resp = tc.post(f"/v1/notebooks/{session_id}/secret-manager/refresh")
         assert resp.status_code == 200, resp.text
         body = resp.json()
-        assert body["env"]["DATABASE_URL"] == value
+        # Fetched values are masked even under a name that does not look secret.
+        assert body["env"]["DATABASE_URL"] == MASKED_ENV_VALUE
+        assert body["cells"][0]["env"]["DATABASE_URL"] == MASKED_ENV_VALUE
         assert body["env_sources"]["DATABASE_URL"] == "infisical"
+        assert _session_env(session_id)["DATABASE_URL"] == value
         return body
 
     @staticmethod
@@ -480,19 +494,18 @@ class TestUpdateEnvEndpointWithFetchedSecrets:
 
     def test_unchanged_fetched_value_is_not_persisted(self, client) -> None:
         tc, session_id, monkeypatch = client
-        self._fetch(tc, session_id, monkeypatch, "postgres://v1")
+        fetched = self._fetch(tc, session_id, monkeypatch, "postgres://v1")
 
         resp = tc.put(
             f"/v1/notebooks/{session_id}/env",
-            json={"env": {"DATABASE_URL": "postgres://v1", "NEW_VAR": "hello"}},
+            json={"env": {**fetched["env"], "NEW_VAR": "hello"}},
         )
         assert resp.status_code == 200, resp.text
         body = resp.json()
-        assert body["env"]["DATABASE_URL"] == "postgres://v1"
         assert body["env"]["NEW_VAR"] == "hello"
         assert body["env_sources"]["DATABASE_URL"] == "infisical"
         assert body["env_sources"]["NEW_VAR"] == MANUAL_SOURCE
-        assert body["cells"][0]["env"]["DATABASE_URL"] == "postgres://v1"
+        assert _session_env(session_id)["DATABASE_URL"] == "postgres://v1"
         assert self._toml_env(session_id) == {"NEW_VAR": "hello"}
 
         # Still provider-owned, so a rotation is picked up.
@@ -512,7 +525,7 @@ class TestUpdateEnvEndpointWithFetchedSecrets:
         resp = tc.put(f"/v1/notebooks/{session_id}/env", json={"env": body["env"]})
         assert resp.status_code == 200, resp.text
         assert self._toml_env(session_id) == {"API_KEY": "", "LOG_LEVEL": "info"}
-        assert resp.json()["env"]["API_KEY"] == "sk-1"
+        assert _session_env(session_id)["API_KEY"] == "sk-1"
 
     def test_edited_fetched_value_becomes_manual(self, client) -> None:
         tc, session_id, monkeypatch = client
@@ -535,18 +548,15 @@ class TestUpdateEnvEndpointWithFetchedSecrets:
 
     def test_fetched_value_survives_failed_refetch_on_save(self, client) -> None:
         tc, session_id, monkeypatch = client
-        self._fetch(tc, session_id, monkeypatch, "postgres://v1")
+        fetched = self._fetch(tc, session_id, monkeypatch, "postgres://v1")
 
         # The save reloads the session, which refetches; that fetch fails here.
         _install_fake_provider(monkeypatch, error="Infisical down")
-        resp = tc.put(
-            f"/v1/notebooks/{session_id}/env",
-            json={"env": {"DATABASE_URL": "postgres://v1"}},
-        )
+        resp = tc.put(f"/v1/notebooks/{session_id}/env", json={"env": fetched["env"]})
         assert resp.status_code == 200, resp.text
         body = resp.json()
-        assert body["env"]["DATABASE_URL"] == "postgres://v1"
         assert body["env_sources"]["DATABASE_URL"] == "infisical"
+        assert _session_env(session_id)["DATABASE_URL"] == "postgres://v1"
         assert self._toml_env(session_id) == {}
 
 
