@@ -18,6 +18,7 @@ from strata_pool.types import Job, JobState, MachineType, UsageEvent, Worker
 logger = logging.getLogger(__name__)
 
 TENANT_HEADER = "X-Strata-Tenant"
+REDACTED = "<redacted>"
 
 
 def _job_json(job: Job) -> dict:
@@ -33,6 +34,16 @@ def _worker_json(worker: Worker) -> dict:
     """A machine without its credential; `repr=False` does not keep it out of `asdict`."""
     fields = asdict(worker)
     fields.pop("auth_token")
+    return fields
+
+
+def _machine_type_json(spec: MachineType, *, full: bool) -> dict:
+    """A catalogue entry; without `full`, operator settings keep their names but not values."""
+    fields = asdict(spec)
+    if not full:
+        # Both commonly carry credentials (a registry login, a model-hub token).
+        fields["env"] = dict.fromkeys(spec.env, REDACTED)
+        fields["provider_options"] = dict.fromkeys(spec.provider_options, REDACTED)
     return fields
 
 
@@ -186,9 +197,12 @@ def create_app(
         return _terminal_response(job)
 
     @app.get("/v1/machine-types", dependencies=guard)
-    async def list_machine_types() -> list[dict]:
+    async def list_machine_types(
+        authorization: Annotated[str | None, Header()] = None,
+    ) -> list[dict]:
         """What a caller may ask for. The catalogue an annotation resolves against."""
-        return [asdict(spec) for spec in pool.machine_types.values()]
+        full = is_admin(authorization)
+        return [_machine_type_json(spec, full=full) for spec in pool.machine_types.values()]
 
     # A catalogue entry decides which image receives a tenant's jobs and
     # their signed URLs, so rewriting it is the operator's call alone.

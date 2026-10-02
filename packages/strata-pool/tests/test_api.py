@@ -45,7 +45,15 @@ async def api(tmp_path):
     pool = Pool(
         store,
         backend,
-        [MachineType(name="cpu", image="w"), MachineType(name="gpu", image="w")],
+        [
+            MachineType(name="cpu", image="w"),
+            MachineType(
+                name="gpu",
+                image="w",
+                env={"HF_TOKEN": "hf_operator_secret"},
+                provider_options={"registryAuthId": "operator-registry-auth"},
+            ),
+        ],
         client=client_to_workers,
         health_poll_seconds=0,
     )
@@ -264,6 +272,22 @@ class TestInspection:
     async def test_machine_types_are_listed_for_a_caller_to_resolve_against(self, api):
         response = await api.get("/v1/machine-types", headers=AUTH)
         assert {spec["name"] for spec in response.json()} == {"cpu", "gpu"}
+
+    async def test_a_tenant_sees_operator_settings_by_name_only(self, api):
+        listed = (await api.get("/v1/machine-types", headers=AUTH)).json()
+
+        gpu = next(spec for spec in listed if spec["name"] == "gpu")
+        assert gpu["env"] == {"HF_TOKEN": "<redacted>"}
+        assert gpu["provider_options"] == {"registryAuthId": "<redacted>"}
+        assert "hf_operator_secret" not in str(listed)
+        assert "operator-registry-auth" not in str(listed)
+
+    async def test_the_admin_sees_the_whole_catalogue(self, api):
+        listed = (await api.get("/v1/machine-types", headers=ADMIN)).json()
+
+        gpu = next(spec for spec in listed if spec["name"] == "gpu")
+        assert gpu["env"] == {"HF_TOKEN": "hf_operator_secret"}
+        assert gpu["provider_options"] == {"registryAuthId": "operator-registry-auth"}
 
     async def test_workers_are_listed_without_their_credentials(self, api):
         await api.post("/v1/jobs/sync?machine_type=cpu", content=b"work", headers=AUTH)

@@ -176,7 +176,7 @@ deployment cannot forget the call that stops it paying for idle machines.
 | `POST /v1/jobs/sync` | Queue and block. 200 with the result bytes, or 202 and an id if `wait_seconds` runs out |
 | `GET /v1/jobs/{id}` | Status, without the payload or result; 404 for another tenant's job |
 | `GET /v1/jobs/{id}/result` | The raw result bytes; 409 while the job is not finished, 404 for another tenant's job |
-| `GET /v1/machine-types` | What a caller may ask for: the catalogue an annotation resolves against |
+| `GET /v1/machine-types` | What a caller may ask for: the catalogue an annotation resolves against. `env` and `provider_options` values read `<redacted>` without the admin token |
 | `PUT /v1/machine-types` | Replace the catalogue without a restart; persisted, so a restart serves it. Admin token only |
 | `GET /v1/workers` | The fleet, without machine credentials |
 | `GET /v1/usage` | The billing feed, filterable by tenant |
