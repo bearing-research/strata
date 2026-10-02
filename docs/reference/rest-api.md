@@ -61,8 +61,8 @@ Under `trusted_proxy`, **every** `/v1/*` endpoint requires `X-Strata-Principal` 
 | Anything that runs code - execute, running tests, dependency and Python-version changes (uv runs build scripts), provisioning an SSH worker - **and any route nobody has classified** | `notebook:execute` |
 | `POST /v1/cache/clear` | `admin:cache` |
 | `GET /v1/logs`, `GET /v1/logs/stream` (the ring buffer holds every tenant's records) | `admin:*` |
-| Artifact and registry writes | `artifacts:write` |
-| `GET /v1/cache/entries`, `GET /v1/debug/cache/inspect` | `admin:cache` |
+| Artifact and registry writes, including `name` on `POST /v1/materialize` | `artifacts:write` |
+| `GET /v1/cache/entries`, `GET /v1/cache/histogram`, `GET /v1/debug/cache/inspect`, `POST /v1/metadata/cleanup` | `admin:cache` |
 | Minting, editing and withdrawing a publication (`POST /v1/artifacts/{id}/v/{n}/publish`, `PATCH` / `DELETE /v1/publications/{token}`) | `artifacts:publish` |
 | Pinning and unpinning a version (`POST` / `DELETE /v1/artifacts/{id}/v/{n}/pin`) | `artifacts:pin` |
 | `GET /v1/admin/tenants`, `GET /v1/admin/tenants/{tenant_id}` | `admin:tenants` |
@@ -70,6 +70,7 @@ Under `trusted_proxy`, **every** `/v1/*` endpoint requires `X-Strata-Principal` 
 | `POST /v1/registry/pending/approve` and `.../reject` | `admin:registry` |
 | Quiesce and release (`POST /v1/notebooks/{id}/quiesce` / `release`, `POST /v1/projects/{path}/quiesce` / `release`) | `admin:notebooks` |
 | `POST /v1/artifacts/gc`, and another tenant's `GET /v1/artifacts/usage` / `stats` | `admin:*` |
+| `GET /metrics/tables`, `GET /metrics/tables/{table_id}` (every tenant's table names), and `/v1/debug/*` other than cache inspection | `admin:*` |
 
 `notebook:execute` is the default on purpose: an operation nobody classified is treated as the most dangerous kind. The per-route table is `src/strata/notebook/scopes.py`, and the same table checks WebSocket frames - a principal that cannot run a cell over the socket cannot run it over REST either.
 

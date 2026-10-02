@@ -3,11 +3,12 @@
 import asyncio
 import time
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from strata.logging import get_logger
-from strata.types import Task, WarmAsyncRequest, WarmJobProgress, WarmJobStatus
+from strata.types import TableIdentity, Task, WarmAsyncRequest, WarmJobProgress, WarmJobStatus
 
 if TYPE_CHECKING:
     from strata.cache import CachedFetcher
@@ -41,6 +42,10 @@ class WarmingJob:
     errors: list[str] = field(default_factory=list)
 
     cancelled: bool = False
+    # The tenant that started the job; only it (or an unscoped caller) can see or cancel it.
+    tenant: str | None = None
+    # Called with each table's planned identity; raises to skip a table the caller may not read.
+    authorize: Callable[[str, TableIdentity], None] | None = field(default=None, repr=False)
     _task: asyncio.Task | None = field(default=None, repr=False)
 
     def to_progress(self) -> WarmJobProgress:
@@ -116,14 +121,25 @@ class CacheWarmer:
                     job.cancelled = True
                     job._task.cancel()
 
-    async def start_job(self, request: WarmAsyncRequest) -> str:
-        """Start a new warming job and return its id."""
+    async def start_job(
+        self,
+        request: WarmAsyncRequest,
+        authorize: Callable[[str, TableIdentity], None] | None = None,
+        tenant: str | None = None,
+    ) -> str:
+        """Start a new warming job for ``tenant`` and return its id.
+
+        ``authorize`` runs on each table's planned identity before any fetch; a table it
+        raises for is recorded as an error and skipped.
+        """
         job_id = str(uuid.uuid4())[:8]
 
         job = WarmingJob(
             job_id=job_id,
             request=request,
             tables_total=len(request.tables),
+            authorize=authorize,
+            tenant=tenant,
         )
 
         async with self._lock:
@@ -140,17 +156,31 @@ class CacheWarmer:
 
         return job_id
 
-    def get_progress(self, job_id: str) -> WarmJobProgress | None:
-        """Return a job's progress snapshot, or ``None`` if the job is unknown."""
+    def _visible_job(self, job_id: str, tenant: str | None) -> WarmingJob | None:
+        """The job if ``tenant`` may see it (``None`` sees every tenant's), else ``None``."""
         job = self._jobs.get(job_id)
+        if job is None or (tenant is not None and job.tenant != tenant):
+            return None
+        return job
+
+    def get_progress(self, job_id: str, tenant: str | None = None) -> WarmJobProgress | None:
+        """Return a job's progress snapshot, or ``None`` if unknown or another tenant's."""
+        job = self._visible_job(job_id, tenant)
         if job is None:
             return None
         return job.to_progress()
 
-    def list_jobs(self, include_completed: bool = False) -> list[WarmJobProgress]:
-        """List jobs by priority then start time; finished ones only with ``include_completed``."""
+    def list_jobs(
+        self, include_completed: bool = False, tenant: str | None = None
+    ) -> list[WarmJobProgress]:
+        """List ``tenant``'s jobs (all with ``None``) by priority then start time.
+
+        Finished ones only with ``include_completed``.
+        """
         result = []
         for job in self._jobs.values():
+            if tenant is not None and job.tenant != tenant:
+                continue
             if include_completed or job.status in (
                 WarmJobStatus.PENDING,
                 WarmJobStatus.RUNNING,
@@ -160,10 +190,10 @@ class CacheWarmer:
         result.sort(key=lambda p: (-self._jobs[p.job_id].request.priority, p.started_at or 0))
         return result
 
-    async def cancel_job(self, job_id: str) -> bool:
-        """Cancel a pending or running job; ``False`` if unknown or already finished."""
+    async def cancel_job(self, job_id: str, tenant: str | None = None) -> bool:
+        """Cancel a pending or running job; ``False`` if unknown, another tenant's or finished."""
         async with self._lock:
-            job = self._jobs.get(job_id)
+            job = self._visible_job(job_id, tenant)
             if job is None:
                 return False
 
@@ -267,6 +297,8 @@ class CacheWarmer:
                     columns=request.columns,
                     filters=[],
                 )
+                if job.authorize is not None:
+                    job.authorize(table_uri, plan.table_identity)
 
                 tasks = plan.tasks
                 if request.max_row_groups is not None:

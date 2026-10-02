@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException
 
+from strata.api.dependencies import require_scope
+
 router = APIRouter(tags=["metadata"])
 
 
@@ -42,11 +44,12 @@ async def get_timeout_config_v1():
     return state.config.get_timeout_config()
 
 
-@router.post("/v1/metadata/cleanup")
+@router.post("/v1/metadata/cleanup", dependencies=[require_scope("admin:cache")])
 async def cleanup_metadata_v1():
     """Remove parquet metadata entries whose file is gone or has a different mtime or size.
 
-    Runs on server startup too. Returns the number of entries removed.
+    Runs on server startup too. Returns the number of entries removed. Requires
+    ``admin:cache``: it rewrites the shared metadata store.
     """
     from strata.metadata_cache import get_metadata_store
 

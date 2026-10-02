@@ -101,6 +101,34 @@ class TestTenantIsolation:
             # else's tenant in the header buys nothing.
             assert read(other, "team-a") == 404
 
+    def test_the_tenant_context_comes_from_the_key(self, tmp_path, monkeypatch):
+        """QoS limiters and log attribution follow the key's tenant, not the client's header."""
+        monkeypatch.setenv("STRATA_DEPLOYMENT_MODE", "service")
+        monkeypatch.setenv("STRATA_AUTH_MODE", "api_key")
+        monkeypatch.setenv("STRATA_MULTI_TENANT_ENABLED", "true")
+        monkeypatch.setenv("STRATA_ARTIFACT_DIR", str(tmp_path / "artifacts"))
+        monkeypatch.setenv("STRATA_CACHE_DIR", str(tmp_path / "cache"))
+
+        from strata.server import app
+
+        with TestClient(app) as client:
+            from strata.api_keys import get_api_key_store
+
+            keys = get_api_key_store()
+            team_key, _ = keys.create_key(principal_id="alice", tenant="team-a")
+            tenantless_key, _ = keys.create_key(principal_id="svc")
+
+            def tenant_context(key):
+                resp = client.get(
+                    "/v1/cache/stats",
+                    headers={"Authorization": f"Bearer {key}", "X-Tenant-ID": "team-b"},
+                )
+                assert resp.status_code == 200
+                return resp.headers["X-Tenant-ID"]
+
+            assert tenant_context(team_key) == "team-a"
+            assert tenant_context(tenantless_key) == "_default"
+
 
 class TestPrincipalAuthEnabled:
     """The predicate the gates share."""

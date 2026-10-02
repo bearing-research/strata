@@ -36,16 +36,16 @@ def _progress(job_id: str = "job-1", status: WarmJobStatus = WarmJobStatus.RUNNI
 class _StubWarmer:
     """Stand-in for a started CacheWarmer, for the warmer-present paths."""
 
-    async def start_job(self, request):
+    async def start_job(self, request, authorize=None, tenant=None):
         return "job-1"
 
-    def list_jobs(self, include_completed=False):
+    def list_jobs(self, include_completed=False, tenant=None):
         return [_progress()]
 
-    def get_progress(self, job_id):
+    def get_progress(self, job_id, tenant=None):
         return _progress(job_id) if job_id == "job-1" else None
 
-    async def cancel_job(self, job_id):
+    async def cancel_job(self, job_id, tenant=None):
         return job_id == "job-1"
 
 
@@ -364,6 +364,194 @@ def test_warm_allows_permitted_table(acl_cache_client):
     assert resp.json()["errors"]
 
 
+class TestWarmTakesTheScanIdentity:
+    """Warm authorizes the identity the scan path does, before planning and again after."""
+
+    @pytest.fixture
+    def lake_state(self, tmp_path):
+        """Service mode with a named catalog ``lake`` whose ``denied`` namespace is denied."""
+        import strata.server as server_module
+        from strata.artifact_store import reset_artifact_store
+        from strata.config import AclConfig, AclRule, StrataConfig
+        from strata.server import ServerState
+
+        config = StrataConfig(
+            deployment_mode="service",
+            auth_mode="trusted_proxy",
+            proxy_token="test-token",
+            cache_dir=tmp_path / "cache",
+            artifact_dir=tmp_path / "artifacts",
+            catalogs={"lake": {"type": "rest", "uri": "http://catalog.invalid"}},
+            acl_config=AclConfig(
+                default="allow",
+                deny_rules=[AclRule(principal="*", tables=["lake:denied.*", "file:denied.*"])],
+            ),
+        )
+        reset_artifact_store()
+        original = server_module._state
+        state = ServerState(config)
+        server_module._state = state
+        try:
+            yield state
+        finally:
+            server_module._state = original
+            reset_artifact_store()
+
+    @staticmethod
+    def _planned_as(identity):
+        """A planner whose catalog resolves every URI to *identity*."""
+        from types import SimpleNamespace
+
+        def plan(**kwargs):
+            return SimpleNamespace(table_identity=identity, tasks=[])
+
+        return plan
+
+    @pytest.mark.parametrize("path", ["/v1/cache/warm", "/v1/cache/warm/async"])
+    def test_a_named_catalog_deny_rule_applies(self, lake_state, path):
+        from strata.server import app
+
+        resp = TestClient(app).post(
+            path, json={"tables": ["lake:denied.salaries"]}, headers=_proxy_headers()
+        )
+        assert resp.status_code == 404, resp.text
+        assert "job_id" not in resp.text
+
+    def test_the_planned_identity_is_checked(self, lake_state, monkeypatch):
+        from strata.server import app
+        from strata.types import TableIdentity
+
+        denied = TableIdentity(catalog="strata", namespace="denied", table="salaries")
+        monkeypatch.setattr(lake_state.planner, "plan", self._planned_as(denied))
+        resp = TestClient(app).post(
+            "/v1/cache/warm",
+            json={"tables": ["file:///wh#allowed.events"]},
+            headers=_proxy_headers(),
+        )
+        assert resp.status_code == 404, resp.text
+
+    async def test_an_async_job_checks_the_planned_identity(self, lake_state):
+        import asyncio
+        from unittest.mock import MagicMock
+
+        from httpx import ASGITransport, AsyncClient
+
+        from strata.cache_warmer import CacheWarmer
+        from strata.server import app
+        from strata.types import TableIdentity
+
+        denied = TableIdentity(catalog="strata", namespace="denied", table="salaries")
+        planner = MagicMock()
+        planner.plan.side_effect = self._planned_as(denied)
+        lake_state._cache_warmer = CacheWarmer(
+            planner=planner, fetcher=MagicMock(), metrics=MagicMock()
+        )
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as client:
+            resp = await client.post(
+                "/v1/cache/warm/async",
+                json={"tables": ["file:///wh#allowed.events"]},
+                headers=_proxy_headers(),
+            )
+            assert resp.status_code == 200, resp.text
+            job_id = resp.json()["job_id"]
+            for _ in range(100):
+                job = await client.get(f"/v1/cache/warm/jobs/{job_id}", headers=_proxy_headers())
+                if job.json()["status"] not in ("pending", "running"):
+                    break
+                await asyncio.sleep(0.01)
+        progress = job.json()
+        assert progress["status"] == "failed"
+        assert progress["tables_completed"] == 0
+        assert progress["errors"] == ["file:///wh#allowed.events: 404: Table not found"]
+
+
+class TestWarmJobsAreTenantScoped:
+    """A warm job names its tenant's tables, so another tenant cannot list, read or cancel it."""
+
+    @pytest.fixture
+    def tenant_state(self, tmp_path):
+        import strata.server as server_module
+        from strata.artifact_store import reset_artifact_store
+        from strata.config import StrataConfig
+        from strata.server import ServerState
+
+        config = StrataConfig(
+            deployment_mode="service",
+            auth_mode="trusted_proxy",
+            proxy_token="test-token",
+            multi_tenant_enabled=True,
+            cache_dir=tmp_path / "cache",
+            artifact_dir=tmp_path / "artifacts",
+        )
+        reset_artifact_store()
+        original = server_module._state
+        state = ServerState(config)
+        server_module._state = state
+        try:
+            yield state
+        finally:
+            server_module._state = original
+            reset_artifact_store()
+
+    @staticmethod
+    def _headers(tenant: str, scopes: str = "") -> dict[str, str]:
+        return {
+            "X-Strata-Proxy-Token": "test-token",
+            "X-Strata-Principal": "analyst",
+            "X-Tenant-ID": tenant,
+            "X-Strata-Scopes": scopes,
+        }
+
+    async def test_another_tenant_cannot_see_or_cancel_a_job(self, tenant_state):
+        import threading
+        from types import SimpleNamespace
+        from unittest.mock import MagicMock
+
+        from httpx import ASGITransport, AsyncClient
+
+        from strata.cache_warmer import CacheWarmer
+        from strata.server import app
+        from strata.types import TableIdentity
+
+        # One row group whose fetch blocks, so the job stays running while we look at it.
+        release = threading.Event()
+        planner = MagicMock()
+        planner.plan.return_value = SimpleNamespace(
+            table_identity=TableIdentity(catalog="strata", namespace="team", table="t"),
+            tasks=[SimpleNamespace(cached=False, bytes_read=0, file_path="f", row_group_id=0)],
+        )
+        fetcher = MagicMock()
+        fetcher.fetch_as_stream_bytes.side_effect = lambda task: release.wait(30)
+        tenant_state._cache_warmer = CacheWarmer(
+            planner=planner, fetcher=fetcher, metrics=MagicMock()
+        )
+        owner, other = self._headers("team-a"), self._headers("team-b")
+        admin = self._headers("team-b", "admin:*")
+        try:
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as client:
+                started = await client.post(
+                    "/v1/cache/warm/async", json={"tables": ["file:///wh#team.t"]}, headers=owner
+                )
+                assert started.status_code == 200, started.text
+                job_id = started.json()["job_id"]
+                jobs = "/v1/cache/warm/jobs"
+
+                def listed(resp):
+                    return [j["job_id"] for j in resp.json()["jobs"]]
+
+                assert listed(await client.get(jobs, headers=other)) == []
+                assert (await client.get(f"{jobs}/{job_id}", headers=other)).status_code == 404
+                assert (await client.delete(f"{jobs}/{job_id}", headers=other)).status_code == 404
+
+                assert listed(await client.get(jobs, headers=owner)) == [job_id]
+                assert listed(await client.get(jobs, headers=admin)) == [job_id]
+                cancel = await client.delete(f"{jobs}/{job_id}", headers=owner)
+                assert cancel.status_code == 200
+        finally:
+            release.set()
+            await tenant_state._cache_warmer.stop()
+
+
 @pytest.mark.parametrize("field,value", [("concurrent", 0), ("concurrent", -1)])
 def test_warm_rejects_unusable_concurrency(cache_client, field, value):
     """``concurrent=0`` made a Semaphore(0) that hung the request and wedged an async job slot."""
@@ -395,6 +583,36 @@ class TestCachePlaneInformationDisclosure:
         """No-auth deployments keep their open introspection."""
         client, _ = cache_client
         assert client.get("/v1/cache/entries").status_code == 200
+        for method, path, _scope in self.OPERATOR_ROUTES:
+            assert client.request(method, path).status_code != 403, path
+
+    # Table names from every tenant, process-wide diagnostics, and a write to the shared
+    # metadata store: operator-only under principal auth.
+    OPERATOR_ROUTES = [
+        ("GET", "/v1/cache/histogram", "admin:cache"),
+        ("POST", "/v1/metadata/cleanup", "admin:cache"),
+        ("GET", "/metrics/tables", "admin:*"),
+        ("GET", "/metrics/tables/strata.ns.t", "admin:*"),
+        ("GET", "/v1/debug/latency", "admin:*"),
+        ("GET", "/v1/debug/gc/pauses", "admin:*"),
+        ("GET", "/v1/debug/pools", "admin:*"),
+        ("GET", "/v1/debug/connections", "admin:*"),
+        ("GET", "/v1/debug/memory?detailed=true", "admin:*"),
+        ("GET", "/v1/debug/rate-limits", "admin:*"),
+    ]
+
+    @pytest.mark.parametrize(("method", "path", "scope"), OPERATOR_ROUTES)
+    def test_operator_routes_need_their_scope(self, acl_cache_client, method, path, scope):
+        def status(scopes: str) -> int:
+            headers = {**_proxy_headers(), "X-Strata-Scopes": scopes}
+            return acl_cache_client.request(method, path, headers=headers).status_code
+
+        assert status("notebook:read artifacts:write") == 403
+        if scope != "admin:*":
+            assert status(scope) != 403
+        else:
+            assert status("admin:cache") == 403
+        assert status("admin:*") != 403
 
 
 class TestDebugInspectPrefixLayout:

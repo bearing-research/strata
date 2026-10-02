@@ -2520,6 +2520,48 @@ async def test_ws_upgrade_rejected_without_principal(notebook_session, trusted_p
     assert fake.closed == (1008, "Unauthorized")
 
 
+@pytest.fixture
+def api_key_mode(_server_state, tmp_path):
+    """Put the server in api_key mode with a fresh key store; yields the store."""
+    from strata.api_keys import get_api_key_store, reset_api_key_store
+
+    _server_state.auth_mode = "api_key"
+    reset_api_key_store()
+    yield get_api_key_store(tmp_path / "keys.sqlite")
+    reset_api_key_store()
+
+
+@pytest.mark.asyncio
+async def test_ws_revoked_key_stops_changing_the_notebook(notebook_session, api_key_mode):
+    """The upgrade verifies the key once; a socket opened before revocation must not outlive it."""
+    from strata.notebook.ws import notebook_websocket
+
+    _, session = notebook_session
+    key, record = api_key_mode.create_key(
+        principal_id="alice", scopes=frozenset({"notebook:read", "notebook:write"})
+    )
+
+    class _RevokedMidSession(FakeNotebookWebSocket):
+        async def receive_text(self) -> str:
+            text = await super().receive_text()
+            if json.loads(text)["payload"].get("source") == "x = 20":
+                api_key_mode.revoke(record.key_id)
+            return text
+
+    fake = _RevokedMidSession(
+        inbound=[
+            _envelope("cell_source_update", {"cell_id": "root", "source": "x = 10"}),
+            _envelope("cell_source_update", {"cell_id": "root", "source": "x = 20"}),
+        ],
+        headers={"authorization": f"Bearer {key}"},
+    )
+    await notebook_websocket(cast(WebSocket, fake), session.id)
+
+    root = next(c for c in session.notebook_state.cells if c.id == "root")
+    assert root.source == "x = 10"
+    assert fake.closed == (1008, "Unauthorized")
+
+
 @pytest.mark.asyncio
 async def test_ws_read_scope_cannot_execute(notebook_session, trusted_proxy_mode):
     """The notebook:read/write/execute scopes gate frames: a read-only principal cannot run code."""

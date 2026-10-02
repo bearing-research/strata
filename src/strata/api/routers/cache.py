@@ -15,8 +15,10 @@ from typing import Annotated
 from fastapi import APIRouter, HTTPException, Query
 
 from strata.api.dependencies import authorize_table_access, require_scope
+from strata.auth import get_principal
 from strata.cache_metrics import get_eviction_tracker
 from strata.cache_stats import get_cache_histogram
+from strata.tenant import get_tenant_id
 from strata.types import (
     Task,
     WarmAsyncRequest,
@@ -70,12 +72,13 @@ async def get_cache_evictions_v1(
     return result
 
 
-@router.get("/v1/cache/histogram")
+@router.get("/v1/cache/histogram", dependencies=[require_scope("admin:cache")])
 async def get_cache_histogram_v1():
     """Get cache hit/miss statistics: lifetime, 1m/5m/1h windows, and top tables.
 
     Counts are exact for each window and recorded per row group, not per request.
-    ``covered_seconds`` is how much of the window the counts span.
+    ``covered_seconds`` is how much of the window the counts span. Requires ``admin:cache``:
+    ``top_tables`` names every tenant's tables.
     """
     histogram = get_cache_histogram()
     return histogram.get_summary()
@@ -117,22 +120,27 @@ async def clear_cache_v1():
 def _authorize_warm_tables(table_uris: list[str]) -> None:
     """Apply the deny-first table ACL to every table a warm request names.
 
-    Warming is a read of the table, so it takes the same gate as a scan. Runs before planning:
-    reporting a planning failure for a denied table would confirm it exists.
+    Warming is a read of the table, so it takes the same gate as a scan, on the identity the scan
+    path parses (a named catalog's included). Runs before planning: reporting a planning failure for
+    a denied table would confirm it exists. The planned identity is checked again after planning.
     """
-    from strata.iceberg import PyIcebergCatalog
-    from strata.types import TableIdentity
+    from strata.server import _table_identity_from_uri
 
     for table_uri in table_uris:
-        _, table_id = PyIcebergCatalog.parse_table_uri(table_uri)
-        try:
-            identity = TableIdentity.from_table_id(table_id)
-        except ValueError:
-            # Not a well-formed ``namespace.table``: leave it to the handler's
-            # own error path, which reveals nothing about a table that cannot
-            # exist under this id anyway.
-            continue
-        authorize_table_access(table_uri, identity)
+        identity = _table_identity_from_uri(table_uri)
+        if identity is not None:
+            authorize_table_access(table_uri, identity)
+
+
+def _warm_job_tenant() -> str | None:
+    """The tenant whose warm jobs the caller sees, or ``None`` for every tenant (``admin:*``).
+
+    A job's tables are the caller's, so another tenant must not list, read or cancel it.
+    """
+    principal = get_principal()
+    if principal is not None and principal.has_scope("admin:*"):
+        return None
+    return get_tenant_id()
 
 
 @router.post("/v1/cache/warm", response_model=WarmResponse)
@@ -186,6 +194,8 @@ async def warm_cache_v1(request: WarmRequest):
                 columns=request.columns,
                 filters=[],
             )
+            # As the scan path does: the catalog may resolve another identity than the URI names.
+            authorize_table_access(table_uri, plan.table_identity)
 
             tasks = plan.tasks
             if request.max_row_groups is not None:
@@ -225,6 +235,8 @@ async def warm_cache_v1(request: WarmRequest):
 
             tables_warmed += 1
 
+        except HTTPException:
+            raise
         except Exception as e:
             errors.append(f"{table_uri}: {e!s}")
 
@@ -268,7 +280,9 @@ async def warm_cache_async_v1(request: WarmAsyncRequest):
     if state._cache_warmer is None:
         raise HTTPException(status_code=503, detail="Cache warmer not initialized")
 
-    job_id = await state._cache_warmer.start_job(request)
+    job_id = await state._cache_warmer.start_job(
+        request, authorize=authorize_table_access, tenant=get_tenant_id()
+    )
 
     return WarmAsyncResponse(
         job_id=job_id,
@@ -290,7 +304,9 @@ async def list_warm_jobs_v1(
     if state._cache_warmer is None:
         return {"jobs": []}
 
-    jobs = state._cache_warmer.list_jobs(include_completed=include_completed)
+    jobs = state._cache_warmer.list_jobs(
+        include_completed=include_completed, tenant=_warm_job_tenant()
+    )
     return {"jobs": [j.model_dump() for j in jobs]}
 
 
@@ -304,7 +320,7 @@ async def get_warm_job_v1(job_id: str):
     if state._cache_warmer is None:
         raise HTTPException(status_code=404, detail="Job not found")
 
-    progress = state._cache_warmer.get_progress(job_id)
+    progress = state._cache_warmer.get_progress(job_id, tenant=_warm_job_tenant())
     if progress is None:
         raise HTTPException(status_code=404, detail="Job not found")
 
@@ -321,7 +337,7 @@ async def cancel_warm_job_v1(job_id: str):
     if state._cache_warmer is None:
         raise HTTPException(status_code=404, detail="Job not found")
 
-    cancelled = await state._cache_warmer.cancel_job(job_id)
+    cancelled = await state._cache_warmer.cancel_job(job_id, tenant=_warm_job_tenant())
 
     if cancelled:
         return {"cancelled": True, "message": f"Job {job_id} cancelled"}

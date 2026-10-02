@@ -206,7 +206,7 @@ Compared to personal mode:
   into a table (`POST /v1/artifacts/{id}/v/{n}/export`). Deny rules
   cannot be bypassed by allow rules, deny-first evaluation. A stream
   (`GET /v1/streams/{id}`) is readable only by the principal that
-  started it, and admin endpoints such as `POST /v1/cache/clear` need
+  started it, in the tenant it started it in, and admin endpoints such as `POST /v1/cache/clear` need
   their [scope](#scope-gated-endpoints).
 - **Per-tenant resources** when multi-tenancy is on. Each tenant
   gets its own QoS limiter pool, its own metric labels, and its own
@@ -217,7 +217,10 @@ Compared to personal mode:
 
 `STRATA_MULTI_TENANT_ENABLED=true` activates per-tenant isolation.
 With `STRATA_REQUIRE_TENANT_HEADER=true`, requests without a tenant
-header are rejected. The tenant ID is validated as 1–64
+header are rejected. Under `api_key` auth the tenant is the key's own
+and an `X-Tenant-ID` the caller sends is ignored, so a key cannot pick
+another tenant's limiters or log attribution; under `trusted_proxy` it
+is the header the proxy sets. The tenant ID is validated as 1–64
 alphanumeric / `_` / `-` characters and hashed into:
 
 - **Cache keys**: tenant A and tenant B can scan the same Iceberg
@@ -226,6 +229,9 @@ alphanumeric / `_` / `-` characters and hashed into:
   cache dir. Artifacts are not split by directory; each row records
   its tenant, and reads are filtered by it.
 - **QoS limiters**: interactive + bulk semaphores per tenant.
+- **Cache warm jobs**: a background job from `POST /v1/cache/warm/async`
+  is listed, read and cancelled (`/v1/cache/warm/jobs*`) only by its
+  own tenant; `admin:*` sees every tenant's.
 - **Metric labels**: Prometheus output carries a `tenant` label so
   you can dashboard per-tenant usage.
 
@@ -294,15 +300,15 @@ auth (`admin:*` satisfies any of them):
 
 | Scope | Gates |
 |---|---|
-| `admin:cache` | `POST /v1/cache/clear`, `GET /v1/cache/entries`, `GET /v1/debug/cache/inspect` |
+| `admin:cache` | `POST /v1/cache/clear`, `GET /v1/cache/entries`, `GET /v1/cache/histogram`, `GET /v1/debug/cache/inspect`, `POST /v1/metadata/cleanup` |
 | `admin:tenants` | `GET /v1/admin/tenants` and `GET /v1/admin/tenants/{tenant_id}` |
 | `admin:notebook-workers` | The server-managed worker registry, every `/v1/admin/notebook-workers*` route (list, replace, add, update, delete, refresh, reload) |
 | `admin:notebooks` | Quiescing a notebook or project and releasing it (`POST /v1/notebooks/{id}/quiesce` and `/release`, `POST /v1/projects/{path}/quiesce` and `/release`) |
-| `admin:*` | Garbage collection (`POST /v1/artifacts/gc`, still limited to the caller's tenant), reading another tenant's `GET /v1/artifacts/usage` / `stats`, and the server-wide log buffer (`GET /v1/logs`, `GET /v1/logs/stream`) |
+| `admin:*` | Garbage collection (`POST /v1/artifacts/gc`, still limited to the caller's tenant), reading another tenant's `GET /v1/artifacts/usage` / `stats`, the server-wide log buffer (`GET /v1/logs`, `GET /v1/logs/stream`), per-table metrics (`GET /metrics/tables*`), and the process diagnostics under `/v1/debug/*` (latency, GC pauses, pools, connections, memory, rate limits) |
 | `admin:registry` | `POST /v1/registry/pending/approve` and `.../reject` - deciding protected-alias changes |
 | `artifacts:pin` | Pinning and unpinning a version against garbage collection (`POST` / `DELETE /v1/artifacts/{id}/v/{n}/pin`) |
 | `artifacts:publish` | Minting, editing and withdrawing a publication (`POST /v1/artifacts/{id}/v/{n}/publish`, `PATCH` / `DELETE /v1/publications/{token}`) |
-| `artifacts:write` | Publishing in service mode (`put` / `set_name` / `set_alias` / tags) when `service_writes_enabled=true`. See [below](#authenticated-write-back-the-shared-research-store). |
+| `artifacts:write` | Publishing in service mode (`put` / `set_name` / `set_alias` / tags, and `name` on `POST /v1/materialize`) when `service_writes_enabled=true`. See [below](#authenticated-write-back-the-shared-research-store). |
 | `notebook:read` | Every notebook `GET` over REST, and observing a notebook over its WebSocket (sync, previews, profiling) |
 | `notebook:write` | Changing a notebook without running anything: creating, editing, reordering and deleting cells, and setting mounts, connections, workers, env, timeout, name and variants. REST and WebSocket alike. |
 | `notebook:execute` | Running code or changing its environment: executing a cell or its tests, run-all, dependency changes and environment sync, requirements imports, the Python version, SSH workers, the inspect REPL and widget updates. REST and WebSocket alike. |
@@ -344,7 +350,9 @@ directly - `put`, `set_name`, `set_alias`, tags - under a strict contract:
   read-only.
 - **Tenant-scoped (team = tenant).** A write lands in the caller's tenant and
   can't target another, so teammates share a namespace and other teams are
-  isolated. The publishing principal is recorded in the registry audit.
+  isolated. A name, alias or tag aimed at another tenant's artifact answers
+  `404 Artifact not found`, the same as a missing artifact or a read of it.
+  The publishing principal is recorded in the registry audit.
 
 ```bash
 STRATA_DEPLOYMENT_MODE=service

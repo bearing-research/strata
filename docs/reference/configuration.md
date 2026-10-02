@@ -370,6 +370,8 @@ Authorization: Bearer strata_<key_id>_<secret>
 
 A key resolves to the same principal a proxy header would have produced, so ACL
 rules, tenant scoping, and scope checks behave identically across both modes.
+The tenant is always the key's: an `X-Tenant-ID` header the caller sends is
+ignored, for QoS limiters and log attribution as well as for data access.
 
 Keys are stored in the artifact store's database, which means they follow
 whichever metadata backend it uses and are shared across nodes automatically.
@@ -396,7 +398,9 @@ credentials. Pass `--dsn` (or set `STRATA_ARTIFACT_METADATA_DSN`) when the
 metadata lives on Postgres, so the CLI writes where the server reads.
 
 **Revocation is immediate**: verification reads the row on each request, so a
-revoked key stops working at once rather than after a cache expiry.
+revoked key stops working at once rather than after a cache expiry. A notebook
+WebSocket opened with the key re-checks it on every frame that edits or runs
+something and closes on the first one after revocation.
 
 ### Running several nodes behind one address
 

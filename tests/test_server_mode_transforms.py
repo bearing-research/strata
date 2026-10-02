@@ -1367,6 +1367,30 @@ class TestServiceModeReviewFindings:
         assert data["inputs"][0]["version"] == 1
         assert data["metadata"]["params"] == {"sql": "SELECT * FROM input"}
 
+    def test_materialize_name_takes_the_write_gate(
+        self, server_mode_auth_app, server_mode_auth_config
+    ):
+        """``name`` writes a registry name when the build finalizes, so it needs write access."""
+        body = {
+            "inputs": ["file:///fake/warehouse#fake.table"],
+            "transform": {"executor": "duckdb_sql@v1", "params": {"sql": "SELECT 1"}},
+            "name": "prod",
+        }
+        writer = _auth_headers(scopes="artifacts:write")
+
+        off = server_mode_auth_app.post("/v1/artifacts/materialize", json=body, headers=writer)
+        assert off.status_code == 403
+        assert off.json()["detail"]["error"] == "writes_disabled"
+
+        server_mode_auth_config.service_writes_enabled = True
+        unscoped = server_mode_auth_app.post(
+            "/v1/artifacts/materialize", json=body, headers=_auth_headers()
+        )
+        assert unscoped.status_code == 403
+        assert unscoped.json()["detail"]["error"] == "missing_scope"
+        allowed = server_mode_auth_app.post("/v1/artifacts/materialize", json=body, headers=writer)
+        assert allowed.status_code == 200, allowed.text
+
     def test_registry_reads_work_in_service_mode(self, server_mode_app):
         """Registry read routes serve in service mode (allow_read=True), unlike the write routes."""
         for path in ("/v1/names", "/v1/registry/summary", "/v1/registry/audit"):

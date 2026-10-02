@@ -1175,9 +1175,10 @@ async def rate_limit_middleware(request: Request, call_next):
 async def tenant_context_middleware(request: Request, call_next):
     """Set the request's tenant context from the tenant header (default ``X-Tenant-ID``).
 
-    Without multi-tenancy every request gets ``_default``. Missing header falls back to
-    ``_default`` unless required (400); an invalid id is 400, a disabled tenant 403. Health,
-    metrics and self-authenticating routes skip this.
+    Under principal auth the tenant is the authenticated principal's, and an API key
+    caller's header is ignored. Without multi-tenancy every request gets ``_default``.
+    Missing header falls back to ``_default`` unless required (400); an invalid id is
+    400, a disabled tenant 403. Health, metrics and self-authenticating routes skip this.
     """
     path = request.url.path
     if (
@@ -1206,7 +1207,13 @@ async def tenant_context_middleware(request: Request, call_next):
             clear_tenant_context()
 
     tenant_header = getattr(config, "tenant_header", "X-Tenant-ID")
-    tenant_id = request.headers.get(tenant_header)
+    principal = get_principal()
+    if config.principal_auth_enabled and principal is not None:
+        # The authenticated principal's tenant, not the header: under api_key the
+        # header is the client's own claim. Under trusted_proxy both are the proxy's.
+        tenant_id = principal.tenant
+    else:
+        tenant_id = request.headers.get(tenant_header)
 
     if not tenant_id:
         if getattr(config, "require_tenant_header", False):
@@ -1692,6 +1699,15 @@ def _authorize_artifact_write() -> None:
         )
 
 
+def _authorize_name_write() -> None:
+    """Gate ``name`` on a materialize request with the ``POST /v1/names`` write gate.
+
+    The name is set on a cache hit and again when a miss finalizes, so refuse it at admission.
+    """
+    _get_artifact_store(allow_write=True)
+    _authorize_artifact_write()
+
+
 @app.post("/v1/artifacts/materialize", response_model=MaterializeResponse)
 async def materialize_artifact(request: MaterializeRequest):
     """Materialize a computed artifact: the cached one on a provenance hit, else a build spec.
@@ -1712,6 +1728,8 @@ async def materialize_artifact(request: MaterializeRequest):
     executor_ref = transform.executor
 
     transform_defn = _validate_transform_allowed(executor_ref, principal=principal)
+    if request.name:
+        _authorize_name_write()
 
     store = _get_artifact_store(allow_server_mode=True)
 
@@ -2010,6 +2028,9 @@ async def _handle_identity_materialize(
 
     filters = identity_params.to_strata_filters()
 
+    if request.name:
+        _authorize_name_write()
+
     # Authorize before planning: the 400/413 planning errors would tell a denied
     # caller the table exists and its size, and planning costs manifest reads.
     # The identity comes from the URI so a refused request does no manifest work.
@@ -2307,7 +2328,8 @@ async def get_stream(stream_id: str, request: Request):
         if principal is None:
             raise HTTPException(status_code=401, detail="Unauthorized")
 
-        if plan.owner_principal != principal.id:
+        # Principal ids are only unique within a tenant.
+        if plan.owner_principal != principal.id or plan.owner_tenant != principal.tenant:
             if not principal.has_scope("admin:*"):
                 if state.config.hide_forbidden_as_not_found:
                     raise HTTPException(status_code=404, detail=f"Stream {stream_id} not found")

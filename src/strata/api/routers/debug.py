@@ -1,5 +1,8 @@
 """Read-only operator diagnostics: latency, GC, pools, connections, memory, rate limits, cache.
 
+Process-wide, so under principal auth each route needs ``admin:*`` (cache inspection
+``admin:cache``); ``detailed=true`` memory walks every GC object.
+
 Server state is imported lazily inside handlers so this module stays a leaf.
 """
 
@@ -19,7 +22,7 @@ from strata.slow_ops import get_latency_stats
 router = APIRouter(tags=["debug"])
 
 
-@router.get("/v1/debug/latency")
+@router.get("/v1/debug/latency", dependencies=[require_scope("admin:*")])
 async def get_latency_histograms_v1():
     """Get latency histograms per stage (plan, ttfb, fetch, total_request).
 
@@ -38,7 +41,7 @@ async def get_latency_histograms_v1():
     return result
 
 
-@router.get("/v1/debug/gc/pauses")
+@router.get("/v1/debug/gc/pauses", dependencies=[require_scope("admin:*")])
 async def get_gc_pauses_v1(
     limit: Annotated[int, Query(description="Maximum pauses to return", ge=1, le=1000)] = 100,
 ):
@@ -55,7 +58,7 @@ async def get_gc_pauses_v1(
     }
 
 
-@router.get("/v1/debug/pools")
+@router.get("/v1/debug/pools", dependencies=[require_scope("admin:*")])
 async def get_pool_metrics_v1():
     """Get utilization and queue depth for the planning and fetch thread pools.
 
@@ -65,14 +68,14 @@ async def get_pool_metrics_v1():
     return pool_tracker.get_summary()
 
 
-@router.get("/v1/debug/connections")
+@router.get("/v1/debug/connections", dependencies=[require_scope("admin:*")])
 async def get_connection_metrics_v1():
     """Get HTTP connection metrics: in-flight, total and peak requests, rate, keep-alive share."""
     connection_metrics = get_connection_metrics()
     return connection_metrics.get_stats()
 
 
-@router.get("/v1/debug/memory")
+@router.get("/v1/debug/memory", dependencies=[require_scope("admin:*")])
 async def get_memory_debug_v1(
     detailed: Annotated[
         bool,
@@ -90,7 +93,7 @@ async def get_memory_debug_v1(
         return snapshot.to_dict()
 
 
-@router.get("/v1/debug/rate-limits")
+@router.get("/v1/debug/rate-limits", dependencies=[require_scope("admin:*")])
 async def get_rate_limits_debug_v1():
     """Get rate limiter statistics: allowed and rejected counts (global, client, endpoint)."""
     rate_limiter = get_rate_limiter()
