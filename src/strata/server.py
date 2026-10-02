@@ -2434,6 +2434,7 @@ def _mount_frontend(application: FastAPI, dist_dir: Path | None = None) -> None:
     )
 
     dist_root = dist_dir.resolve()
+    index = dist_root / "index.html"
 
     # SPA fallback: any non-API GET returns index.html
     @application.get("/{full_path:path}", include_in_schema=False)
@@ -2442,9 +2443,11 @@ def _mount_frontend(application: FastAPI, dist_dir: Path | None = None) -> None:
             raise HTTPException(status_code=404)
         # An absolute or dot-segment path would otherwise escape the dist and read any file.
         file_path = (dist_root / full_path).resolve()
-        if file_path.is_relative_to(dist_root) and file_path.is_file():
-            return FileResponse(str(file_path))
-        return FileResponse(str(dist_dir / "index.html"))
+        if not (file_path.is_relative_to(dist_root) and file_path.is_file()):
+            file_path = index
+        # index.html names this build's hashed assets; a cached copy outlives an upgrade.
+        headers = {"Cache-Control": "no-cache"} if file_path == index else None
+        return FileResponse(str(file_path), headers=headers)
 
 
 _mount_frontend(app)

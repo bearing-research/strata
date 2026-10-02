@@ -86,3 +86,14 @@ def test_only_the_embed_route_itself_may_be_framed_anywhere(spa, path):
 
     assert response.text == INDEX
     assert response.headers["content-security-policy"] == "frame-ancestors 'self'"
+
+
+@pytest.mark.parametrize("path", ["/", "/index.html", "/notebook/anything"])
+def test_index_is_revalidated(spa, path):
+    """A cached index.html outlives an upgrade and names hashed assets that no longer exist."""
+    client, _ = spa
+
+    response = client.get(path)
+
+    assert response.text == INDEX
+    assert response.headers["cache-control"] == "no-cache"
