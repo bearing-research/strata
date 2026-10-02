@@ -270,6 +270,12 @@ input, is refused before planning with `404 Table not found`, so the answer
 does not reveal that the table exists. Set
 `STRATA_HIDE_FORBIDDEN_AS_NOT_FOUND=false` to get `403` instead.
 
+The cache is shared, so the same rules gate reading a stored result: its data,
+metadata, lineage and dependents, publishing it, and exporting it into a table
+(`POST /v1/artifacts/{id}/v/{n}/export`). An export copies the result into a
+table the caller can then scan, so it is refused both when the caller is denied
+the target table and when the caller is denied a table the result was read from.
+
 ### Scope-gated endpoints
 
 A few operations require a specific scope under trusted-proxy or API-key

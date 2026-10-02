@@ -946,7 +946,7 @@ async def export_artifact_to_table(
     """
     from strata.api.dependencies import authorize_table_access
     from strata.iceberg import table_identity_for
-    from strata.server import _ensure_artifact_access, get_state
+    from strata.server import _authorize_artifact_read, _ensure_artifact_access, get_state
     from strata.table_export import export_artifact
 
     config = get_state().config
@@ -958,6 +958,8 @@ async def export_artifact_to_table(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     authorize_table_access(request.table, identity)
     artifact = _ensure_artifact_access(store.get_artifact(artifact_id, version), tenant_filter)
+    # Exporting copies the bytes into a table the caller can scan, so it is a read of them.
+    _authorize_artifact_read(artifact)
     try:
         written = await asyncio.to_thread(
             export_artifact,
