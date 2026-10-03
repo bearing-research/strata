@@ -378,8 +378,9 @@ def _publication_target(
     to_url = getattr(args, "to_url", None)
     if to_url:
         # A store on another machine: the chain travels over HTTP and the grant is minted there,
-        # since a link only resolves from the store that serves it.
-        return RemoteStore(str(to_url), _remote_headers(args)), str(to_url)
+        # since a link only resolves from the store that serves it. Remap, so a chain another
+        # tenant already copied there lands as this caller's own copy instead of a 409.
+        return RemoteStore(str(to_url), _remote_headers(args), remap=True), str(to_url)
 
     into = getattr(args, "into", None)
     if into:

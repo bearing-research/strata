@@ -341,8 +341,8 @@ A link resolves from the store its server serves, and a chain lives in the
 store its cells wrote to. When those are different machines, the chain is
 imported into the serving store first, ancestors before descendants, keeping
 each version's id and number so its lineage edges still resolve.
-`strata artifact publish --to <url>` does this for you. A service doing it
-over HTTP uploads each version's bytes, then its record:
+`strata artifact publish --to <url>` does this for you, and a service doing it
+over HTTP does the same: upload each version's bytes, then its record:
 
 ```
 PUT  /v1/artifacts/import/blobs/{content_sha256}     the bytes, checked against the digest; 201
@@ -358,7 +358,15 @@ The import stamps the caller's tenant on the row, answers 409 for a version
 another tenant or another computation holds unless `?remap=true` is set, and is
 idempotent: repeating a finished import writes nothing and needs no new upload.
 The same route also takes a multipart body with the record as `metadata` and
-the bytes as `data`, which is what the CLI sends.
+the bytes as `data`, which holds the whole artifact in memory on both sides.
+
+`publish --to` streams each artifact's bytes from a file to the upload route
+and sets `remap`. So a chain another tenant on the target already holds (or a
+version id a different computation took there) lands as a copy under a fresh
+id, `<id>@import=<8 hex>`, in the caller's tenant. Each copy keeps its
+provenance hash, and the CLI points every descendant's lineage edges at the
+ids its ancestors landed on, so the published page resolves every step.
+Publishing the same chain again writes nothing.
 
 ## HTTP
 

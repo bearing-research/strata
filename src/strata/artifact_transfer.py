@@ -10,7 +10,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import tempfile
 import time
+from collections.abc import Iterator
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Protocol
@@ -21,6 +23,7 @@ from strata.artifact_store import (
     ImportedArtifact,
     Publication,
 )
+from strata.blob_store import BLOB_STREAM_CHUNK_BYTES
 
 # What another store needs to rebuild an artifact version: everything but the tenant, which the
 # destination takes from the authenticated caller. One list shared by the HTTP transfer and the
@@ -55,7 +58,9 @@ class PublicationTarget(Protocol):
 
     db_path: Path
 
-    def import_artifact(self, record: ArtifactVersion, blob: bytes | None) -> ImportedArtifact: ...
+    def import_artifact(
+        self, record: ArtifactVersion, blob: bytes | Path | None
+    ) -> ImportedArtifact: ...
 
     def publish_artifact(
         self,
@@ -71,35 +76,69 @@ class PublicationTarget(Protocol):
 class RemoteStore:
     """A store on another machine, reached over HTTP; duck-types what ``copy_chain`` uses."""
 
-    def __init__(self, base_url: str, headers: dict[str, str] | None = None) -> None:
+    def __init__(
+        self, base_url: str, headers: dict[str, str] | None = None, *, remap: bool = False
+    ) -> None:
         self.base_url = base_url.rstrip("/")
         self._headers = dict(headers or {})
+        # Land a version another tenant (or computation) holds under a fresh id
+        # rather than failing with 409; copy_chain rewrites edges to the new id.
+        self._remap = remap
         # Distinct from any local store's, so the caller's "are these the same
         # store" check never accidentally matches.
         self.db_path = Path(f"<remote:{self.base_url}>")
 
-    def import_artifact(self, record: ArtifactVersion, blob: bytes | None):
-        """POST one record and its bytes; return where the far side put them."""
+    def import_artifact(self, record: ArtifactVersion, blob: bytes | Path | None):
+        """Upload the bytes, then POST the record naming them; return where they landed.
+
+        The bytes are streamed to the staging route and checked there against their
+        digest, so a file is never read into memory.
+        """
         import httpx
 
         from strata.artifact_store import ImportedArtifact
 
         metadata = record_metadata(record)
-        if blob is not None:
-            metadata["content_sha256"] = hashlib.sha256(blob).hexdigest()
-
-        files: dict[str, tuple[str, Any, str]] = {
-            "metadata": ("metadata.json", json.dumps(metadata), "application/json"),
-        }
-        if blob is not None:
-            files["data"] = ("data.bin", blob, "application/octet-stream")
-
-        response = httpx.post(
-            f"{self.base_url}/v1/artifacts/import",
-            files=files,
-            headers=self._headers,
-            timeout=REMOTE_TIMEOUT_SECONDS,
-        )
+        params = {"remap": "true"} if self._remap else None
+        if blob is None:
+            # Nothing to stage: the far side already holds the bytes, or has none to hold.
+            response = httpx.post(
+                f"{self.base_url}/v1/artifacts/import",
+                files={"metadata": ("metadata.json", json.dumps(metadata), "application/json")},
+                params=params,
+                headers=self._headers,
+                timeout=REMOTE_TIMEOUT_SECONDS,
+            )
+        else:
+            digest = _sha256_of(blob)
+            metadata["content_sha256"] = digest
+            if isinstance(blob, Path):
+                with open(blob, "rb") as body:
+                    staged = httpx.put(
+                        f"{self.base_url}/v1/artifacts/import/blobs/{digest}",
+                        content=_chunks(body),
+                        headers=self._headers,
+                        timeout=REMOTE_TIMEOUT_SECONDS,
+                    )
+            else:
+                staged = httpx.put(
+                    f"{self.base_url}/v1/artifacts/import/blobs/{digest}",
+                    content=blob,
+                    headers=self._headers,
+                    timeout=REMOTE_TIMEOUT_SECONDS,
+                )
+            if staged.status_code >= 400:
+                raise RuntimeError(
+                    f"Upload of {record.id}@v={record.version}'s bytes was refused with "
+                    f"HTTP {staged.status_code}: {detail_of(staged)}"
+                )
+            response = httpx.post(
+                f"{self.base_url}/v1/artifacts/import",
+                json=metadata,
+                params=params,
+                headers=self._headers,
+                timeout=REMOTE_TIMEOUT_SECONDS,
+            )
         if response.status_code >= 400:
             raise RuntimeError(
                 f"Import of {record.id}@v={record.version} was refused with "
@@ -219,6 +258,21 @@ class RemoteStore:
         )
 
 
+def _chunks(handle) -> Iterator[bytes]:
+    while chunk := handle.read(BLOB_STREAM_CHUNK_BYTES):
+        yield chunk
+
+
+def _sha256_of(blob: bytes | Path) -> str:
+    if isinstance(blob, bytes):
+        return hashlib.sha256(blob).hexdigest()
+    hasher = hashlib.sha256()
+    with open(blob, "rb") as handle:
+        for chunk in _chunks(handle):
+            hasher.update(chunk)
+    return hasher.hexdigest()
+
+
 def detail_of(response) -> str:
     """The server's own explanation, when it gave one."""
     try:
@@ -289,12 +343,19 @@ def copy_chain(
         if record is None:
             continue
         record = remap_input_versions(record, remap)
-        reader_cm = source.open_blob_reader(node.artifact_id, node.version)
-        blob = None
-        if reader_cm is not None:
-            with reader_cm as reader:
-                blob = reader.read()
-        imported = target.import_artifact(record, blob)
+        with tempfile.TemporaryDirectory(prefix="strata_copy_") as workdir:
+            # Spooled to disk, so an artifact never sits whole in memory.
+            reader_cm = source.open_blob_reader(node.artifact_id, node.version)
+            blob = None
+            if reader_cm is not None:
+                blob = Path(workdir) / "blob"
+                hasher = hashlib.sha256()
+                with reader_cm as reader, open(blob, "wb") as out:
+                    for chunk in _chunks(reader):
+                        hasher.update(chunk)
+                        out.write(chunk)
+                record = replace(record, content_sha256=hasher.hexdigest())
+            imported = target.import_artifact(record, blob)
         if imported.written:
             written.append(imported.ref)
 
