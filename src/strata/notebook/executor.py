@@ -507,6 +507,9 @@ class CellExecutor:
         self._fetch_times: dict[str, dict[str, float]] = {}
         # Same for ``@dataset``: ``{strata://name/<reference>: <id>@v=<n>}``.
         self._dataset_refs: dict[str, dict[str, str]] = {}
+        # Also store the variables of a cell nothing downstream reads. Off by default: only
+        # consumed variables are kept, and a leaf's result can be large.
+        self.store_leaf_outputs = False
         self._mount_resolver = MountResolver(
             cache_dir=session.path / ".strata" / "mount_cache",
             credentials=mount_credentials,
@@ -4273,6 +4276,8 @@ class CellExecutor:
     ) -> bool:
         """Persist consumed output variables as artifacts; True iff all were stored.
 
+        With ``store_leaf_outputs``, a leaf cell's variables are stored too, best-effort.
+
         With ``variant`` set, ids get an ``@variant={name}`` suffix so fan-out
         instances do not collide.
         """
@@ -4296,7 +4301,10 @@ class CellExecutor:
             [f.name for f in output_files],
         )
 
-        if not consumed_vars:
+        # Kept for the record only: no input resolves through them, so a value that did not
+        # serialize is skipped rather than failing the cell.
+        leaf_vars = set(cell.defines) if not consumed_vars and self.store_leaf_outputs else set()
+        if not consumed_vars and not leaf_vars:
             return True
 
         all_stored = True
@@ -4326,7 +4334,7 @@ class CellExecutor:
             ".rds",
         ]
 
-        for var_name in consumed_vars:
+        for var_name in consumed_vars | leaf_vars:
             # Python writes a case-safe stem (``Data-<hash>.json``), R the plain name. Try every
             # safe-stem candidate, then the plain name only if no safe-stem file exists at all
             # (never per-ext), so a case-differing sibling like ``data.arrow`` is never taken
@@ -4344,6 +4352,8 @@ class CellExecutor:
                 if output_file is not None:
                     break
 
+            if output_file is None and var_name in leaf_vars:
+                continue
             if output_file is None:
                 logger.warning(
                     "_store_outputs %s: no output file for consumed var %s "
@@ -4389,6 +4399,8 @@ class CellExecutor:
                     var_name,
                     cell_id,
                 )
+                if var_name in leaf_vars:
+                    continue
                 all_stored = False
                 break
 
@@ -4401,12 +4413,14 @@ class CellExecutor:
             stored = artifact_mgr.finalize_cell_outputs(staged)
         except Exception:
             logger.exception("Failed to store the outputs of cell %s", cell_id)
-            return False
+            # A leaf's record is best-effort and never fails the cell.
+            return not consumed_vars
 
         for (var_name, content_type), artifact_version in zip(staged_names, stored, strict=True):
-            uri = f"strata://artifact/{artifact_version.id}@v={artifact_version.version}"
-            cell.artifact_uris[var_name] = uri
-            cell.artifact_uri = uri  # backward compat
+            if var_name not in leaf_vars:
+                uri = f"strata://artifact/{artifact_version.id}@v={artifact_version.version}"
+                cell.artifact_uris[var_name] = uri
+                cell.artifact_uri = uri  # backward compat
             logger.info(
                 "Stored output %s for cell %s as %s@v=%d (%d bytes, %s)",
                 var_name,

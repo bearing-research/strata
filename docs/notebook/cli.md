@@ -54,6 +54,17 @@ stderr regardless of format. The executor's per-cell INFO logs are held back
 during a run; set `STRATA_LOG_LEVEL=INFO` to see them. Pipe stdout to `jq`:
 `strata run ... --format json | jq '.cells[] | select(.status == "error")'`.
 
+A successful cell also carries `provenance_hash` and `outputs`, one
+`{name, artifact_id, version, content_sha256}` per stored output, so two runs
+on two machines can be diffed digest by digest with no server involved.
+`strata run` stores the variables of leaf cells too (cells nothing downstream
+reads, which the notebook otherwise keeps no artifact for), so the notebook's
+final results have digests to compare; a value that cannot be serialized is
+skipped. Display outputs and a leaf's cached console appear as `__display__N`
+and `__console__`. An output stored before digests were recorded gets its
+digest computed from its bytes when the report is written. The ZIP export's
+`provenance.json` lists the same `outputs` per cell.
+
 ### Exit Codes
 
 | Code | Meaning                                                        |

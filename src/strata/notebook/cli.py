@@ -275,6 +275,8 @@ async def _run_notebook(args: argparse.Namespace) -> int:
         print()
 
     executor = CellExecutor(session)
+    # The report gives every cell a digest, so a leaf keeps what it defines.
+    executor.store_leaf_outputs = True
     cell_by_id = {c.id: c for c in session.notebook_state.cells}
     results: list[dict[str, Any]] = []
     failed_cells: set[str] = set()
@@ -432,16 +434,7 @@ def _cell_identity(session, cell, cell_id: str) -> dict[str, Any]:
     if cell.last_provenance_hash:
         identity["provenance_hash"] = cell.last_provenance_hash
 
-    manager = session.get_artifact_manager()
-    outputs = [
-        {
-            "name": name,
-            "artifact_id": artifact.id,
-            "version": artifact.version,
-            "content_sha256": artifact.content_sha256,
-        }
-        for name, artifact in sorted(manager.list_cell_artifacts(cell_id))
-    ]
+    outputs = session.get_artifact_manager().cell_output_digests(cell_id)
     if outputs:
         identity["outputs"] = outputs
     return identity
