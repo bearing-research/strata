@@ -419,6 +419,7 @@ async def execute_prompt_cell(
 
     try:
         from strata.artifact_store import TransformSpec
+        from strata.notebook.artifact_integration import caller_principal_id
 
         version = artifact_mgr.artifact_store.create_artifact(
             artifact_id=canonical_id,
@@ -438,6 +439,7 @@ async def execute_prompt_cell(
                 },
                 inputs=[],
             ),
+            principal=caller_principal_id(),
         )
         artifact_mgr.artifact_store.write_blob(canonical_id, version, blob)
         artifact_mgr.artifact_store.finalize_artifact(
