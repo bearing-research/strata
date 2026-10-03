@@ -216,6 +216,15 @@ class TestObjectStoreWarehouseNeedsACatalogUri:
 
         assert config.catalog_properties["uri"] == "postgresql://host/db"
 
+    def test_a_named_credential_can_supply_the_uri(self, tmp_path):
+        config = StrataConfig(
+            cache_dir=tmp_path / "c",
+            catalogs={"lake": {"warehouse": "s3://l/wh", "credential": "lake-db"}},
+            notebook_credentials={"lake-db": {"uri": "${LAKE_DSN}"}},
+        )
+
+        assert config.catalogs["lake"]["credential"] == "lake-db"
+
     @pytest.mark.parametrize(
         "props",
         [

@@ -759,11 +759,13 @@ class StrataConfig(BaseSettings):
         configured.update({f"catalogs.{name}": props for name, props in self.catalogs.items()})
         for where, props in configured.items():
             warehouse = props.get("warehouse", "")
+            credential = self.notebook_credentials.get(props.get("credential", ""), {})
             if (
                 "://" in warehouse
                 and not warehouse.startswith("file://")
                 and props.get("type", "sql") == "sql"
                 and "uri" not in props
+                and "uri" not in credential
             ):
                 raise ValueError(
                     f"{where} has the object-store warehouse {warehouse} but no "

@@ -136,6 +136,22 @@ STRATA_NOTEBOOK_CREDENTIALS='{
 
 The `@mount` annotation takes the name too: `# @mount raw s3://lab-bucket/raw ro credential=lab-bucket`.
 
+A named catalog in the server's `STRATA_CATALOGS` takes the same key, so the
+catalog's secrets (a SQL catalog's database URI, a REST token, `s3.*` keys)
+stay out of the catalog config:
+
+```bash
+STRATA_CATALOGS='{"lake": {"type": "sql", "warehouse": "s3://lake/wh", "credential": "lake-db"}}'
+STRATA_NOTEBOOK_CREDENTIALS='{"lake-db": {"uri": "${LAKE_DSN}", "s3.access-key-id": "${LAKE_KEY}"}}'
+```
+
+Its fields become pyiceberg catalog properties, beneath the catalog's own keys.
+`@table` and scans resolve the references against the server's environment; a
+DuckDB cell attaching the catalog resolves them against the notebook's first, as
+a mount does. A missing name fails the read with a message naming it. The
+catalog's credential is not part of provenance: a table read is already keyed
+by its snapshot.
+
 ## `[[workers]]` - Remote worker registry
 
 ```toml
