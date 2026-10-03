@@ -114,6 +114,7 @@ The standard executor v1 envelope. Cells and inputs are pushed inline; the worke
 ```json
 {
   "protocol_version": "v1",
+  "build_id": "notebook-3f2a9c1b7e04",
   "transform": {
     "ref": "notebook_cell@v1",
     "params": {
@@ -163,6 +164,29 @@ X-Strata-Notebook-Executor-Protocol: notebook-cell-v1
 ```
 
 A cell that raises still answers `200`: the bundle's manifest says `"success": false` and carries the error. The server refuses a response whose protocol headers name a version other than these.
+
+**Asynchronous execution (202).** A worker, or a dispatcher in front of one
+that first has to boot a machine, may answer `202 Accepted` with
+`{"job_url": "/v1/jobs/..."}`, as the [pull model](#post-v1execute-manifest-pull-model)
+does. The server polls `GET {job_url}` with the same headers it sent the
+request with (`Authorization` and `X-Strata-Executor-Protocol`), under the
+same rules: `job_url` must resolve to the host and port the request went to,
+and the job answers `{"state": "queued" | "provisioning" | "starting" | "running"}`
+while it waits or runs. When the job finishes, the job URL answers exactly
+what a synchronous worker would have: `200` with `Content-Type: application/x-tar`,
+the two protocol headers and the output bundle, which the server reads and
+checks as it reads the `200` above. A job that fails answers
+`{"state": "failed", "status_code": 502, "error": "..."}`, and the cell fails
+with that error (`status_code` `408` fails it as a timeout). A `finished`
+state in JSON is refused, since a direct job's result is its bundle.
+
+The deadlines are the pull model's: waiting before `running` is bounded by
+`STRATA_WORKER_PROVISIONING_TIMEOUT_SECONDS` (default 600), and the cell's
+`timeout_seconds` starts only when the job first reports `running`, so a
+machine's boot does not spend the cell's budget. If either deadline passes,
+or the cell is cancelled while the server polls, the server calls
+`/v1/executions/{build_id}/cancel` with the `build_id` from `metadata`.
+A worker that answers `200` directly needs no change.
 
 **Errors:**
 

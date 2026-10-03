@@ -2,12 +2,14 @@
 
 A worker, or a pool in front of one, may answer 202 with a job to poll: the wait for it to
 start is bounded by the provisioning deadline, and the cell's timeout starts when it runs.
-The facade stands in for a pool and runs the manifest on a real worker at ``finished``. A
-fake clock advances on every status read, so deadlines are exercised without waiting.
+The facade stands in for a pool and runs the request on a real worker at ``finished``: a
+manifest's result is the worker's JSON, a direct request's is its output bundle. A fake clock
+advances on every status read, so deadlines are exercised without waiting.
 """
 
 from __future__ import annotations
 
+import asyncio
 import http.server
 import json
 import threading
@@ -36,6 +38,7 @@ class _Facade:
         self.worker_url = worker_url
         self.step = step
         self.manifest: dict | None = None
+        self.direct: tuple[bytes, str] | None = None
         self.cancelled: list[str] = []
         facade = self
 
@@ -54,14 +57,45 @@ class _Facade:
                     facade.cancelled.append(self.path)
                     self._json(200, {"cancelled": True})
                     return
-                facade.manifest = json.loads(raw)
+                if self.headers["Content-Type"].startswith("multipart/form-data"):
+                    facade.direct = (raw, self.headers["Content-Type"])
+                else:
+                    facade.manifest = json.loads(raw)
                 self._json(202, {"job_url": "/jobs/1", "provisioning_deadline": 600})
 
             def do_GET(self):  # noqa: N802
                 facade.clock.now += facade.step
                 state = facade.script.pop(0) if len(facade.script) > 1 else facade.script[0]
+                if state == "failed":
+                    self._json(
+                        200,
+                        {"state": "failed", "status_code": 502, "error": "the machine was lost"},
+                    )
+                    return
+                if state == "finished-without-bundle":
+                    self._json(200, {"state": "finished", "status_code": 200, "result": {}})
+                    return
                 if state != "finished":
                     self._json(200, {"state": state})
+                    return
+                if facade.direct is not None:
+                    raw, content_type = facade.direct
+                    worker = httpx.post(
+                        facade.worker_url,
+                        content=raw,
+                        headers={"Content-Type": content_type, "X-Strata-Executor-Protocol": "v1"},
+                        timeout=120,
+                    )
+                    self.send_response(worker.status_code)
+                    for name in (
+                        "Content-Type",
+                        "X-Strata-Executor-Protocol",
+                        "X-Strata-Notebook-Executor-Protocol",
+                    ):
+                        self.send_header(name, worker.headers[name])
+                    self.send_header("Content-Length", str(len(worker.content)))
+                    self.end_headers()
+                    self.wfile.write(worker.content)
                     return
                 worker = httpx.post(facade.worker_url, json=facade.manifest, timeout=120)
                 self._json(
@@ -93,16 +127,28 @@ def run_cell(tmp_path, monkeypatch, notebook_executor_server, notebook_personal_
     monkeypatch.setattr(executor_module, "_monotonic", clock)
     monkeypatch.setattr(executor_module, "_JOB_POLL_SECONDS", 0)
     phases: list[str] = []
+    cancel_at: list[str] = []
 
     async def record_phase(self, cell_id, worker_spec, phase):
         phases.append(phase)
+        if phase in cancel_at:
+            asyncio.current_task().cancel()
 
     monkeypatch.setattr(CellExecutor, "_broadcast_remote_phase", record_phase)
     facades: list[_Facade] = []
 
-    async def _run(script: list[str], *, provisioning_limit: float = 600.0):
+    async def _run(
+        script: list[str],
+        *,
+        provisioning_limit: float = 600.0,
+        transport: str = "signed",
+        cancel_at_phase: str | None = None,
+    ):
         notebook_personal_server["config"].worker_provisioning_timeout_seconds = provisioning_limit
-        facade = _Facade(clock, script, notebook_executor_server["manifest_execute_url"])
+        worker_url = notebook_executor_server[
+            "execute_url" if transport == "direct" else "manifest_execute_url"
+        ]
+        facade = _Facade(clock, script, worker_url)
         facades.append(facade)
         source = "# @timeout 30\nx = 41 + 1"
         nb = create_notebook(tmp_path / f"nb{len(facades)}", "Async")
@@ -116,14 +162,20 @@ def run_cell(tmp_path, monkeypatch, notebook_executor_server, notebook_personal_
                 runtime_id="pool",
                 config={
                     "url": f"{facade.base}/v1/execute",
-                    "transport": "signed",
+                    "transport": transport,
                     "strata_url": notebook_personal_server["base_url"],
                 },
             )
         ]
         session.notebook_state.worker = "pool"
-        result = await CellExecutor(session).execute_cell("c1", source)
-        return result, facade, phases
+        if cancel_at_phase is None:
+            result = await CellExecutor(session).execute_cell("c1", source)
+            return result, facade, phases
+        cancel_at.append(cancel_at_phase)
+        with pytest.raises(asyncio.CancelledError):
+            await CellExecutor(session).execute_cell("c1", source)
+        asyncio.current_task().uncancel()
+        return None, facade, phases
 
     yield _run
     for facade in facades:
@@ -159,4 +211,51 @@ async def test_the_cells_timeout_starts_when_the_job_runs(run_cell):
 
     assert result.success is False
     assert result.remote_error_code == "TIMEOUT"
+    assert len(facade.cancelled) == 1
+
+
+async def test_a_direct_cell_survives_a_boot_longer_than_its_timeout(run_cell):
+    """The direct transport follows the job URL too: 50 s provisioning against a
+    30 s cell timeout, then the job URL answers the worker's output bundle."""
+    result, facade, phases = await run_cell(
+        ["provisioning"] * 5 + ["running", "finished"], transport="direct"
+    )
+
+    assert result.success, result.error
+    assert result.outputs["x"]["preview"] == 42
+    assert phases == ["starting", "running"]
+    assert facade.direct is not None and facade.manifest is None
+    assert facade.cancelled == []
+
+
+async def test_a_failed_direct_job_fails_the_cell_with_the_jobs_error(run_cell):
+    result, facade, _ = await run_cell(["provisioning", "failed"], transport="direct")
+
+    assert result.success is False
+    assert "the machine was lost" in result.error
+    assert facade.cancelled == []
+
+
+async def test_a_direct_job_that_never_starts_is_cancelled_by_its_build_id(run_cell):
+    result, facade, _ = await run_cell(["provisioning"], provisioning_limit=40, transport="direct")
+
+    assert result.success is False
+    assert result.remote_error_code == "PROVISIONING_TIMEOUT"
+    assert facade.direct is not None
+    metadata = facade.direct[0].split(b"\r\n\r\n", 1)[1].split(b"\r\n--", 1)[0]
+    assert facade.cancelled == [f"/v1/executions/{json.loads(metadata)['build_id']}/cancel"]
+
+
+async def test_a_direct_job_finished_without_its_bundle_is_a_protocol_error(run_cell):
+    result, _, _ = await run_cell(["running", "finished-without-bundle"], transport="direct")
+
+    assert result.success is False
+    assert result.remote_error_code == "PROTOCOL_ERROR"
+
+
+async def test_cancelling_a_direct_cell_while_polling_cancels_the_job(run_cell):
+    _, facade, _ = await run_cell(
+        ["provisioning"], provisioning_limit=1e9, transport="direct", cancel_at_phase="starting"
+    )
+
     assert len(facade.cancelled) == 1
