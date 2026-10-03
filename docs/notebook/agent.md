@@ -221,8 +221,10 @@ If you would rather keep a browser tab than a terminal viewer, start with
   `<!-- strata:agent:end -->` markers is managed; your own notes in the same file
   are preserved and rewritten around.
 
-Both are safe to commit; they make the notebook agent-ready for anyone who
-clones it.
+Neither is part of the notebook's committed set. The `.gitignore` that
+`strata new` writes ignores both, since every launch rewrites them with this
+machine's port and session id, and exports leave them out. Anyone who clones
+the notebook runs `strata agent` to get their own.
 
 ## Options
 

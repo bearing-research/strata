@@ -284,10 +284,15 @@ The committed set is:
 - everything under `cells/`, including cell tests
 - the `.gitignore` itself
 
+The `.mcp.json` and `CLAUDE.md` that `strata agent` writes are ignored: each
+launch rewrites them with the server's port and the session id, so they
+describe one machine's run rather than the notebook.
+
 The rules live in `strata.notebook.layout`: `committed_paths()` returns the
 set for a given directory and `IGNORED_PATTERNS` is what the `.gitignore`
 contains, so this list is a rendering of the code rather than a second source
-that drifts from it.
+that drifts from it. The ZIP and snapshot exports carry exactly
+`committed_paths()`, and `strata import` writes those files back.
 
 ## Round-trip safety
 

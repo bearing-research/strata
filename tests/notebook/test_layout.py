@@ -10,6 +10,7 @@ import subprocess
 
 import pytest
 
+from strata.notebook.agent_launch import _write_agent_config
 from strata.notebook.layout import committed_paths, gitignore_contents, write_gitignore
 from strata.notebook.writer import create_notebook
 
@@ -104,6 +105,10 @@ class TestAgainstRealGit:
         strata_dir.mkdir(parents=True)
         (strata_dir / "artifacts.sqlite").write_bytes(b"SQLite format 3\x00")
         (notebook / ".strata" / "runtime.json").write_text("{}")
+        (notebook / "cells" / "tests").mkdir()
+        (notebook / "cells" / "tests" / "test_a1b2c3d4.py").write_text("def test_x(): pass\n")
+        # What a `strata agent` launch leaves behind: a port and a session id.
+        _write_agent_config(notebook, "http://127.0.0.1:8765", "sess1234")
 
         git("init", "-q")
         git("config", "user.email", "t@example.com")

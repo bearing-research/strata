@@ -17,6 +17,9 @@ IGNORED_PATTERNS: tuple[str, ...] = (
     "renv/staging/",
     "__pycache__/",
     "*.pyc",
+    # Rewritten by every `strata agent` launch: the server's port and session id.
+    "/.mcp.json",
+    "/CLAUDE.md",
 )
 
 _GITIGNORE_HEADER = """\
@@ -24,7 +27,8 @@ _GITIGNORE_HEADER = """\
 #
 # Everything here is rebuilt from notebook.toml, cells/, pyproject.toml and
 # uv.lock. .strata/ holds display outputs, console logs and the artifact
-# store; .venv/ and renv/library/ hold installed packages.
+# store; .venv/ and renv/library/ hold installed packages. `strata agent`
+# writes .mcp.json and CLAUDE.md on each launch.
 """
 
 

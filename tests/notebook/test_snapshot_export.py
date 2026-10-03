@@ -453,3 +453,26 @@ class TestWritingTheBundleOut:
 
         assert self._export(session.path, out) == 0
         assert zipfile.is_zipfile(out)
+
+
+class TestTheCommittedSet:
+    def test_the_bundle_carries_exactly_the_committed_set(self, session):
+        """Cell tests travel; the agent files `strata agent` writes do not."""
+        from strata.notebook.layout import committed_paths
+        from strata.notebook.snapshot import write_committed_files
+
+        tests_dir = session.path / "cells" / "tests"
+        tests_dir.mkdir()
+        (tests_dir / "test_rows.py").write_text("def test_rows(): pass\n")
+        (session.path / ".mcp.json").write_text("{}\n")
+        (session.path / "CLAUDE.md").write_text("# agent\n")
+
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, "w") as archive:
+            write_committed_files(session, archive)
+        names = set(zipfile.ZipFile(io.BytesIO(buffer.getvalue())).namelist())
+
+        assert "cells/tests/test_rows.py" in names
+        assert ".mcp.json" not in names
+        assert "CLAUDE.md" not in names
+        assert names - {"provenance.json"} == {p.as_posix() for p in committed_paths(session.path)}

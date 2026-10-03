@@ -160,8 +160,9 @@ format.
 
 ## Snapshots
 
-`--to snapshot` writes a zip rather than a rendering: the committed files, the
-per-cell runtime state (including each cell's last failure and the source it
+`--to snapshot` writes a zip rather than a rendering: the committed files
+(exactly the [committed set](../reference/notebook-toml.md#what-to-commit),
+cell tests and `.gitignore` included), the per-cell runtime state (including each cell's last failure and the source it
 was about, and what a widget's controls were set to), and as many artifact
 bytes as you ask for. `strata
 import <file>.zip` unpacks one back into a notebook directory (see
