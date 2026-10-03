@@ -82,6 +82,22 @@ def _key_lock(root: Path, key: str) -> filelock.FileLock:
     return filelock.FileLock(str(root / f"{key}.lock"), thread_local=False, timeout=3600)
 
 
+def _refuse_on_event_loop(operation: str) -> None:
+    """Refuse a blocking sync on a thread that runs an event loop.
+
+    A ``sync_streaming`` on that loop may hold the key's lock, and it releases it only
+    when the loop runs again: waiting for it here would hang every request.
+    """
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return
+    raise RuntimeError(
+        f"{operation} waits on a shared environment lock and cannot run on the event "
+        "loop; use the streaming method or asyncio.to_thread"
+    )
+
+
 def _ref_name(notebook_dir: Path) -> str:
     return hashlib.sha256(str(notebook_dir.resolve()).encode()).hexdigest()[:32]
 
@@ -187,6 +203,7 @@ class SharedEnvBackend:
     # --- the backend surface ---
 
     def sync(self, *, python_version: str | None, timeout: int) -> _UvCommandResult:
+        _refuse_on_event_loop("uv sync")
         locked = _run_uv_command(
             self.notebook_dir,
             ["lock"],
@@ -260,6 +277,7 @@ class SharedEnvBackend:
         return _combined(results)
 
     def add(self, package: str, *, timeout: int, dev: bool = False) -> _UvCommandResult:
+        _refuse_on_event_loop("uv add")
         args = ["add", "--no-sync", *(["--dev"] if dev else []), package]
         changed = _run_uv_command(
             self.notebook_dir, args, timeout=timeout, display_name="uv add", env=self._detached()
@@ -269,6 +287,7 @@ class SharedEnvBackend:
         return _combined([changed, self.sync(python_version=None, timeout=timeout)])
 
     def remove(self, package: str, *, timeout: int) -> _UvCommandResult:
+        _refuse_on_event_loop("uv remove")
         changed = _run_uv_command(
             self.notebook_dir,
             ["remove", "--no-sync", package],

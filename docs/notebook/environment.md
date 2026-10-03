@@ -151,6 +151,10 @@ my_notebook/
   package updates that notebook's `pyproject.toml` and `uv.lock` without
   syncing, then syncs, which lands in another environment and moves only that
   notebook's link. The other notebooks keep theirs.
+- **One install at a time per environment.** A notebook that needs an
+  environment another notebook is still installing (an import opened straight
+  away on a new server, say) waits for that install in its own environment
+  job, then only links. The server keeps answering other requests meanwhile.
 - **Clean-up.** An environment no notebook links to is removed once it has
   gone unused for `STRATA_NOTEBOOK_SHARED_ENV_TTL_DAYS` (default 7), by an
   hourly sweep in the server or by `strata env gc`. An environment a notebook
