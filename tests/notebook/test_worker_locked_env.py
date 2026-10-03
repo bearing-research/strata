@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import http.server
 import io
 import json
@@ -18,6 +17,7 @@ import pytest
 import tomli_w
 
 from strata.notebook import worker_env
+from strata.notebook.env import uv_lock_key
 
 pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="POSIX worker environments")
 
@@ -261,7 +261,7 @@ class TestAWorkerThatCannotBeAsked:
 class TestTheWorkerSide:
     def _spec(self, lock: str = "version = 1\n") -> dict[str, str]:
         return {
-            "key": hashlib.sha256(lock.encode()).hexdigest(),
+            "key": uv_lock_key(lock),
             "python": f"{sys.version_info.major}.{sys.version_info.minor}",
             "lockfile": lock,
             "pyproject": '[project]\nname = "x"\nversion = "0"\n',
@@ -272,6 +272,13 @@ class TestTheWorkerSide:
         spec["lockfile"] = "version = 2\n"
 
         with pytest.raises(worker_env.WorkerEnvironmentError, match="does not match"):
+            await worker_env.ensure_environment(spec)
+
+    async def test_a_lock_that_is_not_toml_is_refused(self):
+        spec = self._spec()
+        spec["lockfile"] = "version = \n"
+
+        with pytest.raises(worker_env.WorkerEnvironmentError, match="not TOML"):
             await worker_env.ensure_environment(spec)
 
     async def test_a_registry_supplies_the_environment_instead_of_an_install(
@@ -351,7 +358,7 @@ class TestAnEnvironmentIsCompleteWhenItRuns:
         monkeypatch.setenv("STRATA_WORKER_ENV_REGISTRY_URL", "http://registry")
         lock = "version = 1\n"
         spec = {
-            "key": hashlib.sha256(lock.encode()).hexdigest(),
+            "key": uv_lock_key(lock),
             "python": "",
             "lockfile": lock,
             "pyproject": "[project]\nname = 'nb'\nversion = '0'\n",

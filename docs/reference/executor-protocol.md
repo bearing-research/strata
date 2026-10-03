@@ -81,18 +81,20 @@ A request to a worker that advertises `locked_environments` carries the notebook
 
 ```json
 {
-  "key": "<sha256 of uv.lock>",
+  "key": "<uv_lock_key of uv.lock>",
   "python": "3.13",
   "lockfile": "<the notebook's uv.lock>",
   "pyproject": "<the notebook's pyproject.toml>"
 }
 ```
 
+`key` names what the lock installs, not which notebook it belongs to, so notebooks with the same resolved dependencies share one key. It is `strata.notebook.env.uv_lock_key(lockfile)`: the lock parsed as TOML; in the notebook's own `package` entry (the one whose `source` is `{ virtual = "." }` or `{ editable = "." }`), `name`, `version`, `source` and `metadata` dropped; any other `name` field equal to that project's name, and that name in `manifest.members`, replaced by `"<project>"`; `package` sorted by each entry's JSON with sorted keys; and the SHA-256 hex digest of the result as compact JSON with sorted keys (Python's `json.dumps(data, sort_keys=True, separators=(",", ":"))`). An environment registry addressed by `key` should compute it the same way, ideally by calling that function. The worker installs with `--no-install-project`, so the environment holds only the lock's packages.
+
 The worker runs the cell's harness with the interpreter of that environment:
 
 - It keeps one environment per `key` and interpreter build under `STRATA_WORKER_ENV_ROOT` (default `~/.strata/worker-envs`). An environment already there is reused, so a second cell with the same lock installs nothing.
 - A missing one is fetched from `STRATA_WORKER_ENV_REGISTRY_URL/<key>` as a `.tar.gz` of the environment directory when that is set, and otherwise built with `uv sync --frozen` from the lock. The worker needs `uv` on its `PATH` for that.
-- A lock that does not hash to `key`, or that cannot be installed, fails the cell with the reason (`500`).
+- A lock whose key is not `key`, or that cannot be installed, fails the cell with the reason (`500`).
 
 **`503 Service Unavailable`** from any execution route means the worker is full: `max_concurrent` executions are in flight, or every GPU slot is taken. It carries `Retry-After` in seconds and is refused before any input is downloaded, so retrying costs the worker nothing.
 

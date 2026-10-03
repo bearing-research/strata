@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import ast
 import hashlib
+import json
 import logging
 import tomllib
 from collections.abc import Mapping
@@ -108,6 +109,58 @@ def compute_lockfile_hash(notebook_dir: Path) -> str:
     # lockfile bytes from colliding.
     _fold_lockfile_into_hash(hasher, notebook_dir, "renv.lock", tag=b"\0renv=")
     return hasher.hexdigest()
+
+
+_ROOT_PLACEHOLDER = "<project>"
+
+
+def _is_project_root(package: Any) -> bool:
+    source = package.get("source") if isinstance(package, dict) else None
+    return isinstance(source, dict) and (
+        source.get("virtual") == "." or source.get("editable") == "."
+    )
+
+
+def uv_lock_key(lock: str) -> str:
+    """The key of the environment a ``uv.lock`` installs: shared environments, workers.
+
+    SHA-256 of the lock with the notebook project's own name, version, source and
+    declared specifiers left out, so notebooks with the same resolved packages
+    share one environment. Its dependency edges (extras, markers, dev group) stay,
+    since they choose what is installed. Not the provenance env hash.
+    """
+    data: dict[str, Any] = tomllib.loads(lock)
+    packages = data.get("package", [])
+    roots = {package["name"] for package in packages if _is_project_root(package)}
+
+    def _renamed(value: Any) -> Any:
+        if isinstance(value, dict):
+            return {
+                key: _ROOT_PLACEHOLDER if key == "name" and item in roots else _renamed(item)
+                for key, item in value.items()
+            }
+        if isinstance(value, list):
+            return [_renamed(item) for item in value]
+        return value
+
+    normalized = []
+    for package in packages:
+        if _is_project_root(package):
+            package = {
+                key: item
+                for key, item in package.items()
+                if key not in {"name", "version", "source", "metadata"}
+            }
+        normalized.append(_renamed(package))
+    # uv sorts packages by name, so the project's own entry moves with its name.
+    data["package"] = sorted(normalized, key=lambda package: json.dumps(package, sort_keys=True))
+    manifest = data.get("manifest")
+    if isinstance(manifest, dict) and isinstance(manifest.get("members"), list):
+        manifest["members"] = sorted(
+            _ROOT_PLACEHOLDER if member in roots else member for member in manifest["members"]
+        )
+    canonical = json.dumps(data, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode()).hexdigest()
 
 
 def _runtime_uv_closure_fingerprint(raw_uv_lock: bytes) -> bytes | None:

@@ -133,10 +133,20 @@ my_notebook/
 └── .venv -> ~/.strata/envs/3f9c…
 ```
 
-- **The key** is the SHA-256 of the raw `uv.lock` bytes together with the exact
-  interpreter build and platform. Two notebooks with the same lock on the same
-  interpreter get the same environment, and the second one's sync is only the
-  link.
+- **The key** is a SHA-256 of `uv.lock` together with the exact interpreter
+  build and platform. It leaves out the notebook project's own name, version
+  and declared version ranges, the only part of the lock that differs between
+  two notebooks with the same dependencies. Everything that
+  changes what is installed counts: every resolved package with its version,
+  source and hashes, the markers and extras on the notebook's dependencies, and
+  `requires-python`. So two notebooks with the same resolved dependencies on the
+  same interpreter get the same environment, whatever they are called, and the
+  second one's sync is only the link.
+- **The notebook's own project is not installed** into a shared environment
+  (`uv sync --no-install-project`), since other notebooks link to it. A
+  notebook created by `strata new` has no build system, so uv never installs it
+  anyway. If you add one, its package is not importable from a shared
+  environment.
 - **A shared environment is never changed in place.** Adding or removing a
   package updates that notebook's `pyproject.toml` and `uv.lock` without
   syncing, then syncs, which lands in another environment and moves only that
